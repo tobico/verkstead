@@ -21,7 +21,7 @@ Sets 1259, 1262, 1265 and 1270.
 ## Tasks
 
 - [x] 01: The frame's three bands — [details](01-the-frames-three-bands.md)
-- [ ] 02: What the collapsed pane draws — [details](02-what-the-collapsed-pane-draws.md)
+- [x] 02: What the collapsed pane draws — [details](02-what-the-collapsed-pane-draws.md)
 - [ ] 03: Touch — [details](03-touch.md)
 - [ ] 04: The narrow window's walk — [details](04-the-narrow-windows-walk.md)
 - [ ] 05: The Mac app's head — [details](05-the-mac-apps-head.md)

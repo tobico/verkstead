@@ -782,20 +782,23 @@ describe("the rules the widths are read by", () => {
       "  .panes.listing > .conversationsPane {\n" +
         "    z-index: 1;\n" +
         "    width: var(--pane-expanded, 16rem);\n" +
+        "    padding-inline: 0.5rem 2rem;\n" +
         "    background: var(--paper);\n" +
-        `    clip-path: inset(0 calc(100% - ${COLLAPSED}rem) 0 0);\n  }`,
+        `    clip-path: inset(0 calc(100% - ${COLLAPSED}rem) 0 0);\n`,
     );
     expect(collapsed).toContain(
       "  .panes.listing > .conversationsPane[data-expanded],\n" +
         "  .panes.listing > .conversationsPane:focus-visible,\n" +
         "  .panes.listing > .conversationsPane:has(:focus-visible) {\n" +
+        "    padding-inline: 1.25rem;\n" +
         "    clip-path: inset(0 -3rem 0 0);\n" +
-        "    box-shadow: var(--lift);\n  }",
+        "    box-shadow: var(--lift);\n",
     );
     expect(layout("(width < 100rem) and (hover: hover)")).toContain(
       "  .panes.listing > .conversationsPane:hover {\n" +
+        "    padding-inline: 1.25rem;\n" +
         "    clip-path: inset(0 -3rem 0 0);\n" +
-        "    box-shadow: var(--lift);\n  }",
+        "    box-shadow: var(--lift);\n",
     );
 
     // And moving between the two only where movement is welcome.
@@ -1048,13 +1051,19 @@ describe("what the frame is laid out from", () => {
     const { container } = mount(at);
     const frame = await drawn<HTMLElement>(container, `.${shell.panes}`);
 
-    // Nothing is asked of a page that has not finished arriving: the pinned
+    // Nothing is asked of a page that has not finished arriving: the list's
+    // cards, and — where a conversation is open — its timeline, whose pinned
     // lists are the last thing on it and the whole of what two of these mount.
-    await waitFor(() =>
-      expect(frame.querySelectorAll(`.${shell.pane} *`).length).toBeGreaterThan(
-        20,
-      ),
-    );
+    // Named rather than counted, because a sidebar still reading its list is
+    // a score of elements on its own.
+    await waitFor(() => {
+      expect(frame.querySelector(`.${shell.conversationsPane} [data-row]`)).not.toBeNull();
+      if (at !== undefined) {
+        expect(
+          frame.querySelectorAll(`.${shell.middlePane} *`).length,
+        ).toBeGreaterThan(20);
+      }
+    });
 
     return frame;
   }

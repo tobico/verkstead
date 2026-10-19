@@ -143,13 +143,41 @@
    is raised by a layer — comes up through the list. Paper behind it, because
    expanded it is over a record. And what the clip leaves out is not there for a
    pointer either, so a collapsed list takes no press meant for the pane
-   beside it. */
+   beside it.
+
+   What the strip draws inside it is the components' own, and what the frame
+   hands them is the state, as five properties they read with the expanded
+   value behind each — see `Conversations.module.css`, `Wordmark.module.css`
+   and `Archived.module.css`. `--collapsed-hidden` is the `visibility` of what
+   the strip leaves out but keeps the room of, which is most of it: a card's
+   words, the foot. `--collapsed-faded` is the `opacity` of the two things it
+   leaves out that must still be found while it is collapsed — the head's word,
+   the heading a screen reader reads, and the gear, the first stop for Tab,
+   which expands the pane by taking it. `--collapsed-gone` is the `display` of
+   what gives its room up, which is only the link's words, whose line the icon
+   beside them holds at its height. `--collapsed-drawn` is the `visibility` of
+   what only the strip draws, standing over a card without taking any room of
+   it. And `--collapsed-item` is the strip's item, the `2rem` a part the strip
+   draws is cut to.
+
+   The room at the sides moves with it: half a rem of paper before the item and
+   the rest after, so the item stands in the middle of the strip, and the pane's
+   content keeps the width it has expanded — the two paddings add up to the two
+   they replace. The chrome and the foot bleed by the pane's own padding as
+   ever, which on the left now takes them past the pane's edge, where the clip
+   has them, and on the right short of it, where the clip has already cut. */
 @media (width < 100rem) {
   .panes.listing > .conversationsPane {
     z-index: 1;
     width: var(--pane-expanded, 16rem);
+    padding-inline: 0.5rem 2rem;
     background: var(--paper);
     clip-path: inset(0 calc(100% - 3rem) 0 0);
+    --collapsed-hidden: hidden;
+    --collapsed-faded: 0;
+    --collapsed-gone: none;
+    --collapsed-drawn: visible;
+    --collapsed-item: 2rem;
   }
 
   .panes.listing > .middlePane,
@@ -167,12 +195,21 @@
      well as one inside it: a pane that scrolls is a stop on the way through by
      Tab in Firefox, and the first one into the list. And standing expanded
      where the page says so: with nothing open, the list is the level being
-     shown, and what stands beside it is empty paper until a card is picked. */
+     shown, and what stands beside it is empty paper until a card is picked.
+
+     The pane's own padding back, and the five properties unset, so everything
+     inside reads the expanded value it was written with — see above. */
   .panes.listing > .conversationsPane[data-expanded],
   .panes.listing > .conversationsPane:focus-visible,
   .panes.listing > .conversationsPane:has(:focus-visible) {
+    padding-inline: 1.25rem;
     clip-path: inset(0 -3rem 0 0);
     box-shadow: var(--lift);
+    --collapsed-hidden: initial;
+    --collapsed-faded: initial;
+    --collapsed-gone: initial;
+    --collapsed-drawn: initial;
+    --collapsed-item: initial;
   }
 
   /* And the edge the strip ends at, which no divider draws: there is none
@@ -190,8 +227,14 @@
    Nothing about a press — a card pressed is a pane still under the pointer. */
 @media (width < 100rem) and (hover: hover) {
   .panes.listing > .conversationsPane:hover {
+    padding-inline: 1.25rem;
     clip-path: inset(0 -3rem 0 0);
     box-shadow: var(--lift);
+    --collapsed-hidden: initial;
+    --collapsed-faded: initial;
+    --collapsed-gone: initial;
+    --collapsed-drawn: initial;
+    --collapsed-item: initial;
   }
 }
 
@@ -201,7 +244,8 @@
   .panes.listing > .conversationsPane {
     transition:
       clip-path 150ms ease,
-      box-shadow 150ms ease;
+      box-shadow 150ms ease,
+      padding 150ms ease;
   }
 }
 

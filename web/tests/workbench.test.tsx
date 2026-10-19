@@ -198,6 +198,8 @@ import documents from "../src/workbench/Documents.module.css";
 import documentsCss from "../src/workbench/Documents.module.css?raw";
 // The ring a running session is marked by, wherever it is drawn.
 import marks from "../src/workbench/Mark.module.css";
+import wordmark from "../src/workbench/Wordmark.module.css";
+import wordmarkCss from "../src/workbench/Wordmark.module.css?raw";
 import marksCss from "../src/workbench/Mark.module.css?raw";
 import outputPane from "../src/workbench/Output.module.css";
 import outputCss from "../src/workbench/Output.module.css?raw";
@@ -276,6 +278,7 @@ import { faCircle } from "@fortawesome/free-regular-svg-icons";
 import {
   faCheck,
   faFile,
+  faPenToSquare,
   faPlay,
   faTerminal,
   faXmark,
@@ -1520,7 +1523,7 @@ describe("how a card says where its conversation has got to", () => {
     // dimmed to the soft ink a card that has nothing settled on it is written
     // in.
     expect(sidebarCss).toContain(
-      ".conversationRow.draft .title {\n  font-style: italic;\n  color: var(--ink-soft);\n}",
+      ".conversationRow.draft .title,\n.conversationRow.draft .opening {\n  font-style: italic;\n  color: var(--ink-soft);\n}",
     );
   });
 
@@ -1724,6 +1727,134 @@ describe("how a card says where its conversation has got to", () => {
 /// `crates/server/tests/conversations.rs` say where an unplaced Conversation
 /// lands. What is asked here is that the list moves under the hand and that what
 /// is sent is what is on the screen.
+/// The sidebar as the collapsed strip draws it, under 100rem: the logo, the
+/// new-conversation icon, and each card's first three characters with its mark
+/// under them. Everything the strip leaves out is still laid out at the width
+/// the pane expands to, so that every height is the height it has expanded —
+/// which a browser measures and this suite cannot. What is proved here is what
+/// is drawn for the strip, and that the strip's state reaches it.
+describe("the collapsed sidebar", () => {
+  it("draws the new-conversation link as the pen-to-square and its words", async () => {
+    theSidebar({});
+    mount();
+
+    const link = await screen.findByRole("link", { name: "New conversation" });
+    expect(link.getAttribute("title")).toBe("New conversation");
+
+    // The icon before the words, so collapsing hides the words and keeps it.
+    const [icon, words] = [...link.children];
+    expect(icon!.tagName.toLowerCase()).toBe("svg");
+    expect(icon!.querySelector("path")!.getAttribute("d")).toBe(
+      faPenToSquare.icon[4] as string,
+    );
+    expect(words!.textContent).toBe("New conversation");
+    expect(words!.className).toBe(sidebar.composeWords);
+  });
+
+  /// Three whole characters, cut at a character's edge rather than with an
+  /// ellipsis, and a draft's in the italic its full name wears.
+  it("gives a card the first three characters of its title", async () => {
+    theSidebar(
+      { branch: "collapsible-conversations", state: "Implementing" },
+      { branch: "amber-kestrel", state: "Draft", branch_named: false },
+      { branch: "🦀🦀🦀🦀", state: "Implementing" },
+    );
+    const { container } = mount();
+
+    const [named, draft, crabs] = await cards(container);
+
+    const opening = (card: HTMLElement) =>
+      card.querySelector(`.${sidebar.opening}`)!.textContent;
+    expect(opening(named!)).toBe("col");
+    expect(opening(draft!)).toBe("Dra");
+    expect(opening(crabs!)).toBe("🦀🦀🦀");
+    expect(draft!.className).toContain(sidebar.draft);
+    expect(sidebarCss).toContain(
+      ".conversationRow.draft .title,\n.conversationRow.draft .opening {",
+    );
+  });
+
+  /// The mark on the line under them, where the device and the repo stand
+  /// expanded — and nothing on that line for a card with no mark.
+  it("puts the card's mark under its characters, or nothing", async () => {
+    theSidebar(
+      { state: "Grilling", working: false, waiting: true },
+      { state: "Implementing", working: false, waiting: false },
+    );
+    const { container } = mount();
+
+    const [waiting, quiet] = await cards(container);
+
+    const strip = (card: HTMLElement) =>
+      card.querySelector<HTMLElement>(`.${sidebar.short}`)!;
+    const disc = strip(waiting!).querySelector(`.${sidebar.markLine} .${marks.mark}`);
+    expect(disc!.className).toContain(marks.waiting);
+    expect(strip(waiting!).getAttribute("aria-hidden")).toBe("true");
+    expect(strip(quiet!).querySelector(`.${sidebar.markLine}`)!.children).toHaveLength(0);
+  });
+
+  /// What the strip leaves out is hidden rather than taken away, so it keeps the
+  /// room it has expanded; what only the strip draws stands over the card
+  /// without taking any. Both read the pane's state off the properties the
+  /// frame sets while the list is collapsed, and nothing else.
+  it("hides what the strip leaves out by the frame's say", () => {
+    const collapsed = shellCss.slice(shellCss.indexOf("@media (width < 100rem) {"));
+    expect(collapsed).toContain(
+      "    --collapsed-hidden: hidden;\n" +
+        "    --collapsed-faded: 0;\n" +
+        "    --collapsed-gone: none;\n" +
+        "    --collapsed-drawn: visible;\n" +
+        "    --collapsed-item: 2rem;\n",
+    );
+    expect(collapsed).toContain(
+      "    --collapsed-hidden: initial;\n" +
+        "    --collapsed-faded: initial;\n" +
+        "    --collapsed-gone: initial;\n" +
+        "    --collapsed-drawn: initial;\n" +
+        "    --collapsed-item: initial;\n",
+    );
+
+    // The card: its words, the code icon among them, and the mark at its edge
+    // hidden; the three characters and the mark under them drawn; the card cut
+    // to the strip's item.
+    expect(sidebarCss).toContain(
+      ".conversationRow .what,\n.conversationRow .edgeMark {\n" +
+        "  visibility: var(--collapsed-hidden, visible);\n}",
+    );
+    expect(sidebarCss).toContain("  visibility: var(--collapsed-drawn, hidden);\n");
+    expect(sidebarCss).toContain(
+      "  clip-path: inset(0 calc(100% - var(--collapsed-item)) 0 0 round 0.6rem);\n",
+    );
+
+    // The link: the item's width, and the words gone.
+    expect(sidebarCss).toContain("  width: var(--collapsed-item, 100%);\n");
+    expect(sidebarCss).toContain(
+      ".composeWords {\n  display: var(--collapsed-gone, inline);\n",
+    );
+
+    // The head's word and gear faded, still read aloud and still a stop for
+    // Tab; and the foot's switch and forwarding hidden.
+    expect(wordmarkCss).toContain(
+      ".word,\n.settings {\n  opacity: var(--collapsed-faded, 1);\n}",
+    );
+    expect(archivedCss).toContain(
+      ".showArchived > * {\n  visibility: var(--collapsed-hidden, visible);\n}",
+    );
+  });
+
+  it("hides the head's word and gear, keeping the logo", async () => {
+    theSidebar({});
+    const { container } = mount();
+
+    const heading = await drawn(container, `h1.${wordmark.wordmark}`);
+    expect(heading.querySelector("img")).toBeTruthy();
+    expect(heading.querySelector(`.${wordmark.word}`)!.textContent).toBe("Verkstead");
+    expect(
+      screen.getByRole("button", { name: "Settings" }).className,
+    ).toContain(wordmark.settings);
+  });
+});
+
 describe("the order the human puts the sidebar in", () => {
   /// A sidebar of three named rows, over an endpoint that takes an order and
   /// answers with nothing — which is what the real one does. A test wanting it

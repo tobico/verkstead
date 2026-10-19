@@ -11,6 +11,10 @@
 //! that read *Forwarding 0 ports* on every machine that has never opened a
 //! member's terminal would be a line about nothing on nearly every page.
 //!
+//! Not drawn in the sidebar's collapsed strip, where the foot it stands in is
+//! blank paper; it keeps its room there all the same, wrapped under the switch
+//! where the expanded pane would wrap it. See `Archived.module.css`.
+//!
 //! The popup hangs over the item rather than under it, the item standing at the
 //! bottom of the pane; it is the one menu the app has, so it closes the ways
 //! every menu does and hands the focus back to the item on Escape.

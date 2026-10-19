@@ -1,5 +1,6 @@
 //! The head of whatever page Verkstead is entered at: the mark, the name, and
-//! the gear on to the settings.
+//! the gear on to the settings — or, in the sidebar's collapsed strip, the
+//! mark alone.
 //!
 //! It lived in the conversations sidebar, that being the only page it was ever
 //! drawn on. There are two now — the sidebar, and the compose page standing
@@ -28,6 +29,12 @@ import styles from "./Wordmark.module.css";
 /// No alt text on it, because the word it stands beside is the alt text: a
 /// screen reader that read both would say the name twice.
 ///
+/// Collapsed in the sidebar's strip, the logo is all of it: the word and the
+/// gear keep their room, so the row stands as tall as it does expanded and the
+/// list under it starts where it always starts, and are not drawn — the gear's
+/// open fill on the settings with them — though the heading still reads
+/// *Verkstead* and Tab still stops on the gear. See `Wordmark.module.css`.
+///
 /// No way back either, this being the level every other pane is entered from —
 /// which is what makes it a title the head is handed a class for rather than one
 /// of the head's own: see the `heading` prop in `PaneHead.tsx`.
@@ -38,7 +45,7 @@ export function Wordmark(): JSX.Element {
       title={
         <>
           <img src="/icons/icon-192.png" alt="" />
-          Verkstead
+          <span class={styles.word}>Verkstead</span>
         </>
       }
     >
@@ -81,6 +88,7 @@ function Settings(): JSX.Element {
 
   return (
     <IconButton
+      class={styles.settings}
       of={faGear}
       label="Settings"
       open={open()}
