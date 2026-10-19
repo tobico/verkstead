@@ -363,7 +363,7 @@ impl Tailscale {
     pub(crate) async fn reading(&self) -> RemoteView {
         // Which `tailscale` this is, for the one state whose instruction turns
         // on it: a Mac app is logged in to by opening it.
-        let mac_app = self.found().mac_app;
+        let mac_app = self.found().is_some_and(|found| found.mac_app);
 
         let told = match self.run(&["status", "--json"]).await {
             Ok(told) => told,
@@ -640,7 +640,7 @@ impl Tailscale {
     /// rather type the command still can. What went wrong is said in the log,
     /// which is where the reader who wants it is.
     async fn granting(&self, on: bool, trouble: String) -> ServePress {
-        let grant = grant(&self.found().program, &self.user);
+        let grant = grant(&self.named(), &self.user);
 
         let Some(escalation) = self.escalation.clone() else {
             return ServePress::Ungranted { grant, trouble };
@@ -694,7 +694,7 @@ impl Tailscale {
     /// binary goes is a shell script, and a grant naming the real one would be
     /// a grant no test could take.
     fn operator(&self) -> Vec<String> {
-        let mut asking = self.found().program;
+        let mut asking = self.named();
 
         asking.push("set".to_owned());
         asking.push(format!("--operator={}", self.user));
@@ -733,7 +733,7 @@ impl Tailscale {
     /// business writing on the server's own terminal, and both streams are what
     /// this module reads its answer out of.
     async fn run(&self, arguments: &[&str]) -> std::io::Result<Output> {
-        self.command(arguments).output().await
+        self.command(arguments)?.output().await
     }
 
     /// The same, given `within` to answer in — and killed where it does not.
@@ -751,9 +751,9 @@ impl Tailscale {
     /// `kill_on_drop`, because a timeout that left the process running would be
     /// this deadline saying the pile-up had stopped while it went on.
     async fn run_within(&self, arguments: &[&str], within: Duration) -> std::io::Result<Output> {
-        match tokio::time::timeout(within, self.command(arguments).kill_on_drop(true).output())
-            .await
-        {
+        let mut command = self.command(arguments)?;
+
+        match tokio::time::timeout(within, command.kill_on_drop(true).output()).await {
             Ok(told) => told,
             Err(_) => Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
@@ -766,8 +766,18 @@ impl Tailscale {
     ///
     /// Apart from the running so that the two ways of running it — with a
     /// deadline and without — are one command said once.
-    fn command(&self, arguments: &[&str]) -> Command {
-        let found = self.found();
+    ///
+    /// `NotFound` where a Mac has no `tailscale` anywhere it looks, which is the
+    /// same failure running a program that is not there comes back as — and
+    /// what [`RemoteView::Absent`] is read off either way.
+    fn command(&self, arguments: &[&str]) -> std::io::Result<Command> {
+        let Some(found) = self.found() else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "there is no tailscale on this Mac's PATH or in its Tailscale app",
+            ));
+        };
+
         let (program, before) = found
             .program
             .split_first()
@@ -781,23 +791,24 @@ impl Tailscale {
             .unseen()
             .stdin(std::process::Stdio::null());
 
-        command
+        Ok(command)
     }
 
     /// Which `tailscale` to run, looked for now.
     ///
-    /// A Mac's PATH first and the app after it, and the bare word where neither
-    /// has one: that is a program that is not there, which is what
-    /// [`RemoteView::Absent`] is read off.
+    /// A Mac's PATH first and the app after it, and `None` where neither has
+    /// one. Not the bare word run on the server's own `PATH` instead: that is
+    /// already on the floor, so all it could add is a `tailscale` that is
+    /// somewhere other than where this was told to look.
     ///
     /// Blocks, for a handful of `stat` calls — fewer than the process it is
     /// looking for costs to start.
-    fn found(&self) -> Found {
+    fn found(&self) -> Option<Found> {
         match &self.program {
-            Program::Stated(program) => Found {
+            Program::Stated(program) => Some(Found {
                 program: program.clone(),
                 mac_app: false,
-            },
+            }),
             Program::Mac {
                 floor,
                 applications,
@@ -810,34 +821,36 @@ impl Tailscale {
             }
         }
     }
+
+    /// The program a line handed to the human names: the one found, or the
+    /// bare word where nothing was — a grant asked for between an uninstall and
+    /// the next reading still being a line somebody can make sense of.
+    fn named(&self) -> Vec<String> {
+        self.found()
+            .map_or_else(|| vec![NAME.to_owned()], |found| found.program)
+    }
 }
 
 /// Where a Mac keeps `tailscale`: on `floor`, or else inside `Tailscale.app`
 /// under the first of `applications` that has one — see [`Tailscale::found`].
-fn on_a_mac(floor: &OsStr, applications: &[PathBuf]) -> Found {
+fn on_a_mac(floor: &OsStr, applications: &[PathBuf]) -> Option<Found> {
     let named = |found: &Path| vec![found.to_string_lossy().into_owned()];
 
     if let Some(found) = crate::sandbox::on_the_path(Platform::MacOs, NAME, Some(floor), None) {
-        return Found {
+        return Some(Found {
             program: named(&found),
             mac_app: false,
-        };
+        });
     }
 
-    match applications
+    applications
         .iter()
         .map(|applications| applications.join(IN_THE_APP))
         .find(|found| found.is_file())
-    {
-        Some(found) => Found {
+        .map(|found| Found {
             program: named(&found),
             mac_app: true,
-        },
-        None => Found {
-            program: vec![NAME.to_owned()],
-            mac_app: false,
-        },
-    }
+        })
 }
 
 /// What the program is called wherever it is on a PATH.
