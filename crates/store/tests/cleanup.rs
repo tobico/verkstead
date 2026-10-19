@@ -28,10 +28,10 @@ use std::collections::BTreeSet;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Deletion, Summary, Trimming, append_capture, archive_conversation, capture, deletable,
-    delete_conversation, deleted_tables, load_conversation, load_response, reclaim, session_id,
-    start_capture, timeline, transcript, trim_conversation, trimmable, trimmed,
-    unarchive_conversation,
+    Deletion, Lifecycle, Recorded, Steer, Steering, Summary, Trimming, append_capture,
+    archive_conversation, capture, deletable, delete_conversation, deleted_tables,
+    load_conversation, load_response, reclaim, session_id, start_capture, steer_conversation,
+    timeline, transcript, trim_conversation, trimmable, trimmed, unarchive_conversation,
 };
 
 use owning::{a_conversations_tables, fresh_pool, owning, printed, rows, worked};
@@ -196,6 +196,58 @@ async fn what_is_trimmable_is_what_has_been_archived_for_long_enough() {
     assert!(
         trimmable(&pool, 3).await.unwrap().is_empty(),
         "and once it has been trimmed there is nothing left to do at all",
+    );
+}
+
+/// A steer into `target` and nothing else with it.
+fn steer(target: Lifecycle) -> Steer<'static> {
+    Steer {
+        target,
+        pairings: &[],
+        brief: None,
+        instruction: None,
+        direction: None,
+        worktree: None,
+        base: None,
+        companions: &[],
+        opened: &[],
+        checkouts: &[],
+        said: None,
+        recorded: Recorded::default(),
+        scratch: &[],
+    }
+}
+
+/// A Conversation steered back into the work has no clock running, however
+/// long ago it was archived: the steer takes the archive row with it, and that
+/// row is all the Cleanup lists by — so a session's output is never trimmed
+/// under it, nor the Conversation deleted from beneath it.
+#[tokio::test]
+async fn what_was_steered_back_into_the_work_is_neither_trimmed_nor_deleted() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let worked = worked(&pool, "rate-limiting").await;
+    archived_days_ago(&pool, worked.id, 4).await;
+
+    assert_eq!(
+        steer_conversation(&pool, worked.id, steer(Lifecycle::Implementing))
+            .await
+            .unwrap(),
+        Steering::Steered,
+    );
+
+    assert!(
+        !trimmable(&pool, 3).await.unwrap().contains(&worked.id),
+        "a Conversation being worked in again has nothing to trim",
+    );
+    assert!(
+        !deletable(&pool, 3).await.unwrap().contains(&worked.id),
+        "and nothing to delete",
+    );
+    assert_eq!(
+        trim_conversation(&pool, worked.id).await.unwrap(),
+        Trimming::NotArchived,
+        "and a trim asked for by name is refused, the archiving being gone",
     );
 }
 

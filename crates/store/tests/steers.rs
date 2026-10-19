@@ -41,12 +41,14 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
-    Account, Adding, Base, CompanionMode, Deleting, Directing, Edited, Event, Joining, Lifecycle,
-    Opening, PickedPairing, ProfileFacts, Recorded, RecordedPairing, Role, Scratch, Settling,
-    Steer, SteerRecord, Steering, WaitingOn, add_companion, create_profile, delete_profile,
-    fix_attempts, load_conversation, open_database, pick_direction, record_fix_attempt,
-    register_repo, save_brief, scratch, settle_naming, settle_wrap_up, start_conversation,
-    start_grilling, start_unnamed_conversation, steer_conversation, timeline, wrap_up_settled,
+    Account, Adding, Archiving, Base, Closing, CompanionMode, Deleting, Directing, Edited, Event,
+    Investigated, Joining, Lifecycle, Opening, PickedPairing, ProfileFacts, Recorded,
+    RecordedPairing, Role, Scratch, Settling, Steer, SteerRecord, Steering, WaitingOn,
+    add_companion, archive_conversation, archived, close_conversation, conversations,
+    create_profile, delete_profile, fix_attempts, investigation_over, load_conversation,
+    open_database, pick_direction, record_fix_attempt, register_repo, save_brief, scratch,
+    settle_naming, settle_wrap_up, start_conversation, start_grilling, start_unnamed_conversation,
+    steer_conversation, timeline, wrap_up_settled,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -1468,4 +1470,140 @@ async fn a_steer_from_before_the_record_was_kept_reads_back_without_one() {
         ],
         "and the Event itself is untouched: what it always said, it says",
     );
+}
+
+/// A Conversation closed and put away, the only kind there is to archive.
+async fn put_away(pool: &SqlitePool) -> i64 {
+    let id = grilling(pool).await;
+
+    assert_eq!(close_conversation(pool, id).await.unwrap(), Closing::Closed);
+    assert_eq!(
+        archive_conversation(pool, id).await.unwrap(),
+        Archiving::Archived,
+    );
+
+    id
+}
+
+/// Whether the sidebar draws it, with *Show archived* off.
+async fn on_the_sidebar(pool: &SqlitePool, id: i64) -> bool {
+    conversations(pool, false)
+        .await
+        .unwrap()
+        .iter()
+        .any(|row| row.id == id)
+}
+
+/// A steer out of an archived Conversation is the work starting again, so it
+/// takes the Conversation off the archive in the same move: the sidebar draws
+/// it, and its page offers Archive rather than Unarchive.
+#[tokio::test]
+async fn a_steer_out_of_an_archived_conversation_unarchives_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = put_away(&pool).await;
+
+    assert!(!on_the_sidebar(&pool, id).await, "archived, so not drawn");
+
+    assert_eq!(
+        steer_conversation(
+            &pool,
+            id,
+            Steer {
+                instruction: Some("Pick it back up.\n"),
+                ..into(Lifecycle::Implementing)
+            },
+        )
+        .await
+        .unwrap(),
+        Steering::Steered,
+    );
+
+    assert!(
+        !archived(&pool, id).await.unwrap(),
+        "a Conversation being worked in again is not one put away",
+    );
+    assert!(
+        on_the_sidebar(&pool, id).await,
+        "and the sidebar draws it again without being asked to show the archive",
+    );
+}
+
+/// Into Done as much as into anything something runs in: any steer leaves
+/// Closed, and an archived Conversation that is not Closed is a row the archive
+/// itself would refuse to write.
+#[tokio::test]
+async fn a_steer_into_done_unarchives_it_too() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = put_away(&pool).await;
+
+    assert_eq!(
+        steer_conversation(&pool, id, into(Lifecycle::Done))
+            .await
+            .unwrap(),
+        Steering::Steered,
+    );
+
+    assert_eq!(state(&pool, id).await, Lifecycle::Done);
+    assert!(
+        !archived(&pool, id).await.unwrap(),
+        "nothing runs in Done, and it is still out of Closed",
+    );
+    assert!(on_the_sidebar(&pool, id).await);
+}
+
+/// A Conversation that was never put away has nothing to take off the archive,
+/// and the steer is steered all the same.
+#[tokio::test]
+async fn a_steer_out_of_a_conversation_never_archived_leaves_the_archive_alone() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert!(!archived(&pool, id).await.unwrap());
+
+    assert_eq!(
+        steer_conversation(&pool, id, into(Lifecycle::Implementing))
+            .await
+            .unwrap(),
+        Steering::Steered,
+    );
+
+    assert!(!archived(&pool, id).await.unwrap());
+    assert!(on_the_sidebar(&pool, id).await);
+}
+
+/// An investigation steered out of an archived Conversation goes back to
+/// Closed when it ends, and stays on the sidebar there: the unarchiving was for
+/// good, and putting it away again is the human's press.
+#[tokio::test]
+async fn an_investigation_out_of_the_archive_lands_back_at_closed_on_the_sidebar() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = put_away(&pool).await;
+
+    assert_eq!(
+        steer_conversation(
+            &pool,
+            id,
+            Steer {
+                instruction: Some("Why did this stop?\n"),
+                ..into(Lifecycle::Investigating)
+            },
+        )
+        .await
+        .unwrap(),
+        Steering::Steered,
+    );
+
+    assert_eq!(
+        investigation_over(&pool, id, Lifecycle::Closed)
+            .await
+            .unwrap(),
+        Investigated::Landed,
+    );
+
+    assert_eq!(state(&pool, id).await, Lifecycle::Closed);
+    assert!(
+        !archived(&pool, id).await.unwrap(),
+        "the answer is on the Timeline, and nothing puts it away again by itself",
+    );
+    assert!(on_the_sidebar(&pool, id).await);
 }

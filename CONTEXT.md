@@ -4956,7 +4956,9 @@ off the base the human fixed, resolved at that moment. Every **Companion Repo**
 the record holds with nothing on disk is checked out again beside it, which is
 what a steered Draft and a Conversation steered back out of Closed both need:
 without it either would reach a running state with companions the sandbox skips
-in silence.
+in silence. And a Conversation steered out of Closed that had been
+**Archived** is unarchived by the steer, so it is back on the sidebar and the
+Cleanup's clocks stop with the archiving.
 
 **And somebody else may be standing on the branch, so a steer asks who.** There
 is one *open* Conversation per pull request, so a Conversation closed to make way
@@ -5471,6 +5473,14 @@ conversations** is a way of looking rather than a change to anything: with it
 on, what has been archived is drawn in its ordinary place; with it off, it is
 not. That is the human's standing choice rather than a device's, so it is kept
 beside the archivings and read back on every load.
+
+And a **Steer** is a third, which nobody presses as one. Only a Closed
+Conversation is ever archived and a steer is the one move out of Closed, so
+steering an archived Conversation anywhere — Done included — takes it out for
+good, in the same move, and the Cleanup's clocks stop with it. An
+**Investigating** steered out of one ends by going back to Closed, and lands
+there on the sidebar: the answer is on the Timeline, and putting it away again
+is the human's press.
 
 **In a cluster that switch is one switch for the whole Merged List, and it is
 the opened device's.** The choice is about a list, and the list in front of them
