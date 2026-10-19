@@ -592,6 +592,12 @@ rustc to run*. `RUSTUP_HOME` where the machine sets one, `~/.rustup` where it
 does not, and nothing at all where there is no rustup on the `PATH`, which is
 every nix machine.
 
+**A Mac whose Rust is rustup's finds it the same way, from the Dock too.**
+rustup's installer puts `~/.cargo/bin` on a `PATH` by writing a line into a shell
+profile, which launchd never reads, so the Mac floor carries `~/.cargo/bin`
+itself, behind `~/.local/bin` and ahead of Homebrew's prefixes — and with
+`rustup` found there, the rustup home is granted as it is on Windows.
+
 A session's GitHub auth and the author of its commits are two of those settings
 rather than anything found in a home directory. Who you are is an **Author** in
 `config.yaml`, keyed by a uuid, and its token is in `secrets.yaml` beside the

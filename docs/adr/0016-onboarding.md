@@ -188,6 +188,12 @@ rule stands because the human's own `PATH` is the authority, and from the Dock
 there is no such `PATH` to consult — launchd's four directories are nobody's
 choice. Linux keeps the rule.
 
+*Amended 2026-10-19.* **And the home's `.cargo/bin` beside it**, behind
+`.local/bin` and for its reason: rustup's installer puts that directory on a
+`PATH` through a shell profile, which the Dock never reads, so a Mac whose Rust
+was rustup's had no `cargo` in a session started from the Dock — and with no
+`rustup` on the `PATH`, no rustup home granted either.
+
 **And a Mac's local installs lead its system directories whichever way the
 app was started.** Composed as it was, a session from the Dock had launchd's
 `/usr/bin` ahead of the floor's `/opt/homebrew/bin`, so Apple's older tools

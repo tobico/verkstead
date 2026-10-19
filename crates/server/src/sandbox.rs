@@ -964,8 +964,9 @@ pub(crate) fn entries(platform: Platform, path: &OsStr) -> Vec<PathBuf> {
 /// human ticked rather than one a guess turned up.
 ///
 /// **A Mac's floor is two halves, and the installs are the half that leads the
-/// system directories.** [`APPLE_INSTALLS`] — the home's own `.local/bin`, then
-/// the two Homebrew prefixes and `/usr/local/bin` — is composed ahead of
+/// system directories.** [`APPLE_INSTALLS`] — the home's own `.local/bin` and
+/// `.cargo/bin`, then the two Homebrew prefixes and `/usr/local/bin` — is
+/// composed ahead of
 /// whichever of the server's own entries [`APPLE_SYSTEM_PATH`] already names,
 /// and behind every other entry the server was started with; the rest of
 /// [`APPLE_SYSTEM_PATH`] goes under all of it, first occurrence still winning.
@@ -986,15 +987,17 @@ pub(crate) fn entries(platform: Platform, path: &OsStr) -> Vec<PathBuf> {
 /// Linux server is started from a session whose `PATH` the human's own profile
 /// wrote.
 ///
-/// **And the home's `.local/bin` is composed rather than written**, which is
-/// why the leading half is a list and a path rather than one constant: it is
-/// [`LOCAL_INSTALL`] under whatever home the server runs under, and a server
-/// whose environment names none composes the floor without it. That is where
-/// Anthropic's installer puts `claude`, and from the Dock there is no `PATH` of
-/// the human's to have named it — see ADR-0016's *Macs*, where the rule is
-/// reversed for this platform alone. It is reached the way every entry under
-/// the home is: [`per_user`] grants it, and [`installs`] follows the link in it
-/// into the version it lands on.
+/// **And the home's two are composed rather than written**, which is why the
+/// leading half is a list and some paths rather than one constant: they are
+/// [`HOME_INSTALLS`] under whatever home the server runs under, and a server
+/// whose environment names none composes the floor without them. `.local/bin`
+/// is where Anthropic's installer puts `claude` and `.cargo/bin` is where
+/// rustup puts `cargo`, and from the Dock there is no `PATH` of the human's to
+/// have named either — see ADR-0016's *Macs*, where the rule is reversed for
+/// this platform alone. They are reached the way every entry under the home
+/// is: [`per_user`] grants them, [`installs`] follows the links in them into
+/// whatever they land on, and [`toolchains`] grants the rustup home behind the
+/// shims.
 ///
 /// **Windows is `session` and then the server's own `PATH` as it stands**,
 /// which is what it has always been with the one list in front of it — see
@@ -1014,15 +1017,18 @@ pub(crate) fn composed(
         Platform::Windows => return windows_path(session, servers),
     };
 
-    // The one entry of a floor that is a fact about the server rather than a
-    // string, and a Mac's alone — see [`LOCAL_INSTALL`]. Composed with
-    // [`under`] rather than joined, for that function's own reason: this is an
-    // entry of a Mac's `PATH`, and [`Path::join`] writes the separator of
+    // The entries of a floor that are a fact about the server rather than a
+    // string, and a Mac's alone — see [`HOME_INSTALLS`]. Composed with
+    // [`under`] rather than joined, for that function's own reason: these are
+    // entries of a Mac's `PATH`, and [`Path::join`] writes the separator of
     // whatever host is asking — a backslash on the Windows runner, which is
     // one of the machines that asks what a Mac would compose.
-    let local = match platform {
-        Platform::MacOs => home.map(|home| under(home, LOCAL_INSTALL)),
-        Platform::Linux | Platform::Windows => None,
+    let local: Vec<PathBuf> = match (platform, home) {
+        (Platform::MacOs, Some(home)) => HOME_INSTALLS
+            .iter()
+            .map(|install| under(home, install))
+            .collect(),
+        _ => Vec::new(),
     };
 
     // The two rules read of a named entry, said once because the two lists
@@ -1035,9 +1041,8 @@ pub(crate) fn composed(
         .filter(could_look_in);
 
     let leading = local
-        .as_deref()
-        .map(Path::as_os_str)
-        .into_iter()
+        .iter()
+        .map(PathBuf::as_os_str)
         .chain(apart(OsStr::new(ahead)));
 
     // And the server's own, in two where there is a half to lead: what the
@@ -2094,8 +2099,9 @@ const LINUX_PATH: &str = "/run/current-system/sw/bin:/nix/var/nix/profiles/defau
 /// Homebrew's two prefixes — the Apple-silicon one and the Intel one, which is
 /// under `/usr/local` — because a Mac used for development has its actual
 /// toolchain there and Apple's own `/usr/bin` holds older copies of half of it.
-/// `~/.local/bin` leads them and is not written here, being the server's home
-/// joined with [`LOCAL_INSTALL`] rather than a path any Mac has.
+/// `~/.local/bin` and `~/.cargo/bin` lead them and are not written here, being
+/// the server's home joined with [`HOME_INSTALLS`] rather than paths any Mac
+/// has.
 const APPLE_INSTALLS: &str = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin";
 
 /// And the second: the system, which is what is there on a Mac nobody has
@@ -2121,6 +2127,21 @@ const APPLE_SYSTEM_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin:\
 /// would ever name — see [`composed`], and ADR-0016's *Macs*, which is where
 /// that is settled for this platform alone.
 const LOCAL_INSTALL: &str = ".local/bin";
+
+/// And where rustup puts the shims of the toolchain it installs, `cargo` and
+/// `rustc` among them and `rustup` itself, which is the program
+/// [`toolchains`] reads a machine's Rust as rustup's by.
+///
+/// On the Mac floor for [`LOCAL_INSTALL`]'s reason: rustup's installer puts it
+/// on a `PATH` by writing a line into a shell profile, and launchd reads none,
+/// so from the Dock a session found no `cargo` and was granted no toolchain.
+/// Behind `.local/bin` and ahead of Homebrew's prefixes, which is where that
+/// line puts it in a terminal: a Mac with Homebrew's `rust` as well as
+/// rustup's is one where the human installed rustup to be the one used.
+const RUSTUP_INSTALL: &str = ".cargo/bin";
+
+/// The two of those, in the order they lead a Mac's floor.
+const HOME_INSTALLS: [&str; 2] = [LOCAL_INSTALL, RUSTUP_INSTALL];
 
 /// And what a session's `SHELL` is: the one path every platform this runs on is
 /// certain to have a shell at.
@@ -5826,6 +5847,7 @@ mod tests {
             [
                 "/Users/you/.verkstead/bin",
                 "/Users/you/.local/bin",
+                "/Users/you/.cargo/bin",
                 "/opt/homebrew/bin",
                 "/opt/homebrew/sbin",
                 "/usr/local/bin",
@@ -5867,6 +5889,7 @@ mod tests {
                 "/Users/you/.nvm/versions/node/v22/bin",
                 "/opt/homebrew/bin",
                 "/Users/you/.local/bin",
+                "/Users/you/.cargo/bin",
                 "/opt/homebrew/sbin",
                 "/usr/local/bin",
                 "/usr/bin",
@@ -6088,9 +6111,9 @@ mod tests {
     /// toolchain: the floor is what a session stands on however the unit that
     /// started the server was launched.
     ///
-    /// The Mac's floor is the two halves with the home's own `.local/bin` at
-    /// the head of them, which is the one entry of it that is composed rather
-    /// than written — see [`LOCAL_INSTALL`].
+    /// The Mac's floor is the two halves with the home's own `.local/bin` and
+    /// `.cargo/bin` at the head of them, which are the entries of it that are
+    /// composed rather than written — see [`HOME_INSTALLS`].
     #[test]
     fn a_server_started_with_no_path_still_reaches_the_machines_own() {
         let home = Path::new("/home/you");
@@ -6099,7 +6122,10 @@ mod tests {
             (Platform::Linux, LINUX_PATH.to_owned()),
             (
                 Platform::MacOs,
-                format!("/home/you/.local/bin:{APPLE_INSTALLS}:{APPLE_SYSTEM_PATH}"),
+                format!(
+                    "/home/you/.local/bin:/home/you/.cargo/bin:\
+                     {APPLE_INSTALLS}:{APPLE_SYSTEM_PATH}"
+                ),
             ),
         ];
 
@@ -6136,7 +6162,9 @@ mod tests {
              the second of them already"
         );
         assert!(
-            !apart(&composed).any(|entry| ending(entry).ends_with(b".local/bin")),
+            !apart(&composed).any(|entry| {
+                ending(entry).ends_with(b".local/bin") || ending(entry).ends_with(b".cargo/bin")
+            }),
             "and no home's own directory, there being no home to join one \
              onto: {composed:?}"
         );
