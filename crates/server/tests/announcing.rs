@@ -28,7 +28,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{AskingDevice, DeviceIdentity, DevicesView};
 use verkstead_server::device::reading::Reading;
-use verkstead_server::device::{Device, Devices};
+use verkstead_server::device::{Device, Devices, Tellings};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::open_database;
 use verkstead_server::peer::dialling::Peers;
@@ -84,6 +84,11 @@ struct Verkstead {
     members: Members,
     joins: Joins,
     nudges: Nudges,
+
+    /// What its presses leave running once they have answered, which a test
+    /// waits on before reading what they did over there.
+    tellings: Tellings,
+
     reading: Reading,
 
     /// Where its peer listener landed, which is also the one address it
@@ -141,6 +146,7 @@ impl Verkstead {
             members: Members::recorded(pool.clone()),
             joins: Joins::recorded(pool.clone()),
             nudges: Nudges::new(),
+            tellings: Tellings::default(),
             reading,
             pool,
             address,
@@ -190,6 +196,7 @@ impl Verkstead {
             self.members.clone(),
             self.joins.clone(),
         )
+        .keeping_tellings(self.tellings.clone())
     }
 
     /// How it dials, for the questions that are about a call rather than about
@@ -314,6 +321,10 @@ async fn linked(joining: &Verkstead, answering: &Verkstead) {
     assert_eq!(held.len(), 1, "one question, just asked");
 
     allow(&answering.workbench(), &held[0].request).await;
+
+    // The press answers before its dialling is done, so what the dialling does
+    // over there is only so once it has finished.
+    answering.tellings.told().await;
 }
 
 // ---------------------------------------------------------------------------
@@ -555,6 +566,7 @@ async fn a_member_that_answers_nothing_is_dimmed_and_owed_the_telling() {
 
     let held = being_asked(&b.workbench()).await;
     allow(&b.workbench_in_a_hurry(), &held[0].request).await;
+    b.tellings.told().await;
 
     assert_eq!(
         b.cluster().await,

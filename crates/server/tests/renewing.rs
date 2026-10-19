@@ -33,7 +33,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{AskingDevice, DeviceIdentity, DevicesView, RenewedCertificate};
 use verkstead_server::device::reading::Reading;
-use verkstead_server::device::{Changeover, Device, Devices, RENEW_WITHIN};
+use verkstead_server::device::{Changeover, Device, Devices, RENEW_WITHIN, Tellings};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::open_database;
 use verkstead_server::peer::dialling::Peers;
@@ -98,6 +98,11 @@ struct Verkstead {
     members: Members,
     joins: Joins,
     nudges: Nudges,
+
+    /// What its presses leave running once they have answered, which a test
+    /// waits on before reading what they did over there.
+    tellings: Tellings,
+
     reading: Reading,
 
     /// Where its peer listener landed, which is also the one address it
@@ -147,6 +152,7 @@ impl Verkstead {
             members: Members::recorded(pool.clone()),
             joins: Joins::recorded(pool.clone()),
             nudges: Nudges::new(),
+            tellings: Tellings::default(),
             reading,
             pool,
             address,
@@ -260,6 +266,7 @@ impl Verkstead {
             self.members.clone(),
             self.joins.clone(),
         )
+        .keeping_tellings(self.tellings.clone())
     }
 
     /// How it dials, for the questions that are about a call rather than about a
@@ -934,6 +941,10 @@ async fn linked(joining: &Verkstead, answering: &Verkstead) {
     assert_eq!(held.len(), 1, "one question, just asked");
 
     allow(&answering.workbench(), &held[0].request).await;
+
+    // The press answers before its dialling is done, so what the dialling does
+    // over there is only so once it has finished.
+    answering.tellings.told().await;
 }
 
 /// A call from each of two devices to the other, which is what *every call in

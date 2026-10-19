@@ -34,7 +34,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{AskingDevice, DevicesView, DiscoveredDevice};
 use verkstead_server::device::reading::Reading;
-use verkstead_server::device::{Device, Devices};
+use verkstead_server::device::{Device, Devices, Tellings};
 use verkstead_server::discovery::{Browse, Found};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::open_database;
@@ -109,6 +109,11 @@ struct Verkstead {
     members: Members,
     joins: Joins,
     nudges: Nudges,
+
+    /// What its presses leave running once they have answered, which a test
+    /// waits on before reading what they did over there.
+    tellings: Tellings,
+
     reading: Reading,
 
     /// Where its peer listener landed, which is also the one address it
@@ -153,6 +158,7 @@ impl Verkstead {
             members: Members::recorded(pool.clone()),
             joins: Joins::recorded(pool.clone()),
             nudges: Nudges::new(),
+            tellings: Tellings::default(),
             reading,
             pool,
             address,
@@ -218,6 +224,7 @@ impl Verkstead {
                 self.members.clone(),
                 self.joins.clone(),
             )
+            .keeping_tellings(self.tellings.clone())
             .browsing(self.browse.clone()),
             self.nudges.clone(),
         )
@@ -247,12 +254,21 @@ async fn add(app: &Router, device: &str) -> (StatusCode, String) {
 
 /// Press **Allow** on the modal over there.
 async fn allow(app: &Router, request: &str) {
+    answer(app, request, "allow").await;
+}
+
+/// Or **Deny**.
+async fn deny(app: &Router, request: &str) {
+    answer(app, request, "deny").await;
+}
+
+async fn answer(app: &Router, request: &str, press: &str) {
     let response = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("{ASKING}/{request}/allow"))
+                .uri(format!("{ASKING}/{request}/{press}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -265,7 +281,7 @@ async fn allow(app: &Router, request: &str) {
     assert_eq!(
         status,
         StatusCode::OK,
-        "POST {ASKING}/{request}/allow: {}",
+        "POST {ASKING}/{request}/{press}: {}",
         String::from_utf8_lossy(&bytes),
     );
 }
@@ -562,6 +578,10 @@ async fn allowing_it_makes_the_device_a_member_on_both_and_no_longer_discovered(
 
     allow(&asked.workbench(), &held[0].request).await;
 
+    // The press answers before its dialling is done, so what the dialling does
+    // over there is only so once it has finished.
+    asked.tellings.told().await;
+
     // B's side: A, as A said it was in the join post it made off a row nobody
     // typed an address into.
     let over_there = listing(&asked.workbench()).await;
@@ -594,4 +614,38 @@ async fn allowing_it_makes_the_device_a_member_on_both_and_no_longer_discovered(
          the cluster already, so a row offering to link it would be a press with \
          nothing behind it",
     );
+}
+
+/// And denying it takes the question away at once and tells the device that
+/// asked once the press has answered: its pending row reads refused, and
+/// nobody is a member of anybody.
+#[tokio::test]
+async fn denying_it_answers_and_then_tells_the_device_that_asked() {
+    let asked = Verkstead::asked().await;
+    let asking = Verkstead::asking(vec![found(B, &[asked.at()])]).await;
+
+    let (status, said) = add(&asking.workbench(), B).await;
+    assert_eq!(status, StatusCode::OK, "POST {DISCOVERED}/{B}/add: {said}");
+
+    let held = being_asked(&asked.workbench()).await;
+    assert_eq!(held.len(), 1, "one question to press: {held:?}");
+
+    deny(&asked.workbench(), &held[0].request).await;
+
+    assert!(
+        being_asked(&asked.workbench()).await.is_empty(),
+        "the question is gone the moment the press answers",
+    );
+
+    asked.tellings.told().await;
+
+    let over_here = listing(&asking.workbench()).await;
+
+    assert_eq!(over_here.pending.len(), 1, "{over_here:?}");
+    assert!(
+        over_here.pending[0].refused,
+        "the device that asked was told: {over_here:?}",
+    );
+    assert!(over_here.members.is_empty(), "{over_here:?}");
+    assert!(listing(&asked.workbench()).await.members.is_empty());
 }
