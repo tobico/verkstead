@@ -1602,6 +1602,25 @@ describe("a mouse on the collapsed list", () => {
     expect(hovered(list)).toBe(false);
   });
 
+  /// The browser sends a move with every enter, at the point it entered, and
+  /// often a fraction of a millisecond later: nothing travelled in next to no
+  /// time, which is no speed at all rather than a pointer standing still.
+  it("never reads the move an enter brings as the pointer resting", async () => {
+    const { list } = await reading();
+
+    fireEvent.pointerEnter(list, mouse(46));
+    vi.advanceTimersByTime(0.1);
+    fireEvent.pointerMove(list, mouse(46));
+    expect(hovered(list)).toBe(false);
+    vi.advanceTimersByTime(4);
+    fireEvent.pointerMove(list, mouse(24));
+    vi.advanceTimersByTime(4);
+    fireEvent.pointerLeave(list, mouse(-4));
+
+    vi.advanceTimersByTime(1000);
+    expect(hovered(list)).toBe(false);
+  });
+
   it("collapses a moment after the pointer leaves, unless it comes back", async () => {
     const { list } = await reading();
 

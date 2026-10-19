@@ -483,6 +483,13 @@ export function Panes(props: {
   /// A mouse moving over the strip, timed against where it was last.
   /// `performance.now()` rather than the event's own stamp, which is a clock
   /// the tests' timers do not drive.
+  ///
+  /// A move that has gone nowhere is no sample of a speed. The browser sends
+  /// one with every `pointerenter`, at the very point the pointer entered, and
+  /// often a tenth of a millisecond after it — one crossing in six, on
+  /// Electron 43. Read as a speed that was nought, which opened the pane under
+  /// a pointer only crossing it. A pointer that has really stopped is what
+  /// `STOPPED` is for, and its wait is left running.
   const moved = (event: PointerEvent) => {
     if (event.pointerType !== "mouse" || last === undefined) {
       return;
@@ -491,6 +498,9 @@ export function Panes(props: {
     const at = performance.now();
     const travelled = Math.hypot(event.clientX - last.x, event.clientY - last.y);
     const elapsed = at - last.at;
+    if (travelled === 0) {
+      return;
+    }
 
     if (elapsed > 0 && travelled / elapsed < SETTLED) {
       settle();
