@@ -16,8 +16,9 @@
 //!
 //! **Four things to say, because each wants something different done about it.**
 //! No `tailscale` at all is an install, and nothing on this page can do it. The
-//! binary with no daemon answering is a `tailscale up`, said in the machine's
-//! own words because the line it prints names the service to start. Up is the
+//! binary with no daemon answering is a `tailscale up` — or, where it is the Mac
+//! app's, opening the app — said in the machine's own words because the line
+//! it prints names the service to start. Up is the
 //! node's name and whether the workbench is served to the tailnet. And an
 //! answer this build could not read is none of the three: Tailscale is whatever
 //! the host has, so a shape nobody here has seen says so rather than being read
@@ -508,14 +509,26 @@ export function RemotePane(props: {
 
                 {/* Installed and not up. What it printed is the useful half —
                     the line names the service to start — so it stands as it
-                    came rather than reworded. */}
+                    came rather than reworded. The Mac app is logged in to by
+                    opening it, so where that is what was found the note says
+                    so rather than `tailscale up`. */}
                 <Match when={down(told())} keyed>
                   {(stopped) => (
                     <>
-                      <Note>
-                        Run <code>tailscale up</code> on this machine to join it
-                        to a tailnet. Tailscale said:
-                      </Note>
+                      <Show
+                        when={stopped.mac_app}
+                        fallback={
+                          <Note>
+                            Run <code>tailscale up</code> on this machine to join
+                            it to a tailnet. Tailscale said:
+                          </Note>
+                        }
+                      >
+                        <Note>
+                          Tailscale is installed but not connected. Open it and
+                          log in. Tailscale said:
+                        </Note>
+                      </Show>
                       <p class={styles.trouble}>{stopped.trouble}</p>
                     </>
                   )}

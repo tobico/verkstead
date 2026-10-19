@@ -1,5 +1,5 @@
 {
-  "grant": "sudo tailscale set --operator=ada",
+  "grant": "sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale set --operator=ada",
   "press": "Ungranted",
   "trouble": "Access denied: serve config denied"
 }

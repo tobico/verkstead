@@ -35,6 +35,7 @@
 //! machine reading the same JSON.
 #![cfg(unix)]
 
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
@@ -168,9 +169,12 @@ async fn a_machine_with_no_tailscale_says_so() {
 async fn a_daemon_that_is_not_answering_is_not_a_serve_that_is_off() {
     let (_dir, app) = app_reading(NO_DAEMON).await;
 
-    let RemoteView::Down { trouble } = remote(&app).await else {
+    let RemoteView::Down { trouble, mac_app } = remote(&app).await else {
         panic!("a machine whose daemon is down should read as down");
     };
+
+    // A `tailscale` stated rather than looked for is nobody's Mac app.
+    assert!(!mac_app);
 
     // In the machine's own words, because they are the useful half: the line
     // tailscale prints is the one naming the service to start.
@@ -187,7 +191,7 @@ async fn a_daemon_that_is_not_answering_is_not_a_serve_that_is_off() {
 async fn a_machine_that_has_joined_no_tailnet_reads_as_down_too() {
     let (_dir, app) = app_reading(NOT_LOGGED_IN).await;
 
-    let RemoteView::Down { trouble } = remote(&app).await else {
+    let RemoteView::Down { trouble, .. } = remote(&app).await else {
         panic!("a machine that is not on a tailnet should read as down");
     };
 
@@ -334,19 +338,14 @@ async fn app_asking(
         .await
         .unwrap();
 
-    let tailscale = Tailscale::running(
-        vec![
-            "/bin/sh".to_owned(),
-            "-c".to_owned(),
-            script,
-            // `sh -c` gives `$0` the script's own name, so what Verkstead passes
-            // lands in `$1` onwards.
-            "tailscale".to_owned(),
-        ],
-        PORT,
-    )
-    .as_user(WHO.to_owned())
-    .keyed(WorkbenchKey::stated(dir.path(), KEY).unwrap());
+    // A file rather than an `sh -c`, because the grant line names the program
+    // it ran — see [`grant_for`] — and a line to paste is a path.
+    let program = dir.path().join("tailscale");
+    executable(&program, &script);
+
+    let tailscale = Tailscale::running(vec![program.display().to_string()], PORT)
+        .as_user(WHO.to_owned())
+        .keyed(WorkbenchKey::stated(dir.path(), KEY).unwrap());
 
     let tailscale = match escalation {
         Some(escalation) => tailscale.escalating(escalation),
@@ -354,6 +353,46 @@ async fn app_asking(
     };
 
     (dir, router_reading_tailscale(pool, tailscale))
+}
+
+/// `script` written at `at` as a program to run, with every directory above it.
+///
+/// Written by a child shell rather than from here, for the reason the crate's
+/// own `stand_ins::program` gives: a file this process held open for writing is
+/// one a sibling test's fork can still hold when it is run, and Linux refuses
+/// to run that with `ETXTBSY`.
+fn executable(at: &Path, script: &str) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+
+    let mut writing = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(r#"cat > "$1" && chmod 755 "$1""#)
+        .arg("sh")
+        .arg(at)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    writing
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(format!("#!/bin/sh\n{script}").as_bytes())
+        .unwrap();
+
+    assert!(writing.wait().unwrap().success());
+}
+
+/// The grant line a press refused on the machine in `dir` hands back: the
+/// `tailscale` [`app_asking`] wrote there, made this suite's user's operator.
+fn grant_for(dir: &Path) -> String {
+    format!(
+        "sudo {} set --operator={WHO}",
+        dir.join("tailscale").display()
+    )
 }
 
 /// The platform's own password dialog, as a suite has one: what it was asked to
@@ -541,7 +580,7 @@ async fn a_refused_serve_reads_back_the_grant_and_the_next_press_serves() {
         panic!("a serve refused for want of the operator grant should say so");
     };
 
-    assert_eq!(grant, format!("sudo tailscale set --operator={WHO}"));
+    assert_eq!(grant, grant_for(dir.path()));
 
     // And what the machine said with it, because the grant is this build's
     // reading of a refusal and the refusal itself is the machine's.
@@ -637,13 +676,13 @@ async fn a_dialog_somebody_answered_takes_the_grant_and_serves() {
 #[tokio::test]
 async fn a_dialog_somebody_dismissed_leaves_the_switch_off_and_the_line_shown() {
     let dialog = Dialog::dismissed();
-    let (_dir, app) = app_pressing_through(Some(dialog.clone())).await;
+    let (dir, app) = app_pressing_through(Some(dialog.clone())).await;
 
     let ServePress::Ungranted { grant, trouble } = press(&app, true).await else {
         panic!("a dismissed dialog leaves the press refused");
     };
 
-    assert_eq!(grant, format!("sudo tailscale set --operator={WHO}"));
+    assert_eq!(grant, grant_for(dir.path()));
     assert!(
         trouble.contains("Access denied"),
         "what Tailscale said is what is shown under the line: {trouble}"
@@ -671,13 +710,13 @@ async fn a_dialog_somebody_dismissed_leaves_the_switch_off_and_the_line_shown() 
 async fn a_serve_still_refused_after_the_grant_reads_back_the_line() {
     let dialog = Dialog::answered();
     let dir = tempfile::tempdir().unwrap();
-    let (_dir, app) = app_asking(dir, STUBBORN.to_owned(), Some(dialog.clone())).await;
+    let (dir, app) = app_asking(dir, STUBBORN.to_owned(), Some(dialog.clone())).await;
 
     let ServePress::Ungranted { grant, trouble } = press(&app, true).await else {
         panic!("a serve refused after the grant is still a serve that was refused");
     };
 
-    assert_eq!(grant, format!("sudo tailscale set --operator={WHO}"));
+    assert_eq!(grant, grant_for(dir.path()));
     assert!(
         trouble.contains("Access denied"),
         "what the machine said the second time: {trouble}"
@@ -687,6 +726,167 @@ async fn a_serve_still_refused_after_the_grant_reads_back_the_line() {
     // the same press would be the app asking for something it has just been
     // given.
     assert_eq!(dialog.asked().len(), 1);
+}
+
+/// Where a Mac's lookup finds things in this suite, under one temporary
+/// directory: the PATH a session gets, and the two directories of applications
+/// the Tailscale app may be in — the machine's, then the home's.
+struct AMac {
+    dir: tempfile::TempDir,
+}
+
+impl AMac {
+    fn new() -> AMac {
+        AMac {
+            dir: tempfile::tempdir().unwrap(),
+        }
+    }
+
+    /// The one directory on this Mac's PATH.
+    fn floor(&self) -> PathBuf {
+        self.dir.path().join("floor")
+    }
+
+    /// `/Applications`, and then `~/Applications`.
+    fn applications(&self) -> Vec<PathBuf> {
+        vec![
+            self.dir.path().join("Applications"),
+            self.dir.path().join("home").join("Applications"),
+        ]
+    }
+
+    /// A `tailscale` on the PATH, as the open-source formula puts one.
+    fn on_the_floor(&self, script: &str) -> PathBuf {
+        let at = self.floor().join("tailscale");
+        executable(&at, script);
+        at
+    }
+
+    /// And the Mac app's own CLI, inside the app under `applications`.
+    fn in_the_app(&self, applications: &Path, script: &str) -> PathBuf {
+        let at = applications.join("Tailscale.app/Contents/MacOS/Tailscale");
+        executable(&at, script);
+        at
+    }
+
+    /// A server looking for `tailscale` the way a Mac does, over this one.
+    async fn app(&self) -> Router {
+        let pool = open_database(&self.dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let tailscale =
+            Tailscale::on_a_mac(self.floor().into_os_string(), self.applications(), PORT)
+                .as_user(WHO.to_owned());
+
+        router_reading_tailscale(pool, tailscale)
+    }
+}
+
+/// The open-source formula's `tailscale`, on the PATH a session gets: found
+/// there rather than on the PATH the server was started with, which on a Mac
+/// started from the Dock has no Homebrew in it — and this suite's has no such
+/// directory either.
+#[tokio::test]
+async fn a_mac_finds_tailscale_on_the_path_a_session_gets() {
+    let mac = AMac::new();
+    mac.on_the_floor(NOT_SERVING);
+
+    assert_eq!(
+        remote(&mac.app().await).await,
+        RemoteView::Up {
+            node: "workbench.tailnet-name.ts.net".to_owned(),
+            serve: verkstead_render::ServeView::Off,
+            link: None,
+        }
+    );
+}
+
+/// The Tailscale most Macs have links nothing onto any PATH: its CLI is inside
+/// the app. Found there, and a machine it says is not logged in reads as down
+/// with the fact that it is the app's — which is what the pane's note turns on.
+#[tokio::test]
+async fn a_mac_finds_the_cli_inside_the_tailscale_app() {
+    let mac = AMac::new();
+    mac.in_the_app(&mac.applications()[0], NOT_LOGGED_IN);
+
+    let RemoteView::Down { trouble, mac_app } = remote(&mac.app().await).await else {
+        panic!("the app's CLI should be found, and read as down");
+    };
+
+    assert!(mac_app, "what was run is the Mac app's own CLI");
+    assert!(trouble.contains("NeedsLogin"), "{trouble}");
+}
+
+/// And the app under the home's own `~/Applications`, which is where the cask
+/// puts it when it is told to.
+#[tokio::test]
+async fn a_mac_finds_the_app_under_the_homes_own_applications() {
+    let mac = AMac::new();
+    mac.in_the_app(&mac.applications()[1], NOT_LOGGED_IN);
+
+    assert!(matches!(
+        remote(&mac.app().await).await,
+        RemoteView::Down { mac_app: true, .. }
+    ));
+}
+
+/// Where both are there, the PATH's wins: the human who installed the formula
+/// chose it, and the app is what is looked in when there is nothing else.
+#[tokio::test]
+async fn a_mac_with_both_runs_the_one_on_the_path() {
+    let mac = AMac::new();
+    mac.on_the_floor(NOT_SERVING);
+    mac.in_the_app(&mac.applications()[0], NO_DAEMON);
+
+    assert!(matches!(
+        remote(&mac.app().await).await,
+        RemoteView::Up { .. }
+    ));
+}
+
+/// And a Mac with neither has no Tailscale, which is still the one state with
+/// an install to point at.
+#[tokio::test]
+async fn a_mac_with_neither_says_there_is_no_tailscale() {
+    let mac = AMac::new();
+
+    assert_eq!(remote(&mac.app().await).await, RemoteView::Absent);
+}
+
+/// Looked for at every reading rather than once: an install made while the
+/// server is up is read at the next opening of the pane, with nothing restarted.
+#[tokio::test]
+async fn a_tailscale_installed_while_the_server_is_up_is_found() {
+    let mac = AMac::new();
+    let app = mac.app().await;
+
+    assert_eq!(remote(&app).await, RemoteView::Absent);
+
+    mac.in_the_app(&mac.applications()[0], NOT_LOGGED_IN);
+
+    assert!(matches!(
+        remote(&app).await,
+        RemoteView::Down { mac_app: true, .. }
+    ));
+}
+
+/// The grant line names the program that was run: on a Mac whose `tailscale`
+/// is inside the app there is nothing of that name on the PATH the line is
+/// pasted into.
+#[tokio::test]
+async fn the_grant_names_the_tailscale_that_was_found() {
+    let mac = AMac::new();
+    let found = mac.in_the_app(&mac.applications()[0], &switchable(mac.dir.path()));
+
+    let ServePress::Ungranted { grant, .. } = press(&mac.app().await, true).await else {
+        panic!("a serve refused for want of the operator grant should say so");
+    };
+
+    assert_eq!(
+        grant,
+        format!("sudo {} set --operator={WHO}", found.display())
+    );
 }
 
 /// A server on the serving machine above, standing behind its own key: what the

@@ -1,0 +1,5 @@
+{
+  "mac_app": true,
+  "tailscale": "Down",
+  "trouble": "The Tailscale daemon reports NeedsLogin."
+}

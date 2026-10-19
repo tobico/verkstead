@@ -16,6 +16,22 @@
 //! binary on the machine is the one thing that is certain to speak this
 //! machine's Tailscale, whatever version it happens to be.
 //!
+//! **Found where a Mac keeps it, and found again at every reading.** On Linux
+//! and Windows the program is the bare word `tailscale`, which their packages
+//! and installer put on the PATH. A Mac is two things that word misses. The
+//! desktop app is started from the Dock, and launchd hands it
+//! `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else, so even the open-source
+//! formula's `/opt/homebrew/bin/tailscale` is not on the server's own PATH. And
+//! the Tailscale most Macs have — the standalone download, the App Store build
+//! and the Homebrew cask alike — puts nothing on any PATH: its CLI is
+//! `Tailscale.app/Contents/MacOS/Tailscale`, inside the app. So a Mac looks
+//! over the PATH a session gets ([`crate::sandbox::machine_path`], which has
+//! Homebrew's directories ahead of launchd's) and then inside the app, under
+//! `/Applications` and then `~/Applications` — the PATH first, because a human
+//! who installed the formula chose it. Nothing of the lookup is held, for the
+//! reason the reading is not: an install made while the server is up is a
+//! machine that changed.
+//!
 //! **Which is exactly why the reading is defensive.** Tailscale is whatever the
 //! host has — nothing in this repository pins it, and the NixOS module only
 //! turns the host's own on — and the JSON it prints is documented as subject to
@@ -38,8 +54,8 @@
 //! there is nothing the server can do about that: it runs unprivileged, and a
 //! daemon that could make itself the operator would be a daemon that could do
 //! anything. So a denied press hands back the line that grants it —
-//! `sudo tailscale set --operator=<user>`, for this machine's own user — and
-//! the next press is the re-try.
+//! `sudo tailscale set --operator=<user>`, for this machine's own user, naming
+//! whichever `tailscale` was found — and the next press is the re-try.
 //!
 //! **Unless whatever started this server handed over a way to ask.** The
 //! desktop app has one — the platform's own password dialog, which is what
@@ -72,6 +88,8 @@
 //! machine on a tailnet serving nothing has no address, and so no link.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::Arc;
 use std::time::Duration;
@@ -81,6 +99,8 @@ use tokio::process::Command;
 use verkstead_render::{RemoteView, ServePress, ServeView};
 
 use crate::key::WorkbenchKey;
+use crate::platform::{Environment, Platform};
+use crate::sandbox::MacFloor;
 use crate::unseen::Unseen;
 
 /// The tailscale on this machine, and the port a serve has to be pointing at
@@ -91,9 +111,8 @@ use crate::unseen::Unseen;
 /// goes is a shell script, and a handle is what lets them.
 #[derive(Debug, Clone)]
 pub struct Tailscale {
-    /// What to run, and whatever stands before the arguments this module
-    /// passes. `["tailscale"]` on a real machine.
-    program: Vec<String>,
+    /// What to run, or where to look for it — see [`Program`].
+    program: Program,
 
     /// The port the workbench is served on, which is [`crate::Config::listen`]'s
     /// rather than a constant: an install told to listen somewhere else is one
@@ -126,6 +145,41 @@ pub struct Tailscale {
     /// reads the machine exactly as the served one does and hands back no link,
     /// there being no key to make one out of.
     key: Option<WorkbenchKey>,
+}
+
+/// Which `tailscale` a [`Tailscale`] runs.
+#[derive(Debug, Clone)]
+enum Program {
+    /// This, as it stands, and whatever stands before the arguments this module
+    /// passes: `["tailscale"]` on Linux and Windows, and a shell script in the
+    /// suites.
+    Stated(Vec<String>),
+
+    /// Looked for the way a Mac has to be, at every reading — see the module's
+    /// own account of why.
+    Mac {
+        /// The PATH to look over first: the machine's own floor, or one the
+        /// suites state, so that what they find is what they put there.
+        floor: MacFloor,
+
+        /// And the directories to look in for `Tailscale.app` after it, in
+        /// order: `/Applications`, then the home's own.
+        applications: Vec<PathBuf>,
+    },
+}
+
+/// Where the Mac app keeps its CLI, under a directory of applications.
+const IN_THE_APP: &str = "Tailscale.app/Contents/MacOS/Tailscale";
+
+/// The `tailscale` a reading runs, once it has been looked for.
+struct Found {
+    /// What to run, and whatever stands before the arguments.
+    program: Vec<String>,
+
+    /// Whether it is the Mac app's own CLI, which is a Tailscale somebody logs
+    /// in to by opening the app rather than by running `tailscale up` — see
+    /// [`RemoteView::Down`], which carries it.
+    mac_app: bool,
 }
 
 /// A way for this process to run one command with a privilege it has not got.
@@ -207,14 +261,54 @@ const HTTPS: &str = "443";
 const ANSWERING: Duration = Duration::from_secs(5);
 
 impl Tailscale {
-    /// The real thing: whatever `tailscale` the host has on its PATH, in front
-    /// of `port`.
+    /// The real thing: whatever `tailscale` the host has, in front of `port` —
+    /// the one on its PATH, or on a Mac wherever the module's account of it
+    /// says a Mac keeps one.
     pub fn on_path(port: u16) -> Tailscale {
-        Tailscale::running(vec!["tailscale".to_owned()], port)
+        match Platform::HERE {
+            Platform::MacOs => {
+                let home =
+                    crate::platform::home_dir(Platform::MacOs, &Environment::of_the_process());
+
+                let applications = std::iter::once(PathBuf::from("/Applications"))
+                    .chain(home.map(|home| home.join("Applications")))
+                    .collect();
+
+                Tailscale::with(
+                    Program::Mac {
+                        floor: MacFloor::Machine,
+                        applications,
+                    },
+                    port,
+                )
+            }
+            Platform::Linux | Platform::Windows => {
+                Tailscale::running(vec!["tailscale".to_owned()], port)
+            }
+        }
     }
 
     /// The same, with something else where `tailscale` goes.
     pub fn running(program: Vec<String>, port: u16) -> Tailscale {
+        Tailscale::with(Program::Stated(program), port)
+    }
+
+    /// The same, looking for `tailscale` the way a Mac does: over `floor`, and
+    /// then inside `Tailscale.app` under each of `applications`.
+    ///
+    /// For the suites, which have a Mac's lookup to check on whatever machine
+    /// they run on, and so state both halves of where it looks.
+    pub fn on_a_mac(floor: OsString, applications: Vec<PathBuf>, port: u16) -> Tailscale {
+        Tailscale::with(
+            Program::Mac {
+                floor: MacFloor::Stated(floor),
+                applications,
+            },
+            port,
+        )
+    }
+
+    fn with(program: Program, port: u16) -> Tailscale {
         Tailscale {
             program,
             port,
@@ -267,6 +361,10 @@ impl Tailscale {
     /// between requests would be a pane that had to be reloaded twice to tell
     /// the truth.
     pub(crate) async fn reading(&self) -> RemoteView {
+        // Which `tailscale` this is, for the one state whose instruction turns
+        // on it: a Mac app is logged in to by opening it.
+        let mac_app = self.found().is_some_and(|found| found.mac_app);
+
         let told = match self.run(&["status", "--json"]).await {
             Ok(told) => told,
 
@@ -280,6 +378,7 @@ impl Tailscale {
             Err(trouble) => {
                 return RemoteView::Down {
                     trouble: trouble.to_string(),
+                    mac_app,
                 };
             }
         };
@@ -289,6 +388,7 @@ impl Tailscale {
         if !told.status.success() {
             return RemoteView::Down {
                 trouble: complaint(&told),
+                mac_app,
             };
         }
 
@@ -313,6 +413,7 @@ impl Tailscale {
         if state != RUNNING {
             return RemoteView::Down {
                 trouble: format!("The Tailscale daemon reports {state}."),
+                mac_app,
             };
         }
 
@@ -539,7 +640,7 @@ impl Tailscale {
     /// rather type the command still can. What went wrong is said in the log,
     /// which is where the reader who wants it is.
     async fn granting(&self, on: bool, trouble: String) -> ServePress {
-        let grant = grant(&self.user);
+        let grant = grant(&self.named(), &self.user);
 
         let Some(escalation) = self.escalation.clone() else {
             return ServePress::Ungranted { grant, trouble };
@@ -588,12 +689,12 @@ impl Tailscale {
     /// `sudo` on the front: what raises the privilege is the platform's own
     /// asking rather than a word in front of the command.
     ///
-    /// Built off `program` rather than off the word `tailscale`, for the reason
-    /// every other command here is: what the suites put where the binary goes is
-    /// a shell script, and a grant naming the real one would be a grant no test
-    /// could take.
+    /// Built off the program found rather than off the word `tailscale`, for
+    /// the reason every other command here is: what the suites put where the
+    /// binary goes is a shell script, and a grant naming the real one would be
+    /// a grant no test could take.
     fn operator(&self) -> Vec<String> {
-        let mut asking = self.program.clone();
+        let mut asking = self.named();
 
         asking.push("set".to_owned());
         asking.push(format!("--operator={}", self.user));
@@ -632,7 +733,7 @@ impl Tailscale {
     /// business writing on the server's own terminal, and both streams are what
     /// this module reads its answer out of.
     async fn run(&self, arguments: &[&str]) -> std::io::Result<Output> {
-        self.command(arguments).output().await
+        self.command(arguments)?.output().await
     }
 
     /// The same, given `within` to answer in — and killed where it does not.
@@ -650,9 +751,9 @@ impl Tailscale {
     /// `kill_on_drop`, because a timeout that left the process running would be
     /// this deadline saying the pile-up had stopped while it went on.
     async fn run_within(&self, arguments: &[&str], within: Duration) -> std::io::Result<Output> {
-        match tokio::time::timeout(within, self.command(arguments).kill_on_drop(true).output())
-            .await
-        {
+        let mut command = self.command(arguments)?;
+
+        match tokio::time::timeout(within, command.kill_on_drop(true).output()).await {
             Ok(told) => told,
             Err(_) => Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
@@ -665,8 +766,19 @@ impl Tailscale {
     ///
     /// Apart from the running so that the two ways of running it — with a
     /// deadline and without — are one command said once.
-    fn command(&self, arguments: &[&str]) -> Command {
-        let (program, before) = self
+    ///
+    /// `NotFound` where a Mac has no `tailscale` anywhere it looks, which is the
+    /// same failure running a program that is not there comes back as — and
+    /// what [`RemoteView::Absent`] is read off either way.
+    fn command(&self, arguments: &[&str]) -> std::io::Result<Command> {
+        let Some(found) = self.found() else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "there is no tailscale on this Mac's PATH or in its Tailscale app",
+            ));
+        };
+
+        let (program, before) = found
             .program
             .split_first()
             .expect("a Tailscale is built with a program to run");
@@ -679,9 +791,64 @@ impl Tailscale {
             .unseen()
             .stdin(std::process::Stdio::null());
 
-        command
+        Ok(command)
+    }
+
+    /// Which `tailscale` to run, looked for now.
+    ///
+    /// A Mac's PATH first and the app after it, and `None` where neither has
+    /// one. Not the bare word run on the server's own `PATH` instead: that is
+    /// already on the floor, so all it could add is a `tailscale` that is
+    /// somewhere other than where this was told to look.
+    ///
+    /// Blocks, for a handful of `stat` calls — fewer than the process it is
+    /// looking for costs to start.
+    fn found(&self) -> Option<Found> {
+        match &self.program {
+            Program::Stated(program) => Some(Found {
+                program: program.clone(),
+                mac_app: false,
+            }),
+            Program::Mac {
+                floor,
+                applications,
+            } => on_a_mac(floor, applications),
+        }
+    }
+
+    /// The program a line handed to the human names: the one found, or the
+    /// bare word where nothing was — a grant asked for between an uninstall and
+    /// the next reading still being a line somebody can make sense of.
+    fn named(&self) -> Vec<String> {
+        self.found()
+            .map_or_else(|| vec![NAME.to_owned()], |found| found.program)
     }
 }
+
+/// Where a Mac keeps `tailscale`: on `floor`, or else inside `Tailscale.app`
+/// under the first of `applications` that has one — see [`Tailscale::found`].
+fn on_a_mac(floor: &MacFloor, applications: &[PathBuf]) -> Option<Found> {
+    let named = |found: &Path| vec![found.to_string_lossy().into_owned()];
+
+    if let Some(found) = floor.find(NAME) {
+        return Some(Found {
+            program: named(&found),
+            mac_app: false,
+        });
+    }
+
+    applications
+        .iter()
+        .map(|applications| applications.join(IN_THE_APP))
+        .find(|found| found.is_file())
+        .map(|found| Found {
+            program: named(&found),
+            mac_app: true,
+        })
+}
+
+/// What the program is called wherever it is on a PATH.
+const NAME: &str = "tailscale";
 
 /// The nodes of `status`'s tailnet that are up, in the order a probe asks them —
 /// see [`Tailscale::peers`], whose whole answer this is.
@@ -852,8 +1019,29 @@ fn ungranted(trouble: &str) -> bool {
 /// Handed over rather than run. Nothing here escalates: the server has no
 /// privilege to raise, and a daemon that quietly acquired one would be a worse
 /// thing than a switch that has to be pressed twice.
-fn grant(user: &str) -> String {
-    format!("sudo tailscale set --operator={user}")
+///
+/// It names `program`, the one that was found, because that is the only one
+/// certain to be there: a Mac whose `tailscale` is inside the app has nothing
+/// of that name on the PATH the line is pasted into.
+fn grant(program: &[String], user: &str) -> String {
+    let program: Vec<String> = program.iter().map(|word| pastable(word)).collect();
+
+    format!("sudo {} set --operator={user}", program.join(" "))
+}
+
+/// `word` as a shell reads it back unchanged: as it stands where it is made of
+/// nothing a shell would act on, and in single quotes otherwise — a home with a
+/// space in its name being a home whose `~/Applications` has one too.
+fn pastable(word: &str) -> String {
+    let plain = !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/._-+=:@,%".contains(c));
+
+    match plain {
+        true => word.to_owned(),
+        false => format!("'{}'", word.replace('\'', r"'\''")),
+    }
 }
 
 /// What this machine's own user is called, for the grant above to name.
@@ -1196,7 +1384,25 @@ mod tests {
     /// what makes it a line somebody can paste.
     #[test]
     fn the_grant_names_this_machines_user() {
-        assert_eq!(grant("ada"), "sudo tailscale set --operator=ada");
+        assert_eq!(
+            grant(&["tailscale".to_owned()], "ada"),
+            "sudo tailscale set --operator=ada"
+        );
+    }
+
+    /// And names the program it was found as in words a shell reads back
+    /// unchanged: the Mac app's CLI under a home with a space in its name is
+    /// one quoted word rather than two.
+    #[test]
+    fn the_grant_quotes_a_program_with_a_space_in_it() {
+        let program = "/Users/Ada Lovelace/Applications/Tailscale.app/Contents/MacOS/Tailscale";
+
+        assert_eq!(
+            grant(&[program.to_owned()], "ada"),
+            "sudo '/Users/Ada Lovelace/Applications/Tailscale.app/Contents/MacOS/Tailscale' \
+             set --operator=ada"
+        );
+        assert_eq!(pastable("it's"), r"'it'\''s'");
     }
 
     /// And it names whoever this machine calls its user, whichever of the three

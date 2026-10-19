@@ -592,6 +592,12 @@ rustc to run*. `RUSTUP_HOME` where the machine sets one, `~/.rustup` where it
 does not, and nothing at all where there is no rustup on the `PATH`, which is
 every nix machine.
 
+**A Mac whose Rust is rustup's finds it the same way, from the Dock too.**
+rustup's installer puts `~/.cargo/bin` on a `PATH` by writing a line into a shell
+profile, which launchd never reads, so the Mac floor carries `~/.cargo/bin`
+itself, behind `~/.local/bin` and ahead of Homebrew's prefixes — and with
+`rustup` found there, the rustup home is granted as it is on Windows.
+
 A session's GitHub auth and the author of its commits are two of those settings
 rather than anything found in a home directory. Who you are is an **Author** in
 `config.yaml`, keyed by a uuid, and its token is in `secrets.yaml` beside the
@@ -1038,9 +1044,18 @@ phone's camera at, the address and the **Workbench Key** together. Nothing to
 run in a terminal, and nothing to paste: Tailscale itself is the machine's, and
 a serve set up by hand reads on that page exactly as one set up from it would.
 
+On a Mac the server looks for `tailscale` over the `PATH` a session gets — so
+Homebrew's `/opt/homebrew/bin` counts even for an app started from the Dock —
+and then inside the Tailscale app itself, at
+`Tailscale.app/Contents/MacOS/Tailscale` under `/Applications` or
+`~/Applications`. That is where the standalone download, the App Store build
+and the Homebrew cask all put the CLI, and none of them links it onto a `PATH`.
+The one on the `PATH` wins where both are there.
+
 Where the press is refused for want of the operator grant — Tailscale allows a
 serve from nobody but root and the tailnet's operator — the pane shows the
-`sudo tailscale set --operator=…` that lifts it, and the next press is the
+`sudo tailscale set --operator=…` that lifts it, naming whichever `tailscale`
+was found (on a Mac, perhaps the one inside the app), and the next press is the
 re-try. The desktop app puts that through `pkexec` instead — its sidecar
 is a `serve --desktop`, and the flag is how the server knows there is somebody
 at the machine to ask, where a `serve` started in a terminal has not.

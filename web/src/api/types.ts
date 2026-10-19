@@ -5095,7 +5095,15 @@ export type RemoteView = { "tailscale": "Absent" } | { "tailscale": "Down",
  * What `tailscale` said about it — its own line where it printed one,
  * because that is what names the service to start.
  */
-trouble: string, } | { "tailscale": "Unreadable", trouble: string, } | { "tailscale": "Up", 
+trouble: string, 
+/**
+ * Whether the `tailscale` that said it is the Mac app's own CLI —
+ * the standalone download, the App Store build or the Homebrew cask —
+ * rather than one on the PATH. A fact about the program rather than a
+ * sentence: what the pane says about it is the viewer's, and a Mac
+ * app is logged in to by opening it rather than by `tailscale up`.
+ */
+mac_app: boolean, } | { "tailscale": "Unreadable", trouble: string, } | { "tailscale": "Up", 
 /**
  * The node's own name, as the tailnet knows it —
  * `workbench.tailnet-name.ts.net`, with the trailing dot a DNS name

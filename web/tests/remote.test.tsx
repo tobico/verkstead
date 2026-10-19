@@ -70,6 +70,7 @@ import devicesWaiting from "./fixtures/devices-waiting.json" with { type: "json"
 import devicesWsl from "./fixtures/devices-wsl.json" with { type: "json" };
 import absent from "./fixtures/remote-absent.json" with { type: "json" };
 import down from "./fixtures/remote-down.json" with { type: "json" };
+import downInTheMacApp from "./fixtures/remote-down-mac-app.json" with { type: "json" };
 import off from "./fixtures/remote-off.json" with { type: "json" };
 import unreadableServe from "./fixtures/remote-serve-unreadable.json" with { type: "json" };
 import serving from "./fixtures/remote-serving.json" with { type: "json" };
@@ -78,11 +79,13 @@ import ungranted from "./fixtures/serve-ungranted.json" with { type: "json" };
 import { askedFor, json, whenever, serving as stubbing } from "./serving";
 import { stream, streaming } from "./streaming";
 
-/// The five machines: no Tailscale at all, one whose daemon is not answering,
-/// one that is up and serving the workbench, one that is up and serving
-/// nothing, and one that is up and whose serve state could not be read.
+/// The six machines: no Tailscale at all, one whose daemon is not answering,
+/// a Mac whose Tailscale app is not logged in, one that is up and serving the
+/// workbench, one that is up and serving nothing, and one that is up and whose
+/// serve state could not be read.
 const ABSENT = absent as RemoteView;
 const DOWN = down as RemoteView;
+const DOWN_IN_THE_MAC_APP = downInTheMacApp as RemoteView;
 const SERVING = serving as RemoteView;
 const OFF = off as RemoteView;
 const UNREADABLE_SERVE = unreadableServe as RemoteView;
@@ -92,6 +95,11 @@ const UNREADABLE_SERVE = unreadableServe as RemoteView;
 /// carries.
 const DONE = done as ServePress;
 const UNGRANTED = ungranted as ServePress;
+
+/// The line that refusal hands back: on a Mac whose `tailscale` is the one
+/// inside the app, which is what the line names.
+const GRANT =
+  "sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale set --operator=ada";
 
 /// And what this Verkstead is: one device, on a Linux, with nothing linked to
 /// it — and the same device on a WSL, which is the case the OS word exists for
@@ -309,6 +317,20 @@ describe("the pane", () => {
     expect(screen.getByText("tailscale up")).toBeTruthy();
   });
 
+  /// The Mac app is logged in to by opening it, so where what was found is the
+  /// app's own CLI the note says that instead of `tailscale up` — still with
+  /// what Tailscale said under it.
+  it("tells a Mac whose Tailscale app is not logged in to open it", async () => {
+    mountPane(DOWN_IN_THE_MAC_APP);
+
+    await waitFor(() =>
+      expect(screen.getByText(/Open it and log in/)).toBeTruthy(),
+    );
+
+    expect(screen.getByText(/NeedsLogin/)).toBeTruthy();
+    expect(screen.queryByText("tailscale up")).toBeNull();
+  });
+
   /// What a serving machine's pane is, whole: the box with the one line that is
   /// its own, the code and the link, and the key with its own one line.
   ///
@@ -464,11 +486,7 @@ describe("the serve checkbox", () => {
     await waitFor(() => expect(theBox().checked).toBe(false));
     fireEvent.click(theBox());
 
-    await waitFor(() =>
-      expect(
-        screen.getByText("sudo tailscale set --operator=ada"),
-      ).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText(GRANT)).toBeTruthy());
 
     // With what Tailscale said under it, because the grant is this build's
     // reading of a refusal and the refusal is the machine's own.
@@ -487,11 +505,7 @@ describe("the serve checkbox", () => {
     await waitFor(() => expect(theBox().checked).toBe(false));
     fireEvent.click(theBox());
 
-    await waitFor(() =>
-      expect(
-        screen.getByText("sudo tailscale set --operator=ada"),
-      ).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText(GRANT)).toBeTruthy());
 
     fireEvent.click(theBox());
 
@@ -499,7 +513,7 @@ describe("the serve checkbox", () => {
 
     // And the grant goes with the refusal it belonged to: there is nothing left
     // for anybody to run.
-    expect(screen.queryByText("sudo tailscale set --operator=ada")).toBeNull();
+    expect(screen.queryByText(GRANT)).toBeNull();
   });
 
   /// The page that arrived over the serve cannot take it away: unticking from

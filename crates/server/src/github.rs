@@ -34,6 +34,17 @@
 //! over on. That is what [`Trouble`] is: a reason in words, for the human to
 //! read on a Timeline and do something about.
 //!
+//! **On a Mac the program is looked for, at every call**, over the `PATH` a
+//! session gets — [`crate::sandbox::machine_path`], which has Homebrew's
+//! directories ahead of launchd's. The desktop app is started from the Dock,
+//! and launchd hands it `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else, so
+//! the bare word `gh` run on the server's own `PATH` found nothing where
+//! Homebrew had put one in `/opt/homebrew/bin` — the onboarding probes, which
+//! look over that same list, saying `gh` was there while every ask said it was
+//! not. Linux and Windows keep the bare word, their `PATH` being the human's
+//! own. Nothing of the lookup is held, so an install made while the server is
+//! up is found by the next ask.
+//!
 //! Which is also why the program is a field rather than the literal `gh`,
 //! exactly as the agent is on [`crate::Agents`]: what has to be provable here is
 //! that each of those answers reaches the human as itself, and asking that of
@@ -47,6 +58,8 @@ use std::process::{Command, Stdio};
 
 use serde::Deserialize;
 
+use crate::platform::Platform;
+use crate::sandbox::MacFloor;
 use crate::settings::Settings;
 use crate::store;
 use crate::unseen::Unseen;
@@ -157,6 +170,10 @@ pub struct Gh {
     /// goes.
     program: Vec<String>,
 
+    /// Where the first word of `program` is looked for before it is run, or
+    /// `None` where it is run as it stands — see [`MacFloor`].
+    floor: Option<MacFloor>,
+
     /// Where the configured token is read from, or `None` where this `Gh` has
     /// no settings behind it — a router watching nothing has no Data Directory
     /// to read one out of, and nothing on it ever asks GitHub anything.
@@ -169,18 +186,54 @@ pub struct Gh {
 }
 
 impl Gh {
-    /// The real thing: whatever `gh` the host has on its PATH.
+    /// The real thing: whatever `gh` the host has on its PATH — on a Mac, the
+    /// one on the `PATH` a session gets.
     pub fn on_path() -> Gh {
-        Gh::running(vec!["gh".to_owned()])
+        let floor = match Platform::HERE {
+            Platform::MacOs => Some(MacFloor::Machine),
+            Platform::Linux | Platform::Windows => None,
+        };
+
+        Gh {
+            floor,
+            ..Gh::running(vec!["gh".to_owned()])
+        }
     }
 
     /// The same, with something else where `gh` goes — see [`Gh::program`].
     pub fn running(program: Vec<String>) -> Gh {
         Gh {
             program,
+            floor: None,
             settings: None,
             author: None,
         }
+    }
+
+    /// What to run, looked for now, with whatever stands before the arguments
+    /// already on it.
+    ///
+    /// The first word as it stands where there is no floor to look over, or
+    /// where the floor has none of it: that is a program that is not there,
+    /// which is what [`Trouble::NoGh`] is read off.
+    ///
+    /// Blocks, for a handful of `stat` calls — fewer than the process it is
+    /// looking for costs to start.
+    fn command(&self) -> Command {
+        let (program, before) = self
+            .program
+            .split_first()
+            .expect("a Gh is built with at least the program to run");
+
+        let found = self.floor.as_ref().and_then(|floor| floor.find(program));
+
+        let mut command = match found {
+            Some(found) => Command::new(found),
+            None => Command::new(program),
+        };
+
+        command.args(before);
+        command
     }
 
     /// And the same again, authenticating as whatever token `settings` holds at
@@ -332,15 +385,9 @@ impl Gh {
         args: &[&str],
         body: Option<&str>,
     ) -> Result<String, Trouble> {
-        let (program, before) = self
-            .program
-            .split_first()
-            .expect("a Gh is built with at least the program to run");
-
-        let mut command = Command::new(program);
+        let mut command = self.command();
 
         command
-            .args(before)
             .args(args)
             // Nothing on the screen for it either — see [`crate::unseen`].
             .unseen()
@@ -460,15 +507,9 @@ impl Gh {
         name: &str,
         environment: &[(String, OsString)],
     ) -> Result<(), Trouble> {
-        let (program, before) = self
-            .program
-            .split_first()
-            .expect("a Gh is built with at least the program to run");
-
-        let mut command = Command::new(program);
+        let mut command = self.command();
 
         command
-            .args(before)
             .args([name, "--help"])
             .env_clear()
             .unseen()
@@ -2121,6 +2162,49 @@ mod tests {
             Trouble::NoGh.why().contains("PATH"),
             "and says where it looked: {}",
             Trouble::NoGh.why(),
+        );
+    }
+
+    /// A Mac's `gh` is the one on the `PATH` a session gets rather than the
+    /// server's own, which from the Dock is launchd's and holds no Homebrew —
+    /// and a floor with none on it is still a machine with no `gh`.
+    #[test]
+    fn a_mac_finds_gh_on_the_path_a_session_gets() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let homebrew = tempfile::tempdir().unwrap();
+        // Named something no runner has, so that a floor without it falls back
+        // to a bare word that is not there either.
+        let gh = homebrew.path().join("verkstead-gh");
+
+        std::fs::write(
+            &gh,
+            r#"#!/bin/sh
+printf '%s' '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main"}'
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let on_a_mac = |floor: &Path| Gh {
+            floor: Some(MacFloor::Stated(floor.as_os_str().to_owned())),
+            ..Gh::running(vec!["verkstead-gh".to_owned()])
+        };
+
+        assert_eq!(
+            pull_request(&on_a_mac(homebrew.path()), dir.path(), "rate-limiting")
+                .unwrap()
+                .number,
+            41,
+            "the `gh` on the floor is the one asked"
+        );
+
+        let empty = tempfile::tempdir().unwrap();
+
+        assert_eq!(
+            pull_request(&on_a_mac(empty.path()), dir.path(), "rate-limiting"),
+            Err(Trouble::NoGh),
         );
     }
 
