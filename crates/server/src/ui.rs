@@ -244,7 +244,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/terminals/{number}/attach",
             get(crate::terminals::attach),
         )
-        // And what the terminals a member is attached to are listening on, which
+        // And what the terminals offered to a member are listening on, which
         // is that member's reading and nobody else's: answered over the link
         // alone, a browser here being on the machine the ports are on already —
         // see [`crate::terminals::ports_of`].
@@ -252,6 +252,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/ports",
             get(crate::terminals::ports_of),
         )
+        // And the same of every Conversation at once, which is what a device
+        // reads of a member whenever what it knows may be stale — see
+        // [`crate::terminals::offered_to`].
+        .route("/api/ui/ports", get(crate::terminals::offered_to))
         // And one connection to one of those ports, as an upgrade — over the
         // link alone too, and only to a port in the caller's own reading: see
         // [`crate::terminals::connect`].

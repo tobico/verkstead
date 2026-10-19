@@ -156,7 +156,8 @@ use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::{Extension, Json};
 use tokio::sync::oneshot;
 use verkstead_render::{
-    InFront, PortsView, TerminalClosed, TerminalOpened, TerminalPorts, TerminalView,
+    ConversationPorts, InFront, OfferedView, PortsView, TerminalClosed, TerminalOpened,
+    TerminalPorts, TerminalView,
 };
 use verkstead_schema::{ApiError, Nudge};
 
@@ -722,6 +723,24 @@ impl Terminals {
 
         theirs.sort_unstable_by_key(|terminal| terminal.number);
         theirs
+    }
+
+    /// What is offered to `member` on every Conversation at once — [`Self::ports`]
+    /// of each one with at least one terminal offered to it, lowest id first.
+    pub(crate) fn offered(&self, member: &str) -> Vec<ConversationPorts> {
+        let conversations: Vec<i64> = self.held().keys().copied().collect();
+
+        let mut offered: Vec<ConversationPorts> = conversations
+            .into_iter()
+            .map(|conversation| ConversationPorts {
+                conversation,
+                terminals: self.ports(conversation, member),
+            })
+            .filter(|conversation| !conversation.terminals.is_empty())
+            .collect();
+
+        offered.sort_unstable_by_key(|conversation| conversation.conversation);
+        offered
     }
 
     /// Whether `member` may be connected to `port` on one of them: the terminal
@@ -1848,6 +1867,38 @@ pub(crate) async fn ports_of(
     };
 
     Json(PortsView { terminals }).into_response()
+}
+
+/// `GET /api/ui/ports` — what every Conversation's terminals offered to the
+/// calling member are listening on, in one reading.
+///
+/// What a device reads of a member whenever what it knows of it may be stale:
+/// its Nudge stream to the member taken up — the device's own start among those
+/// — and the member answering again after a turn found it not. A `ports` Nudge
+/// said while nobody was listening is one this reading makes up for. **Over the
+/// link alone**, for [`ports_of`]'s reason, and refused by name to a browser
+/// here. See [`Terminals::offered`].
+pub(crate) async fn offered_to(
+    State(state): State<AppState>,
+    over_the_link: Option<Extension<OverTheLink>>,
+    caller: Option<Extension<ConnectInfo<Caller>>>,
+) -> HttpResponse {
+    if over_the_link.is_none() {
+        return crate::ui::refused(
+            StatusCode::FORBIDDEN,
+            ApiError::new(
+                "What the terminals here are listening on is read over the link by a device \
+                 of the cluster attached to them, not by a browser on this machine.",
+            ),
+        );
+    }
+
+    let conversations = match calling(&state, caller).await {
+        Some(member) => state.terminals.offered(&member),
+        None => Vec::new(),
+    };
+
+    Json(OfferedView { conversations }).into_response()
 }
 
 /// What a forwarded connection's upgrade names, and what its `101` answers with.

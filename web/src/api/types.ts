@@ -1698,6 +1698,11 @@ name: string,
 conversation: number, };
 
 /**
+ * One Conversation of that reading: its id, and its [`PortsView`].
+ */
+export type ConversationPorts = { conversation: number, terminals: Array<TerminalPorts>, };
+
+/**
  * What became of submitting one.
  *
  * Named the way [`GrillingStarted`]'s refusals are, and nothing here is about
@@ -4060,6 +4065,15 @@ export type Nudged = {
 device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "login", profile: number, } | { "kind": "everything" });
 
 /**
+ * And the same of every Conversation at once: what a member offers the device
+ * asking, read over the link whenever that device's knowledge of it may be
+ * stale — its Nudge stream to the member taken up, or the member answering
+ * again. A Conversation is listed where at least one of its terminals is
+ * offered to the caller, lowest id first.
+ */
+export type OfferedView = { conversations: Array<ConversationPorts>, };
+
+/**
  * Whether a fresh Verkstead can do anything yet, and what it would take.
  */
 export type OnboardingView = { 
@@ -4452,13 +4466,13 @@ export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": Ta
 export type Platform = "Linux" | "MacOs" | "Windows";
 
 /**
- * What one device's attached terminals on a Conversation are listening on —
- * the reading a device takes over the link, of the member running them.
+ * What the terminals on a Conversation offered to one device are listening on
+ * — the reading a device takes over the link, of the member running them.
  *
- * **Only the caller's own.** A terminal is listed where the device asking holds
- * an attach on it and not otherwise, so a device that holds none reads an empty
- * list and a device never reads the ports of a terminal another one attached:
- * what a device is offered to forward is what it is looking at.
+ * **Only the caller's own.** A terminal is offered to every device that has
+ * attached it, from that first attach until the terminal ends, and listed to
+ * no other: a device that never attached one reads an empty list, and a device
+ * never reads the ports of a terminal only another one attached.
  *
  * Oldest terminal first, and each one's ports lowest first.
  */
