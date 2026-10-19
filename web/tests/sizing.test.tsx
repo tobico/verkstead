@@ -775,7 +775,8 @@ describe("the rules the widths are read by", () => {
   /// the strip, so every height in it is its expanded height; expanded, the
   /// clip lets the whole pane and its shadow out over the panes beside it,
   /// under a pointer resting on it, a keyboard's focus inside it, or the page
-  /// saying nothing is open.
+  /// saying nothing is open. The padding is the strip's in both, so nothing in
+  /// the pane slides sideways as it opens.
   it("clips the collapsed list to its strip and lets it out over the rest", () => {
     const collapsed = layout("(width < 100rem)");
 
@@ -783,7 +784,7 @@ describe("the rules the widths are read by", () => {
       "  .panes.listing > .conversationsPane {\n" +
         "    z-index: 1;\n" +
         "    width: var(--pane-expanded, 16rem);\n" +
-        "    padding-inline: 0.5rem 2rem;\n" +
+        "    padding-inline: 0.5rem 1.25rem;\n" +
         "    background: var(--paper);\n" +
         `    clip-path: inset(0 calc(100% - ${COLLAPSED}rem) 0 0);\n`,
     );
@@ -791,16 +792,17 @@ describe("the rules the widths are read by", () => {
       "  .panes.listing > .conversationsPane[data-expanded],\n" +
         "  .panes.listing > .conversationsPane:focus-visible,\n" +
         "  .panes.listing > .conversationsPane:has(:focus-visible) {\n" +
-        "    padding-inline: 1.25rem;\n" +
         "    clip-path: inset(0 -3rem 0 0);\n" +
         "    box-shadow: var(--lift);\n",
     );
     expect(layout("(width < 100rem) and (hover: hover)")).toContain(
       "  .panes.listing > .conversationsPane:hover:not([data-finger]) {\n" +
-        "    padding-inline: 1.25rem;\n" +
         "    clip-path: inset(0 -3rem 0 0);\n" +
         "    box-shadow: var(--lift);\n",
     );
+
+    // Nothing but the clip and the shadow move between the two.
+    expect(collapsed.match(/padding-inline/g)).toHaveLength(1);
 
     // And moving between the two only where movement is welcome.
     expect(

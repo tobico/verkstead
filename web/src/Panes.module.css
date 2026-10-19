@@ -171,17 +171,18 @@
    it. And `--collapsed-item` is the strip's item, the `2rem` a part the strip
    draws is cut to.
 
-   The room at the sides moves with it: half a rem of paper before the item and
-   the rest after, so the item stands in the middle of the strip, and the pane's
-   content keeps the width it has expanded — the two paddings add up to the two
-   they replace. The chrome and the foot bleed by the pane's own padding as
-   ever, which on the left now takes them past the pane's edge, where the clip
-   has them, and on the right short of it, where the clip has already cut. */
+   The room at the sides is the strip's in both states: half a rem of paper
+   before the item, so the item stands in the middle of the strip, and the
+   pane's own `1.25rem` after the content. Expanding changes the clip and
+   nothing else, so nothing in the pane slides sideways under a pointer as it
+   opens, and the content is the one width collapsed and expanded. The chrome
+   and the foot bleed by the pane's own padding as ever, which on the left now
+   takes them past the pane's edge, where the clip has them. */
 @media (width < 100rem) {
   .panes.listing > .conversationsPane {
     z-index: 1;
     width: var(--pane-expanded, 16rem);
-    padding-inline: 0.5rem 2rem;
+    padding-inline: 0.5rem 1.25rem;
     background: var(--paper);
     clip-path: inset(0 calc(100% - 3rem) 0 0);
     --collapsed-hidden: hidden;
@@ -208,12 +209,11 @@
      where the page says so: with nothing open, the list is the level being
      shown, and what stands beside it is empty paper until a card is picked.
 
-     The pane's own padding back, and the five properties unset, so everything
-     inside reads the expanded value it was written with — see above. */
+     The five properties unset, so everything inside reads the expanded value
+     it was written with — see above. The padding stays the strip's. */
   .panes.listing > .conversationsPane[data-expanded],
   .panes.listing > .conversationsPane:focus-visible,
   .panes.listing > .conversationsPane:has(:focus-visible) {
-    padding-inline: 1.25rem;
     clip-path: inset(0 -3rem 0 0);
     box-shadow: var(--lift);
     --collapsed-hidden: initial;
@@ -241,7 +241,6 @@
    hold the pane open after the tap that was to collapse it. See `Panes.tsx`. */
 @media (width < 100rem) and (hover: hover) {
   .panes.listing > .conversationsPane:hover:not([data-finger]) {
-    padding-inline: 1.25rem;
     clip-path: inset(0 -3rem 0 0);
     box-shadow: var(--lift);
     --collapsed-hidden: initial;
@@ -258,8 +257,7 @@
   .panes.listing > .conversationsPane {
     transition:
       clip-path 150ms ease,
-      box-shadow 150ms ease,
-      padding 150ms ease;
+      box-shadow 150ms ease;
   }
 }
 
