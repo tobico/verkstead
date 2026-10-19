@@ -126,7 +126,12 @@ flowchart LR
   ladder rather than on it, since every other state is somewhere the work has
   got to. A conversation that is closed or Done is got back into by steering
   it, a steer into Grilling being what opens a new brief round (*refined
-  2026-08-26, building close-and-retirements*). **Follow-up** sits beside the
+  2026-08-26, building close-and-retirements*). A steer out of an archived
+  conversation unarchives it, whatever the target, in the store's own
+  transaction for the steer rather than in its handler: the Cleanup trims and
+  deletes by the archiving alone, so an archiving left standing would trim a
+  live conversation's output under its session (*refined 2026-10-19, building
+  unarchive-on-steer*). **Follow-up** sits beside the
   ladder the way Closed sits off it: a steer from Done, Wrapping or Closed, on
   work that is already on a pull request, opens a session the human asks and is
   asked in until they are finished with it. It ends when the session runs

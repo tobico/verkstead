@@ -88,6 +88,16 @@
 //! [`plan`], which is the one place any of it is decided, and [`make`], which is
 //! the one place any of it is created.
 //!
+//! **And an archived Conversation is put back on the sidebar.** Only a Closed
+//! Conversation is ever archived, and a steer out of one is the work starting
+//! again, so the archive row goes with the move — into any target, Done
+//! included, and an Investigating that ends by going back to Closed lands there
+//! on the sidebar, putting it away again being the human's press. It is the
+//! store's to do rather than this module's, in the steer's own transaction: the
+//! Cleanup trims and deletes by that row alone, so a row outliving the state it
+//! was written beside would trim a live Conversation under its session. Nothing
+//! is announced for it beyond the steer's own nudge, which redraws the list.
+//!
 //! **And a steer may widen the set it works alongside, and open a row of it
 //! up.** The form's companion section puts another registered Repo in and ticks
 //! a read-only one up to read-write, and the steer checks each out as part of

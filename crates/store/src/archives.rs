@@ -6,6 +6,12 @@
 //! there is the whole of the flag, which is a thing a column could only say
 //! twice. Taking that row away is what unarchiving is.
 //!
+//! The row is only ever beside a Closed Conversation. Archiving refuses
+//! anything else, and a steer — the one move out of Closed — takes the row away
+//! in its own transaction, see [`super::steer_conversation`]: the Cleanup lists
+//! what to trim and delete by this row alone, so it cannot be left standing
+//! under work that has started again.
+//!
 //! Nothing leaves a Timeline. An archived Conversation is one the list stops
 //! drawing and nothing else: its record is where it was, its branch is where it
 //! was, and opening it by its own URL shows all of it.
@@ -96,7 +102,9 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 ///
 /// The state is read and the row written in one transaction, so a Conversation
 /// steered back into the work from another device between the two cannot end up
-/// hidden from the list it is being worked in.
+/// hidden from the list it is being worked in. And the other way round, a steer
+/// out of Closed takes the row away in the steer's own transaction, so what
+/// this writes stays beside a Closed Conversation for as long as it stands.
 pub async fn archive_conversation(pool: &SqlitePool, id: i64) -> Result<Archiving> {
     let mut tx = super::writing(pool, "archiving a Conversation").await?;
 

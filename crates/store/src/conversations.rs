@@ -5346,6 +5346,21 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         .await
         .with_context(|| format!("steering Conversation {id} into {}", target.stored()))?;
 
+    // And off the archive, whatever the target: only a Closed Conversation is
+    // ever archived, and a steer is the one move out of Closed, so an archived
+    // Conversation steered anywhere is a row the archive itself would refuse to
+    // write. Here rather than in the server, and in this transaction rather than
+    // through [`super::unarchive_conversation`], because the Cleanup lists what
+    // to trim and delete by that row alone — see [`super::cleanup`] — so a row
+    // outliving the state it was written beside is a live Conversation's output
+    // trimmed under its session. A Conversation that was never archived has no
+    // row to take, so there is nothing to report either way.
+    sqlx::query("DELETE FROM archived_conversations WHERE conversation_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("unarchiving Conversation {id} on its way out of Closed"))?;
+
     // What the branch was cut from, for the one source that had no branch: a
     // Draft's column holds the base the human picked while drafting, which is a
     // *branch* until the moment something resolves it. This is that moment, as
