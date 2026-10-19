@@ -1997,6 +1997,17 @@ pub enum StageState {
         stages: Vec<String>,
     },
 
+    /// Nothing has started it, it stands on no other stage, and the roadmap's own
+    /// Conversation — the one that wrote it — has not settled: its wrap-up, the
+    /// review among it, is still going on.
+    ///
+    /// Beside [`WaitingOn`](StageState::WaitingOn) rather than inside it, because
+    /// what it waits on is not a stage and that variant's `stages` is never
+    /// empty. Any roadmap's, declaring or not: a stage that stands on nothing
+    /// stands on the roadmap being reviewed, and that is the scheduler's rule
+    /// rather than a reading of what the lines declare.
+    WaitingOnTheRoadmap,
+
     /// Nothing has started it and nothing about the roadmap is what holds it: it
     /// is **ready** — every stage it stands on has settled — and there is nowhere
     /// to run it.

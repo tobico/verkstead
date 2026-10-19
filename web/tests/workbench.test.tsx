@@ -15925,6 +15925,16 @@ const PLACELESS: StageEntry[] = stated([
   { state: "WaitingForAPlace" },
 ]);
 
+/// And the same four stages of a roadmap whose own Conversation is still being
+/// wrapped up: 01 stands on no other stage, so it waits on the roadmap's review,
+/// and the rest stand on the one before them.
+const REVIEWING: StageEntry[] = stated([
+  { state: "WaitingOnTheRoadmap" },
+  { state: "ToDo" },
+  { state: "ToDo" },
+  { state: "ToDo" },
+]);
+
 /// The fixture's stages with one state each, in the roadmap's own order.
 function stated(states: StageState[]): StageEntry[] {
   return ROADMAP.stages.map((stage, at) => ({ ...stage, state: states[at]! }));
@@ -16183,6 +16193,37 @@ describe("the pinned stage list", () => {
     // rows are neither struck through nor ticked.
     expect(rows.map((row) => row.classList.contains(timeline.done!))).toEqual([
       true,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  /// And a stage standing on no other stage reads *waiting on the roadmap's
+  /// review* while the roadmap's own Conversation is still being wrapped up, which
+  /// is the server's word for the hold and nothing the card works out.
+  it("says a first stage is waiting on the roadmap's review while it is held", async () => {
+    theStaged({
+      pinned: [
+        {
+          StageList: {
+            ...ROADMAP,
+            stages: REVIEWING,
+          },
+        },
+      ],
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+    const rows = [...list.querySelectorAll(`.${timeline.stages} li`)];
+
+    expect(
+      rows.map((row) => row.querySelector(`.${timeline.state}`)!.textContent),
+    ).toEqual(["waiting on the roadmap's review", "to do", "to do", "to do"]);
+
+    expect(rows.map((row) => row.classList.contains(timeline.done!))).toEqual([
+      false,
       false,
       false,
       false,

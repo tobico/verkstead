@@ -2620,6 +2620,56 @@ async fn the_branch_a_roadmap_was_planned_on_is_its_own_conversations() {
     );
 }
 
+/// The Conversation that wrote a roadmap is read beside its stages, and the same
+/// way: in flight while it is wrapping up, settled once it has reached Done.
+///
+/// Beside them rather than among them — no label answers for it — and told from
+/// an unlabelled stage by the Roadmap direction, for
+/// [`roadmap_planner`]'s reason. A roadmap nobody planned has no such standing.
+#[tokio::test]
+async fn the_record_says_how_far_the_conversation_that_wrote_a_roadmap_got() {
+    let (_dir, pool) = fresh_pool().await;
+    let ours = repo(&pool, "verkstead").await;
+
+    // An unlabelled row headed somewhere else: a stage from before the label.
+    let before = directed(&pool, ours, "mvp/02-grilling", Direction::TaskList).await;
+    record_roadmap(&pool, before, Some("mvp")).await.unwrap();
+
+    assert_eq!(
+        stage_standings(&pool, ours).await.unwrap().planner("mvp"),
+        None,
+        "a stage with no label is nobody's roadmap Conversation",
+    );
+
+    let wrote = directed(&pool, ours, "roadmaps/mvp", Direction::Roadmap).await;
+    record_roadmap(&pool, wrote, Some("mvp")).await.unwrap();
+    steer_conversation(&pool, wrote, steer(Lifecycle::Wrapping))
+        .await
+        .unwrap();
+
+    let standings = stage_standings(&pool, ours).await.unwrap();
+
+    assert_eq!(
+        standings.planner("mvp"),
+        Some(StageStanding::InFlight),
+        "a roadmap whose own wrap-up has not settled is in flight",
+    );
+    assert_eq!(
+        standings.of("mvp", ""),
+        None,
+        "and nothing answers for it under a stage's label",
+    );
+
+    steer_conversation(&pool, wrote, steer(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_standings(&pool, ours).await.unwrap().planner("mvp"),
+        Some(StageStanding::Settled),
+    );
+}
+
 /// The roadmaps being driven come back **oldest first**, which is the order the
 /// free places on the server are handed out in.
 ///
