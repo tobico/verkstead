@@ -510,6 +510,7 @@ describe("the room the window's controls take", () => {
     });
     expect(reserved(insets(TRAFFIC, ACROSS))).toEqual({
       "--controls-left": "81px",
+      "--controls-band": "46px",
     });
     expect(reserved(CLEAR)).toEqual({});
   });
@@ -595,6 +596,40 @@ describe("the frame", () => {
 
     expect(frame.style.getPropertyValue("--controls-left")).toBe("81px");
     expect(frame.style.getPropertyValue("--controls-right")).toBe("");
+  });
+
+  /// And the band the list's head drops by, beside that inset and only beside
+  /// it: the head's own band, which is the strip the lights are centred in.
+  it("carries the head's band beside a left inset", () => {
+    theApp("darwin");
+    overlaid(TRAFFIC);
+    vi.stubGlobal("innerWidth", ACROSS);
+
+    expect(theFrame().style.getPropertyValue("--controls-band")).toBe(
+      `${band()}px`,
+    );
+  });
+
+  /// Nowhere else: the right-hand controls take nothing from the top of the
+  /// list, and full screen on a Mac is the overlay saying it is not `visible`,
+  /// where the head stands at the top of the pane.
+  it("carries no band where nothing was taken at the left", () => {
+    theApp("linux");
+    overlaid(OVERLAID);
+    vi.stubGlobal("innerWidth", ACROSS);
+
+    expect(theFrame().style.getPropertyValue("--controls-band")).toBe("");
+  });
+
+  it("carries no band in full screen, where the lights withdraw", () => {
+    theApp("darwin");
+    overlaid(null);
+    vi.stubGlobal("innerWidth", ACROSS);
+
+    const frame = theFrame();
+
+    expect(frame.style.getPropertyValue("--controls-band")).toBe("");
+    expect(frame.style.getPropertyValue("--controls-left")).toBe("");
   });
 
   /// The rectangle read again, which is not an optimisation: the first reading on
@@ -713,12 +748,43 @@ describe("which head the frame keeps clear", () => {
       ".panes.listing > .pane {\n  --head-left: 0px;\n  --head-right: 0px;\n}",
     );
     expect(stylesheet).toContain(
-      ".panes.listing > .conversationsPane {\n" +
-        "  --head-left: var(--controls-left, 0px);\n}",
-    );
-    expect(stylesheet).toContain(
       ".panes.listing > .middlePane,\n.panes.listing > .detailsPane {\n" +
         "  --head-right: var(--controls-right, 0px);\n}",
+    );
+  });
+
+  /// Except that the list's head is not padded at the left at all: it drops
+  /// below the controls there, by the band the frame carries beside a left
+  /// inset — the logo standing under a Mac's traffic lights, collapsed and
+  /// expanded alike, rather than beside them.
+  it("drops the list's head below the controls at the left, rather than padding it", () => {
+    expect(stylesheet).not.toMatch(
+      /\.conversationsPane\s*\{[^}]*--head-left:\s*var\(--controls-left/,
+    );
+    expect(stylesheet).toContain(
+      ":root[data-app] .panes.listing > .conversationsPane > .paneChrome {\n" +
+        "  padding-top: calc(0.375rem + var(--controls-band, 0px));\n}",
+    );
+  });
+
+  /// And the pane beside the collapsed strip is padded by what of the inset
+  /// reaches past the strip and its own padding, which is nothing where there
+  /// is no inset — and the details pane stops being that pane from 60rem but
+  /// where it is the one pane after the strip.
+  it("pads the pane beside the strip by what of the inset reaches past it", () => {
+    const padded =
+      "  .panes.listing > .middlePane,\n  .panes.listing > .detailsPane {\n" +
+      "    --head-left: max(0px, var(--controls-left, 0px) - 4.25rem);\n  }";
+
+    expect(stylesheet).toContain(padded);
+    // After the rule that zeroes every pane beside the list, which is as
+    // specific: before it, the zero stood and a Mac's third light was over the
+    // draft's title.
+    expect(stylesheet.indexOf(padded)).toBeGreaterThan(
+      stylesheet.indexOf(".panes.listing > .pane {\n  --head-left: 0px;"),
+    );
+    expect(atWidth(BESIDE)).toContain(
+      "  .panes.listing:not(.widened) > .detailsPane {\n    --head-left: 0px;\n  }",
     );
   });
 

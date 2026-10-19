@@ -1,0 +1,514 @@
+# Throwaway: the collapsing sidebar's head on a real Mac — the conversations
+# pane's logo dropped below the traffic lights, collapsed and expanded, and at
+# the top in full screen. Lives only on the `macos-pack-probe` branch and merges
+# nowhere. The instruments are the lights proof's, from b8fba285.
+#
+# Strict, unlike the measurement run before it: every assertion fails the job
+# saying what it wanted, because this run is the proof of task 04's first two
+# criteria — the lights centred in the head's first row and clear to the left of
+# the Wordmark, at the browser's default text size and at a larger one, with
+# nothing the page draws underneath them at one, two or three panes, across a
+# resize and a maximise.
+#
+# **Three instruments.** `windows` lists what is on the screen and needs no
+# permission; `cdp` evaluates in the window's own renderer, over the remote
+# debugging port the app is started with; and the accessibility API is what says
+# where the lights actually are, that being the one thing the page cannot see.
+# The window's own origin comes from the same API, so a button's position minus
+# the window's is the point in the page's own coordinates — the app has no title
+# bar, so the first pixel of the window is the first pixel of the page.
+name: Mac head drop proof
+
+on:
+  push:
+    branches: [macos-pack-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  the-head-drop:
+    name: The list's head below the lights
+    runs-on: macos-15
+    env:
+      DMG: target/electron/out/Verkstead-universal.dmg
+      MOUNT: target/electron/mounted
+      APP: target/electron/mounted/Verkstead.app
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Set up the viewer
+        uses: ./.github/actions/setup-pnpm-project
+
+      - name: Build the viewer
+        working-directory: web
+        env:
+          NODE_OPTIONS: --max-old-space-size=5120
+        run: pnpm build
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: macos-dmg-leg
+
+      - name: Build both halves of the sidecar
+        run: |
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked --no-default-features \
+              --package verkstead-cli --target "$target"
+          done
+
+      - name: Set up the desktop app
+        uses: ./.github/actions/setup-pnpm-project
+        with:
+          project: desktop
+
+      - name: Pack the app
+        working-directory: desktop
+        run: |
+          pnpm run pack \
+            ../target/aarch64-apple-darwin/release/verkstead \
+            ../target/x86_64-apple-darwin/release/verkstead
+          ls -l ../target/electron/out
+
+      - name: Mount it
+        run: |
+          mkdir -p "$MOUNT"
+          hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$PWD/$MOUNT"
+
+      - name: Build the instruments
+        run: |
+          PROBE="$RUNNER_TEMP/probe"
+          mkdir -p "$PROBE" "$RUNNER_TEMP/shots" "$RUNNER_TEMP/said"
+
+          cat > "$PROBE/windows.swift" <<'SWIFT'
+          import CoreGraphics
+          import Foundation
+
+          let want = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ""
+          let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
+            as? [[String: Any]] ?? []
+
+          for window in info {
+            let owner = window[kCGWindowOwnerName as String] as? String ?? "?"
+            if !want.isEmpty && owner != want { continue }
+            let number = window[kCGWindowNumber as String] as? Int ?? -1
+            let layer = window[kCGWindowLayer as String] as? Int ?? -1
+            let bounds = window[kCGWindowBounds as String] as? [String: Any] ?? [:]
+            let x = bounds["X"] ?? "?", y = bounds["Y"] ?? "?"
+            let w = bounds["Width"] ?? "?", h = bounds["Height"] ?? "?"
+            print("\(owner)\tnumber=\(number)\tlayer=\(layer)\tat=\(x),\(y)\twidth=\(w)\theight=\(h)")
+          }
+          SWIFT
+          swiftc -O "$PROBE/windows.swift" -o "$PROBE/windows"
+
+          cat > "$PROBE/cdp.mjs" <<'NODE'
+          // Evaluate an expression in the window's own renderer.
+          // node cdp.mjs <port> <match> <file>
+          import { readFileSync } from "node:fs";
+
+          const [, , port, match, file] = process.argv;
+          const expression = readFileSync(file, "utf8");
+
+          const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+          const wanted = targets.find(
+            (target) => target.type === "page" && String(target.url).includes(match),
+          );
+          if (wanted === undefined) {
+            console.error(`no target at ${match}: ${JSON.stringify(targets, null, 2)}`);
+            process.exit(2);
+          }
+
+          const socket = new WebSocket(wanted.webSocketDebuggerUrl);
+          await new Promise((ready, broken) => {
+            socket.addEventListener("open", ready, { once: true });
+            socket.addEventListener("error", broken, { once: true });
+          });
+
+          let last = 0;
+          const answer = await new Promise((answered) => {
+            const id = ++last;
+            socket.addEventListener("message", (event) => {
+              const message = JSON.parse(event.data);
+              if (message.id === id) answered(message);
+            });
+            socket.send(
+              JSON.stringify({
+                id,
+                method: "Runtime.evaluate",
+                params: {
+                  expression,
+                  awaitPromise: true,
+                  returnByValue: true,
+                  userGesture: true,
+                },
+              }),
+            );
+          });
+          socket.close();
+
+          const result = answer.result ?? {};
+          if (result.exceptionDetails !== undefined) {
+            console.error(JSON.stringify(result.exceptionDetails, null, 2));
+            process.exit(1);
+          }
+          console.log(
+            typeof result.result?.value === "string"
+              ? result.result.value
+              : JSON.stringify(result.result?.value ?? result, null, 2),
+          );
+          NODE
+
+          # Where the lights are, and where the window is: the two together are the
+          # lights in the page's own coordinates.
+          cat > "$PROBE/lights.applescript" <<'AS'
+          tell application "System Events"
+            tell process "Verkstead"
+              set answer to ""
+              set w to window 1
+              set p to position of w
+              set s to size of w
+              set answer to answer & "window " & (item 1 of p as text) & " " & ¬
+                (item 2 of p as text) & " " & (item 1 of s as text) & " " & ¬
+                (item 2 of s as text)
+              repeat with b in (every button of w)
+                set bp to position of b
+                set bs to size of b
+                set answer to answer & linefeed & "button " & (item 1 of bp as text) & ¬
+                  " " & (item 2 of bp as text) & " " & (item 1 of bs as text) & " " & ¬
+                  (item 2 of bs as text)
+              end repeat
+              return answer
+            end tell
+          end tell
+          AS
+
+          # What the page has to say about itself: the head's own row, the inset the
+          # frame reserved, and what is underneath each light.
+          cat > "$PROBE/measure.mjs" <<'NODE'
+          // node measure.mjs <ax file> <page json> — the two readings against each
+          // other, and the whole of what this run is asserting.
+          import { readFileSync } from "node:fs";
+
+          const [, , axFile, pageFile] = process.argv;
+
+          const ax = readFileSync(axFile, "utf8")
+            .split("\n")
+            .map((line) => line.trim().split(/\s+/))
+            .filter((parts) => parts.length === 5);
+
+          const window = ax.find((parts) => parts[0] === "window")?.slice(1).map(Number);
+          const buttons = ax
+            .filter((parts) => parts[0] === "button")
+            .map((parts) => parts.slice(1).map(Number))
+            // In the page's own coordinates: the window has no title bar, so its
+            // own origin is the page's.
+            .map(([x, y, width, height]) => ({
+              left: x - window[0],
+              top: y - window[1],
+              width,
+              height,
+              middle: y - window[1] + height / 2,
+              centre: x - window[0] + width / 2,
+            }))
+            .sort((one, other) => one.left - other.left);
+
+          const page = JSON.parse(readFileSync(pageFile, "utf8"));
+          const wrong = [];
+          const said = [];
+
+          said.push(`the page says the overlay is ${JSON.stringify(page.overlay)}`);
+          said.push(`the accessibility API says the window is ${window.join(" ")}`);
+
+          // The two instruments have to be looking at the same window, and after a
+          // full screen they were not: the accessibility API resized something the
+          // renderer never heard about, and every number below it would have been
+          // two windows averaged. So they are made to agree before anything is
+          // measured against anything.
+          if (Math.abs(window[2] - page.inner.width) > 2) {
+            wrong.push(
+              `the accessibility API is looking at a window ${window[2]} wide while ` +
+                `the page is ${page.inner.width} wide`,
+            );
+          }
+
+          // Full screen is the one state with no lights at all: macOS withdraws
+          // them until the pointer goes to the top of the screen, so there is
+          // nothing to be centred on anything. What is asked there is only that
+          // the page was left able to draw — the strip it reserves is the
+          // platform's own answer, and it has no buttons to measure it against.
+          if (buttons.length === 0 && process.env.LIGHTLESS === "yes") {
+            said.push("there are no lights, which is what full screen withdraws");
+            said.push(`the head's own row is at ${JSON.stringify(page.heads[0])}`);
+            for (const line of said) console.log(`  ${line}`);
+            for (const trouble of wrong) console.log(`::warning::${trouble}`);
+            process.exit(0);
+          }
+
+          if (buttons.length !== 3) {
+            wrong.push(`there are ${buttons.length} traffic lights rather than three`);
+            for (const line of said) console.log(`  ${line}`);
+            for (const trouble of wrong) console.log(`::error::${trouble}`);
+            process.exit(1);
+          }
+
+          const first = buttons[0];
+          const last = buttons[buttons.length - 1];
+          const lights = { top: first.top, bottom: first.top + first.height, right: last.left + last.width };
+          said.push(
+            `the lights stand ${lights.top}–${lights.bottom} down and out to ${lights.right}`,
+          );
+
+          // The head's first row, as the page actually drew it: the Wordmark is
+          // centred in that row, so its middle is the row's.
+          const mark = page.heads[0];
+          if (mark === undefined) {
+            wrong.push("the page draws no head at all, so there is no row to be in");
+          } else {
+            said.push(
+              `the Wordmark's row is centred ${mark.middle} down, its text at ${mark.left}`,
+            );
+
+            const centred = first.middle;
+            if (Math.abs(centred - mark.middle) > 2) {
+              wrong.push(
+                `the lights are centred ${centred} down while the head's row is centred ` +
+                  `${mark.middle} down`,
+              );
+            }
+
+            if (lights.right >= mark.left) {
+              wrong.push(
+                `the lights run out to ${lights.right}, which is not clear of the ` +
+                  `Wordmark at ${mark.left}`,
+              );
+            }
+          }
+
+          // And the inset the frame reserved, which has to cover them.
+          const inset = Number.parseFloat(page.inset ?? "");
+          said.push(`the frame reserves ${page.inset ?? "nothing"} at the left`);
+          if (!(inset >= lights.right)) {
+            wrong.push(
+              `the frame reserves ${page.inset ?? "nothing"} where the lights run out ` +
+                `to ${lights.right}`,
+            );
+          }
+
+          // And nothing pressable under any of them, which is the whole point of
+          // reserving it.
+          for (const under of page.under) {
+            said.push(`under ${under.at}: ${under.tag}${under.control === null ? "" : ` in a ${under.control}`}`);
+            if (under.control !== null) {
+              wrong.push(`there is a ${under.control} under the light at ${under.at}`);
+            }
+          }
+
+          said.push(
+            `the window is ${page.inner.width}×${page.inner.height} at a ${page.rem}px rem, ` +
+              `${page.panes} pane(s)`,
+          );
+
+          for (const line of said) console.log(`  ${line}`);
+
+          if (wrong.length > 0) {
+            for (const trouble of wrong) console.log(`::error::${trouble}`);
+            process.exit(1);
+          }
+          NODE
+
+      # The app, with the onboarding wizard finished so that the workbench — and
+      # so a pane head — is what the window is showing.
+      - name: Start it, and get to the workbench
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          PROBE="$RUNNER_TEMP/probe"
+          log="$HOME/Library/Logs/Verkstead/verkstead.log"
+          rm -f "$log"
+
+          open -a "$PWD/$APP" --args --remote-debugging-port=9222
+
+          for _ in $(seq 120); do
+            if [ -n "$("$PROBE/windows" Verkstead | awk '/layer=0/ { print $2 }')" ]; then break; fi
+            sleep 1
+          done
+          "$PROBE/windows" Verkstead
+
+          secret=$(cat "$HOME/Library/Application Support/Verkstead/workbench.key")
+          curl --silent --show-error --fail --retry 20 --retry-delay 1 \
+            --retry-connrefused --cookie "workbench_key=$secret" \
+            -X POST http://127.0.0.1:8422/api/ui/onboarding/finished > /dev/null
+
+          # A Repo and a draft Conversation on it, so that the frame has a list
+          # in it: a fresh runner has nothing to list and shows the compose page.
+          repo="$RUNNER_TEMP/a-repo"
+          mkdir -p "$repo" && git -C "$repo" init -q -b main
+          git -C "$repo" -c user.name=probe -c user.email=probe@example.com \
+            commit -q --allow-empty -m first
+          api() {
+            curl --silent --show-error --cookie "workbench_key=$secret" \
+              -H 'content-type: application/json' "$@"
+          }
+          api -X POST http://127.0.0.1:8422/api/ui/repos \
+            -d "{\"path\": \"$repo\"}" | tee "$RUNNER_TEMP/repo.json"; echo
+          api http://127.0.0.1:8422/api/ui/repos | tee "$RUNNER_TEMP/repos.json"; echo
+          id=$(node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const l = Array.isArray(r) ? r : (r.repos ?? Object.values(r).find(Array.isArray)); console.log(l[0].id)' "$RUNNER_TEMP/repos.json")
+          api -X POST http://127.0.0.1:8422/api/ui/conversations \
+            -d "{\"repo_id\": $id}" | tee "$RUNNER_TEMP/conversation.json"; echo
+          api http://127.0.0.1:8422/api/ui/conversations | head -c 2000; echo
+
+          printf '%s' "location.assign('/'), 'going'" > "$PROBE/go.js"
+          node "$PROBE/cdp.mjs" 9222 8422 "$PROBE/go.js"
+          sleep 8
+          grep "traffic lights" "$log" || true
+
+      - name: The head stands below the lights, collapsed and expanded
+        timeout-minutes: 15
+        run: |
+          set -uo pipefail
+          PROBE="$RUNNER_TEMP/probe"; SHOTS="$RUNNER_TEMP/shots"; SAID="$RUNNER_TEMP/said"
+          failed=0
+
+          cat > "$PROBE/read.mjs" <<'NODE'
+          // node read.mjs <ax file> — writes the page-side reader for these lights.
+          import { readFileSync, writeFileSync } from "node:fs";
+          const ax = readFileSync(process.argv[2], "utf8").split("\n")
+            .map((l) => l.trim().split(/\s+/)).filter((p) => p.length === 5);
+          const w = (ax.find((p) => p[0] === "window") ?? ["window", 0, 0, 0, 0]).slice(1).map(Number);
+          const lights = ax.filter((p) => p[0] === "button").map((p) => p.slice(1).map(Number))
+            .map(([x, y, width, height]) => ({ left: x - w[0], top: y - w[1], width, height }));
+          writeFileSync(`${process.env.PROBE}/read.js`, `(() => {
+            const lights = ${JSON.stringify(lights)};
+            const logo = document.querySelector("h1 img");
+            const pane = logo && logo.closest("section, [data-expanded], .pane, div[class*=conversationsPane]");
+            const section = logo && logo.closest("section");
+            const box = (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }; };
+            const frame = document.querySelector("[data-pane]");
+            const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+            return JSON.stringify({
+              inner: { width: innerWidth, height: innerHeight }, rem,
+              middle: Math.round(0.375 * rem + (2 * rem + 2) / 2),
+              band: frame && frame.style.getPropertyValue("--controls-band"),
+              inset: frame && frame.style.getPropertyValue("--controls-left"),
+              expanded: section && section.hasAttribute("data-expanded"),
+              clip: section && getComputedStyle(section).clipPath,
+              logo: box(logo), head: box(logo && logo.closest("h1").parentElement),
+              titles: [...document.querySelectorAll("h1")].filter((h) => h.getBoundingClientRect().height > 0).map((h) => ({ text: h.innerText.trim().slice(0, 20), ...box(h.querySelector("img, span") ?? h) })),
+              headers: [...document.querySelectorAll("h1")].map((h) => { const r = document.createRange(); r.selectNodeContents(h); const b = r.getBoundingClientRect(); return { text: h.innerText.trim().slice(0, 20), left: b.left, top: b.top, right: b.right, bottom: b.bottom }; }).filter((b) => b.bottom > b.top),
+              lights: lights.map((l) => ({ ...l, middle: l.top + l.height / 2,
+                under: (() => { const f = document.elementFromPoint(l.left + l.width / 2, l.top + l.height / 2);
+                  const c = f && f.closest("a, button, input, label, select, textarea, h1, img, [role=button], [tabindex]");
+                  return { tag: f ? f.tagName.toLowerCase() : null, control: c ? c.tagName.toLowerCase() + (c.textContent ? ":" + c.textContent.trim().slice(0, 20) : "") : null }; })() })),
+            });
+          })()`);
+          NODE
+
+          # node judge.mjs <json> <state>: expanded|collapsed|fullscreen
+          cat > "$PROBE/judge.mjs" <<'NODE'
+          import { readFileSync } from "node:fs";
+          const page = JSON.parse(readFileSync(process.argv[2], "utf8"));
+          const state = process.argv[3];
+          const wrong = [];
+          console.log(`  ${JSON.stringify(page)}`);
+          if (page.logo === null) wrong.push("no logo drawn");
+          if (state === "fullscreen") {
+            if (page.lights.length !== 0) console.log("::warning::lights still drawn in full screen");
+            if (page.band) wrong.push(`a band of ${page.band} written in full screen`);
+            if (page.logo && page.logo.top > 16) wrong.push(`the logo stands ${page.logo.top} down in full screen, not at the top`);
+          } else {
+            if (page.lights.length !== 3) wrong.push(`${page.lights.length} lights`);
+            const bottom = Math.max(...page.lights.map((l) => l.top + l.height));
+            if (page.logo && page.logo.top < bottom) wrong.push(`the logo's top ${page.logo.top} is above the lights' bottom ${bottom}`);
+            for (const l of page.lights) {
+              if (Math.abs(l.middle - page.middle) > 1.5) wrong.push(`a light centred ${l.middle} down, not at the app's ${page.middle}`);
+              if (l.under.control !== null) wrong.push(`a ${l.under.control} under the light at ${l.left}`);
+            }
+            const right = Math.max(...page.lights.map((l) => l.left + l.width));
+            for (const t of page.headers) {
+              if (t.top < bottom && t.bottom > Math.min(...page.lights.map((l) => l.top)) && t.left < right && t.right > 0)
+                wrong.push(`the heading "${t.text}" at ${t.left} starts under the lights, which run out to ${right}`);
+            }
+            if (state === "collapsed" && page.expanded) wrong.push("the pane is still expanded");
+            if (state === "expanded" && !page.expanded) wrong.push("the pane is not expanded");
+          }
+          for (const t of wrong) console.log(`::error::${t}`);
+          process.exit(wrong.length > 0 ? 1 : 0);
+          NODE
+
+          export PROBE
+          reading() {
+            name=$1; state=$2
+            echo "======== $name ($state)"
+            osascript "$PROBE/lights.applescript" > "$SAID/$name.ax" || true
+            cat "$SAID/$name.ax"
+            node "$PROBE/read.mjs" "$SAID/$name.ax"
+            node "$PROBE/cdp.mjs" 9222 8422 "$PROBE/read.js" > "$SAID/$name.json"
+            screencapture -x "$SHOTS/$name.png"
+            node "$PROBE/judge.mjs" "$SAID/$name.json" "$state" || failed=1
+          }
+          resize() {
+            osascript -e "tell application \"System Events\" to tell process \"Verkstead\" to set size of window 1 to {$1, $2}"
+            sleep 3
+          }
+          # The strip drawn as it is beside an open conversation: there is none on
+          # a fresh runner, so the expansion nothing-open stands is taken off by
+          # hand. Nothing re-adds it until the page's state moves.
+          # The root stands the list expanded over empty paper; a card pressed
+          # opens its Conversation with the list collapsed beside it.
+          printf '%s' "location.assign('/'), 'root'" > "$PROBE/root.js"
+          printf '%s' "location.assign('/conversations/1'), 'opened'" > "$PROBE/press.js"
+
+          for width in 700 1000; do
+            resize "$width" 700
+            node "$PROBE/cdp.mjs" 9222 8422 "$PROBE/root.js" || true
+            sleep 5
+            reading "w$width-expanded" expanded
+            node "$PROBE/cdp.mjs" 9222 8422 "$PROBE/press.js" || true
+            sleep 6
+            printf '%s' "location.pathname" > "$PROBE/where.js"
+            node "$PROBE/cdp.mjs" 9222 8422 "$PROBE/where.js" || true
+            reading "w$width-collapsed" collapsed
+          done
+
+          settled() {
+            printf '%s' "JSON.stringify({w: innerWidth, h: innerHeight})" > "$PROBE/size.js"
+            for _ in $(seq 30); do
+              said=$(node "$PROBE/cdp.mjs" 9222 8422 "$PROBE/size.js" 2> /dev/null || true)
+              echo "  the page is $said"
+              case "$said" in *"\"w\":$1"*) return 0 ;; esac
+              sleep 2
+            done
+            return 1
+          }
+          osascript -e 'tell application "System Events" to tell process "Verkstead" to set value of attribute "AXFullScreen" of window 1 to true' || true
+          settled 1024 || true
+          sleep 3
+          reading fullscreen fullscreen
+          osascript -e 'tell application "System Events" to tell process "Verkstead" to set value of attribute "AXFullScreen" of window 1 to false' || true
+          sleep 5
+          resize 900 650
+          settled 900 || true
+          reading after-fullscreen collapsed
+          exit "$failed"
+
+      - name: The shots and the readings
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: head-drop-proof
+          path: |
+            ${{ runner.temp }}/shots
+            ${{ runner.temp }}/said
+          if-no-files-found: warn
+
+      - name: Unmount the dmg
+        if: always()
+        run: |
+          if hdiutil info | grep -qF "$PWD/$MOUNT"; then
+            hdiutil detach "$PWD/$MOUNT" || hdiutil detach -force "$PWD/$MOUNT"
+          fi

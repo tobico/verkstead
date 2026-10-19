@@ -496,7 +496,8 @@
 /* And what a head at an edge does about it, said once for all of them: the room
    comes out of the head rather than off the pane, so what moves is the one band
    the controls are drawn over and the record under it is read exactly where it
-   was read before. */
+   was read before. The list's head is the one exception, dropped rather than
+   padded — see below. */
 .panes .paneHead {
   padding-left: var(--head-left, 0px);
   padding-right: var(--head-right, 0px);
@@ -510,13 +511,41 @@
   --head-right: 0px;
 }
 
-.panes.listing > .conversationsPane {
-  --head-left: var(--controls-left, 0px);
-}
-
 .panes.listing > .middlePane,
 .panes.listing > .detailsPane {
   --head-right: var(--controls-right, 0px);
+}
+
+/* And the pane beside the collapsed strip is padded by whatever of the left
+   inset reaches past the strip and its own padding: a Mac's lights end a little
+   beyond 3rem, over the start of that pane's title. Nought wherever the inset
+   is narrower than that, which is every window with none. After the rule above
+   that zeroes it, which is as specific: the order is what decides. */
+@media (width < 100rem) {
+  .panes.listing > .middlePane,
+  .panes.listing > .detailsPane {
+    --head-left: max(0px, var(--controls-left, 0px) - 4.25rem);
+  }
+}
+
+/* And the list at the left edge is not padded clear of the controls there but
+   dropped below them (Set 1265 Q19). The left edge is a Mac's traffic lights,
+   which stand over the very corner a 3rem strip puts its logo in, and a strip
+   cannot pad a logo out past an inset wider than itself — so the head takes no
+   left padding, and the chrome it is stuck to the top of pads it one band
+   lower instead: the band `head.ts` adds up and the app centres the lights in,
+   which the frame carries as `--controls-band` beside a left inset and nowhere
+   else. The lights stand where the app put them, in a strip of paper above the
+   logo.
+
+   One rule for the strip and for the pane expanded, and for the full sidebar,
+   so the logo never moves between beside the lights and below them as the pane
+   opens out or the window widens. And no rule about full screen, where the
+   lights withdraw: there is no inset there, so no band is written either and
+   the head stands at the top. The six pixels are the chrome's own, said above
+   for every pane in the app. */
+:root[data-app] .panes.listing > .conversationsPane > .paneChrome {
+  padding-top: calc(0.375rem + var(--controls-band, 0px));
 }
 
 /* From 60rem the panes stand side by side: the collapsed list beside the
@@ -588,8 +617,9 @@
     --head-right: 0px;
   }
 
-  /* The head at the left edge, which is the list's wherever there is one — said
-     above, at every width — the record's in the frame that has none, and the
+  /* The head at the left edge, which is the list's wherever there is one —
+     dropped below the controls rather than padded, said above at every width —
+     the record's in the frame that has none, and the
      details pane's in the frame that is nothing else. Each is the first column
      of the layout it names, and the two that are not the list are the frames
      said at the end of this file. */
@@ -611,6 +641,13 @@
 
   .panes.listing > .middlePane {
     --head-right: 0px;
+  }
+
+  /* Nor is the details pane beside the strip from here, but where it is the
+     whole of the frame after it — `widened` — so the room past the strip that
+     the lights reach into is the middle pane's alone. */
+  .panes.listing:not(.widened) > .detailsPane {
+    --head-left: 0px;
   }
 
   /* And the edge a collapsed strip ends at is drawn by the middle pane alone
