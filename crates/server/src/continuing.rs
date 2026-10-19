@@ -56,7 +56,8 @@
 //! Conversation**, and is not ready until that Conversation's wrap-up has
 //! settled — so a look made while the roadmap is still being reviewed starts
 //! nothing of it, and the roadmap's own settle is what starts its first stages.
-//! The rule is [`stages::ready`]'s, the one every reading goes through.
+//! The rule is [`stages::ready`]'s, the one every reading goes through; a press
+//! is not held on it either, and reads [`stages::ready_when_asked`].
 //!
 //! **Each start is its own act.** A branch already taken, a branch standing in the
 //! way, no git author configured, a fetch git would not make, a companion that

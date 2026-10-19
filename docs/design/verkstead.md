@@ -448,9 +448,10 @@ flowchart LR
   or by a steer, or was closed having wrapped up. The rule is in the one reading
   of what may start, so a look, a settle, the card and the pane cannot disagree
   — the pane says a held root is *waiting on the roadmap's review*. A roadmap
-  adopted stage by stage, with no Conversation that wrote it, holds nothing, and
-  ADR-0021 is unchanged: what a declared stage stands on is still what its line
-  says.
+  adopted stage by stage, with no Conversation that wrote it, holds nothing; nor
+  does a press of *Continue a roadmap*, which is the human asking rather than
+  the scheduler deciding. ADR-0021 is unchanged: what a declared stage stands on
+  is still what its line says.
 - **Stages always stack.** The next stage's branch stacks on the unmerged
   predecessor (`gh stack`), per the repo's stacked review process — *refined
   2026-08-21, building stage 04*: per the mechanism that repo **records**, in

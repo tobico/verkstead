@@ -1026,10 +1026,11 @@ pub(crate) enum Ready<'a> {
 ///
 /// **A stage that stands on no other stage stands on the roadmap's own
 /// Conversation**, wherever the record has one: it is not ready until that
-/// Conversation's wrap-up has settled, so nothing of a roadmap starts before the
-/// roadmap itself has been reviewed — see [`held_on_the_roadmap`]. Here rather
-/// than in the look alone, so that the look, the settle, the card and the pane
-/// cannot disagree about whether a first stage is ready.
+/// Conversation's wrap-up has settled, so nothing of a roadmap starts unasked
+/// before the roadmap itself has been reviewed — see [`held_on_the_roadmap`].
+/// Here rather than in the look alone, so that the look, the settle, the card and
+/// the pane cannot disagree about whether a first stage is ready. A press is the
+/// one start not held on it, and reads [`ready_when_asked`].
 ///
 /// **An undeclared roadmap is read as each stage standing on the one before it**,
 /// as the roadmap lists them. That is what *in order* means to the scheduler, and
@@ -1059,6 +1060,41 @@ pub(crate) fn ready<'a>(
     record: &store::StageStandings,
     branch: &str,
 ) -> Ready<'a> {
+    readiness(
+        roadmap,
+        list,
+        record,
+        branch,
+        held_on_the_roadmap(roadmap, record),
+    )
+}
+
+/// [`ready`] for a start somebody **asked for**: the same rule, without the hold
+/// on the roadmap's own Conversation.
+///
+/// That hold is there for the starts nobody asked for — a settle's, a look's —
+/// and a press is the one start that is not held back: a human at the workbench
+/// pressing *Continue a roadmap* while the roadmap is still being reviewed has
+/// decided not to wait for the review. So [`startable`] reads this, and the
+/// notice and the page it draws offer what the press would start.
+pub(crate) fn ready_when_asked<'a>(
+    roadmap: &str,
+    list: &'a str,
+    record: &store::StageStandings,
+    branch: &str,
+) -> Ready<'a> {
+    readiness(roadmap, list, record, branch, false)
+}
+
+/// The whole of [`ready`]'s rule, with whether a root is `held` on the roadmap's
+/// own Conversation decided by the caller — see [`ready_when_asked`].
+fn readiness<'a>(
+    roadmap: &str,
+    list: &'a str,
+    record: &store::StageStandings,
+    branch: &str,
+    held: bool,
+) -> Ready<'a> {
     let entries: Vec<checklist::Entry<'a>> = list.lines().filter_map(checklist::entry).collect();
 
     let stands_on = match standing_on(roadmap, list, &entries) {
@@ -1083,15 +1119,13 @@ pub(crate) fn ready<'a>(
         })
         .collect();
 
-    // And a root stands on the roadmap's own Conversation, which may not have
-    // settled yet — see [`held_on_the_roadmap`].
-    let held = held_on_the_roadmap(roadmap, record);
-
     let mut ready: Vec<checklist::Entry<'a>> = entries
         .iter()
         .enumerate()
         .filter(|(at, _)| !settled[*at] && !on_it[*at])
         .filter(|(at, _)| stands_on[*at].iter().all(|stood| settled[*stood]))
+        // And a root stands on the roadmap's own Conversation, which may not
+        // have settled yet — see [`held_on_the_roadmap`].
         .filter(|(at, _)| !(held && stands_on[*at].is_empty()))
         .map(|(_, entry)| *entry)
         .collect();
@@ -1182,7 +1216,11 @@ fn standing_on(
 /// one whose Conversation was closed before it ever wrapped up holds nothing here
 /// either, because nothing reads a closed Conversation's roadmap unasked — the
 /// look's reading needs the foot's Worktree — so the press is already the only
-/// way in, and holding here would refuse the press too.
+/// way in, and a pane saying its roots wait on a review would be waiting on one
+/// that is never coming.
+///
+/// And held for the starts nobody asked for alone: a press reads
+/// [`ready_when_asked`], which holds nothing here.
 fn held_on_the_roadmap(roadmap: &str, record: &store::StageStandings) -> bool {
     record.planner(roadmap) == Some(store::StageStanding::InFlight)
 }
@@ -2309,14 +2347,15 @@ pub(crate) fn startable(
 
     // Clause 1: a stage that may start — [`ready`]'s answer, which is the one
     // reading the carry-on goes through too, so that what is offered here and what
-    // an unattended run would start are one rule. Every stage done is a roadmap
-    // that finished, and its directory stays where it is as the record of what it
-    // was; nothing ready with a stage still in flight is neither that nor a stage
-    // to offer.
+    // an unattended run would start are one rule. As asked for, because the press
+    // is: a root waiting on the roadmap's own review is one the human may start —
+    // see [`ready_when_asked`]. Every stage done is a roadmap that finished, and
+    // its directory stays where it is as the record of what it was; nothing ready
+    // with a stage still in flight is neither that nor a stage to offer.
     //
     // All of them, lowest first: the press starts every one there is a place for,
     // so this offers every one there is a place for.
-    let (entry, rest, in_flight) = match ready(name, &index, record, "") {
+    let (entry, rest, in_flight) = match ready_when_asked(name, &index, record, "") {
         Ready::Stages {
             lowest,
             rest,
@@ -6390,6 +6429,34 @@ Turns this askance clone into Verkstead.
             "so the press has a stage to start: {:?}",
             repo.startable("mvp"),
         );
+    }
+
+    /// A press is not held on the roadmap's own review: a root waiting on it is
+    /// one the human may start, so the press — and the notice and the page that
+    /// offer what it would start — has it to start, where a look would not.
+    #[test]
+    fn a_press_may_start_a_root_while_the_roadmap_is_being_reviewed() {
+        let repo = Repo::with(&[("mvp", UNTICKED)]);
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.commit();
+
+        let reviewing =
+            store::StageStandings::default().with_planner("mvp", store::StageStanding::InFlight);
+
+        assert_eq!(
+            ready("mvp", UNTICKED, &reviewing, ""),
+            Ready::InFlight,
+            "a look would start nothing of it",
+        );
+
+        let Startable::Stage(abandoned) = repo.startable_with("mvp", &reviewing) else {
+            panic!(
+                "the press has a stage to start: {:?}",
+                repo.startable_with("mvp", &reviewing),
+            );
+        };
+
+        assert_eq!(abandoned.stage.label, "01");
     }
 
     /// The same four clauses, each answered by its own name — which is what the
