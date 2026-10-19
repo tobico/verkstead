@@ -186,15 +186,9 @@ async fn relay(State(state): State<AppState>, request: Request) -> Response {
         }
     }
 
-    // A terminal attach is counted as relayed for as long as its socket is
-    // joined, which is what has this device read that terminal's ports again
-    // where a member's `ports` Nudge may have been missed — see
-    // [`crate::forwarding`]. Counted from before the dial, so that the attach
-    // is never one this device does not know it is holding.
-    let attaching = taking
-        .as_ref()
-        .and_then(|_| crate::forwarding::attach_of(&onwards))
-        .map(|conversation| state.forwards.attached(&device, conversation));
+    // What it was for, for the one socket this device has an interest in once
+    // it is up: an attach on a member's terminal — see below.
+    let attaching = taking.is_some().then(|| onwards.clone());
 
     let call = Call {
         method: parts.method,
@@ -208,7 +202,17 @@ async fn relay(State(state): State<AppState>, request: Request) -> Response {
 
     match devices.relay(&device, call).await {
         Ok(answered) => match taking {
-            Some(taking) => bridging::bridged(taking, answered, attaching),
+            Some(taking) => {
+                // The terminal's tab opened here, which takes back what this
+                // device dismissed on it — see [`crate::forwarding::attached`].
+                if let Some(onwards) = attaching
+                    && answered.status() == StatusCode::SWITCHING_PROTOCOLS
+                {
+                    crate::forwarding::attached(&state, &device, &onwards);
+                }
+
+                bridging::bridged(taking, answered)
+            }
             None => handed_back(answered),
         },
 

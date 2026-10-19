@@ -2353,31 +2353,42 @@ _Avoid_: proxy, forwarding (a **Forward** is something else), tunnel, the bridge
 
 **Forward**:
 A server started in a **Terminal** on another **Member**, reachable on this
-device's own `localhost` at the same port for as long as the terminal's tab is
-open here (ADR-0019, *Forwards*). The member reads what the terminal is
-listening on — a listening TCP socket on any address, held by any process in
-the terminal's tree, about every two seconds and only while a device holds an
-attach on it over the link — and the device whose browser has the tab open
-holds a listener on its loopback, IPv4 and IPv6, at the same number. Each
-connection made to it is one upgrade over the **Peer Listener**, which the
-member answers by dialling that port on its own loopback, joined byte for byte
-by the **Relay**'s bridge. A printed `localhost` URL hurries the read and
-forwards nothing by itself.
-**Held by the attaching device and no other**: not every device in the
-cluster, and nothing for a terminal this device's own browser attached, the
-port being on this machine already. A number already bound here is **skipped**
-and said — *port busy here* — rather than remapped or taken, and taken when it
-frees. The member connects only a port it is reporting, and only for a device
-attached to that terminal.
-**It ends on its own**: two seconds after it leaves the reading — the tab
-closed, the port closed, the terminal ended — the watcher's grace, so a pane
-swap keeps it; and at once where the member is unreachable, taken up again
-once it answers while the tab is still open. Ending closes the listener and
-every connection crossing it. Nothing stops one by hand: closing the tab is the
-stop.
+device's own `localhost` at the same port from the moment this device's browser
+first opens the terminal's tab until the server stops or the terminal ends
+(ADR-0019, *Forwards*, as amended). The member **offers** a terminal to every
+device that has attached it, from the first attach until the terminal ends,
+and reads what it is listening on — a listening TCP socket on any address, held
+by any process in the terminal's tree — every two seconds while a tab is
+attached and every ten otherwise; and this device holds a listener on its
+loopback, IPv4 and IPv6, at the same number. Each connection made to it is one
+upgrade over the **Peer Listener**, which the member answers by dialling that
+port on its own loopback, joined byte for byte by the **Relay**'s bridge. A
+printed `localhost` URL hurries the read and forwards nothing by itself.
+**Held by a device that has attached the terminal and no other**: not every
+device in the cluster, and nothing for a terminal this device's own browser
+attached, the port being on this machine already. A number already bound here
+is **skipped** and said — *port busy here* — rather than remapped or taken, and
+taken when it frees. The member connects only a port it is reporting, and only
+for a device it offers that terminal to.
+**Sticky**: the tab closing, the page closing, the hub sleeping, the link
+dropping and the hub's own server restarting all keep it. A member that stops
+answering leaves it standing as *device unreachable*, dimmed; it is taken up
+again when the member answers. The hub reads **everything a member offers it**
+whenever its stream to that member is taken up — its own start included — and
+whenever a member that was not answering answers, so a restart on either side
+of the link finds whatever is still offered and ends whatever is not.
+**It ends on its own**: two seconds after it leaves the reading — the port
+closed, the terminal ended, the member answering with nothing — the watcher's
+grace, so a server restarting on a file change keeps it; and at once where the
+member is unlinked. Ending closes the listener and every connection crossing
+it. **And by hand**: the × on its row ends it on this device and remembers
+that, so the member's next reading does not bring it back — until the port
+leaves the reading, or this device opens the terminal's tab again, or this
+server restarts, the dismissal being memory like the Forward itself.
 **Said at the sidebar's foot**, *Forwarding 3 ports* beside *Show archived*,
-whose popup lists each as a link with its device and Conversation. That reading
-and its `forwards` Nudge are this device's own and never served over the link.
+whose popup lists each as a link with its device and Conversation, and the ×
+beside it. That reading and its `forwards` Nudge are this device's own and
+never served over the link.
 **Not the Relay**, which carries the workbench's own calls and sockets to a
 member; a Forward carries whatever a server in a terminal speaks, and none of
 the workbench. **Not the agent's session**, whose ports are never read. **Not

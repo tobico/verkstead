@@ -71,6 +71,7 @@ import type {
   FileWrite,
   FileWritten,
   FolderListing,
+  ForwardView,
   ForwardsView,
   GrillingStarted,
   LanguageCleared,
@@ -2023,6 +2024,16 @@ export function updateAnnex(): Promise<ComponentsView> {
 /// back from the link — so there is no device on the call.
 export function loadForwards(): Promise<ForwardsView> {
   return get<ForwardsView>("/api/ui/forwards");
+}
+
+/// And the × on one of their rows: that Forward ended on this device, and kept
+/// ended until the port leaves the member's reading or the terminal's tab is
+/// opened here again. Answered with nothing, whether or not the server still
+/// held it — a Forward that has already gone is what the press asked for.
+export async function dismissForward(forward: ForwardView): Promise<void> {
+  const at = `/api/ui/forwards/${encodeURIComponent(forward.device)}/${forward.conversation}/${forward.terminal}/${forward.port}`;
+
+  await refused(at, await fetch(at, { method: "DELETE" }));
 }
 
 /// And the devices nobody has typed an address for: the Discovered list under

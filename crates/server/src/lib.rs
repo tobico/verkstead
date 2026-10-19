@@ -117,8 +117,9 @@ mod files;
 /// What a follow-up session is started on, and read back from where it stands.
 mod follow_ups;
 mod followers;
-/// The ports of members' terminals held on this device's own `localhost`, for
-/// as long as the terminal's tab is open here.
+/// The ports of members' terminals held on this device's own `localhost`, from
+/// the first time the terminal's tab is opened here until the server stops or
+/// the terminal ends.
 mod forwarding;
 /// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
 ///
@@ -466,8 +467,8 @@ pub(crate) struct AppState {
 
     /// And the ports of members' terminals this device holds on its own
     /// `localhost`, which is the other end of a terminal's ports: read off the
-    /// member as it moves and held here while the tab is open — see
-    /// [`forwarding`].
+    /// member as it moves and held here until the server stops or the terminal
+    /// ends — see [`forwarding`].
     forwards: forwarding::Forwards,
 
     /// And which Conversations have a Code pane attached, with the watcher the

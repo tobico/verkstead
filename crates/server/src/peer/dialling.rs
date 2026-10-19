@@ -785,7 +785,22 @@ impl Peers {
             }
 
             match attempt.send().await {
-                Ok(answered) => return Ok(answered),
+                Ok(answered) => {
+                    // A row a dial dimmed is put back by the next that gets
+                    // through, this one included: a stream taken up again or a
+                    // call relayed is the member answering, whether or not
+                    // anything reads its identity afterwards.
+                    if !member.reachable
+                        && let Err(why) = self.members.answering(&member.device).await
+                    {
+                        tracing::warn!(
+                            device = %member.device,
+                            "a member answered and could not be marked as answering: {why:#}",
+                        );
+                    }
+
+                    return Ok(answered);
+                }
 
                 Err(why) if why.is_connect() => {
                     tracing::debug!(

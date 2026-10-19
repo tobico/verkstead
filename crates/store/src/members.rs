@@ -719,6 +719,32 @@ pub async fn member_unreachable(pool: &SqlitePool, device: &str) -> Result<()> {
         .with_context(|| format!("marking device {device} as answering nothing"))
 }
 
+/// Mark `device` as answering again, and seen now: what a dial that got
+/// through does to a row [`member_unreachable`] dimmed, where the dial was not
+/// one that records what the far end says of itself — see [`record_member`],
+/// which is the one that is.
+///
+/// Nothing else about the row moves, and a device that is not a member is
+/// nothing to write and nothing to fail.
+pub async fn member_answering(pool: &SqlitePool, device: &str) -> Result<()> {
+    let mut tx = writing(pool, "marking a member answering").await?;
+
+    sqlx::query(
+        "UPDATE members
+            SET reachable = 1,
+                last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE device = ?",
+    )
+    .bind(device)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("marking device {device} as answering again"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("marking device {device} as answering again"))
+}
+
 /// Write down where this device reaches `device` directly, or that it reaches
 /// it nowhere but at what it advertises — see [`Member::direct`].
 ///

@@ -88,21 +88,28 @@
 //! **And what one is listening on, for the devices looking at it from
 //! elsewhere.** A server started in a terminal on this device is one a member
 //! of the cluster attached to it would forward to its own `localhost`, so the
-//! register counts, per terminal, the members whose attach sockets are open on
-//! it — up on the attach and down when the socket ends, as the file watchers'
-//! register counts panes. While any member holds one, the terminal is read every
-//! [`READING`] for the TCP ports something inside it is listening on — see
-//! [`ports`] — and a `ports` Nudge is announced whenever that set moves, or the
-//! members attached to it do. The read stops with the last of them. A terminal
-//! attached only from this device's own browser counts nobody and is not read:
-//! there is nothing to forward to a browser on the machine the port is on.
+//! register remembers, per terminal, every member that has attached it — the
+//! devices it is **offered** to, from the first attach until the terminal ends
+//! (ADR-0019, *Forwards*, as amended). A Forward is held rather than attached:
+//! the tab closing, there, is nobody saying the server is done with.
+//!
+//! From that first attach the terminal is read for the TCP ports something
+//! inside it is listening on — see [`ports`] — every [`READING`] while a member
+//! holds an attach socket open on it and every [`UNWATCHED`] while none does,
+//! and a `ports` Nudge is announced whenever that set moves, or the members
+//! attached to it do. So the register counts those sockets too — up on the
+//! attach and down when the socket ends, as the file watchers' register counts
+//! panes — and what the count decides is the cadence and nothing else. The read
+//! stops with the terminal. A terminal attached only from this device's own
+//! browser is offered to nobody and is not read: there is nothing to forward to
+//! a browser on the machine the port is on.
 //!
 //! A turn is hurried by the terminal printing an address on this machine with a
 //! port, which is a server saying it is up: the read happens then rather than
 //! on the turn, and what it finds is still what is forwarded — see [`printed`].
 //!
-//! What a member reads back is its own and no other's — the terminals *it*
-//! holds an attach on, over the link and nowhere else. See [`ports_of`].
+//! What a member reads back is its own and no other's — the terminals offered
+//! to *it*, over the link and nowhere else. See [`ports_of`].
 //!
 //! **And a port in that reading is one the member may connect to**, one
 //! upgrade per connection, joined to this device's loopback byte for byte — and
@@ -117,8 +124,9 @@ pub mod shell;
 /// before it ends the shell — see [`busy`].
 pub mod busy;
 
-/// And what one is listening on, which is read while a member of the cluster
-/// holds an attach on it — see [`ports`], and [`Terminals::attach`].
+/// And what one is listening on, which is read from the first time a member of
+/// the cluster attaches it until it ends — see [`ports`], and
+/// [`Terminals::attach`].
 pub mod ports;
 
 /// And a server printing its address, which hurries that read along — see
@@ -148,7 +156,8 @@ use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::{Extension, Json};
 use tokio::sync::oneshot;
 use verkstead_render::{
-    InFront, PortsView, TerminalClosed, TerminalOpened, TerminalPorts, TerminalView,
+    ConversationPorts, InFront, OfferedView, PortsView, TerminalClosed, TerminalOpened,
+    TerminalPorts, TerminalView,
 };
 use verkstead_schema::{ApiError, Nudge};
 
@@ -203,6 +212,12 @@ const LINGERING: Duration = Duration::from_secs(2);
 /// nothing to do every couple of seconds for the few terminals anybody is
 /// looking at from another machine.
 const READING: Duration = Duration::from_secs(2);
+
+/// And how often one is read that is offered to a member but that no member
+/// holds an attach on: nobody is looking at it start a server, so there is no
+/// hurry but the one a printed address brings — see [`printed`] — and a port
+/// closing here is a Forward ending there a turn and a grace later.
+const UNWATCHED: Duration = Duration::from_secs(10);
 /// How often a terminal opened for a Preview is read for its shell having come
 /// up, before the command is typed into it.
 ///
@@ -302,11 +317,18 @@ struct Watched {
     leader: Option<ports::Tree>,
 
     /// The members of the cluster holding an attach on it, by Device Id, each
-    /// with how many sockets it has open — see [`Attached`].
+    /// with how many sockets it has open — see [`Attached`]. What it decides is
+    /// how often the ports are read, and nothing about whom they are offered to.
     members: HashMap<String, usize>,
 
-    /// What it was listening on at the last read, which is nothing while no
-    /// member is attached.
+    /// The members it is offered to: every one that has attached it, from its
+    /// first attach until the terminal ends. Grown and never shrunk, so that a
+    /// tab closing on another device keeps what that device forwards — this is
+    /// what the reading and the connect gate answer on.
+    offered: HashSet<String>,
+
+    /// What it was listening on at the last read, which is nothing until a
+    /// member has attached it.
     ports: BTreeSet<u16>,
 
     /// Whether the read is running, so that a second attach does not start a
@@ -561,6 +583,8 @@ impl Terminals {
             return TerminalClosed::Closed;
         };
 
+        watched.hurry.hurry();
+
         let _ = watched.hung_up().await;
 
         tracing::info!(conversation_id, number, "a terminal was closed");
@@ -590,6 +614,7 @@ impl Terminals {
                     "a terminal is ending with its Conversation"
                 );
 
+                watched.hurry.hurry();
                 watched.hung_up()
             })
             .collect();
@@ -612,16 +637,20 @@ impl Terminals {
             return;
         };
 
-        held.live.remove(&number);
+        if let Some(watched) = held.live.remove(&number) {
+            watched.hurry.hurry();
+        }
     }
 
     /// Count `member` as attached to one of them for as long as what comes back
-    /// is held, and start reading the terminal's ports if nothing is yet.
+    /// is held, offer it the terminal from now until the terminal ends, and
+    /// start reading the terminal's ports if nothing is yet.
     ///
     /// `None` where the terminal is not live, which is a socket about to be
     /// refused anyway. A member's first socket on a terminal is a `ports` Nudge,
-    /// as its last one closing is: which devices are attached is half of what a
-    /// reading says.
+    /// as its last one closing is — the hub reconciles on it — and a read that
+    /// is already running is hurried, so that its turns quicken to [`READING`]
+    /// now rather than at the end of an [`UNWATCHED`] one.
     pub(crate) fn attach(
         &self,
         conversation_id: i64,
@@ -636,7 +665,13 @@ impl Terminals {
             let count = watched.members.entry(member.clone()).or_default();
             *count += 1;
 
+            watched.offered.insert(member.clone());
+
             let start = watched.hurry.start().then(|| watched.hurry.clone());
+
+            if start.is_none() {
+                watched.hurry.hurry();
+            }
 
             (*count == 1, start)
         };
@@ -666,8 +701,9 @@ impl Terminals {
         })
     }
 
-    /// What `member` is attached to on this Conversation, and what each is
-    /// listening on — the terminals it holds an attach on and no others.
+    /// What is offered to `member` on this Conversation, and what each is
+    /// listening on — the terminals it has attached, whether or not it holds an
+    /// attach on them now, and no others.
     pub(crate) fn ports(&self, conversation_id: i64, member: &str) -> Vec<TerminalPorts> {
         let open = self.held();
 
@@ -678,7 +714,7 @@ impl Terminals {
         let mut theirs: Vec<TerminalPorts> = held
             .live
             .iter()
-            .filter(|(_, watched)| watched.members.contains_key(member))
+            .filter(|(_, watched)| watched.offered.contains(member))
             .map(|(&number, watched)| TerminalPorts {
                 number,
                 ports: watched.ports.iter().copied().collect(),
@@ -689,9 +725,26 @@ impl Terminals {
         theirs
     }
 
-    /// Whether `member` may be connected to `port` on one of them: an attach of
-    /// its own open on the terminal, and the port in the terminal's reading as it
-    /// stands.
+    /// What is offered to `member` on every Conversation at once — [`Self::ports`]
+    /// of each one with at least one terminal offered to it, lowest id first.
+    pub(crate) fn offered(&self, member: &str) -> Vec<ConversationPorts> {
+        let conversations: Vec<i64> = self.held().keys().copied().collect();
+
+        let mut offered: Vec<ConversationPorts> = conversations
+            .into_iter()
+            .map(|conversation| ConversationPorts {
+                conversation,
+                terminals: self.ports(conversation, member),
+            })
+            .filter(|conversation| !conversation.terminals.is_empty())
+            .collect();
+
+        offered.sort_unstable_by_key(|conversation| conversation.conversation);
+        offered
+    }
+
+    /// Whether `member` may be connected to `port` on one of them: the terminal
+    /// offered to it, and the port in the terminal's reading as it stands.
     ///
     /// **The reading is the gate**, rather than whether something happens to
     /// answer on the loopback: a port the terminal never opened is not one it
@@ -711,14 +764,23 @@ impl Terminals {
             .and_then(|held| held.live.get(&number))
             .ok_or(Unforwardable::NoSuchTerminal)?;
 
-        if !watched.members.contains_key(member) {
-            return Err(Unforwardable::NotAttached);
+        if !watched.offered.contains(member) {
+            return Err(Unforwardable::NotOffered);
         }
 
         match watched.ports.contains(&port) {
             true => Ok(()),
             false => Err(Unforwardable::NotListening),
         }
+    }
+
+    /// Whether a member holds an attach on one of them now, which is how often
+    /// its ports are read — see [`reading`]. `None` where it is not live.
+    fn watched_from_elsewhere(&self, conversation_id: i64, number: i64) -> Option<bool> {
+        let open = self.held();
+        let watched = open.get(&conversation_id)?.live.get(&number)?;
+
+        Some(!watched.members.is_empty())
     }
 
     /// A press on the Preview titled `preview`, decided against the newest of
@@ -894,8 +956,8 @@ pub(crate) struct Attached {
 
 impl Drop for Attached {
     /// Counted down, and the member taken off with its last socket — which is a
-    /// `ports` Nudge, as its first was. The read notices an empty list on its
-    /// next turn and stops there.
+    /// `ports` Nudge, as its first was. The terminal stays offered to it: the
+    /// read carries on, at [`UNWATCHED`] once nobody holds an attach.
     fn drop(&mut self) {
         let last = {
             let mut open = self.terminals.held();
@@ -929,8 +991,9 @@ impl Drop for Attached {
     }
 }
 
-/// Read one terminal's ports every [`READING`] for as long as a member is
-/// attached to it, announcing a `ports` Nudge whenever they move.
+/// Read one terminal's ports from its first attach until it ends — every
+/// [`READING`] while a member holds an attach on it and every [`UNWATCHED`]
+/// while none does — announcing a `ports` Nudge whenever they move.
 ///
 /// Read at once and then on every turn, so that a port somebody opened is in the
 /// reading within one turn of it opening and a port that closed is out of it
@@ -940,10 +1003,11 @@ impl Drop for Attached {
 /// **And sooner where the terminal says so**: an address printed while this is
 /// waiting for its turn is the turn — see [`printed`].
 ///
-/// **Ends with the last member**, taking the ports with it — a terminal nobody
-/// is attached to from elsewhere has nothing to offer anybody — and **with the
-/// terminal**, which is a Nudge of its own: whoever was attached was reading
-/// ports of a terminal that has gone.
+/// **Ends with the terminal and nothing else**, which is a Nudge of its own:
+/// whoever it was offered to was reading ports of a terminal that has gone.
+/// Taking it off the register hurries this, so that ending is said at once
+/// rather than a turn later. The last attach closing is not an ending: a
+/// Forward is held, not attached.
 async fn reading(
     terminals: Terminals,
     conversation_id: i64,
@@ -959,22 +1023,16 @@ async fn reading(
 
     loop {
         let leader = {
-            let mut open = terminals.held();
+            let open = terminals.held();
 
             let Some(watched) = open
-                .get_mut(&conversation_id)
-                .and_then(|held| held.live.get_mut(&number))
+                .get(&conversation_id)
+                .and_then(|held| held.live.get(&number))
             else {
                 drop(open);
                 moved();
                 return;
             };
-
-            if watched.members.is_empty() {
-                watched.hurry.stop();
-                watched.ports.clear();
-                return;
-            }
 
             watched.leader.clone()
         };
@@ -1005,9 +1063,21 @@ async fn reading(
             moved();
         }
 
+        // Listened for before the register is looked at, so that an attach or
+        // an ending that comes after the look is heard as the turn itself.
+        let hurried = hurry.hurried();
+        tokio::pin!(hurried);
+        hurried.as_mut().enable();
+
+        let turn = match terminals.watched_from_elsewhere(conversation_id, number) {
+            Some(true) => READING,
+            Some(false) => UNWATCHED,
+            None => Duration::ZERO,
+        };
+
         tokio::select! {
-            () = tokio::time::sleep(READING) => {}
-            () = hurry.hurried() => {}
+            () = tokio::time::sleep(turn) => {}
+            () = hurried => {}
         }
     }
 }
@@ -1358,6 +1428,7 @@ pub(crate) async fn open(
             ended,
             leader: ports::Tree::of(&child),
             members: HashMap::new(),
+            offered: HashSet::new(),
             ports: BTreeSet::new(),
             hurry: hurry.clone(),
             preview: preview.as_ref().map(|preview| preview.title.clone()),
@@ -1720,11 +1791,11 @@ fn hang_up(_child: &Child, _conversation_id: i64, _number: i64) {}
 /// nothing to relay, and no read-only grid to fall back to either, a terminal
 /// being memory only.
 ///
-/// **And a member's attach is counted**, for as long as its socket is open: that
-/// is what has the terminal read for its ports — see [`Terminals::attach`]. The
-/// member is the one whose certificate the connection was made with, over the
-/// Peer Listener; this device's own browser is nobody's attach and counts for
-/// nothing.
+/// **And a member's attach is counted**, for as long as its socket is open, and
+/// the terminal offered to that member until it ends: that is what has the
+/// terminal read for its ports — see [`Terminals::attach`]. The member is the
+/// one whose certificate the connection was made with, over the Peer Listener;
+/// this device's own browser is nobody's attach and counts for nothing.
 pub(crate) async fn attach(
     State(state): State<AppState>,
     Path((id, number)): Path<(String, String)>,
@@ -1765,15 +1836,15 @@ pub(crate) async fn attach(
     })
 }
 
-/// `GET /api/ui/conversations/{id}/ports` — what the calling member's attached
-/// terminals on this Conversation are listening on.
+/// `GET /api/ui/conversations/{id}/ports` — what the terminals on this
+/// Conversation that are offered to the calling member are listening on.
 ///
 /// **Over the link alone.** What it is for is a device forwarding a port on this
 /// machine to its own `localhost`, and this device's own browser is on this
 /// machine already: there is nothing to forward to it. So a browser here is
-/// refused, by name, and a member is answered with the terminals *it* holds an
-/// attach on — none at all where it holds none, and never one another device
-/// attached. See [`Terminals::ports`].
+/// refused, by name, and a member is answered with the terminals *it* has
+/// attached — none at all where it has attached none, and never one only
+/// another device attached. See [`Terminals::ports`].
 pub(crate) async fn ports_of(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -1798,6 +1869,38 @@ pub(crate) async fn ports_of(
     Json(PortsView { terminals }).into_response()
 }
 
+/// `GET /api/ui/ports` — what every Conversation's terminals offered to the
+/// calling member are listening on, in one reading.
+///
+/// What a device reads of a member whenever what it knows of it may be stale:
+/// its Nudge stream to the member taken up — the device's own start among those
+/// — and the member answering again after a turn found it not. A `ports` Nudge
+/// said while nobody was listening is one this reading makes up for. **Over the
+/// link alone**, for [`ports_of`]'s reason, and refused by name to a browser
+/// here. See [`Terminals::offered`].
+pub(crate) async fn offered_to(
+    State(state): State<AppState>,
+    over_the_link: Option<Extension<OverTheLink>>,
+    caller: Option<Extension<ConnectInfo<Caller>>>,
+) -> HttpResponse {
+    if over_the_link.is_none() {
+        return crate::ui::refused(
+            StatusCode::FORBIDDEN,
+            ApiError::new(
+                "What the terminals here are listening on is read over the link by a device \
+                 of the cluster attached to them, not by a browser on this machine.",
+            ),
+        );
+    }
+
+    let conversations = match calling(&state, caller).await {
+        Some(member) => state.terminals.offered(&member),
+        None => Vec::new(),
+    };
+
+    Json(OfferedView { conversations }).into_response()
+}
+
 /// What a forwarded connection's upgrade names, and what its `101` answers with.
 ///
 /// Not a WebSocket: what crosses is a TCP connection's bytes as they are, with
@@ -1814,7 +1917,7 @@ const DIALLING: Duration = Duration::from_secs(5);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Unforwardable {
     NoSuchTerminal,
-    NotAttached,
+    NotOffered,
     NotListening,
 }
 
@@ -1828,7 +1931,7 @@ enum Unforwardable {
 /// bytes crossed both ways, and whichever end goes ending both with a shutdown.
 ///
 /// **Refused by name before anything is dialled** unless the caller may have
-/// it: over the link alone, from a member holding an attach on that terminal,
+/// it: over the link alone, from a member that terminal is offered to,
 /// for a port in the terminal's current reading — see
 /// [`Terminals::forwardable`]. And a port that is in the reading but whose
 /// server went between the read and the dial is refused too, rather than
@@ -1869,13 +1972,13 @@ pub(crate) async fn connect(
     }
 
     let Some(member) = calling(&state, caller).await else {
-        return not_attached();
+        return not_offered();
     };
 
     match state.terminals.forwardable(id, number, &member, port) {
         Ok(()) => {}
         Err(Unforwardable::NoSuchTerminal) => return crate::ui::no_such_terminal(),
-        Err(Unforwardable::NotAttached) => return not_attached(),
+        Err(Unforwardable::NotOffered) => return not_offered(),
         Err(Unforwardable::NotListening) => return not_listening(&port.to_string()),
     }
 
@@ -1949,12 +2052,12 @@ async fn dialled(port: u16) -> Option<tokio::net::TcpStream> {
     None
 }
 
-/// The refusal for a caller that holds no attach on the terminal it named.
-fn not_attached() -> HttpResponse {
+/// The refusal for a caller the terminal it named is not offered to.
+fn not_offered() -> HttpResponse {
     crate::ui::refused(
         StatusCode::FORBIDDEN,
         ApiError::new(
-            "A terminal's ports are connected to only for a device holding an attach on it.",
+            "A terminal's ports are connected to only for a device that has attached it.",
         ),
     )
 }

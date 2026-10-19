@@ -1,6 +1,7 @@
 //! What this device is forwarding: the ports of terminals on other devices of
 //! the cluster, each held on this device's own `localhost` at the same number
-//! while the terminal's tab is open here.
+//! from the first time the terminal's tab is opened here until the server stops
+//! or the terminal ends.
 //!
 //! **This device's own reading and nobody else's.** A **Forward** is a listener
 //! on this machine's loopback, so what it says is a fact about this machine:
@@ -18,8 +19,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-/// `GET /api/ui/forwards` — every Forward this device holds, forwarding or
-/// skipped, lowest port first.
+/// `GET /api/ui/forwards` — every Forward this device holds, forwarding,
+/// skipped or unreachable, lowest port first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ForwardsView {
@@ -57,7 +58,8 @@ pub struct ForwardView {
     pub standing: ForwardStanding,
 }
 
-/// Whether a Forward is carrying connections, or could not be held here.
+/// Whether a Forward is carrying connections, could not be held here, or is
+/// waiting on its member.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -69,6 +71,11 @@ pub enum ForwardStanding {
     /// Nothing listening here for it, and why. Tried again while it stands, so a
     /// port that frees is taken without anybody pressing anything.
     Skipped { reason: ForwardSkip },
+
+    /// Its member is not answering — asleep, off the network. The listener
+    /// stays bound, so the port is still this Forward's, but a connection made
+    /// to it fails until the member answers again: *device unreachable*.
+    Unreachable,
 }
 
 /// Why a Forward could not be held.

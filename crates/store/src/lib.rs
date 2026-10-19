@@ -147,9 +147,9 @@ pub use mcp_servers::{
 pub use members::{
     Linking, Member, Renewal, Telling, announcement_made, announcements_owed,
     announcements_owed_to, changeover_over, forget_every_member, forget_every_member_but,
-    forget_member, member_count, member_holding, member_reached_at, member_unreachable, members,
-    members_yet_to_acknowledge, owe_announcement, record_member, record_renewal,
-    renewal_acknowledged,
+    forget_member, member_answering, member_count, member_holding, member_reached_at,
+    member_unreachable, members, members_yet_to_acknowledge, owe_announcement, record_member,
+    record_renewal, renewal_acknowledged,
 };
 pub use memos::{
     Memo, Retirement, Retiring, StandingMemo, leave_memo, memo_of, restore_memo, retire_memo,
