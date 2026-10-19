@@ -111,7 +111,9 @@ be compared by eye. On Allow, B dials A back at the addresses A gave, checks
 the certificate it meets is the one in the request, and hands over its own
 identity and certificate and every member's; A checks B's certificate is the
 one it saw. B then announces A to each of its own members, over the link it
-already holds to each, and every one of them records A. A deny or an expiry
+already holds to each, and every one of them records A. The press is answered
+as soon as A is written down as a member, and the dialling follows on its own,
+so a member that is switched off never holds the modal up. A deny or an expiry
 reads on A's pending row and is dismissed.
 
 **Addresses.** A laptop moves between the LAN and the tailnet and DHCP moves

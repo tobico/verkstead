@@ -26,7 +26,7 @@ use tokio::task::JoinHandle;
 use tower::ServiceExt;
 use verkstead_render::{AskingDevice, DeviceIdentity};
 use verkstead_server::device::reading::Reading;
-use verkstead_server::device::{Device, Devices};
+use verkstead_server::device::{Device, Devices, Tellings};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::open_database;
 use verkstead_server::peer::annex_forward::{self, Pointing};
@@ -98,6 +98,11 @@ struct Verkstead {
     members: Members,
     joins: Joins,
     nudges: Nudges,
+
+    /// What its presses leave running once they have answered, which a test
+    /// waits on before reading what they did over there.
+    tellings: Tellings,
+
     reading: Reading,
 
     /// Where its peer listener landed, which is the one address it advertises
@@ -177,6 +182,7 @@ impl Verkstead {
             members,
             joins,
             nudges,
+            tellings: Tellings::default(),
             reading,
             address,
             serving: Some(serving),
@@ -211,6 +217,7 @@ impl Verkstead {
             self.members.clone(),
             self.joins.clone(),
         )
+        .keeping_tellings(self.tellings.clone())
         .waiting(ANSWERED_WITHIN);
 
         let devices = match &self.forward {
@@ -319,6 +326,10 @@ async fn linked(joining: &Verkstead, answering: &Verkstead) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "allow: {said}");
+
+    // The press answers before its dialling is done, so what the dialling does
+    // over there is only so once it has finished.
+    answering.tellings.told().await;
 }
 
 /// `keeper` links `annex` by the Keeper's Join, at the Annex's own peer

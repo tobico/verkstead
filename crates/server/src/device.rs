@@ -706,6 +706,77 @@ impl AnnexData for PathBuf {
     }
 }
 
+/// The tellings an Allow or a Deny leaves running once it has answered — the
+/// dial back to the asker, and on an Allow the announcement to each member —
+/// every clone sharing them.
+///
+/// **A press answers before its dialling is done** (see [`Devices::allow`]), so
+/// what the dialling does over there is only so once it has finished. A running
+/// server never waits on that; a suite reading a far end after a press does, with
+/// [`Tellings::told`].
+///
+/// **One at a time, in the order of the presses.** Two Allows pressed a second
+/// apart would otherwise dial at once, and the second's announcement can reach
+/// the first newcomer before it has been told it is in — where the gate turns it
+/// away as a stranger, and a member that is perfectly well reads dimmed and owed
+/// the telling until its next exchange. Each telling waits for the one before it,
+/// which is the order a press that waited on its own dialling always had.
+#[derive(Debug, Clone, Default)]
+pub struct Tellings(std::sync::Arc<std::sync::Mutex<Carried>>);
+
+/// What [`Tellings`] holds: the tellings not yet waited on, and the word the
+/// last of them sends as it finishes, which the next one waits for.
+#[derive(Debug, Default)]
+struct Carried {
+    running: Vec<tokio::task::JoinHandle<()>>,
+    last: Option<tokio::sync::oneshot::Receiver<()>>,
+}
+
+impl Tellings {
+    /// Carry `telling` on in a task of its own, once the one carried before it
+    /// has finished, held where [`Tellings::told`] can wait for it. The ones
+    /// already finished are let go of here, so that a server that never waits
+    /// holds no more than are running.
+    fn carry(&self, telling: impl std::future::Future<Output = ()> + Send + 'static) {
+        let mut carried = self.0.lock().expect("the tellings are never poisoned");
+        let (finished, next) = tokio::sync::oneshot::channel::<()>();
+        let before = carried.last.replace(next);
+
+        carried.running.retain(|telling| !telling.is_finished());
+        carried.running.push(tokio::spawn(async move {
+            // Sent or dropped, it is the same word: the one before is over,
+            // whether it finished or was cut short.
+            if let Some(before) = before {
+                let _ = before.await;
+            }
+
+            telling.await;
+            drop(finished);
+        }));
+    }
+
+    /// Wait until every telling carried here has finished.
+    pub async fn told(&self) {
+        loop {
+            let running: Vec<_> = self
+                .0
+                .lock()
+                .expect("the tellings are never poisoned")
+                .running
+                .drain(..)
+                .collect();
+
+            if running.is_empty() {
+                return;
+            }
+
+            for telling in running {
+                let _ = telling.await;
+            }
+        }
+    }
+}
+
 /// What the **Devices** section of the Remote access pane reads: this device,
 /// and every other device in its cluster (ADR-0020).
 ///
@@ -810,6 +881,10 @@ pub struct Devices {
     /// [`Devices::forget_annex`]. Nobody listening unless a start said
     /// otherwise, see [`Devices::nudging`].
     nudges: crate::nudge::Nudges,
+
+    /// And the tellings an Allow or a Deny left running after it answered —
+    /// see [`Devices::allow`] and [`Tellings`].
+    tellings: Tellings,
 }
 
 impl Devices {
@@ -840,6 +915,7 @@ impl Devices {
             annex_trouble: std::sync::Arc::default(),
             annexed: None,
             nudges: crate::nudge::Nudges::new(),
+            tellings: Tellings::default(),
         }
     }
 
@@ -994,6 +1070,15 @@ impl Devices {
             peers: self.peers.waiting(patience),
             ..self
         }
+    }
+
+    /// The same, holding the tellings its presses leave running in `tellings`
+    /// — see [`Tellings`].
+    ///
+    /// For a suite that builds a fresh handle for every press and wants to wait
+    /// on what they all left running in one place.
+    pub fn keeping_tellings(self, tellings: Tellings) -> Devices {
+        Devices { tellings, ..self }
     }
 
     /// The list as the pane draws it, assembled now.
@@ -1613,6 +1698,36 @@ impl Devices {
             "a device has been let into this one's cluster",
         );
 
+        // And the rest is the dialling, which the press does not wait on: the
+        // asker is a member here and the request is gone, which is all the
+        // answer is about, and a member that is switched off costs a dial's
+        // patience at each of its addresses — seconds apiece, which a press
+        // should not be held up by and a reload should not cut short.
+        let devices = self.clone();
+
+        self.tellings.carry(async move {
+            devices
+                .tell_joined(held, introducer, already, members)
+                .await;
+        });
+
+        Ok(())
+    }
+
+    /// What an Allow leaves running once it has answered: the asker told it is
+    /// in, each member told about it, and any changeover in flight told about the
+    /// newcomer — in that order, which is the order they always ran in — and then
+    /// the Devices list nudged, because a member found switched off on the way
+    /// is a row that has just been dimmed.
+    async fn tell_joined(
+        &self,
+        held: verkstead_store::HeldJoin,
+        introducer: DeviceIdentity,
+        already: Vec<verkstead_store::Member>,
+        members: Vec<DeviceIdentity>,
+    ) {
+        let request = &held.request;
+
         if let Err(why) = self
             .peers
             .settle(
@@ -1660,7 +1775,7 @@ impl Devices {
         // Nothing at all where no changeover is in flight, which is every join.
         self.announce_renewal().await;
 
-        Ok(())
+        self.nudges.announce(verkstead_schema::Nudge::Devices);
     }
 
     /// Tell each of `members` about `newcomer`, and write down the tellings
@@ -2438,15 +2553,22 @@ impl Devices {
             "a device asking to be let into this one's cluster was refused",
         );
 
-        if let Err(why) = self.peers.settle(&held, &JoinSettled::Denied).await {
-            tracing::info!(
-                %why,
-                device = %held.device,
-                request = %request,
-                "a device that was refused could not be told, and its own row runs out \
-                 inside the ten minutes",
-            );
-        }
+        // Told after the press has answered, for the reason an Allow's dial back
+        // is — and nothing is written down where it cannot be, there being
+        // nothing recorded to owe.
+        let devices = self.clone();
+
+        self.tellings.carry(async move {
+            if let Err(why) = devices.peers.settle(&held, &JoinSettled::Denied).await {
+                tracing::info!(
+                    %why,
+                    device = %held.device,
+                    request = %held.request,
+                    "a device that was refused could not be told, and its own row runs out \
+                     inside the ten minutes",
+                );
+            }
+        });
 
         Ok(())
     }
@@ -2666,4 +2788,32 @@ fn printable(digest: impl AsRef<[u8]>) -> String {
         .map(|byte| format!("{byte:02X}"))
         .collect::<Vec<String>>()
         .join(":")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Tellings;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    /// A second press's telling waits for the first's, however much longer the
+    /// first takes: the order they finish in is the order they were pressed in.
+    #[tokio::test]
+    async fn tellings_are_carried_one_at_a_time_in_the_order_of_the_presses() {
+        let tellings = Tellings::default();
+        let finished = Arc::new(Mutex::new(Vec::new()));
+
+        for (press, takes) in [(1, 200), (2, 0), (3, 50)] {
+            let finished = finished.clone();
+
+            tellings.carry(async move {
+                tokio::time::sleep(Duration::from_millis(takes)).await;
+                finished.lock().unwrap().push(press);
+            });
+        }
+
+        tellings.told().await;
+
+        assert_eq!(*finished.lock().unwrap(), vec![1, 2, 3]);
+    }
 }

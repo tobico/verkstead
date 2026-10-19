@@ -85,7 +85,7 @@ function card(): Promise<HTMLElement> {
 /// One of the two presses on it, read afresh: the card is rebuilt over whichever
 /// device is asking now, so a button held from before an answer landed is a node
 /// no longer on the page.
-function pressing(name: "Allow" | "Deny"): HTMLButtonElement {
+function pressing(name: string): HTMLButtonElement {
   return screen.getByRole("button", { name }) as HTMLButtonElement;
 }
 
@@ -169,8 +169,9 @@ describe("a device asking to link", () => {
 
   /// Neither press can be made twice, and neither can be made while the other is
   /// in flight: the two are one decision, and a Deny landing behind an Allow
-  /// would be the human answering the same question both ways.
-  it("puts both presses out while either is on its way", async () => {
+  /// would be the human answering the same question both ways. And the press on
+  /// its way says so, rather than the card sitting there looking untouched.
+  it("puts both presses out while either is on its way, and says which", async () => {
     const { fetching } = mount(
       whenever(ASKING, json([LAPTOP])),
       whenever(`${ASKING}/${LAPTOP.request}/allow`, hangs(), "POST"),
@@ -178,13 +179,72 @@ describe("a device asking to link", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
 
-    await waitFor(() => expect(pressing("Allow").disabled).toBe(true));
+    await waitFor(() => expect(pressing("Allowing…").disabled).toBe(true));
     expect(pressing("Deny").disabled).toBe(true);
 
-    fireEvent.click(pressing("Allow"));
+    fireEvent.click(pressing("Allowing…"));
     fireEvent.click(pressing("Deny"));
 
     expect(posted(fetching)).toEqual([`${ASKING}/${LAPTOP.request}/allow`]);
+  });
+
+  /// The same for Deny.
+  it("says a Deny is on its way while it is", async () => {
+    mount(
+      whenever(ASKING, json([LAPTOP])),
+      whenever(`${ASKING}/${LAPTOP.request}/deny`, hangs(), "POST"),
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Deny" }));
+
+    await waitFor(() => expect(pressing("Denying…").disabled).toBe(true));
+    expect(pressing("Allow").disabled).toBe(true);
+  });
+
+  /// A press the server refused leaves the question up, says why in the
+  /// server's own words, and hands both presses back.
+  it.each([
+    ["allow", "Allow", "The device couldn't be let in: the database is locked."],
+    ["deny", "Deny", "The device couldn't be refused: the database is locked."],
+  ])("keeps the card up and says why when the %s is refused", async (route, button, said) => {
+    mount(
+      whenever(ASKING, json([LAPTOP])),
+      whenever(
+        `${ASKING}/${LAPTOP.request}/${route}`,
+        json({ error: said }, 503),
+        "POST",
+      ),
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: button }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("dialog").textContent).toContain(said),
+    );
+    expect(pressing("Allow").disabled).toBe(false);
+    expect(pressing("Deny").disabled).toBe(false);
+  });
+
+  /// And one that never reached the server says which press it was, there being
+  /// no words of the server's to quote.
+  it("says the server couldn't be reached when the press never got there", async () => {
+    mount(
+      whenever(ASKING, json([LAPTOP])),
+      whenever(
+        `${ASKING}/${LAPTOP.request}/allow`,
+        () => Promise.reject(new TypeError("Failed to fetch")),
+        "POST",
+      ),
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("dialog").textContent).toContain(
+        "The device couldn't be let in. The server couldn't be reached.",
+      ),
+    );
+    expect(pressing("Allow").disabled).toBe(false);
   });
 
   /// And the card goes when the question does, whoever answered it: a press on

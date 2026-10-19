@@ -83,8 +83,21 @@
   border: 1px solid var(--accent);
 }
 
+/* Both greyed while a press is on its way — Deny gets its own from
+   `.secondary:disabled` in `styles/base.css`, and this is the filled one's. */
+.asking .out button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* What a refused press says, under the row it refused. */
+.asking .failure {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+}
+
 @media (hover: hover) {
-  .asking .out button:not(:where(.secondary)):hover {
+  .asking .out button:not(:where(.secondary)):not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }

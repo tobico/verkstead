@@ -38,10 +38,11 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Icon } from "./Icon";
 import styles from "./Joining.module.css";
 import { Modal } from "./Modal";
-import { allowJoin, denyJoin, loadAsking } from "./api/client";
+import { RefusedError, allowJoin, denyJoin, loadAsking } from "./api/client";
 import type { AskingDevice } from "./api/types";
 import { useReading } from "./freshness";
 import { osIcon } from "./devices";
+import { ErrorLine } from "./notices";
 
 /// The modal, where a device is asking, and nothing at all where none is.
 ///
@@ -110,6 +111,33 @@ export function Asked(props: { by: AskingDevice | null }): JSX.Element {
   /// human answering twice.
   const pressing = () => allow.isPending || deny.isPending;
 
+  /// What a refused press says under the buttons, which come back live with
+  /// it: the server's own sentence where it answered — its refusals lead with
+  /// what could not be done — and where it could not be reached at all, which
+  /// press that was and why, there being no words of the server's to quote.
+  const refused = (): string | null => {
+    const [error, lead] = allow.isError
+      ? [allow.error, "The device couldn't be let in."]
+      : deny.isError
+        ? [deny.error, "The device couldn't be refused."]
+        : [null, ""];
+
+    if (error === null) {
+      return null;
+    }
+
+    return error instanceof RefusedError
+      ? error.message
+      : `${lead} The server couldn't be reached.`;
+  };
+
+  // One press at a time is answered, so a second clears what the first said.
+  const press = (pressed: "allow" | "deny", request: string) => {
+    allow.reset();
+    deny.reset();
+    (pressed === "allow" ? allow : deny).mutate(request);
+  };
+
   /// The address the human is looking for: the first the device advertised,
   /// which is the one it would rather be reached on — the tailnet name before
   /// the LAN, in the order the list came in. A device on neither answers with
@@ -175,18 +203,22 @@ export function Asked(props: { by: AskingDevice | null }): JSX.Element {
                 type="button"
                 class={`${styles.secondary!} secondary`}
                 disabled={pressing()}
-                onClick={() => deny.mutate(device.request)}
+                onClick={() => press("deny", device.request)}
               >
-                Deny
+                {deny.isPending ? "Denying…" : "Deny"}
               </button>
               <button
                 type="button"
                 disabled={pressing()}
-                onClick={() => allow.mutate(device.request)}
+                onClick={() => press("allow", device.request)}
               >
-                Allow
+                {allow.isPending ? "Allowing…" : "Allow"}
               </button>
             </div>
+
+            <Show when={refused()}>
+              {(why) => <ErrorLine class={styles.failure}>{why()}</ErrorLine>}
+            </Show>
           </>
         )}
       </Show>
