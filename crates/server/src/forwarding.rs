@@ -1,11 +1,14 @@
 //! **Forwards**: a server started in a terminal on another device of the
-//! cluster, reachable on this device's own `localhost` at the same port for as
-//! long as the terminal's tab is open here.
+//! cluster, reachable on this device's own `localhost` at the same port from
+//! the moment this device's browser first opens the terminal's tab until the
+//! server stops or the terminal ends. **Held, not attached** (ADR-0019,
+//! *Forwards*, as amended): the tab closing keeps it.
 //!
-//! **The device whose browser has the tab open is the one that forwards.** That
-//! is the hub bridging the attach, and it is the only device the member counts
-//! as attached — see [`crate::terminals::Terminals::attach`] — so it is the only
-//! one the member reads that terminal's ports to. A terminal this device's own
+//! **The device whose browser opened the tab is the one that forwards.** That
+//! is the hub bridging the attach, and the member offers the terminal to every
+//! device that has attached it, from the first attach until the terminal ends —
+//! see [`crate::terminals::Terminals::attach`] — so it is the only one the
+//! member reads that terminal's ports to. A terminal this device's own
 //! browser attached locally is no Forward at all: the port is on this machine
 //! already, and there is nothing to cross.
 //!
@@ -34,10 +37,9 @@
 //! were both rejected: a `localhost:3000` that meant something different from
 //! one minute to the next would be worse than one that plainly is not this.
 //!
-//! **A Forward ends** [`GRACE`] after it leaves the reading, so a pane swap or
-//! a reload — an attach let go of and taken again — keeps it. Leaving the
-//! reading is every ending there is: the attach it stands on ending, the port
-//! closing, the terminal ending. And it ends at once where the member reads as
+//! **A Forward ends** [`GRACE`] after it leaves the reading, so a dev server
+//! restarting on a file change keeps it. Leaving the reading is every ending
+//! there is: the port closing, the terminal ending. And it ends at once where the member reads as
 //! unreachable or is no member at all, there being nothing to connect to — and
 //! is taken up again once it answers, while the tab is still open.
 //! Ending closes the listener, and the connections crossing it go with it.
@@ -78,9 +80,9 @@ pub(crate) const LOOPBACKS: [IpAddr; 2] = [
 ];
 
 /// How long a Forward outlives its port leaving the reading — the file
-/// watcher's grace, for the file watcher's reason: a pane swap or a reload is an
-/// attach let go of and taken again, and that gap is a repaint rather than
-/// anybody leaving. See [`crate::watchers::GRACE`].
+/// watcher's grace: a dev server restarting on a file change closes its port
+/// and opens it again, and that gap is a restart rather than the server
+/// stopping. See [`crate::watchers::GRACE`].
 const GRACE: Duration = crate::watchers::GRACE;
 
 /// How often the Forwards are looked over: a grace that has run out, a skip to

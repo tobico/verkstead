@@ -19,7 +19,7 @@ unreachable* until it answers again.
 
 ## Tasks
 
-- [ ] 01: A terminal is offered until it ends — [details](01-a-terminal-is-offered-until-it-ends.md)
+- [x] 01: A terminal is offered until it ends — [details](01-a-terminal-is-offered-until-it-ends.md)
 - [ ] 02: Everything a member offers, read back after a restart or a blip — [details](02-everything-a-member-offers.md)
 - [ ] 03: A member not answering keeps its Forwards — [details](03-a-member-not-answering-keeps-its-forwards.md)
 - [ ] 04: A × per row — [details](04-a-cross-per-row.md)

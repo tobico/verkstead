@@ -19,9 +19,9 @@
 //! started is walking is read once; and the turns carry on from there as they
 //! would have — see [`Hurry`].
 //!
-//! **And only while the terminal is being read at all**, which is while a member
-//! holds an attach on it: output nobody is reading the ports of is not looked
-//! at.
+//! **And only while the terminal is being read at all**, which is from the
+//! first time a member attaches it until it ends, whether or not a tab is open
+//! on it now: output nobody is reading the ports of is not looked at.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -47,15 +47,10 @@ pub(crate) struct Hurry {
 
 impl Hurry {
     /// Mark the read as running, saying whether it was not already — which is
-    /// whether to start one. Called under the register's lock, as its stopping
-    /// is.
+    /// whether to start one. Called under the register's lock. Never marked
+    /// stopped: the read runs until the terminal ends, and this with it.
     pub(crate) fn start(&self) -> bool {
         !self.reading.swap(true, Ordering::Relaxed)
-    }
-
-    /// And mark it stopped, which is the sniff stopping with it.
-    pub(crate) fn stop(&self) {
-        self.reading.store(false, Ordering::Relaxed);
     }
 
     /// Whether the read is running, which is whether the output is worth looking

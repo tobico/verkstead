@@ -90,6 +90,10 @@ const HURRIED: Duration = Duration::from_millis(1200);
 /// turn of the reading, twice.
 const SETTLING: Duration = Duration::from_secs(5);
 
+/// How often a terminal is read that has been attached from elsewhere but has
+/// no attach on it now: `terminals::UNWATCHED`.
+const UNWATCHED: Duration = Duration::from_secs(10);
+
 /// One Verkstead: its store, its identity, and where its Peer Listener landed.
 struct Verkstead {
     device: Device,
@@ -707,15 +711,25 @@ async fn a_server_in_a_remote_terminal_is_in_the_attaching_devices_reading_until
         "a port closing should have been a ports Nudge on B's stream",
     );
 
-    // And A letting go is A's terminals going from the reading altogether.
+    // And A letting go keeps the terminal in A's reading: it is offered to A
+    // until it ends, not for as long as a tab is open on it.
     terminal.closed().await;
 
-    until(
-        &app,
-        &through(B, &ports_path()),
-        <[TerminalPorts]>::is_empty,
-    )
-    .await;
+    assert!(
+        page.heard(Duration::from_millis(500))
+            .await
+            .contains(&PORTS),
+        "A letting go should have been a ports Nudge on B's stream",
+    );
+
+    let read: PortsView = call(&app, "GET", &through(B, &ports_path())).await;
+    assert_eq!(
+        read.terminals,
+        vec![TerminalPorts {
+            number,
+            ports: Vec::new(),
+        }],
+    );
 }
 
 /// A terminal attached only from B's own browser is not read: a server in it is
@@ -912,11 +926,14 @@ fn port_path(number: i64, port: u16) -> String {
 }
 
 /// What a server started in a terminal is typed as when it is to be talked to:
-/// node on `host`, echoing what it is sent behind `echo:` and ending the
-/// connection itself — with `ended` — on anything starting `end`.
+/// node on `host`, echoing what it is sent behind `echo:`, ending the
+/// connection itself — with `ended` — on anything starting `end`, and exiting
+/// on anything starting `quit`, which is the server stopping with no tab open
+/// to stop it from.
 fn echoing(host: &str, port: u16) -> String {
     format!(
         "node -e \"require('net').createServer(s => s.on('data', d => \
+         String(d).startsWith('quit') ? process.exit() : \
          String(d).startsWith('end') ? s.end('ended') : s.write('echo:' + d)))\
          .listen({port}, '{host}', () => console.log('listening-' + {port}))\"\n"
     )
@@ -1071,7 +1088,7 @@ async fn a_connection_upgraded_over_the_link_reaches_the_server_in_the_terminal(
 }
 
 /// Nothing is joined that the caller may not have: a port not in the reading, a
-/// terminal it holds no attach on, and the device's own browser are each refused
+/// terminal it never attached, and the device's own browser are each refused
 /// by name — and a port in the reading that the loopback does not answer is
 /// refused rather than answered with a socket carrying nothing.
 #[tokio::test]
@@ -1119,12 +1136,21 @@ async fn a_connection_is_refused_unless_the_reading_offers_it_to_the_caller() {
     assert_eq!(status, 404, "{said}");
     assert!(said.contains("isn't listening"), "{said}");
 
-    // A terminal A holds no attach on, for a port that is listening in another.
+    // A terminal A never attached, for a port that is listening in another —
+    // which is not in A's reading either.
+    let read: PortsView = call(&app, "GET", &through(B, &ports_path())).await;
+    assert!(
+        read.terminals
+            .iter()
+            .all(|terminal| terminal.number != unattached),
+        "a terminal A never attached should not be in A's reading: {read:?}",
+    );
+
     let (status, said) = upgraded(at, &through(B, &port_path(unattached, elsewhere)))
         .await
-        .expect_err("a terminal the caller is not attached to should have been refused");
+        .expect_err("a terminal the caller never attached should have been refused");
     assert_eq!(status, 403, "{said}");
-    assert!(said.contains("holding an attach"), "{said}");
+    assert!(said.contains("has attached it"), "{said}");
 
     // And B's own browser, for the very port A may have.
     let (status, said) = upgraded(own, &port_path(number, elsewhere))
@@ -1332,8 +1358,9 @@ async fn heard_nudged(page: &mut Listening, over: Duration) -> Vec<Nudged> {
 
 /// A server started in a terminal on B, attached from A's browser, is reachable
 /// at A's own loopback on the same port — IPv4 and IPv6 both — within a few
-/// seconds; a pane swap keeps it, and closing the tab ends it once the grace is
-/// over.
+/// seconds; a pane swap keeps it, and so does closing the tab, for as long as
+/// the server listens. The server stopping ends it, within the grace and a
+/// turn.
 #[tokio::test]
 async fn a_server_in_a_remote_terminal_is_forwarded_to_the_attaching_devices_localhost() {
     let (a, _b, _holding) = linked_forwarding().await;
@@ -1409,23 +1436,34 @@ async fn a_server_in_a_remote_terminal_is_forwarded_to_the_attaching_devices_loc
     );
     echoes(forwarded_v4(port), "after-the-swap").await;
 
-    // And the tab closed: the Forward outlives it by the grace and no longer.
-    let closed = Instant::now();
+    // And the tab closed: the Forward is held, not attached, so it stands past
+    // the grace with nothing attached at all.
     terminal.closed().await;
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(SETTLING).await;
+
     let read: ForwardsView = call(&app, "GET", "/api/ui/forwards").await;
     assert_eq!(
         standing(&read.forwards, port),
         Some(ForwardStanding::Forwarding),
-        "a Forward should have outlived its tab for the grace",
+        "closing the tab should have kept the Forward",
     );
+    echoes(forwarded_v4(port), "after-the-tab-closed").await;
+    echoes(forwarded_v6(port), "still-after-the-tab-closed").await;
+
+    // The server stopping, with no tab open: out of the reading on the next
+    // unwatched turn, and the Forward gone the grace after that.
+    let mut quitting = tokio::net::TcpStream::connect(forwarded_v4(port))
+        .await
+        .unwrap();
+    let stopped = Instant::now();
+    quitting.write_all(b"quit").await.unwrap();
 
     forwarded_until(&app, <[ForwardView]>::is_empty).await;
-    let took = closed.elapsed();
+    let took = stopped.elapsed();
     assert!(
-        took >= Duration::from_secs(2) && took < PROMPTLY + Duration::from_secs(2),
-        "the Forward ended {took:?} after its tab closed",
+        took < UNWATCHED + Duration::from_secs(2) + PROMPTLY,
+        "the Forward ended {took:?} after its server stopped",
     );
 
     assert!(
@@ -1433,6 +1471,134 @@ async fn a_server_in_a_remote_terminal_is_forwarded_to_the_attaching_devices_loc
             .await
             .is_err(),
         "nothing should be listening on port {port} here once the Forward has ended",
+    );
+}
+
+/// Closing a terminal no tab is open on ends its Forward within the grace and
+/// a little — not a whole unwatched turn later — and nothing listens at A's
+/// loopback on that port afterwards.
+#[tokio::test]
+async fn closing_the_terminal_ends_its_forward() {
+    let (a, _b, _holding) = linked_forwarding().await;
+    let (app, at) = a.served().await;
+
+    let number = opened(
+        &app,
+        &through(B, &format!("/api/ui/conversations/{THERE}/terminals")),
+    )
+    .await;
+
+    let mut terminal = Terminal::attached(format!(
+        "ws://{at}{}",
+        through(
+            B,
+            &format!("/api/ui/conversations/{THERE}/terminals/{number}/attach")
+        )
+    ))
+    .await;
+
+    let port = free_port();
+    terminal.typed(&echoing("127.0.0.1", port)).await;
+    terminal.until(&format!("listening-{port}")).await;
+
+    forwarded_until(&app, |read| {
+        standing(read, port) == Some(ForwardStanding::Forwarding)
+    })
+    .await;
+
+    terminal.closed().await;
+    tokio::time::sleep(SETTLING).await;
+    echoes(forwarded_v4(port), "with-no-tab-open").await;
+
+    // The ×, asked and said yes to: a server is running in it. Answered once
+    // the shell has gone, which is when the terminal has ended.
+    let (status, said) = asked(
+        &app,
+        "DELETE",
+        &through(
+            B,
+            &format!("/api/ui/conversations/{THERE}/terminals/{number}?asked=true"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let closed = Instant::now();
+
+    forwarded_until(&app, <[ForwardView]>::is_empty).await;
+    let took = closed.elapsed();
+    assert!(
+        took < Duration::from_secs(2) + PROMPTLY,
+        "the Forward ended {took:?} after its terminal closed",
+    );
+
+    assert!(
+        tokio::net::TcpStream::connect(forwarded_v4(port))
+            .await
+            .is_err(),
+        "nothing should be listening on port {port} here once the Forward has ended",
+    );
+}
+
+/// With no tab attached a terminal is read every ten seconds rather than every
+/// two, and a printed address still hurries the read.
+///
+/// One node, started while the tab is open and left running once it closes:
+/// three seconds on it opens a port and prints its address, and two seconds
+/// after that opens a second and says nothing. The first is in the reading
+/// well inside a turn, being printed; the second waits for the unwatched turn
+/// after the read the print hurried, which a two-second turn would have been
+/// long past.
+#[tokio::test]
+async fn a_terminal_no_tab_is_attached_to_is_read_every_ten_seconds() {
+    let (a, _b) = linked().await;
+    let (app, at) = a.served().await;
+
+    let (number, mut terminal) = attached_from_a(&app, at).await;
+
+    let printed = free_port();
+    let quiet = free_port();
+    terminal
+        .typed(&format!(
+            "node -e \"const n = require('net'); console.log('started'); \
+             setTimeout(() => n.createServer().listen({printed}, '127.0.0.1', \
+             () => console.log('up at http://local' + 'host:' + {printed} + '/')), 3000); \
+             setTimeout(() => n.createServer().listen({quiet}, '127.0.0.1'), 5000)\"\n"
+        ))
+        .await;
+    terminal.until("started").await;
+    let started = Instant::now();
+    terminal.closed().await;
+
+    let ports = through(B, &ports_path());
+
+    until(&app, &ports, |read| holds(read, printed)).await;
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_secs(3) + HURRIED,
+        "the printed port reached the reading {took:?} after the server started",
+    );
+
+    // Two seconds a turn would have read the quiet one by seven.
+    tokio::time::sleep_until(started + Duration::from_secs(8)).await;
+    let read: PortsView = call(&app, "GET", &ports).await;
+    assert!(
+        !holds(&read.terminals, quiet),
+        "with no tab attached the quiet port should not have been read yet: {read:?}",
+    );
+
+    until(&app, &ports, |read| holds(read, quiet)).await;
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_secs(3) + UNWATCHED + PROMPTLY,
+        "the quiet port reached the reading {took:?} after the server started",
+    );
+
+    assert!(
+        call::<PortsView>(&app, "GET", &ports)
+            .await
+            .terminals
+            .iter()
+            .any(|terminal| terminal.number == number),
     );
 }
 
