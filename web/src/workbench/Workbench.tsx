@@ -13,8 +13,8 @@
 //! the frame at all and the details take its column as well as their own. The
 //! whole pane goes rather than most of it: no strip of what its header carried,
 //! no pins, no status. What is left is the conversations and the composer, and
-//! a narrow window walks between exactly those two — Back from the composer is
-//! Back out of the Conversation, there being no level in between. A second
+//! a narrow window shows the composer beside the collapsed list — Back from it
+//! is Back out of the Conversation, there being no level in between. A second
 //! Event of any kind puts the Timeline back at the width this device left it.
 //!
 //! And none of them, where the sidebar's list is empty. The bare workbench is a
@@ -110,7 +110,7 @@ import {
   type JSX,
 } from "solid-js";
 
-import { Panes, matching, type Pane } from "../Panes";
+import { Panes, type Pane } from "../Panes";
 import { useDevices } from "../devices";
 import { Reaching, keyOf, type Device } from "../reaching";
 import { loadConversation, seeConversation } from "../api/client";
@@ -129,7 +129,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
-import { BESIDE, maximised as remembered, setMaximised } from "../widths";
+import { maximised as remembered, setMaximised } from "../widths";
 import { Asked } from "./Asked";
 import { Backlog } from "./Backlog";
 import { Brief } from "./Brief";
@@ -268,7 +268,7 @@ export function Workbench(): JSX.Element {
   const navigate = useNavigate();
   const where = useLocation();
 
-  const [pane, setPane] = createSignal<Pane>("conversations");
+  const [pane, setPane] = createSignal<Pane>("nothing");
 
   /// Which Conversation the URL names, or the empty string on the bare
   /// workbench. Unparsed, like a Set's id: the server decides what names
@@ -350,22 +350,16 @@ export function Workbench(): JSX.Element {
     setMaximised(on);
   };
 
-  /// Whether the window is wide enough for the toggle to have anything to hide.
-  ///
-  /// Below this the frame is walked one pane at a time and the details pane
-  /// already has the window, so there is nothing to give it: the toggle is not
-  /// drawn at all there, and whatever this device remembers is left where it
-  /// is, exactly as the widths are.
-  const beside = matching(BESIDE);
-
-  /// And whether the frame is actually standing Code alone: the toggle on, the
-  /// window wide enough, and Code the pane that is open.
+  /// Whether the frame is actually standing Code alone: the toggle on, and Code
+  /// the pane that is open. At every width, because something stands beside
+  /// Code at every width — the collapsed list, on a phone — and that is what
+  /// the toggle hides.
   ///
   /// The last of those is what keeps the mode Code's own. Every other details
   /// pane is read beside the record it belongs to, and a Brief drawn across a
   /// whole window because somebody maximised the editor an hour ago would be
   /// this setting answering for a pane it was never about.
-  const maximised = () => whole() && beside() && event() === "code";
+  const maximised = () => whole() && event() === "code";
 
   /// Whether there is anything to list, which is where the zero state is
   /// decided: the sidebar's own query, read here as well — see `zero.ts`.
@@ -447,7 +441,7 @@ export function Workbench(): JSX.Element {
   createEffect(
     on([selected, device], ([id]) => {
       setPane(
-        id === "" ? "conversations" : event() === null ? "middle" : "details",
+        id === "" ? "nothing" : event() === null ? "middle" : "details",
       );
 
       // And opening one is the human having looked at it, which takes the news
@@ -649,8 +643,8 @@ export function Workbench(): JSX.Element {
   /// from — a change of level rather than a navigation, the Conversation being
   /// where the page still stands. Where the record is the one Event there is no
   /// Timeline to go back to, so the way out is out of the Conversation
-  /// altogether, which is a navigation exactly as the Timeline's own "←
-  /// Conversations" is.
+  /// altogether, which is a navigation to the root — and the list it goes back
+  /// to is beside the composer at every width, so the frame draws it nowhere.
   const leaving = () =>
     alone()
       ? { to: "Conversations", go: () => navigate("/") }
@@ -846,9 +840,7 @@ export function Workbench(): JSX.Element {
                 // says: every Verkstead issues a Conversation 7, and Code's
                 // keeping is keyed by both (ADR-0025).
                 code={(id) => code.of(id, device())}
-                maximise={
-                  beside() ? { on: whole(), set: maximise } : undefined
-                }
+                maximise={{ on: whole(), set: maximise }}
                 shut={shut}
               />
             </Reaching.Provider>
@@ -877,9 +869,10 @@ function TimelinePane(props: {
   /// details pane.
   pane: (pane: Pane) => void;
 
-  /// And the way back out to the list, which is a navigation rather than a
-  /// change of level: what is being let go of is the selection, and the URL is
-  /// where the selection is kept.
+  /// And the way back out to the list, which is where a press on the hatch
+  /// that landed leaves the human: a navigation rather than a change of level,
+  /// what is being let go of being the selection, and the URL where the
+  /// selection is kept.
   list: () => void;
 
   /// And the way to another Conversation, which the roadmap's card leads to: a
@@ -912,7 +905,6 @@ function TimelinePane(props: {
         {(conversation) => (
           <Timeline
             conversation={conversation()}
-            back={props.list}
             go={props.go}
             details={() => props.pane("details")}
             selected={props.event}
@@ -961,8 +953,8 @@ function DetailsPane(props: {
   /// the page has open.
   code: (conversation: number) => Kept;
 
-  /// And the maximise toggle, where the window is wide enough for it to have
-  /// something to hide. Code's alone: it is the one pane that wants the window,
+  /// And the maximise toggle, which has something to hide at every width: the
+  /// collapsed list stands beside Code even on a phone. Code's alone: it is the one pane that wants the window,
   /// and the only one the page reads the setting against.
   maximise?: { on: boolean; set: (on: boolean) => void };
 

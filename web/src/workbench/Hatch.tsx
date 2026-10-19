@@ -26,9 +26,8 @@
 //! only reads the world again and stays where it is. There is nothing here to
 //! stay for: the page could not be read before the press and will not be read
 //! after it, so what a re-read would draw is the same error over a Conversation
-//! that is now off the list. On a narrow window that is the way back to the
-//! conversations, and on a wide one the empty pane — one navigation, because
-//! they are the same one.
+//! that is now off the list. It goes to the root, where nothing is open and the
+//! list stands expanded over the empty paper.
 //!
 //! **And it leaves at the press rather than at the answer.** Both rows here are
 //! eager, as the ordinary menu's are — see `eager.ts` — so the row goes off the
@@ -84,8 +83,8 @@ export function Hatch(props: {
   /// that would have carried anything else is the one that failed.
   id: string;
 
-  /// The way back out to the list, which is both what the header's back button
-  /// does on a narrow window and where a press that landed leaves the human.
+  /// The way back out to the list, which is where a press that landed leaves
+  /// the human.
   back: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
@@ -170,11 +169,9 @@ export function Hatch(props: {
   return (
     <>
       <PaneHead
-        // The way back out of a level a narrow window has no other way out of.
-        // Drawn always and hidden where all three panes stand at once, as every
-        // pane's is — and the whole reason the hatch is on the pane rather than
-        // on the sidebar's right-click, which a phone has no way to open at all.
-        back={{ to: "Conversations", go: props.back }}
+        // No way back: the conversations are beside it at every width. The
+        // hatch is on the pane rather than on the sidebar's right-click because
+        // a phone has no way to open that at all.
         // The branch, where the sidebar knows it, so the human can see this is
         // the Conversation they meant. Where it does not, the id it was asked
         // for: a header with no name at all would be one more thing that will

@@ -1490,9 +1490,11 @@ settings page (that is the whole page, and this is one section of it)
 
 **Window Decorations**:
 The window the desktop app draws has no title bar, and what stands where one
-would have been is the platform's own controls: the traffic lights inset to the
-left of the wordmark on a Mac, the controls overlay at the top-right corner on
-Windows and Linux (ADR-0020). Controls drawn by the page were rejected — the
+would have been is the platform's own controls: the traffic lights in a band of
+their own above the sidebar's logo on a Mac — the list's head dropping one band
+below them, a **Collapsed** sidebar being too narrow to pad its logo past them —
+and the controls overlay at the top-right corner on Windows and Linux
+(ADR-0020). Controls drawn by the page were rejected — the
 platform's keep Windows' snap layouts and a Mac's traffic lights as that
 platform draws them, and neither is worth redrawing by hand. `titleBarStyle:
 "hidden"` is the whole of what asks for it, and there is no platform branch
@@ -1557,7 +1559,8 @@ the overlay's own and the window's resize: the sum is the window's width less
 the strip the page was left, and Windows delivers those two a moment apart —
 so a reading taken on either event alone pairs a rectangle that has moved with
 a window that has not, and pads the head by the difference or by nothing at
-all. And the one pane a narrow window shows is at both edges at once.
+all. The pane beside a **Collapsed** sidebar's strip is padded by whatever of a
+left inset reaches past the strip, a Mac's third light ending just beyond it.
 **A page with no header gets a bare drag bar** of the same band: the onboarding
 wizard, the no-such-page, and the moment before the verdict about this machine
 lands. A window that cannot be moved for the length of any of them is the same
@@ -2935,6 +2938,23 @@ it shares the control and it is drawn as a chip beside these pills, but what it
 is, is a reference by name to something declared in the settings rather than
 bytes copied into the Conversation's directory — see **MCP server**.
 
+**Collapsed** and **Expanded**:
+The conversations sidebar's two states under 100rem, where it is **Collapsed**
+until something expands it; from 100rem it is the full sidebar at the share this
+device dragged it to, and neither word applies. Collapsed, it is a 3rem strip
+down the window's left edge: the logo alone at the head, the New conversation
+link as its pen-to-square icon, each card's first three characters with its mark
+under them, and the foot — *Show archived* and the forwarding reading — as blank
+paper. Every part stands exactly as tall as it does expanded; only the width
+shrinks. **Expanded** is the same pane at the width it would stand at full,
+drawn *over* the panes beside it with a shadow, nothing beside it moving. A
+hovering pointer, a keyboard focus inside it or a tap expands it; a mouse leaving
+it, or a finger's tap on a card, the link or anywhere outside it, collapses it
+again. With nothing open — the root address — it stands expanded until a card is
+picked. Width alone decides which the sidebar is: there is no pin and no
+collapse button. See the design document's UI section.
+_Avoid_: rail, drawer, mini sidebar, hamburger, minimised, docked
+
 **Timeline**:
 A Conversation's ordered record of what has happened to it, and the middle pane
 of the workbench. Everything Verkstead and its agents do lands here as an
@@ -2945,8 +2965,9 @@ looking at a session's Screen leaves no Event, and neither does typing into one
 **A record of one Event is not drawn at all**, which is every draft nothing has
 happened to yet: there is nothing to read on it, so the pane goes — the whole of
 it, header and pins included — and the composer beside it takes the column as
-well as its own. A narrow window walks straight from the conversations to the
-composer and straight back out. A second Event of any kind puts the pane back,
+well as its own. A narrow window opens straight onto the composer, and Back
+out of it is out of the Conversation, to the list standing **Expanded** over
+nothing open. A second Event of any kind puts the pane back,
 at the width this device left it.
 
 **And one item on it that is not an Event at all, at the very end: the steer
@@ -3406,8 +3427,8 @@ attached. What is open — the groups, the tabs, the unsaved text — is the
 device's, kept per Conversation in the browser — keyed by the device it lives
 on as well as its number, a member's Conversation 7 being another piece of work
 than this device's — and back after a reload; so is
-the **maximise** toggle in the header, which hides the sidebar and the
-Timeline on a window wide enough to have drawn them.
+the **maximise** toggle in the header, which hides the sidebar — collapsed or
+full, so it is drawn at every width — and the Timeline wherever it is drawn.
 **Reads and writes are the server's own, outside the Sandbox**, bounded by the
 roots: nothing under `.git`, nothing outside a Worktree, nothing written to a
 read-only Companion. Desktop-first — nothing is promised on a phone. **Not a

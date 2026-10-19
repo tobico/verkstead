@@ -26,12 +26,33 @@
 }
 
 /* The mark at the height of the header rather than of the word beside it, so
-   what the eye lands on first is the thing rather than the name of it. */
+   what the eye lands on first is the thing rather than the name of it.
+
+   In the middle of the `2rem` item the sidebar's collapsed strip draws, which
+   is where it stands expanded too, so collapsing moves nothing of it: flush at
+   a page's `2rem`, and a quarter of a rem in at the app's smaller one. */
 .wordmark img {
   --size: 2rem;
   width: var(--size);
   height: var(--size);
-  margin-left: 0.2rem;
+  margin-left: calc((2rem - var(--size)) / 2);
+}
+
+/* And all the collapsed strip draws of the head is that mark. The word and the
+   gear keep their room — the row is as tall as it is expanded, so the list
+   under it starts where it always starts — and are not drawn, by the say of
+   the frame around them (`--collapsed-faded` in `Panes.module.css`). On the
+   compose page standing without the sidebar nothing sets it, and both are
+   always drawn.
+
+   Faded rather than hidden, because both are still there to be found: the
+   word is the heading a screen reader reads the pane by, and the gear is the
+   first stop Tab makes in the pane — taking it is a focus inside, which is
+   what expands the pane and draws the gear it landed on. No pointer reaches
+   the gear collapsed: it stands past the strip, where the clip has it. */
+.word,
+.settings {
+  opacity: var(--collapsed-faded, 1);
 }
 
 /* Inside the app, the mark in the head is a header bar's title like every other

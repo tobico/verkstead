@@ -22,6 +22,16 @@
   border-top: 1px solid var(--edge);
 }
 
+/* In the sidebar's collapsed strip the foot is blank paper under its rule:
+   the switch, whatever stands beside it and a failure under them are not drawn,
+   and keep their room — laid out at the width the pane expands to, so where the
+   forwarding item would wrap under the switch the foot is two lines tall
+   collapsed as well. The frame says when (`--collapsed-hidden` in
+   `Panes.module.css`); on the compose page nothing does. */
+.showArchived > * {
+  visibility: var(--collapsed-hidden, visible);
+}
+
 /* Two words and a switch, on one line however narrow the pane is dragged: a
    label that wrapped would put the switch on a line of its own with nothing to
    say what it was for. The switch is `Switch.module.css`'s and its label is the

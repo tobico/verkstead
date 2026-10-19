@@ -6,8 +6,23 @@
 //! side by side and a phone shows one of them at a time. The same page answers
 //! both.
 //!
+//! Where there is a list to pick from it stands at every width, in one of three
+//! bands. Under 60rem it is collapsed beside the one other level a phone shows;
+//! from 60rem it is collapsed beside the timeline and the details; from 100rem
+//! it is the full sidebar. Collapsed it is a strip of `COLLAPSED` rem, drawn at
+//! the width it would stand at full and clipped down to the strip, so every
+//! height in it is the height it has expanded; a pointer resting on it, a
+//! keyboard focus inside it or a finger's tap on it expands it over the panes
+//! beside it, which do not move — a finger's tap doing nothing else, and the
+//! next one on a card or a link, or one anywhere outside, collapsing it again.
+//!
+//! So the list is never a level of its own: it is beside whatever the window
+//! shows, and a narrow window walks the two levels after it, one at a time. The
+//! root, where nothing is open, is neither of them — `pane` saying `nothing` —
+//! and stands the list expanded over the empty paper until a card is picked.
+//!
 //! Which level is showing is `data-pane` on the frame, and the stylesheet is
-//! what makes it mean anything: a wide window ignores it and draws all three.
+//! what makes it mean anything: from 60rem it is ignored and every pane drawn.
 //! The attribute rather than a rendered-or-not pane, because walking back out
 //! should not throw away what the pane it came from had drawn. Which level it
 //! is is the caller's — the workbench reads it off the URL and its selection,
@@ -36,9 +51,10 @@
 //! frame rather than of anything drawn in it. They are percentages kept per
 //! device (`widths.ts`) — one set for the device rather than one per page, with
 //! a width of its own for the frame that has no list in it — and the dividers
-//! that set them exist only in the layouts that stand panes side by side: below
-//! that breakpoint the page is walked through one pane at a time, so there is no
-//! border to drag and nothing remembered is read.
+//! that set them exist only where they part two panes standing side by side:
+//! below 60rem the page is walked through one pane at a time beside the
+//! collapsed list, so there is no border to drag, and the only width read is
+//! the sidebar's, for how wide the list expands to.
 //!
 //! The floors under those percentages are lengths rather than shares, because
 //! what makes a pane too narrow is what stands in it. So this is the one part
@@ -51,8 +67,12 @@
 //! no title bar, so the platform draws its controls over a corner of the page
 //! (ADR-0020) — and which head is at that corner is a fact about the layout
 //! rather than about a pane. The sidebar is leftmost where there is a list to
-//! pick from, the record is where there is none, the details pane is rightmost
-//! always, and the one pane a narrow window shows is both at once. Those are
+//! pick from — and its head drops below a left inset by the head's band rather
+//! than being padded past it, a collapsed strip being narrower than a Mac's
+//! traffic lights — the record is where there is none, the details pane is
+//! rightmost always, and the one pane a narrow window shows beside the
+//! collapsed list is rightmost too — and both at once where there is no list
+//! beside it. Those are
 //! the distinctions this file already makes for its columns and its dividers,
 //! so the two insets arrive on the frame as variables the way the column widths
 //! do and `Panes.module.css` hands each of them to the head that stands at that
@@ -72,10 +92,11 @@ import {
 import { controls, reserved } from "./controls";
 import styles from "./Panes.module.css";
 import {
-  ALL_THREE,
   BESIDE,
+  FULL,
   clamped,
   dragged,
+  expanded,
   nudged,
   range,
   remember,
@@ -86,22 +107,19 @@ import {
   type Widths,
 } from "./widths";
 
-/// Which level of the hierarchy a narrow window is showing.
-export type Pane = "conversations" | "middle" | "details";
+/// Which level of the hierarchy a narrow window is showing, or `nothing` where
+/// nothing is open: the list is beside every level rather than one of them.
+export type Pane = "nothing" | "middle" | "details";
 
 /// Whether a media query holds, as something the page can be built out of.
 ///
 /// The stylesheet answers the same question for itself; this is for the parts
 /// of the layout that are the page's rather than the rules' — which dividers
 /// exist, whether this device's remembered widths are read at all, and whether
-/// there is a pane standing beside the details for a maximise toggle to hide. A
-/// browser with no `matchMedia` to ask answers no to everything, which is the
-/// narrow layout: one pane, no dividers, nothing read.
-///
-/// Exported because the last of those is asked above the frame rather than
-/// inside it: what hands the frame its panes is the page, so what decides
-/// whether it is handed fewer of them is the page's question too.
-export function matching(query: string): Accessor<boolean> {
+/// the list is collapsed. A browser with no `matchMedia` to ask answers no to
+/// everything, which is the narrow layout: one pane beside the collapsed list,
+/// and no dividers.
+function matching(query: string): Accessor<boolean> {
   if (typeof window.matchMedia !== "function") {
     return () => false;
   }
@@ -162,7 +180,7 @@ export function Panes(props: {
   /// which level the page stands at is the page's own URL and selection.
   pane: Pane;
 
-  /// The three panes, in the order they are walked through.
+  /// The three panes: the list, and the two levels walked through beside it.
   ///
   /// The first of them is absent in the one frame that has nothing to pick
   /// from: a share, which is one Conversation and no list of them. Then the
@@ -210,9 +228,8 @@ export function Panes(props: {
   const record = children(() => props.middle);
 
   /// Whether there is a level between the list and the details at all — see
-  /// `middle` above. Where there is not, the frame is the sidebar and the
-  /// details with the sidebar's own divider between them, which is the layout
-  /// the two of them already stand in below the last breakpoint.
+  /// `middle` above. Where there is not, the frame is the list and the details,
+  /// with the sidebar's own divider between them wherever the list is full.
   const reading = () => record() !== undefined;
 
   /// And the frame with neither of them: the details pane by itself, across the
@@ -225,14 +242,19 @@ export function Panes(props: {
   /// Which layout is standing, which decides how many dividers there are and
   /// how much room each pane is allowed to leave the others.
   const beside = matching(BESIDE);
-  const allThree = matching(ALL_THREE);
+  const full = matching(FULL);
+
+  /// Whether the list is collapsed, which is every width under [`FULL`]: no
+  /// divider of its own, and a column of `COLLAPSED` rem whatever share this
+  /// device settled it at.
+  const collapsed = () => picking() && !full();
 
   /// And whether all three of them are actually up, which is the width *and*
   /// there being a middle pane to fill the column it brings: a frame handed no
-  /// Timeline stands two panes however wide the window is, so the second
+  /// Timeline stands two panes however wide the window is, so the middle
   /// divider never arrives and the width behind it is left exactly as this
   /// device settled it.
-  const three = () => allThree() && reading();
+  const three = () => beside() && reading();
 
   /// How wide the panes stand. Read off this device once, and written back when
   /// a drag is let go of rather than on the way — a width settled on is worth
@@ -293,12 +315,13 @@ export function Panes(props: {
   /// ask — see `controls.ts`.
   const taken = controls();
 
-  /// The frame as the arithmetic asks about it: how much room there is, and how
-  /// many panes are sharing it.
+  /// The frame as the arithmetic asks about it: how much room there is, how
+  /// many panes are sharing it, and whether the list among them is collapsed.
   const frame = (): Frame => ({
     rem: across(),
     three: three(),
     picking: picking(),
+    collapsed: collapsed(),
   });
 
   /// And the widths as they may actually be drawn: a sidebar dragged wide while
@@ -354,39 +377,164 @@ export function Panes(props: {
   /// is — see `restore` in `widths.ts`.
   const defaults = () => setSettled((was) => restore(was, frame()));
 
-  /// What the frame carries the widths as. Only where a layout stands panes
-  /// side by side: below that the page is walked through one pane at a time,
-  /// and what this device remembers about a desktop's columns is nothing a
-  /// phone should be reading. And the names are the standing layout's own: the
+  /// How wide the collapsed list expands to, in rem: the share it would stand at
+  /// full, met against this frame as the full band meets it — with the middle
+  /// pane owed its room wherever there is one, whether or not it is beside the
+  /// details at this width. A length rather than a share, because the pane is
+  /// drawn over a column `COLLAPSED` wide and a percentage would be one of that.
+  ///
+  /// Nothing until the frame has been measured: a share of nought rem is no
+  /// width, and the stylesheet has the sidebar's floor behind the name.
+  const expandsTo = () =>
+    across() > 0
+      ? (expanded(settled(), { ...frame(), three: reading() }) * across()) / 100
+      : undefined;
+
+  /// The collapsed list's own section, which a finger is asked about.
+  let strip: HTMLElement | undefined;
+
+  /// Whether a finger has expanded the collapsed list, which is how a screen
+  /// with nothing to hover opens it: a tap anywhere on the strip expands it and
+  /// does nothing else, a tap on a card or a link in it then goes where it was
+  /// put and collapses it behind, and a tap anywhere outside it collapses it
+  /// and lands where it was put too — nothing is washed behind the pane to
+  /// catch it. Drawn as `data-expanded`, the same expansion nothing being open
+  /// stands it at.
+  ///
+  /// Read off the pointer each gesture began with rather than off the device,
+  /// as the sidebar's drag reads it: a laptop with a touchscreen hovers with
+  /// its mouse and taps with a finger. A mouse expands it by resting on it, and
+  /// a press of one leaves it to the hover — so it is a mouse's press as much
+  /// as a finger's that puts down an expansion a finger made, the pointer
+  /// resting there holding it open until it leaves.
+  const [touched, setTouched] = createSignal(false);
+
+  /// And whether the hand last on the list was a finger, which turns the
+  /// hover off for as long as it is: a browser leaves `:hover` standing where a
+  /// finger tapped, and a pane held open by it would be a finger's tap on a
+  /// card that never collapsed it. A mouse moving over the pane again is a
+  /// mouse resting on it, and the hover is its own again. Drawn as
+  /// `data-finger`.
+  const [finger, setFinger] = createSignal(false);
+
+  /// Whether the tap now landing is the one that expanded the list, and so is
+  /// to be swallowed before anything inside it hears it. Set by each press
+  /// and spent by the click that follows it. A press that brings no click — a
+  /// finger that scrolled the list, which the browser cancels, or one that held
+  /// a card until it lifted — is forgotten by the next press, the cancel, or a
+  /// key, so a keyboard's click is never the one swallowed.
+  let swallowing = false;
+  const forget = () => {
+    swallowing = false;
+  };
+
+  /// Whether the list is already standing expanded, by any of the ways it
+  /// does: nothing open, a finger, or a keyboard's focus. Hover is not asked
+  /// after, a finger having nothing to hover with.
+  const standing = (pane: HTMLElement): boolean => {
+    if (!collapsed() || pane.hasAttribute("data-expanded")) {
+      return true;
+    }
+
+    try {
+      return pane.matches(":focus-visible, :has(:focus-visible)");
+    } catch {
+      return false;
+    }
+  };
+
+  /// A press on the list: a finger's on the collapsed strip expands it.
+  /// Heard on the way down, ahead of the card that would otherwise take it.
+  const pressed = (event: PointerEvent) => {
+    setFinger(event.pointerType !== "mouse");
+    swallowing =
+      event.pointerType !== "mouse" &&
+      !standing(event.currentTarget as HTMLElement);
+
+    if (swallowing) {
+      setTouched(true);
+    }
+  };
+
+  /// A mouse moving over the list, which hands the hover back to it.
+  const moved = (event: PointerEvent) => {
+    if (event.pointerType === "mouse") {
+      setFinger(false);
+    }
+  };
+
+  /// And the click it ends in: the expanding tap's goes no further, and a
+  /// card's or a link's goes where it was put and collapses the list behind it.
+  const clicked = (event: MouseEvent) => {
+    if (swallowing) {
+      swallowing = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    const target = event.target as Element | null;
+    if (target?.closest("a[href], [data-row]")) {
+      setTouched(false);
+    }
+  };
+
+  /// A press anywhere outside the list puts a finger's expansion down, and is
+  /// left to land where it was put.
+  onMount(() => {
+    const elsewhere = (event: PointerEvent) => {
+      if (touched() && !strip?.contains(event.target as Node)) {
+        setTouched(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", elsewhere, true);
+    onCleanup(() =>
+      document.removeEventListener("pointerdown", elsewhere, true),
+    );
+  });
+
+  /// What the frame carries the widths as. Only the standing layout's own: the
   /// stylesheet has a default behind each of them, so a name the frame does not
-  /// carry is the untouched frame rather than a broken one.
+  /// carry is the untouched frame rather than a broken one. The pair's from
+  /// where its two panes stand side by side; the middle pane's from where it
+  /// stands beside the details; the sidebar's where the list is full; and how
+  /// wide a collapsed list expands to wherever it is collapsed, phones included,
+  /// that being the one width a list standing as a strip still has.
   ///
   /// Which is why the frame with no middle pane names the sidebar's width and
   /// nothing else: there is no column for the middle one to be the width of,
   /// and a name written over a column that is not there would be this frame
   /// answering for the one the Timeline comes back to.
-  const columns = () => {
-    if (!beside() || alone()) {
+  const columns = (): Record<string, string> | undefined => {
+    if (alone()) {
       return undefined;
     }
 
     if (!picking()) {
-      return { "--pane-pair": `${shown().pair}%` };
+      return beside() ? { "--pane-pair": `${shown().pair}%` } : undefined;
     }
 
-    return reading()
-      ? {
-          "--pane-sidebar": `${shown().sidebar}%`,
-          "--pane-middle": `${shown().middle}%`,
-        }
-      : { "--pane-sidebar": `${shown().sidebar}%` };
+    const middle: Record<string, string> = three()
+      ? { "--pane-middle": `${shown().middle}%` }
+      : {};
+
+    if (collapsed()) {
+      const to = expandsTo();
+
+      return to === undefined
+        ? middle
+        : { "--pane-expanded": `${to}rem`, ...middle };
+    }
+
+    return { "--pane-sidebar": `${shown().sidebar}%`, ...middle };
   };
 
   /// And everything the frame carries on itself, which is those two kinds of
   /// variable and nothing else: how wide its columns stand, and how much of each
   /// edge the window's controls have taken. Nothing where it comes to neither —
-  /// a browser below the first breakpoint — so the element is left exactly as
-  /// bare as it was before either of them existed.
+  /// a browser below the first breakpoint with no list on it — so the element
+  /// is left exactly as bare as it was before either of them existed.
   const carried = () => {
     const named = { ...columns(), ...reserved(taken()) };
 
@@ -397,6 +545,9 @@ export function Panes(props: {
     <div
       class={[
         styles.panes,
+        // The frame with a list in it, which is the one whose bands are the
+        // collapsed list's: the other two keep the one line they always had.
+        picking() ? styles.listing : undefined,
         // The one pane by itself, which is neither of the two frames below and
         // not both of them either: what those say is where the column that is
         // missing used to be, and here there is only the one left.
@@ -411,26 +562,46 @@ export function Panes(props: {
       style={carried()}
     >
       <Show when={picking()}>
+        {/* Standing expanded while it is collapsed and nothing is open:
+            there is no level to show beside it, and what is there is empty
+            paper until a card is picked. And while a finger has
+            expanded it — see `touched`. The press and the click are heard on
+            the way down, before anything in the list hears them. */}
         <section
           class={`${styles.pane} ${styles.conversationsPane}`}
           aria-label="Conversations"
+          ref={(section) => {
+            strip = section;
+            section.addEventListener("pointerdown", pressed, true);
+            section.addEventListener("click", clicked, true);
+            section.addEventListener("pointermove", moved, true);
+            section.addEventListener("pointercancel", forget, true);
+            section.addEventListener("keydown", forget, true);
+          }}
+          data-expanded={
+            collapsed() && (props.pane === "nothing" || touched())
+              ? ""
+              : undefined
+          }
+          data-finger={finger() ? "" : undefined}
         >
           {list()}
         </section>
       </Show>
 
-      {/* One divider per border there is: the sidebar's wherever the sidebar
-          stands beside something, the middle pane's only where all three panes
-          are up, and the pair's where there is no list and so no sidebar. Each
-          sits between the two panes it parts, so the grid places it without
-          being told where.
+      {/* One divider per border there is: the sidebar's wherever the list
+          stands full, the middle pane's wherever the middle pane stands beside
+          the details, and the pair's where there is no list and so no sidebar.
+          A collapsed list has none: its column is the same strip whatever the
+          share says. Each sits between the two panes it parts, so the grid
+          places it without being told where.
 
           The sidebar's is the border of whatever stands to its right, which is
           the Timeline where there is one and the details where there is not:
           the same handle moving the same width either way, so the frame with
           no middle pane keeps the columns this device settled and hands them
           straight back when the Timeline returns. */}
-      <Show when={beside() && picking()}>
+      <Show when={picking() && !collapsed()}>
         <Handle
           divider="sidebar"
           label="Resize the conversations pane"
@@ -470,8 +641,7 @@ export function Panes(props: {
       {/* And the pair's, which stands in the same place for the same reason:
           the middle pane is what it is the far edge of. It arrives with the
           panes themselves rather than with a third one, there being no third
-          one to wait for — the two are side by side from the width the sidebar
-          used to arrive at. */}
+          one to wait for — the two are side by side from 60rem. */}
       <Show when={beside() && !picking() && !alone()}>
         <Handle
           divider="pair"

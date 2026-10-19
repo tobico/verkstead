@@ -20,7 +20,15 @@ import {
   waitFor,
 } from "@solidjs/testing-library";
 import type { Terminal as XTerm } from "@xterm/xterm";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vitest";
 
 import type {
   AbandonedRepo,
@@ -190,6 +198,8 @@ import documents from "../src/workbench/Documents.module.css";
 import documentsCss from "../src/workbench/Documents.module.css?raw";
 // The ring a running session is marked by, wherever it is drawn.
 import marks from "../src/workbench/Mark.module.css";
+import wordmark from "../src/workbench/Wordmark.module.css";
+import wordmarkCss from "../src/workbench/Wordmark.module.css?raw";
 import marksCss from "../src/workbench/Mark.module.css?raw";
 import outputPane from "../src/workbench/Output.module.css";
 import outputCss from "../src/workbench/Output.module.css?raw";
@@ -268,6 +278,7 @@ import { faCircle } from "@fortawesome/free-regular-svg-icons";
 import {
   faCheck,
   faFile,
+  faPenToSquare,
   faPlay,
   faTerminal,
   faXmark,
@@ -597,6 +608,17 @@ const BRIEF = briefOf(OPEN);
 // test's own teardown and this one's first line. Cleared here, that straggler
 // is the previous test's rather than the next test's first surprise.
 beforeEach(resetEditing);
+
+/// Every scroll the page puts on a pane, which is what moves wherever there is
+/// a list beside the record: the frame is the window's height at every width
+/// there, and each pane scrolls inside it — so following a record's bottom
+/// sets a pane's `scrollTop` rather than scrolling the window. Put back when
+/// the test ends.
+function paneScrolls() {
+  const scrolled = vi.spyOn(Element.prototype, "scrollTop", "set");
+  onTestFinished(() => scrolled.mockRestore());
+  return scrolled;
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -1501,7 +1523,7 @@ describe("how a card says where its conversation has got to", () => {
     // dimmed to the soft ink a card that has nothing settled on it is written
     // in.
     expect(sidebarCss).toContain(
-      ".conversationRow.draft .title {\n  font-style: italic;\n  color: var(--ink-soft);\n}",
+      ".conversationRow.draft .title,\n.conversationRow.draft .opening {\n  font-style: italic;\n  color: var(--ink-soft);\n}",
     );
   });
 
@@ -1705,6 +1727,134 @@ describe("how a card says where its conversation has got to", () => {
 /// `crates/server/tests/conversations.rs` say where an unplaced Conversation
 /// lands. What is asked here is that the list moves under the hand and that what
 /// is sent is what is on the screen.
+/// The sidebar as the collapsed strip draws it, under 100rem: the logo, the
+/// new-conversation icon, and each card's first three characters with its mark
+/// under them. Everything the strip leaves out is still laid out at the width
+/// the pane expands to, so that every height is the height it has expanded —
+/// which a browser measures and this suite cannot. What is proved here is what
+/// is drawn for the strip, and that the strip's state reaches it.
+describe("the collapsed sidebar", () => {
+  it("draws the new-conversation link as the pen-to-square and its words", async () => {
+    theSidebar({});
+    mount();
+
+    const link = await screen.findByRole("link", { name: "New conversation" });
+    expect(link.getAttribute("title")).toBe("New conversation");
+
+    // The icon before the words, so collapsing hides the words and keeps it.
+    const [icon, words] = [...link.children];
+    expect(icon!.tagName.toLowerCase()).toBe("svg");
+    expect(icon!.querySelector("path")!.getAttribute("d")).toBe(
+      faPenToSquare.icon[4] as string,
+    );
+    expect(words!.textContent).toBe("New conversation");
+    expect(words!.className).toBe(sidebar.composeWords);
+  });
+
+  /// Three whole characters, cut at a character's edge rather than with an
+  /// ellipsis, and a draft's in the italic its full name wears.
+  it("gives a card the first three characters of its title", async () => {
+    theSidebar(
+      { branch: "collapsible-conversations", state: "Implementing" },
+      { branch: "amber-kestrel", state: "Draft", branch_named: false },
+      { branch: "🦀🦀🦀🦀", state: "Implementing" },
+    );
+    const { container } = mount();
+
+    const [named, draft, crabs] = await cards(container);
+
+    const opening = (card: HTMLElement) =>
+      card.querySelector(`.${sidebar.opening}`)!.textContent;
+    expect(opening(named!)).toBe("col");
+    expect(opening(draft!)).toBe("Dra");
+    expect(opening(crabs!)).toBe("🦀🦀🦀");
+    expect(draft!.className).toContain(sidebar.draft);
+    expect(sidebarCss).toContain(
+      ".conversationRow.draft .title,\n.conversationRow.draft .opening {",
+    );
+  });
+
+  /// The mark on the line under them, where the device and the repo stand
+  /// expanded — and nothing on that line for a card with no mark.
+  it("puts the card's mark under its characters, or nothing", async () => {
+    theSidebar(
+      { state: "Grilling", working: false, waiting: true },
+      { state: "Implementing", working: false, waiting: false },
+    );
+    const { container } = mount();
+
+    const [waiting, quiet] = await cards(container);
+
+    const strip = (card: HTMLElement) =>
+      card.querySelector<HTMLElement>(`.${sidebar.short}`)!;
+    const disc = strip(waiting!).querySelector(`.${sidebar.markLine} .${marks.mark}`);
+    expect(disc!.className).toContain(marks.waiting);
+    expect(strip(waiting!).getAttribute("aria-hidden")).toBe("true");
+    expect(strip(quiet!).querySelector(`.${sidebar.markLine}`)!.children).toHaveLength(0);
+  });
+
+  /// What the strip leaves out is hidden rather than taken away, so it keeps the
+  /// room it has expanded; what only the strip draws stands over the card
+  /// without taking any. Both read the pane's state off the properties the
+  /// frame sets while the list is collapsed, and nothing else.
+  it("hides what the strip leaves out by the frame's say", () => {
+    const collapsed = shellCss.slice(shellCss.indexOf("@media (width < 100rem) {"));
+    expect(collapsed).toContain(
+      "    --collapsed-hidden: hidden;\n" +
+        "    --collapsed-faded: 0;\n" +
+        "    --collapsed-gone: none;\n" +
+        "    --collapsed-drawn: visible;\n" +
+        "    --collapsed-item: 2rem;\n",
+    );
+    expect(collapsed).toContain(
+      "    --collapsed-hidden: initial;\n" +
+        "    --collapsed-faded: initial;\n" +
+        "    --collapsed-gone: initial;\n" +
+        "    --collapsed-drawn: initial;\n" +
+        "    --collapsed-item: initial;\n",
+    );
+
+    // The card: its words, the code icon among them, and the mark at its edge
+    // hidden; the three characters and the mark under them drawn; the card cut
+    // to the strip's item.
+    expect(sidebarCss).toContain(
+      ".conversationRow .what,\n.conversationRow .edgeMark {\n" +
+        "  visibility: var(--collapsed-hidden, visible);\n}",
+    );
+    expect(sidebarCss).toContain("  visibility: var(--collapsed-drawn, hidden);\n");
+    expect(sidebarCss).toContain(
+      "  clip-path: inset(0 calc(100% - var(--collapsed-item)) 0 0 round 0.6rem);\n",
+    );
+
+    // The link: the item's width, and the words gone.
+    expect(sidebarCss).toContain("  width: var(--collapsed-item, 100%);\n");
+    expect(sidebarCss).toContain(
+      ".composeWords {\n  display: var(--collapsed-gone, inline);\n",
+    );
+
+    // The head's word and gear faded, still read aloud and still a stop for
+    // Tab; and the foot's switch and forwarding hidden.
+    expect(wordmarkCss).toContain(
+      ".word,\n.settings {\n  opacity: var(--collapsed-faded, 1);\n}",
+    );
+    expect(archivedCss).toContain(
+      ".showArchived > * {\n  visibility: var(--collapsed-hidden, visible);\n}",
+    );
+  });
+
+  it("hides the head's word and gear, keeping the logo", async () => {
+    theSidebar({});
+    const { container } = mount();
+
+    const heading = await drawn(container, `h1.${wordmark.wordmark}`);
+    expect(heading.querySelector("img")).toBeTruthy();
+    expect(heading.querySelector(`.${wordmark.word}`)!.textContent).toBe("Verkstead");
+    expect(
+      screen.getByRole("button", { name: "Settings" }).className,
+    ).toContain(wordmark.settings);
+  });
+});
+
 describe("the order the human puts the sidebar in", () => {
   /// A sidebar of three named rows, over an endpoint that takes an order and
   /// answers with nothing — which is what the real one does. A test wanting it
@@ -3369,16 +3519,14 @@ describe("the escape hatch on a conversation that will not load", () => {
     await waitFor(() => screen.getByText(/The conversation couldn't be read/));
   });
 
-  /// And the way back out, which is the whole reason the hatch is on the pane
-  /// rather than on the sidebar's right-click: a phone has no right-click, and
-  /// a page it cannot leave is worse than one it cannot read.
-  it("carries the way back to the conversations", async () => {
+  /// And no way back out on its head: the conversations are beside it at
+  /// every width, so a phone leaves it by pressing one of them.
+  it("draws no way back to the conversations", async () => {
     theBrokenConversation();
-    const { container, history } = mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
 
-    fireEvent.click(await drawn(container, `.${shell.middlePane} .${shell.paneBack}`));
-
-    await waitFor(() => expect(history.get()).toBe("/"));
+    await drawn(container, `.${shell.middlePane} .${paneHead.head}`);
+    expect(container.querySelector(`.${shell.middlePane} .${shell.paneBack}`)).toBeNull();
   });
 
   /// One row, and the one that covers every state: close refuses nothing but a
@@ -6622,34 +6770,44 @@ describe("the agent dropdown on a conversation", () => {
 
 describe("the panes on a narrow window", () => {
   /// Asked over a record with something on it beyond the Brief, which is what
-  /// makes three levels to walk: a Conversation whose record is the one Event
+  /// makes two levels to walk: a Conversation whose record is the one Event
   /// draws no Timeline at all, and the walk skips it — see *the one-event
-  /// layout* below.
-  it("starts on the conversations and walks in and back out", async () => {
+  /// layout* below. The list is beside both rather than a level of its own.
+  it("starts with nothing open and walks in and back out", async () => {
     theRecordedWith();
-    const { container } = mount();
+    const { container, history } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
-    // Nothing picked, so the level being shown is the list.
-    expect(frame(container).dataset.pane).toBe("conversations");
+    // Nothing picked, so there is no level to show: the list stands expanded
+    // over the empty paper. Asked afresh each time, the root and a
+    // Conversation being routes of their own.
+    const list = () =>
+      container.querySelector<HTMLElement>(`.${shell.conversationsPane}`)!;
+    expect(frame(container).dataset.pane).toBe("nothing");
+    expect(list().hasAttribute("data-expanded")).toBe(true);
 
     fireEvent.click(screen.getByText(DRAFTING.branch));
     await waitFor(() =>
       expect(frame(container).dataset.pane).toBe("middle"),
     );
+    expect(list().hasAttribute("data-expanded")).toBe(false);
 
     // The third level is the open Event's own, and the landing opens the newest
     // thing on the record — so there is something to page into, and the way on
     // is offered.
     await waitFor(() => screen.getByRole("button", { name: "Details →" }));
 
-    // The way back out is a navigation — it takes the Conversation off the URL
-    // — so the level changes when the router has moved rather than when the
-    // button was pressed.
-    fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
+    // And no way back to the list, which is beside the timeline at every width.
+    expect(screen.queryByRole("button", { name: "← Conversations" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Back to Conversations" })).toBeNull();
+
+    // Back is a navigation — it takes the Conversation off the URL — so the
+    // level changes when the router has moved.
+    history.back();
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("conversations"),
+      expect(frame(container).dataset.pane).toBe("nothing"),
     );
+    expect(list().hasAttribute("data-expanded")).toBe(true);
   });
 
   /// Walking back out takes the Conversation off the URL as well as off the
@@ -6668,9 +6826,9 @@ describe("the panes on a narrow window", () => {
     expect(history.get()).toBe(`/conversations/${DRAFTING.id}`);
     await drawn(container, `.${timeline.timeline}`);
 
-    fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
+    history.back();
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("conversations"),
+      expect(frame(container).dataset.pane).toBe("nothing"),
     );
     expect(history.get()).toBe("/");
 
@@ -6727,7 +6885,7 @@ describe("the panes on a narrow window", () => {
 
     history.set({ value: "/" });
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("conversations"),
+      expect(frame(container).dataset.pane).toBe("nothing"),
     );
   });
 
@@ -6736,8 +6894,7 @@ describe("the panes on a narrow window", () => {
   it("is one pane at a time until the window is wide enough for more", () => {
     expect(shellCss).toContain(".panes > .pane {\n  display: none;\n}");
     expect(shellCss).toContain(
-      '.panes[data-pane="conversations"] > .conversationsPane,\n' +
-        '.panes[data-pane="middle"] > .middlePane,\n' +
+      '.panes[data-pane="middle"] > .middlePane,\n' +
         '.panes[data-pane="details"] > .detailsPane {\n' +
         "  display: block;\n}",
     );
@@ -7289,7 +7446,7 @@ describe("the one-event layout", () => {
   /// And the walk on a narrow window skips the level that is not there, in
   /// either direction: opening the Conversation lands on the composer, and the
   /// way off the composer is the way out of the Conversation.
-  it("lands on the brief pane, and back goes to the conversations", async () => {
+  it("lands on the brief pane, and back goes to the root", async () => {
     theWorkbench();
     const { container, history } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
@@ -7305,10 +7462,18 @@ describe("the one-event layout", () => {
     // there is no timeline.
     expect(screen.queryByRole("button", { name: "Details →" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
+    // And its way back to the list is drawn nowhere, the list being beside it
+    // at every width — jsdom lays nothing out, so the rule is what is read.
+    expect(shellCss).toContain(
+      ".panes.listing.widened > .detailsPane .paneBack {\n  display: none;\n}",
+    );
+
+    history.back();
 
     await waitFor(() => expect(history.get()).toBe("/"));
-    expect(frame(container).dataset.pane).toBe("conversations");
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("nothing"),
+    );
   });
 });
 
@@ -8977,14 +9142,12 @@ describe("a session's output on the timeline", () => {
   /// the record rather than the beginning of it — and the pane goes on following
   /// as the session talks.
   ///
-  /// What the ask lands on here is the window: which box scrolls is the
-  /// stylesheet's answer to how wide the window is, and jsdom lays nothing out,
-  /// so the walk up from the record finds no box that scrolls and the page
-  /// itself is what moves. Where the pause and the resume are asked about is
-  /// `following.test.ts`, which builds a box that scrolls.
+  /// What the ask lands on here is the pane: which box scrolls is the
+  /// stylesheet's answer, and with a list beside the record every pane scrolls
+  /// on its own at every width. Where the pause and the resume are asked about
+  /// is `following.test.ts`, which builds a box that scrolls.
   it("opens a running session's record at its end, and follows it down", async () => {
-    const scrolled = vi.fn();
-    vi.stubGlobal("scrollTo", scrolled);
+    const scrolled = paneScrolls();
 
     theGrillingOutput(
       { running: true },
@@ -9015,8 +9178,7 @@ describe("a session's output on the timeline", () => {
   /// keep up with, and moving a reader off the first thing the session said
   /// would be the pane deciding where they meant to start.
   it("leaves a finished session's record where the reader arrives", async () => {
-    const scrolled = vi.fn();
-    vi.stubGlobal("scrollTo", scrolled);
+    const scrolled = paneScrolls();
 
     theSpeaking();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -20472,7 +20634,7 @@ describe("the path a details pane stands at", () => {
     history.back();
     await waitFor(() => expect(history.get()).toBe("/"));
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("conversations"),
+      expect(frame(container).dataset.pane).toBe("nothing"),
     );
   });
 
@@ -20703,8 +20865,7 @@ const LANDED: TimelineEvent = {
 /// record, and goes after each Event that lands on it.
 describe("the timeline following its bottom", () => {
   it("opens the record at its end", async () => {
-    const scrolled = vi.fn();
-    vi.stubGlobal("scrollTo", scrolled);
+    const scrolled = paneScrolls();
 
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -20715,8 +20876,7 @@ describe("the timeline following its bottom", () => {
   });
 
   it("goes after each event that lands on the record", async () => {
-    const scrolled = vi.fn();
-    vi.stubGlobal("scrollTo", scrolled);
+    const scrolled = paneScrolls();
 
     /// The record as the server has it, which grows under the page the way a
     /// running session's does — with every Set on it settled, since a Set
@@ -30175,21 +30335,17 @@ describe("the maximise toggle in the code pane", () => {
     );
   });
 
-  /// And on a window the details pane already has, the toggle is not drawn at
-  /// all: there is no pane beside this one for a press to hide, and a control
-  /// about a layout that is not standing is furniture.
-  it("is absent on a window that is walked one pane at a time", async () => {
+  /// And on a window walked one pane at a time the toggle is drawn all the
+  /// same: the collapsed list stands beside Code there, and that is what a
+  /// press hides.
+  it("hides the collapsed list on a window that is walked one pane at a time", async () => {
     const { container } = await opened("narrow");
 
-    expect(toggle(container)).toBeNull();
+    expect(toggle(container)).not.toBeNull();
 
-    // And the pane is the one being read, which is what a narrow window is:
-    // there is nothing to maximise because there is nothing else up.
-    expect(panes(container)).toEqual([
-      "conversations",
-      "timeline",
-      "details",
-    ]);
+    fireEvent.click(toggle(container)!);
+
+    await waitFor(() => expect(panes(container)).toEqual(["details"]));
   });
 });
 

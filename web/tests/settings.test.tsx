@@ -2081,18 +2081,16 @@ describe("the settings page", () => {
     );
   });
 
-  /// The way back out of the settings, in the slot every pane keeps for it —
-  /// drawn always and hidden by the frame wherever the conversations are already
-  /// on screen.
-  it("goes back to the conversations", async () => {
-    const { container, history } = thePage();
+  /// No way back out of the settings: the conversations are beside them at
+  /// every width, so leaving is pressing one of them. The details pane's way
+  /// back to the settings is unchanged — see below.
+  it("draws no way back to the conversations", async () => {
+    const { container } = thePage();
 
     const settings = panes(container)[1]!;
-    const back = await drawn<HTMLButtonElement>(settings, `.${head.back}`);
-    expect(back.textContent).toContain("Conversations");
-
-    fireEvent.click(back);
-    await waitFor(() => expect(history.get()).toBe("/"));
+    await drawn(settings, `.${head.head}`);
+    expect(settings.querySelector(`.${shell.paneBack}`)).toBeNull();
+    expect(screen.queryByText(/Conversations/, { selector: "button" })).toBeNull();
   });
 
   /// The switch about this device came with the Repos it was on, and it keeps
@@ -2223,6 +2221,29 @@ describe("the path a details pane stands at", () => {
     expect(container.querySelector(`.${shell.panes}`)!.getAttribute("data-pane")).toBe(
       "details",
     );
+  });
+
+  /// The walk on a narrow window is settings ↔ detail, with the list collapsed
+  /// beside both rather than a level above them: nothing on this page stands
+  /// it expanded.
+  it("walks settings and detail with the list collapsed beside both", async () => {
+    const { container } = thePage();
+    const frame = container.querySelector<HTMLElement>(`.${shell.panes}`)!;
+    const list = panes(container)[0]!;
+
+    const face = await drawn<HTMLElement>(container, `.${styles.gitCard}`);
+    expect(frame.dataset.pane).toBe("middle");
+    expect(list.hasAttribute("data-expanded")).toBe(false);
+
+    fireEvent.click(face);
+    await waitFor(() => expect(frame.dataset.pane).toBe("details"));
+    expect(list.hasAttribute("data-expanded")).toBe(false);
+
+    fireEvent.click(
+      await drawn<HTMLButtonElement>(panes(container)[2]!, `.${head.back}`),
+    );
+    await waitFor(() => expect(frame.dataset.pane).toBe("middle"));
+    expect(list.hasAttribute("data-expanded")).toBe(false);
   });
 
   /// And the way back out of it is a change of level rather than a navigation:

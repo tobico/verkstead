@@ -11,6 +11,10 @@
 //! Where it sits is the pane's rather than this component's: it wears the
 //! frame's `paneFoot`, so whichever pane it is handed to sticks it against its
 //! bottom edge with the paper the content passes behind.
+//!
+//! In the sidebar's collapsed strip the foot is blank paper under its rule, at
+//! the height it stands expanded: the switch and whatever was handed to stand
+//! beside it are not drawn until the pane expands. See `Archived.module.css`.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Show, type JSX } from "solid-js";

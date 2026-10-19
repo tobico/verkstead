@@ -390,6 +390,15 @@ async fn read_member(state: &AppState, device: &str) {
         }
     };
 
+    // Held as soon as they are written down, and not after the tokens: the
+    // list is drawn off the store, so a mirror it shows is one a Repo must be
+    // able to be pointed at already, and a token's round trip home is long
+    // enough for somebody to try. Whether a copy has arrived is read off
+    // `secrets.yaml` as the settings are, so nothing here waits on it.
+    if moved {
+        hold(state).await;
+    }
+
     let mut copies: BTreeMap<String, Copy> =
         before.into_iter().map(|id| (id, Copy::Gone)).collect();
 
@@ -405,7 +414,6 @@ async fn read_member(state: &AppState, device: &str) {
     let copied = copying(state, copies).await;
 
     if moved || copied {
-        hold(state).await;
         state.nudges.announce_here(Nudge::Authors);
     }
 }

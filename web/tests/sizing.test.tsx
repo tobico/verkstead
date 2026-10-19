@@ -1,6 +1,10 @@
 //! How wide the frame's three panes stand: the arithmetic underneath it, the
 //! dividers that drive it, and where a device remembers what it was left at.
 //!
+//! Three bands for the frame with a list in it: under 60rem the list is a
+//! collapsed strip beside one pane, from 60rem the strip stands beside the
+//! timeline and the details, and from 100rem the list is the full sidebar.
+//!
 //! Two halves, and they are separable on purpose. The widths are shares of the
 //! frame worked out in `src/widths.ts`, which knows nothing of the page; what
 //! `src/Panes.tsx` adds is a handle to drag, a frame to measure a drag against,
@@ -34,14 +38,17 @@ import attachedCss from "../src/workbench/Attached.module.css?raw";
 // page by, and the source to read the rules that jsdom lays nothing out for.
 import { Panes } from "../src/Panes";
 import shell from "../src/Panes.module.css";
+import sidebar from "../src/workbench/Conversations.module.css";
 import stylesheet from "../src/Panes.module.css?raw";
 import {
-  ALL_THREE,
   BESIDE,
+  COLLAPSED,
   DEFAULTS,
+  FULL,
   MINIMUMS,
   clamped,
   dragged,
+  expanded,
   nudged,
   range,
   remember,
@@ -51,7 +58,7 @@ import {
   type Widths,
 } from "../src/widths";
 import type { ConversationView } from "../src/api/types";
-import { drawn, mount, theWorkbench } from "./bench";
+import { OPEN, drawn, mount, theWorkbench } from "./bench";
 import { json, whenever } from "./serving";
 import roadmap from "./fixtures/conversation-roadmap.json" with { type: "json" };
 import tasks from "./fixtures/conversation-tasks.json" with { type: "json" };
@@ -79,28 +86,60 @@ const MIDDLE = "verkstead.pane-timeline";
 const PAIR_KEY = "verkstead.pane-pair";
 
 /// How wide the frame is pretending to be, in the pixels a drag is reported in:
-/// 80rem at the 16px a rem is here, which is the window the third pane arrives
-/// at and so the narrowest one that stands all three.
-const FRAME = 1280;
+/// 100rem at the 16px a rem is here, which is the window the list stands full
+/// at and so the narrowest one that stands all three at their shares.
+const FRAME = 1600;
+
+/// And the window between the two lines, where the list is collapsed beside
+/// the timeline and the details: 70rem.
+const BETWEEN = 1120;
+
+/// And a phone's, where the list is collapsed beside the one pane.
+const PHONE = 375;
 
 /// The same frame as the arithmetic is asked about it, and a two-pane window
 /// that is not the same width — a minimum is a length now, so what it is worth
 /// depends on which frame it is being met in.
-const THREE: Frame = { rem: FRAME / 16, three: true, picking: true };
-const TWO: Frame = { rem: 70, three: false, picking: true };
+const THREE: Frame = {
+  rem: FRAME / 16,
+  three: true,
+  picking: true,
+  collapsed: false,
+};
+const TWO: Frame = { rem: 70, three: false, picking: true, collapsed: false };
+
+/// And the frame whose list is collapsed beside the timeline and the details,
+/// which is every window between the two lines: the middle divider and nothing
+/// else, measured from the strip rather than from the sidebar's share.
+const COLLAPSED_THREE: Frame = {
+  rem: BETWEEN / 16,
+  three: true,
+  picking: true,
+  collapsed: true,
+};
 
 /// And the frame with nothing to pick from, which is the share's: two panes and
 /// the one divider. [`FRAME`] wide, that being the window the page tests below
 /// draw it in, so the same constant answers for the arithmetic and for what
 /// they read off the frame.
-const PAIR: Frame = { rem: FRAME / 16, three: false, picking: false };
+const PAIR: Frame = {
+  rem: FRAME / 16,
+  three: false,
+  picking: false,
+  collapsed: false,
+};
 
 /// And the frame with a list but no middle pane — the workbench reading a
 /// Conversation whose record is the one Event. Two panes with the sidebar's own
 /// divider between them, which is [`TWO`] again in a window wide enough for the
 /// third pane: what says all three are standing is a middle pane to fill the
 /// column, and there is none.
-const WIDENED: Frame = { rem: FRAME / 16, three: false, picking: true };
+const WIDENED: Frame = {
+  rem: FRAME / 16,
+  three: false,
+  picking: true,
+  collapsed: false,
+};
 
 /// A set of widths with one or two of them said: the rest are the defaults,
 /// which is what a device that has dragged one frame and not the other holds.
@@ -151,10 +190,12 @@ afterEach(() => {
 });
 
 /// The window this test is being read on, said the only way the page asks:
-/// which of the frame's two breakpoints hold.
-function windowIs(width: "narrow" | "two panes" | "three panes"): void {
+/// which of the frame's two lines hold. Under the first the list is collapsed
+/// beside one pane, between them it is collapsed beside two, and past the
+/// second it is full.
+function windowIs(width: "narrow" | "beside" | "full"): void {
   vi.stubGlobal("matchMedia", (query: string) => ({
-    matches: query === BESIDE ? width !== "narrow" : width === "three panes",
+    matches: query === BESIDE ? width !== "narrow" : width === "full",
     media: query,
     addEventListener() {},
     removeEventListener() {},
@@ -355,48 +396,174 @@ describe("how far a divider goes", () => {
   });
 });
 
-describe("the dividers on the workbench", () => {
-  /// One per border there is: the sidebar's wherever the sidebar stands beside
-  /// something, the middle one's only where all three panes are up, and neither
-  /// on a window that shows one pane at a time.
-  it("puts a handle on every border there is", async () => {
-    const three = await bench("three panes");
-    expect(dividers(three.container)).toHaveLength(2);
+/// The list collapsed to its strip, which is every window under the full band:
+/// the column is [`COLLAPSED`] wide whatever share this device settled the
+/// sidebar at, so the share is left exactly as it was and is read only for how
+/// wide the list expands to.
+describe("a collapsed list", () => {
+  it("leaves the sidebar's share as it was settled", () => {
+    expect(clamped(all({ sidebar: 95, middle: 40 }), COLLAPSED_THREE)).toEqual(
+      all({ sidebar: 95, middle: 40 }),
+    );
+    expect(
+      clamped(all({ sidebar: 95 }), { ...COLLAPSED_THREE, three: false }),
+    ).toEqual(all({ sidebar: 95 }));
+  });
 
-    const two = await bench("two panes");
-    expect(dividers(two.container)).toHaveLength(1);
-    expect(dividers(two.container)[0]!.getAttribute("aria-label")).toBe(
-      "Resize the conversations pane",
+  /// The middle pane starts after the strip rather than after the sidebar's
+  /// share, so that is what comes off a drop and what is spent before it.
+  it("measures the middle divider from the strip", () => {
+    const strip = share(COLLAPSED, COLLAPSED_THREE);
+
+    expect(
+      dragged(all({ sidebar: 40 }), "middle", 50, COLLAPSED_THREE).middle,
+    ).toBeCloseTo(50 - strip);
+    const { least, most } = range(
+      "middle",
+      all({ sidebar: 40 }),
+      COLLAPSED_THREE,
+    );
+    expect(least).toBeCloseTo(share(MINIMUMS.middle, COLLAPSED_THREE));
+    expect(most).toBeCloseTo(
+      100 - strip - share(MINIMUMS.details, COLLAPSED_THREE),
+    );
+  });
+
+  /// It has no divider of its own, so a drag of the middle one writes that
+  /// width and nothing else — and a double-click puts back that one alone.
+  it("writes down and puts back the middle pane's width alone", () => {
+    remember(all({ sidebar: 34, middle: 26 }), COLLAPSED_THREE);
+
+    expect(localStorage.getItem(SIDEBAR)).toBeNull();
+    expect(localStorage.getItem(MIDDLE)).toBe("26");
+
+    localStorage.setItem(SIDEBAR, "34");
+
+    expect(restore(all({ sidebar: 34, middle: 26 }), COLLAPSED_THREE)).toEqual(
+      all({ sidebar: 34 }),
+    );
+    expect(localStorage.getItem(SIDEBAR)).toBe("34");
+    expect(localStorage.getItem(MIDDLE)).toBeNull();
+
+    // And with no middle pane there is nothing at all to write.
+    remember(all({ sidebar: 50, middle: 50 }), {
+      ...COLLAPSED_THREE,
+      three: false,
+    });
+    expect(localStorage.getItem(SIDEBAR)).toBe("34");
+    expect(localStorage.getItem(MIDDLE)).toBeNull();
+  });
+
+  /// How wide it expands to is the share it would stand at full, met against
+  /// this frame the way the full band meets it: a share that fits is the share,
+  /// one too wide leaves the other two their floors, and a phone has room for
+  /// nothing but the sidebar's own.
+  it("expands to the share the full band would stand it at", () => {
+    expect(expanded(all({ sidebar: 25 }), COLLAPSED_THREE)).toBe(25);
+    expect(expanded(all({ sidebar: 60 }), COLLAPSED_THREE)).toBe(
+      100 - share(MINIMUMS.middle + MINIMUMS.details, COLLAPSED_THREE),
     );
 
-    const narrow = await bench("narrow");
+    const phone: Frame = { ...COLLAPSED_THREE, rem: PHONE / 16 };
+    expect(expanded(all({ sidebar: 25 }), phone)).toBe(
+      share(MINIMUMS.sidebar, phone),
+    );
+  });
+});
+
+describe("the dividers on the workbench", () => {
+  /// One per border there is: the sidebar's wherever the list stands full,
+  /// the middle one's wherever the timeline stands beside the details, and
+  /// neither on a window that shows one pane at a time. A collapsed list has
+  /// none of its own.
+  it("puts a handle on every border there is", async () => {
+    const full = await bench("full");
+    expect(dividers(full.container)).toHaveLength(2);
+
+    const beside = await bench("beside", BETWEEN);
+    expect(dividers(beside.container)).toHaveLength(1);
+    expect(dividers(beside.container)[0]!.getAttribute("aria-label")).toBe(
+      "Resize the timeline pane",
+    );
+
+    const narrow = await bench("narrow", PHONE);
     expect(dividers(narrow.container)).toEqual([]);
   });
 
-  /// And the widths themselves reach the frame only there. Below the
-  /// breakpoint the page is walked through one pane at a time and what this
-  /// device remembers about a desktop's columns is not read at all.
-  it("names the widths on the frame only where panes stand together", async () => {
-    remember(all({ sidebar: 34, middle: 34 }), THREE);
+  /// And the widths themselves reach the frame only where they are drawn: the
+  /// sidebar's where the list is full, the middle pane's wherever it stands
+  /// beside the details, and nothing of either on a phone — which has only how
+  /// wide the collapsed list expands to.
+  it("names the widths on the frame only where they are drawn", async () => {
+    remember(all({ sidebar: 30, middle: 40 }), THREE);
 
-    const wide = await bench("three panes");
-    expect(wide.frame.style.getPropertyValue("--pane-sidebar")).toBe("34%");
-    expect(wide.frame.style.getPropertyValue("--pane-middle")).toBe("34%");
+    const wide = await bench("full");
+    expect(wide.frame.style.getPropertyValue("--pane-sidebar")).toBe("30%");
+    expect(wide.frame.style.getPropertyValue("--pane-middle")).toBe("40%");
+    expect(wide.frame.style.getPropertyValue("--pane-expanded")).toBe("");
 
-    const narrow = await bench("narrow");
+    const between = await bench("beside", BETWEEN);
+    expect(between.frame.style.getPropertyValue("--pane-sidebar")).toBe("");
+    expect(between.frame.style.getPropertyValue("--pane-middle")).toBe("40%");
+
+    const narrow = await bench("narrow", PHONE);
     expect(narrow.frame.style.getPropertyValue("--pane-sidebar")).toBe("");
     expect(narrow.frame.style.getPropertyValue("--pane-middle")).toBe("");
+  });
+
+  /// A share dragged where the list stands full is the width it expands to
+  /// where it is collapsed, and a phone expands it to the sidebar's floor.
+  it("expands the collapsed list to the share dragged at full width", async () => {
+    const { container } = await bench("full");
+
+    dragTo(dividers(container)[0]!, FRAME * 0.25);
+    await waitFor(() => expect(localStorage.getItem(SIDEBAR)).toBe("25"));
+    cleanup();
+
+    const between = await bench("beside", BETWEEN);
+    expect(between.frame.style.getPropertyValue("--pane-expanded")).toBe(
+      `${(25 * BETWEEN) / 16 / 100}rem`,
+    );
+
+    const phone = await bench("narrow", PHONE);
+    expect(phone.frame.style.getPropertyValue("--pane-expanded")).toBe(
+      `${MINIMUMS.sidebar}rem`,
+    );
+  });
+
+  /// With nothing open the list is the level being shown, so a collapsed one
+  /// stands expanded over the empty paper beside it — and opening a
+  /// Conversation is what lets it collapse.
+  it("stands the collapsed list expanded while nothing is open", async () => {
+    const list = (container: ParentNode) =>
+      container.querySelector<HTMLElement>(`.${shell.conversationsPane}`)!;
+
+    for (const width of ["narrow", "beside"] as const) {
+      const { container } = await bench(width);
+      expect(list(container).hasAttribute("data-expanded"), width).toBe(true);
+      cleanup();
+    }
+
+    const full = await bench("full");
+    expect(list(full.container).hasAttribute("data-expanded")).toBe(false);
+    cleanup();
+
+    windowIs("beside");
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await drawn(container, `.${shell.panes}`);
+    expect(list(container).hasAttribute("data-expanded")).toBe(false);
   });
 
   it("starts where this device left the panes", async () => {
     remember(all({ sidebar: 40, middle: 25 }), THREE);
 
-    const { frame } = await bench("three panes");
+    const { frame } = await bench("full");
     expect(frame.style.getPropertyValue("--pane-sidebar")).toBe("40%");
   });
 
   it("moves the border the pointer drags, and writes it down", async () => {
-    const { container, frame } = await bench("three panes");
+    const { container, frame } = await bench("full");
 
     dragTo(dividers(container)[0]!, FRAME * 0.25);
 
@@ -416,7 +583,7 @@ describe("the dividers on the workbench", () => {
   });
 
   it("holds the minimum however far the pointer goes", async () => {
-    const { container, frame } = await bench("three panes");
+    const { container, frame } = await bench("full");
 
     dragTo(dividers(container)[0]!, FRAME * 0.98);
 
@@ -442,21 +609,21 @@ describe("the dividers on the workbench", () => {
   it("keeps a pane's width, not its share, as the window narrows", async () => {
     remember(all({ sidebar: 5, middle: 30 }), THREE);
 
-    const wide = await bench("two panes");
-    expect(wide.frame.style.getPropertyValue("--pane-sidebar")).toBe(
-      `${share(MINIMUMS.sidebar, { ...TWO, rem: FRAME / 16 })}%`,
+    const wider = await bench("full", 2400);
+    expect(wider.frame.style.getPropertyValue("--pane-sidebar")).toBe(
+      `${share(MINIMUMS.sidebar, { ...THREE, rem: 150 })}%`,
     );
 
-    const narrow = await bench("two panes", 960);
-    expect(narrow.frame.style.getPropertyValue("--pane-sidebar")).toBe(
-      `${share(MINIMUMS.sidebar, { ...TWO, rem: 60 })}%`,
+    const wide = await bench("full");
+    expect(wide.frame.style.getPropertyValue("--pane-sidebar")).toBe(
+      `${share(MINIMUMS.sidebar, THREE)}%`,
     );
   });
 
   it("puts the defaults back on a double-click", async () => {
     remember(all({ sidebar: 40, middle: 25 }), THREE);
 
-    const { container, frame } = await bench("three panes");
+    const { container, frame } = await bench("full");
     fireEvent.dblClick(dividers(container)[0]!);
 
     await waitFor(() =>
@@ -471,40 +638,62 @@ describe("the dividers on the workbench", () => {
     expect(localStorage.getItem(MIDDLE)).toBeNull();
   });
 
-  /// The defaults *this frame* has, that is. Between the two breakpoints only
-  /// the sidebar's divider is up, and a double-click on it is a human asking
-  /// for the width they can see back — not for the middle pane's, which they
-  /// have no handle on and will not meet again until the window is wider.
+  /// The defaults *this frame* has, that is. Between the two lines only the
+  /// middle divider is up, and a double-click on it is a human asking for the
+  /// width they can see back — not for the sidebar's, which they have no handle
+  /// on and will not meet again until the window is wider.
   ///
-  /// Said here because it is the one place the two frames' widths could get
-  /// mixed up without anybody noticing: what a double-click here left behind
-  /// would show up as a column somebody never touched, on some other afternoon,
-  /// at some other window size.
-  it("leaves the middle pane's width alone where its divider is not up", async () => {
-    remember(all({ sidebar: 40, middle: 25 }), THREE);
+  /// Said here because it is the one place the bands' widths could get mixed
+  /// up without anybody noticing: what a double-click here left behind would
+  /// show up as a column somebody never touched, on some other afternoon, at
+  /// some other window size.
+  it("leaves the sidebar's width alone where its divider is not up", async () => {
+    remember(all({ sidebar: 25, middle: 40 }), THREE);
 
-    const { container, frame } = await bench("two panes");
+    const { container, frame } = await bench("beside", BETWEEN);
     expect(dividers(container)).toHaveLength(1);
 
     fireEvent.dblClick(dividers(container)[0]!);
 
+    // The default, held to the timeline's floor: a 70rem window owes the
+    // timeline more of itself than the default share is.
     await waitFor(() =>
-      expect(frame.style.getPropertyValue("--pane-sidebar")).toBe(
-        `${DEFAULTS.sidebar}%`,
+      expect(frame.style.getPropertyValue("--pane-middle")).toBe(
+        `${share(MINIMUMS.middle, COLLAPSED_THREE)}%`,
       ),
     );
-    expect(localStorage.getItem(SIDEBAR)).toBeNull();
+    expect(localStorage.getItem(MIDDLE)).toBeNull();
 
-    // And the width the three-pane frame would be drawn at is where this
-    // device left it, on the frame and in the storage behind it.
-    expect(frame.style.getPropertyValue("--pane-middle")).toBe("25%");
-    expect(localStorage.getItem(MIDDLE)).toBe("25");
+    // And the share the full band would be drawn at is where this device left
+    // it, in the storage and in how wide the collapsed list expands to.
+    expect(localStorage.getItem(SIDEBAR)).toBe("25");
+    expect(frame.style.getPropertyValue("--pane-expanded")).toBe(
+      `${(25 * BETWEEN) / 16 / 100}rem`,
+    );
+  });
+
+  /// And dragged there, the middle divider is the far edge of a pane that
+  /// starts after the strip, so the strip is what comes off where it was
+  /// dropped.
+  it("moves the middle divider from the strip between the two lines", async () => {
+    const { container, frame } = await bench("beside", BETWEEN);
+
+    dragTo(dividers(container)[0]!, BETWEEN * 0.5);
+
+    const strip = share(COLLAPSED, COLLAPSED_THREE);
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--pane-middle")).toBe(
+        `${50 - strip}%`,
+      ),
+    );
+    expect(localStorage.getItem(MIDDLE)).toBe(String(50 - strip));
+    expect(localStorage.getItem(SIDEBAR)).toBeNull();
   });
 
   /// A handle nobody can put a pointer on is still a handle, so the arrow keys
   /// move it — and settle it, there being no letting go of a key.
   it("moves with the arrow keys too", async () => {
-    const { container, frame } = await bench("three panes");
+    const { container, frame } = await bench("full");
 
     fireEvent.keyDown(dividers(container)[0]!, { key: "ArrowRight" });
 
@@ -519,7 +708,7 @@ describe("the dividers on the workbench", () => {
   /// What the handle is, for anything reading the page rather than looking at
   /// it: a separator with the share of the workbench it decides on it.
   it("says what it is and where it stands", async () => {
-    const { container } = await bench("three panes");
+    const { container } = await bench("full");
     const [sidebar, middle] = dividers(container);
 
     expect(sidebar!.getAttribute("role")).toBe("separator");
@@ -566,10 +755,59 @@ describe("the rules the widths are read by", () => {
         "    grid-template-columns: var(--pane-pair, 40%) auto 1fr;\n  }",
     );
 
+    // And the list's own two bands below the full one: the strip beside one
+    // pane, and the strip beside the timeline and the details.
+    expect(stylesheet).toContain(
+      ".panes.listing {\n" +
+        `  grid-template-columns: ${COLLAPSED}rem 1fr;\n`,
+    );
+    expect(stylesheet).toContain(
+      `    grid-template-columns: ${COLLAPSED}rem var(--pane-middle, 30%) auto 1fr;`,
+    );
+
     // The breakpoints the page asks `matchMedia` about are the ones the rules
     // are written at, and nothing may let the two drift apart.
     expect(stylesheet).toContain(`@media ${BESIDE} {`);
-    expect(stylesheet).toContain(`@media ${ALL_THREE} {`);
+    expect(stylesheet).toContain(`@media ${FULL} {`);
+  });
+
+  /// Collapsed, the list is laid out at the width it expands to and clipped to
+  /// the strip, so every height in it is its expanded height; expanded, the
+  /// clip lets the whole pane and its shadow out over the panes beside it,
+  /// under a pointer resting on it, a keyboard's focus inside it, or the page
+  /// saying nothing is open. The padding is the strip's in both, so nothing in
+  /// the pane slides sideways as it opens.
+  it("clips the collapsed list to its strip and lets it out over the rest", () => {
+    const collapsed = layout("(width < 100rem)");
+
+    expect(collapsed).toContain(
+      "  .panes.listing > .conversationsPane {\n" +
+        "    z-index: 1;\n" +
+        "    width: var(--pane-expanded, 16rem);\n" +
+        "    padding-inline: 0.5rem 1.25rem;\n" +
+        "    background: var(--paper);\n" +
+        `    clip-path: inset(0 calc(100% - ${COLLAPSED}rem) 0 0);\n`,
+    );
+    expect(collapsed).toContain(
+      "  .panes.listing > .conversationsPane[data-expanded],\n" +
+        "  .panes.listing > .conversationsPane:focus-visible,\n" +
+        "  .panes.listing > .conversationsPane:has(:focus-visible) {\n" +
+        "    clip-path: inset(0 -3rem 0 0);\n" +
+        "    box-shadow: var(--lift);\n",
+    );
+    expect(layout("(width < 100rem) and (hover: hover)")).toContain(
+      "  .panes.listing > .conversationsPane:hover:not([data-finger]) {\n" +
+        "    clip-path: inset(0 -3rem 0 0);\n" +
+        "    box-shadow: var(--lift);\n",
+    );
+
+    // Nothing but the clip and the shadow move between the two.
+    expect(collapsed.match(/padding-inline/g)).toHaveLength(1);
+
+    // And moving between the two only where movement is welcome.
+    expect(
+      layout("(width < 100rem) and (prefers-reduced-motion: no-preference)"),
+    ).toContain("clip-path 150ms ease");
   });
 
   /// The divider draws the line between two panes, so the panes do not: two
@@ -595,8 +833,16 @@ describe("the rules the widths are read by", () => {
     );
 
     // And the panes themselves have given theirs up: nothing in the workbench
-    // draws an edge down the side of a column any more.
+    // draws an edge down the side of a column a divider stands beside. The one
+    // edge a pane draws is the collapsed strip's, which has no divider — and
+    // from 60rem the details pane, beyond the middle divider, draws none.
     expect(stylesheet).not.toContain("border-right: 1px solid var(--edge)");
+    expect(layout("(width < 100rem)")).toContain(
+      "    border-left: 1px solid var(--edge);\n",
+    );
+    expect(layout(BESIDE)).toContain(
+      "  .panes.listing > .detailsPane {\n    border-left: 0;\n  }",
+    );
   });
 
   /// However wide the pane is dragged, what it holds is read at the width
@@ -643,7 +889,8 @@ describe("the rules the widths are read by", () => {
         "  display: flex;\n}",
     );
     expect(stylesheet).toContain(
-      "  .panes.widened > .detailsPane:has(.paneComposer) {\n    display: flex;\n  }",
+      "  .panes.listing > .detailsPane:has(.paneComposer),\n" +
+        "  .panes.listing > .detailsPane:has(.paneScreen) {\n    display: flex;\n  }",
     );
     expect(stylesheet).toContain(
       "  .panes > .detailsPane:has(.paneComposer) {\n    display: flex;\n  }",
@@ -670,6 +917,26 @@ describe("the rules the widths are read by", () => {
     // is clipped rather than turned into document to scroll.
     expect(beside).toContain("    height: 100dvh;\n");
     expect(beside).toContain("    overflow: hidden;\n");
+
+    // And the frame with a list is all of that at every width, a phone's
+    // included: the list stands beside a pane everywhere.
+    expect(stylesheet).toContain(
+      ".panes.listing {\n" +
+        "  grid-template-columns: 3rem 1fr;\n" +
+        "  height: 100dvh;\n" +
+        "  overflow: hidden;\n}",
+    );
+    expect(stylesheet).toContain(
+      ".panes.listing > .pane {\n" +
+        "  overflow-y: auto;\n" +
+        "  overscroll-behavior: contain;\n}",
+    );
+    expect(stylesheet).toContain(
+      ".panes.listing > .detailsPane:has(.paneScreen) {\n  height: auto;\n}",
+    );
+    expect(stylesheet).toContain(
+      ".panes.listing > .detailsPane:has(.paneComposer) {\n  min-height: auto;\n}",
+    );
 
     // Each pane scrolls on its own, and stops when it runs out.
     expect(beside).toContain(
@@ -778,7 +1045,7 @@ describe("what the frame is laid out from", () => {
   /// these. Every one of them is the workbench: the frame is where the rule is
   /// written, so the pages that stand in it are what has to hold it.
   async function drawnPage(at?: string) {
-    windowIs("three panes");
+    windowIs("full");
     theWorkbench(
       whenever(`/api/ui/conversations/${TASKED.id}`, json(TASKED)),
       whenever(`/api/ui/conversations/${STAGED.id}`, json(STAGED)),
@@ -787,13 +1054,19 @@ describe("what the frame is laid out from", () => {
     const { container } = mount(at);
     const frame = await drawn<HTMLElement>(container, `.${shell.panes}`);
 
-    // Nothing is asked of a page that has not finished arriving: the pinned
+    // Nothing is asked of a page that has not finished arriving: the list's
+    // cards, and — where a conversation is open — its timeline, whose pinned
     // lists are the last thing on it and the whole of what two of these mount.
-    await waitFor(() =>
-      expect(frame.querySelectorAll(`.${shell.pane} *`).length).toBeGreaterThan(
-        20,
-      ),
-    );
+    // Named rather than counted, because a sidebar still reading its list is
+    // a score of elements on its own.
+    await waitFor(() => {
+      expect(frame.querySelector(`.${shell.conversationsPane} [data-row]`)).not.toBeNull();
+      if (at !== undefined) {
+        expect(
+          frame.querySelectorAll(`.${shell.middlePane} *`).length,
+        ).toBeGreaterThan(20);
+      }
+    });
 
     return frame;
   }
@@ -868,7 +1141,7 @@ describe("what the frame is laid out from", () => {
 /// settings page stand on the same one.
 describe("the frame on its own", () => {
   it("draws the three panes it is handed, in the order they are walked", () => {
-    windowIs("three panes");
+    windowIs("full");
 
     const { container } = render(() => (
       <Panes
@@ -902,7 +1175,7 @@ describe("the frame on its own", () => {
   /// The middle pane is the only one whose name changes from page to page, so
   /// the handle beside it says which pane it moves in the page's own words.
   it("names the middle divider after what the pane holds", () => {
-    windowIs("three panes");
+    windowIs("full");
 
     const { container } = render(() => (
       <Panes
@@ -950,7 +1223,7 @@ describe("the divider between two panes with no list beside them", () => {
   /// width the two stand side by side at rather than from the one the third
   /// pane would have arrived at.
   it("puts one handle between the panes, and none below the breakpoint", () => {
-    const beside = pair("two panes");
+    const beside = pair("beside");
 
     expect(
       [...beside.frame.children].map((child) =>
@@ -958,9 +1231,9 @@ describe("the divider between two panes with no list beside them", () => {
       ),
     ).toEqual(["Timeline", "Resize the timeline pane", "Details"]);
 
-    // A wider window changes nothing: there is no third pane to arrive, so
+    // A wider window changes nothing: there is no list to stand full, so
     // there is no second border for one to make.
-    expect(dividers(pair("three panes").container)).toHaveLength(1);
+    expect(dividers(pair("full").container)).toHaveLength(1);
 
     // And below the breakpoint the frame is walked one pane at a time, with no
     // border to drag and nothing this device remembers being read.
@@ -972,7 +1245,7 @@ describe("the divider between two panes with no list beside them", () => {
   it("starts where this device left the two panes", () => {
     remember(all({ pair: 55 }), PAIR);
 
-    const { frame } = pair("two panes");
+    const { frame } = pair("beside");
 
     expect(frame.style.getPropertyValue("--pane-pair")).toBe("55%");
 
@@ -983,7 +1256,7 @@ describe("the divider between two panes with no list beside them", () => {
   });
 
   it("moves the border the pointer drags, and writes it down", async () => {
-    const { container, frame } = pair("two panes");
+    const { container, frame } = pair("beside");
 
     dragTo(dividers(container)[0]!, FRAME * 0.5);
 
@@ -998,7 +1271,7 @@ describe("the divider between two panes with no list beside them", () => {
   });
 
   it("holds both panes to their minimums however far the pointer goes", async () => {
-    const { container, frame } = pair("two panes");
+    const { container, frame } = pair("beside");
 
     dragTo(dividers(container)[0]!, FRAME * 0.98);
 
@@ -1020,7 +1293,7 @@ describe("the divider between two panes with no list beside them", () => {
   it("moves with the arrow keys, and gives the default back on a double-click", async () => {
     remember(all({ pair: 55 }), PAIR);
 
-    const { container, frame } = pair("two panes");
+    const { container, frame } = pair("beside");
 
     fireEvent.keyDown(dividers(container)[0]!, { key: "ArrowLeft" });
 
@@ -1043,7 +1316,7 @@ describe("the divider between two panes with no list beside them", () => {
   /// it: a separator named for the pane it moves, carrying the share of the
   /// frame that pane is worth and how far it may be taken.
   it("says what it is and where it stands", () => {
-    const { container } = pair("two panes");
+    const { container } = pair("beside");
     const [divider] = dividers(container);
 
     expect(divider!.getAttribute("role")).toBe("separator");
@@ -1072,7 +1345,7 @@ describe("the divider between two panes with no list beside them", () => {
       clear() {},
     });
 
-    const { container, frame } = pair("two panes");
+    const { container, frame } = pair("beside");
     expect(frame.style.getPropertyValue("--pane-pair")).toBe(
       `${DEFAULTS.pair}%`,
     );
@@ -1124,21 +1397,25 @@ describe("the frame with no middle pane in it", () => {
     };
   }
 
-  /// Two panes and the one border, and the third pane's breakpoint brings
-  /// nothing: what it is about is room for a middle pane, and there is none to
-  /// find room for.
-  it("puts one handle between the panes, and none below the breakpoint", () => {
-    const beside = widened("two panes");
+  /// Two panes and the sidebar's border where the list stands full, and no
+  /// border at all where it is collapsed: there is no middle pane for the
+  /// middle divider to be the far edge of.
+  it("puts one handle between the panes, and none while the list is collapsed", () => {
+    const wide = widened("full");
 
+    expect(
+      [...wide.frame.children].map((child) => child.getAttribute("aria-label")),
+    ).toEqual(["Conversations", "Resize the conversations pane", "Details"]);
+    expect(wide.frame.querySelector(`.${shell.middlePane}`)).toBeNull();
+
+    const beside = widened("beside");
     expect(
       [...beside.frame.children].map((child) =>
         child.getAttribute("aria-label"),
       ),
-    ).toEqual(["Conversations", "Resize the conversations pane", "Details"]);
-
-    const wide = widened("three panes");
-    expect(dividers(wide.container)).toHaveLength(1);
-    expect(wide.frame.querySelector(`.${shell.middlePane}`)).toBeNull();
+    ).toEqual(["Conversations", "Details"]);
+    expect(beside.frame.style.getPropertyValue("--pane-sidebar")).toBe("");
+    expect(beside.frame.style.getPropertyValue("--pane-middle")).toBe("");
 
     const narrow = widened("narrow");
     expect(dividers(narrow.container)).toEqual([]);
@@ -1151,7 +1428,7 @@ describe("the frame with no middle pane in it", () => {
   it("names the sidebar's width and no other", () => {
     remember(all({ sidebar: 34, middle: 34 }), THREE);
 
-    const { frame } = widened("three panes");
+    const { frame } = widened("full");
 
     expect(frame.style.getPropertyValue("--pane-sidebar")).toBe("34%");
     expect(frame.style.getPropertyValue("--pane-middle")).toBe("");
@@ -1164,7 +1441,7 @@ describe("the frame with no middle pane in it", () => {
   it("moves the sidebar and leaves the timeline's width where it was", async () => {
     remember(all({ sidebar: 20, middle: 33 }), THREE);
 
-    const { container, frame } = widened("three panes");
+    const { container, frame } = widened("full");
 
     dragTo(dividers(container)[0]!, FRAME * 0.3);
 
@@ -1179,7 +1456,7 @@ describe("the frame with no middle pane in it", () => {
   /// pane the sidebar is beside *is* the details here, and there is no middle
   /// pane owed anything between them.
   it("leaves the details their own width and nothing else's", async () => {
-    const { container, frame } = widened("three panes");
+    const { container, frame } = widened("full");
 
     dragTo(dividers(container)[0]!, FRAME * 0.98);
 
@@ -1196,14 +1473,21 @@ describe("the frame with no middle pane in it", () => {
   /// already beside it.
   it("draws the two columns and takes the way back off", () => {
     expect(stylesheet).toContain(
-      "  .panes.widened {\n" +
+      `@media ${FULL} {\n` +
+        "  .panes.widened {\n" +
         "    grid-template-columns: var(--pane-sidebar, 20%) auto 1fr;\n  }",
     );
     expect(stylesheet).toContain(
-      "  .panes.widened > .detailsPane {\n    display: block;\n  }",
+      "  .panes.widened {\n" +
+        `    grid-template-columns: ${COLLAPSED}rem 1fr;\n  }`,
     );
-    expect(stylesheet).toContain(
-      "  .panes.widened .detailsPane .paneBack {\n    display: none;\n  }",
+    expect(layout(BESIDE)).toContain(
+      "  .panes.listing > .middlePane,\n" +
+        "  .panes.listing > .detailsPane {\n    display: block;\n  }",
+    );
+    expect(layout(BESIDE)).toContain(
+      "  .panes.listing .detailsPane .paneBack,\n" +
+        "  .panes.listing .paneForward {\n    display: none;\n  }",
     );
 
     // And what the pane holds is still read at the app's own measure, in the
@@ -1226,3 +1510,131 @@ function layout(breakpoint: string): string {
   );
   return stylesheet.slice(opened, stylesheet.indexOf("\n}\n", opened));
 }
+
+/// A finger on the collapsed list, where there is nothing to hover with: the
+/// first tap expands it and does nothing else, a tap on a card in it opens the
+/// card and collapses it, and a tap anywhere else collapses it and lands where
+/// it was put. A mouse is told apart by the pointer each press began with.
+describe("a finger on the collapsed list", () => {
+  /// The workbench between the two lines with a Conversation open, so the list
+  /// is collapsed rather than standing expanded over nothing.
+  async function reading() {
+    windowIs("beside");
+    theWorkbench();
+
+    const mounted = mount(`/conversations/${OPEN.id}`);
+    const list = await drawn<HTMLElement>(
+      mounted.container,
+      `.${shell.conversationsPane}`,
+    );
+    await drawn(list, "[data-row] article");
+
+    return { ...mounted, list };
+  }
+
+  /// A card for some Conversation other than the open one.
+  function other(list: HTMLElement): HTMLElement {
+    return [...list.querySelectorAll<HTMLElement>("[data-row]")]
+      .find((row) => !row.classList.contains(sidebar.selected!))!
+      .querySelector<HTMLElement>("article")!;
+  }
+
+  /// A tap: down, up, and the click the browser makes of the two.
+  function tap(target: Element, pointerType: "touch" | "mouse" = "touch") {
+    const at = { button: 0, pointerId: 7, pointerType };
+
+    fireEvent.pointerDown(target, at);
+    fireEvent.pointerUp(target, at);
+    fireEvent.click(target);
+  }
+
+  const expanded = (list: HTMLElement) => list.hasAttribute("data-expanded");
+
+  it("expands on the first tap and opens nothing", async () => {
+    const { list, history } = await reading();
+    const card = other(list);
+    const opened = history.get();
+
+    expect(expanded(list)).toBe(false);
+    tap(card);
+
+    expect(expanded(list)).toBe(true);
+    expect(history.get()).toBe(opened);
+
+    // And the second opens the card it is on, and collapses the list behind.
+    tap(card);
+    await waitFor(() => expect(history.get()).not.toBe(opened));
+    expect(expanded(list)).toBe(false);
+
+    // With the hover off, which a browser leaves standing where a finger
+    // tapped, until a mouse moves over the pane again.
+    expect(list.hasAttribute("data-finger")).toBe(true);
+    fireEvent.pointerMove(list, { pointerType: "mouse" });
+    expect(list.hasAttribute("data-finger")).toBe(false);
+  });
+
+  it("collapses on a tap elsewhere, which lands where it was put", async () => {
+    const { container, list } = await reading();
+    const frame = container.querySelector<HTMLElement>(`.${shell.panes}`)!;
+    const beside = container.querySelector<HTMLElement>(
+      `.${shell.detailsPane}`,
+    )!;
+    const before = [...document.body.querySelectorAll("*")].length;
+    const heard = vi.fn();
+    beside.addEventListener("click", heard);
+
+    tap(other(list));
+    expect(expanded(list)).toBe(true);
+
+    // Nothing washed behind the pane: the frame holds the panes it held and
+    // the page has gained no element to catch the tap.
+    expect(
+      [...frame.children].every((child) =>
+        child.matches(`.${shell.pane}, .${shell.divider}`),
+      ),
+    ).toBe(true);
+    expect([...document.body.querySelectorAll("*")].length).toBe(before);
+
+    tap(beside);
+    expect(expanded(list)).toBe(false);
+    expect(heard).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a mouse's press to the hover", async () => {
+    const { list, history } = await reading();
+    const opened = history.get();
+
+    // A mouse's first press is not swallowed: the hover had expanded the
+    // pane before it landed, and the press opens the card.
+    tap(other(list), "mouse");
+    await waitFor(() => expect(history.get()).not.toBe(opened));
+    expect(expanded(list)).toBe(false);
+
+    // And a mouse pressing a card in a pane a finger expanded opens it,
+    // leaving the pointer resting there to hold the pane open.
+    const card = other(list);
+    tap(card);
+    expect(expanded(list)).toBe(true);
+    const now = history.get();
+    tap(card, "mouse");
+    await waitFor(() => expect(history.get()).not.toBe(now));
+  });
+
+  it("stays expanded for the length of a drag", async () => {
+    const { list } = await reading();
+    const card = other(list);
+    const at = { button: 0, pointerId: 7, pointerType: "touch" };
+
+    fireEvent.pointerDown(card, { ...at, clientX: 0, clientY: 0 });
+    expect(expanded(list)).toBe(true);
+
+    // Long enough to lift — see `LIFT` in `Conversations.tsx` — and carried
+    // out over the pane beside it.
+    await new Promise((done) => setTimeout(done, 450));
+    fireEvent.pointerMove(window, { ...at, clientX: 400, clientY: 40 });
+    expect(expanded(list)).toBe(true);
+
+    fireEvent.pointerUp(window, { ...at, clientX: 400, clientY: 40 });
+    expect(expanded(list)).toBe(true);
+  });
+});

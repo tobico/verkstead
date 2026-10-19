@@ -87,8 +87,24 @@
 //! same switch — so they are `Wordmark.tsx` and `Archived.tsx`, and this pane
 //! puts them where they go. See `zero.ts` for what decides that this pane is
 //! drawn at all.
+//!
+//! **Collapsed and expanded.** Under 100rem the frame stands this pane as a
+//! `3rem` strip and expands it over the panes beside it under a hover, a
+//! keyboard's focus, a finger's tap, or nothing being open — see
+//! `Panes.module.css` and `touched` in `Panes.tsx`, which is where the state is
+//! decided. On a screen with nothing to hover, the first tap on the strip only
+//! expands it, whatever it lands on; a tap on a card or the link then goes
+//! where it was put and the pane collapses behind it, and a tap outside it
+//! collapses it. A long press still lifts a card, and the pane stays expanded
+//! under the drag. What the strip draws is this pane's: the logo
+//! alone at the head, the pen-to-square of the link without its words, each
+//! card's first three characters with its mark on the line under them, and the
+//! foot as blank paper. Everything else is hidden rather than taken away, laid
+//! out at the width the pane expands to, so every part is exactly as tall
+//! collapsed as expanded and nothing hidden takes a press. The frame hands the
+//! state down as the `--collapsed-*` properties every rule here reads.
 
-import { faCode } from "@fortawesome/free-solid-svg-icons";
+import { faCode, faPenToSquare } from "@fortawesome/free-solid-svg-icons";
 import { A, useNavigate } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -610,9 +626,19 @@ export function Conversations(props: {
           Conversation is written before it exists — the brief, the setup and the
           roadmaps there are to adopt all being questions asked in the one box.
           A link rather than a button because it is a page: it opens in a new tab
-          if somebody asks it to, and Back leaves it. */}
-      <A class={styles.compose} href="/compose">
-        New conversation
+          if somebody asks it to, and Back leaves it.
+
+          The pen-to-square before the words, which is all the collapsed strip
+          draws of it — so the words are its label and its tooltip as well,
+          the way the gear's are, for the link that is an icon alone. */}
+      <A
+        class={styles.compose}
+        href="/compose"
+        aria-label="New conversation"
+        title="New conversation"
+      >
+        <Icon of={faPenToSquare} />
+        <span class={styles.composeWords}>New conversation</span>
       </A>
 
       <Switch>
@@ -1021,12 +1047,42 @@ function ConversationRow(props: {
             it means, so there is nothing here for a screen reader to find. */}
         <Show when={mark(props.entry)}>
           {(which) => (
-            <span class={`${marks.mark} ${marks[which()]}`} aria-hidden="true" />
+            <span
+              class={`${marks.mark} ${marks[which()]} ${styles.edgeMark}`}
+              aria-hidden="true"
+            />
           )}
         </Show>
+        {/* The card as the collapsed strip draws it, over the left of the one
+            above: the first characters of its name, and its mark on the line
+            under them where the device and the Repo stand — or that line blank
+            at its height. Drawn only collapsed, and the words and the mark
+            above are not, by the frame's say (see `Panes.module.css`); nothing
+            in it for a screen reader, the card's label having said it all. */}
+        <span class={styles.short} aria-hidden="true">
+          <span class={styles.opening}>{opening(titled(props.entry))}</span>
+          <span class={styles.markLine}>
+            <Show when={mark(props.entry)}>
+              {(which) => <span class={`${marks.mark} ${marks[which()]}`} />}
+            </Show>
+          </span>
+        </span>
       </CardButton>
     </li>
   );
+}
+
+/// The first three characters of a card's name, which is what the collapsed
+/// strip has room for: whole characters, as a reader counts them rather than
+/// as a string is stored, so an emoji or an accent built of two code points is
+/// one of the three rather than half of one. Cut with no ellipsis — the strip
+/// is a glance at which card is which, and the whole name is a hover away.
+function opening(name: string): string {
+  const characters = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  return [...characters.segment(name)]
+    .slice(0, 3)
+    .map((character) => character.segment)
+    .join("");
 }
 
 /// The code icon before a card's title, drawn while something is active in

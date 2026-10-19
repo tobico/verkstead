@@ -35,15 +35,23 @@
 
 import { forget, read, write } from "./remembered";
 
-/// From here the sidebar stands beside the level being read, and the divider
-/// between the two can be dragged. Below it the frame pages one pane at a time:
-/// nothing stands beside anything, so there are no dividers to drag and
-/// whatever this device remembers is left where it is.
+/// From here the panes stand side by side and the frame stops being walked
+/// one at a time: the timeline beside the details where there is a list, and
+/// the record beside what it has open where there is none. Below it one of them
+/// has the room beside the list, with nothing to drag between it and the other.
 export const BESIDE = "(min-width: 60rem)";
 
-/// And from here all three panes stand together, which is the layout with two
-/// dividers in it.
-export const ALL_THREE = "(min-width: 80rem)";
+/// And from here the conversations pane stands at its full width, at the share
+/// this device settled it at, with its own divider to drag. Below it the pane
+/// is collapsed to [`COLLAPSED`] and expands over the panes beside it, so the
+/// share is read only for how wide it expands to and is never written.
+export const FULL = "(min-width: 100rem)";
+
+/// How wide the collapsed conversations pane stands, in `rem`: a 2rem item and
+/// half a rem of paper either side of it. A length rather than a share, because
+/// what it holds is the same few characters on every window — and the length
+/// the stylesheet writes as the collapsed column's own.
+export const COLLAPSED = 3;
 
 /// Which divider a drag is of — named for the pane on its left, which is the
 /// one whose width the drag decides.
@@ -85,29 +93,40 @@ const MAXIMISED = "verkstead.pane-maximised";
 export type Widths = Record<Divider, number>;
 
 /// The frame those are shares *of*: how wide it stands in `rem`, whether all
-/// three panes are standing in it, and whether it has a list to pick from at
-/// all.
+/// three panes are standing in it, whether it has a list to pick from at all,
+/// and whether that list is collapsed.
 ///
-/// All three are the page's to answer — the first by measuring the frame, the
-/// second by asking which breakpoint holds *and* whether there is a middle pane
-/// to fill the column it brings, the third by whether it was handed a
-/// conversations pane — and together they are the whole of what the arithmetic
-/// here needs to know about the window in front of the human.
+/// All four are the page's to answer — the first by measuring the frame, the
+/// second by asking whether [`BESIDE`] holds *and* there is a middle pane to
+/// fill the column it brings, the third by whether it was handed a
+/// conversations pane, the last by whether [`FULL`] holds — and together they
+/// are the whole of what the arithmetic here needs to know about the window in
+/// front of the human.
+///
+/// A collapsed list is [`COLLAPSED`] wide whatever this device settled its
+/// share at, so that is what stands before the middle pane and what the middle
+/// divider measures from; the share itself has no divider in such a frame and
+/// is left exactly as it was settled.
 ///
 /// A frame with nothing to pick from is the share's pair of panes, and `three`
 /// says nothing about one: there is no third pane for a breakpoint to bring in.
 ///
 /// And a frame with a list but no middle pane is `three: false` at every width:
-/// the sidebar stands beside the details with one border between them, which is
-/// the layout those two are already in below the last breakpoint. So the
+/// the list stands beside the details, with the sidebar's border between them
+/// where the list is full and none at all where it is collapsed. So the
 /// arithmetic is the same arithmetic, the divider is the sidebar's own, and the
 /// width behind the column that is not drawn is left exactly where this device
 /// settled it — which is what hands it back when the middle pane returns.
-export type Frame = { rem: number; three: boolean; picking: boolean };
+export type Frame = {
+  rem: number;
+  three: boolean;
+  picking: boolean;
+  collapsed: boolean;
+};
 
 /// What they are worth with nobody having said otherwise — the 15rem and 25rem
 /// the columns used to be fixed at, as shares of the 80rem window the third
-/// pane arrives at, rounded to numbers a person could have chosen. And for the
+/// pane used to arrive at, rounded to numbers a person could have chosen. And for the
 /// pair, the 40% its record stood at while its border could not be moved.
 export const DEFAULTS: Widths = { sidebar: 20, middle: 30, pair: 40 };
 
@@ -119,8 +138,8 @@ export const DEFAULTS: Widths = { sidebar: 20, middle: 30, pair: 40 };
 /// Lengths rather than shares, so that they mean the same thing on every window
 /// the frame is drawn on — which is the point of writing them here at all. They
 /// have to fit beside each other in the narrowest window that stands all three
-/// panes, which is the 80rem [`ALL_THREE`] names; what is left over after them
-/// is how far the dividers can travel there.
+/// at full width, which is the 100rem [`FULL`] names; what is left over after
+/// them is how far the dividers can travel there.
 ///
 /// Three of them for three dividers, one of the three counted twice: what the
 /// pair's divider has either side of it is a middle pane and the details, and
@@ -134,9 +153,17 @@ export const MINIMUMS = { sidebar: 16, middle: 24, details: 24 } as const;
 /// others: what a reader settles a share's panes at must leave the workbench's
 /// own columns exactly as this device left them, and the way to be sure of that
 /// is to touch nothing else.
+///
+/// And a collapsed list has no divider of its own: the middle one is all there
+/// is to move, and only where there is a middle pane for it to be the far edge
+/// of.
 function moving(frame: Frame): Divider[] {
   if (!frame.picking) {
     return ["pair"];
+  }
+
+  if (frame.collapsed) {
+    return frame.three ? ["middle"] : [];
   }
 
   return frame.three ? ["sidebar", "middle"] : ["sidebar"];
@@ -198,6 +225,12 @@ function shareOf(length: number, frame: Frame): number {
   return frame.rem > 0 ? (length / frame.rem) * 100 : 0;
 }
 
+/// How much of the frame the list takes before the middle pane starts: its
+/// share where it stands full, and the [`COLLAPSED`] column where it does not.
+function spent(settled: Widths, frame: Frame): number {
+  return frame.collapsed ? shareOf(COLLAPSED, frame) : settled.sidebar;
+}
+
 /// How far a divider may travel: the least the pane on its left may be left
 /// with, and the most it may take.
 ///
@@ -235,7 +268,7 @@ export function range(
           frame,
         )
       : shareOf(MINIMUMS.details, frame) +
-        (divider === "middle" ? settled.sidebar : 0);
+        (divider === "middle" ? spent(settled, frame) : 0);
 
   // A frame too narrow to hold every floor at once is one where a floor has to
   // give, and the one that gives is the room left for the panes beyond: a
@@ -250,13 +283,24 @@ export function range(
 /// are passed through untouched rather than squeezed against a minimum they
 /// have no business meeting yet. That is what keeps a sidebar dragged wide while
 /// two panes stand from quietly rewriting the three-pane layout, and what keeps
-/// a share — which has neither — from touching either.
+/// a share — which has neither — from touching either. And it is what leaves a
+/// collapsed list's share as it was: the column is [`COLLAPSED`] wide whatever
+/// the share says, and the share is the full band's to meet.
 export function clamped(settled: Widths, frame: Frame): Widths {
   if (!frame.picking) {
     return {
       ...settled,
       pair: between(settled.pair, range("pair", settled, frame)),
     };
+  }
+
+  if (frame.collapsed) {
+    return frame.three
+      ? {
+          ...settled,
+          middle: between(settled.middle, range("middle", settled, frame)),
+        }
+      : settled;
   }
 
   const sidebar = between(settled.sidebar, range("sidebar", settled, frame));
@@ -279,7 +323,8 @@ export function clamped(settled: Widths, frame: Frame): Widths {
 /// The sidebar's divider says where the sidebar ends, so its share *is* the
 /// width — and so is the pair's, whose pane starts at the frame's own edge. The
 /// middle one says where the middle pane ends, which is a share of the frame and
-/// not of what is left of it, so the sidebar comes off it first.
+/// not of what is left of it, so the list comes off it first — the sidebar's
+/// share, or the collapsed column where the list is collapsed.
 export function dragged(
   settled: Widths,
   divider: Divider,
@@ -288,7 +333,7 @@ export function dragged(
 ): Widths {
   const moved: Widths =
     divider === "middle"
-      ? { ...settled, middle: share - settled.sidebar }
+      ? { ...settled, middle: share - spent(settled, frame) }
       : { ...settled, [divider]: share };
 
   return clamped(moved, frame);
@@ -303,6 +348,13 @@ export function nudged(
   frame: Frame,
 ): Widths {
   return clamped({ ...settled, [divider]: settled[divider] + by }, frame);
+}
+
+/// How wide a collapsed list expands to, as a share of the frame: the share
+/// it would stand at were it full, met against this frame the way the full
+/// band meets it — which on a phone is the sidebar's own floor.
+export function expanded(settled: Widths, frame: Frame): number {
+  return clamped(settled, { ...frame, collapsed: false }).sidebar;
 }
 
 function between(share: number, { least, most }: ReturnType<typeof range>): number {

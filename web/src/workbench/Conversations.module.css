@@ -18,12 +18,19 @@
 /* The way on to the compose page, and the pane's one action: where a
    Conversation is written before it exists, roadmaps to adopt included. A link,
    so it is the paint of a button rather than a button — no underline, and the
-   pane's width. */
+   pane's width.
+
+   Or the collapsed strip's item: `--collapsed-item` is set while the frame has
+   the pane collapsed (see `Panes.module.css`), and the link is then that wide
+   with the pen-to-square in the middle of it and its words gone. No room at
+   the sides: what is in it is centred whichever width it is, and an item's
+   width less its border and a padding is narrower than the icon, which a
+   centred line then sets against its start instead. */
 .compose {
   display: block;
-  width: 100%;
+  width: var(--collapsed-item, 100%);
   margin-bottom: 1.5rem;
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0;
   font-weight: 600;
   text-align: center;
   text-decoration: none;
@@ -31,6 +38,14 @@
   background: var(--card);
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
+}
+
+/* The words after the icon, gone while the pane is collapsed. Gone rather
+   than hidden, so the icon is all the item holds; the link stands as tall as
+   ever, the line the icon is on being a line of text all the same. */
+.composeWords {
+  display: var(--collapsed-gone, inline);
+  margin-left: 0.5rem;
 }
 
 /* The conversations themselves, drawn as the set lists' rows are: the whole card
@@ -83,10 +98,73 @@
      it passed in the selection blue. There is nothing on a card worth selecting
      — the branch is read, not copied out of here. */
   user-select: none;
+
+  /* What the collapsed strip draws of the card stands over it, against it. */
+  position: relative;
+
+  /* And the card cut to the strip's item while the pane is collapsed, its fill
+     with it — still laid out at the pane's width, so it is as tall as it is
+     expanded. With no fallback on purpose: expanded, the property is unset and
+     the whole value with it, which leaves no clip at all rather than one that
+     would cut the focus ring off the card. */
+  clip-path: inset(0 calc(100% - var(--collapsed-item)) 0 0 round 0.6rem);
+}
+
+/* What the strip leaves out of a card: its words, the code icon before them,
+   and the mark at its edge. Hidden and not gone, so the card keeps its height
+   — a device and a Repo that wrap onto two lines expanded are two lines
+   collapsed — and so nothing of it takes a press. */
+.conversationRow .what,
+.conversationRow .edgeMark {
+  visibility: var(--collapsed-hidden, visible);
+}
+
+/* And what it draws instead, in the item at the card's left: the first three
+   characters of the name, and the mark under them on the line where the device
+   and the Repo stand. The card's own padding over the first, at the name's
+   weight and line, and the gap the two lines are parted by, so each stands
+   exactly over the line it replaces. The strip's item wide, with no room at
+   the sides of its own — three characters are what it has room for. Out over
+   the card's left border, which is there and never drawn, so the item is the
+   one the strip stands it in rather than a pixel to the right of it. */
+.conversationRow .short {
+  position: absolute;
+  inset: 0 auto 0 -1px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 2rem;
+  padding-top: 0.85rem;
+  visibility: var(--collapsed-drawn, hidden);
+}
+
+/* Cut where the item ends, with no ellipsis: a wide three is cut short rather
+   than given a fourth character's worth of dots. In the middle while they fit,
+   and from the start once they do not, which is what a centred line does. */
+.conversationRow .opening {
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* The line under them, at the height of the line it stands over — the smaller
+   text of it, and a character of no width to give it that text's line — with
+   the mark in the middle of it, or nothing. */
+.conversationRow .markLine {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+}
+
+.conversationRow .markLine::before {
+  content: "\200b";
 }
 
 /* A draft: nothing about it has been settled */
-.conversationRow.draft .title {
+.conversationRow.draft .title,
+.conversationRow.draft .opening {
   font-style: italic;
   color: var(--ink-soft);
 }

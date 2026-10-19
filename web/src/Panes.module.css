@@ -6,8 +6,18 @@
    conversation is picked, then read, then its details are looked at — so a
    narrow window shows one level of it at a time and a wide one shows the levels
    side by side. Which level is showing is `data-pane` on the frame, put there by
-   the page; below the first breakpoint it is the whole of what decides what is
-   drawn, and above the last it decides nothing.
+   the page; below 60rem it is the whole of what decides which pane is drawn, and
+   from 60rem it decides nothing.
+
+   Where there is a list to pick from — `listing` on the frame — the list stands
+   at every width, in three bands. Under 60rem it is a collapsed strip beside
+   the one pane `data-pane` names — or beside nothing, expanded over the
+   empty paper, where nothing is open; from 60rem it is the strip beside the
+   timeline and the details; from 100rem it is the full sidebar at the share
+   this device settled it at. The frame is the window's height in all three, so
+   a phone's page never scrolls and every pane scrolls inside it. The frames
+   with no list keep the one line they always had: walked one pane at a time as
+   a page that scrolls, and side by side from 60rem.
 
    The middle pane is named for its place rather than for what stands in it: the
    workbench reads a Timeline there and the settings page draws its own root,
@@ -20,10 +30,11 @@
    such pane at all then, and the two frames that happen in are said at the end
    of this file.
 
-   Seven of the names here are worn by things this file does not draw:
+   Eight of the names here are worn by things this file does not draw:
    `paneChrome` by whatever sticks to the top of a pane, `paneFoot` by whatever
    sticks to its bottom, `paneHead` by the bar across the top of one, `paneBack`
-   by the way out of it, `paneScreen` by a terminal that takes a pane's whole
+   by the way out of it, `paneForward` by the timeline's way on into the
+   details, `paneScreen` by a terminal that takes a pane's whole
    height, `paneWide` by one that takes its whole width as well, and
    `paneComposer` by the one thing a pane holds that stands in the middle of it
    rather than at the top. The rules that read them are about what a *pane* does,
@@ -67,12 +78,13 @@
 }
 
 /* Phone-first, as everything here is: one pane, and it is whichever one the
-   page says. */
+   page says — beside the list, wherever there is one, which is never a level
+   of its own: it stands at every width (below). Where the page says `nothing`,
+   nothing is open and no pane is shown beside it. */
 .panes > .pane {
   display: none;
 }
 
-.panes[data-pane="conversations"] > .conversationsPane,
 .panes[data-pane="middle"] > .middlePane,
 .panes[data-pane="details"] > .detailsPane {
   display: block;
@@ -86,29 +98,175 @@
    the switch there while the cards go under it.
 
    Which way the column runs is said once, off the pane's own name and outside
-   every rule that shows or hides it: the pane is shown by a different rule at
-   each width, and a direction written into one of them would be a direction the
-   other two widths did not have. What each of those rules has to say instead is
-   `flex` where it used to say `block`. */
+   the rule that shows it, so that the rule has only `flex` to say. */
 .conversationsPane {
   flex-direction: column;
 }
 
-/* Said after the rule it takes the `display` back off, which is the only place
-   it could win. Here the pane is the whole page, so what it is a column of is
-   the window, and `min-height` is what says so — taken off again above the
-   first breakpoint, where the pane is a cell of a frame that is already exactly
-   that tall. */
-.panes[data-pane="conversations"] > .conversationsPane {
+/* The frame with a list in it, at every width: the list's column and the one
+   pane beside it, the frame the window's height, and each pane scrolling on its
+   own inside it. The rest of what the 60rem frame says below — and why the
+   clip and the `overscroll-behavior` are both needed — is said there for all
+   three frames; this is the same three lines said from the first pixel, where
+   a list stands beside a pane at every width.
+
+   The column is the collapsed strip's `3rem`: a `2rem` item and half a rem of
+   paper either side of it, which grows with the text size as a rem does.
+   `COLLAPSED` in `widths.ts` is the same length, for the arithmetic. */
+.panes.listing {
+  grid-template-columns: 3rem 1fr;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.panes.listing > .pane {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.panes.listing > .conversationsPane {
   display: flex;
-  min-height: 100dvh;
+}
+
+/* And the details pane's way back out, where there is no timeline for it to go
+   back to and so it goes to the list — the frame `widened` names. The list is
+   beside it at every width, so there is nowhere for it to go that is not
+   already on screen. Its way back to a timeline stays where the timeline is
+   not beside it, which is below 60rem. */
+.panes.listing.widened > .detailsPane .paneBack {
+  display: none;
+}
+
+/* Collapsed, which is every width under the full band.
+
+   The pane is laid out at the width it expands to and clipped down to the
+   strip, rather than laid out at the strip: every height in it is then the
+   height it has expanded, which is what keeps a card where it is when the pane
+   opens out, and what keeps the list starting where it starts. The width is the
+   one the frame works out — the share this device settled the sidebar at, met
+   against this frame as the full band meets it — and the sidebar's own floor
+   until the frame has been measured.
+
+   Over the panes beside it rather than pushing them: the grid column stays the
+   strip whatever the pane does, the pane overflows it to the right, and it is
+   above them in the stacking order. The panes beside it are each a stacking
+   context of their own, so nothing stuck inside one of them — a pane's chrome
+   is raised by a layer — comes up through the list. Paper behind it, because
+   expanded it is over a record. And what the clip leaves out is not there for a
+   pointer either, so a collapsed list takes no press meant for the pane
+   beside it.
+
+   What the strip draws inside it is the components' own, and what the frame
+   hands them is the state, as five properties they read with the expanded
+   value behind each — see `Conversations.module.css`, `Wordmark.module.css`
+   and `Archived.module.css`. `--collapsed-hidden` is the `visibility` of what
+   the strip leaves out but keeps the room of, which is most of it: a card's
+   words, the foot. `--collapsed-faded` is the `opacity` of the two things it
+   leaves out that must still be found while it is collapsed — the head's word,
+   the heading a screen reader reads, and the gear, the first stop for Tab,
+   which expands the pane by taking it. `--collapsed-gone` is the `display` of
+   what gives its room up, which is only the link's words, whose line the icon
+   beside them holds at its height. `--collapsed-drawn` is the `visibility` of
+   what only the strip draws, standing over a card without taking any room of
+   it. And `--collapsed-item` is the strip's item, the `2rem` a part the strip
+   draws is cut to.
+
+   The room at the sides is the strip's in both states: half a rem of paper
+   before the item, so the item stands in the middle of the strip, and the
+   pane's own `1.25rem` after the content. Expanding changes the clip and
+   nothing else, so nothing in the pane slides sideways under a pointer as it
+   opens, and the content is the one width collapsed and expanded. The chrome
+   and the foot bleed by the pane's own padding as ever, which on the left now
+   takes them past the pane's edge, where the clip has them. */
+@media (width < 100rem) {
+  .panes.listing > .conversationsPane {
+    z-index: 1;
+    width: var(--pane-expanded, 16rem);
+    padding-inline: 0.5rem 1.25rem;
+    background: var(--paper);
+    clip-path: inset(0 calc(100% - 3rem) 0 0);
+    --collapsed-hidden: hidden;
+    --collapsed-faded: 0;
+    --collapsed-gone: none;
+    --collapsed-drawn: visible;
+    --collapsed-item: 2rem;
+  }
+
+  .panes.listing > .middlePane,
+  .panes.listing > .detailsPane {
+    isolation: isolate;
+  }
+
+  /* Expanded: the whole pane, and a clip let out past its far edge far enough
+     for the shadow saying it stands over what is beside it. The same `--lift`
+     a menu and a toast stand off the page by.
+
+     Under a keyboard's focus, which is what reaches it without a pointer — a
+     focus a click left behind is not one, so a card pressed with a mouse does
+     not hold the pane open once the pointer has gone. The pane's own focus as
+     well as one inside it: a pane that scrolls is a stop on the way through by
+     Tab in Firefox, and the first one into the list. And standing expanded
+     where the page says so: with nothing open, the list is the level being
+     shown, and what stands beside it is empty paper until a card is picked.
+
+     The five properties unset, so everything inside reads the expanded value
+     it was written with — see above. The padding stays the strip's. */
+  .panes.listing > .conversationsPane[data-expanded],
+  .panes.listing > .conversationsPane:focus-visible,
+  .panes.listing > .conversationsPane:has(:focus-visible) {
+    clip-path: inset(0 -3rem 0 0);
+    box-shadow: var(--lift);
+    --collapsed-hidden: initial;
+    --collapsed-faded: initial;
+    --collapsed-gone: initial;
+    --collapsed-drawn: initial;
+    --collapsed-item: initial;
+  }
+
+  /* And the edge the strip ends at, which no divider draws: there is none
+     beside a collapsed list. Drawn by the pane in the second column — whichever
+     of the two `data-pane` names below 60rem, and the middle pane from there,
+     where the details are beyond a divider of their own. */
+  .panes.listing > .middlePane,
+  .panes.listing > .detailsPane {
+    border-left: 1px solid var(--edge);
+  }
+}
+
+/* And under a pointer that can rest on it, which is how a mouse opens it: the
+   pane expands while the pointer is over it and collapses when it leaves.
+   Nothing about a press — a card pressed is a pane still under the pointer.
+   Not where the hand last on it was a finger, `data-finger`: a browser leaves
+   `:hover` where a finger tapped, which on a laptop with a touchscreen would
+   hold the pane open after the tap that was to collapse it. See `Panes.tsx`. */
+@media (width < 100rem) and (hover: hover) {
+  .panes.listing > .conversationsPane:hover:not([data-finger]) {
+    clip-path: inset(0 -3rem 0 0);
+    box-shadow: var(--lift);
+    --collapsed-hidden: initial;
+    --collapsed-faded: initial;
+    --collapsed-gone: initial;
+    --collapsed-drawn: initial;
+    --collapsed-item: initial;
+  }
+}
+
+/* Opening and closing as a movement rather than a cut, where movement is
+   welcome. */
+@media (width < 100rem) and (prefers-reduced-motion: no-preference) {
+  .panes.listing > .conversationsPane {
+    transition:
+      clip-path 150ms ease,
+      box-shadow 150ms ease;
+  }
 }
 
 /* The line between two panes, and the handle that moves it.
 
-   Only in the document where a layout stands panes side by side — the page puts
-   it there, and takes it away again below the breakpoint where the frame is
-   walked through one pane at a time. So there is no `display: none` here to
+   Only in the document where it parts two panes standing side by side — the
+   page puts it there, and takes it away again wherever there is no such
+   border: below 60rem, where the frame is walked one pane at a time, and beside
+   a collapsed list, whose strip is the same width whatever is dragged. So there is no `display: none` here to
    keep in step with the rules that decide which panes are drawn: a divider that
    is drawn is a divider there is something either side of.
 
@@ -336,25 +494,64 @@
 /* And what a head at an edge does about it, said once for all of them: the room
    comes out of the head rather than off the pane, so what moves is the one band
    the controls are drawn over and the record under it is read exactly where it
-   was read before. */
+   was read before. The list's head is the one exception, dropped rather than
+   padded — see below. */
 .panes .paneHead {
   padding-left: var(--head-left, 0px);
   padding-right: var(--head-right, 0px);
 }
 
-/* From 60rem the window holds the sidebar beside the level being read: the
-   conversations stay, and the second column is the middle pane or the details.
+/* Except where a list stands beside the one pane, which is every width of the
+   frame that has one: the list is the left edge, and the pane beside it the
+   right — whichever of the two `data-pane` names. */
+.panes.listing > .pane {
+  --head-left: 0px;
+  --head-right: 0px;
+}
+
+.panes.listing > .middlePane,
+.panes.listing > .detailsPane {
+  --head-right: var(--controls-right, 0px);
+}
+
+/* And the pane beside the collapsed strip is padded by whatever of the left
+   inset reaches past the strip and its own padding: a Mac's lights end a little
+   beyond 3rem, over the start of that pane's title. Nought wherever the inset
+   is narrower than that, which is every window with none. After the rule above
+   that zeroes it, which is as specific: the order is what decides. */
+@media (width < 100rem) {
+  .panes.listing > .middlePane,
+  .panes.listing > .detailsPane {
+    --head-left: max(0px, var(--controls-left, 0px) - 4.25rem);
+  }
+}
+
+/* And the list at the left edge is not padded clear of the controls there but
+   dropped below them (Set 1265 Q19). The left edge is a Mac's traffic lights,
+   which stand over the very corner a 3rem strip puts its logo in, and a strip
+   cannot pad a logo out past an inset wider than itself — so the head takes no
+   left padding, and the chrome it is stuck to the top of pads it one band
+   lower instead: the band `head.ts` adds up and the app centres the lights in,
+   which the frame carries as `--controls-band` beside a left inset and nowhere
+   else. The lights stand where the app put them, in a strip of paper above the
+   logo.
+
+   One rule for the strip and for the pane expanded, and for the full sidebar,
+   so the logo never moves between beside the lights and below them as the pane
+   opens out or the window widens. And no rule about full screen, where the
+   lights withdraw: there is no inset there, so no band is written either and
+   the head stands at the top. The six pixels are the chrome's own, said above
+   for every pane in the app. */
+:root[data-app] .panes.listing > .conversationsPane > .paneChrome {
+  padding-top: calc(0.375rem + var(--controls-band, 0px));
+}
+
+/* From 60rem the panes stand side by side: the collapsed list beside the
+   timeline and the details, and the share's record beside what it has open.
    Each pane scrolls on its own from here, because two columns of one page's
    scroll would move the list the human is not reading. */
 @media (min-width: 60rem) {
   .panes {
-    /* The sidebar, the divider that moves it, and whichever level is being
-       read. A share of the window rather than a length: what the human is
-       trading away is a part of what they have, and what they have is not the
-       same window twice. The default behind the name is the 15rem this column
-       used to be fixed at, as a share of the window the third pane arrives
-       at. */
-    grid-template-columns: var(--pane-sidebar, 20%) auto 1fr;
     height: 100dvh;
     /* And nothing inside it may make the document taller than that. The frame
        is the window's height here, so anything standing past the bottom of it
@@ -377,30 +574,35 @@
     overscroll-behavior: contain;
   }
 
-  /* The column again, said where this width is what shows the pane. */
-  .panes > .conversationsPane {
-    display: flex;
+  /* The strip, the timeline, the divider between it and the details, and the
+     details. The timeline's a share of the window rather than a length: what
+     the human is trading away is a part of what they have, and what they have
+     is not the same window twice. */
+  .panes.listing {
+    grid-template-columns: 3rem var(--pane-middle, 30%) auto 1fr;
   }
 
-  /* And the window's height it asked for while it was the page goes: the pane
-     is a cell of a frame that is already exactly that tall, and asking the
-     viewport for it a second time is what leaves a pane standing a pixel past
-     the bottom of the frame. Written against the selector that set it, which is
-     what it takes to outrank it. */
-  .panes[data-pane="conversations"] > .conversationsPane {
-    min-height: auto;
-  }
-
-  .panes:not([data-pane="details"]) > .middlePane,
-  .panes[data-pane="details"] > .detailsPane {
+  /* Every pane the list's frame was handed, `data-pane` naming none of them —
+     and the details as a column where they hold a composer or a Screen, which
+     is the column the rules further down make of it where it is shown by
+     name. */
+  .panes.listing > .middlePane,
+  .panes.listing > .detailsPane {
     display: block;
   }
 
-  /* And the conversations being on screen is what makes the middle pane's way
-     back to them pointless, so it goes. The details pane keeps its own: it is
-     what the second column gives up to. The way back is drawn by `PaneHead`,
-     and wears this name so that the frame can say where one is not needed. */
-  .middlePane .paneBack {
+  .panes.listing > .detailsPane:has(.paneComposer),
+  .panes.listing > .detailsPane:has(.paneScreen) {
+    display: flex;
+  }
+
+  /* And the details pane's way back goes, the timeline it goes back to
+     standing beside it; and the timeline's way on into the details, which are
+     beside it too. The way back is drawn by `PaneHead` and the way on by
+     `Timeline.tsx`, and each wears the frame's name so that the frame can say
+     where one is not needed. */
+  .panes.listing .detailsPane .paneBack,
+  .panes.listing .paneForward {
     display: none;
   }
 
@@ -413,15 +615,12 @@
     --head-right: 0px;
   }
 
-  /* The head at the left edge, which is the sidebar's wherever there is a list
-     to pick from — the record's in the frame that has none, and the details
-     pane's in the frame that is nothing else. Each of the three is the first
-     column of the layout it names, and the two that are not the sidebar are the
-     frames said at the end of this file. */
-  .panes > .conversationsPane {
-    --head-left: var(--controls-left, 0px);
-  }
-
+  /* The head at the left edge, which is the list's wherever there is one —
+     dropped below the controls rather than padded, said above at every width —
+     the record's in the frame that has none, and the
+     details pane's in the frame that is nothing else. Each is the first column
+     of the layout it names, and the two that are not the list are the frames
+     said at the end of this file. */
   .panes.two > .middlePane {
     --head-left: var(--controls-left, 0px);
   }
@@ -431,50 +630,40 @@
   }
 
   /* And the head at the right edge, which is the details pane's in every frame
-     that shows one — and the middle pane's as well at this width, where the
-     second column is whichever of the two `data-pane` names and so both of them
-     are the far column, one at a time. Except in the frame with no list, where
-     the middle pane is the near column and the details pane is beside it: that
-     is what the `:not` says, and the 80rem block below is where the rest of it
-     stops. */
+     that shows one. The middle pane's stops being, where there is a list: below
+     here it was the far column whenever `data-pane` named it, and from here the
+     details stand beyond it. */
   .panes > .detailsPane {
     --head-right: var(--controls-right, 0px);
   }
 
-  .panes:not(.two) > .middlePane {
-    --head-right: var(--controls-right, 0px);
+  .panes.listing > .middlePane {
+    --head-right: 0px;
+  }
+
+  /* Nor is the details pane beside the strip from here, but where it is the
+     whole of the frame after it — `widened` — so the room past the strip that
+     the lights reach into is the middle pane's alone. */
+  .panes.listing:not(.widened) > .detailsPane {
+    --head-left: 0px;
+  }
+
+  /* And the edge a collapsed strip ends at is drawn by the middle pane alone
+     from here: the details are beyond a divider of their own. */
+  .panes.listing > .detailsPane {
+    border-left: 0;
   }
 }
 
-/* And from 80rem all three stand together, which is the frame as it is meant
-   to be read: pick, read, and look into. Nothing is anywhere else to go
-   to, so the ways between the panes go away — the last of them in
-   `PaneHead.module.css`, there being no pane left to name. */
-@media (min-width: 80rem) {
-  .panes {
+/* And from 100rem the list stands full, which is the frame as it is meant to
+   be read: pick, read, and look into, each at the share this device settled
+   it at. The default behind the sidebar's name is the 15rem this column used
+   to be fixed at, as a share of the 80rem window the third pane used to arrive
+   at. */
+@media (min-width: 100rem) {
+  .panes.listing {
     grid-template-columns:
       var(--pane-sidebar, 20%) auto var(--pane-middle, 30%) auto 1fr;
-  }
-
-  .panes > .pane {
-    display: block;
-  }
-
-  /* And the conversations pane goes on being the column it is below, said a
-     third time because the rule that shows every pane at this width would
-     otherwise make a block of it again. */
-  .panes > .conversationsPane {
-    display: flex;
-  }
-
-  /* And the middle pane stops being the far column: all three stand together
-     from here, so what is against the window's right edge is the details pane
-     and the middle pane is in the middle of the frame. The same selector the
-     inset was given by a breakpoint ago, said again rather than narrowed there —
-     what this width changes is the layout, and a rule about the layout belongs
-     at the width that has it. */
-  .panes:not(.two) > .middlePane {
-    --head-right: 0px;
   }
 }
 
@@ -544,6 +733,12 @@
   }
 }
 
+/* And never asked for in the frame with a list, which is a frame the window's
+   height at every width. */
+.panes.listing > .detailsPane:has(.paneComposer) {
+  min-height: auto;
+}
+
 /* The one exception to that pane: the one with a Screen in it, which is the one
    pane in the frame that ends where the window does rather than running on
    down the page. A column: the header and the turn count keep their size and
@@ -587,6 +782,12 @@
   }
 }
 
+/* The same in the frame with a list, which is a frame the window's height at
+   every width. */
+.panes.listing > .detailsPane:has(.paneScreen) {
+  height: auto;
+}
+
 .panes > .detailsPane:has(.paneScreen) > :not(.paneScreen) {
   flex: none;
 }
@@ -610,11 +811,12 @@
   padding-inline: 1.25rem;
 }
 
-/* And that it is a column at all, said twice, because the pane is shown by two
-   different rules: by name below the last breakpoint, and along with every
-   other pane above it. What must not happen is either of them turning into a
-   `display` for a pane that is meant to be hidden — so each is answered where
-   it is made rather than once over the top of both. */
+/* And that it is a column at all, said where the pane is shown: by name below
+   60rem, along with every pane of the list's frame from there — in the 60rem
+   block above — and from 80rem in the frames with no list. What must not
+   happen is any of them turning into a `display` for a pane that is meant to be
+   hidden — so each is answered where it is made rather than once over the top
+   of all of them. */
 .panes[data-pane="details"] > .detailsPane:has(.paneScreen) {
   display: flex;
 }
@@ -657,9 +859,9 @@
    three-pane frame reads as one thing and this reads as what it is — the same
    frame with the first level taken off.
 
-   The two stand side by side from the width the sidebar used to arrive at,
-   rather than waiting for the third breakpoint: what that breakpoint is about is
-   room for three columns, and there are two. */
+   The two stand side by side from 60rem, which is where the list's frame
+   stands its timeline beside its details: there are two columns here and room
+   for two. */
 .panes.two {
   grid-template-columns: 1fr;
 }
@@ -673,14 +875,6 @@
   .panes.two > .detailsPane {
     display: block;
   }
-
-  /* And the record's way back out to a list that is not there. The rule above
-     takes it off the middle pane once the sidebar is beside it; here there is
-     no sidebar to be beside, and the pane it would go back to has never
-     existed. */
-  .panes.two .middlePane .paneBack {
-    display: none;
-  }
 }
 
 /* And the other two panes rather than three: the frame the workbench is drawn
@@ -690,43 +884,29 @@
    rather than drawn empty, so nothing the Timeline's head would have carried is
    left standing over the pane beside it.
 
-   The details take the room, which is the whole of what this says: the sidebar
-   at the width this device settled it, its own divider, and everything after it.
-   No width of its own, and that is the point — the border is the sidebar's,
-   moving the sidebar's own percentage, and the middle pane's is left untouched
-   in this device's storage for the moment a second Event brings the column back.
+   The details take the room, which is the whole of what this says: the list
+   collapsed or at the width this device settled it, the sidebar's divider where
+   it is full, and everything after it. No width of its own, and that is the
+   point — the border is the sidebar's, moving the sidebar's own percentage, and
+   the middle pane's is left untouched in this device's storage for the moment a
+   second Event brings the column back.
+
+   Below 60rem there is nothing to say: the strip and the one pane are what the
+   list's frame always is there, and `data-pane` names the details.
 
    After every rule it overrides, as `.two` is and for the same reason: the
-   columns above are set on `.panes` at two widths and the rules that show a pane
-   are the same two classes deep as these. Two classes here outrank one there
-   whatever the order, and the order says which frame is the ordinary one all the
-   same. */
+   columns above are set on `.panes.listing` at the same two widths and the
+   same two classes deep, so the order is what decides, and it says which frame
+   is the ordinary one. */
 @media (min-width: 60rem) {
   .panes.widened {
+    grid-template-columns: 3rem 1fr;
+  }
+}
+
+@media (min-width: 100rem) {
+  .panes.widened {
     grid-template-columns: var(--pane-sidebar, 20%) auto 1fr;
-  }
-
-  /* The second column is the details at every width from here, rather than
-     whichever level `data-pane` names: there is no middle pane for it to name,
-     and the walk that attribute is for is the narrow window's. */
-  .panes.widened > .detailsPane {
-    display: block;
-  }
-
-  /* Except where it holds a composer, which is a column in every frame — this
-     one above all, a Conversation with nothing on its record but its Brief
-     being exactly what stands the panes this wide. */
-  .panes.widened > .detailsPane:has(.paneComposer) {
-    display: flex;
-  }
-
-  /* And the details pane's way back out, which the sidebar being on screen
-     makes pointless exactly as it does the Timeline's. Said here rather than
-     left to the 80rem rule in `PaneHead.module.css`, because what takes the way
-     back away is the pane it would go back to already standing beside this one —
-     and in this frame that happens a breakpoint earlier. */
-  .panes.widened .detailsPane .paneBack {
-    display: none;
   }
 }
 
