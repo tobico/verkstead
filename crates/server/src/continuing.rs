@@ -52,6 +52,12 @@
 //! standing on the one before it, so such a roadmap runs exactly as it always
 //! did: there is one scheduler rather than two.
 //!
+//! **A stage that stands on no other stage stands on the roadmap's own
+//! Conversation**, and is not ready until that Conversation's wrap-up has
+//! settled — so a look made while the roadmap is still being reviewed starts
+//! nothing of it, and the roadmap's own settle is what starts its first stages.
+//! The rule is [`stages::ready`]'s, the one every reading goes through.
+//!
 //! **Each start is its own act.** A branch already taken, a branch standing in the
 //! way, no git author configured, a fetch git would not make, a companion that
 //! cannot be delivered: each of them halts the one stage, says so on the settled

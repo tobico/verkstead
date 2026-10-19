@@ -4226,7 +4226,10 @@ roadmap has finished, there being nothing unmerged left to stand on. What the
 branch ends up **stacked on** is a second fact and a later one, settled at the
 Stage's finish when it joins the chain; where the target repository records no
 way to stack a Stage for review the base is the same, and the pull request
-carries the branch below it until that one merges.
+carries the branch below it until that one merges. **A Stage that stands on no
+other Stage stands on the roadmap's own Conversation**: it is not started until
+that Conversation's wrap-up has settled, so nothing of a roadmap starts before
+the roadmap itself has been reviewed.
 
 **Its line in `ROADMAP.md` declares what it stands on**, after the link to the
 brief: `after 01, 03` names other stages of the same roadmap by their labels as
