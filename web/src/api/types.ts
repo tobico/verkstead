@@ -3232,9 +3232,10 @@ path: string, entries: Array<FolderEntry>, } } | "Outside" | "UnderGit" | "RootG
 export type ForwardSkip = "port_busy" | "not_permitted";
 
 /**
- * Whether a Forward is carrying connections, or could not be held here.
+ * Whether a Forward is carrying connections, could not be held here, or is
+ * waiting on its member.
  */
-export type ForwardStanding = { "kind": "forwarding" } | { "kind": "skipped", reason: ForwardSkip, };
+export type ForwardStanding = { "kind": "forwarding" } | { "kind": "skipped", reason: ForwardSkip, } | { "kind": "unreachable" };
 
 /**
  * One of them: the port, the device and terminal it reaches, the Conversation

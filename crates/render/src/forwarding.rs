@@ -57,7 +57,8 @@ pub struct ForwardView {
     pub standing: ForwardStanding,
 }
 
-/// Whether a Forward is carrying connections, or could not be held here.
+/// Whether a Forward is carrying connections, could not be held here, or is
+/// waiting on its member.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -69,6 +70,11 @@ pub enum ForwardStanding {
     /// Nothing listening here for it, and why. Tried again while it stands, so a
     /// port that frees is taken without anybody pressing anything.
     Skipped { reason: ForwardSkip },
+
+    /// Its member is not answering — asleep, off the network. The listener
+    /// stays bound, so the port is still this Forward's, but a connection made
+    /// to it fails until the member answers again: *device unreachable*.
+    Unreachable,
 }
 
 /// Why a Forward could not be held.

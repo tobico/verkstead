@@ -2,10 +2,11 @@
 //! ports** beside *Show archived*, and under a press the Forwards themselves.
 //!
 //! A **Forward** is a port a terminal on another device of the cluster is
-//! listening on, held on this machine's own `localhost` at the same number for
-//! as long as the terminal's tab is open here. The server holds them — see
-//! `forwarding.rs` — and this only says what it holds: nothing here starts one,
-//! and nothing stops one either. The tab is the stop.
+//! listening on, held on this machine's own `localhost` at the same number from
+//! the first time the terminal's tab is opened here until the server stops or
+//! the terminal ends. The server holds them — see `forwarding.rs` — and this
+//! only says what it holds: nothing here starts one, and nothing stops one
+//! either.
 //!
 //! Drawn only while there is something to say, forwarding or skipped: a foot
 //! that read *Forwarding 0 ports* on every machine that has never opened a
@@ -69,18 +70,31 @@ export function Forwarding(): JSX.Element {
   );
 }
 
+/// What an unreachable Forward reads: its member is not answering.
+const UNREACHABLE = "device unreachable";
+
 /// One Forward: the port, the device it reaches and the Conversation the
 /// terminal is on.
 ///
 /// A link where it is forwarding, opening `localhost` at that port in a tab of
 /// its own — which is the server on the member, carried across. A skipped one
 /// is not a link: `localhost` at that number is whatever this machine already
-/// had there, which is exactly what the row is not.
+/// had there, which is exactly what the row is not. Nor is an unreachable one:
+/// the port is still held here, but a page opened on it would fail, and the
+/// row is there to say why.
 function Row(props: { forward: ForwardView }): JSX.Element {
-  const skipped = (): ForwardSkip | null =>
-    props.forward.standing.kind === "skipped"
-      ? props.forward.standing.reason
-      : null;
+  const skipped = (): string | null => {
+    const standing = props.forward.standing;
+
+    switch (standing.kind) {
+      case "forwarding":
+        return null;
+      case "skipped":
+        return SKIPPED[standing.reason];
+      case "unreachable":
+        return UNREACHABLE;
+    }
+  };
 
   const lines = (): JSX.Element => (
     <>
@@ -89,7 +103,7 @@ function Row(props: { forward: ForwardView }): JSX.Element {
           narrow as the sidebar, and every line of a row is cut short before it
           wraps — which a reason must never be. */}
       <Show when={skipped()}>
-        {(reason) => <span class={styles.reason}>{SKIPPED[reason()]}</span>}
+        {(reason) => <span class={styles.reason}>{reason()}</span>}
       </Show>
       <span class={styles.device}>
         <Icon of={osIcon(props.forward.os)} class={styles.os} />

@@ -43,10 +43,15 @@
 //! **A Forward ends** [`GRACE`] after it leaves the reading, so a dev server
 //! restarting on a file change keeps it. Leaving the reading is every ending
 //! there is: the port closing, the terminal ending. And it ends at once where
-//! the member reads as unreachable or is no member at all, there being nothing
-//! to connect to — and is taken up again once it answers, through the reading
-//! of everything it offers.
+//! the member is no member at all, there being nothing to wait for.
 //! Ending closes the listener, and the connections crossing it go with it.
+//!
+//! **A member not answering keeps its Forwards.** Asleep, off the network, the
+//! internet gone for a while: each of its Forwards stands as *unreachable*, its
+//! listener still bound — `localhost` at that port is still this Forward's and
+//! nobody else's, and a connection made to it fails because the member cannot
+//! be dialled. Once it answers, everything it offers is read again: a port
+//! still offered is forwarding again, and one gone starts its grace.
 //!
 //! **This device's own business.** The reading is [`forwards`], for this
 //! device's own browser, and every change is a `forwards` Nudge — both held
@@ -125,10 +130,15 @@ struct Key {
     terminal: i64,
 }
 
-/// One Forward as it is held: listening or skipped, and since when it has been
-/// missing from the member's reading, where it is.
+/// One Forward as it is held: listening or skipped, whether its member is
+/// answering, and since when it has been missing from the member's reading,
+/// where it is.
 struct Forward {
     held: Held,
+
+    /// Whether the last turn found its member not answering — what reads as
+    /// *unreachable*, whatever is held.
+    unreachable: bool,
 
     /// When the port was last seen leaving the reading — `None` while it is in
     /// it. What [`GRACE`] is counted from.
@@ -233,9 +243,8 @@ async fn held(state: AppState) {
             },
 
             _ = turning.tick() => {
-                // A member answering again after a turn that found it not, which
-                // ended its Forwards: the member has nothing new to say about
-                // ports that did not move.
+                // A member answering again after a turn that found it not: what
+                // it offers may have moved while nobody could hear it say so.
                 for device in turned(&state, &mut away).await {
                     everything(&state, &device).await;
                 }
@@ -409,6 +418,7 @@ fn matched(
                 key,
                 Forward {
                     held,
+                    unreachable: false,
                     missing: None,
                 },
             );
@@ -424,7 +434,9 @@ fn matched(
 }
 
 /// Look the Forwards over: end the ones whose grace has run out and the ones on
-/// a member that is not answering, and try again the ones that were skipped.
+/// a device that is no member any more, mark the ones on a member that is not
+/// answering as unreachable — and the ones on a member answering again as not —
+/// and try again the ones that were skipped.
 ///
 /// **And say which members have come back** — answering now, where they were
 /// in `away` on the last turn — so that everything they offer is read again.
@@ -463,15 +475,19 @@ async fn turned(state: &AppState, away: &mut BTreeSet<String>) -> BTreeSet<Strin
             .collect()
     });
 
+    let members: Option<BTreeSet<String>> = rows
+        .as_ref()
+        .map(|rows| rows.iter().map(|member| member.device.clone()).collect());
+
     let changed = {
         let mut forwards = state.forwards.held();
         let before = forwards.len();
         let now = Instant::now();
 
         forwards.retain(|key, forward| {
-            let gone = answering
+            let gone = members
                 .as_ref()
-                .is_some_and(|answering| !answering.contains(&key.device));
+                .is_some_and(|members| !members.contains(&key.device));
             let over = forward
                 .missing
                 .is_some_and(|since| now.duration_since(since) >= GRACE);
@@ -484,7 +500,7 @@ async fn turned(state: &AppState, away: &mut BTreeSet<String>) -> BTreeSet<Strin
                     terminal = key.terminal,
                     "a Forward ended: {}",
                     match gone {
-                        true => "its member is not answering",
+                        true => "its device is no member any more",
                         false => "its port has left the member's reading",
                     },
                 );
@@ -494,6 +510,26 @@ async fn turned(state: &AppState, away: &mut BTreeSet<String>) -> BTreeSet<Strin
         });
 
         let mut changed = forwards.len() != before;
+
+        if let Some(answering) = answering.as_ref() {
+            for (key, forward) in forwards.iter_mut() {
+                let unreachable = !answering.contains(&key.device);
+
+                if forward.unreachable != unreachable {
+                    tracing::info!(
+                        port = key.port,
+                        device = key.device,
+                        "a Forward's member is {}",
+                        match unreachable {
+                            true => "not answering, so it stands as unreachable",
+                            false => "answering again",
+                        },
+                    );
+                    forward.unreachable = unreachable;
+                    changed = true;
+                }
+            }
+        }
 
         // The order matters for the ones skipped as busy: a Forward that ended
         // above has let go of its port, and a skip of the same number is free to
@@ -517,7 +553,7 @@ async fn turned(state: &AppState, away: &mut BTreeSet<String>) -> BTreeSet<Strin
         state.nudges.announce_here(Nudge::Forwards);
     }
 
-    let (Some(rows), Some(answering)) = (rows, answering) else {
+    let (Some(members), Some(answering)) = (members, answering) else {
         return BTreeSet::new();
     };
 
@@ -526,8 +562,6 @@ async fn turned(state: &AppState, away: &mut BTreeSet<String>) -> BTreeSet<Strin
         .filter(|device| answering.contains(*device))
         .cloned()
         .collect();
-
-    let members: BTreeSet<String> = rows.into_iter().map(|member| member.device).collect();
 
     *away = looking
         .into_iter()
@@ -751,7 +785,8 @@ fn upgrading(key: &Key) -> Call {
 
 /// `GET /api/ui/forwards` — every Forward this device holds, for its own
 /// browser: the port, the device it reaches with that device's name and OS, the
-/// Conversation and its title, and whether it is forwarding or skipped and why.
+/// Conversation and its title, and whether it is forwarding, skipped and why, or
+/// waiting on its member to answer.
 ///
 /// **Never served over the link** — the prefix is one this device keeps to
 /// itself, see [`crate::peer::workbench::KEPT_TO_ITSELF`].
@@ -762,6 +797,7 @@ pub(crate) async fn forwards(State(state): State<AppState>) -> Json<ForwardsView
         .iter()
         .map(|(key, forward)| {
             let standing = match forward.held {
+                _ if forward.unreachable => ForwardStanding::Unreachable,
                 Held::Forwarding { .. } => ForwardStanding::Forwarding,
                 Held::Skipped(reason) => ForwardStanding::Skipped { reason },
             };

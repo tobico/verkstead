@@ -205,6 +205,31 @@ describe("the popup it opens", () => {
     expect(card.querySelectorAll("a[role=menuitem]")).toHaveLength(1);
   });
 
+  /// An unreachable one is no link either — its port is still held here, but a
+  /// page opened on it would fail while its member is not answering — and says
+  /// so, dimmed the way a skipped one is.
+  it("dims a Forward whose device is unreachable and says so", async () => {
+    forwardingThese(() => [
+      forward(3000),
+      forward(8080, { standing: { kind: "unreachable" } }),
+    ]);
+    const { container } = mountSidebar("/");
+
+    fireEvent.click(await item(container));
+    const card = await drawn(
+      container,
+      `.${forwarding.forwarding} [role="menu"]`,
+    );
+
+    const unreachable = card.querySelector(`.${forwarding.skipped}`)!;
+    expect(unreachable).not.toBeNull();
+    expect(unreachable.tagName).not.toBe("A");
+    expect(unreachable.getAttribute("aria-disabled")).toBe("true");
+    expect(unreachable.textContent).toContain("localhost:8080");
+    expect(unreachable.textContent).toContain("device unreachable");
+    expect(card.querySelectorAll("a[role=menuitem]")).toHaveLength(1);
+  });
+
   it("closes on Escape and hands the focus back to the item", async () => {
     forwardingThese(() => [forward(3000)]);
     const { container } = mountSidebar("/");

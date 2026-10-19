@@ -99,6 +99,11 @@ const UNWATCHED: Duration = Duration::from_secs(10);
 /// again once it has ended: `relaying::freshness::AGAIN`.
 const STREAM_AGAIN: Duration = Duration::from_secs(5);
 
+/// And how long it waits after a try that reached nobody: the wait doubles
+/// while nothing answers, so a member found away is tried again this long
+/// after.
+const AGAIN_AFTER_A_MISS: Duration = Duration::from_secs(10);
+
 /// How long a Forward outlives its port leaving the reading:
 /// `forwarding::GRACE`.
 const GRACE: Duration = Duration::from_secs(2);
@@ -1746,60 +1751,138 @@ async fn a_terminal_no_tab_is_attached_to_is_read_every_ten_seconds() {
     );
 }
 
-/// A member a turn found not answering has its Forwards ended at once — and
-/// taken up again once it answers, its tab closed long since and nothing about
-/// its ports having moved to say so.
+/// A member that stops answering keeps its Forward: it stands as unreachable,
+/// its port still bound here and a connection to it failing, and A's own pages
+/// are told — and once the member answers, it is forwarding again, nobody
+/// having opened a tab and nothing about its ports having moved to say so.
 #[tokio::test]
-async fn a_forward_ended_by_its_member_not_answering_comes_back_when_it_does() {
-    let (a, b, _holding) = linked_forwarding().await;
+async fn a_member_not_answering_keeps_its_forward_until_it_answers_again() {
+    let (a, b, _holding, link) = linked_forwarding_over_a_link().await;
     let (app, at) = a.served().await;
 
-    let number = opened(
-        &app,
-        &through(B, &format!("/api/ui/conversations/{THERE}/terminals")),
-    )
-    .await;
+    let (_, port) = forwarded_and_closed(&app, at, |port| echoing("127.0.0.1", port)).await;
 
-    let mut terminal = Terminal::attached(format!(
-        "ws://{at}{}",
-        through(
-            B,
-            &format!("/api/ui/conversations/{THERE}/terminals/{number}/attach")
-        )
-    ))
-    .await;
+    let mut own = Listening::open(&app, "/api/ui/nudges").await;
 
-    let port = free_port();
-    terminal.typed(&echoing("127.0.0.1", port)).await;
-    terminal.until(&format!("listening-{port}")).await;
+    // B gone from the network: every dial to it now reaches nothing, which is
+    // what the stream's next try writes down.
+    link.pointed_at(nowhere());
+    link.cut();
 
-    forwarded_until(&app, |read| {
-        standing(read, port) == Some(ForwardStanding::Forwarding)
+    let took = forwarded_until(&app, |read| {
+        standing(read, port) == Some(ForwardStanding::Unreachable)
     })
     .await;
+    assert!(
+        took < STREAM_AGAIN + PROMPTLY,
+        "the Forward took {took:?} to stand as unreachable",
+    );
 
-    terminal.closed().await;
+    assert!(
+        heard_nudged(&mut own, Duration::from_millis(500))
+            .await
+            .contains(&Nudged::here(Nudge::Forwards)),
+        "A's own pages should have been told the Forward's standing moved",
+    );
 
-    // What a dial that reached none of B's addresses writes down.
-    verkstead_store::member_unreachable(&a.pool, B)
-        .await
-        .unwrap();
+    // Still A's to hold: nobody else takes the port while the member is away.
+    let taken = TcpListener::bind(forwarded_v4(port))
+        .expect_err("the port should still be held by the Forward");
+    assert_eq!(taken.kind(), std::io::ErrorKind::AddrInUse);
 
-    forwarded_until(&app, <[ForwardView]>::is_empty).await;
+    fails(forwarded_v4(port)).await;
 
-    // And what the next dial that gets through writes back.
-    a.linked_to(&b.device, vec![b.at()]).await;
+    // And B back on the network.
+    link.pointed_at(b.address);
 
     let took = forwarded_until(&app, |read| {
         standing(read, port) == Some(ForwardStanding::Forwarding)
     })
     .await;
     assert!(
-        took < PROMPTLY,
-        "port {port} took {took:?} to be forwarded again once B answered"
+        took < AGAIN_AFTER_A_MISS + PROMPTLY,
+        "port {port} took {took:?} to be forwarded again once B answered",
     );
 
     echoes(forwarded_v4(port), "after-the-blip").await;
+}
+
+/// A member that answers again with the port gone — restarted while it was
+/// away, its terminals ended with it — has its Forward end within the grace and
+/// a turn of answering.
+#[tokio::test]
+async fn a_member_answering_again_without_the_port_ends_its_forward() {
+    let (a, b, _holding, link) = linked_forwarding_over_a_link().await;
+    let (app, at) = a.served().await;
+
+    let (_, port) = forwarded_and_closed(&app, at, |port| echoing("127.0.0.1", port)).await;
+
+    // Restarted before it goes away rather than while it is, so that it is
+    // there to answer by the stream's next try.
+    let again = b.restarted().await;
+
+    link.pointed_at(nowhere());
+    link.cut();
+
+    forwarded_until(&app, |read| {
+        standing(read, port) == Some(ForwardStanding::Unreachable)
+    })
+    .await;
+
+    link.pointed_at(again.address);
+    let back = Instant::now();
+
+    forwarded_until(&app, <[ForwardView]>::is_empty).await;
+    let took = back.elapsed();
+    assert!(
+        took < AGAIN_AFTER_A_MISS + GRACE + PROMPTLY,
+        "the Forward ended {took:?} after its member answered without the port",
+    );
+}
+
+/// A device unlinked is no member to wait for: its Forwards end at once.
+#[tokio::test]
+async fn an_unlinked_member_has_its_forwards_end_at_once() {
+    let (a, _b, _holding) = linked_forwarding().await;
+    let (app, at) = a.served().await;
+
+    let (_, port) = forwarded_and_closed(&app, at, |port| echoing("127.0.0.1", port)).await;
+
+    verkstead_store::forget_member(&a.pool, B).await.unwrap();
+    let unlinked = Instant::now();
+
+    forwarded_until(&app, <[ForwardView]>::is_empty).await;
+    let took = unlinked.elapsed();
+    assert!(
+        took < PROMPTLY,
+        "the Forward ended {took:?} after its member was unlinked",
+    );
+
+    TcpListener::bind(forwarded_v4(port)).expect("the port to have been let go");
+}
+
+/// An address nothing listens on: what a member gone from the network is
+/// dialled at.
+fn nowhere() -> SocketAddr {
+    SocketAddr::new(Ipv4Addr::LOCALHOST.into(), free_port())
+}
+
+/// Whether a connection to `at` is ended without an answer: what a Forward
+/// whose member cannot be dialled does with one.
+async fn fails(at: SocketAddr) {
+    let mut stream = tokio::time::timeout(PATIENCE, tokio::net::TcpStream::connect(at))
+        .await
+        .expect("the Forward to accept")
+        .expect("the Forward to accept");
+
+    stream.write_all(b"nobody-there").await.unwrap();
+
+    let mut answer = Vec::new();
+    tokio::time::timeout(PATIENCE, stream.read_to_end(&mut answer))
+        .await
+        .expect("the connection to be ended")
+        .ok();
+    assert!(answer.is_empty(), "{}", String::from_utf8_lossy(&answer));
 }
 
 /// Where A served afresh forwards: another IPv4 loopback address. The first A

@@ -799,6 +799,19 @@ impl Members {
         }
     }
 
+    /// And mark one dimmed by [`Members::unreachable`] as answering again,
+    /// which is what a dial that got through without reading its identity
+    /// does — see [`verkstead_store::member_answering`].
+    pub(crate) async fn answering(&self, device: &str) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::member_answering(pool, device)
+                .await
+                .with_context(|| format!("marking device {device} as answering again")),
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
     /// And write down where one is reached directly, which is what a Keeper
     /// and its Annex hold each other at — see
     /// [`verkstead_store::member_reached_at`] and [`Member::direct`].
