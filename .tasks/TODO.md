@@ -24,5 +24,5 @@ Sets 1259, 1262, 1265 and 1270.
 - [x] 02: What the collapsed pane draws — [details](02-what-the-collapsed-pane-draws.md)
 - [x] 03: Touch — [details](03-touch.md)
 - [x] 04: The narrow window's walk — [details](04-the-narrow-windows-walk.md)
-- [ ] 05: The Mac app's head — [details](05-the-mac-apps-head.md)
+- [x] 05: The Mac app's head — [details](05-the-mac-apps-head.md)
 - [ ] 06: The design document — [details](06-the-design-document.md)

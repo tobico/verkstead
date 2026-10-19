@@ -67,9 +67,12 @@
 //! no title bar, so the platform draws its controls over a corner of the page
 //! (ADR-0020) — and which head is at that corner is a fact about the layout
 //! rather than about a pane. The sidebar is leftmost where there is a list to
-//! pick from, the record is where there is none, the details pane is rightmost
-//! always, and the one pane a narrow window shows beside the collapsed list is
-//! rightmost too — and both at once where there is no list beside it. Those are
+//! pick from — and its head drops below a left inset by the head's band rather
+//! than being padded past it, a collapsed strip being narrower than a Mac's
+//! traffic lights — the record is where there is none, the details pane is
+//! rightmost always, and the one pane a narrow window shows beside the
+//! collapsed list is rightmost too — and both at once where there is no list
+//! beside it. Those are
 //! the distinctions this file already makes for its columns and its dividers,
 //! so the two insets arrive on the frame as variables the way the column widths
 //! do and `Panes.module.css` hands each of them to the head that stands at that

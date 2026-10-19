@@ -29,6 +29,15 @@
 //! it — and the arithmetic stays here, where the rules that draw the head are
 //! already added up once, rather than being written into the app a second time.
 //!
+//! **The list's head is not in that row, though, and that is on purpose** (Set
+//! 1265 Q19). The lights stand over the corner a 3rem collapsed strip puts its
+//! logo in, so the conversations pane's head drops one [`band`] lower wherever
+//! there is a left inset, and the band the lights are centred in is a strip of
+//! paper above it. What the app is told does not change: the row's middle is
+//! where a head's first row *would* stand, which is where the pane beside the
+//! strip still draws its own — see `reserved` in `controls.ts`, which carries
+//! the band to the frame.
+//!
 //! **A flip of the scheme is `prefers-color-scheme` and nothing else.** There is
 //! no theme switch in this app — the scheme is the machine's — so the media query
 //! is both the question and the only warning that the answer has changed, which

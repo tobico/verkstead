@@ -6,7 +6,9 @@
 //! top-right on Windows and Linux, the traffic lights at the top-left on a Mac.
 //! Whatever the page puts in that corner is underneath them, which is a control
 //! nobody can press — so the page has to know how much of each edge is not its
-//! own, and the frame is what pads its outermost heads by it (`Panes.tsx`).
+//! own, and the frame is what keeps its outermost heads clear of it
+//! (`Panes.tsx`): padded in from the right-hand edge by the inset, and at the
+//! left — where the list stands — dropped below the lights by the head's band.
 //!
 //! **The rectangle is the page's area rather than the controls'.**
 //! `getTitlebarAreaRect()` answers with what is left *for the page* across the
@@ -23,8 +25,11 @@
 //! 43, against the packed app: the overlay is there, it says it is `visible`, and
 //! its rectangle begins past the traffic lights — `x: 81` in a window whose lights
 //! the app had put twenty points in and which therefore ended at seventy-five. So
-//! the left inset the frame pads by is the lights' own strip, and the head at that
-//! edge clears them by the same reading Windows and Linux are padded by.
+//! the left inset is the lights' own strip, read the way Windows and Linux are —
+//! and what the frame does with it at that edge is drop the list's head below
+//! them rather than pad it past them, a collapsed strip being 3rem across (see
+//! [`reserved`]). The pane beside the strip is padded by whatever of the inset
+//! reaches past it.
 //!
 //! **The far margin of that strip is the platform's own**, and it is worth knowing
 //! that it moves a little: the same window read `x: 94` after a push had moved the
@@ -37,7 +42,7 @@
 //! **And full screen is where a Mac withdraws them altogether**, which is the one
 //! state that would have been a gap in the head with nothing in it: measured in the
 //! same run, the overlay there says `visible: false` over a rectangle of zeroes, so
-//! [`CLEAR`] is what comes back and the head stands at the window's own edge again.
+//! [`CLEAR`] is what comes back and the head stands at the top of the window again.
 //! The guard that answers it is the one written for a browser, and it wanted no
 //! platform added to it.
 //!
@@ -57,6 +62,8 @@
 //! browser is served is the document it was.
 
 import { createSignal, onCleanup, type Accessor } from "solid-js";
+
+import { band } from "./head";
 
 /// How much room the controls take at each edge of the window, in CSS pixels.
 ///
@@ -139,16 +146,32 @@ export function controls(): Accessor<Insets> {
   return taken;
 }
 
-/// What the frame carries the insets as, for the rules that pad its outermost
-/// heads by them.
+/// What the frame carries the insets as, for the rules that keep its outermost
+/// heads clear of them.
 ///
 /// Variables on the frame, the way its column widths already are — and an edge
 /// the controls take nothing from is left unsaid rather than written as nought:
 /// the stylesheet has the nought behind each name, so a browser's frame carries
 /// exactly the style attribute it carried before any of this.
+///
+/// **And the head's band beside a left inset, as `--controls-band`**, which is
+/// what the conversations pane drops its head by (Set 1265 Q19). The lights are
+/// at the left, which is where a list is standing at every width that has one,
+/// and a 3rem collapsed strip cannot pad its logo out past an inset of five: so
+/// that head stands one band lower instead, under the strip of paper the lights
+/// are centred in. The band is [`band`]'s, the one the app is already told
+/// about, and it is written only where there is a left inset — a stylesheet
+/// cannot ask whether a length is nought, and a variable that is there or is not
+/// is how it is told. Full screen on a Mac answers [`CLEAR`], so the head stands
+/// at the top there with nothing asked about full screen by name.
 export function reserved(taken: Insets): Record<string, string> {
   return {
-    ...(taken.left > 0 ? { "--controls-left": `${taken.left}px` } : {}),
+    ...(taken.left > 0
+      ? {
+          "--controls-left": `${taken.left}px`,
+          "--controls-band": `${band()}px`,
+        }
+      : {}),
     ...(taken.right > 0 ? { "--controls-right": `${taken.right}px` } : {}),
   };
 }
