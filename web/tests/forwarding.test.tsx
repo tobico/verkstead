@@ -230,6 +230,87 @@ describe("the popup it opens", () => {
     expect(card.querySelectorAll("a[role=menuitem]")).toHaveLength(1);
   });
 
+  /// A × at the end of every row, forwarding, skipped and unreachable alike,
+  /// each called by the port it ends — and beside the link rather than inside
+  /// it, so the rest of the row still opens the page.
+  it("draws a × on every row", async () => {
+    forwardingThese(() => [
+      forward(3000),
+      forward(8080, { standing: { kind: "skipped", reason: "port_busy" } }),
+      forward(9000, { standing: { kind: "unreachable" } }),
+    ]);
+    const { container } = mountSidebar("/");
+
+    fireEvent.click(await item(container));
+    const card = await drawn(
+      container,
+      `.${forwarding.forwarding} [role="menu"]`,
+    );
+
+    const stops = [...card.querySelectorAll(`.${forwarding.stop}`)];
+    expect(stops.map((stop) => stop.getAttribute("aria-label"))).toEqual([
+      "Stop forwarding localhost:3000",
+      "Stop forwarding localhost:8080",
+      "Stop forwarding localhost:9000",
+    ]);
+    expect(stops.every((stop) => !stop.closest("a"))).toBe(true);
+  });
+
+  /// A press ends that one Forward and leaves the menu open on the rest, so
+  /// several can be ended in one visit; the last one ended takes the item with
+  /// it.
+  it("takes a row away on a press, and the item at none", async () => {
+    let held = [forward(3000), forward(5173)];
+    const ended: string[] = [];
+    const dismissing = (port: number) =>
+      whenever(
+        `/api/ui/forwards/${MEMBER}/7/1/${port}`,
+        () => {
+          ended.push(`${port}`);
+          held = held.filter((forward) => forward.port !== port);
+          return Promise.resolve(new Response(null, { status: 204 }));
+        },
+        "DELETE",
+      );
+    theWorkbench(
+      whenever("/api/ui/forwards", () =>
+        json({ forwards: held } satisfies ForwardsView)(),
+      ),
+      dismissing(3000),
+      dismissing(5173),
+    );
+    const { container } = mountSidebar("/");
+
+    const trigger = await item(container);
+    fireEvent.click(trigger);
+    const card = await drawn(
+      container,
+      `.${forwarding.forwarding} [role="menu"]`,
+    );
+
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Stop forwarding localhost:3000" }),
+    );
+
+    await waitFor(() =>
+      expect(card.querySelectorAll("a[role=menuitem]")).toHaveLength(1),
+    );
+    expect(ended).toEqual(["3000"]);
+    expect(card.isConnected).toBe(true);
+    expect(card.textContent).toContain("localhost:5173");
+    expect(card.textContent).not.toContain("localhost:3000");
+    await waitFor(() => expect(trigger.textContent).toBe("Forwarding 1 port"));
+
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Stop forwarding localhost:5173" }),
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector(`.${forwarding.forwarding}`)).toBeNull(),
+    );
+    expect(ended).toEqual(["3000", "5173"]);
+  });
+
   it("closes on Escape and hands the focus back to the item", async () => {
     forwardingThese(() => [forward(3000)]);
     const { container } = mountSidebar("/");

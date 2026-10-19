@@ -186,6 +186,10 @@ async fn relay(State(state): State<AppState>, request: Request) -> Response {
         }
     }
 
+    // What it was for, for the one socket this device has an interest in once
+    // it is up: an attach on a member's terminal — see below.
+    let attaching = taking.is_some().then(|| onwards.clone());
+
     let call = Call {
         method: parts.method,
         onwards,
@@ -198,7 +202,17 @@ async fn relay(State(state): State<AppState>, request: Request) -> Response {
 
     match devices.relay(&device, call).await {
         Ok(answered) => match taking {
-            Some(taking) => bridging::bridged(taking, answered),
+            Some(taking) => {
+                // The terminal's tab opened here, which takes back what this
+                // device dismissed on it — see [`crate::forwarding::attached`].
+                if let Some(onwards) = attaching
+                    && answered.status() == StatusCode::SWITCHING_PROTOCOLS
+                {
+                    crate::forwarding::attached(&state, &device, &onwards);
+                }
+
+                bridging::bridged(taking, answered)
+            }
             None => handed_back(answered),
         },
 

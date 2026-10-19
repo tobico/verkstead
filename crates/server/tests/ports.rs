@@ -2178,5 +2178,174 @@ async fn what_a_device_forwards_is_not_served_over_the_link() {
     assert_eq!(status, StatusCode::FORBIDDEN, "{said}");
     assert!(said.contains("keeps to itself"), "{said}");
 
+    // Nor is a member's × on one of them.
+    let (status, said) = asked(&relaying, "DELETE", &through(A, &dismissing(number, port))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{said}");
+    forwarded_until(&app, |read| {
+        standing(read, port) == Some(ForwardStanding::Forwarding)
+    })
+    .await;
+
     terminal.closed().await;
+}
+
+/// Where the × on the row of B's terminal `number`'s Forward of `port` presses.
+fn dismissing(number: i64, port: u16) -> String {
+    format!("/api/ui/forwards/{B}/{THERE}/{number}/{port}")
+}
+
+/// Press the × on that row, which answers with nothing whether or not A held
+/// the Forward.
+async fn dismissed(app: &Router, number: i64, port: u16) {
+    let (status, said) = asked(app, "DELETE", &dismissing(number, port)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{said}");
+}
+
+/// A press on the × ends the Forward at once — the port free at A's loopback
+/// and the row gone — and B's next `ports` Nudge, with the port still offered,
+/// does not take it again. Attaching the terminal again does.
+#[tokio::test]
+async fn a_cross_ends_a_forward_until_the_terminal_is_attached_again() {
+    let (a, _b, _holding) = linked_forwarding().await;
+    let (app, at) = a.served().await;
+
+    let second = free_port();
+    let (number, first) = forwarded_and_closed(&app, at, |first| opening(first, second)).await;
+
+    dismissed(&app, number, first).await;
+
+    let read: ForwardsView = call(&app, "GET", "/api/ui/forwards").await;
+    assert_eq!(standing(&read.forwards, first), None, "{:?}", read.forwards);
+    assert!(
+        tokio::net::TcpStream::connect(forwarded_v4(first))
+            .await
+            .is_err(),
+        "nothing should be listening on port {first} here once the Forward is dismissed",
+    );
+
+    // Pressed again, on a Forward A no longer holds: nothing to do.
+    dismissed(&app, number, first).await;
+
+    // A second port, opened and printed: a `ports` Nudge from B, whose reading
+    // still offers the first.
+    let mut asking = tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, first))
+        .await
+        .unwrap();
+    exchanged(&mut asking, "open", "opened").await;
+
+    forwarded_until(&app, |read| {
+        standing(read, second) == Some(ForwardStanding::Forwarding)
+    })
+    .await;
+
+    let offered: PortsView = call(&app, "GET", &through(B, &ports_path())).await;
+    assert!(holds(&offered.terminals, first), "{:?}", offered.terminals);
+
+    let read: ForwardsView = call(&app, "GET", "/api/ui/forwards").await;
+    assert_eq!(
+        standing(&read.forwards, first),
+        None,
+        "a dismissed Forward should not be taken again while its port is still offered: {:?}",
+        read.forwards,
+    );
+
+    // The tab opened again, which is the way back.
+    let terminal = Terminal::attached(format!(
+        "ws://{at}{}",
+        through(
+            B,
+            &format!("/api/ui/conversations/{THERE}/terminals/{number}/attach")
+        )
+    ))
+    .await;
+    let attached = Instant::now();
+
+    forwarded_until(&app, |read| {
+        standing(read, first) == Some(ForwardStanding::Forwarding)
+    })
+    .await;
+    let took = attached.elapsed();
+    assert!(
+        took < PROMPTLY,
+        "port {first} was taken again {took:?} after the terminal was attached again",
+    );
+
+    echoes(forwarded_v4(first), "after-the-tab-opened-again").await;
+
+    terminal.closed().await;
+}
+
+/// What a server is typed as that stops and listens again when asked: node,
+/// echoing on `port` as [`echoing`] does, and — on anything starting `restart`
+/// — closing, printing an address so the port's going is read at once, and
+/// listening again four seconds on, printing its address again.
+fn restarting(port: u16) -> String {
+    format!(
+        "node -e \"const n = require('net'); let server; \
+         const echo = s => s.on('data', d => String(d).startsWith('restart') ? restart() : \
+         s.write('echo:' + d)); \
+         const up = said => {{ server = n.createServer(echo).listen({port}, '127.0.0.1', \
+         () => console.log(said)); }}; \
+         const restart = () => {{ server.close(); \
+         setTimeout(() => console.log('down at http://local' + 'host:' + {port} + '/'), 300); \
+         setTimeout(() => up('up again at http://local' + 'host:' + {port} + '/'), 4000); }}; \
+         up('listening-' + {port})\"\n"
+    )
+}
+
+/// A dismissal is forgotten once the port leaves the member's reading, so a
+/// server that stops and listens again is forwarded afresh, nobody having
+/// opened a tab.
+#[tokio::test]
+async fn a_dismissed_server_listening_again_is_forwarded_again() {
+    let (a, _b, _holding) = linked_forwarding().await;
+    let (app, at) = a.served().await;
+
+    let (number, port) = forwarded_and_closed(&app, at, restarting).await;
+
+    dismissed(&app, number, port).await;
+
+    let mut asking = tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+        .await
+        .unwrap();
+    asking.write_all(b"restart").await.unwrap();
+    drop(asking);
+
+    // Gone from B's reading, and back in it.
+    until(&app, &through(B, &ports_path()), |read| !holds(read, port)).await;
+    until(&app, &through(B, &ports_path()), |read| holds(read, port)).await;
+
+    forwarded_until(&app, |read| {
+        standing(read, port) == Some(ForwardStanding::Forwarding)
+    })
+    .await;
+
+    echoes(forwarded_v4(port), "after-it-listened-again").await;
+}
+
+/// A dismissal is memory: a hub served afresh reads everything its member
+/// offers and takes a dismissed Forward again.
+#[tokio::test]
+async fn a_hub_served_afresh_takes_a_dismissed_forward_again() {
+    let (a, _b, _holding) = linked_forwarding().await;
+    let (app, at) = a.served().await;
+
+    let (number, port) = forwarded_and_closed(&app, at, |port| echoing("127.0.0.1", port)).await;
+
+    dismissed(&app, number, port).await;
+    forwarded_until(&app, <[ForwardView]>::is_empty).await;
+
+    let (again, mut holding, staying) = a.forwarding_again(forwarding_afresh_on()).await;
+    holding.0.push(staying.started());
+
+    forwarded_until(&again.workbench(), |read| {
+        standing(read, port) == Some(ForwardStanding::Forwarding)
+    })
+    .await;
+
+    echoes(
+        SocketAddr::new(forwarding_afresh_on()[0], port),
+        "after-the-restart",
+    )
+    .await;
 }

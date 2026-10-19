@@ -771,6 +771,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // `localhost`, which the sidebar's foot counts: this device's own
         // reading, held back from the link — see [`crate::forwarding`].
         .route("/api/ui/forwards", get(crate::forwarding::forwards))
+        // And the × on one of their rows, which ends it here and remembers that.
+        .route(
+            "/api/ui/forwards/{device}/{conversation}/{terminal}/{port}",
+            delete(crate::forwarding::dismiss),
+        )
         // And the devices nobody has typed an address for, which is the
         // Discovered list under those rows. A read of its own beside the one
         // above rather than a field of it, and that is the point of it: a browse

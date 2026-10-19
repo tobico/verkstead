@@ -71,6 +71,7 @@ import type {
   FileWrite,
   FileWritten,
   FolderListing,
+  ForwardView,
   ForwardsView,
   GrillingStarted,
   LanguageCleared,
@@ -389,10 +390,12 @@ export function createRepo(
   github: boolean,
   author?: string,
 ): Promise<Created> {
-  return post<Created>(
-    on(device, "/api/ui/repos/new"),
-    { parent, name, github, author },
-  );
+  return post<Created>(on(device, "/api/ui/repos/new"), {
+    parent,
+    name,
+    github,
+    author,
+  });
 }
 
 /// Ask `device` to clone a **Clonable Repo** under `parent` and take it on, as
@@ -597,7 +600,8 @@ export function publishShare(
   id: number,
 ): Promise<SharePublished> {
   return post<SharePublished>(
-    on(device, `/api/ui/conversations/${id}/share/publish`), {},
+    on(device, `/api/ui/conversations/${id}/share/publish`),
+    {},
   );
 }
 
@@ -614,7 +618,8 @@ export function shareToPullRequests(
   id: number,
 ): Promise<ShareCommented> {
   return post<ShareCommented>(
-    on(device, `/api/ui/conversations/${id}/share/comment`), {},
+    on(device, `/api/ui/conversations/${id}/share/comment`),
+    {},
   );
 }
 
@@ -817,9 +822,7 @@ export function listFileRoots(
 /// whatever becomes of the browser, so a laptop shut mid-edit stops the watcher
 /// without anybody having to notice.
 export function filesSocket(device: Device, id: number): string {
-  return socketAt(
-    on(device, `/api/ui/conversations/${id}/files/attach`),
-  );
+  return socketAt(on(device, `/api/ui/conversations/${id}/files/attach`));
 }
 
 /// And what one folder of one of them holds.
@@ -1322,9 +1325,9 @@ export function saveBrief(
   id: number,
   markdown: string,
 ): Promise<BriefSaved> {
-  return post<BriefSaved>(
-    on(device, `/api/ui/conversations/${id}/brief`), { markdown },
-  );
+  return post<BriefSaved>(on(device, `/api/ui/conversations/${id}/brief`), {
+    markdown,
+  });
 }
 
 /// Take a Memo out of every later prompt of its Conversation, from its card.
@@ -1364,12 +1367,9 @@ export function switchRepo(
   id: number,
   repoId: number,
 ): Promise<RepoSwitched> {
-  return post<RepoSwitched>(
-    on(device, `/api/ui/conversations/${id}/repo`),
-    {
-      repo_id: repoId,
-    },
-  );
+  return post<RepoSwitched>(on(device, `/api/ui/conversations/${id}/repo`), {
+    repo_id: repoId,
+  });
 }
 
 /// Say what kind of work a drafting Conversation is for.
@@ -1384,7 +1384,8 @@ export function pickProcess(
   process: Process,
 ): Promise<ProcessPicked> {
   return post<ProcessPicked>(
-    on(device, `/api/ui/conversations/${id}/process`), { process },
+    on(device, `/api/ui/conversations/${id}/process`),
+    { process },
   );
 }
 
@@ -1395,9 +1396,9 @@ export function renameBranch(
   id: number,
   branch: string,
 ): Promise<BranchRenamed> {
-  return post<BranchRenamed>(
-    on(device, `/api/ui/conversations/${id}/branch`), { branch },
-  );
+  return post<BranchRenamed>(on(device, `/api/ui/conversations/${id}/branch`), {
+    branch,
+  });
 }
 
 /// Name what the work is pointed at — a pull request URL, a `#number` or a
@@ -1413,7 +1414,8 @@ export function nameTarget(
   target: string,
 ): Promise<TargetRecorded> {
   return post<TargetRecorded>(
-    on(device, `/api/ui/conversations/${id}/target`), { target },
+    on(device, `/api/ui/conversations/${id}/target`),
+    { target },
   );
 }
 
@@ -1427,9 +1429,9 @@ export function setBaseBranch(
   id: number,
   branch: string | null,
 ): Promise<BaseRecorded> {
-  return post<BaseRecorded>(
-    on(device, `/api/ui/conversations/${id}/base`), { branch },
-  );
+  return post<BaseRecorded>(on(device, `/api/ui/conversations/${id}/base`), {
+    branch,
+  });
 }
 
 /// Work alongside another registered Repo, read-only and off its own default
@@ -1518,7 +1520,8 @@ export function startGrilling(
   id: number,
 ): Promise<GrillingStarted> {
   return post<GrillingStarted>(
-    on(device, `/api/ui/conversations/${id}/grill`), {},
+    on(device, `/api/ui/conversations/${id}/grill`),
+    {},
   );
 }
 
@@ -1628,7 +1631,8 @@ export function closeConversation(
   id: number,
 ): Promise<ConversationClosed> {
   return post<ConversationClosed>(
-    on(device, `/api/ui/conversations/${id}/close`), {},
+    on(device, `/api/ui/conversations/${id}/close`),
+    {},
   );
 }
 
@@ -1681,7 +1685,8 @@ export function archiveConversation(
   id: number,
 ): Promise<ConversationArchived> {
   return post<ConversationArchived>(
-    on(device, `/api/ui/conversations/${id}/archive`), {},
+    on(device, `/api/ui/conversations/${id}/archive`),
+    {},
   );
 }
 
@@ -1713,10 +1718,7 @@ export async function seeConversation(
   device: Device,
   id: string,
 ): Promise<void> {
-  const at = on(
-    device,
-    `/api/ui/conversations/${encodeURIComponent(id)}/seen`,
-  );
+  const at = on(device, `/api/ui/conversations/${encodeURIComponent(id)}/seen`);
 
   await refused(at, await sent(at, {}));
 }
@@ -1749,7 +1751,8 @@ export function resolveConflicts(
   id: number,
 ): Promise<Resolved> {
   return post<Resolved>(
-    on(device, `/api/ui/conversations/${id}/resolve-conflicts`), {},
+    on(device, `/api/ui/conversations/${id}/resolve-conflicts`),
+    {},
   );
 }
 
@@ -1764,7 +1767,8 @@ export function stopConversation(
   id: number,
 ): Promise<ConversationStopped> {
   return post<ConversationStopped>(
-    on(device, `/api/ui/conversations/${id}/stop`), {},
+    on(device, `/api/ui/conversations/${id}/stop`),
+    {},
   );
 }
 
@@ -1802,7 +1806,8 @@ export function saveSteer(
   form: SteerForm,
 ): Promise<SteerSaved> {
   return post<SteerSaved>(
-    on(device, `/api/ui/conversations/${id}/steer/save`), form,
+    on(device, `/api/ui/conversations/${id}/steer/save`),
+    form,
   );
 }
 
@@ -1816,7 +1821,8 @@ export function cancelSteer(
   id: number,
 ): Promise<SteerCancelled> {
   return post<SteerCancelled>(
-    on(device, `/api/ui/conversations/${id}/steer/cancel`), {},
+    on(device, `/api/ui/conversations/${id}/steer/cancel`),
+    {},
   );
 }
 
@@ -1888,7 +1894,10 @@ export function deleteProfile(id: number): Promise<ProfileDeleted> {
 /// Open a Profile's login: the one already running for it, joined, or a new
 /// one started. `viewer` is a name the modal made up for itself, so that its
 /// closing is told apart from another device's.
-export function openLogin(profile: number, viewer: string): Promise<LoginState> {
+export function openLogin(
+  profile: number,
+  viewer: string,
+): Promise<LoginState> {
   return post<LoginState>(`/api/ui/profiles/${profile}/login`, { viewer });
 }
 
@@ -1906,7 +1915,10 @@ export function sendLoginCode(
 }
 
 /// This device closing the modal. The last one to close it ends the login.
-export async function closeLogin(profile: number, viewer: string): Promise<void> {
+export async function closeLogin(
+  profile: number,
+  viewer: string,
+): Promise<void> {
   const at = `/api/ui/profiles/${profile}/login/close`;
 
   await refused(at, await sent(at, { viewer }));
@@ -2023,6 +2035,16 @@ export function updateAnnex(): Promise<ComponentsView> {
 /// back from the link — so there is no device on the call.
 export function loadForwards(): Promise<ForwardsView> {
   return get<ForwardsView>("/api/ui/forwards");
+}
+
+/// And the × on one of their rows: that Forward ended on this device, and kept
+/// ended until the port leaves the member's reading or the terminal's tab is
+/// opened here again. Answered with nothing, whether or not the server still
+/// held it — a Forward that has already gone is what the press asked for.
+export async function dismissForward(forward: ForwardView): Promise<void> {
+  const at = `/api/ui/forwards/${encodeURIComponent(forward.device)}/${forward.conversation}/${forward.terminal}/${forward.port}`;
+
+  await refused(at, await fetch(at, { method: "DELETE" }));
 }
 
 /// And the devices nobody has typed an address for: the Discovered list under
@@ -2303,7 +2325,9 @@ export function listAuthors(device: Device): Promise<AuthorEntry[]> {
 /// The outcome is the answer's body, a Repo removal's way: a registered Repo
 /// still pointing at it refuses it, naming the Repos.
 export function removeAuthor(id: string): Promise<AuthorRemoved> {
-  return post<AuthorRemoved>(`/api/ui/authors/${encodeURIComponent(id)}/remove`);
+  return post<AuthorRemoved>(
+    `/api/ui/authors/${encodeURIComponent(id)}/remove`,
+  );
 }
 
 /// Rewrite one Author's fields and set or clear its token, by its uuid, and

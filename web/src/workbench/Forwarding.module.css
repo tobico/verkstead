@@ -50,6 +50,34 @@
   white-space: nowrap;
 }
 
+/* A row and its ×, side by side: the row takes every bit of the width the ×
+   does not, so all of it but the × is still one target. */
+.row {
+  display: flex;
+  align-items: center;
+}
+
+.row > [role="menuitem"]:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The ×, drawn as the terminal tabs draw theirs: quiet until the pointer is on
+   it. Spelled against the card so it outweighs the menu's own rule for a
+   button in a row, which would lay it out full width. */
+.forwarding [role="menu"] .stop {
+  flex: none;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  opacity: 0.7;
+}
+
 /* A skipped row is drawn as a row and dimmed: there is nothing listening here
    for it, so it is not a link, and it says why in place of opening anything. */
 .skipped {
@@ -94,5 +122,10 @@
 @media (hover: hover) {
   .forwarding > button:hover {
     color: var(--accent);
+  }
+
+  .forwarding [role="menu"] .stop:hover {
+    color: var(--ink);
+    opacity: 1;
   }
 }

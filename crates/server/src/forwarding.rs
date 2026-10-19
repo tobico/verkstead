@@ -53,6 +53,13 @@
 //! be dialled. Once it answers, everything it offers is read again: a port
 //! still offered is forwarding again, and one gone starts its grace.
 //!
+//! **And it ends by hand**, a × on its row: see [`dismiss`]. The dismissal is
+//! remembered, so that the member's next reading does not take the Forward
+//! again — until the port leaves the reading, or this device attaches the
+//! terminal again, which is the plainest way there is of saying *I want this
+//! after all* (see [`attached`]). Memory, like the Forwards themselves: this
+//! server restarting forgets it, and a second press is the answer.
+//!
 //! **This device's own business.** The reading is [`forwards`], for this
 //! device's own browser, and every change is a `forwards` Nudge — both held
 //! back from the link the way the Remote access, Devices and push namespaces
@@ -65,8 +72,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::Instant;
@@ -118,6 +126,11 @@ const BACKLOG: u32 = 1024;
 #[derive(Clone, Default)]
 pub(crate) struct Forwards {
     held: Arc<Mutex<BTreeMap<Key, Forward>>>,
+
+    /// The Forwards ended by hand that their members still offer, which a
+    /// reading does not take again — see [`dismiss`]. Only ever locked after
+    /// `held`, where both are.
+    dismissed: Arc<Mutex<BTreeSet<Key>>>,
 }
 
 /// What one Forward is: a port of one terminal of one Conversation on one
@@ -176,6 +189,12 @@ impl Forwards {
     /// The register, locked. Never held across an await.
     fn held(&self) -> MutexGuard<'_, BTreeMap<Key, Forward>> {
         self.held.lock().expect("nothing panics holding this")
+    }
+
+    /// The dismissals, locked. Never held across an await, and only taken
+    /// after [`Forwards::held`] where both are.
+    fn dismissed(&self) -> MutexGuard<'_, BTreeSet<Key>> {
+        self.dismissed.lock().expect("nothing panics holding this")
     }
 }
 
@@ -380,9 +399,11 @@ fn keys<'a>(
 /// Make the Forwards held on `device` — of `conversation` alone, where one is
 /// said — match what it `offered`.
 ///
-/// A port offered and not held is taken; one held and still offered has its
-/// grace called off; one held and not offered starts its grace, and is ended by
-/// [`turned`] once that has run out.
+/// A port offered and not held is taken, unless it was dismissed; one held and
+/// still offered has its grace called off; one held and not offered starts its
+/// grace, and is ended by [`turned`] once that has run out. And a dismissal of
+/// a port no longer offered is forgotten, so that a server stopped and started
+/// again is forwarded afresh.
 fn matched(
     state: &AppState,
     devices: &Devices,
@@ -390,13 +411,20 @@ fn matched(
     conversation: Option<i64>,
     offered: BTreeSet<Key>,
 ) {
+    let within = |key: &Key| {
+        key.device == device && conversation.is_none_or(|only| key.conversation == only)
+    };
+
     let changed = {
         let mut forwards = state.forwards.held();
+        let mut dismissed = state.forwards.dismissed();
         let now = Instant::now();
         let mut changed = false;
 
+        dismissed.retain(|key| !within(key) || offered.contains(key));
+
         for (key, forward) in forwards.iter_mut() {
-            if key.device != device || conversation.is_some_and(|only| key.conversation != only) {
+            if !within(key) {
                 continue;
             }
 
@@ -408,7 +436,7 @@ fn matched(
         }
 
         for key in offered {
-            if forwards.contains_key(&key) {
+            if forwards.contains_key(&key) || dismissed.contains(&key) {
                 continue;
             }
 
@@ -830,4 +858,114 @@ pub(crate) async fn forwards(State(state): State<AppState>) -> Json<ForwardsView
         .collect();
 
     Json(ForwardsView { forwards })
+}
+
+/// `DELETE /api/ui/forwards/{device}/{conversation}/{terminal}/{port}` — the ×
+/// on a Forward's row: end it on this device, and remember that, so that the
+/// member's next reading does not take it again.
+///
+/// Ended the way every Forward ends — its listener closed and every connection
+/// crossing it with it — whether it was forwarding, skipped or unreachable: a
+/// skipped one stops being tried. Answered with nothing, and the same where the
+/// Forward named is not one this device holds: it is already what the press
+/// asked for, so there is nothing to refuse.
+///
+/// **Never served over the link**, as the reading is not — see
+/// [`crate::peer::workbench::KEPT_TO_ITSELF`].
+pub(crate) async fn dismiss(
+    State(state): State<AppState>,
+    Path((device, conversation, terminal, port)): Path<(String, i64, i64, u16)>,
+) -> Response {
+    let key = Key {
+        port,
+        device,
+        conversation,
+        terminal,
+    };
+
+    let ended = {
+        let mut forwards = state.forwards.held();
+        let ended = forwards.remove(&key);
+
+        if ended.is_some() {
+            state.forwards.dismissed().insert(key.clone());
+        }
+
+        ended
+    };
+
+    if ended.is_some() {
+        tracing::info!(
+            port = key.port,
+            device = key.device,
+            conversation = key.conversation,
+            terminal = key.terminal,
+            "a Forward ended: it was dismissed on this device",
+        );
+
+        state.nudges.announce_here(Nudge::Forwards);
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// This device's browser has just attached `onwards` on `device` through the
+/// relay — where that is one of its terminals: what this device dismissed on
+/// that terminal is forgotten, and its ports are read again, so that what it
+/// is still listening on is forwarded afresh. Opening the tab is the way back
+/// from a ×.
+///
+/// Read again here rather than left to the member's `ports` Nudge, which it
+/// says on a device's first socket on the terminal and not on a second.
+pub(crate) fn attached(state: &AppState, device: &str, onwards: &str) {
+    let Some((conversation, terminal)) = attaching(onwards) else {
+        return;
+    };
+
+    state.forwards.dismissed().retain(|key| {
+        !(key.device == device && key.conversation == conversation && key.terminal == terminal)
+    });
+
+    let state = state.clone();
+    let device = device.to_owned();
+
+    tokio::spawn(async move { reconciled(&state, &device, conversation).await });
+}
+
+/// The Conversation and the terminal an attach is on, where `onwards` is one —
+/// `/api/ui/conversations/{id}/terminals/{n}/attach`, its query aside.
+fn attaching(onwards: &str) -> Option<(i64, i64)> {
+    let path = onwards.split_once('?').map_or(onwards, |(path, _)| path);
+    let rest = path.strip_prefix("/api/ui/conversations/")?;
+    let (conversation, rest) = rest.split_once('/')?;
+    let (terminal, rest) = rest.strip_prefix("terminals/")?.split_once('/')?;
+
+    if rest != "attach" {
+        return None;
+    }
+
+    Some((conversation.parse().ok()?, terminal.parse().ok()?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::attaching;
+
+    #[test]
+    fn an_attach_is_read_off_the_path_it_was_relayed_to() {
+        assert_eq!(
+            attaching("/api/ui/conversations/7/terminals/2/attach"),
+            Some((7, 2)),
+        );
+        assert_eq!(
+            attaching("/api/ui/conversations/7/terminals/2/attach?cols=80"),
+            Some((7, 2)),
+        );
+        assert_eq!(attaching("/api/ui/conversations/7/terminals/2"), None);
+        assert_eq!(attaching("/api/ui/conversations/7/screen/attach"), None);
+        assert_eq!(
+            attaching("/api/ui/conversations/7/terminals/2/ports/3000"),
+            None
+        );
+    }
 }
