@@ -7,11 +7,13 @@
 //! the terminal ends. The server holds them — see `forwarding.rs` — and this
 //! says what it holds: nothing here starts one. The one thing it does is the ×
 //! at the end of each row, which ends that Forward on this device and keeps it
-//! ended until the terminal's tab is opened here again.
+//! ended until the port closes, the terminal's tab is opened here again, or
+//! this device's server restarts.
 //!
-//! Drawn only while there is something to say, forwarding or skipped: a foot
-//! that read *Forwarding 0 ports* on every machine that has never opened a
-//! member's terminal would be a line about nothing on nearly every page.
+//! Drawn only while there is something to say, forwarding, skipped or
+//! unreachable: a foot that read *Forwarding 0 ports* on every machine that has
+//! never opened a member's terminal would be a line about nothing on nearly
+//! every page.
 //!
 //! The popup hangs over the item rather than under it, the item standing at the
 //! bottom of the pane; it is the one menu the app has, so it closes the ways

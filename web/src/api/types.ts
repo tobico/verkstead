@@ -3272,8 +3272,8 @@ title: string | null,
 terminal: number, standing: ForwardStanding, };
 
 /**
- * `GET /api/ui/forwards` — every Forward this device holds, forwarding or
- * skipped, lowest port first.
+ * `GET /api/ui/forwards` — every Forward this device holds, forwarding,
+ * skipped or unreachable, lowest port first.
  */
 export type ForwardsView = { forwards: Array<ForwardView>, };
 

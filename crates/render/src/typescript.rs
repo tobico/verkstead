@@ -272,8 +272,9 @@ fn the_viewers_types_are_written_from_these() {
     TerminalOpened::export_all(&config).unwrap();
     OpenTerminal::export_all(&config).unwrap();
     TerminalClosed::export_all(&config).unwrap();
-    // And what a device reads over the link of the ports its attached terminals
-    // are listening on, which no page reads yet: the hub is what asks.
+    // And what a device reads over the link of the ports the terminals offered
+    // to it are listening on, one Conversation's and every one's at once, which
+    // no page reads yet: the hub is what asks.
     PortsView::export_all(&config).unwrap();
     OfferedView::export_all(&config).unwrap();
 

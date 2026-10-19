@@ -1,6 +1,7 @@
 //! What this device is forwarding: the ports of terminals on other devices of
 //! the cluster, each held on this device's own `localhost` at the same number
-//! while the terminal's tab is open here.
+//! from the first time the terminal's tab is opened here until the server stops
+//! or the terminal ends.
 //!
 //! **This device's own reading and nobody else's.** A **Forward** is a listener
 //! on this machine's loopback, so what it says is a fact about this machine:
@@ -18,8 +19,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-/// `GET /api/ui/forwards` — every Forward this device holds, forwarding or
-/// skipped, lowest port first.
+/// `GET /api/ui/forwards` — every Forward this device holds, forwarding,
+/// skipped or unreachable, lowest port first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ForwardsView {
