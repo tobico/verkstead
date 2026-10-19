@@ -59,6 +59,7 @@ use std::process::{Command, Stdio};
 use serde::Deserialize;
 
 use crate::platform::Platform;
+use crate::sandbox::MacFloor;
 use crate::settings::Settings;
 use crate::store;
 use crate::unseen::Unseen;
@@ -170,8 +171,8 @@ pub struct Gh {
     program: Vec<String>,
 
     /// Where the first word of `program` is looked for before it is run, or
-    /// `None` where it is run as it stands — see [`Floor`].
-    floor: Option<Floor>,
+    /// `None` where it is run as it stands — see [`MacFloor`].
+    floor: Option<MacFloor>,
 
     /// Where the configured token is read from, or `None` where this `Gh` has
     /// no settings behind it — a router watching nothing has no Data Directory
@@ -184,25 +185,12 @@ pub struct Gh {
     author: Option<String>,
 }
 
-/// The `PATH` a [`Gh`] looks for its program over — see the module's own
-/// account of why a Mac has one.
-#[derive(Debug, Clone)]
-enum Floor {
-    /// The machine's own, which is [`crate::sandbox::machine_path`] read at the
-    /// moment of looking.
-    Machine,
-
-    /// This one, for the suites, so that what they find is what they put there.
-    #[cfg(test)]
-    Stated(OsString),
-}
-
 impl Gh {
     /// The real thing: whatever `gh` the host has on its PATH — on a Mac, the
     /// one on the `PATH` a session gets.
     pub fn on_path() -> Gh {
         let floor = match Platform::HERE {
-            Platform::MacOs => Some(Floor::Machine),
+            Platform::MacOs => Some(MacFloor::Machine),
             Platform::Linux | Platform::Windows => None,
         };
 
@@ -237,15 +225,7 @@ impl Gh {
             .split_first()
             .expect("a Gh is built with at least the program to run");
 
-        let floor = self.floor.as_ref().map(|floor| match floor {
-            Floor::Machine => crate::sandbox::machine_path(Platform::MacOs),
-            #[cfg(test)]
-            Floor::Stated(floor) => floor.clone(),
-        });
-
-        let found = floor.and_then(|floor| {
-            crate::sandbox::on_the_path(Platform::MacOs, program, Some(&*floor), None)
-        });
+        let found = self.floor.as_ref().and_then(|floor| floor.find(program));
 
         let mut command = match found {
             Some(found) => Command::new(found),
@@ -2208,7 +2188,7 @@ printf '%s' '{"number":41,"title":"Rate limiting","url":"https://github.com/tobi
         std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let on_a_mac = |floor: &Path| Gh {
-            floor: Some(Floor::Stated(floor.as_os_str().to_owned())),
+            floor: Some(MacFloor::Stated(floor.as_os_str().to_owned())),
             ..Gh::running(vec!["verkstead-gh".to_owned()])
         };
 

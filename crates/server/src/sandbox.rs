@@ -1997,6 +1997,38 @@ pub(crate) fn on_the_path(
     }
 }
 
+/// The `PATH` a program the server runs itself is looked for over on a Mac —
+/// `gh` for [`crate::github`], `tailscale` for [`crate::remote`].
+///
+/// **The server's own `PATH` is not enough there.** The desktop app is started
+/// from the Dock, and launchd hands it `/usr/bin:/bin:/usr/sbin:/sbin` and
+/// nothing else, so a bare word run on it misses everything Homebrew put in
+/// `/opt/homebrew/bin`. The floor a session gets — [`machine_path`] — is what
+/// the human's tools are on, so it is what these are looked for over too.
+#[derive(Debug, Clone)]
+pub(crate) enum MacFloor {
+    /// The machine's own, which is [`machine_path`] read at the moment of
+    /// looking.
+    Machine,
+
+    /// This one, for the suites, so that what they find is what they put there.
+    Stated(OsString),
+}
+
+impl MacFloor {
+    /// Where `program` is on this floor, or `None` where it is nowhere on it.
+    ///
+    /// Blocks: it is a handful of `stat` calls.
+    pub(crate) fn find(&self, program: &str) -> Option<PathBuf> {
+        let floor = match self {
+            MacFloor::Machine => Cow::Owned(machine_path(Platform::MacOs)),
+            MacFloor::Stated(floor) => Cow::Borrowed(floor),
+        };
+
+        on_the_path(Platform::MacOs, program, Some(&floor), None)
+    }
+}
+
 /// The directories a Unix `PATH` names, in the order they were written, with
 /// the empty ones left out — an empty entry means the working directory, which
 /// is not somewhere to go looking for a program.

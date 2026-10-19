@@ -88,7 +88,7 @@
 //! machine on a tailnet serving nothing has no address, and so no link.
 
 use std::collections::HashMap;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::Arc;
@@ -100,6 +100,7 @@ use verkstead_render::{RemoteView, ServePress, ServeView};
 
 use crate::key::WorkbenchKey;
 use crate::platform::{Environment, Platform};
+use crate::sandbox::MacFloor;
 use crate::unseen::Unseen;
 
 /// The tailscale on this machine, and the port a serve has to be pointing at
@@ -157,10 +158,9 @@ enum Program {
     /// Looked for the way a Mac has to be, at every reading — see the module's
     /// own account of why.
     Mac {
-        /// The PATH to look over first. `None` is the machine's own, which is
-        /// [`crate::sandbox::machine_path`] read at the moment of looking; the
-        /// suites state one, so that what they find is what they put there.
-        floor: Option<OsString>,
+        /// The PATH to look over first: the machine's own floor, or one the
+        /// suites state, so that what they find is what they put there.
+        floor: MacFloor,
 
         /// And the directories to look in for `Tailscale.app` after it, in
         /// order: `/Applications`, then the home's own.
@@ -276,7 +276,7 @@ impl Tailscale {
 
                 Tailscale::with(
                     Program::Mac {
-                        floor: None,
+                        floor: MacFloor::Machine,
                         applications,
                     },
                     port,
@@ -301,7 +301,7 @@ impl Tailscale {
     pub fn on_a_mac(floor: OsString, applications: Vec<PathBuf>, port: u16) -> Tailscale {
         Tailscale::with(
             Program::Mac {
-                floor: Some(floor),
+                floor: MacFloor::Stated(floor),
                 applications,
             },
             port,
@@ -812,13 +812,7 @@ impl Tailscale {
             Program::Mac {
                 floor,
                 applications,
-            } => {
-                let floor = floor
-                    .clone()
-                    .unwrap_or_else(|| crate::sandbox::machine_path(Platform::MacOs));
-
-                on_a_mac(&floor, applications)
-            }
+            } => on_a_mac(floor, applications),
         }
     }
 
@@ -833,10 +827,10 @@ impl Tailscale {
 
 /// Where a Mac keeps `tailscale`: on `floor`, or else inside `Tailscale.app`
 /// under the first of `applications` that has one — see [`Tailscale::found`].
-fn on_a_mac(floor: &OsStr, applications: &[PathBuf]) -> Option<Found> {
+fn on_a_mac(floor: &MacFloor, applications: &[PathBuf]) -> Option<Found> {
     let named = |found: &Path| vec![found.to_string_lossy().into_owned()];
 
-    if let Some(found) = crate::sandbox::on_the_path(Platform::MacOs, NAME, Some(floor), None) {
+    if let Some(found) = floor.find(NAME) {
         return Some(Found {
             program: named(&found),
             mac_app: false,
