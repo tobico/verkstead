@@ -6245,8 +6245,16 @@ impl StageStanding {
 ///
 /// A value rather than a query, so that the readings stay readings: none of them
 /// asks the database, and what they are handed is this.
+///
+/// **And the roadmap's own Conversation**, beside its stages rather than among
+/// them: a stage that stands on no other stage stands on that Conversation's
+/// wrap-up, so it is read the same way a stage is — see
+/// [`StageStandings::planner`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct StageStandings(HashMap<String, HashMap<String, Held>>);
+pub struct StageStandings {
+    stages: HashMap<String, HashMap<String, Held>>,
+    planners: HashMap<String, StageStanding>,
+}
 
 impl StageStandings {
     /// What the record says about stage `label` of `roadmap`, or `None` where it
@@ -6291,6 +6299,29 @@ impl StageStandings {
         self.held(roadmap, label).map(|held| held.conversation_id)
     }
 
+    /// What the record says about **the roadmap's own Conversation** — the one
+    /// that wrote `roadmap` — or `None` where it holds no such Conversation.
+    ///
+    /// The same three answers a stage gets and off the same reading of the
+    /// Timeline, because the question is the same one: whether its wrap-up has
+    /// settled. A stage that stands on no other stage stands on this, so nothing
+    /// of a roadmap starts unasked while the roadmap itself is still being
+    /// reviewed — see the server's `stages` module, where that rule is.
+    ///
+    /// Apart from [`StageStandings::of`] rather than under a label of its own, so
+    /// that what `of` answers stays a stage's and nothing else's. `None` is a
+    /// roadmap adopted stage by stage, with no Conversation that wrote it.
+    pub fn planner(&self, roadmap: &str) -> Option<StageStanding> {
+        self.planners.get(roadmap).copied()
+    }
+
+    /// And the same with the roadmap's own Conversation standing `standing`, for
+    /// the readings' tests — see [`StageStandings::from_rows`].
+    pub fn with_planner(mut self, roadmap: &str, standing: StageStanding) -> Self {
+        self.plan(roadmap, standing);
+        self
+    }
+
     /// One built from rows rather than from a database, for the readings' own
     /// tests: what they take is a value, so what a test hands them is one too.
     ///
@@ -6312,7 +6343,17 @@ impl StageStandings {
     /// What is kept about stage `label` of `roadmap`, which is what each of the
     /// two readings above takes its half of.
     fn held(&self, roadmap: &str, label: &str) -> Option<Held> {
-        self.0.get(roadmap)?.get(label).copied()
+        self.stages.get(roadmap)?.get(label).copied()
+    }
+
+    /// Put the standing of a Conversation that wrote `roadmap` in, behind
+    /// whatever a second one that wrote it already said — a roadmap planned twice
+    /// being settled where either settled, for [`StageStanding::over`]'s reason.
+    fn plan(&mut self, roadmap: &str, standing: StageStanding) {
+        self.planners
+            .entry(roadmap.to_owned())
+            .and_modify(|kept| *kept = kept.over(standing))
+            .or_insert(standing);
     }
 
     /// Put one stage Conversation's standing in, behind whatever a second
@@ -6331,7 +6372,7 @@ impl StageStandings {
             conversation_id,
         };
 
-        self.0
+        self.stages
             .entry(roadmap.to_owned())
             .or_default()
             .entry(label.to_owned())
@@ -6382,6 +6423,12 @@ impl Held {
     }
 }
 
+/// One row of [`stage_standings`]' read: the roadmap, the stage's label — none
+/// for the Conversation that wrote the roadmap — the state, whether it ever reached
+/// Done, whether it ever wrapped up, whether it has stopped, and which
+/// Conversation it is.
+type StandingRow = (String, Option<String>, String, bool, bool, bool, i64);
+
 /// What the record says about every stage Conversation of `repo_id`'s roadmaps.
 ///
 /// The read behind [`StageStandings`], and the one thing that joins Verkstead's
@@ -6390,11 +6437,15 @@ impl Held {
 /// none — see the server's `stages` module, which is where the two are put
 /// together.
 ///
-/// Only the rows that hold a label, which is what a stage Conversation's own row
+/// The rows that hold a label, which is what a stage Conversation's own row
 /// holds. A row with a roadmap and no label says nothing about any stage — it is a
 /// stage from before the label was written down, or the Conversation that wrote
-/// the roadmap — so it is left out of this and the box goes on speaking for
+/// the roadmap — so it is left out of the stages and the box goes on speaking for
 /// whichever it was; see [`StageOf::stage`].
+///
+/// **Except the Conversation that wrote the roadmap**, which is read beside them
+/// — see [`StageStandings::planner`] — and told from a stage with no label the
+/// way [`roadmap_planner`] tells it: by the Roadmap direction.
 ///
 /// **Where each of them has been** is the Timeline's to answer, every move being
 /// written on it — see [`moved`] — and the state column says where it is now. It
@@ -6415,7 +6466,7 @@ impl Held {
 /// this process is asked about a stage is the Conversation, and this is the read
 /// that holds the roadmap and the label beside it.
 pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageStandings> {
-    let rows: Vec<(String, String, String, bool, bool, bool, i64)> = sqlx::query_as(
+    let rows: Vec<StandingRow> = sqlx::query_as(
         "SELECT r.roadmap, r.stage, c.state,
                 EXISTS (
                     SELECT 1 FROM timeline_events e
@@ -6429,7 +6480,8 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
                 r.conversation_id
          FROM stage_roadmaps r
          JOIN conversations c ON c.id = r.conversation_id
-         WHERE c.repo_id = ? AND r.stage IS NOT NULL
+         LEFT JOIN directions d ON d.conversation_id = r.conversation_id
+         WHERE c.repo_id = ? AND (r.stage IS NOT NULL OR d.direction = ?)
          ORDER BY r.conversation_id",
     )
     .bind(Event::Moved(Lifecycle::Done).kind())
@@ -6438,6 +6490,7 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
     .bind(Lifecycle::Wrapping.stored())
     .bind(Lifecycle::Done.stored())
     .bind(repo_id)
+    .bind(direction_stored(Direction::Roadmap))
     .fetch_all(pool)
     .await
     .with_context(|| format!("reading what Repo {repo_id}'s roadmap stages have got to"))?;
@@ -6458,7 +6511,10 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
             _ => StageStanding::InFlight,
         };
 
-        standings.record(&roadmap, &label, standing, stopped, conversation_id);
+        match label {
+            Some(label) => standings.record(&roadmap, &label, standing, stopped, conversation_id),
+            None => standings.plan(&roadmap, standing),
+        }
     }
 
     Ok(standings)

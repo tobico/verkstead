@@ -443,6 +443,20 @@ flowchart LR
   stage is where the two limits part: it keeps its place under its own roadmap's
   until it is Resumed or closed, and holds none on the server, nothing being
   left running or driving it. See [ADR-0021](../adr/0021-parallel-stages.md).
+  *Refined 2026-10-19, building roadmap-review-gate*: **a stage that stands on
+  no other stage stands on the roadmap's own wrap-up.** The roadmap is on the
+  record from the moment its commit lands, and a look made then found its first
+  stage standing on nothing and started it — before the roadmap's pull request
+  had been reviewed, so a stage could be built on a roadmap the review was about
+  to change. So a root is not ready until the roadmap's own Conversation has
+  settled, read the way a stage's settling is: it reached Done, by its wrap-up
+  or by a steer, or was closed having wrapped up. The rule is in the one reading
+  of what may start, so a look, a settle, the card and the pane cannot disagree
+  — the pane says a held root is *waiting on the roadmap's review*. A roadmap
+  adopted stage by stage, with no Conversation that wrote it, holds nothing; nor
+  does a press of *Continue a roadmap*, which is the human asking rather than
+  the scheduler deciding. ADR-0021 is unchanged: what a declared stage stands on
+  is still what its line says.
 - **Stages always stack.** The next stage's branch stacks on the unmerged
   predecessor (`gh stack`), per the repo's stacked review process — *refined
   2026-08-21, building stage 04*: per the mechanism that repo **records**, in

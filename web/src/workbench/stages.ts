@@ -26,6 +26,10 @@ import type { StageState } from "../api/types";
 /// still behind, which the server sends along with the state and the page joins
 /// up with commas the way it says what a stage stands on.
 ///
+/// A stage that stands on no other stage waits on the roadmap itself while the
+/// roadmap's own Conversation is still being wrapped up, which is said as the
+/// review it is waiting on: that is what the human can go and do something about.
+///
 /// And one word covers two things: a stage waiting for a place is waiting on one
 /// of the two limits there are — its roadmap's and the server's — and which of
 /// them is said on the Timeline of the Conversation that held it rather than
@@ -43,6 +47,8 @@ export function stageState(state: StageState): string {
       return "halted";
     case "WaitingOn":
       return `waiting on ${state.stages.join(", ")}`;
+    case "WaitingOnTheRoadmap":
+      return "waiting on the roadmap's review";
     case "WaitingForAPlace":
       return "waiting for a place";
     case "ToDo":
@@ -85,6 +91,7 @@ export function inFlight(state: StageState): boolean {
       return true;
     case "Done":
     case "WaitingOn":
+    case "WaitingOnTheRoadmap":
     case "WaitingForAPlace":
     case "ToDo":
       return false;

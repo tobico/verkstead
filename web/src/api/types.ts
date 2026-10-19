@@ -6597,7 +6597,7 @@ export type StageState = { "state": "Done" } | { "state": "InProgress" } | { "st
  * whole is [`StageDocument::stands_on`], which the pane says beside this
  * and which does not move as the roadmap runs.
  */
-stages: Array<string>, } | { "state": "WaitingForAPlace" } | { "state": "ToDo" };
+stages: Array<string>, } | { "state": "WaitingOnTheRoadmap" } | { "state": "WaitingForAPlace" } | { "state": "ToDo" };
 
 /**
  * How a Set stands: still waiting on the human, answered, or closed unanswered.

@@ -1024,6 +1024,14 @@ pub(crate) enum Ready<'a> {
 /// stage whose pull request is open and whose wrap-up reached Done is a stage the
 /// ones above it stand on, which is the whole of how a roadmap runs.
 ///
+/// **A stage that stands on no other stage stands on the roadmap's own
+/// Conversation**, wherever the record has one: it is not ready until that
+/// Conversation's wrap-up has settled, so nothing of a roadmap starts unasked
+/// before the roadmap itself has been reviewed — see [`held_on_the_roadmap`].
+/// Here rather than in the look alone, so that the look, the settle, the card and
+/// the pane cannot disagree about whether a first stage is ready. A press is the
+/// one start not held on it, and reads [`ready_when_asked`].
+///
 /// **An undeclared roadmap is read as each stage standing on the one before it**,
 /// as the roadmap lists them. That is what *in order* means to the scheduler, and
 /// it is what keeps this one reading rather than two: every roadmap written before
@@ -1052,39 +1060,46 @@ pub(crate) fn ready<'a>(
     record: &store::StageStandings,
     branch: &str,
 ) -> Ready<'a> {
+    readiness(
+        roadmap,
+        list,
+        record,
+        branch,
+        held_on_the_roadmap(roadmap, record),
+    )
+}
+
+/// [`ready`] for a start somebody **asked for**: the same rule, without the hold
+/// on the roadmap's own Conversation.
+///
+/// That hold is there for the starts nobody asked for — a settle's, a look's —
+/// and a press is the one start that is not held back: a human at the workbench
+/// pressing *Continue a roadmap* while the roadmap is still being reviewed has
+/// decided not to wait for the review. So [`startable`] reads this, and the
+/// notice and the page it draws offer what the press would start.
+pub(crate) fn ready_when_asked<'a>(
+    roadmap: &str,
+    list: &'a str,
+    record: &store::StageStandings,
+    branch: &str,
+) -> Ready<'a> {
+    readiness(roadmap, list, record, branch, false)
+}
+
+/// The whole of [`ready`]'s rule, with whether a root is `held` on the roadmap's
+/// own Conversation decided by the caller — see [`ready_when_asked`].
+fn readiness<'a>(
+    roadmap: &str,
+    list: &'a str,
+    record: &store::StageStandings,
+    branch: &str,
+    held: bool,
+) -> Ready<'a> {
     let entries: Vec<checklist::Entry<'a>> = list.lines().filter_map(checklist::entry).collect();
 
-    // What each stage stands on, by where in the list that stage is. The labels
-    // are the roadmap's and the indices are ours: a declaration names stages of
-    // its own roadmap, which the judging has already checked, so every label here
-    // is one of these entries.
-    let stands_on: Vec<Vec<usize>> = match declarations::judge(roadmap, list) {
-        declarations::Judgement::Refused(why) => return Ready::Misdeclared(why),
-
-        // Each stage standing on the one before it, which is what *in order* means
-        // — and the first stage of one standing on nothing at all.
-        declarations::Judgement::Undeclared => (0..entries.len())
-            .map(|at| match at.checked_sub(1) {
-                Some(before) => vec![before],
-                None => Vec::new(),
-            })
-            .collect(),
-
-        declarations::Judgement::Declared(declared) => entries
-            .iter()
-            .map(|entry| {
-                declared
-                    .iter()
-                    .find(|one| one.label == entry.label)
-                    .map(|one| {
-                        one.stands_on
-                            .iter()
-                            .filter_map(|label| entries.iter().position(|one| one.label == *label))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            })
-            .collect(),
+    let stands_on = match standing_on(roadmap, list, &entries) {
+        Ok(stands_on) => stands_on,
+        Err(why) => return Ready::Misdeclared(why),
     };
 
     // And what the record and the boxes say about each of them, once each: whether
@@ -1109,6 +1124,9 @@ pub(crate) fn ready<'a>(
         .enumerate()
         .filter(|(at, _)| !settled[*at] && !on_it[*at])
         .filter(|(at, _)| stands_on[*at].iter().all(|stood| settled[*stood]))
+        // And a root stands on the roadmap's own Conversation, which may not
+        // have settled yet — see [`held_on_the_roadmap`].
+        .filter(|(at, _)| !(held && stands_on[*at].is_empty()))
         .map(|(_, entry)| *entry)
         .collect();
 
@@ -1137,6 +1155,76 @@ pub(crate) fn ready<'a>(
     }
 }
 
+/// What each stage of a roadmap **stands on**, by where in `entries` that stage
+/// is — or the fault a roadmap that declares badly is refused in.
+///
+/// The labels are the roadmap's and the indices are ours: a declaration names
+/// stages of its own roadmap, which the judging has already checked, so every
+/// label here is one of these entries. An undeclared roadmap is each stage
+/// standing on the one before it — see [`ready`], where that reading of silence
+/// is written down.
+///
+/// An empty list is a **root**: a stage that stands on no other stage, and so on
+/// the roadmap's own Conversation — see [`held_on_the_roadmap`].
+fn standing_on(
+    roadmap: &str,
+    list: &str,
+    entries: &[checklist::Entry<'_>],
+) -> Result<Vec<Vec<usize>>, String> {
+    Ok(match declarations::judge(roadmap, list) {
+        declarations::Judgement::Refused(why) => return Err(why),
+
+        // Each stage standing on the one before it, which is what *in order* means
+        // — and the first stage of one standing on nothing at all.
+        declarations::Judgement::Undeclared => (0..entries.len())
+            .map(|at| match at.checked_sub(1) {
+                Some(before) => vec![before],
+                None => Vec::new(),
+            })
+            .collect(),
+
+        declarations::Judgement::Declared(declared) => entries
+            .iter()
+            .map(|entry| {
+                declared
+                    .iter()
+                    .find(|one| one.label == entry.label)
+                    .map(|one| {
+                        one.stands_on
+                            .iter()
+                            .filter_map(|label| entries.iter().position(|one| one.label == *label))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect(),
+    })
+}
+
+/// Whether a root of `roadmap` — a stage standing on no other stage — is held
+/// because **the roadmap's own Conversation** has not settled.
+///
+/// A root stands on that Conversation's wrap-up: its pull request opened, the
+/// review session run and acted on, the checks green. Until then nothing of the
+/// roadmap starts, however many looks run — a roadmap is reviewed before any of
+/// its stages is built on it. Settled is the same reading a stage gets, so a
+/// roadmap Conversation steered to Done by hand is settled too, and the next look
+/// starts its stages.
+///
+/// Held on **in flight** alone. A roadmap with no such Conversation on the
+/// record — one adopted stage by stage — holds nothing, exactly as before; and
+/// one whose Conversation was closed before it ever wrapped up holds nothing here
+/// either, because nothing reads a closed Conversation's roadmap unasked — the
+/// look's reading needs the foot's Worktree — so the press is already the only
+/// way in, and a pane saying its roots wait on a review would be waiting on one
+/// that is never coming.
+///
+/// And held for the starts nobody asked for alone: a press reads
+/// [`ready_when_asked`], which holds nothing here.
+fn held_on_the_roadmap(roadmap: &str, record: &store::StageStandings) -> bool {
+    record.planner(roadmap) == Some(store::StageStanding::InFlight)
+}
+
 /// Whether one stage of a roadmap is **done**: the rule that joins Verkstead's
 /// record to the boxes the repository keeps.
 ///
@@ -1147,7 +1235,9 @@ pub(crate) fn ready<'a>(
 ///
 /// One rule in one function, spent by [`ready`] on every stage of a roadmap: what
 /// is done is what the stages above it stand on, and what is not done is what may
-/// yet start. Both readings of a roadmap go through that one reading — the
+/// yet start. A stage standing on no other stage stands on the roadmap's own
+/// Conversation instead, whose standing is read the same way and is
+/// [`held_on_the_roadmap`]'s to ask. Both readings of a roadmap go through that one reading — the
 /// carry-on's, off a Worktree as it stands, and the adoption's, off a Repo at a
 /// commit — because a stage that is done to one of them and open to the other is a
 /// notice offering work somebody has finished, or a roadmap that stops advancing.
@@ -1206,7 +1296,10 @@ fn done(entry: &checklist::Entry<'_>, standing: Option<store::StageStanding>) ->
 ///   stages its own line stands on that have not settled, or — where there are
 ///   none of those and there is nowhere to run it —
 ///   [`StageState::WaitingForAPlace`], or [`StageState::ToDo`] where neither is
-///   true. The two waits cannot both be a stage's: what is ready waits on no
+///   true. A stage standing on no other stage, while the roadmap's own
+///   Conversation has not settled, is [`StageState::WaitingOnTheRoadmap`] — any
+///   roadmap's, declaring or not, because that hold is the scheduler's rule
+///   rather than a declaration — see [`held_on_the_roadmap`]. The two waits cannot both be a stage's: what is ready waits on no
 ///   stage, and what waits on a stage is not ready. See [`waiting_for_a_place`].
 ///
 /// **The whole list rather than a stage at a time**, which is the one thing this
@@ -1271,9 +1364,19 @@ fn states(
     // scheduler's own reading of the same file against the places there are.
     let placeless = waiting_for_a_place(roadmap, list, record, places);
 
+    // And which stand on no other stage while the roadmap's own Conversation has
+    // not settled — [`ready`]'s hold, asked the same way. A roadmap that declares
+    // badly holds nothing here: nothing of it starts whatever this says.
+    let reviewing = held_on_the_roadmap(roadmap, record);
+    let roots: Vec<bool> = match standing_on(roadmap, list, &entries) {
+        Ok(stands_on) => stands_on.iter().map(Vec::is_empty).collect(),
+        Err(_) => vec![false; entries.len()],
+    };
+
     entries
         .iter()
-        .map(|entry| match record.of(roadmap, entry.label) {
+        .zip(&roots)
+        .map(|(entry, root)| match record.of(roadmap, entry.label) {
             Some(store::StageStanding::Settled) => StageState::Done,
             Some(store::StageStanding::Abandoned) => StageState::Halted,
             Some(store::StageStanding::InFlight) => {
@@ -1288,6 +1391,7 @@ fn states(
             None if entry.checked => StageState::Done,
             None => match waiting_on(entry, &entries, &settled, declaring) {
                 stages if !stages.is_empty() => StageState::WaitingOn { stages },
+                _ if *root && reviewing => StageState::WaitingOnTheRoadmap,
                 // A stage waiting on a neighbour is never one of these and the
                 // other way about — what is ready stands on nothing unsettled —
                 // so the order these are asked in decides nothing.
@@ -2243,14 +2347,15 @@ pub(crate) fn startable(
 
     // Clause 1: a stage that may start — [`ready`]'s answer, which is the one
     // reading the carry-on goes through too, so that what is offered here and what
-    // an unattended run would start are one rule. Every stage done is a roadmap
-    // that finished, and its directory stays where it is as the record of what it
-    // was; nothing ready with a stage still in flight is neither that nor a stage
-    // to offer.
+    // an unattended run would start are one rule. As asked for, because the press
+    // is: a root waiting on the roadmap's own review is one the human may start —
+    // see [`ready_when_asked`]. Every stage done is a roadmap that finished, and
+    // its directory stays where it is as the record of what it was; nothing ready
+    // with a stage still in flight is neither that nor a stage to offer.
     //
     // All of them, lowest first: the press starts every one there is a place for,
     // so this offers every one there is a place for.
-    let (entry, rest, in_flight) = match ready(name, &index, record, "") {
+    let (entry, rest, in_flight) = match ready_when_asked(name, &index, record, "") {
         Ready::Stages {
             lowest,
             rest,
@@ -3519,6 +3624,49 @@ Turns this askance clone into Verkstead.
             ],
             "a root has nothing to wait on, and the two that stand on stages say \
              which ones",
+        );
+    }
+
+    /// A root says it is **waiting on the roadmap** while the roadmap's own
+    /// Conversation has not settled — any roadmap's, declaring or not — and goes
+    /// back to *to do* once it has.
+    #[test]
+    fn a_root_says_it_is_waiting_on_the_roadmap_while_the_roadmap_is_reviewed() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+
+        let reviewing =
+            store::StageStandings::default().with_planner("mvp", store::StageStanding::InFlight);
+
+        assert_eq!(
+            states(&repo.lists_with(&reviewing)),
+            [
+                StageState::WaitingOnTheRoadmap,
+                StageState::WaitingOnTheRoadmap,
+                behind(&["02"]),
+                behind(&["01", "03"]),
+            ],
+        );
+
+        let settled =
+            store::StageStandings::default().with_planner("mvp", store::StageStanding::Settled);
+
+        assert_eq!(
+            states(&repo.lists_with(&settled)),
+            states(&repo.lists()),
+            "a settled roadmap reads as one with no Conversation behind it",
+        );
+
+        repo.write("mvp", UNTICKED);
+
+        assert_eq!(
+            states(&repo.lists_with(&reviewing)),
+            [
+                StageState::WaitingOnTheRoadmap,
+                StageState::ToDo,
+                StageState::ToDo,
+            ],
+            "an undeclared roadmap's first stage is its root",
         );
     }
 
@@ -5151,6 +5299,84 @@ Turns this askance clone into Verkstead.
         );
     }
 
+    /// A stage that stands on no other stage stands on **the roadmap's own
+    /// Conversation**: while that Conversation's wrap-up is in flight — its review
+    /// still going, its checks still running — no root of the roadmap is ready,
+    /// declaring or not.
+    #[test]
+    fn no_root_is_ready_while_the_roadmaps_own_conversation_is_in_flight() {
+        let reviewing =
+            store::StageStandings::default().with_planner("mvp", store::StageStanding::InFlight);
+
+        for list in [DECLARED, UNTICKED] {
+            assert_eq!(
+                ready("mvp", list, &reviewing, ""),
+                Ready::InFlight,
+                "nothing of a roadmap starts before the roadmap is reviewed",
+            );
+        }
+
+        // And another roadmap's Conversation holds nothing of this one.
+        let elsewhere = store::StageStandings::default()
+            .with_planner("public-release", store::StageStanding::InFlight);
+
+        assert!(matches!(
+            ready("mvp", UNTICKED, &elsewhere, ""),
+            Ready::Stages { lowest, .. } if lowest.label == "01",
+        ));
+    }
+
+    /// And once it has settled — or where it was closed before it ever wrapped up,
+    /// or where no Conversation wrote the roadmap at all — the roots are ready
+    /// exactly as they were before any of this.
+    #[test]
+    fn the_roots_are_ready_once_the_roadmaps_own_conversation_has_settled() {
+        let standings = [
+            Some(store::StageStanding::Settled),
+            Some(store::StageStanding::Abandoned),
+            None,
+        ];
+
+        for standing in standings {
+            let record = match standing {
+                Some(standing) => store::StageStandings::default().with_planner("mvp", standing),
+                None => store::StageStandings::default(),
+            };
+
+            let Ready::Stages { lowest, rest, .. } = ready("mvp", DECLARED, &record, "") else {
+                panic!("both roots of this roadmap may start with the roadmap {standing:?}");
+            };
+
+            assert_eq!(lowest.label, "01");
+            assert_eq!(
+                rest.iter().map(|entry| entry.label).collect::<Vec<_>>(),
+                ["02"],
+            );
+        }
+    }
+
+    /// The hold is on roots alone: a stage standing on a settled stage is ready
+    /// whatever the roadmap's own Conversation is doing, it having been settled by
+    /// the time anything settled above it.
+    #[test]
+    fn the_roadmaps_own_conversation_holds_only_the_stages_that_stand_on_nothing() {
+        let record = store::StageStandings::from_rows([(
+            "mvp",
+            "02",
+            store::StageStanding::Settled,
+            false,
+            7,
+        )])
+        .with_planner("mvp", store::StageStanding::InFlight);
+
+        let Ready::Stages { lowest, rest, .. } = ready("mvp", DECLARED, &record, "") else {
+            panic!("03 stands on 02, which has settled");
+        };
+
+        assert_eq!(lowest.label, "03");
+        assert!(rest.is_empty(), "and 01 is a root, held on the roadmap");
+    }
+
     /// And an undeclared roadmap has one ready stage at most, whatever the record
     /// says: each stage stands on the one before it, so the one below the lowest
     /// unticked box has to have settled before anything above it is ready.
@@ -6203,6 +6429,34 @@ Turns this askance clone into Verkstead.
             "so the press has a stage to start: {:?}",
             repo.startable("mvp"),
         );
+    }
+
+    /// A press is not held on the roadmap's own review: a root waiting on it is
+    /// one the human may start, so the press — and the notice and the page that
+    /// offer what it would start — has it to start, where a look would not.
+    #[test]
+    fn a_press_may_start_a_root_while_the_roadmap_is_being_reviewed() {
+        let repo = Repo::with(&[("mvp", UNTICKED)]);
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.commit();
+
+        let reviewing =
+            store::StageStandings::default().with_planner("mvp", store::StageStanding::InFlight);
+
+        assert_eq!(
+            ready("mvp", UNTICKED, &reviewing, ""),
+            Ready::InFlight,
+            "a look would start nothing of it",
+        );
+
+        let Startable::Stage(abandoned) = repo.startable_with("mvp", &reviewing) else {
+            panic!(
+                "the press has a stage to start: {:?}",
+                repo.startable_with("mvp", &reviewing),
+            );
+        };
+
+        assert_eq!(abandoned.stage.label, "01");
     }
 
     /// The same four clauses, each answered by its own name — which is what the
