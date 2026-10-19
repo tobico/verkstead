@@ -1042,7 +1042,7 @@ pub(crate) fn composed(
 
     let leading = local
         .iter()
-        .map(PathBuf::as_os_str)
+        .map(|install| install.as_os_str())
         .chain(apart(OsStr::new(ahead)));
 
     // And the server's own, in two where there is a half to lead: what the
