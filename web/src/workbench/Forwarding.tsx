@@ -93,9 +93,18 @@ const UNREACHABLE = "device unreachable";
 /// The × is a control of its own beside the row rather than inside it, so the
 /// rest of the row is still one target for the link. A press takes the row
 /// away at once, and the server's `forwards` Nudge says the same a moment
-/// later.
+/// later. A × pressed with the focus on it hands the focus to the next row's ×,
+/// or the one before where it was the last, so a hand on the keyboard stays in
+/// the card rather than being dropped onto the page with the row.
 function Row(props: { forward: ForwardView }): JSX.Element {
   const queries = useQueryClient();
+
+  let row!: HTMLDivElement;
+
+  /// Where the focus goes once the row has gone — read at the press, while the
+  /// row is still there to look either side of, and only where the focus was
+  /// on this row: a × nobody was on is no reason to move it.
+  let handing: HTMLButtonElement | null = null;
 
   const dismiss = useMutation(() => ({
     mutationFn: () => dismissForward(props.forward),
@@ -110,8 +119,24 @@ function Row(props: { forward: ForwardView }): JSX.Element {
           : read,
       );
       void queries.invalidateQueries({ queryKey: ["forwards"] });
+
+      if (handing?.isConnected) handing.focus();
+      handing = null;
+    },
+    onError: () => {
+      handing = null;
     },
   }));
+
+  const press = (): void => {
+    const neighbour = row.nextElementSibling ?? row.previousElementSibling;
+
+    handing = row.contains(document.activeElement)
+      ? (neighbour?.querySelector<HTMLButtonElement>("button") ?? null)
+      : null;
+
+    dismiss.mutate();
+  };
 
   const skipped = (): string | null => {
     const standing = props.forward.standing;
@@ -146,7 +171,7 @@ function Row(props: { forward: ForwardView }): JSX.Element {
   );
 
   return (
-    <div role="none" class={styles.row}>
+    <div role="none" class={styles.row} ref={row}>
       <Show
         when={!skipped()}
         fallback={
@@ -173,7 +198,7 @@ function Row(props: { forward: ForwardView }): JSX.Element {
         class={styles.stop}
         aria-label={`Stop forwarding localhost:${props.forward.port}`}
         disabled={dismiss.isPending}
-        onClick={() => dismiss.mutate()}
+        onClick={press}
       >
         <Icon of={faXmark} />
       </button>

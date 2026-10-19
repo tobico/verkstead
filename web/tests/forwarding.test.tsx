@@ -311,6 +311,50 @@ describe("the popup it opens", () => {
     expect(ended).toEqual(["3000", "5173"]);
   });
 
+  it("hands the focus to the next row's × on a press, or the one before at the last", async () => {
+    let held = [forward(3000), forward(5173), forward(8080)];
+    const dismissing = (port: number) =>
+      whenever(
+        `/api/ui/forwards/${MEMBER}/7/1/${port}`,
+        () => {
+          held = held.filter((forward) => forward.port !== port);
+          return Promise.resolve(new Response(null, { status: 204 }));
+        },
+        "DELETE",
+      );
+    theWorkbench(
+      whenever("/api/ui/forwards", () =>
+        json({ forwards: held } satisfies ForwardsView)(),
+      ),
+      dismissing(3000),
+      dismissing(8080),
+    );
+    const { container } = mountSidebar("/");
+
+    fireEvent.click(await item(container));
+    await drawn(container, `.${forwarding.forwarding} [role="menu"]`);
+
+    const stop = (port: number) =>
+      screen.getByRole("menuitem", {
+        name: `Stop forwarding localhost:${port}`,
+      });
+
+    const last = stop(8080);
+    last.focus();
+    fireEvent.click(last);
+
+    await waitFor(() => expect(document.activeElement).toBe(stop(5173)));
+
+    const first = stop(3000);
+    first.focus();
+    fireEvent.click(first);
+
+    await waitFor(() =>
+      expect(screen.queryByText("localhost:3000")).toBeNull(),
+    );
+    expect(document.activeElement).toBe(stop(5173));
+  });
+
   it("closes on Escape and hands the focus back to the item", async () => {
     forwardingThese(() => [forward(3000)]);
     const { container } = mountSidebar("/");
