@@ -3682,15 +3682,31 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await,
     );
 
-    let (_dir, denied) = tailscale_app(REFUSES_SERVE).await;
+    // The refusal on a Mac whose `tailscale` is the one inside the app, which
+    // is what the grant line has to name — the word alone is on no PATH there —
+    // and pinned to where the app really is, so the fixture is the line a Mac
+    // shows rather than a temporary directory's.
+    let (dir, denied) = tailscale_app_in_the_app(REFUSES_SERVE).await;
     write(
         "serve-ungranted.json",
-        &post(
-            &denied,
-            "/api/ui/remote/serve",
-            &serde_json::json!({ "on": true }),
-        )
-        .await,
+        &pin_under(
+            &post(
+                &denied,
+                "/api/ui/remote/serve",
+                &serde_json::json!({ "on": true }),
+            )
+            .await,
+            dir.path(),
+            "",
+        ),
+    );
+
+    // And that Mac's app not logged in, which the pane tells to open the app
+    // rather than to run `tailscale up`.
+    let (_dir, logged_out) = tailscale_app_in_the_app(NOT_LOGGED_IN).await;
+    write(
+        "remote-down-mac-app.json",
+        &get(&logged_out, "/api/ui/remote").await,
     );
 
     // And what the third section of that same pane reads: this device, and how
@@ -4514,6 +4530,10 @@ echo "failed to connect to local tailscaled; it doesn't appear to be running (su
 exit 1
 "#;
 
+/// And one whose daemon is running and which has joined no tailnet.
+#[cfg(unix)]
+const NOT_LOGGED_IN: &str = r#"printf '%s' '{"BackendState":"NeedsLogin","Self":{}}'"#;
+
 /// And the machine with no `tailscale` on it, which is a program that is not
 /// there rather than a script that says anything.
 #[cfg(unix)]
@@ -4589,6 +4609,58 @@ async fn browsing_app() -> (tempfile::TempDir, Router) {
         .unwrap();
 
     (dir, router(pool))
+}
+
+/// A server on a Mac whose only `tailscale` is the Tailscale app's own CLI,
+/// which is `script`: nothing on the PATH it looks over, and the app under the
+/// temporary directory's `Applications`.
+///
+/// The directory resolved before anything is put in it, so that the path the
+/// grant line names is the one [`pin_under`] looks for.
+#[cfg(unix)]
+async fn tailscale_app_in_the_app(script: &str) -> (tempfile::TempDir, Router) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let applications = dir.path().canonicalize().unwrap().join("Applications");
+    let cli = applications.join("Tailscale.app/Contents/MacOS/Tailscale");
+    std::fs::create_dir_all(cli.parent().unwrap()).unwrap();
+
+    // Written by a child shell rather than from here, so that no fork of a
+    // sibling test holds it open for writing when it is run — see the crate's
+    // own `stand_ins::program`.
+    let mut writing = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(r#"cat > "$1" && chmod 755 "$1""#)
+        .arg("sh")
+        .arg(&cli)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    writing
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(format!("#!/bin/sh\n{script}").as_bytes())
+        .unwrap();
+
+    assert!(writing.wait().unwrap().success());
+
+    let tailscale = Tailscale::on_a_mac(
+        dir.path().join("nothing-on-the-path").into_os_string(),
+        vec![applications],
+        WORKBENCH,
+    )
+    .as_user("ada".to_owned())
+    .keyed(WorkbenchKey::stated(dir.path(), "a-stated-workbench-key").unwrap());
+
+    (dir, router_reading_tailscale(pool, tailscale))
 }
 
 /// Put a payload's temporary directory back to a stated one, wherever it

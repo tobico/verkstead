@@ -1,4 +1,5 @@
 {
+  "mac_app": false,
   "tailscale": "Down",
   "trouble": "failed to connect to local tailscaled; it doesn't appear to be running (sudo systemctl start tailscaled ?)"
 }
