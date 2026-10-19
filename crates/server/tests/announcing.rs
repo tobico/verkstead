@@ -27,6 +27,7 @@ use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{AskingDevice, DeviceIdentity, DevicesView};
+use verkstead_schema::Nudge;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices, Tellings};
 use verkstead_server::nudge::Nudges;
@@ -44,6 +45,13 @@ use verkstead_store::Linking;
 const DEVICES: &str = "/api/ui/devices";
 const ADD: &str = "/api/ui/devices/joins";
 const ASKING: &str = "/api/ui/devices/asking";
+
+/// And where an open page listens for the word that something moved.
+const NUDGES: &str = "/api/ui/nudges";
+
+/// How long a test will wait for a Nudge it expects: generous, because it is
+/// only ever paid when the assertion is about to fail.
+const HEARING: Duration = Duration::from_secs(5);
 
 /// The three devices, named by the ids a cluster names them by.
 ///
@@ -197,6 +205,9 @@ impl Verkstead {
             self.joins.clone(),
         )
         .keeping_tellings(self.tellings.clone())
+        // And the pages its own work tells, which are the ones its workbench
+        // serves, as a running server wires them.
+        .nudging(self.nudges.clone())
     }
 
     /// How it dials, for the questions that are about a call rather than about
@@ -278,6 +289,74 @@ async fn allow(app: &Router, request: &str) {
         "POST {ASKING}/{request}/allow: {}",
         String::from_utf8_lossy(&bytes),
     );
+}
+
+/// One of this device's open workbenches, listening on the Nudge stream.
+///
+/// Read off the wire rather than off the channel behind it, the way
+/// `tests/unlinking.rs` reads one: what has to hold is that a page which is
+/// open hears that a row has just been dimmed, down its own connection.
+struct Listening {
+    body: Body,
+
+    /// What has been read off the stream and is not a whole frame yet. SSE
+    /// frames are not the chunks they arrive in.
+    buffered: String,
+}
+
+impl Listening {
+    /// Open the stream the way a page does. Returns once the response is in
+    /// hand, which is after the handler has subscribed — so anything the test
+    /// does next is something this page is listening for.
+    async fn open(app: &Router) -> Listening {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(NUDGES).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK, "GET {NUDGES}");
+
+        Listening {
+            body: response.into_body(),
+            buffered: String::new(),
+        }
+    }
+
+    /// The next Nudge, past the keep-alives that are the stream's other traffic.
+    async fn nudge(&mut self) -> Nudge {
+        let waited_for = tokio::time::timeout(HEARING, async {
+            loop {
+                let frame = self.frame().await;
+
+                if let Some(data) = frame.lines().find_map(|line| line.strip_prefix("data: ")) {
+                    return serde_json::from_str(data).unwrap();
+                }
+            }
+        });
+
+        waited_for.await.expect("waited for a Nudge in vain")
+    }
+
+    /// The next whole frame off the stream, whatever kind it is.
+    async fn frame(&mut self) -> String {
+        loop {
+            if let Some(end) = self.buffered.find("\n\n") {
+                return self.buffered.drain(..end + 2).collect();
+            }
+
+            let chunk = self
+                .body
+                .frame()
+                .await
+                .expect("the stream ended")
+                .unwrap()
+                .into_data()
+                .expect("the stream carries data frames");
+
+            self.buffered.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+    }
 }
 
 /// What the section reads, parsed as the type the pane draws.
@@ -565,8 +644,15 @@ async fn a_member_that_answers_nothing_is_dimmed_and_owed_the_telling() {
     assert_eq!(status, StatusCode::OK, "POST {ADD}: {said}");
 
     let held = being_asked(&b.workbench()).await;
+    let mut page = Listening::open(&b.workbench()).await;
+
     allow(&b.workbench_in_a_hurry(), &held[0].request).await;
     b.tellings.told().await;
+
+    // The press answered before the dimming happened, so an open page holds a
+    // row that was live when it was read: it has to be told the list moved, or
+    // the member that was off stays drawn as reachable until a reload.
+    while page.nudge().await != Nudge::Devices {}
 
     assert_eq!(
         b.cluster().await,
