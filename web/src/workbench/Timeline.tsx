@@ -145,6 +145,7 @@ import { CardButton } from "../CardButton";
 import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
+import shell from "../Panes.module.css";
 import { Truncated } from "../Truncated";
 import { troubleReading } from "../broken";
 import { deviceShown, osIcon, sameMark, useDevices } from "../devices";
@@ -681,7 +682,7 @@ export function Timeline(props: {
             <Show when={props.selected !== null}>
               <button
                 type="button"
-                class={styles.paneForward}
+                class={`${styles.paneForward} ${shell.paneForward}`}
                 onClick={props.details}
               >
                 Details →

@@ -178,10 +178,10 @@
   cursor: pointer;
 }
 
-/* From 80rem all three panes stand together, so there is nowhere left to go
-   back to. The width before it takes the timeline's away on its own — the
-   conversations are on screen by then — and that one is said in
-   `Panes.module.css`, where the pane it names is. */
+/* From 80rem the frames with no list have every pane they hold on screen, so
+   there is nowhere left to go back to. The frame with a list gets there at
+   60rem, and that is said in `Panes.module.css`, where the panes it names
+   are. */
 @media (min-width: 80rem) {
   .back,
   .backArrow {

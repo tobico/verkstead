@@ -143,8 +143,10 @@
   cursor: pointer;
 }
 
-/* And gone once all three panes stand together, because then there is nowhere
-   to page to. */
+/* And gone once the details stand beside the timeline, because then there is
+   nowhere to page to: from 80rem here, which is the share's, and from 60rem in
+   the frame with a list, which `Panes.module.css` says by the frame's own
+   `paneForward`. */
 @media (min-width: 80rem) {
   .paneForward {
     display: none;

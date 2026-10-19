@@ -80,7 +80,7 @@ import shell from "../src/Panes.module.css";
 import stylesheet from "../src/Panes.module.css?raw";
 import heads from "../src/workbench/PaneHead.module.css?raw";
 import { Switch } from "../src/Switch";
-import { ALL_THREE, BESIDE } from "../src/widths";
+import { BESIDE } from "../src/widths";
 import type { OnboardingView } from "../src/api/types";
 import { NAME, type Bridge, type Head } from "../src/settings/bridge";
 import { PaneHead } from "../src/workbench/PaneHead";
@@ -705,19 +705,32 @@ describe("which head the frame keeps clear", () => {
     );
   });
 
+  /// Except where a list stands beside the one pane, which is every width of
+  /// the frame that has one: the list is the left edge and the pane beside it
+  /// the right.
+  it("hands the edges to the list and the pane beside it, where there is a list", () => {
+    expect(stylesheet).toContain(
+      ".panes.listing > .pane {\n  --head-left: 0px;\n  --head-right: 0px;\n}",
+    );
+    expect(stylesheet).toContain(
+      ".panes.listing > .conversationsPane {\n" +
+        "  --head-left: var(--controls-left, 0px);\n}",
+    );
+    expect(stylesheet).toContain(
+      ".panes.listing > .middlePane,\n.panes.listing > .detailsPane {\n" +
+        "  --head-right: var(--controls-right, 0px);\n}",
+    );
+  });
+
   /// And once the panes stand side by side, the head at each edge is the pane in
-  /// the column at that edge: the sidebar where there is a list to pick from, the
-  /// record in the frame that has none, and the details pane in the frame that is
-  /// nothing else.
+  /// the column at that edge: the list where there is one to pick from — said
+  /// above, at every width — the record in the frame that has none, and the
+  /// details pane in the frame that is nothing else.
   it("hands the left edge to whichever pane is the first column", () => {
     const beside = atWidth(BESIDE);
 
     expect(beside).toContain(
       "  .panes > .pane {\n    --head-left: 0px;\n    --head-right: 0px;\n  }",
-    );
-    expect(beside).toContain(
-      "  .panes > .conversationsPane {\n" +
-        "    --head-left: var(--controls-left, 0px);\n  }",
     );
     expect(beside).toContain(
       "  .panes.two > .middlePane {\n" +
@@ -730,20 +743,16 @@ describe("which head the frame keeps clear", () => {
   });
 
   /// The right edge is the details pane's in every frame that shows one — and the
-  /// middle pane's as well while it is standing in the details pane's own column,
-  /// which is what the two-panes-of-three width does. With all three up it stops,
-  /// which is the one thing here that two breakpoints have to agree about.
+  /// middle pane's as well while it is the one pane beside the list, which is
+  /// every width under 60rem. From there the details stand beyond it and it
+  /// stops, which is the one thing here that the two widths have to agree about.
   it("hands the right edge to the far column, whichever pane that is", () => {
     expect(atWidth(BESIDE)).toContain(
       "  .panes > .detailsPane {\n" +
         "    --head-right: var(--controls-right, 0px);\n  }",
     );
     expect(atWidth(BESIDE)).toContain(
-      "  .panes:not(.two) > .middlePane {\n" +
-        "    --head-right: var(--controls-right, 0px);\n  }",
-    );
-    expect(atWidth(ALL_THREE)).toContain(
-      "  .panes:not(.two) > .middlePane {\n    --head-right: 0px;\n  }",
+      "  .panes.listing > .middlePane {\n    --head-right: 0px;\n  }",
     );
   });
 });

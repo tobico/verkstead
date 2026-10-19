@@ -20,7 +20,15 @@ import {
   waitFor,
 } from "@solidjs/testing-library";
 import type { Terminal as XTerm } from "@xterm/xterm";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vitest";
 
 import type {
   AbandonedRepo,
@@ -597,6 +605,17 @@ const BRIEF = briefOf(OPEN);
 // test's own teardown and this one's first line. Cleared here, that straggler
 // is the previous test's rather than the next test's first surprise.
 beforeEach(resetEditing);
+
+/// Every scroll the page puts on a pane, which is what moves wherever there is
+/// a list beside the record: the frame is the window's height at every width
+/// there, and each pane scrolls inside it — so following a record's bottom
+/// sets a pane's `scrollTop` rather than scrolling the window. Put back when
+/// the test ends.
+function paneScrolls() {
+  const scrolled = vi.spyOn(Element.prototype, "scrollTop", "set");
+  onTestFinished(() => scrolled.mockRestore());
+  return scrolled;
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -8977,14 +8996,12 @@ describe("a session's output on the timeline", () => {
   /// the record rather than the beginning of it — and the pane goes on following
   /// as the session talks.
   ///
-  /// What the ask lands on here is the window: which box scrolls is the
-  /// stylesheet's answer to how wide the window is, and jsdom lays nothing out,
-  /// so the walk up from the record finds no box that scrolls and the page
-  /// itself is what moves. Where the pause and the resume are asked about is
-  /// `following.test.ts`, which builds a box that scrolls.
+  /// What the ask lands on here is the pane: which box scrolls is the
+  /// stylesheet's answer, and with a list beside the record every pane scrolls
+  /// on its own at every width. Where the pause and the resume are asked about
+  /// is `following.test.ts`, which builds a box that scrolls.
   it("opens a running session's record at its end, and follows it down", async () => {
-    const scrolled = vi.fn();
-    vi.stubGlobal("scrollTo", scrolled);
+    const scrolled = paneScrolls();
 
     theGrillingOutput(
       { running: true },
@@ -9015,8 +9032,7 @@ describe("a session's output on the timeline", () => {
   /// keep up with, and moving a reader off the first thing the session said
   /// would be the pane deciding where they meant to start.
   it("leaves a finished session's record where the reader arrives", async () => {
-    const scrolled = vi.fn();
-    vi.stubGlobal("scrollTo", scrolled);
+    const scrolled = paneScrolls();
 
     theSpeaking();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -20703,8 +20719,7 @@ const LANDED: TimelineEvent = {
 /// record, and goes after each Event that lands on it.
 describe("the timeline following its bottom", () => {
   it("opens the record at its end", async () => {
-    const scrolled = vi.fn();
-    vi.stubGlobal("scrollTo", scrolled);
+    const scrolled = paneScrolls();
 
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -20715,8 +20730,7 @@ describe("the timeline following its bottom", () => {
   });
 
   it("goes after each event that lands on the record", async () => {
-    const scrolled = vi.fn();
-    vi.stubGlobal("scrollTo", scrolled);
+    const scrolled = paneScrolls();
 
     /// The record as the server has it, which grows under the page the way a
     /// running session's does — with every Set on it settled, since a Set
@@ -30175,21 +30189,17 @@ describe("the maximise toggle in the code pane", () => {
     );
   });
 
-  /// And on a window the details pane already has, the toggle is not drawn at
-  /// all: there is no pane beside this one for a press to hide, and a control
-  /// about a layout that is not standing is furniture.
-  it("is absent on a window that is walked one pane at a time", async () => {
+  /// And on a window walked one pane at a time the toggle is drawn all the
+  /// same: the collapsed list stands beside Code there, and that is what a
+  /// press hides.
+  it("hides the collapsed list on a window that is walked one pane at a time", async () => {
     const { container } = await opened("narrow");
 
-    expect(toggle(container)).toBeNull();
+    expect(toggle(container)).not.toBeNull();
 
-    // And the pane is the one being read, which is what a narrow window is:
-    // there is nothing to maximise because there is nothing else up.
-    expect(panes(container)).toEqual([
-      "conversations",
-      "timeline",
-      "details",
-    ]);
+    fireEvent.click(toggle(container)!);
+
+    await waitFor(() => expect(panes(container)).toEqual(["details"]));
   });
 });
 

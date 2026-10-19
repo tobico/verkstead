@@ -822,15 +822,15 @@ export function Code(props: {
   /// long as it stands.
   held: Kept;
 
-  /// The maximise toggle's state and the way to change it, where the window is
-  /// wide enough to have something to hide.
+  /// The maximise toggle's state and the way to change it.
   ///
-  /// Absent below that breakpoint, which is what takes the toggle out of the
-  /// header: the details pane already has the window there, and a press that
-  /// hid nothing would be a control about a layout that is not standing (ADR
-  /// 0019, *One pane, replacing the Terminal*). What it hides is the frame's,
-  /// so what it is remembered in is the frame's too — the toggle is here
-  /// because the pane it gives the window to is.
+  /// Handed in at every width, something standing beside Code at every width —
+  /// the collapsed list, on a phone. Absent only where the pane is drawn with
+  /// no frame around it to hide anything of, which takes the toggle out of the
+  /// header: a press that hid nothing would be a control about a layout that
+  /// is not standing (ADR 0019, *One pane, replacing the Terminal*). What it
+  /// hides is the frame's, so what it is remembered in is the frame's too — the
+  /// toggle is here because the pane it gives the window to is.
   maximise?: { on: boolean; set: (on: boolean) => void };
 }): JSX.Element {
   const device = useDevice();
