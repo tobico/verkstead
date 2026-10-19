@@ -2948,9 +2948,10 @@ under them, and the foot — *Show archived* and the forwarding reading — as b
 paper. Every part stands exactly as tall as it does expanded; only the width
 shrinks. **Expanded** is the same pane at the width it would stand at full,
 drawn *over* the panes beside it with a shadow, nothing beside it moving. A
-hovering pointer, a keyboard focus inside it or a tap expands it; a mouse leaving
-it, or a finger's tap on a card, the link or anywhere outside it, collapses it
-again. With nothing open — the root address — it stands expanded until a card is
+mouse that has slowed or stopped on it, a keyboard focus inside it or a tap
+expands it — a pointer only crossing it does not; a mouse leaving it, a moment
+after it has gone, or a finger's tap on a card, the link or anywhere outside it,
+collapses it again. With nothing open — the root address — it stands expanded until a card is
 picked. Width alone decides which the sidebar is: there is no pin and no
 collapse button. See the design document's UI section.
 _Avoid_: rail, drawer, mini sidebar, hamburger, minimised, docked

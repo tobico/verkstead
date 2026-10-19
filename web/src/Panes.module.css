@@ -171,13 +171,15 @@
    it. And `--collapsed-item` is the strip's item, the `2rem` a part the strip
    draws is cut to.
 
-   The room at the sides is the strip's in both states: half a rem of paper
-   before the item, so the item stands in the middle of the strip, and the
-   pane's own `1.25rem` after the content. Expanding changes the clip and
-   nothing else, so nothing in the pane slides sideways under a pointer as it
-   opens, and the content is the one width collapsed and expanded. The chrome
-   and the foot bleed by the pane's own padding as ever, which on the left now
-   takes them past the pane's edge, where the clip has them. */
+   The room at the sides: collapsed, half a rem of paper before the item, so
+   the item stands in the middle of the strip, and the pane's own `1.25rem`
+   after the content; expanded, the pane's own `1.25rem` on both sides, as the
+   full sidebar has it. So the content slides `0.75rem` right as the pane opens
+   — which a pointer never sees happen under it, the hover waiting for the
+   pointer to settle before it expands the pane and the slide being over
+   before the pointer reaches a card. Nothing moves vertically. The chrome and
+   the foot bleed by the pane's own padding as ever, which collapsed takes them
+   past the pane's edge on the left, where the clip has them. */
 @media (width < 100rem) {
   .panes.listing > .conversationsPane {
     z-index: 1;
@@ -201,6 +203,15 @@
      for the shadow saying it stands over what is beside it. The same `--lift`
      a menu and a toast stand off the page by.
 
+     Under a mouse resting on it, `data-hovered`, which the page puts there
+     rather than `:hover` being asked: the page waits for the pointer to have
+     slowed or stopped on the strip, so one crossing it on the way off the
+     window's edge never opens it, and keeps it open a moment after the pointer
+     leaves. And only a mouse arms it, so a finger's tap — where a browser
+     leaves `:hover` standing — never holds the pane open. See `hovered` in
+     `Panes.tsx`. Nothing about a press: a card pressed is a pane still under
+     the pointer.
+
      Under a keyboard's focus, which is what reaches it without a pointer — a
      focus a click left behind is not one, so a card pressed with a mouse does
      not hold the pane open once the pointer has gone. The pane's own focus as
@@ -210,10 +221,12 @@
      shown, and what stands beside it is empty paper until a card is picked.
 
      The five properties unset, so everything inside reads the expanded value
-     it was written with — see above. The padding stays the strip's. */
+     it was written with — see above. And the padding the pane's own. */
+  .panes.listing > .conversationsPane[data-hovered],
   .panes.listing > .conversationsPane[data-expanded],
   .panes.listing > .conversationsPane:focus-visible,
   .panes.listing > .conversationsPane:has(:focus-visible) {
+    padding-inline-start: 1.25rem;
     clip-path: inset(0 -3rem 0 0);
     box-shadow: var(--lift);
     --collapsed-hidden: initial;
@@ -225,29 +238,11 @@
 
   /* And the edge the strip ends at, which no divider draws: there is none
      beside a collapsed list. Drawn by the pane in the second column — whichever
-     of the two `data-pane` names below 60rem, and the middle pane from there,
-     where the details are beyond a divider of their own. */
+     of the two `data-pane` names below 60rem, and from there the middle pane,
+     or the details where there is no middle pane beside them. */
   .panes.listing > .middlePane,
   .panes.listing > .detailsPane {
     border-left: 1px solid var(--edge);
-  }
-}
-
-/* And under a pointer that can rest on it, which is how a mouse opens it: the
-   pane expands while the pointer is over it and collapses when it leaves.
-   Nothing about a press — a card pressed is a pane still under the pointer.
-   Not where the hand last on it was a finger, `data-finger`: a browser leaves
-   `:hover` where a finger tapped, which on a laptop with a touchscreen would
-   hold the pane open after the tap that was to collapse it. See `Panes.tsx`. */
-@media (width < 100rem) and (hover: hover) {
-  .panes.listing > .conversationsPane:hover:not([data-finger]) {
-    clip-path: inset(0 -3rem 0 0);
-    box-shadow: var(--lift);
-    --collapsed-hidden: initial;
-    --collapsed-faded: initial;
-    --collapsed-gone: initial;
-    --collapsed-drawn: initial;
-    --collapsed-item: initial;
   }
 }
 
@@ -256,6 +251,7 @@
 @media (width < 100rem) and (prefers-reduced-motion: no-preference) {
   .panes.listing > .conversationsPane {
     transition:
+      padding-inline-start 150ms ease,
       clip-path 150ms ease,
       box-shadow 150ms ease;
   }
@@ -526,6 +522,20 @@
   }
 }
 
+/* And the list's head is no drag region while it is collapsed, which a mouse
+   would never get through to the gear: Electron hands the page no pointer
+   events over a drag region, so the pane loses its hover the moment the pointer
+   reaches the head — `pointerleave`, and no `pointerenter` back over a
+   `no-drag` button inside it, as a probe on Electron 43.1 under X showed — and
+   collapses under the pointer on its way to the gear. The pane beside the strip
+   keeps its head the window's width to be dragged by, and the full sidebar from
+   100rem keeps its own. */
+@media (width < 100rem) {
+  :root[data-app] .panes.listing > .conversationsPane .paneHead {
+    -webkit-app-region: no-drag;
+  }
+}
+
 /* And the list at the left edge is not padded clear of the controls there but
    dropped below them (Set 1265 Q19). The left edge is a Mac's traffic lights,
    which stand over the very corner a 3rem strip puts its logo in, and a strip
@@ -648,9 +658,11 @@
     --head-left: 0px;
   }
 
-  /* And the edge a collapsed strip ends at is drawn by the middle pane alone
-     from here: the details are beyond a divider of their own. */
-  .panes.listing > .detailsPane {
+  /* And the edge a collapsed strip ends at is drawn by the middle pane from
+     here, the details being beyond a divider of their own — except in the
+     frame with no middle pane, `widened`, where the details stand beside the
+     strip and draw its edge themselves. */
+  .panes.listing:not(.widened) > .detailsPane {
     border-left: 0;
   }
 }
