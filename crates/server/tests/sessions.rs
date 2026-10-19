@@ -18465,6 +18465,43 @@ fn a_roadmap_of_briefs_then_wraps_up(
     merging: &str,
     briefs: &str,
 ) -> String {
+    let review = format!(
+        "{merging}\n    printf 'I read the whole branch and found nothing worth raising\\n'\n    exit 0"
+    );
+
+    a_roadmap_reviewed_by(planning, worked, stages, workflow, briefs, &review)
+}
+
+/// And the same with the review session's whole body the caller's — for the
+/// tests about what happens while the roadmap's own review is still going on,
+/// which want one that waits on the human rather than exiting. Written the way
+/// [`a_backlog_then_wraps_up`] takes its review: `WHILE_NOBODY_HAS_ASKED` is
+/// spelled out here.
+fn a_roadmap_then_reviews(
+    planning: &Path,
+    worked: &Path,
+    stages: &str,
+    reviews: &Path,
+    review: &str,
+) -> String {
+    let review = format!(
+        "    printf 'model=%s\n%s\n=====\n' \"$1\" \"$2\" >> {reviews}\n{review}",
+        reviews = quoted(reviews),
+        review = review.replace("WHILE_NOBODY_HAS_ASKED", WHILE_NOBODY_HAS_ASKED),
+    );
+
+    a_roadmap_reviewed_by(planning, worked, stages, RECORDS_STACKING, "", &review)
+}
+
+/// The stub under both of those, with the review session's body as given.
+fn a_roadmap_reviewed_by(
+    planning: &Path,
+    worked: &Path,
+    stages: &str,
+    workflow: &str,
+    briefs: &str,
+    review: &str,
+) -> String {
     format!(
         r#"
 case "$2" in
@@ -18485,9 +18522,7 @@ case "$2" in
     sleep 300
     ;;
 *reviewing/SKILL.md*)
-{merging}
-    printf 'I read the whole branch and found nothing worth raising\n'
-    exit 0
+{review}
     ;;
 *next-stage/SKILL.md*)
     printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {planning}
@@ -19902,6 +19937,141 @@ async fn a_place_coming_free_starts_the_stage_that_waited_for_one() {
         6,
         "the roadmap, the investigation and one Conversation per stage",
     );
+}
+
+/// A roadmap's first stage waits on **the roadmap's own review**: however many
+/// looks run while the roadmap Conversation is wrapping up, none of them starts a
+/// stage of it, and the card says what stage 01 is waiting on. Once the review is
+/// answered and the wrap-up settles, the settle starts it as it always has.
+///
+/// The look is what used to start it early: the roadmap is on the record the
+/// moment its commit lands, so a look running while the review was still asking
+/// found stage 01 standing on nothing and started it. This bench looks every
+/// tenth of a second, so the wait below spans dozens of them.
+#[tokio::test]
+async fn no_stage_of_a_roadmap_starts_while_the_roadmap_is_being_reviewed() {
+    let (fixture, set) = a_roadmap_under_review().await;
+
+    // Many looks' worth of the review waiting on the human.
+    tokio::time::sleep(LOOKING.places * 30).await;
+
+    assert_eq!(
+        conversations(&fixture.app)
+            .await
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>(),
+        [fixture.id],
+        "nothing but the roadmap's own Conversation while its review is open",
+    );
+    assert_eq!(
+        stage_states(&fixture).await,
+        [
+            ("01".to_owned(), StageState::WaitingOnTheRoadmap),
+            ("02".to_owned(), StageState::ToDo),
+        ],
+        "and the card says what stage 01 is waiting on",
+    );
+
+    // The human answers, the review finishes, the wrap-up settles: the settle
+    // starts stage 01, exactly as it did before there was anything to wait on.
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let stages = stages_of(&fixture, 1).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        ["roadmaps/rate-limiting/01-counter"],
+    );
+
+    let said = said_on(&fixture, fixture.id, "Stage 01").await;
+
+    assert!(
+        said.contains("has started as a conversation of its own"),
+        "the roadmap's own Timeline says the stage started: {said:?}",
+    );
+}
+
+/// And a roadmap Conversation **steered to Done** by hand has settled all the
+/// same: a steer runs no settle, so what starts its first stage is the next look.
+#[tokio::test]
+async fn a_roadmap_steered_to_done_starts_its_first_stage_on_the_next_look() {
+    let (fixture, _set) = a_roadmap_under_review().await;
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture.steer_into("Done", true).await,
+        ConversationSteered::Steered,
+    );
+
+    let stages = stages_of(&fixture, 1).await;
+
+    assert_eq!(stages[0].branch, "roadmaps/rate-limiting/01-counter");
+}
+
+/// A roadmap Conversation staged, pushed and wrapping up, with its review session
+/// asking the human and waiting on the answer — at a pace that looks for a free
+/// place every tenth of a second.
+async fn a_roadmap_under_review() -> (Grilling, i64) {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+    let reviews = spill.path().join("review-prompts");
+
+    let stub = a_roadmap_then_reviews(
+        &planning,
+        &worked,
+        TWO_STAGES,
+        &reviews,
+        REVIEW_THEN_FIX_AND_IDLE,
+    );
+
+    let fixture = grilling_at_pace(spill, &stub, &gh_about(GREEN, "", ""), *LOOKING, &[]).await;
+
+    staged(&fixture).await;
+    until_asking(&fixture, &reviews).await;
+
+    let set = fixture.ask(REVIEW).await;
+
+    (fixture, set)
+}
+
+/// What the roadmap's own card says each of its stages is, by label.
+async fn stage_states(fixture: &Grilling) -> Vec<(String, StageState)> {
+    fixture
+        .view()
+        .await
+        .pinned
+        .into_iter()
+        .find_map(|pinned| match pinned {
+            PinnedEvent::StageList(list) => Some(list),
+            _ => None,
+        })
+        .expect("the roadmap this Conversation's branch wrote is pinned")
+        .stages
+        .into_iter()
+        .map(|stage| (stage.number, stage.state))
+        .collect()
 }
 
 /// And how many Conversations the whole server runs at once is a **setting**
