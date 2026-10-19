@@ -34,11 +34,11 @@
 //! gear reads as open, this being the pane it opens.
 //!
 //! Which level a narrow window is showing is this page's, as it is the
-//! workbench's: the walk is conversations → settings → detail, one pane at a
-//! time, and each pane's way back out is drawn by its own head and hidden by the
-//! frame wherever the pane it goes back to is already on screen. The way out of
-//! the settings themselves is a navigation rather than a change of level,
-//! because the settings are a page and leaving them is leaving it.
+//! workbench's: the walk is settings → detail, one pane at a time beside the
+//! collapsed list, and the details pane's way back out is drawn by its own head
+//! and hidden by the frame wherever the settings are already on screen. The
+//! settings themselves have no way back: the conversations are beside them at
+//! every width, and leaving the settings is pressing one of them.
 //!
 //! What the details pane is showing has a path of its own under `/settings`, the
 //! way a Conversation's panes have one under the Conversation — see
@@ -217,11 +217,7 @@ export function SettingsPage(): JSX.Element {
         />
       }
       middle={
-        <Settings
-          opening={opening()}
-          select={select}
-          back={() => navigate("/")}
-        />
+        <Settings opening={opening()} select={select} />
       }
       details={
         <Details
@@ -242,10 +238,6 @@ function Settings(props: {
   opening: Opening | null;
   /// And how to change it.
   select: (opening: Opening) => void;
-  /// The way back out to the conversations, which is a navigation: the settings
-  /// are a page, and leaving them is leaving it. Drawn always and hidden by the
-  /// frame wherever the conversations are already on screen.
-  back: () => void;
 }): JSX.Element {
   return (
     <>
@@ -254,7 +246,7 @@ function Settings(props: {
           switch is small enough to live in the space the title was leaving
           empty anyway. */}
       <PaneSticky>
-        <PaneHead back={{ to: "Conversations", go: props.back }} title="Settings">
+        <PaneHead title="Settings">
           <Notifications />
         </PaneHead>
       </PaneSticky>

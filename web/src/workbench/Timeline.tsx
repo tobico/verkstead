@@ -521,19 +521,13 @@ function PaneName(props: {
 export function Timeline(props: {
   conversation: ConversationView;
 
-  /// The way back out to the conversations, where there is a list to go back
-  /// to. A share has none — it is one Conversation and nothing around it — so
-  /// there is nothing to draw and nowhere to go.
-  back?: () => void;
-
   /// The way to another Conversation entirely, which the roadmap's card uses: a
   /// stage in flight on it leads to the Conversation working that stage — see
   /// [`StageRow`].
   ///
-  /// Optional for `back`'s reason, and absent in the same place: a share is one
-  /// Conversation and nothing around it, so there is nowhere to go — and a share
-  /// carries no roadmap to be led out of anyway, every pinned card being left off
-  /// one.
+  /// Absent on a share: it is one Conversation and nothing around it, so there
+  /// is nowhere to go — and a share carries no roadmap to be led out of anyway,
+  /// every pinned card being left off one.
   go?: (conversation: number) => void;
 
   details: () => void;
@@ -640,10 +634,8 @@ export function Timeline(props: {
           between the title and the pinned items and nothing to keep a pinned
           block's own offset in step with. */}
       <PaneSticky>
-        {/* The way back out of this level, which is the whole of what a narrow
-            window offers instead of the pane beside it. Drawn wherever there is
-            a list to go back to, and hidden by the pane head where all three
-            panes are on screen at once.
+        {/* No way back out of this level: the conversations are beside it at
+            every width, so there is no level above it to go back to.
 
             Titled for its branch, or a Draft where nobody has named one — the
             same rule the sidebar row it was opened from draws, so the card and
@@ -655,11 +647,6 @@ export function Timeline(props: {
             repositories are both called Draft, and the Repo is the only thing
             on either header that tells them apart. */}
         <PaneHead
-          back={
-            props.back === undefined
-              ? undefined
-              : { to: "Conversations", go: props.back }
-          }
           heading={styles.paneName}
           title={
             <PaneName

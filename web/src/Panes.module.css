@@ -11,7 +11,8 @@
 
    Where there is a list to pick from — `listing` on the frame — the list stands
    at every width, in three bands. Under 60rem it is a collapsed strip beside
-   the one pane `data-pane` names; from 60rem it is the strip beside the
+   the one pane `data-pane` names — or beside nothing, expanded over the
+   empty paper, where nothing is open; from 60rem it is the strip beside the
    timeline and the details; from 100rem it is the full sidebar at the share
    this device settled it at. The frame is the window's height in all three, so
    a phone's page never scrolls and every pane scrolls inside it. The frames
@@ -77,12 +78,13 @@
 }
 
 /* Phone-first, as everything here is: one pane, and it is whichever one the
-   page says. */
+   page says — beside the list, wherever there is one, which is never a level
+   of its own: it stands at every width (below). Where the page says `nothing`,
+   nothing is open and no pane is shown beside it. */
 .panes > .pane {
   display: none;
 }
 
-.panes[data-pane="conversations"] > .conversationsPane,
 .panes[data-pane="middle"] > .middlePane,
 .panes[data-pane="details"] > .detailsPane {
   display: block;
@@ -124,6 +126,15 @@
 
 .panes.listing > .conversationsPane {
   display: flex;
+}
+
+/* And the details pane's way back out, where there is no timeline for it to go
+   back to and so it goes to the list — the frame `widened` names. The list is
+   beside it at every width, so there is nowhere for it to go that is not
+   already on screen. Its way back to a timeline stays where the timeline is
+   not beside it, which is below 60rem. */
+.panes.listing.widened > .detailsPane .paneBack {
+  display: none;
 }
 
 /* Collapsed, which is every width under the full band.
@@ -558,17 +569,11 @@
     display: flex;
   }
 
-  /* And the conversations being on screen is what makes the middle pane's way
-     back to them pointless, so it goes. The way back is drawn by `PaneHead`,
-     and wears this name so that the frame can say where one is not needed. */
-  .middlePane .paneBack {
-    display: none;
-  }
-
-  /* So does the details pane's, the pane it goes back to — the timeline, or
-     the list where there is none — standing beside it; and the timeline's way
-     on into the details, which are beside it too. The way on is drawn by
-     `Timeline.tsx`, and wears its name for the same reason. */
+  /* And the details pane's way back goes, the timeline it goes back to
+     standing beside it; and the timeline's way on into the details, which are
+     beside it too. The way back is drawn by `PaneHead` and the way on by
+     `Timeline.tsx`, and each wears the frame's name so that the frame can say
+     where one is not needed. */
   .panes.listing .detailsPane .paneBack,
   .panes.listing .paneForward {
     display: none;
@@ -834,14 +839,6 @@
   .panes.two > .middlePane,
   .panes.two > .detailsPane {
     display: block;
-  }
-
-  /* And the record's way back out to a list that is not there. The rule above
-     takes it off the middle pane once the sidebar is beside it; here there is
-     no sidebar to be beside, and the pane it would go back to has never
-     existed. */
-  .panes.two .middlePane .paneBack {
-    display: none;
   }
 }
 

@@ -3519,16 +3519,14 @@ describe("the escape hatch on a conversation that will not load", () => {
     await waitFor(() => screen.getByText(/The conversation couldn't be read/));
   });
 
-  /// And the way back out, which is the whole reason the hatch is on the pane
-  /// rather than on the sidebar's right-click: a phone has no right-click, and
-  /// a page it cannot leave is worse than one it cannot read.
-  it("carries the way back to the conversations", async () => {
+  /// And no way back out on its head: the conversations are beside it at
+  /// every width, so a phone leaves it by pressing one of them.
+  it("draws no way back to the conversations", async () => {
     theBrokenConversation();
-    const { container, history } = mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
 
-    fireEvent.click(await drawn(container, `.${shell.middlePane} .${shell.paneBack}`));
-
-    await waitFor(() => expect(history.get()).toBe("/"));
+    await drawn(container, `.${shell.middlePane} .${paneHead.head}`);
+    expect(container.querySelector(`.${shell.middlePane} .${shell.paneBack}`)).toBeNull();
   });
 
   /// One row, and the one that covers every state: close refuses nothing but a
@@ -6772,34 +6770,44 @@ describe("the agent dropdown on a conversation", () => {
 
 describe("the panes on a narrow window", () => {
   /// Asked over a record with something on it beyond the Brief, which is what
-  /// makes three levels to walk: a Conversation whose record is the one Event
+  /// makes two levels to walk: a Conversation whose record is the one Event
   /// draws no Timeline at all, and the walk skips it — see *the one-event
-  /// layout* below.
-  it("starts on the conversations and walks in and back out", async () => {
+  /// layout* below. The list is beside both rather than a level of its own.
+  it("starts with nothing open and walks in and back out", async () => {
     theRecordedWith();
-    const { container } = mount();
+    const { container, history } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
-    // Nothing picked, so the level being shown is the list.
-    expect(frame(container).dataset.pane).toBe("conversations");
+    // Nothing picked, so there is no level to show: the list stands expanded
+    // over the empty paper. Asked afresh each time, the root and a
+    // Conversation being routes of their own.
+    const list = () =>
+      container.querySelector<HTMLElement>(`.${shell.conversationsPane}`)!;
+    expect(frame(container).dataset.pane).toBe("nothing");
+    expect(list().hasAttribute("data-expanded")).toBe(true);
 
     fireEvent.click(screen.getByText(DRAFTING.branch));
     await waitFor(() =>
       expect(frame(container).dataset.pane).toBe("middle"),
     );
+    expect(list().hasAttribute("data-expanded")).toBe(false);
 
     // The third level is the open Event's own, and the landing opens the newest
     // thing on the record — so there is something to page into, and the way on
     // is offered.
     await waitFor(() => screen.getByRole("button", { name: "Details →" }));
 
-    // The way back out is a navigation — it takes the Conversation off the URL
-    // — so the level changes when the router has moved rather than when the
-    // button was pressed.
-    fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
+    // And no way back to the list, which is beside the timeline at every width.
+    expect(screen.queryByRole("button", { name: "← Conversations" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Back to Conversations" })).toBeNull();
+
+    // Back is a navigation — it takes the Conversation off the URL — so the
+    // level changes when the router has moved.
+    history.back();
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("conversations"),
+      expect(frame(container).dataset.pane).toBe("nothing"),
     );
+    expect(list().hasAttribute("data-expanded")).toBe(true);
   });
 
   /// Walking back out takes the Conversation off the URL as well as off the
@@ -6818,9 +6826,9 @@ describe("the panes on a narrow window", () => {
     expect(history.get()).toBe(`/conversations/${DRAFTING.id}`);
     await drawn(container, `.${timeline.timeline}`);
 
-    fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
+    history.back();
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("conversations"),
+      expect(frame(container).dataset.pane).toBe("nothing"),
     );
     expect(history.get()).toBe("/");
 
@@ -6877,7 +6885,7 @@ describe("the panes on a narrow window", () => {
 
     history.set({ value: "/" });
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("conversations"),
+      expect(frame(container).dataset.pane).toBe("nothing"),
     );
   });
 
@@ -6886,8 +6894,7 @@ describe("the panes on a narrow window", () => {
   it("is one pane at a time until the window is wide enough for more", () => {
     expect(shellCss).toContain(".panes > .pane {\n  display: none;\n}");
     expect(shellCss).toContain(
-      '.panes[data-pane="conversations"] > .conversationsPane,\n' +
-        '.panes[data-pane="middle"] > .middlePane,\n' +
+      '.panes[data-pane="middle"] > .middlePane,\n' +
         '.panes[data-pane="details"] > .detailsPane {\n' +
         "  display: block;\n}",
     );
@@ -7439,7 +7446,7 @@ describe("the one-event layout", () => {
   /// And the walk on a narrow window skips the level that is not there, in
   /// either direction: opening the Conversation lands on the composer, and the
   /// way off the composer is the way out of the Conversation.
-  it("lands on the brief pane, and back goes to the conversations", async () => {
+  it("lands on the brief pane, and back goes to the root", async () => {
     theWorkbench();
     const { container, history } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
@@ -7455,10 +7462,18 @@ describe("the one-event layout", () => {
     // there is no timeline.
     expect(screen.queryByRole("button", { name: "Details →" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
+    // And its way back to the list is drawn nowhere, the list being beside it
+    // at every width — jsdom lays nothing out, so the rule is what is read.
+    expect(shellCss).toContain(
+      ".panes.listing.widened > .detailsPane .paneBack {\n  display: none;\n}",
+    );
+
+    history.back();
 
     await waitFor(() => expect(history.get()).toBe("/"));
-    expect(frame(container).dataset.pane).toBe("conversations");
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("nothing"),
+    );
   });
 });
 
@@ -20619,7 +20634,7 @@ describe("the path a details pane stands at", () => {
     history.back();
     await waitFor(() => expect(history.get()).toBe("/"));
     await waitFor(() =>
-      expect(frame(container).dataset.pane).toBe("conversations"),
+      expect(frame(container).dataset.pane).toBe("nothing"),
     );
   });
 

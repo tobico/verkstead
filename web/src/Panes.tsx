@@ -14,9 +14,12 @@
 //! height in it is the height it has expanded; a pointer resting on it, a
 //! keyboard focus inside it or a finger's tap on it expands it over the panes
 //! beside it, which do not move — a finger's tap doing nothing else, and the
-//! next one on a card or a link, or one anywhere outside, collapsing it again. And with nothing open — `pane` saying the conversations are the level
-//! being shown — it stands expanded over the empty paper until a card is
-//! picked.
+//! next one on a card or a link, or one anywhere outside, collapsing it again.
+//!
+//! So the list is never a level of its own: it is beside whatever the window
+//! shows, and a narrow window walks the two levels after it, one at a time. The
+//! root, where nothing is open, is neither of them — `pane` saying `nothing` —
+//! and stands the list expanded over the empty paper until a card is picked.
 //!
 //! Which level is showing is `data-pane` on the frame, and the stylesheet is
 //! what makes it mean anything: from 60rem it is ignored and every pane drawn.
@@ -101,8 +104,9 @@ import {
   type Widths,
 } from "./widths";
 
-/// Which level of the hierarchy a narrow window is showing.
-export type Pane = "conversations" | "middle" | "details";
+/// Which level of the hierarchy a narrow window is showing, or `nothing` where
+/// nothing is open: the list is beside every level rather than one of them.
+export type Pane = "nothing" | "middle" | "details";
 
 /// Whether a media query holds, as something the page can be built out of.
 ///
@@ -173,7 +177,7 @@ export function Panes(props: {
   /// which level the page stands at is the page's own URL and selection.
   pane: Pane;
 
-  /// The three panes, in the order they are walked through.
+  /// The three panes: the list, and the two levels walked through beside it.
   ///
   /// The first of them is absent in the one frame that has nothing to pick
   /// from: a share, which is one Conversation and no list of them. Then the
@@ -556,8 +560,8 @@ export function Panes(props: {
     >
       <Show when={picking()}>
         {/* Standing expanded while it is collapsed and nothing is open:
-            the level being shown is the list, and what is beside it is
-            empty paper until a card is picked. And while a finger has
+            there is no level to show beside it, and what is there is empty
+            paper until a card is picked. And while a finger has
             expanded it — see `touched`. The press and the click are heard on
             the way down, before anything in the list hears them. */}
         <section
@@ -572,7 +576,7 @@ export function Panes(props: {
             section.addEventListener("keydown", forget, true);
           }}
           data-expanded={
-            collapsed() && (props.pane === "conversations" || touched())
+            collapsed() && (props.pane === "nothing" || touched())
               ? ""
               : undefined
           }
