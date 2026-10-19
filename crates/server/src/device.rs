@@ -714,18 +714,45 @@ impl AnnexData for PathBuf {
 /// what the dialling does over there is only so once it has finished. A running
 /// server never waits on that; a suite reading a far end after a press does, with
 /// [`Tellings::told`].
+///
+/// **One at a time, in the order of the presses.** Two Allows pressed a second
+/// apart would otherwise dial at once, and the second's announcement can reach
+/// the first newcomer before it has been told it is in — where the gate turns it
+/// away as a stranger, and a member that is perfectly well reads dimmed and owed
+/// the telling until its next exchange. Each telling waits for the one before it,
+/// which is the order a press that waited on its own dialling always had.
 #[derive(Debug, Clone, Default)]
-pub struct Tellings(std::sync::Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>);
+pub struct Tellings(std::sync::Arc<std::sync::Mutex<Carried>>);
+
+/// What [`Tellings`] holds: the tellings not yet waited on, and the word the
+/// last of them sends as it finishes, which the next one waits for.
+#[derive(Debug, Default)]
+struct Carried {
+    running: Vec<tokio::task::JoinHandle<()>>,
+    last: Option<tokio::sync::oneshot::Receiver<()>>,
+}
 
 impl Tellings {
-    /// Carry `telling` on in a task of its own, held where [`Tellings::told`]
-    /// can wait for it. The ones already finished are let go of here, so that a
-    /// server that never waits holds no more than are running.
+    /// Carry `telling` on in a task of its own, once the one carried before it
+    /// has finished, held where [`Tellings::told`] can wait for it. The ones
+    /// already finished are let go of here, so that a server that never waits
+    /// holds no more than are running.
     fn carry(&self, telling: impl std::future::Future<Output = ()> + Send + 'static) {
-        let mut tellings = self.0.lock().expect("the tellings are never poisoned");
+        let mut carried = self.0.lock().expect("the tellings are never poisoned");
+        let (finished, next) = tokio::sync::oneshot::channel::<()>();
+        let before = carried.last.replace(next);
 
-        tellings.retain(|telling| !telling.is_finished());
-        tellings.push(tokio::spawn(telling));
+        carried.running.retain(|telling| !telling.is_finished());
+        carried.running.push(tokio::spawn(async move {
+            // Sent or dropped, it is the same word: the one before is over,
+            // whether it finished or was cut short.
+            if let Some(before) = before {
+                let _ = before.await;
+            }
+
+            telling.await;
+            drop(finished);
+        }));
     }
 
     /// Wait until every telling carried here has finished.
@@ -735,6 +762,7 @@ impl Tellings {
                 .0
                 .lock()
                 .expect("the tellings are never poisoned")
+                .running
                 .drain(..)
                 .collect();
 
@@ -2760,4 +2788,32 @@ fn printable(digest: impl AsRef<[u8]>) -> String {
         .map(|byte| format!("{byte:02X}"))
         .collect::<Vec<String>>()
         .join(":")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Tellings;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    /// A second press's telling waits for the first's, however much longer the
+    /// first takes: the order they finish in is the order they were pressed in.
+    #[tokio::test]
+    async fn tellings_are_carried_one_at_a_time_in_the_order_of_the_presses() {
+        let tellings = Tellings::default();
+        let finished = Arc::new(Mutex::new(Vec::new()));
+
+        for (press, takes) in [(1, 200), (2, 0), (3, 50)] {
+            let finished = finished.clone();
+
+            tellings.carry(async move {
+                tokio::time::sleep(Duration::from_millis(takes)).await;
+                finished.lock().unwrap().push(press);
+            });
+        }
+
+        tellings.told().await;
+
+        assert_eq!(*finished.lock().unwrap(), vec![1, 2, 3]);
+    }
 }
