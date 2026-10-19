@@ -299,6 +299,45 @@ the stop. A × per row, and a × beside a switch turning forwarding off for a
 device, were both rejected for this build — the Brief asked for it automatic,
 and a port somebody never wants on this machine is a case nobody has met yet.
 
+*Amended 2026-10-19.* **A Forward is held, not attached.** Its life was the
+attach's, and the attach turned out to be the Code pane's socket, which closes
+whenever the pane is taken down — so navigating to the Timeline ended every
+Forward two seconds later, which is not what anybody closing nothing meant.
+Decided in the grilling of 2026-10-19:
+
+- **The member offers a terminal to every device that has attached it, until
+  the terminal ends.** The memory is the terminal's, not the socket's: the
+  reading runs from the first attach to the end — every two seconds while a tab
+  is attached, every ten otherwise, hurried by a printed address as before —
+  and the ports reading and the connect gate answer on it. The unit is the
+  terminal rather than the port: a server restarted on a new port after the tab
+  closed is forwarded too. Offering only the ports seen while a tab was open was
+  rejected as a rule nobody could predict from the screen.
+- **What ends one is the port leaving the reading or the terminal ending**, with
+  the same two-second grace, which now covers a dev server restarting on a file
+  change rather than a pane swap. Closing the tab, closing the page, the hub
+  sleeping, the link dropping and the hub's server restarting all keep it.
+  Lengthening the grace was rejected: a slower restart is retaken within a turn.
+- **The hub reads everything a member offers it** — one reading across all the
+  member's Conversations — whenever its stream to that member is taken up, which
+  its own start does, and whenever a member it found not answering answers. That
+  one mechanism is what survives a hub restart, a sleeping laptop and a dropped
+  link alike, and it replaces the hub's counting of the attaches it relays. A
+  member's own restart ends its terminals, so it answers with nothing and those
+  Forwards end. Persisting Forwards in the store was rejected: the member is the
+  record of what is still listening.
+- **A member that stops answering keeps its Forwards**, standing as *device
+  unreachable* — the listener held, the row dimmed and not a link — and taken up
+  again when it answers. Ending them at once, as before, left nothing to take
+  them up again once no tab held them. An unlinked member's end at once still.
+- **And a × per row is the stop by hand**, the tab no longer being one. It ends
+  the Forward on this device and remembers the dismissal, so the member's next
+  reading does not retake it, until the port leaves the reading or this device
+  attaches the terminal again; a × on a skipped row stops the retrying; the row
+  goes rather than staying dimmed, the tab being the way back. A dismissal is
+  memory, like everything else here: a hub restart takes a dismissed Forward
+  again, and a second press is the answer.
+
 ## What Code is not
 
 Everything ADR-0013 said a terminal is not. **Not a record**: no Capture, no
