@@ -776,13 +776,82 @@ The panes are resizable where they stand side by side (*settled 2026-08-24,
 building workbench-refit*). Widths are shares of the window rather than fixed
 lengths — what is traded away is a part of what this screen has, and no two
 screens have the same — and the dividers between the panes drag: both of them
-with all three panes up, the sidebar's alone with two. Each pane keeps a floor
-so none can be dragged away, a double-click on a divider puts the defaults
-back, and what a drag settles on is remembered per device. Below the two-pane
-breakpoint the layout pages one pane at a time: no dividers, and nothing
-remembered is read. The details pane caps its content at the 60rem the Set and
-Settings pages are read at and centres it when the pane is wider, so a pane
-dragged to the width of a window is still a pane a line can be read across.
+with all three panes up, the sidebar's alone with two (*revised 2026-10-19,
+building collapsing-sidebar*: the sidebar's divider stands only where the
+sidebar is full, from 100rem, and the middle one wherever the timeline and the
+details stand side by side, from 60rem — see the three bands below). Each pane
+keeps a floor so none can be dragged away, a double-click on a divider puts the
+defaults back, and what a drag settles on is remembered per device. Below the
+two-pane breakpoint the layout pages one pane at a time: no dividers, and
+nothing remembered is read (*revised 2026-10-19, building collapsing-sidebar*:
+it walks the timeline and the details one at a time *beside the collapsed
+sidebar*, the conversations no longer being a level of the walk; the middle
+divider is the only one, and it is not drawn there). The details pane caps its
+content at the 60rem the Set and Settings pages are read at and centres it when
+the pane is wider, so a pane dragged to the width of a window is still a pane a
+line can be read across.
+
+**Under 100rem the sidebar is collapsed** (*settled 2026-10-19, grilling and
+building collapsing-sidebar*). A full column for the list on a laptop was a
+quarter of the screen given to something the human glances at, so the frame
+with a list stands in three bands:
+
+| Width | Conversations pane | Beside it |
+|---|---|---|
+| under 60rem | collapsed, 3rem | one pane: the timeline or the details, as the walk names it |
+| 60rem to 100rem | collapsed, 3rem | the timeline and the details, the middle divider between them |
+| 100rem and up | full, at its remembered share, its divider dragging | the timeline and the details |
+
+The frame with no list — the zero state — keeps its one 60rem line, having
+nothing to collapse. **The frame fills the window at every width now**, phones
+included: the phone's page scrolled as a document with the pane the walk named
+as the whole page, and that is gone — the frame is the window's height, clips,
+and each pane scrolls inside it, which is the rule above for panes side by
+side, there being a pane beside the strip at every width. The remembered share
+is read only in the full band and left exactly as the device settled it in the
+other two. The **collapsed** pane is 3rem — a 2rem item with 0.5rem either
+side, in rem so it grows with the text — and draws the logo alone at its head,
+the New conversation link as a pen-to-square (which the full link carries
+before its words as well), each card's first three characters with no ellipsis
+and its mark on the line under them, and its foot — the archived switch and
+the forwarding reading — as blank paper under the foot's rule. Only the width
+shrinks: the pane is laid out at the width it expands to and clipped down to
+the strip, so every part is exactly as tall collapsed as expanded and nothing
+moves vertically when it opens. **It expands** to the width it would stand at
+full — the remembered share, clamped against the frame the way the full band
+clamps it, which on a phone is the 16rem floor — *over* the panes beside it:
+the grid column stays 3rem, nothing beside it moves, and the `--lift` shadow
+the menus wear says it is on top, in a 150ms transition reduced motion turns
+off. **A hovering pointer, a keyboard focus inside it, or a tap** expands it,
+and which collapses it again is read per gesture off the pointer's type, the
+way the sidebar's drag already reads it: a mouse's pane collapses when the
+pointer leaves and nothing inside has focus, a press on a card leaving it
+open; a finger's first tap on the strip expands it and does nothing else, the
+pane as a whole being the one target while it is 3rem wide, and a tap on a
+card or the link then goes where it was put and collapses the pane, as does a
+tap anywhere outside it — which lands on what was tapped, there being no wash
+behind the pane to catch it. A long press that lifts a card holds it open for
+the length of the drag. **With nothing open it stands expanded**: the root
+address is *nothing open*, empty paper with the list over it until a card is
+picked, so Back out of a Conversation on a phone arrives at the list rather
+than at a level of its own. **The timeline's and the settings pane's
+← Conversations are gone** with that level, the conversations being beside
+them at every width; ← Timeline and ← Settings stay. On a Mac **the list's head
+drops one band below the traffic lights** wherever the frame measures a left
+inset, a 3rem strip having no room to pad its logo past the lights the way the
+full head did, so the lights keep their place in a strip of paper above the
+logo, the logo never jumps as the pane opens, and full screen — which answers
+no inset — puts the head back at the top. **Width alone decides which the
+sidebar is**: there is no pin and no manual collapse, the toggle being one
+more control and one more remembered state for a pane that opens under the
+pointer anyway. Considered and rejected, so they are not reopened: collapsing
+only in the two-pane band, which left a phone's one-pane walk with a level of
+its own just for the list; hover alone on a touch screen, which has nothing to
+hover with; a fixed 16rem expansion, when the width the human dragged the full
+sidebar to is the width they chose for it; a delay before a hover expands it,
+which makes reaching the list slower to save a pointer crossing the strip a
+flicker; and a half-collapsed state between the two, a third width to lay
+every part of the pane out at for nothing either of the others lacks.
 
 **A Conversation whose record is the one Event has no timeline pane at all**
 (*settled 2026-09-02, building brief-details-view*), which is every draft
