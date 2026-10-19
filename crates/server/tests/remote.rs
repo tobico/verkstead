@@ -775,12 +775,9 @@ impl AMac {
             .await
             .unwrap();
 
-        let tailscale = Tailscale::on_a_mac(
-            self.floor().into_os_string(),
-            self.applications(),
-            PORT,
-        )
-        .as_user(WHO.to_owned());
+        let tailscale =
+            Tailscale::on_a_mac(self.floor().into_os_string(), self.applications(), PORT)
+                .as_user(WHO.to_owned());
 
         router_reading_tailscale(pool, tailscale)
     }
