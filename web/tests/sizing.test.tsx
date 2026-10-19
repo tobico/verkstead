@@ -1636,12 +1636,19 @@ describe("a mouse on the collapsed list", () => {
   /// In the app the head is a drag region, over which Electron hands the page
   /// no pointer events: the pane lost its hover the moment the pointer reached
   /// the title row on its way to the gear. So the list's head is none while
-  /// the list is collapsed, and only then.
+  /// the list is collapsed, and only then. And expanded, the list's head lies
+  /// over the head beside it, which Electron lets win under the gear: so the
+  /// heads beside it are none either for as long as it is expanded, by every
+  /// one of the four things that expand it.
   it("keeps the list's head clear of the window's drag while collapsed", () => {
     expect(layout("(width < 100rem)")).not.toContain("app-region");
     expect(stylesheet).toContain(
       "@media (width < 100rem) {\n" +
-        "  :root[data-app] .panes.listing > .conversationsPane .paneHead {\n" +
+        "  :root[data-app] .panes.listing > .conversationsPane .paneHead,\n" +
+        "  :root[data-app] .panes.listing > .conversationsPane[data-hovered] ~ .pane .paneHead,\n" +
+        "  :root[data-app] .panes.listing > .conversationsPane[data-expanded] ~ .pane .paneHead,\n" +
+        "  :root[data-app] .panes.listing > .conversationsPane:focus-visible ~ .pane .paneHead,\n" +
+        "  :root[data-app] .panes.listing > .conversationsPane:has(:focus-visible) ~ .pane .paneHead {\n" +
         "    -webkit-app-region: no-drag;\n  }\n}",
     );
   });

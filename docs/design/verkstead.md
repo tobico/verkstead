@@ -853,9 +853,14 @@ timeline from there, and the details wherever there is no timeline beside them
 page no pointer events over a drag region, so on Linux and Windows alike — a
 probe on Electron 43.1 under X showed it — the pane lost its hover the instant
 the pointer reached the title row and collapsed under it on its way to the
-gear, which no mouse could then press. The pane beside the strip keeps its
-head, the window's width, to drag by, and the full sidebar from 100rem keeps
-its own. **With nothing open it stands expanded**: the root
+gear, which no mouse could then press. Nor, while the list is expanded, are
+the heads of the panes beside it (*revised 2026-10-19, review of
+collapsible-list-fixes*): the expanded list lies over the start of the head
+beside it, the gear included, and where two regions overlap Electron goes by
+the one later in the document, so the pointer lost the list the moment it
+crossed the strip's edge in the title row. Collapsed, the pane beside the strip
+keeps its head, the window's width, to drag by, and the full sidebar from
+100rem keeps its own. **With nothing open it stands expanded**: the root
 address is *nothing open*, empty paper with the list over it until a card is
 picked, so Back out of a Conversation on a phone arrives at the list rather
 than at a level of its own. **The timeline's and the settings pane's

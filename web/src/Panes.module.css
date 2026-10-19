@@ -529,9 +529,22 @@
    `no-drag` button inside it, as a probe on Electron 43.1 under X showed — and
    collapses under the pointer on its way to the gear. The pane beside the strip
    keeps its head the window's width to be dragged by, and the full sidebar from
-   100rem keeps its own. */
+   100rem keeps its own.
+
+   Except while the list is expanded over it. The list is drawn the width it
+   expands to whatever the clip shows, so its head lies over the start of the
+   head beside it, and where two regions overlap Electron goes by the one later
+   in the document — the pane beside, whose head is a drag region all the way
+   across under the gear, which stands past the strip. The same probe had the
+   pointer lose the expanded list the moment it crossed the strip's edge in the
+   title row. So while the list is expanded the heads beside it are none either,
+   and collapsed they are the window's to be dragged by again. */
 @media (width < 100rem) {
-  :root[data-app] .panes.listing > .conversationsPane .paneHead {
+  :root[data-app] .panes.listing > .conversationsPane .paneHead,
+  :root[data-app] .panes.listing > .conversationsPane[data-hovered] ~ .pane .paneHead,
+  :root[data-app] .panes.listing > .conversationsPane[data-expanded] ~ .pane .paneHead,
+  :root[data-app] .panes.listing > .conversationsPane:focus-visible ~ .pane .paneHead,
+  :root[data-app] .panes.listing > .conversationsPane:has(:focus-visible) ~ .pane .paneHead {
     -webkit-app-region: no-drag;
   }
 }
