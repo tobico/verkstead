@@ -90,8 +90,13 @@
 //!
 //! **Collapsed and expanded.** Under 100rem the frame stands this pane as a
 //! `3rem` strip and expands it over the panes beside it under a hover, a
-//! keyboard's focus, or nothing being open — see `Panes.module.css`, which is
-//! where the state is decided. What the strip draws is this pane's: the logo
+//! keyboard's focus, a finger's tap, or nothing being open — see
+//! `Panes.module.css` and `touched` in `Panes.tsx`, which is where the state is
+//! decided. On a screen with nothing to hover, the first tap on the strip only
+//! expands it, whatever it lands on; a tap on a card or the link then goes
+//! where it was put and the pane collapses behind it, and a tap outside it
+//! collapses it. A long press still lifts a card, and the pane stays expanded
+//! under the drag. What the strip draws is this pane's: the logo
 //! alone at the head, the pen-to-square of the link without its words, each
 //! card's first three characters with its mark on the line under them, and the
 //! foot as blank paper. Everything else is hidden rather than taken away, laid

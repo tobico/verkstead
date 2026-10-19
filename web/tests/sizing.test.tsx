@@ -38,6 +38,7 @@ import attachedCss from "../src/workbench/Attached.module.css?raw";
 // page by, and the source to read the rules that jsdom lays nothing out for.
 import { Panes } from "../src/Panes";
 import shell from "../src/Panes.module.css";
+import sidebar from "../src/workbench/Conversations.module.css";
 import stylesheet from "../src/Panes.module.css?raw";
 import {
   BESIDE,
@@ -795,7 +796,7 @@ describe("the rules the widths are read by", () => {
         "    box-shadow: var(--lift);\n",
     );
     expect(layout("(width < 100rem) and (hover: hover)")).toContain(
-      "  .panes.listing > .conversationsPane:hover {\n" +
+      "  .panes.listing > .conversationsPane:hover:not([data-finger]) {\n" +
         "    padding-inline: 1.25rem;\n" +
         "    clip-path: inset(0 -3rem 0 0);\n" +
         "    box-shadow: var(--lift);\n",
@@ -1507,3 +1508,131 @@ function layout(breakpoint: string): string {
   );
   return stylesheet.slice(opened, stylesheet.indexOf("\n}\n", opened));
 }
+
+/// A finger on the collapsed list, where there is nothing to hover with: the
+/// first tap expands it and does nothing else, a tap on a card in it opens the
+/// card and collapses it, and a tap anywhere else collapses it and lands where
+/// it was put. A mouse is told apart by the pointer each press began with.
+describe("a finger on the collapsed list", () => {
+  /// The workbench between the two lines with a Conversation open, so the list
+  /// is collapsed rather than standing expanded over nothing.
+  async function reading() {
+    windowIs("beside");
+    theWorkbench();
+
+    const mounted = mount(`/conversations/${OPEN.id}`);
+    const list = await drawn<HTMLElement>(
+      mounted.container,
+      `.${shell.conversationsPane}`,
+    );
+    await drawn(list, "[data-row] article");
+
+    return { ...mounted, list };
+  }
+
+  /// A card for some Conversation other than the open one.
+  function other(list: HTMLElement): HTMLElement {
+    return [...list.querySelectorAll<HTMLElement>("[data-row]")]
+      .find((row) => !row.classList.contains(sidebar.selected!))!
+      .querySelector<HTMLElement>("article")!;
+  }
+
+  /// A tap: down, up, and the click the browser makes of the two.
+  function tap(target: Element, pointerType: "touch" | "mouse" = "touch") {
+    const at = { button: 0, pointerId: 7, pointerType };
+
+    fireEvent.pointerDown(target, at);
+    fireEvent.pointerUp(target, at);
+    fireEvent.click(target);
+  }
+
+  const expanded = (list: HTMLElement) => list.hasAttribute("data-expanded");
+
+  it("expands on the first tap and opens nothing", async () => {
+    const { list, history } = await reading();
+    const card = other(list);
+    const opened = history.get();
+
+    expect(expanded(list)).toBe(false);
+    tap(card);
+
+    expect(expanded(list)).toBe(true);
+    expect(history.get()).toBe(opened);
+
+    // And the second opens the card it is on, and collapses the list behind.
+    tap(card);
+    await waitFor(() => expect(history.get()).not.toBe(opened));
+    expect(expanded(list)).toBe(false);
+
+    // With the hover off, which a browser leaves standing where a finger
+    // tapped, until a mouse moves over the pane again.
+    expect(list.hasAttribute("data-finger")).toBe(true);
+    fireEvent.pointerMove(list, { pointerType: "mouse" });
+    expect(list.hasAttribute("data-finger")).toBe(false);
+  });
+
+  it("collapses on a tap elsewhere, which lands where it was put", async () => {
+    const { container, list } = await reading();
+    const frame = container.querySelector<HTMLElement>(`.${shell.panes}`)!;
+    const beside = container.querySelector<HTMLElement>(
+      `.${shell.detailsPane}`,
+    )!;
+    const before = [...document.body.querySelectorAll("*")].length;
+    const heard = vi.fn();
+    beside.addEventListener("click", heard);
+
+    tap(other(list));
+    expect(expanded(list)).toBe(true);
+
+    // Nothing washed behind the pane: the frame holds the panes it held and
+    // the page has gained no element to catch the tap.
+    expect(
+      [...frame.children].every((child) =>
+        child.matches(`.${shell.pane}, .${shell.divider}`),
+      ),
+    ).toBe(true);
+    expect([...document.body.querySelectorAll("*")].length).toBe(before);
+
+    tap(beside);
+    expect(expanded(list)).toBe(false);
+    expect(heard).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a mouse's press to the hover", async () => {
+    const { list, history } = await reading();
+    const opened = history.get();
+
+    // A mouse's first press is not swallowed: the hover had expanded the
+    // pane before it landed, and the press opens the card.
+    tap(other(list), "mouse");
+    await waitFor(() => expect(history.get()).not.toBe(opened));
+    expect(expanded(list)).toBe(false);
+
+    // And a mouse pressing a card in a pane a finger expanded opens it,
+    // leaving the pointer resting there to hold the pane open.
+    const card = other(list);
+    tap(card);
+    expect(expanded(list)).toBe(true);
+    const now = history.get();
+    tap(card, "mouse");
+    await waitFor(() => expect(history.get()).not.toBe(now));
+  });
+
+  it("stays expanded for the length of a drag", async () => {
+    const { list } = await reading();
+    const card = other(list);
+    const at = { button: 0, pointerId: 7, pointerType: "touch" };
+
+    fireEvent.pointerDown(card, { ...at, clientX: 0, clientY: 0 });
+    expect(expanded(list)).toBe(true);
+
+    // Long enough to lift — see `LIFT` in `Conversations.tsx` — and carried
+    // out over the pane beside it.
+    await new Promise((done) => setTimeout(done, 450));
+    fireEvent.pointerMove(window, { ...at, clientX: 400, clientY: 40 });
+    expect(expanded(list)).toBe(true);
+
+    fireEvent.pointerUp(window, { ...at, clientX: 400, clientY: 40 });
+    expect(expanded(list)).toBe(true);
+  });
+});

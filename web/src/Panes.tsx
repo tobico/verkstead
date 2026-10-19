@@ -11,9 +11,10 @@
 //! from 60rem it is collapsed beside the timeline and the details; from 100rem
 //! it is the full sidebar. Collapsed it is a strip of `COLLAPSED` rem, drawn at
 //! the width it would stand at full and clipped down to the strip, so every
-//! height in it is the height it has expanded; a pointer resting on it or a
-//! keyboard focus inside it expands it over the panes beside it, which do not
-//! move. And with nothing open — `pane` saying the conversations are the level
+//! height in it is the height it has expanded; a pointer resting on it, a
+//! keyboard focus inside it or a finger's tap on it expands it over the panes
+//! beside it, which do not move — a finger's tap doing nothing else, and the
+//! next one on a card or a link, or one anywhere outside, collapsing it again. And with nothing open — `pane` saying the conversations are the level
 //! being shown — it stands expanded over the empty paper until a card is
 //! picked.
 //!
@@ -382,6 +383,110 @@ export function Panes(props: {
       ? (expanded(settled(), { ...frame(), three: reading() }) * across()) / 100
       : undefined;
 
+  /// The collapsed list's own section, which a finger is asked about.
+  let strip: HTMLElement | undefined;
+
+  /// Whether a finger has expanded the collapsed list, which is how a screen
+  /// with nothing to hover opens it: a tap anywhere on the strip expands it and
+  /// does nothing else, a tap on a card or a link in it then goes where it was
+  /// put and collapses it behind, and a tap anywhere outside it collapses it
+  /// and lands where it was put too — nothing is washed behind the pane to
+  /// catch it. Drawn as `data-expanded`, the same expansion nothing being open
+  /// stands it at.
+  ///
+  /// Read off the pointer each gesture began with rather than off the device,
+  /// as the sidebar's drag reads it: a laptop with a touchscreen hovers with
+  /// its mouse and taps with a finger. A mouse expands it by resting on it, and
+  /// a press of one leaves it to the hover — so it is a mouse's press as much
+  /// as a finger's that puts down an expansion a finger made, the pointer
+  /// resting there holding it open until it leaves.
+  const [touched, setTouched] = createSignal(false);
+
+  /// And whether the hand last on the list was a finger, which turns the
+  /// hover off for as long as it is: a browser leaves `:hover` standing where a
+  /// finger tapped, and a pane held open by it would be a finger's tap on a
+  /// card that never collapsed it. A mouse moving over the pane again is a
+  /// mouse resting on it, and the hover is its own again. Drawn as
+  /// `data-finger`.
+  const [finger, setFinger] = createSignal(false);
+
+  /// Whether the tap now landing is the one that expanded the list, and so is
+  /// to be swallowed before anything inside it hears it. Set by each press
+  /// and spent by the click that follows it. A press that brings no click — a
+  /// finger that scrolled the list, which the browser cancels, or one that held
+  /// a card until it lifted — is forgotten by the next press, the cancel, or a
+  /// key, so a keyboard's click is never the one swallowed.
+  let swallowing = false;
+  const forget = () => {
+    swallowing = false;
+  };
+
+  /// Whether the list is already standing expanded, by any of the ways it
+  /// does: nothing open, a finger, or a keyboard's focus. Hover is not asked
+  /// after, a finger having nothing to hover with.
+  const standing = (pane: HTMLElement): boolean => {
+    if (!collapsed() || pane.hasAttribute("data-expanded")) {
+      return true;
+    }
+
+    try {
+      return pane.matches(":focus-visible, :has(:focus-visible)");
+    } catch {
+      return false;
+    }
+  };
+
+  /// A press on the list: a finger's on the collapsed strip expands it.
+  /// Heard on the way down, ahead of the card that would otherwise take it.
+  const pressed = (event: PointerEvent) => {
+    setFinger(event.pointerType !== "mouse");
+    swallowing =
+      event.pointerType !== "mouse" &&
+      !standing(event.currentTarget as HTMLElement);
+
+    if (swallowing) {
+      setTouched(true);
+    }
+  };
+
+  /// A mouse moving over the list, which hands the hover back to it.
+  const moved = (event: PointerEvent) => {
+    if (event.pointerType === "mouse") {
+      setFinger(false);
+    }
+  };
+
+  /// And the click it ends in: the expanding tap's goes no further, and a
+  /// card's or a link's goes where it was put and collapses the list behind it.
+  const clicked = (event: MouseEvent) => {
+    if (swallowing) {
+      swallowing = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    const target = event.target as Element | null;
+    if (target?.closest("a[href], [data-row]")) {
+      setTouched(false);
+    }
+  };
+
+  /// A press anywhere outside the list puts a finger's expansion down, and is
+  /// left to land where it was put.
+  onMount(() => {
+    const elsewhere = (event: PointerEvent) => {
+      if (touched() && !strip?.contains(event.target as Node)) {
+        setTouched(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", elsewhere, true);
+    onCleanup(() =>
+      document.removeEventListener("pointerdown", elsewhere, true),
+    );
+  });
+
   /// What the frame carries the widths as. Only the standing layout's own: the
   /// stylesheet has a default behind each of them, so a name the frame does not
   /// carry is the untouched frame rather than a broken one. The pair's from
@@ -452,13 +557,26 @@ export function Panes(props: {
       <Show when={picking()}>
         {/* Standing expanded while it is collapsed and nothing is open:
             the level being shown is the list, and what is beside it is
-            empty paper until a card is picked. */}
+            empty paper until a card is picked. And while a finger has
+            expanded it — see `touched`. The press and the click are heard on
+            the way down, before anything in the list hears them. */}
         <section
           class={`${styles.pane} ${styles.conversationsPane}`}
           aria-label="Conversations"
+          ref={(section) => {
+            strip = section;
+            section.addEventListener("pointerdown", pressed, true);
+            section.addEventListener("click", clicked, true);
+            section.addEventListener("pointermove", moved, true);
+            section.addEventListener("pointercancel", forget, true);
+            section.addEventListener("keydown", forget, true);
+          }}
           data-expanded={
-            collapsed() && props.pane === "conversations" ? "" : undefined
+            collapsed() && (props.pane === "conversations" || touched())
+              ? ""
+              : undefined
           }
+          data-finger={finger() ? "" : undefined}
         >
           {list()}
         </section>

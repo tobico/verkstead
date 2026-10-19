@@ -224,9 +224,12 @@
 
 /* And under a pointer that can rest on it, which is how a mouse opens it: the
    pane expands while the pointer is over it and collapses when it leaves.
-   Nothing about a press — a card pressed is a pane still under the pointer. */
+   Nothing about a press — a card pressed is a pane still under the pointer.
+   Not where the hand last on it was a finger, `data-finger`: a browser leaves
+   `:hover` where a finger tapped, which on a laptop with a touchscreen would
+   hold the pane open after the tap that was to collapse it. See `Panes.tsx`. */
 @media (width < 100rem) and (hover: hover) {
-  .panes.listing > .conversationsPane:hover {
+  .panes.listing > .conversationsPane:hover:not([data-finger]) {
     padding-inline: 1.25rem;
     clip-path: inset(0 -3rem 0 0);
     box-shadow: var(--lift);
