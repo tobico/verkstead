@@ -45,7 +45,7 @@ use tokio_rustls::TlsConnector;
 use tower::ServiceExt;
 use verkstead_render::{AskingDevice, DeviceIdentity, DevicesView, JoinSettled};
 use verkstead_server::device::reading::Reading;
-use verkstead_server::device::{Device, Devices};
+use verkstead_server::device::{Device, Devices, Tellings};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::open_database;
 use verkstead_server::peer::dialling::Peers;
@@ -123,6 +123,11 @@ struct Verkstead {
     members: Members,
     joins: Joins,
     nudges: Nudges,
+
+    /// What its presses leave running once they have answered, which a test
+    /// waits on before reading what they did over there.
+    tellings: Tellings,
+
     reading: Reading,
 
     /// Where its peer listener landed, which is also the one address it
@@ -166,6 +171,7 @@ impl Verkstead {
             members: Members::recorded(pool.clone()),
             joins: Joins::recorded(pool.clone()),
             nudges: Nudges::new(),
+            tellings: Tellings::default(),
             reading,
             pool,
             address,
@@ -230,6 +236,7 @@ impl Verkstead {
             self.members.clone(),
             self.joins.clone(),
         )
+        .keeping_tellings(self.tellings.clone())
     }
 
     /// How it dials, for the questions that are about a call rather than about
@@ -380,6 +387,8 @@ async fn allow_leaves_both_devices_recording_each_other() {
 
     press(&asked.workbench(), &request, "allow").await;
 
+    asked.tellings.told().await;
+
     // B's side: A, as A said it was in the join post.
     let over_there = listing(&asked.workbench()).await;
     assert_eq!(over_there.members.len(), 1);
@@ -460,6 +469,7 @@ async fn the_handover_carries_every_member_the_device_holds() {
 
     let request = a_join_asked_of(&asked, &asking).await;
     press(&asked.workbench(), &request, "allow").await;
+    asked.tellings.told().await;
 
     let mut landed: Vec<String> = listing(&asking.workbench())
         .await
@@ -519,6 +529,7 @@ async fn a_call_afterwards_is_an_ordinary_members_call() {
 
     let request = a_join_asked_of(&asked, &asking).await;
     press(&asked.workbench(), &request, "allow").await;
+    asked.tellings.told().await;
 
     assert_eq!(
         status(&dialled(&asked, &asking.device, NOTHING_ANSWERS).await),
@@ -790,6 +801,8 @@ async fn a_deny_reaches_the_pending_row_and_is_dismissed() {
 
     press(&asked.workbench(), &request, "deny").await;
 
+    asked.tellings.told().await;
+
     let over_here = listing(&asking.workbench()).await;
 
     assert_eq!(over_here.pending.len(), 1, "the row stays to be read");
@@ -904,6 +917,8 @@ async fn a_dial_back_that_reaches_nobody_still_lets_the_device_in() {
     .unwrap();
 
     press(&asked.workbench_in_a_hurry(), "1122334455667788", "allow").await;
+
+    asked.tellings.told().await;
 
     let over_there = listing(&asked.workbench()).await;
 
