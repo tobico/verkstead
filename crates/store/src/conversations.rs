@@ -6408,6 +6408,12 @@ impl Held {
     }
 }
 
+/// One row of [`stage_standings`]' read: the roadmap, the stage's label — none
+/// for the Conversation that wrote the roadmap — the state, whether it ever reached
+/// Done, whether it ever wrapped up, whether it has stopped, and which
+/// Conversation it is.
+type StandingRow = (String, Option<String>, String, bool, bool, bool, i64);
+
 /// What the record says about every stage Conversation of `repo_id`'s roadmaps.
 ///
 /// The read behind [`StageStandings`], and the one thing that joins Verkstead's
@@ -6445,7 +6451,7 @@ impl Held {
 /// this process is asked about a stage is the Conversation, and this is the read
 /// that holds the roadmap and the label beside it.
 pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageStandings> {
-    let rows: Vec<(String, Option<String>, String, bool, bool, bool, i64)> = sqlx::query_as(
+    let rows: Vec<StandingRow> = sqlx::query_as(
         "SELECT r.roadmap, r.stage, c.state,
                 EXISTS (
                     SELECT 1 FROM timeline_events e
