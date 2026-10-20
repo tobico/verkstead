@@ -13,17 +13,18 @@
 //! in the platform's spelling, and its behaviour written by people who know
 //! what Cmd+Z means in a text field on a Mac. An id is one of the few items a
 //! Mac's bar carries that go somewhere in Verkstead — Settings…, New
-//! Conversation, the Help menu's three — and it is mapped to its act at the
-//! edge, in a record keyed by [`Acting`], exactly as the tray's menu ids are in
-//! `tray.ts`: so an item added here without an act is a compile error there,
-//! and every label, id and key stays something a test can read off this value.
+//! Conversation, the Help menu's three, the whole of Go — and it is mapped to
+//! its act at the edge, in a record keyed by [`Acting`], exactly as the tray's
+//! menu ids are in `tray.ts`: so an item added here without an act is a compile
+//! error there, and every label, id and key stays something a test can read off
+//! this value.
 //!
 //! **Which is the one thing worth pinning.** On Windows and Linux the bar is
 //! hidden (ADR-0020) and the menu is the whole of what registers the keystrokes
 //! a window showing a web page is expected to answer, so an item dropped from
 //! it is a shortcut that silently stops working. And on a Mac the bar is the
 //! strip at the top of the screen, which the other two have nothing of: the
-//! application menu, File and Help are a Mac's alone, and the Window menu is
+//! application menu, File, Go and Help are a Mac's alone, and the Window menu is
 //! furniture the platform fills in for itself.
 //!
 //! **The Window submenu is Minimize, and it is there for the two platforms
@@ -71,7 +72,21 @@ export type Role =
 
 /// The items that are Verkstead's own acts rather than the platform's, each
 /// the id its item carries — so a press is read back as the thing pressed.
-export const ACTS = ["settings", "compose", "guide", "logs", "issue"] as const;
+export const ACTS = [
+  "settings",
+  "compose",
+  "guide",
+  "logs",
+  "issue",
+  "back",
+  "forward",
+  "conversations",
+  "timeline",
+  "code",
+  "backlog",
+  "roadmap",
+  "share",
+] as const;
 
 /// One of them.
 export type Acting = (typeof ACTS)[number];
@@ -189,7 +204,29 @@ export function roles(platform: NodeJS.Platform): Item[] {
       ],
     };
 
-    return [application, file, editing, view, { role: "windowMenu" }, help];
+    // Between View and Window, which is where a Mac puts it. Back and Forward
+    // are the window's own history, which on a page that routes in place is
+    // every pane and page walked through; Conversations is the workbench with
+    // nothing open and carries no key, ⌘0 being the zoom's reset; and the five
+    // panes are the workbench's own order on the keys a Mac gives an app's
+    // main views. Which of them is greyed is [`enabled`](./where.js)'s.
+    const go: Item = {
+      label: "Go",
+      submenu: [
+        { id: "back", label: "Back", accelerator: "Cmd+[" },
+        { id: "forward", label: "Forward", accelerator: "Cmd+]" },
+        { type: "separator" },
+        { id: "conversations", label: "Conversations" },
+        { type: "separator" },
+        { id: "timeline", label: "Timeline", accelerator: "Cmd+1" },
+        { id: "code", label: "Code", accelerator: "Cmd+2" },
+        { id: "backlog", label: "Backlog", accelerator: "Cmd+3" },
+        { id: "roadmap", label: "Roadmap", accelerator: "Cmd+4" },
+        { id: "share", label: "Share", accelerator: "Cmd+5" },
+      ],
+    };
+
+    return [application, file, editing, view, go, { role: "windowMenu" }, help];
   }
 
   return [editing, view, window];

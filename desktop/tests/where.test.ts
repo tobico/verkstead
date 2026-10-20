@@ -7,13 +7,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { NOWHERE, PANES, where } from "../src/where.js";
+import { enabled, NOWHERE, PANES, pathFor, type Where, where } from "../src/where.js";
 
 /// What the page says of a Conversation on a member with every pane to go to.
 const AT = "/devices/8f2a/conversations/3";
-const ALL = {
+const ALL: Where = {
   panes: [
-    { pane: "timeline", path: AT },
+    { pane: "timeline", path: `${AT}/timeline` },
     { pane: "code", path: `${AT}/code` },
     { pane: "backlog", path: `${AT}/backlog` },
     { pane: "roadmap", path: `${AT}/roadmaps/mvp` },
@@ -68,5 +68,76 @@ describe("the panes", () => {
   /// The Go menu's own order, which is the workbench's.
   it("are the five the Go menu draws, in its order", () => {
     expect(PANES).toEqual(["timeline", "code", "backlog", "roadmap", "share"]);
+  });
+});
+
+describe("which of the Go menu's items can be pressed", () => {
+  /// Where the window's history stands at the very start of a run.
+  const START = { back: false, forward: false };
+
+  it("is Conversations alone at the start of a run, with nowhere said", () => {
+    expect(enabled(NOWHERE, START)).toStrictEqual({
+      back: false,
+      forward: false,
+      conversations: true,
+      timeline: false,
+      code: false,
+      backlog: false,
+      roadmap: false,
+      share: false,
+    });
+  });
+
+  /// The settings page and the compose page say nowhere, and have a history
+  /// behind them.
+  it("greys the five panes on a page with no Conversation open", () => {
+    expect(enabled(NOWHERE, { back: true, forward: false })).toStrictEqual({
+      back: true,
+      forward: false,
+      conversations: true,
+      timeline: false,
+      code: false,
+      backlog: false,
+      roadmap: false,
+      share: false,
+    });
+  });
+
+  it("enables every pane on a record with a backlog and a roadmap", () => {
+    expect(enabled(ALL, { back: true, forward: true })).toStrictEqual({
+      back: true,
+      forward: true,
+      conversations: true,
+      timeline: true,
+      code: true,
+      backlog: true,
+      roadmap: true,
+      share: true,
+    });
+  });
+
+  it("greys Backlog and Roadmap on a record with neither", () => {
+    const three = {
+      panes: ALL.panes.filter(({ pane }) => pane !== "backlog" && pane !== "roadmap"),
+    };
+
+    expect(enabled(three, START)).toMatchObject({
+      timeline: true,
+      code: true,
+      backlog: false,
+      roadmap: false,
+      share: true,
+    });
+  });
+});
+
+describe("where a pane item goes", () => {
+  it("is the path the page gave for it, device and all", () => {
+    expect(pathFor(ALL, "roadmap")).toBe(`${AT}/roadmaps/mvp`);
+    expect(pathFor(ALL, "timeline")).toBe(`${AT}/timeline`);
+  });
+
+  it("is nowhere for a pane the page did not name", () => {
+    expect(pathFor(NOWHERE, "code")).toBeUndefined();
   });
 });

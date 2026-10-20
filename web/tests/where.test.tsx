@@ -44,6 +44,15 @@ const ROADMAPS: TimelineEvent = {
   },
 };
 
+/// And a roadmap landing after them, which a Timeline that is advancing opens.
+const LATER: TimelineEvent = {
+  StageList: {
+    id: 41,
+    at: "2026-08-03T09:09:00.000Z",
+    roadmaps: [{ name: "later", title: "Later", stages: [] }],
+  },
+};
+
 /// A Conversation with both lists on its record, and one with neither — the
 /// fixture's own, which is a Brief and nothing else.
 const PLANNED: ConversationView = {
@@ -145,7 +154,7 @@ describe("what the open Conversation can go to", () => {
     told.go(planned);
     await waitFor(() =>
       expect(last(told)).toEqual([
-        ["timeline", planned],
+        ["timeline", `${planned}/timeline`],
         ["code", `${planned}/code`],
         ["backlog", `${planned}/backlog`],
         ["roadmap", `${planned}/roadmaps/after`],
@@ -157,7 +166,7 @@ describe("what the open Conversation can go to", () => {
     told.go(bare);
     await waitFor(() =>
       expect(last(told)).toEqual([
-        ["timeline", bare],
+        ["timeline", `${bare}/timeline`],
         ["code", `${bare}/code`],
         ["share", `${bare}/share`],
       ]),
@@ -167,7 +176,7 @@ describe("what the open Conversation can go to", () => {
     told.go(member);
     await waitFor(() =>
       expect(last(told)).toEqual([
-        ["timeline", member],
+        ["timeline", `${member}/timeline`],
         ["code", `${member}/code`],
         ["backlog", `${member}/backlog`],
         ["roadmap", `${member}/roadmaps/after`],
@@ -217,6 +226,44 @@ describe("what the open Conversation can go to", () => {
 
     await client.invalidateQueries();
     expect(told.lists).toHaveLength(before + 1);
+  });
+});
+
+describe("the Timeline the menu goes to", () => {
+  /// The Conversation's own path lands on the end of its record; the
+  /// Timeline's path is the details pane closed, and kept closed.
+  it("opens nothing beside it, however the record moves", async () => {
+    let planned: ConversationView = PLANNED;
+    const told = standingIn();
+    const conversation = `/conversations/${OPEN.id}`;
+    const { client } = at(`${conversation}/share`, () => planned);
+
+    await waitFor(() => expect(last(told)).toHaveLength(5));
+
+    // Where it would have landed, as a control: the bare path is rewritten.
+    told.go(conversation);
+    await waitFor(() =>
+      expect(window.location.pathname).not.toBe(conversation),
+    );
+    const landed = window.location.pathname;
+    expect(landed.startsWith(`${conversation}/`)).toBe(true);
+
+    told.go(`${conversation}/timeline`);
+    await waitFor(() =>
+      expect(window.location.pathname).toBe(`${conversation}/timeline`),
+    );
+
+    // And a re-read, and a new Event landing on a Timeline that was
+    // advancing, both leave it where it was asked to be.
+    await client.invalidateQueries();
+    planned = { ...PLANNED, timeline: [...PLANNED.timeline, LATER] };
+    await client.invalidateQueries();
+    await new Promise((settled) => setTimeout(settled, 50));
+    expect(window.location.pathname).toBe(`${conversation}/timeline`);
+
+    // Back is the landed pane it came from.
+    window.history.back();
+    await waitFor(() => expect(window.location.pathname).toBe(landed));
   });
 });
 

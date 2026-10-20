@@ -19,7 +19,7 @@
 import type { ConversationView } from "./api/types";
 import type { Device } from "./reaching";
 import { bridge, type Bridge, type Where } from "./settings/bridge";
-import { opensRoadmap, pathOf, pathTo } from "./workbench/openings";
+import { opensRoadmap, pathTo, timelineOf } from "./workbench/openings";
 
 /// What a page with no Conversation open can go to: nothing. The settings page,
 /// the compose page, the bare workbench and a page that is no such page.
@@ -28,11 +28,12 @@ export const NOWHERE: Where = { panes: [] };
 /// What the Conversation can go to, in the Go menu's order, each at the path the
 /// page routes to for it.
 ///
-/// **Timeline** is the Conversation's own path, which closes whatever details
-/// pane is open; **Code** and **Share** are always there. **Backlog** is there
-/// where the record has a task list still readable — the rule the backlog card
-/// follows — and **Roadmap** where it landed one, naming the last roadmap of the
-/// last stage list: one item, however many roadmaps the Worktree holds.
+/// **Timeline** is the Timeline's own path, which closes whatever details pane
+/// is open and keeps it closed — see `timelineOf`. **Code** and **Share** are
+/// always there. **Backlog** is there where the record has a task list still
+/// readable — the rule the backlog card follows — and **Roadmap** where it
+/// landed one, naming the last roadmap of the last stage list: one item,
+/// however many roadmaps the Worktree holds.
 ///
 /// Steer is an act rather than a place, and is not among them.
 export function whereIn(
@@ -53,7 +54,7 @@ export function whereIn(
 
   return {
     panes: [
-      { pane: "timeline", path: pathOf(id, device) },
+      { pane: "timeline", path: timelineOf(id, device) },
       { pane: "code", path: pathTo(id, "code", device) },
       ...(backlog
         ? [{ pane: "backlog" as const, path: pathTo(id, "backlog", device) }]

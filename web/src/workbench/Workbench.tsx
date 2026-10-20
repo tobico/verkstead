@@ -151,6 +151,7 @@ import { Timeline } from "./Timeline";
 import { pressed } from "./eager";
 import { keeping, type Kept } from "./keeping";
 import {
+  closedAt,
   landing,
   openingAt,
   pathOf,
@@ -302,6 +303,11 @@ export function Workbench(): JSX.Element {
   /// either: a path names the Conversation and the detail together, so a new
   /// Conversation's path names no detail of the old one's.
   const event = createMemo(() => openingAt(where.pathname));
+
+  /// Whether the Timeline was asked for with nothing open beside it — the Mac's
+  /// Go menu's **Timeline** — which neither the landing nor advancing opens
+  /// anything over. See `timelineOf` in `openings.ts`.
+  const closed = createMemo(() => closedAt(where.pathname));
 
   /// What Code has open, per Conversation, kept above the frame that swaps the
   /// details pane for whatever else the Timeline opens.
@@ -717,6 +723,10 @@ export function Workbench(): JSX.Element {
   // selection. Which is also what settles this: the navigation it makes names a
   // pane, so the very next run has nothing left to do.
   //
+  // Nor where the path is the Timeline's own, which asked for the details pane
+  // closed — see [`closed`]. Picking a card from there is a pick like any
+  // other, and the path it writes names a pane.
+  //
   // A record with nothing openable on it selects nothing and the pane stays bare
   // paper, which is a Draft with only the Brief being written.
   //
@@ -742,7 +752,13 @@ export function Workbench(): JSX.Element {
     // And nothing at all on a tombstone: the effect above is taking the page
     // off it, and a pane opened on the way out would be one navigation racing
     // another over a copy that is not the record.
-    if (id === "" || read === undefined || event() !== null || away() !== null) {
+    if (
+      id === "" ||
+      read === undefined ||
+      event() !== null ||
+      closed() ||
+      away() !== null
+    ) {
       return;
     }
 
@@ -771,7 +787,7 @@ export function Workbench(): JSX.Element {
     const id = selected();
     const read = conversation.data;
 
-    if (!advancing() || read === undefined || away() !== null) {
+    if (!advancing() || read === undefined || closed() || away() !== null) {
       return;
     }
 

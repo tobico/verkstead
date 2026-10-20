@@ -69,7 +69,7 @@ import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
 import { takeOver as takeOverAgent } from "./launchd.js";
 import { heard, keep, say } from "./log.js";
-import { shortcuts } from "./menu.js";
+import { grey, shortcuts } from "./menu.js";
 import { hold, type Notice, opens, showing } from "./notices.js";
 import { dataDir, logDir } from "./platform.js";
 import { GUIDE, ISSUES } from "./roles.js";
@@ -90,7 +90,7 @@ import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
 import { APPDIR, stripped, unmounted } from "./unmounted.js";
 import { browse, forward, open, type Opened } from "./window.js";
-import { NOWHERE, type Where, where } from "./where.js";
+import { enabled, NOWHERE, type Pane, pathFor, type Where, where } from "./where.js";
 import { ADDRESS, HEALTH, HOST, LISTEN, NOTICES, ORIGIN, PORT } from "./workbench.js";
 
 /// What the human is told when the CLI is not where the app looked.
@@ -609,13 +609,53 @@ async function run(): Promise<void> {
     visiting(path);
     forward(onscreen);
   };
-  shortcuts(machine.platform, {
+  //
+  // The Go menu's panes go where the page last said they are, read at the
+  // press; one the page has not named is an item greyed a moment too late.
+  const pane = (which: Pane) => (): void => {
+    const path = pathFor(going, which);
+    if (path === undefined) {
+      say(`the menu asked for ${which}, which the open conversation has not got`);
+      return;
+    }
+    go(path);
+  };
+
+  // And Back and Forward are the window's own history, which on a page that
+  // routes in place is every pane and page walked through.
+  const history = () => onscreen?.webContents.navigationHistory;
+
+  const bar = shortcuts(machine.platform, {
     settings: () => go("/settings"),
     compose: () => go("/compose"),
     guide: () => browse(GUIDE, by),
     logs: () => logs(kept, by),
     issue: () => browse(ISSUES, by),
+    back: () => history()?.goBack(),
+    forward: () => history()?.goForward(),
+    conversations: () => go("/"),
+    timeline: pane("timeline"),
+    code: pane("code"),
+    backlog: pane("backlog"),
+    roadmap: pane("roadmap"),
+    share: pane("share"),
   });
+
+  // Which of the Go menu's items can be pressed, as [`enabled`] answers it from
+  // what the page last said and where the history stands — applied here and
+  // decided there. Asked again whenever either moves, and once now, so that a
+  // menu with no window behind it yet is a menu with nowhere to go.
+  const regrey = (): void => {
+    const now = history();
+    grey(
+      bar,
+      enabled(going, {
+        back: now?.canGoBack() ?? false,
+        forward: now?.canGoForward() ?? false,
+      }),
+    );
+  };
+  regrey();
 
   try {
     const waited = await healthy(HEALTH);
@@ -755,6 +795,7 @@ async function run(): Promise<void> {
 
     going = heard;
     say(`the open conversation can go to ${going.panes.map(({ pane }) => pane).join(", ") || "nothing"}`);
+    regrey();
   });
 
   // Whether this launch is a login's — the flag the registration writes, or a
@@ -808,6 +849,11 @@ async function run(): Promise<void> {
   const window = opened.window;
   onscreen = window;
   visiting = opened.visit;
+
+  // And the history moving is Back and Forward greying: a document arriving,
+  // and every route the page changes in place, which is most of them.
+  window.webContents.on("did-navigate", regrey);
+  window.webContents.on("did-navigate-in-page", regrey);
 
   // **And a Dock activation is the window coming back**, which is the other half
   // of what closing means on a Mac (ADR-0020): the app is a regular Dock app

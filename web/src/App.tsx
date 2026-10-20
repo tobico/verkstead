@@ -228,6 +228,7 @@ export function conversationRoutes(): JSX.Element {
         <Route path="/code" />
         <Route path="/steer" />
         <Route path="/roadmaps/:name" />
+        <Route path="/timeline" />
       </Route>
       {/* And where Code's pane stood while it was the Terminal pane, which is
           a redirect rather than a page: a link somebody kept and a browser

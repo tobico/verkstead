@@ -76,3 +76,43 @@ export function where(pushed: unknown): Where | undefined {
 
   return { panes: read };
 }
+
+/// Where the window's own history stands: whether there is anything behind it to
+/// go Back to, and anything ahead of it to go Forward to.
+export interface History {
+  readonly back: boolean;
+  readonly forward: boolean;
+}
+
+/// Which of the Go menu's items can be pressed, given what the page last said
+/// and where the window's history stands — the answer the edge applies to the
+/// menu Electron holds, and never works out for itself.
+///
+/// **Conversations always**, being the workbench with nothing open, which every
+/// page can go to. **Back and Forward** where the history has somewhere to go.
+/// **Each pane** exactly where the page named it: none on a page with no
+/// Conversation open, Backlog only on a record with a task list, Roadmap only
+/// on one that landed a roadmap.
+export function enabled(
+  going: Where,
+  history: History,
+): Record<"back" | "forward" | "conversations" | Pane, boolean> {
+  const named = (pane: Pane): boolean => going.panes.some((each) => each.pane === pane);
+
+  return {
+    back: history.back,
+    forward: history.forward,
+    conversations: true,
+    timeline: named("timeline"),
+    code: named("code"),
+    backlog: named("backlog"),
+    roadmap: named("roadmap"),
+    share: named("share"),
+  };
+}
+
+/// The path the page gave for `pane`, or `undefined` where it named no such
+/// pane — a press on an item greyed a moment too late.
+export function pathFor(going: Where, pane: Pane): string | undefined {
+  return going.panes.find((each) => each.pane === pane)?.path;
+}

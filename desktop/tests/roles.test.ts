@@ -87,13 +87,14 @@ describe("a Mac's bar", () => {
     );
   }
 
-  it("is the application menu, File, Edit, View, Window and Help", () => {
+  it("is the application menu, File, Edit, View, Go, Window and Help", () => {
     const mac = roles("darwin");
     expect(mac.map((item) => item.label ?? item.role)).toStrictEqual([
       "Verkstead",
       "File",
       "Edit",
       "View",
+      "Go",
       "windowMenu",
       "Help",
     ]);
@@ -122,6 +123,24 @@ describe("a Mac's bar", () => {
     expect(drawn(under(roles("darwin"), "File") ?? [])).toStrictEqual([
       { id: "compose", label: "New Conversation", accelerator: "Cmd+N" },
       "close",
+    ]);
+  });
+
+  /// Back and Forward, the way back to the workbench with no key — ⌘0 being
+  /// the zoom's reset — and the five panes on ⌘1 to ⌘5, in the workbench's own
+  /// order.
+  it("has Back, Forward, Conversations and the five panes in Go", () => {
+    expect(drawn(under(roles("darwin"), "Go") ?? [])).toStrictEqual([
+      { id: "back", label: "Back", accelerator: "Cmd+[" },
+      { id: "forward", label: "Forward", accelerator: "Cmd+]" },
+      "—",
+      { id: "conversations", label: "Conversations", accelerator: undefined },
+      "—",
+      { id: "timeline", label: "Timeline", accelerator: "Cmd+1" },
+      { id: "code", label: "Code", accelerator: "Cmd+2" },
+      { id: "backlog", label: "Backlog", accelerator: "Cmd+3" },
+      { id: "roadmap", label: "Roadmap", accelerator: "Cmd+4" },
+      { id: "share", label: "Share", accelerator: "Cmd+5" },
     ]);
   });
 
