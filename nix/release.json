@@ -1,21 +1,21 @@
 {
-  "version": "0.2.1",
+  "version": "0.2.2",
   "systems": {
     "x86_64-linux": {
-      "url": "https://github.com/tobico/verkstead/releases/download/v0.2.1/verkstead-linux-x64",
-      "hash": "sha256-eFg57kFdaadx6RNumtql8FF5pBPNpi/9osfGgi/t5tw="
+      "url": "https://github.com/tobico/verkstead/releases/download/v0.2.2/verkstead-linux-x64",
+      "hash": "sha256-fryQyBX2QpKjZf/jonlbYasy5uc21RO9ead0BFPs0tU="
     },
     "aarch64-linux": {
-      "url": "https://github.com/tobico/verkstead/releases/download/v0.2.1/verkstead-linux-arm64",
-      "hash": "sha256-0iYyCBc5cuea1+59qDLfofssalUxnnI1//e36F/KqOI="
+      "url": "https://github.com/tobico/verkstead/releases/download/v0.2.2/verkstead-linux-arm64",
+      "hash": "sha256-Zm3BlVuZHZTz+xo/CiHyKOoHZEoBCXEybXE79rbqOg8="
     },
     "x86_64-darwin": {
-      "url": "https://github.com/tobico/verkstead/releases/download/v0.2.1/verkstead-macos-x64",
-      "hash": "sha256-gqKxAMcIxng9IrTV92jiF/uyXxNUZlvqOEQqkWaJLR4="
+      "url": "https://github.com/tobico/verkstead/releases/download/v0.2.2/verkstead-macos-x64",
+      "hash": "sha256-ZSdd9woZd//vQEG9jAM0LNH4D8U4CkdQLpxrr1l5r6g="
     },
     "aarch64-darwin": {
-      "url": "https://github.com/tobico/verkstead/releases/download/v0.2.1/verkstead-macos-arm64",
-      "hash": "sha256-QTiXle6UNw00FZUIRRrfD/bOmse9lUwH3T853O7CwnM="
+      "url": "https://github.com/tobico/verkstead/releases/download/v0.2.2/verkstead-macos-arm64",
+      "hash": "sha256-JZGFvulcGSU9hO36bePdS5NvNJgdfRfLdSlGA8wyFYc="
     }
   }
 }
