@@ -49,7 +49,11 @@ jobs:
           async function arm(mode, focus) {
             const win = new BrowserWindow({ width: 700, height: 400 });
             win.webContents.on("console-message", (e) => console.log("page:", e.message));
-            await win.loadFile("index.html", { query: { mode } });
+            console.log("loading", mode, focus);
+            for (let tries = 0; ; tries++) {
+              try { await win.loadFile("index.html", { query: { mode } }); break; }
+              catch (e) { console.log("load failed, again", e.message); if (tries > 3) throw e; await wait(1000); }
+            }
             await wait(1500);
             app.focus({ steal: true }); win.focus(); await wait(500);
             const focused = await win.webContents.executeJavaScript(focus === "editor" ? "focusEditor()" : "focusButton()");
@@ -61,8 +65,10 @@ jobs:
               const after = await win.webContents.executeJavaScript("read()");
               results.push({ key: `Cmd+${k}`, menu: [...pressed], before, after, editorChanged: before !== after });
             }
-            win.destroy();
-            return { mode, focus, focused, results };
+            win.hide();
+            const one = { mode, focus, focused, results };
+            console.log("ARM " + JSON.stringify(one));
+            return one;
           }
           process.on("unhandledRejection", (e) => { console.log("FAILED", e); app.exit(1); });
           app.whenReady().then(async () => {
