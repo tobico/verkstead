@@ -29,8 +29,9 @@ import parser from "@typescript-eslint/parser";
 /// — what it *decides* is elsewhere, in modules vitest runs. `tray.ts` holds a
 /// `Tray`, which is the same case: the object *is* the icon on somebody's panel,
 /// and what the menu on it says and means is `chosen.ts`, which vitest runs.
-/// `menu.ts` is the handing of the application menu to Electron, and that call
-/// is the whole of it: what the menu *holds* is `roles.ts`, which vitest runs.
+/// `menu.ts` is the handing of the application menu to Electron, with each act's
+/// id made a click on the way: what the menu *holds* is `roles.ts`, which vitest
+/// runs.
 /// `preload.mts` is
 /// the one file here that is not the main process at all: it runs inside the
 /// window and `contextBridge` is how it puts the bridge on it, which is a call

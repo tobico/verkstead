@@ -62,6 +62,7 @@ import { heard, keep, say } from "./log.js";
 import { shortcuts } from "./menu.js";
 import { hold, type Notice, opens, showing } from "./notices.js";
 import { dataDir, logDir } from "./platform.js";
+import { GUIDE, ISSUES } from "./roles.js";
 import { takeOver as takeOverValue } from "./runkey.js";
 import { changed, FILE as DESKTOP, set, type Settings, settings } from "./settings.js";
 import { how, type Sidecar, start } from "./sidecar.js";
@@ -78,7 +79,7 @@ import { taken } from "./taken.js";
 import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
 import { APPDIR, stripped, unmounted } from "./unmounted.js";
-import { forward, open, type Opened } from "./window.js";
+import { browse, forward, open, type Opened } from "./window.js";
 import { ADDRESS, HEALTH, HOST, LISTEN, NOTICES, ORIGIN, PORT } from "./workbench.js";
 
 /// What the human is told when the CLI is not where the app looked.
@@ -117,6 +118,11 @@ function foreign(address: string): void {
 /// The window, once there is one — which a second launch wants and the launch
 /// it happens in cannot hand it.
 let onscreen: BrowserWindow | undefined;
+
+/// How to go somewhere on the workbench in that window, once there is one — what
+/// the menu bar's Settings… and New Conversation reach at the press, the menu
+/// being set before the window is opened.
+let visiting: Opened["visit"] | undefined;
 
 /// Whether a launch asked for the window while there was not one yet.
 ///
@@ -575,7 +581,25 @@ async function run(): Promise<void> {
   // Before the window, so that it is never briefly a window whose keystrokes do
   // nothing: the menu is what registers copy, paste, zoom, reload and the
   // developer tools, and the bar it would be drawn in is hidden by the window.
-  shortcuts(machine.platform);
+  //
+  // The acts the Mac's bar carries go somewhere in the workbench, and they go
+  // there the way a clicked notification does: told to the page, which routes
+  // in place, and the window brought forward — a ⌘W'd window is in the Dock.
+  const go = (path: string): void => {
+    if (visiting === undefined || onscreen === undefined) {
+      say(`the menu asked for ${path} before there was a window to open it in`);
+      return;
+    }
+    visiting(path);
+    forward(onscreen);
+  };
+  shortcuts(machine.platform, {
+    settings: () => go("/settings"),
+    compose: () => go("/compose"),
+    guide: () => browse(GUIDE, by),
+    logs: () => logs(kept, by),
+    issue: () => browse(ISSUES, by),
+  });
 
   try {
     const waited = await healthy(HEALTH);
@@ -752,6 +776,7 @@ async function run(): Promise<void> {
   });
   const window = opened.window;
   onscreen = window;
+  visiting = opened.visit;
 
   // **And a Dock activation is the window coming back**, which is the other half
   // of what closing means on a Mac (ADR-0020): the app is a regular Dock app
