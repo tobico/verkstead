@@ -26,14 +26,15 @@ import {
   REGISTER,
   SET,
   STARTUP,
+  WHERE,
 } from "../src/bridge.js";
 
 /// Every channel the bridge crosses on, which is the list both tests below read.
-/// [`HEAD`] among them though it is the one that goes the other way: a channel is
+/// [`HEAD`] and [`WHERE`] among them though they go the other way: a channel is
 /// a name in a renderer's namespace whichever direction the message travels in,
 /// and a push that shared a name with a question would be an overlay recoloured by
 /// a set.
-const CHANNELS = [ASKED, SET, LOGS, STARTUP, REGISTER, NOTIFIABLE, HEAD, OPEN];
+const CHANNELS = [ASKED, SET, LOGS, STARTUP, REGISTER, NOTIFIABLE, HEAD, WHERE, OPEN];
 
 /// This project's own directory, which is what `src/` is under.
 const project = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -58,6 +59,14 @@ describe("the channels", () => {
 describe("the channel a clicked notification is told on", () => {
   it("is the app's own word for opening", () => {
     expect(OPEN).toBe("verkstead:open");
+  });
+});
+
+/// And the one the page pushes the Go menu's list on, which it names for the same
+/// reason — pinned here and in `web/tests/where.test.tsx` to the same literal.
+describe("the channel what the open Conversation can go to is said on", () => {
+  it("is the app's own word for where", () => {
+    expect(WHERE).toBe("verkstead:where");
   });
 });
 

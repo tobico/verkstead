@@ -41,6 +41,10 @@
 //! the page: the app says the path over [`OPEN`], and `opened.ts` routes to it in
 //! place, so nothing reloads and nothing half typed is lost.
 //!
+//! **And one more the page says, from everywhere.** What the open Conversation
+//! can go to is pushed over [`WHERE`] for the Mac's Go menu, the paths built
+//! where the page already builds them — see `where.ts`.
+//!
 //! What this module holds is the shape and the reading of the window, and
 //! nothing else: the words the section is drawn in are `Desktop.tsx`'s, and what
 //! a set *means* is the app's — see `changed` in `desktop/src/settings.ts`.
@@ -117,6 +121,10 @@ export interface Registration {
   readonly refused?: string;
 }
 
+/// The channel what the open Conversation can go to is pushed on — `WHERE` in
+/// `desktop/src/bridge.ts`, said again here for the reason [`OPEN`] is.
+export const WHERE = "verkstead:where";
+
 /// What the head is drawn in and how tall its band stands — `Head` in
 /// `desktop/src/decorations.ts`, said again on this side of the bridge.
 ///
@@ -143,6 +151,22 @@ export interface Head {
   /// way — which is what a Mac centres its traffic lights on (Set 889 Q4a), there
   /// being no overlay on that platform to paint.
   readonly middle: number;
+}
+
+/// One of the places the Mac's Go menu goes to, in the order it draws them.
+export type Pane = "timeline" | "code" | "backlog" | "roadmap" | "share";
+
+/// What the open Conversation can go to — `Where` in `desktop/src/where.ts`,
+/// said again on this side of the bridge.
+///
+/// **The second thing on this bridge the page tells the app** (Set 1283 Q7):
+/// only the page knows which Conversation is open, which device it is on and
+/// what its record holds, so the paths are built here and the app is handed a
+/// list it can draw a menu from. In the Go menu's order, each with the path the
+/// page routes to for it, and empty where no Conversation is open. See
+/// `where.ts`, which builds it and pushes it.
+export interface Where {
+  readonly panes: ReadonlyArray<{ readonly pane: Pane; readonly path: string }>;
 }
 
 /// What `window.verkstead` is, where there is one.
@@ -188,6 +212,11 @@ export interface Bridge {
   /// awaiting one at every flip of the colour scheme.
   head(worn: Head): void;
 
+  /// Say what the open Conversation can go to, for the Mac's Go menu to be
+  /// greyed and enabled by. Answers with nothing, for [`head`]'s reason — see
+  /// `where.ts`.
+  where(open: Where): void;
+
   /// Hear the path of every one of the app's notifications that is clicked,
   /// for the page to go to in place, and answer with what stops listening.
   ///
@@ -230,6 +259,7 @@ function shaped(held: unknown): held is Bridge {
     typeof reached.register === "function" &&
     typeof reached.notifiable === "function" &&
     typeof reached.head === "function" &&
+    typeof reached.where === "function" &&
     typeof reached.opening === "function"
   );
 }

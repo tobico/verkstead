@@ -202,6 +202,15 @@ export function deviceAt(pathname: string): Device {
     : null;
 }
 
+/// Whether a path is a Conversation's, or one of its details panes', on whichever
+/// device — the pages the workbench draws a record on, and so the ones whose Go
+/// menu is the workbench's to say rather than nothing.
+export function conversationAt(pathname: string): boolean {
+  const [first, id] = under(pathname);
+
+  return first === "conversations" && id !== undefined;
+}
+
 /// A path with the device taken off the front of it, in segments: what is left
 /// is the path a local Conversation stands at, which is the one shape
 /// everything here reads.

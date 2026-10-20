@@ -13,24 +13,27 @@
 //! nothing here is a page with no Desktop section, and that is the whole
 //! mechanism.
 //!
-//! **What is in this file is what crosses**: the name, the eight channels, and
+//! **What is in this file is what crosses**: the name, the nine channels, and
 //! the shape. It holds no behaviour and touches no disk on purpose — the
 //! preload imports it, so everything it imports is loaded inside the window,
 //! and what the app *does* about each of them is `main.ts`'s while what they
 //! *mean* is elsewhere: a set is [`changed`](./settings.js)'s, the startup
-//! registration is [`startup.ts`](./startup.js)'s, and the head's colours and
-//! height are [`decorations.ts`](./decorations.js)'s.
+//! registration is [`startup.ts`](./startup.js)'s, the head's colours and
+//! height are [`decorations.ts`](./decorations.js)'s, and what the open
+//! Conversation can go to is [`where.ts`](./where.js)'s.
 //!
-//! **And six of the eight go one way while the last two go others.** Everything
-//! the page *asks* is an `invoke` and comes back answered; the head is something
-//! the page *says* — the app cannot know what the viewer resolved its tokens to,
-//! and there is nothing to answer once it has been told. See [`HEAD`]. And a
-//! notification clicked is something the *app* says, which the page acts on by
-//! going where it leads. See [`OPEN`].
+//! **And six of the nine go one way while the last three go others.** Everything
+//! the page *asks* is an `invoke` and comes back answered; the head and what the
+//! open Conversation can go to are things the page *says* — the app cannot know
+//! what the viewer resolved its tokens to, nor what the record it is drawing
+//! holds, and there is nothing to answer once it has been told. See [`HEAD`] and
+//! [`WHERE`]. And a notification clicked is something the *app* says, which the
+//! page acts on by going where it leads. See [`OPEN`].
 
 import type { Head } from "./decorations.js";
 import type { Settings } from "./settings.js";
 import type { Registration } from "./startup.js";
+import type { Where } from "./where.js";
 
 /// What the bridge is called on the window object: `window.verkstead`.
 ///
@@ -98,6 +101,18 @@ export const REGISTER = "verkstead:register";
 /// is [`Head`](./decorations.js).
 export const HEAD = "verkstead:head";
 
+/// And the channel **what the open Conversation can go to** is pushed on — the
+/// second thing on this bridge the page says rather than asks, and what the Mac's
+/// Go menu is greyed and enabled by.
+///
+/// **The page's to say rather than the app's to ask** (Set 1283 Q7): only the
+/// page knows which Conversation is open, which device it is on and what its
+/// record holds, so the paths are built there, where the page already builds
+/// them, and the app learns a list it can draw a menu from. Pushed when the page
+/// starts, at every navigation and at every read of the record that changes the
+/// list, and never twice the same. What crosses is [`Where`](./where.js).
+export const WHERE = "verkstead:where";
+
 /// The channel **whether this desktop shows notifications at all** is asked on.
 ///
 /// Electron's own `Notification.isSupported()`, which only the main process can
@@ -127,13 +142,13 @@ export const OPEN = "verkstead:open";
 
 /// What `window.verkstead` is, where there is one.
 ///
-/// Eight acts and one value, which is the whole of what the page needs: what
+/// Nine acts and one value, which is the whole of what the page needs: what
 /// machine this is, the settings read and written, the log file opened, the
 /// startup registration read and written, whether notifications can be shown,
-/// the head's colours and height said,
-/// and a clicked notification's path heard. Everything the page *asks* is
+/// the head's colours and height said, what the open Conversation can go to
+/// said, and a clicked notification's path heard. Everything the page *asks* is
 /// asynchronous, because everything but the platform is a question for the
-/// process on the other side of the bridge; the one thing it *says* answers
+/// process on the other side of the bridge; the two things it *says* answer
 /// with nothing at all, and the one thing it *hears* is a listener it hands in.
 export interface Bridge {
   /// Which platform the app is running on — `process.platform`, read in the
@@ -184,6 +199,11 @@ export interface Bridge {
   /// platform with an overlay recolours it, a Mac moves its buttons, and neither
   /// is news the page can act on — see [`HEAD`].
   head(worn: Head): void;
+
+  /// Say what the open Conversation can go to — each pane the Mac's Go menu
+  /// enables, with the path the page routes to for it, or none where nothing is
+  /// open. Nothing comes back, for [`head`]'s reason — see [`WHERE`].
+  where(open: Where): void;
 
   /// Hear the path of every notification that is clicked, relative to the
   /// workbench, for the page to go to in place. Answers with what stops

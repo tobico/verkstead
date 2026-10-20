@@ -130,6 +130,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { maximised as remembered, setMaximised } from "../widths";
+import { NOWHERE, tell, whereIn } from "../where";
 import { Asked } from "./Asked";
 import { Backlog } from "./Backlog";
 import { Brief } from "./Brief";
@@ -568,6 +569,20 @@ export function Workbench(): JSX.Element {
   /// every link anybody kept still leads to the work, and what it leads to is
   /// wherever the work is now. So this page never draws one — see [`elsewhere`].
   const away = createMemo(() => conversation.data?.transferred ?? null);
+
+  // And what the open Conversation can go to, told to the app for the Mac's Go
+  // menu — at every read of the record, which says it only where the list has
+  // changed, and as nothing at all on the bare workbench, while the record is on
+  // its way and on a tombstone. See `where.ts`; nothing in a browser.
+  createEffect(() => {
+    const data = conversation.data;
+
+    tell(
+      selected() === "" || data === undefined || away() !== null
+        ? NOWHERE
+        : whereIn(data, selected(), device()),
+    );
+  });
 
   /// This device's own id, read only while something is standing on a tombstone.
   ///

@@ -23,6 +23,6 @@ they were, and ADR-0020 amended. Settled in the grilling of 2026-10-20, Sets
 ## Tasks
 
 - [x] 01: The menus the page needs nothing for — [details](01-the-menus-the-page-needs-nothing-for.md)
-- [ ] 02: The page says what is open — [details](02-the-page-says-what-is-open.md)
+- [x] 02: The page says what is open — [details](02-the-page-says-what-is-open.md)
 - [ ] 03: The Go menu — [details](03-the-go-menu.md)
 - [ ] 04: The words — [details](04-the-words.md)

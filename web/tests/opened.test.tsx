@@ -51,6 +51,7 @@ function standingIn(): Telling {
     register: () => Promise.resolve({ possible: false, on: false }),
     notifiable: () => Promise.resolve(true),
     head: () => {},
+    where: () => {},
     opening: (listener) => {
       heard = listener;
       listening += 1;

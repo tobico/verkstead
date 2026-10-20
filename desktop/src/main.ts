@@ -51,7 +51,17 @@ import { app, BrowserWindow, dialog, ipcMain, Notification } from "electron";
 import { artwork } from "./artwork.js";
 import { AUTOSCROLLING } from "./autoscroll.js";
 import { FILE } from "./bounds.js";
-import { ASKED, HEAD, LOGS, NOTIFIABLE, PRELOAD, REGISTER, SET, STARTUP } from "./bridge.js";
+import {
+  ASKED,
+  HEAD,
+  LOGS,
+  NOTIFIABLE,
+  PRELOAD,
+  REGISTER,
+  SET,
+  STARTUP,
+  WHERE,
+} from "./bridge.js";
 import { cli, type Install, OVERRIDE } from "./cli.js";
 import { closing } from "./closing.js";
 import { buttoned, lights, overlaid, overlay, worn } from "./decorations.js";
@@ -80,6 +90,7 @@ import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
 import { APPDIR, stripped, unmounted } from "./unmounted.js";
 import { browse, forward, open, type Opened } from "./window.js";
+import { NOWHERE, type Where, where } from "./where.js";
 import { ADDRESS, HEALTH, HOST, LISTEN, NOTICES, ORIGIN, PORT } from "./workbench.js";
 
 /// What the human is told when the CLI is not where the app looked.
@@ -123,6 +134,11 @@ let onscreen: BrowserWindow | undefined;
 /// the menu bar's Settings… and New Conversation reach at the press, the menu
 /// being set before the window is opened.
 let visiting: Opened["visit"] | undefined;
+
+/// What the open Conversation can go to, as the page last said it — what the
+/// Mac's Go menu is greyed and enabled by, and nowhere until the page has said
+/// anything. See [`where`](./where.js).
+let going: Where = NOWHERE;
 
 /// Whether a launch asked for the window while there was not one yet.
 ///
@@ -724,6 +740,21 @@ async function run(): Promise<void> {
   // to it.
   ipcMain.on(HEAD, (event, pushed: unknown) => {
     wearing(BrowserWindow.fromWebContents(event.sender), machine.platform, pushed);
+  });
+
+  // And the other statement: what the open Conversation can go to, checked
+  // before it is held — a push of the wrong shape is dropped and said rather
+  // than thrown on — and held for the Go menu to read.
+  ipcMain.on(WHERE, (_event, pushed: unknown) => {
+    const heard = where(pushed);
+
+    if (heard === undefined) {
+      say("the page said where the open conversation can go in a shape this app does not read");
+      return;
+    }
+
+    going = heard;
+    say(`the open conversation can go to ${going.panes.map(({ pane }) => pane).join(", ") || "nothing"}`);
   });
 
   // Whether this launch is a login's — the flag the registration writes, or a
