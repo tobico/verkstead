@@ -171,6 +171,11 @@ are enough to say *this is a heading*; a third would only be decoration.
 | --- | --- |
 | *Launch on Startup* (the desktop app's menu item) | *Launch on startup* |
 
+**Except a Mac's menu bar, which is Title Case**: *New Conversation*, *View
+Logs*, *Report an Issue*. The bar is the platform's furniture, and an item that
+read differently from *Hide Others* beside it would be the one that looked
+wrong — see ADR-0020, *Amended: the Mac menu bar*.
+
 ### Button
 
 The verb for what it does: *Save*, *Remove*, *Send anyway*, *Lock unanswered*.
