@@ -774,9 +774,9 @@ describe("the rules the widths are read by", () => {
   /// Collapsed, the list is laid out at the width it expands to and clipped to
   /// the strip, so every height in it is its expanded height; expanded, the
   /// clip lets the whole pane and its shadow out over the panes beside it,
-  /// under a pointer resting on it, a keyboard's focus inside it, or the page
-  /// saying nothing is open. The padding is the strip's in both, so nothing in
-  /// the pane slides sideways as it opens.
+  /// under a mouse the page has seen settle on it, a keyboard's focus inside
+  /// it, or the page saying nothing is open. Collapsed, the padding centres the
+  /// item in the strip; expanded, it is the full sidebar's `1.25rem`.
   it("clips the collapsed list to its strip and lets it out over the rest", () => {
     const collapsed = layout("(width < 100rem)");
 
@@ -789,25 +789,27 @@ describe("the rules the widths are read by", () => {
         `    clip-path: inset(0 calc(100% - ${COLLAPSED}rem) 0 0);\n`,
     );
     expect(collapsed).toContain(
-      "  .panes.listing > .conversationsPane[data-expanded],\n" +
+      "  .panes.listing > .conversationsPane[data-hovered],\n" +
+        "  .panes.listing > .conversationsPane[data-expanded],\n" +
         "  .panes.listing > .conversationsPane:focus-visible,\n" +
         "  .panes.listing > .conversationsPane:has(:focus-visible) {\n" +
-        "    clip-path: inset(0 -3rem 0 0);\n" +
-        "    box-shadow: var(--lift);\n",
-    );
-    expect(layout("(width < 100rem) and (hover: hover)")).toContain(
-      "  .panes.listing > .conversationsPane:hover:not([data-finger]) {\n" +
+        "    padding-inline-start: 1.25rem;\n" +
         "    clip-path: inset(0 -3rem 0 0);\n" +
         "    box-shadow: var(--lift);\n",
     );
 
-    // Nothing but the clip and the shadow move between the two.
-    expect(collapsed.match(/padding-inline/g)).toHaveLength(1);
+    // The hover is the page's, not the browser's: `:hover` would open the
+    // pane under a pointer crossing it and hold it open where a finger tapped.
+    expect(stylesheet).not.toMatch(/conversationsPane:hover/);
+    expect(stylesheet).not.toContain("data-finger");
 
-    // And moving between the two only where movement is welcome.
-    expect(
-      layout("(width < 100rem) and (prefers-reduced-motion: no-preference)"),
-    ).toContain("clip-path 150ms ease");
+    // And moving between the two only where movement is welcome, the padding
+    // with the clip.
+    const moving = layout(
+      "(width < 100rem) and (prefers-reduced-motion: no-preference)",
+    );
+    expect(moving).toContain("padding-inline-start 150ms ease");
+    expect(moving).toContain("clip-path 150ms ease");
   });
 
   /// The divider draws the line between two panes, so the panes do not: two
@@ -835,13 +837,19 @@ describe("the rules the widths are read by", () => {
     // And the panes themselves have given theirs up: nothing in the workbench
     // draws an edge down the side of a column a divider stands beside. The one
     // edge a pane draws is the collapsed strip's, which has no divider — and
-    // from 60rem the details pane, beyond the middle divider, draws none.
+    // from 60rem the details pane, beyond the middle divider, draws none. But
+    // where there is no middle pane, `widened`, the details pane stands beside
+    // the strip and keeps the edge.
     expect(stylesheet).not.toContain("border-right: 1px solid var(--edge)");
     expect(layout("(width < 100rem)")).toContain(
       "    border-left: 1px solid var(--edge);\n",
     );
     expect(layout(BESIDE)).toContain(
-      "  .panes.listing > .detailsPane {\n    border-left: 0;\n  }",
+      "  .panes.listing:not(.widened) > .detailsPane {\n" +
+        "    border-left: 0;\n  }",
+    );
+    expect(stylesheet).not.toMatch(
+      /\.panes\.listing > \.detailsPane \{\n\s*border-left: 0;/,
     );
   });
 
@@ -1511,6 +1519,160 @@ function layout(breakpoint: string): string {
   return stylesheet.slice(opened, stylesheet.indexOf("\n}\n", opened));
 }
 
+/// A mouse on the collapsed list, which the page watches rather than leaving
+/// it to `:hover`: the list expands once the pointer has slowed or stopped on
+/// it, never under one crossing it on the way somewhere else, and collapses a
+/// moment after the pointer has left it.
+describe("a mouse on the collapsed list", () => {
+  async function reading() {
+    windowIs("beside");
+    theWorkbench();
+
+    const mounted = mount(`/conversations/${OPEN.id}`);
+    const list = await drawn<HTMLElement>(
+      mounted.container,
+      `.${shell.conversationsPane}`,
+    );
+    await drawn(list, "[data-row] article");
+
+    // From here the clock is the test's, `performance.now()` included, which
+    // is what the pointer's speed is timed by.
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "performance"],
+    });
+
+    return { ...mounted, list };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const mouse = (x: number, y = 100) => ({
+    pointerType: "mouse",
+    pointerId: 1,
+    clientX: x,
+    clientY: y,
+  });
+
+  const hovered = (list: HTMLElement) => list.hasAttribute("data-hovered");
+
+  it("expands under a pointer that has slowed on it", async () => {
+    const { list } = await reading();
+
+    fireEvent.pointerEnter(list, mouse(40));
+    expect(hovered(list)).toBe(false);
+
+    // Arriving quickly — 20px in 5ms, four times too fast — and then easing
+    // to 2px in 20ms.
+    vi.advanceTimersByTime(5);
+    fireEvent.pointerMove(list, mouse(20));
+    expect(hovered(list)).toBe(false);
+    vi.advanceTimersByTime(20);
+    fireEvent.pointerMove(list, mouse(18));
+    expect(hovered(list)).toBe(true);
+  });
+
+  it("expands under a pointer that has stopped on it", async () => {
+    const { list } = await reading();
+
+    fireEvent.pointerEnter(list, mouse(40));
+    vi.advanceTimersByTime(5);
+    fireEvent.pointerMove(list, mouse(20));
+    vi.advanceTimersByTime(59);
+    expect(hovered(list)).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(hovered(list)).toBe(true);
+  });
+
+  /// Which is the flash a pointer flung off the window's left edge made: the
+  /// pane opened under it and shut behind it.
+  it("never expands under a pointer crossing it", async () => {
+    const { list } = await reading();
+
+    fireEvent.pointerEnter(list, mouse(46));
+    vi.advanceTimersByTime(4);
+    fireEvent.pointerMove(list, mouse(30));
+    vi.advanceTimersByTime(4);
+    fireEvent.pointerMove(list, mouse(12));
+    vi.advanceTimersByTime(4);
+    fireEvent.pointerLeave(list, mouse(-4));
+
+    vi.advanceTimersByTime(1000);
+    expect(hovered(list)).toBe(false);
+  });
+
+  /// The browser sends a move with every enter, at the point it entered, and
+  /// often a fraction of a millisecond later: nothing travelled in next to no
+  /// time, which is no speed at all rather than a pointer standing still.
+  it("never reads the move an enter brings as the pointer resting", async () => {
+    const { list } = await reading();
+
+    fireEvent.pointerEnter(list, mouse(46));
+    vi.advanceTimersByTime(0.1);
+    fireEvent.pointerMove(list, mouse(46));
+    expect(hovered(list)).toBe(false);
+    vi.advanceTimersByTime(4);
+    fireEvent.pointerMove(list, mouse(24));
+    vi.advanceTimersByTime(4);
+    fireEvent.pointerLeave(list, mouse(-4));
+
+    vi.advanceTimersByTime(1000);
+    expect(hovered(list)).toBe(false);
+  });
+
+  it("collapses a moment after the pointer leaves, unless it comes back", async () => {
+    const { list } = await reading();
+
+    fireEvent.pointerEnter(list, mouse(20));
+    vi.advanceTimersByTime(60);
+    expect(hovered(list)).toBe(true);
+
+    // Out and back inside the wait: still open, and still open after it.
+    fireEvent.pointerLeave(list, mouse(300));
+    vi.advanceTimersByTime(100);
+    expect(hovered(list)).toBe(true);
+    fireEvent.pointerEnter(list, mouse(250));
+    vi.advanceTimersByTime(500);
+    expect(hovered(list)).toBe(true);
+
+    // Out for good.
+    fireEvent.pointerLeave(list, mouse(300));
+    vi.advanceTimersByTime(149);
+    expect(hovered(list)).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(hovered(list)).toBe(false);
+  });
+
+  it("is armed by a mouse alone", async () => {
+    const { list } = await reading();
+
+    fireEvent.pointerEnter(list, { ...mouse(20), pointerType: "pen" });
+    vi.advanceTimersByTime(500);
+    expect(hovered(list)).toBe(false);
+  });
+
+  /// In the app the head is a drag region, over which Electron hands the page
+  /// no pointer events: the pane lost its hover the moment the pointer reached
+  /// the title row on its way to the gear. So the list's head is none while
+  /// the list is collapsed, and only then. And expanded, the list's head lies
+  /// over the head beside it, which Electron lets win under the gear: so the
+  /// heads beside it are none either for as long as it is expanded, by every
+  /// one of the four things that expand it.
+  it("keeps the list's head clear of the window's drag while collapsed", () => {
+    expect(layout("(width < 100rem)")).not.toContain("app-region");
+    expect(stylesheet).toContain(
+      "@media (width < 100rem) {\n" +
+        "  :root[data-app] .panes.listing > .conversationsPane .paneHead,\n" +
+        "  :root[data-app] .panes.listing > .conversationsPane[data-hovered] ~ .pane .paneHead,\n" +
+        "  :root[data-app] .panes.listing > .conversationsPane[data-expanded] ~ .pane .paneHead,\n" +
+        "  :root[data-app] .panes.listing > .conversationsPane:focus-visible ~ .pane .paneHead,\n" +
+        "  :root[data-app] .panes.listing > .conversationsPane:has(:focus-visible) ~ .pane .paneHead {\n" +
+        "    -webkit-app-region: no-drag;\n  }\n}",
+    );
+  });
+});
+
 /// A finger on the collapsed list, where there is nothing to hover with: the
 /// first tap expands it and does nothing else, a tap on a card in it opens the
 /// card and collapses it, and a tap anywhere else collapses it and lands where
@@ -1566,11 +1728,9 @@ describe("a finger on the collapsed list", () => {
     await waitFor(() => expect(history.get()).not.toBe(opened));
     expect(expanded(list)).toBe(false);
 
-    // With the hover off, which a browser leaves standing where a finger
-    // tapped, until a mouse moves over the pane again.
-    expect(list.hasAttribute("data-finger")).toBe(true);
-    fireEvent.pointerMove(list, { pointerType: "mouse" });
-    expect(list.hasAttribute("data-finger")).toBe(false);
+    // And a finger never arms the hover, which a browser would have left
+    // standing where it tapped.
+    expect(list.hasAttribute("data-hovered")).toBe(false);
   });
 
   it("collapses on a tap elsewhere, which lands where it was put", async () => {

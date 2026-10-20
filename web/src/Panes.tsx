@@ -11,7 +11,7 @@
 //! from 60rem it is collapsed beside the timeline and the details; from 100rem
 //! it is the full sidebar. Collapsed it is a strip of `COLLAPSED` rem, drawn at
 //! the width it would stand at full and clipped down to the strip, so every
-//! height in it is the height it has expanded; a pointer resting on it, a
+//! height in it is the height it has expanded; a mouse settling on it, a
 //! keyboard focus inside it or a finger's tap on it expands it over the panes
 //! beside it, which do not move — a finger's tap doing nothing else, and the
 //! next one on a card or a link, or one anywhere outside, collapsing it again.
@@ -110,6 +110,22 @@ import {
 /// Which level of the hierarchy a narrow window is showing, or `nothing` where
 /// nothing is open: the list is beside every level rather than one of them.
 export type Pane = "nothing" | "middle" | "details";
+
+/// How slow a mouse over the collapsed list has to be going, in CSS pixels a
+/// millisecond, before it is taken as resting there and the list expands —
+/// 250 a second. A hand reaching for the list slows to well under it before it
+/// arrives; one flung off the window's edge crosses the strip at many times it.
+/// Meant to be tuned, as the two after it are.
+const SETTLED = 0.25;
+
+/// And how long a mouse over it may send no move before it is taken as
+/// stopped, in milliseconds: a pointer that stops dead says nothing more to be
+/// timed, and a flung one is across the 3rem strip in well under this.
+const STOPPED = 60;
+
+/// How long the list stays expanded after a mouse has left it, in milliseconds,
+/// for a hand that overshot its edge to come back inside.
+const LINGER = 150;
 
 /// Whether a media query holds, as something the page can be built out of.
 ///
@@ -403,19 +419,122 @@ export function Panes(props: {
   ///
   /// Read off the pointer each gesture began with rather than off the device,
   /// as the sidebar's drag reads it: a laptop with a touchscreen hovers with
-  /// its mouse and taps with a finger. A mouse expands it by resting on it, and
-  /// a press of one leaves it to the hover — so it is a mouse's press as much
-  /// as a finger's that puts down an expansion a finger made, the pointer
-  /// resting there holding it open until it leaves.
+  /// its mouse and taps with a finger. A mouse expands it by resting on it —
+  /// see `hovered` — and a press of one leaves it to the hover, so it is a
+  /// mouse's press as much as a finger's that puts down an expansion a finger
+  /// made, the pointer resting there holding it open until it leaves.
   const [touched, setTouched] = createSignal(false);
 
-  /// And whether the hand last on the list was a finger, which turns the
-  /// hover off for as long as it is: a browser leaves `:hover` standing where a
-  /// finger tapped, and a pane held open by it would be a finger's tap on a
-  /// card that never collapsed it. A mouse moving over the pane again is a
-  /// mouse resting on it, and the hover is its own again. Drawn as
-  /// `data-finger`.
-  const [finger, setFinger] = createSignal(false);
+  /// Whether a mouse is resting on the collapsed list, which is how a mouse
+  /// opens it: drawn as `data-hovered`, and put there by the page rather than
+  /// left to `:hover`, for two things `:hover` cannot do.
+  ///
+  /// It waits for the pointer to settle. A pointer flung off the window's left
+  /// edge crosses the strip on its way, and a pane that opened under it and
+  /// shut again behind it is a flash of the whole list for nothing — so the
+  /// pane expands once the pointer over it has slowed below `SETTLED`, or has
+  /// stopped for `STOPPED`, and a pointer that leaves before either never
+  /// opened it. Slowing rather than a fixed delay, which would make every
+  /// deliberate reach for the list that much slower too.
+  ///
+  /// And it lets go a moment late: a pointer leaving the pane collapses it
+  /// `LINGER` later, and one coming back inside that keeps it open, so a hand
+  /// overshooting the edge does not snap it shut.
+  ///
+  /// Only a mouse arms it. A browser leaves `:hover` standing where a finger
+  /// tapped, and a pane held open by that would be a finger's tap on a card
+  /// that never collapsed it — which a pointer's type, read here, never is.
+  const [hovered, setHovered] = createSignal(false);
+
+  /// Where and when the pointer over the strip was last seen, while it is
+  /// being watched for settling; nothing when it is not.
+  let last: { x: number; y: number; at: number } | undefined;
+
+  /// The wait for a pointer that has stopped, which sends no more moves to be
+  /// timed, and the wait after one that has left.
+  let stopping: ReturnType<typeof setTimeout> | undefined;
+  let leaving: ReturnType<typeof setTimeout> | undefined;
+
+  const settle = () => {
+    clearTimeout(stopping);
+    stopping = undefined;
+    last = undefined;
+    setHovered(true);
+  };
+
+  /// A mouse coming onto the list: back inside the wait after it left, which
+  /// keeps the pane open, or onto the strip, which starts watching it.
+  const entered = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") {
+      return;
+    }
+
+    clearTimeout(leaving);
+    leaving = undefined;
+    if (hovered() || !collapsed()) {
+      return;
+    }
+
+    last = { x: event.clientX, y: event.clientY, at: performance.now() };
+    clearTimeout(stopping);
+    stopping = setTimeout(settle, STOPPED);
+  };
+
+  /// A mouse moving over the strip, timed against where it was last.
+  /// `performance.now()` rather than the event's own stamp, which is a clock
+  /// the tests' timers do not drive.
+  ///
+  /// A move that has gone nowhere is no sample of a speed. The browser sends
+  /// one with every `pointerenter`, at the very point the pointer entered, and
+  /// often a tenth of a millisecond after it — one crossing in six, on
+  /// Electron 43. Read as a speed that was nought, which opened the pane under
+  /// a pointer only crossing it. A pointer that has really stopped is what
+  /// `STOPPED` is for, and its wait is left running.
+  const moved = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse" || last === undefined) {
+      return;
+    }
+
+    const at = performance.now();
+    const travelled = Math.hypot(event.clientX - last.x, event.clientY - last.y);
+    const elapsed = at - last.at;
+    if (travelled === 0) {
+      return;
+    }
+
+    if (elapsed > 0 && travelled / elapsed < SETTLED) {
+      settle();
+      return;
+    }
+
+    last = { x: event.clientX, y: event.clientY, at };
+    clearTimeout(stopping);
+    stopping = setTimeout(settle, STOPPED);
+  };
+
+  /// And a mouse leaving it: a crossing that never settled is forgotten, and a
+  /// pane it had opened collapses after the wait.
+  const left = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") {
+      return;
+    }
+
+    clearTimeout(stopping);
+    stopping = undefined;
+    last = undefined;
+    if (hovered()) {
+      clearTimeout(leaving);
+      leaving = setTimeout(() => {
+        leaving = undefined;
+        setHovered(false);
+      }, LINGER);
+    }
+  };
+
+  onCleanup(() => {
+    clearTimeout(stopping);
+    clearTimeout(leaving);
+  });
 
   /// Whether the tap now landing is the one that expanded the list, and so is
   /// to be swallowed before anything inside it hears it. Set by each press
@@ -446,20 +565,12 @@ export function Panes(props: {
   /// A press on the list: a finger's on the collapsed strip expands it.
   /// Heard on the way down, ahead of the card that would otherwise take it.
   const pressed = (event: PointerEvent) => {
-    setFinger(event.pointerType !== "mouse");
     swallowing =
       event.pointerType !== "mouse" &&
       !standing(event.currentTarget as HTMLElement);
 
     if (swallowing) {
       setTouched(true);
-    }
-  };
-
-  /// A mouse moving over the list, which hands the hover back to it.
-  const moved = (event: PointerEvent) => {
-    if (event.pointerType === "mouse") {
-      setFinger(false);
     }
   };
 
@@ -574,7 +685,9 @@ export function Panes(props: {
             strip = section;
             section.addEventListener("pointerdown", pressed, true);
             section.addEventListener("click", clicked, true);
+            section.addEventListener("pointerenter", entered);
             section.addEventListener("pointermove", moved, true);
+            section.addEventListener("pointerleave", left);
             section.addEventListener("pointercancel", forget, true);
             section.addEventListener("keydown", forget, true);
           }}
@@ -583,7 +696,7 @@ export function Panes(props: {
               ? ""
               : undefined
           }
-          data-finger={finger() ? "" : undefined}
+          data-hovered={collapsed() && hovered() ? "" : undefined}
         >
           {list()}
         </section>

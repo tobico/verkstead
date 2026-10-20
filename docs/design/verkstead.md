@@ -822,16 +822,45 @@ full — the remembered share, clamped against the frame the way the full band
 clamps it, which on a phone is the 16rem floor — *over* the panes beside it:
 the grid column stays 3rem, nothing beside it moves, and the `--lift` shadow
 the menus wear says it is on top, in a 150ms transition reduced motion turns
-off. **A hovering pointer, a keyboard focus inside it, or a tap** expands it,
-and which collapses it again is read per gesture off the pointer's type, the
-way the sidebar's drag already reads it: a mouse's pane collapses when the
-pointer leaves and nothing inside has focus, a press on a card leaving it
-open; a finger's first tap on the strip expands it and does nothing else, the
+off. Expanded, its left padding is the full sidebar's 1.25rem rather than the
+strip's 0.5rem, so the content slides 0.75rem right as the clip opens (*revised
+2026-10-19, grilling collapsible-list-fixes*: the strip's padding in both
+states had been kept so no card slid under an arriving pointer, but the
+expanded list then sat unevenly against the full one; the hover's waiting for
+the pointer to settle, below, means the slide is over before the pointer
+reaches a card). **A mouse settling on it, a keyboard focus inside it, or a
+tap** expands it, and which collapses it again is read per gesture off the
+pointer's type, the way the sidebar's drag already reads it. A mouse's hover
+is the page's rather than the browser's `:hover` (*revised 2026-10-19, grilling
+collapsible-list-fixes*): it expands the pane once the pointer over the strip
+has slowed under 250px a second or sent no move for 60ms, so a pointer flung
+off the window's left edge — which crosses the strip faster than either — never
+flashes it open and shut, and a deliberate reach still opens it at once; it
+collapses 150ms after the pointer leaves, and a pointer back inside that keeps
+it open; a press on a card leaves it open, and nothing inside having focus is
+still what lets it collapse. Only a mouse arms it, so a browser's `:hover`
+standing where a finger tapped never holds the pane open. A finger's first tap on the strip expands it and does nothing else, the
 pane as a whole being the one target while it is 3rem wide, and a tap on a
 card or the link then goes where it was put and collapses the pane, as does a
 tap anywhere outside it — which lands on what was tapped, there being no wash
 behind the pane to catch it. A long press that lifts a card holds it open for
-the length of the drag. **With nothing open it stands expanded**: the root
+the length of the drag. **The pane beside the strip draws the strip's edge**,
+there being no divider beside a collapsed list: the one pane under 60rem, the
+timeline from there, and the details wherever there is no timeline beside them
+— the compose page and a one-Event Conversation — rather than nothing at all.
+**In the app the list's head is no drag region while it is collapsed**
+(*settled 2026-10-19, grilling collapsible-list-fixes*): Electron hands the
+page no pointer events over a drag region, so on Linux and Windows alike — a
+probe on Electron 43.1 under X showed it — the pane lost its hover the instant
+the pointer reached the title row and collapsed under it on its way to the
+gear, which no mouse could then press. Nor, while the list is expanded, are
+the heads of the panes beside it (*revised 2026-10-19, review of
+collapsible-list-fixes*): the expanded list lies over the start of the head
+beside it, the gear included, and where two regions overlap Electron goes by
+the one later in the document, so the pointer lost the list the moment it
+crossed the strip's edge in the title row. Collapsed, the pane beside the strip
+keeps its head, the window's width, to drag by, and the full sidebar from
+100rem keeps its own. **With nothing open it stands expanded**: the root
 address is *nothing open*, empty paper with the list over it until a card is
 picked, so Back out of a Conversation on a phone arrives at the list rather
 than at a level of its own. **The timeline's and the settings pane's
@@ -848,9 +877,10 @@ pointer anyway. Considered and rejected, so they are not reopened: collapsing
 only in the two-pane band, which left a phone's one-pane walk with a level of
 its own just for the list; hover alone on a touch screen, which has nothing to
 hover with; a fixed 16rem expansion, when the width the human dragged the full
-sidebar to is the width they chose for it; a delay before a hover expands it,
-which makes reaching the list slower to save a pointer crossing the strip a
-flicker; and a half-collapsed state between the two, a third width to lay
+sidebar to is the width they chose for it; a fixed delay before a hover expands it,
+which makes every reach for the list slower to save a pointer crossing the
+strip a flicker — waiting for the pointer to slow, above, is what was settled
+instead, a hand arriving on purpose having slowed by the time it arrives; and a half-collapsed state between the two, a third width to lay
 every part of the pane out at for nothing either of the others lacks.
 
 **A Conversation whose record is the one Event has no timeline pane at all**
