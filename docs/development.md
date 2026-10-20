@@ -390,8 +390,10 @@ window was last time is where it comes back, remembered in the app's own user
 data because where a window sits is a fact about the desk rather than about
 your Verkstead. The menu bar is hidden on Linux and Windows with copy, paste,
 zoom, reload and the developer tools still on their keystrokes — Alt brings the
-bar down — and a Mac keeps the strip at the top of the screen that says which
-application is in front. The icon's menu is **Open**, **View Logs** and
+bar down — and on a Mac the strip at the top of the screen carries Verkstead's
+own menus: **Settings…** on ⌘,, a File menu, Go to move between the open
+Conversation's panes on ⌘1–⌘5, and Help (ADR 0020, *Amended: the Mac menu
+bar*). The icon's menu is **Open**, **View Logs** and
 **Quit**, a left click on it opens the window, and its **Quit** never asks.
 Closing the window is a choice rather than a quit — keep running in the tray,
 which is the default, ask before quitting, or quit — while the server ending is

@@ -80,7 +80,8 @@ what a narrow window's single pane gets. A page with no pane head — the
 onboarding wizard, the no-such-page, and the moment before the verdict about
 this machine lands — draws a bare drag bar of the same height, inside the app
 only. The menu bar is hidden on Windows and Linux with its shortcuts kept; a
-Mac keeps the application menu it cannot do without. Links off the workbench
+Mac's is filled out with Verkstead's own menus (*Amended: the Mac menu bar*,
+below). Links off the workbench
 open in the system browser, and the window never navigates away from
 localhost. Its size and position are remembered between runs.
 
@@ -266,3 +267,76 @@ first Conversation started was rejected as a notification about nothing.
   too many.
 - **Showing every notification, as the phone does.** Rejected for the focus
   rule: a toast over the very page that just drew the news is noise.
+
+## Amended: the Mac menu bar
+
+Decided in the grilling of 2026-10-20 (Sets 1281, 1283 and 1284).
+
+**The bar above kept only what a Mac cannot do without**: the application menu
+as Electron fills it in, Edit, View and Window, every item a role. So there was
+no Settings… on ⌘, — the one key every Mac app answers — no File menu, so ⌘W
+closed nothing, and nothing in the bar went anywhere in the workbench. **On a
+Mac it is now filled out**, and Windows and Linux keep their hidden bars exactly
+as they were, item for item:
+
+- **Verkstead** — About · **Settings…** `⌘,` · Services · Hide · Hide Others ·
+  Show All · Quit. Written out rather than the `appMenu` role, which nothing
+  can be added to, so that Settings… stands where a Mac puts it; every other
+  item is still the platform's role. It opens the settings page itself, and it
+  is *Settings…* because that is what macOS 13 renamed it to and what the
+  workbench calls the page.
+- **File** — **New Conversation** `⌘N`, the compose page, and **Close Window**
+  `⌘W`, the platform's `close`, which the close policy already makes a hide to
+  the Dock, the way the red light is.
+- **Edit** and **View** — as they were.
+- **Go** — **Back** `⌘[` · **Forward** `⌘]` · **Conversations** ·
+  **Timeline** `⌘1` · **Code** `⌘2` · **Backlog** `⌘3` · **Roadmap** `⌘4` ·
+  **Share** `⌘5`. Conversations is the workbench with nothing open and carries
+  no key, ⌘0 being the zoom's reset; the five panes are the workbench's own
+  order on the keys a Mac gives an app's main views.
+- **Window** — the platform's own `windowMenu`.
+- **Help** — the `help` role, which is what gives it a Mac's search field:
+  **Verkstead Help**, the docs site in the browser; **View Logs**, the tray's
+  act reached a third way; and **Report an Issue**, the issue tracker in the
+  browser.
+
+**In Title Case**, the platform's own casing rather than the viewer's sentence
+case: the bar is a Mac's furniture, and an item that read differently from
+Hide Others beside it would be the one that looked wrong.
+
+**An item that goes somewhere sends a path to the page** over the channel a
+clicked notification already crosses on, so the page routes there in place:
+nothing reloads, and a brief half typed into the composer survives ⌘, and is
+there again on Back. A window whose page is not listening is loaded on the
+path instead. The menu is set before the window exists, so each act reads the
+window at the press rather than holding one from the build.
+
+**The Go menu is enabled by what the page says, the way the head's colours
+are pushed.** Which Conversation is open, which device it is on and what its
+record holds are the page's to know, so the page builds the list — each pane
+the open Conversation has, with the path it routes to for it, a member's under
+its device — and pushes it over the bridge whenever it changes. A pane the
+page names nothing for is greyed: all five on the settings and compose pages,
+Backlog where the record has no task list, Roadmap where no roadmap has
+landed. The app checks what arrives before holding it, as it checks a set
+from the page, and a press reads the latest push.
+
+**Back and Forward are the window's own history**, which on a page that
+routes in place is every pane and page walked through, greyed where there is
+nothing behind or ahead. ⌘[ and ⌘] are also the Code pane's outdent and
+indent, chosen knowing it: Electron gives the page the first refusal of a
+keystroke, so a writable editor with the focus keeps them, and Back and
+Forward fire everywhere else, a read-only editor included — the way Xcode
+does it. Proven on a `macos-15` runner rather than taken on trust.
+
+### Considered Options
+
+- **The `appMenu` role with Settings… somewhere else.** Rejected: ⌘, in the
+  application menu is where every Mac app keeps it.
+- **The app asking the page where it is**, or working it out from the URL.
+  Rejected: the page already knows, and a second copy of the routes in the
+  main process is one that drifts.
+- **⌘0 for Conversations.** Rejected: it is the zoom's reset, a role the View
+  menu already carries.
+- **Sentence case, as the viewer writes.** Rejected for the platform's casing
+  in the platform's bar.
