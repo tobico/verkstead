@@ -1,0 +1,77 @@
+name: mac-go-keys-probe
+on:
+  push:
+    branches: [mac-go-keys-probe]
+jobs:
+  keys:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The probe app
+        run: |
+          mkdir probe && cd probe
+          npm init -y >/dev/null
+          npm i electron@43.7.5 monaco-editor@0.56.0 esbuild@0.25.0 >/dev/null
+          cat > entry.js <<'JS'
+          import * as monaco from "monaco-editor";
+          self.MonacoEnvironment = { getWorker: () => new Worker(URL.createObjectURL(new Blob([""]))) };
+          const writable = new URLSearchParams(location.search).get("mode") === "writable";
+          const editor = monaco.editor.create(document.getElementById("host"), {
+            value: "alpha\nbeta", readOnly: !writable, automaticLayout: true,
+          });
+          window.focusEditor = () => { editor.setPosition({ lineNumber: 1, column: 1 }); editor.focus(); return editor.hasTextFocus(); };
+          window.focusButton = () => { document.getElementById("away").focus(); return document.activeElement.id; };
+          window.read = () => JSON.stringify(editor.getValue());
+          JS
+          npx esbuild entry.js --bundle --outfile=out.js --loader:.ttf=file --format=iife >/dev/null 2>&1 || npx esbuild entry.js --bundle --outfile=out.js --loader:.ttf=file --format=iife
+          cat > index.html <<'HTML'
+          <!doctype html><meta charset="utf-8"><link rel="stylesheet" href="out.css">
+          <button id="away">away</button><div id="host" style="width:600px;height:300px"></div>
+          <script src="out.js"></script>
+          HTML
+          cat > main.js <<'JS'
+          const { app, BrowserWindow, Menu } = require("electron");
+          const { execFileSync } = require("node:child_process");
+          const pressed = [];
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          Menu.setApplicationMenu(Menu.buildFromTemplate([
+            { role: "appMenu" }, { role: "editMenu" },
+            { label: "Go", submenu: [
+              { label: "Back", accelerator: "Cmd+[", click: () => pressed.push("Back") },
+              { label: "Forward", accelerator: "Cmd+]", click: () => pressed.push("Forward") },
+            ] },
+          ]));
+          const key = (k) => execFileSync("osascript", ["-e", `tell application "System Events" to keystroke "${k}" using command down`]);
+          async function arm(mode, focus) {
+            const win = new BrowserWindow({ width: 700, height: 400 });
+            await win.loadFile("index.html", { query: { mode } });
+            await wait(1500);
+            app.focus({ steal: true }); win.focus(); await wait(500);
+            const focused = await win.webContents.executeJavaScript(focus === "editor" ? "focusEditor()" : "focusButton()");
+            const results = [];
+            for (const k of ["]", "["]) {
+              pressed.length = 0;
+              const before = await win.webContents.executeJavaScript("read()");
+              key(k); await wait(1000);
+              const after = await win.webContents.executeJavaScript("read()");
+              results.push({ key: `Cmd+${k}`, menu: [...pressed], before, after, editorChanged: before !== after });
+            }
+            win.destroy();
+            return { mode, focus, focused, results };
+          }
+          app.whenReady().then(async () => {
+            const out = [];
+            out.push(await arm("writable", "editor"));
+            out.push(await arm("readonly", "editor"));
+            out.push(await arm("writable", "button"));
+            console.log("PROBE " + JSON.stringify(out, null, 2));
+            app.quit();
+          });
+          JS
+          echo '{"name":"probe","main":"main.js"}' > package.json.tmp && node -e 'const p=require("./package.json");p.main="main.js";require("fs").writeFileSync("package.json",JSON.stringify(p))'
+      - name: Press the keys
+        working-directory: probe
+        run: npx electron . 2>&1 | sed -n '/PROBE/,$p'
