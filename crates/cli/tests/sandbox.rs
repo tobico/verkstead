@@ -520,7 +520,7 @@ fn a_session_reads_the_certificate_store_and_its_own_name() {
 
     if host.status.success() {
         assert_eq!(
-            fixture.inside(&["sh", "-c", "getent passwd \"$(id -u)\" | cut -d: -f1"]),
+            fixture.inside(&["id", "-un"]),
             String::from_utf8_lossy(&host.stdout).trim(),
             "a session's uid has the name the host gives it"
         );
