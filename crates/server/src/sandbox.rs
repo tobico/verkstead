@@ -5730,6 +5730,7 @@ mod tests {
     /// A made-up machine for [`off_the_floor_hops`] to walk: a temporary
     /// directory, spelled the way the kernel spells it, with a `floor` inside it
     /// that stands for the system paths.
+    #[cfg(unix)]
     fn machine() -> (tempfile::TempDir, PathBuf, String) {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
@@ -5740,10 +5741,12 @@ mod tests {
         (dir, root, floor)
     }
 
+    #[cfg(unix)]
     fn link(target: impl AsRef<Path>, at: impl AsRef<Path>) {
         std::os::unix::fs::symlink(target, at).unwrap();
     }
 
+    #[cfg(unix)]
     fn hops(entries: &[PathBuf], floor: &str) -> Vec<PathBuf> {
         let entries: Vec<&str> = entries.iter().map(|e| e.to_str().unwrap()).collect();
 
@@ -5755,6 +5758,7 @@ mod tests {
     /// is itself a link off the floor into a store that is on it. Both
     /// off-floor directories are bound, once each and in the order met; the
     /// store is not, and neither is anything for an entry not there.
+    #[cfg(unix)]
     #[test]
     fn every_hop_off_the_floor_is_bound_once_and_in_order() {
         let (_dir, root, floor) = machine();
@@ -5790,6 +5794,7 @@ mod tests {
     }
 
     /// Today's resolver on WSL: one link, to a file off the floor.
+    #[cfg(unix)]
     #[test]
     fn a_single_hop_is_bound_where_it_leads() {
         let (_dir, root, floor) = machine();
@@ -5808,6 +5813,7 @@ mod tests {
 
     /// A relative target is read against the link's own directory, and its
     /// `..` taken out before the floor is asked about it.
+    #[cfg(unix)]
     #[test]
     fn a_relative_hop_is_read_against_the_links_directory() {
         let (_dir, root, floor) = machine();
@@ -5829,6 +5835,7 @@ mod tests {
 
     /// A loop ends the walk rather than the server, and binds nothing: what
     /// is at the end of it is nothing a session could open either.
+    #[cfg(unix)]
     #[test]
     fn a_loop_of_links_is_given_up_on() {
         let (_dir, root, floor) = machine();
