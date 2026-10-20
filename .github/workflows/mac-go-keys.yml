@@ -26,7 +26,8 @@ jobs:
           window.focusButton = () => { document.getElementById("away").focus(); return document.activeElement.id; };
           window.read = () => JSON.stringify(editor.getValue());
           JS
-          npx esbuild entry.js --bundle --outfile=out.js --loader:.ttf=file --format=iife >/dev/null 2>&1 || npx esbuild entry.js --bundle --outfile=out.js --loader:.ttf=file --format=iife
+          npx esbuild entry.js --bundle --outfile=out.js --loader:.ttf=file --format=iife --log-level=warning
+          ls -la
           cat > index.html <<'HTML'
           <!doctype html><meta charset="utf-8"><link rel="stylesheet" href="out.css">
           <button id="away">away</button><div id="host" style="width:600px;height:300px"></div>
@@ -47,6 +48,7 @@ jobs:
           const key = (k) => execFileSync("osascript", ["-e", `tell application "System Events" to keystroke "${k}" using command down`]);
           async function arm(mode, focus) {
             const win = new BrowserWindow({ width: 700, height: 400 });
+            win.webContents.on("console-message", (e) => console.log("page:", e.message));
             await win.loadFile("index.html", { query: { mode } });
             await wait(1500);
             app.focus({ steal: true }); win.focus(); await wait(500);
@@ -62,6 +64,7 @@ jobs:
             win.destroy();
             return { mode, focus, focused, results };
           }
+          process.on("unhandledRejection", (e) => { console.log("FAILED", e); app.exit(1); });
           app.whenReady().then(async () => {
             const out = [];
             out.push(await arm("writable", "editor"));
@@ -74,4 +77,4 @@ jobs:
           echo '{"name":"probe","main":"main.js"}' > package.json.tmp && node -e 'const p=require("./package.json");p.main="main.js";require("fs").writeFileSync("package.json",JSON.stringify(p))'
       - name: Press the keys
         working-directory: probe
-        run: npx electron . 2>&1 | sed -n '/PROBE/,$p'
+        run: npx electron . 2>&1
