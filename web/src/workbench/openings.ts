@@ -22,6 +22,15 @@
 //!   not happened yet, which is why it is named by a word rather than by an
 //!   Event id and why the Timeline draws it after everything that has.
 //!
+//! And one path under a Conversation that names no pane: `timeline`, the
+//! Timeline with the details pane closed and kept closed — what the Mac's Go
+//! menu visits for **Timeline**. The Conversation's own path lands on the end of
+//! its record (see `Workbench.tsx`), which is what opening a Conversation is
+//! for, and a press that asked for the Timeline alone would find a details pane
+//! reopened under it. So the ask is a path of its own rather than a flag on the
+//! visit: it crosses the bridge as every other path does, survives a reload,
+//! and is what Back returns to. See [`closedAt`].
+//!
 //! The `events/` segment is what keeps the ids and the word-named panes apart.
 //! A bare `:event` segment would have read the same as `backlog` the moment
 //! anything was named by a word, so the ids are put behind a segment of their
@@ -138,6 +147,27 @@ export function pathTo(
   return `${under}/events/${opening}`;
 }
 
+/// And where its Timeline stands with nothing open beside it — see the top of
+/// this file.
+export function timelineOf(
+  conversation: string | number,
+  device: Device = null,
+): string {
+  return `${pathOf(conversation, device)}/timeline`;
+}
+
+/// Whether a path is a Timeline asked for with nothing open beside it, which the
+/// landing leaves alone. See [`timelineOf`].
+export function closedAt(pathname: string): boolean {
+  const segments = under(pathname);
+
+  return (
+    segments[0] === "conversations" &&
+    segments.length === 3 &&
+    segments[2] === "timeline"
+  );
+}
+
 /// What a path says is open, or `null` where it names no details pane at all —
 /// the Conversation's own path, the bare workbench, or any other page.
 ///
@@ -200,6 +230,15 @@ export function deviceAt(pathname: string): Device {
   return segments[0] === "devices" && segments[1] !== undefined
     ? decodeURIComponent(segments[1])
     : null;
+}
+
+/// Whether a path is a Conversation's, or one of its details panes', on whichever
+/// device — the pages the workbench draws a record on, and so the ones whose Go
+/// menu is the workbench's to say rather than nothing.
+export function conversationAt(pathname: string): boolean {
+  const [first, id] = under(pathname);
+
+  return first === "conversations" && id !== undefined;
 }
 
 /// A path with the device taken off the front of it, in segments: what is left

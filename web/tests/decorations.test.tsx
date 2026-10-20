@@ -250,6 +250,7 @@ function theApp(platform: string): Head[] {
     head: (worn: Head) => {
       pushed.push(worn);
     },
+    where: () => {},
     opening: () => () => {},
   } satisfies Bridge);
 

@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationView } from "../src/api/types";
 import {
+  closedAt,
   deviceAt,
   landing,
   lastOpening,
@@ -25,6 +26,7 @@ import {
   pathOf,
   pathTo,
   roadmapOpened,
+  timelineOf,
   type Opening,
 } from "../src/workbench/openings";
 import { pending } from "./steering";
@@ -352,5 +354,27 @@ describe("the device a path stands on", () => {
 
     expect(openingAt(pathOf(3, MEMBER))).toBeNull();
     expect(openingAt(`/devices/${MEMBER}/conversations/3/nowhere`)).toBeNull();
+  });
+});
+
+describe("the Timeline with nothing open beside it", () => {
+  const MEMBER = "8f2a1c0b4d6e7f902b13c4d5e6f70819";
+
+  /// What the Mac's Go menu visits for Timeline: a path of its own, which
+  /// names no pane and which the landing leaves alone.
+  it("stands under the Conversation, on whichever device", () => {
+    expect(timelineOf(3)).toBe("/conversations/3/timeline");
+    expect(timelineOf(3, MEMBER)).toBe(`/devices/${MEMBER}/conversations/3/timeline`);
+  });
+
+  it("names no pane, and is told from the Conversation's own path", () => {
+    for (const device of [null, MEMBER]) {
+      expect(openingAt(timelineOf(3, device))).toBeNull();
+      expect(closedAt(timelineOf(3, device))).toBe(true);
+      expect(closedAt(pathOf(3, device))).toBe(false);
+      expect(closedAt(pathTo(3, "code", device))).toBe(false);
+    }
+    expect(closedAt("/timeline")).toBe(false);
+    expect(closedAt("/conversations/3/timeline/more")).toBe(false);
   });
 });

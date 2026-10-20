@@ -18,22 +18,48 @@
 //! is the platform's own answer for a hidden menu bar and one less thing to
 //! explain.
 //!
-//! Everything in it is a role rather than a handler, and which roles a platform
-//! gets is [`roles.ts`](./roles.js)'s — a value, and one vitest can be asked
-//! about. What is left here is the handing over, which is a call on `electron`
-//! and the only reason this file is at the wall in `eslint.config.js`. The
+//! Everything in it is a role or an id rather than a handler, and which a
+//! platform gets is [`roles.ts`](./roles.js)'s — a value, and one vitest can be
+//! asked about. What is left here is the handing over, which is a call on
+//! `electron` and the only reason this file is at the wall in
+//! `eslint.config.js`, and the one step that makes an id a click — and the
+//! greying of one, which is decided in `where.ts` and only applied here. The
 //! handover is also what checks that template: a role Electron does not have
-//! fails to typecheck on the line below.
+//! fails to typecheck on the line below, and an id with no act fails at `acts`.
 
-import { Menu } from "electron";
+import { Menu, type MenuItemConstructorOptions } from "electron";
 
-import { roles } from "./roles.js";
+import { type Acting, type Item, roles } from "./roles.js";
 
 /// Set the application menu, from which every shortcut in it is registered.
 ///
 /// Called once, after the app is ready and before the window it applies to is
 /// opened, so that the window is never briefly a window whose keystrokes do
-/// nothing.
-export function shortcuts(platform: NodeJS.Platform): void {
-  Menu.setApplicationMenu(Menu.buildFromTemplate(roles(platform)));
+/// nothing. So an act reads whatever it needs at the press rather than being
+/// handed a window here — there is none yet.
+///
+/// Returns the menu it set, which is what [`grey`] is later handed.
+export function shortcuts(platform: NodeJS.Platform, acts: Record<Acting, () => void>): Menu {
+  const clicking = (item: Item): MenuItemConstructorOptions => ({
+    ...item,
+    ...(item.id === undefined ? {} : { click: acts[item.id] }),
+    ...(item.submenu === undefined ? {} : { submenu: item.submenu.map(clicking) }),
+  });
+
+  const menu = Menu.buildFromTemplate(roles(platform).map(clicking));
+  Menu.setApplicationMenu(menu);
+  return menu;
+}
+
+/// Grey and enable the menu's acting items, by id, as `answer` says — the
+/// answer being [`enabled`](./where.js)'s, worked out where vitest can ask about
+/// it. An id the menu has not got is a platform whose bar carries no such item,
+/// and is passed over.
+export function grey(menu: Menu, answer: Partial<Record<Acting, boolean>>): void {
+  for (const [id, on] of Object.entries(answer)) {
+    const item = menu.getMenuItemById(id);
+    if (item !== null) {
+      item.enabled = on;
+    }
+  }
 }

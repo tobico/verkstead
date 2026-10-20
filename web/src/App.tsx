@@ -1,8 +1,15 @@
 //! The application: everything under the API routes the agents use.
 
-import { Navigate, Route, Router, useNavigate, useParams } from "@solidjs/router";
+import {
+  Navigate,
+  Route,
+  Router,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "@solidjs/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
-import { Show, onCleanup, onMount, type JSX } from "solid-js";
+import { Show, createEffect, onCleanup, onMount, type JSX } from "solid-js";
 
 import styles from "./App.module.css";
 import { DragBar } from "./DragBar";
@@ -19,8 +26,9 @@ import { SetupPage } from "./setup/SetupPage";
 import { SETUP } from "./setup/steps";
 import { ComposePage } from "./workbench/Compose";
 import { forget } from "./workbench/eager";
-import { pathTo } from "./workbench/openings";
+import { conversationAt, pathTo } from "./workbench/openings";
 import { Workbench } from "./workbench/Workbench";
+import { NOWHERE, tell } from "./where";
 
 /// One client for the whole app, made once rather than per render: it is where
 /// the cache lives, and a page that rebuilt it would have no cache at all.
@@ -220,6 +228,7 @@ export function conversationRoutes(): JSX.Element {
         <Route path="/code" />
         <Route path="/steer" />
         <Route path="/roadmaps/:name" />
+        <Route path="/timeline" />
       </Route>
       {/* And where Code's pane stood while it was the Terminal pane, which is
           a redirect rather than a page: a link somebody kept and a browser
@@ -281,6 +290,17 @@ export function Shell(props: { children?: JSX.Element }): JSX.Element {
 function Followed(props: { children?: JSX.Element }): JSX.Element {
   const navigate = useNavigate();
   onMount(() => onCleanup(follow((path) => navigate(path))));
+
+  // And held here for the same reason: what the Mac's Go menu can go to is
+  // nothing on every page but a Conversation's — the settings, the compose page,
+  // the bare workbench, the wizard and the no-such-page — and a Conversation's
+  // is the workbench's to say, from the record it has read. See `where.ts`.
+  const location = useLocation();
+  createEffect(() => {
+    if (!conversationAt(location.pathname)) {
+      tell(NOWHERE);
+    }
+  });
 
   return <Shell>{props.children}</Shell>;
 }

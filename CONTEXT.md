@@ -1487,6 +1487,14 @@ the tray misbehaved on, which is the machine whose log is worth reading.
 **A Mac draws no close radio**, closing a window there leaving the application
 running in the Dock, and **Show tray icon** reads as the menu bar, that being
 where the icon goes.
+**And a Mac's menu bar is where the settings are reached from by key**: the
+strip at the top of the screen carries Verkstead's own menus there — **Settings…**
+on ⌘, in the application menu, opening the settings page itself; **File**, with
+**New Conversation** and **Close Window**; **Go**, with Back, Forward,
+Conversations and the open Conversation's panes on ⌘1–⌘5, greyed where the page
+names nothing for them; and **Help** — in Title Case, the platform's own, and
+each item that goes somewhere routing the page in place (ADR-0020, *Amended: the
+Mac menu bar*). Windows and Linux keep their bar hidden, its keys kept.
 _Avoid_: preferences, app config, device settings, desktop configuration, the
 settings page (that is the whole page, and this is one section of it)
 

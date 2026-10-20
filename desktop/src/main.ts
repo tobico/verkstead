@@ -51,7 +51,17 @@ import { app, BrowserWindow, dialog, ipcMain, Notification } from "electron";
 import { artwork } from "./artwork.js";
 import { AUTOSCROLLING } from "./autoscroll.js";
 import { FILE } from "./bounds.js";
-import { ASKED, HEAD, LOGS, NOTIFIABLE, PRELOAD, REGISTER, SET, STARTUP } from "./bridge.js";
+import {
+  ASKED,
+  HEAD,
+  LOGS,
+  NOTIFIABLE,
+  PRELOAD,
+  REGISTER,
+  SET,
+  STARTUP,
+  WHERE,
+} from "./bridge.js";
 import { cli, type Install, OVERRIDE } from "./cli.js";
 import { closing } from "./closing.js";
 import { buttoned, lights, overlaid, overlay, worn } from "./decorations.js";
@@ -59,9 +69,10 @@ import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
 import { takeOver as takeOverAgent } from "./launchd.js";
 import { heard, keep, say } from "./log.js";
-import { shortcuts } from "./menu.js";
+import { grey, shortcuts } from "./menu.js";
 import { hold, type Notice, opens, showing } from "./notices.js";
 import { dataDir, logDir } from "./platform.js";
+import { GUIDE, ISSUES } from "./roles.js";
 import { takeOver as takeOverValue } from "./runkey.js";
 import { changed, FILE as DESKTOP, set, type Settings, settings } from "./settings.js";
 import { how, type Sidecar, start } from "./sidecar.js";
@@ -78,7 +89,8 @@ import { taken } from "./taken.js";
 import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
 import { APPDIR, stripped, unmounted } from "./unmounted.js";
-import { forward, open, type Opened } from "./window.js";
+import { browse, forward, open, type Opened } from "./window.js";
+import { enabled, NOWHERE, type Pane, pathFor, type Where, where } from "./where.js";
 import { ADDRESS, HEALTH, HOST, LISTEN, NOTICES, ORIGIN, PORT } from "./workbench.js";
 
 /// What the human is told when the CLI is not where the app looked.
@@ -117,6 +129,16 @@ function foreign(address: string): void {
 /// The window, once there is one — which a second launch wants and the launch
 /// it happens in cannot hand it.
 let onscreen: BrowserWindow | undefined;
+
+/// How to go somewhere on the workbench in that window, once there is one — what
+/// the menu bar's Settings… and New Conversation reach at the press, the menu
+/// being set before the window is opened.
+let visiting: Opened["visit"] | undefined;
+
+/// What the open Conversation can go to, as the page last said it — what the
+/// Mac's Go menu is greyed and enabled by, and nowhere until the page has said
+/// anything. See [`where`](./where.js).
+let going: Where = NOWHERE;
 
 /// Whether a launch asked for the window while there was not one yet.
 ///
@@ -575,7 +597,65 @@ async function run(): Promise<void> {
   // Before the window, so that it is never briefly a window whose keystrokes do
   // nothing: the menu is what registers copy, paste, zoom, reload and the
   // developer tools, and the bar it would be drawn in is hidden by the window.
-  shortcuts(machine.platform);
+  //
+  // The acts the Mac's bar carries go somewhere in the workbench, and they go
+  // there the way a clicked notification does: told to the page, which routes
+  // in place, and the window brought forward — a ⌘W'd window is in the Dock.
+  const go = (path: string): void => {
+    if (visiting === undefined || onscreen === undefined) {
+      say(`the menu asked for ${path} before there was a window to open it in`);
+      return;
+    }
+    visiting(path);
+    forward(onscreen);
+  };
+  //
+  // The Go menu's panes go where the page last said they are, read at the
+  // press; one the page has not named is an item greyed a moment too late.
+  const pane = (which: Pane) => (): void => {
+    const path = pathFor(going, which);
+    if (path === undefined) {
+      say(`the menu asked for ${which}, which the open conversation has not got`);
+      return;
+    }
+    go(path);
+  };
+
+  // And Back and Forward are the window's own history, which on a page that
+  // routes in place is every pane and page walked through.
+  const history = () => onscreen?.webContents.navigationHistory;
+
+  const bar = shortcuts(machine.platform, {
+    settings: () => go("/settings"),
+    compose: () => go("/compose"),
+    guide: () => browse(GUIDE, by),
+    logs: () => logs(kept, by),
+    issue: () => browse(ISSUES, by),
+    back: () => history()?.goBack(),
+    forward: () => history()?.goForward(),
+    conversations: () => go("/"),
+    timeline: pane("timeline"),
+    code: pane("code"),
+    backlog: pane("backlog"),
+    roadmap: pane("roadmap"),
+    share: pane("share"),
+  });
+
+  // Which of the Go menu's items can be pressed, as [`enabled`] answers it from
+  // what the page last said and where the history stands — applied here and
+  // decided there. Asked again whenever either moves, and once now, so that a
+  // menu with no window behind it yet is a menu with nowhere to go.
+  const regrey = (): void => {
+    const now = history();
+    grey(
+      bar,
+      enabled(going, {
+        back: now?.canGoBack() ?? false,
+        forward: now?.canGoForward() ?? false,
+      }),
+    );
+  };
+  regrey();
 
   try {
     const waited = await healthy(HEALTH);
@@ -702,6 +782,22 @@ async function run(): Promise<void> {
     wearing(BrowserWindow.fromWebContents(event.sender), machine.platform, pushed);
   });
 
+  // And the other statement: what the open Conversation can go to, checked
+  // before it is held — a push of the wrong shape is dropped and said rather
+  // than thrown on — and held for the Go menu to read.
+  ipcMain.on(WHERE, (_event, pushed: unknown) => {
+    const heard = where(pushed);
+
+    if (heard === undefined) {
+      say("the page said where the open conversation can go in a shape this app does not read");
+      return;
+    }
+
+    going = heard;
+    say(`the open conversation can go to ${going.panes.map(({ pane }) => pane).join(", ") || "nothing"}`);
+    regrey();
+  });
+
   // Whether this launch is a login's — the flag the registration writes, or a
   // Mac saying its login item started this — read against the tray, because the
   // icon is the whole of what makes a hidden app reachable (ADR-0020). Read
@@ -752,6 +848,12 @@ async function run(): Promise<void> {
   });
   const window = opened.window;
   onscreen = window;
+  visiting = opened.visit;
+
+  // And the history moving is Back and Forward greying: a document arriving,
+  // and every route the page changes in place, which is most of them.
+  window.webContents.on("did-navigate", regrey);
+  window.webContents.on("did-navigate-in-page", regrey);
 
   // **And a Dock activation is the window coming back**, which is the other half
   // of what closing means on a Mac (ADR-0020): the app is a regular Dock app

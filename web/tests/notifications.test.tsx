@@ -308,6 +308,7 @@ function inTheApp(held: Partial<DesktopSettings> = {}, notifiable = true) {
     register: () => Promise.resolve({ possible: false, on: false }),
     notifiable: () => Promise.resolve(notifiable),
     head: () => {},
+    where: () => {},
     opening: () => () => {},
   } satisfies Bridge);
 

@@ -471,7 +471,14 @@ function away(url: string, origin: string, by: Opening | undefined): void {
   }
 
   say(`${url} is not this Verkstead, so it goes to the browser`);
+  browse(url, by);
+}
 
+/// Hand `url` to the browser, whatever it is — a link off the workbench, or one
+/// of the Mac menu bar's Help items.
+///
+/// Not awaited, for the reason [`away`] says.
+export function browse(url: string, by: Opening | undefined): void {
   // Ours to open where this machine has said so, for the reason **View Logs** is
   // — see [`opening`](./opening.js): a browser started off this process's own
   // environment is a browser loading the bundle's libraries.

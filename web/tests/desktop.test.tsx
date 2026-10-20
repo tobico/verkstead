@@ -162,6 +162,8 @@ function standingIn(
     head: (worn) => {
       asked.head(worn);
     },
+    // And the Go menu's list, which this page says nothing particular about.
+    where: () => {},
     // Nothing on this page listens for a clicked notification — the app's shell
     // does, see `opened.ts` — so nothing is ever told here.
     opening: () => () => {},
