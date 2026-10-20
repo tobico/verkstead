@@ -481,3 +481,66 @@ fn a_set_carrying_a_proposal_goes_through_from_inside_a_sandbox() {
         "and the session is told which direction was picked, which is the proposal accepted"
     );
 }
+
+/// What a session needs of `/etc` to reach anything over TLS and to have a
+/// name: every certificate the host can read, the session can read too, and
+/// the user the host names is the one the session is.
+///
+/// Measured against the host rather than against fixed paths, because which of
+/// these a machine has is a fact about its distribution: Ubuntu's are under
+/// `/etc/ssl/certs` and into `/usr/share`, NixOS's through `/etc/static` into
+/// the store. What this cannot prove from inside a session whose own `/etc`
+/// dangles is the heal, since the host it measures has nothing to read either —
+/// there it says nothing regressed, and the server's own tests say the rest.
+#[test]
+fn a_session_reads_the_certificate_store_and_its_own_name() {
+    let fixture = grilling();
+
+    let readable: Vec<String> = [
+        "/etc/ssl/certs",
+        "/etc/ssl/cert.pem",
+        "/etc/pki/tls/certs",
+        "/etc/pki/ca-trust/extracted",
+        "/etc/ca-certificates",
+    ]
+    .iter()
+    .flat_map(|entry| files_under(Path::new(entry)))
+    .filter(|file| std::fs::read(file).is_ok())
+    .filter_map(|file| file.to_str().map(str::to_owned))
+    .collect();
+
+    if !readable.is_empty() {
+        let mut argv = vec!["sh", "-c", "cat \"$@\" >/dev/null", "sh"];
+        argv.extend(readable.iter().map(String::as_str));
+
+        fixture.inside(&argv);
+    }
+
+    let host = Command::new("id").arg("-un").output().unwrap();
+
+    if host.status.success() {
+        assert_eq!(
+            fixture.inside(&["sh", "-c", "getent passwd \"$(id -u)\" | cut -d: -f1"]),
+            String::from_utf8_lossy(&host.stdout).trim(),
+            "a session's uid has the name the host gives it"
+        );
+    }
+}
+
+/// `path` if it is a file, and the files directly in it if it is a directory,
+/// each through whatever links lead there — and nothing for a path not here.
+fn files_under(path: &Path) -> Vec<PathBuf> {
+    if path.is_file() {
+        return vec![path.to_owned()];
+    }
+
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return Vec::new();
+    };
+
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|entry| entry.is_file())
+        .collect()
+}

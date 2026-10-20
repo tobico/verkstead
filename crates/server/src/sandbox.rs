@@ -207,7 +207,9 @@ pub(crate) const SYSTEM: &[&str] = if cfg!(target_os = "macos") {
 /// `/nix` is the whole of what makes the box usable — every binary a session
 /// runs is under it — and the rest is what a dynamic linker, a certificate store
 /// and a shell need to exist at all. `/run/current-system` is NixOS's own, and
-/// is what `PATH` below points at.
+/// is what `PATH` below points at. Where the certificate store, the resolver
+/// or the user's name is a link out of `/etc` to somewhere none of these
+/// reach, [`on_the_machine`] binds that too — see [`FOLLOWED`].
 ///
 /// One that is not there is skipped rather than refused: `/lib64` is an x86
 /// fact, and a machine without `/run/current-system` is one that is not NixOS,
@@ -592,13 +594,26 @@ fn separator(platform: Platform) -> &'static str {
 /// `TEMP`, which points inside the session's own profile — so that one is said
 /// with the rest of the profile rather than here. See [`temporary_inside`].
 ///
-/// **And on Linux the resolver's file is bound wherever it really is.**
-/// `/etc/resolv.conf` is often a link out of `/etc`: WSL's points at a file it
-/// writes under `/mnt/wsl`, and systemd-resolved's into `/run`. Neither is on
-/// the floor, so a session behind one has a network and no names on it — every
-/// harness's first request fails `EAI_AGAIN`, which reads as the internet being
-/// down. What is bound is that one file, read-only, at its own path, so the
-/// link resolves inside the sandbox the way it does outside.
+/// **And on Linux a handful of entries under `/etc` are bound wherever they
+/// lead** — the [`FOLLOWED`] ones: the resolver, the certificate store, and the
+/// files a user's name is read out of. `/etc` is on the floor, but what is in it
+/// is often a link out of it, and a link to somewhere the floor does not reach
+/// is a name that dangles inside. WSL's resolver points at a file it writes
+/// under `/mnt/wsl`, and systemd-resolved's into `/run`: a session behind either
+/// has a network and no names on it, and every harness's first request fails
+/// `EAI_AGAIN`, which reads as the internet being down. And a server run inside
+/// an FHS env — the packed app under NixOS's `appimage-run` — is given an `/etc`
+/// that is a tmpfs of links into `/.host-etc`, where the real one is: a session
+/// handed that `/etc` and nothing under `/.host-etc` has no certificates, so
+/// every `git push` and `curl` fails *unable to get local issuer certificate*,
+/// and no name for its own uid, so `whoami` fails and a prompt says *I have no
+/// name!*.
+///
+/// Each is followed link by link rather than to where it lands, and every hop
+/// off the floor is bound read-only at its own path — see [`off_the_floor_hops`],
+/// which says why the hop in the middle is the one that matters. A name the
+/// session's kernel resolves through the same links then lands in the same
+/// place inside as out.
 pub(crate) fn on_the_machine(platform: Platform, chdir: PathBuf) -> Surface {
     let mut surface = Surface::starting_in(chdir);
 
@@ -606,12 +621,10 @@ pub(crate) fn on_the_machine(platform: Platform, chdir: PathBuf) -> Surface {
         surface.own(path, Reach::ReadOnly);
     }
 
-    if platform == Platform::Linux
-        && let Some(real) = std::fs::canonicalize(RESOLVER)
-            .ok()
-            .and_then(|real| off_the_floor(&real, LINUX_SYSTEM))
-    {
-        surface.own(real, Reach::ReadOnly);
+    if platform == Platform::Linux {
+        for hop in off_the_floor_hops(FOLLOWED, LINUX_SYSTEM) {
+            surface.own(hop, Reach::ReadOnly);
+        }
     }
 
     surface.made(Access::ProcessTable).made(Access::Devices);
@@ -626,17 +639,115 @@ pub(crate) fn on_the_machine(platform: Platform, chdir: PathBuf) -> Surface {
     surface
 }
 
-/// Where a program looks for the name servers.
-const RESOLVER: &str = "/etc/resolv.conf";
+/// The entries under `/etc` that [`on_the_machine`] follows off the floor on
+/// Linux, in the order they are followed.
+///
+/// The leaves are named rather than `/etc/ssl` or `/etc/pki`, because the walk
+/// follows the links on the path it is given and nothing beside it: under an
+/// FHS env `/etc/ssl` is a real directory and its `certs` is the link. One that
+/// is not on this machine is skipped, as a missing system directory is. Adding
+/// another — `/etc/hosts`, `/etc/localtime` — is a line here.
+const FOLLOWED: &[&str] = &[
+    // Where a program looks for the name servers.
+    "/etc/resolv.conf",
+    // OpenSSL's directory: Debian, NixOS, Arch, Alpine.
+    "/etc/ssl/certs",
+    // The single-bundle spelling some distributions add.
+    "/etc/ssl/cert.pem",
+    // Fedora's and RHEL's directory, which NixOS provides too.
+    "/etc/pki/tls/certs",
+    // What Fedora's `ca-bundle.crt` links into.
+    "/etc/pki/ca-trust/extracted",
+    // Debian's extracted store, which its `/etc/ssl/certs` links into.
+    "/etc/ca-certificates",
+    // NixOS's hub: most of its `/etc` is links through here into the store,
+    // its certificate bundle among them.
+    "/etc/static",
+    // Where a uid's name is, and a gid's.
+    "/etc/passwd",
+    "/etc/group",
+];
 
-/// `real`, where it is somewhere none of `floor` reaches — the resolver's file
-/// that [`on_the_machine`] has to bind by itself.
+/// `real`, where it is somewhere none of `floor` reaches — a hop that
+/// [`on_the_machine`] has to bind by itself.
 fn off_the_floor(real: &Path, floor: &[&str]) -> Option<PathBuf> {
     let reached = floor
         .iter()
         .any(|directory| within(real.as_os_str(), OsStr::new(directory)));
 
     (!reached).then(|| real.to_owned())
+}
+
+/// Every link on the way to each of `entries` that leads somewhere `floor`
+/// does not reach, in the order they are met and each once.
+///
+/// **Every hop, and not only the last.** NixOS's certificate bundle is
+/// `/etc/ssl/certs/ca-certificates.crt → /etc/static/ssl/certs/… →
+/// /nix/store/…`, and under an FHS env `/etc/static` is itself a link into
+/// `/.host-etc`. Where that chain lands is on the floor; the hop in the middle
+/// is not, and it is the one a session's kernel has to get through. So each
+/// path is walked a component at a time from the root, the way the kernel walks
+/// one, and a link's target — read against the link's own directory and
+/// [`normalised`], which is safe here because everything above it has already
+/// been walked down to a real directory — is a hop. One off the floor and on
+/// the machine is kept, and the walk carries on *from* it, since its own path
+/// can hold a link too.
+///
+/// **The hop as it is written, not where it lands**: binding `/.host-etc/static`
+/// at `/.host-etc/static` is what makes the link `/etc/static` resolve inside,
+/// and bubblewrap follows the host's own links from there when it mounts it.
+/// Kept in the order they are met, so a later hop's parents are reachable by
+/// the time it is mounted. [`HOPS`] is where a loop stops.
+fn off_the_floor_hops(entries: &[&str], floor: &[&str]) -> Vec<PathBuf> {
+    let mut hops: Vec<PathBuf> = Vec::new();
+
+    for entry in entries {
+        let mut pending = names(&normalised(Path::new(entry)));
+        let mut walked = PathBuf::from("/");
+        let mut followed = 0;
+
+        while let Some(name) = pending.pop() {
+            let candidate = walked.join(name);
+
+            let Ok(metadata) = std::fs::symlink_metadata(&candidate) else {
+                break;
+            };
+
+            if !metadata.file_type().is_symlink() {
+                walked = candidate;
+                continue;
+            }
+
+            followed += 1;
+
+            let (true, Ok(target)) = (followed <= HOPS, std::fs::read_link(&candidate)) else {
+                break;
+            };
+
+            let hop = normalised(&walked.join(target));
+
+            if off_the_floor(&hop, floor).is_some() && hop.exists() && !hops.contains(&hop) {
+                hops.push(hop.clone());
+            }
+
+            pending.extend(names(&hop));
+            walked = PathBuf::from("/");
+        }
+    }
+
+    hops
+}
+
+/// The names in an absolute, [`normalised`] `path`, the first of them last —
+/// what [`off_the_floor_hops`] has left to walk, popped off the end.
+fn names(path: &Path) -> Vec<OsString> {
+    path.components()
+        .rev()
+        .filter_map(|piece| match piece {
+            std::path::Component::Normal(name) => Some(name.to_owned()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// A directory that is really there and really empty.
@@ -5614,6 +5725,122 @@ mod tests {
                 "{real}"
             );
         }
+    }
+
+    /// A made-up machine for [`off_the_floor_hops`] to walk: a temporary
+    /// directory, spelled the way the kernel spells it, with a `floor` inside it
+    /// that stands for the system paths.
+    fn machine() -> (tempfile::TempDir, PathBuf, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let floor = root.join("floor");
+        std::fs::create_dir_all(floor.join("etc")).unwrap();
+        let floor = floor.to_str().unwrap().to_owned();
+
+        (dir, root, floor)
+    }
+
+    fn link(target: impl AsRef<Path>, at: impl AsRef<Path>) {
+        std::os::unix::fs::symlink(target, at).unwrap();
+    }
+
+    fn hops(entries: &[PathBuf], floor: &str) -> Vec<PathBuf> {
+        let entries: Vec<&str> = entries.iter().map(|e| e.to_str().unwrap()).collect();
+
+        off_the_floor_hops(&entries, &[floor])
+    }
+
+    /// An FHS env's `/etc`: a directory of links into `/.host-etc`, where the
+    /// certificate directory's bundle links back through `/etc/static`, which
+    /// is itself a link off the floor into a store that is on it. Both
+    /// off-floor directories are bound, once each and in the order met; the
+    /// store is not, and neither is anything for an entry not there.
+    #[test]
+    fn every_hop_off_the_floor_is_bound_once_and_in_order() {
+        let (_dir, root, floor) = machine();
+        let etc = Path::new(&floor).join("etc");
+        let host = root.join("host-etc");
+        let store = Path::new(&floor).join("store/etc");
+
+        std::fs::create_dir_all(etc.join("ssl")).unwrap();
+        std::fs::create_dir_all(host.join("ssl/certs")).unwrap();
+        std::fs::create_dir_all(store.join("ssl/certs")).unwrap();
+        std::fs::write(store.join("ssl/certs/ca.crt"), "roots\n").unwrap();
+
+        link(host.join("ssl/certs"), etc.join("ssl/certs"));
+        link(
+            etc.join("static/ssl/certs/ca.crt"),
+            host.join("ssl/certs/ca.crt"),
+        );
+        link(host.join("static"), etc.join("static"));
+        link(&store, host.join("static"));
+
+        assert_eq!(
+            hops(
+                &[
+                    etc.join("ssl/certs"),
+                    etc.join("static"),
+                    etc.join("ssl/certs/ca.crt"),
+                    etc.join("pki/tls/certs"),
+                ],
+                &floor
+            ),
+            [host.join("ssl/certs"), host.join("static")]
+        );
+    }
+
+    /// Today's resolver on WSL: one link, to a file off the floor.
+    #[test]
+    fn a_single_hop_is_bound_where_it_leads() {
+        let (_dir, root, floor) = machine();
+        let etc = Path::new(&floor).join("etc");
+        let wsl = root.join("mnt/wsl");
+
+        std::fs::create_dir_all(&wsl).unwrap();
+        std::fs::write(wsl.join("resolv.conf"), "nameserver 10.0.0.1\n").unwrap();
+        link(wsl.join("resolv.conf"), etc.join("resolv.conf"));
+
+        assert_eq!(
+            hops(&[etc.join("resolv.conf")], &floor),
+            [wsl.join("resolv.conf")]
+        );
+    }
+
+    /// A relative target is read against the link's own directory, and its
+    /// `..` taken out before the floor is asked about it.
+    #[test]
+    fn a_relative_hop_is_read_against_the_links_directory() {
+        let (_dir, root, floor) = machine();
+        let etc = Path::new(&floor).join("etc");
+
+        std::fs::create_dir_all(root.join("host-etc")).unwrap();
+        std::fs::write(
+            root.join("host-etc/passwd"),
+            "infi:x:1000:100::/home/infi:/bin/sh\n",
+        )
+        .unwrap();
+        link("../../host-etc/passwd", etc.join("passwd"));
+
+        assert_eq!(
+            hops(&[etc.join("passwd")], &floor),
+            [root.join("host-etc/passwd")]
+        );
+    }
+
+    /// A loop ends the walk rather than the server, and binds nothing: what
+    /// is at the end of it is nothing a session could open either.
+    #[test]
+    fn a_loop_of_links_is_given_up_on() {
+        let (_dir, root, floor) = machine();
+        let etc = Path::new(&floor).join("etc");
+        let off = root.join("off");
+
+        std::fs::create_dir_all(&off).unwrap();
+        link(off.join("a"), etc.join("group"));
+        link(off.join("b"), off.join("a"));
+        link(off.join("a"), off.join("b"));
+
+        assert_eq!(hops(&[etc.join("group")], &floor), Vec::<PathBuf>::new());
     }
 
     /// The bind puts the executable in one directory and `PATH` sends a session
