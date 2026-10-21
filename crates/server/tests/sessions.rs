@@ -39589,6 +39589,7 @@ async fn a_terminal_opened_for_a_preview_runs_its_command_in_the_shell() {
         fixture.id,
         "Build and test",
         "printf 'the preview %s\\n' ran",
+        None,
         "a test",
     )
     .await
@@ -39870,6 +39871,7 @@ async fn a_retyped_preview_starts_from_the_worktree_root() {
         fixture.id,
         "Moves",
         "cd web && printf 'the move %s\\n' ran",
+        None,
         "a test",
     )
     .await
@@ -39879,6 +39881,7 @@ async fn a_retyped_preview_starts_from_the_worktree_root() {
         fixture.id,
         "Stays",
         "printf 'the stay %s\\n' ran",
+        None,
         "a test",
     )
     .await
@@ -40493,6 +40496,7 @@ async fn a_steered_instruction_is_told_the_previews_and_a_grilling_is_not() {
         fixture.id,
         "Build and test",
         "cargo run -- serve",
+        None,
         "the session that worked task 01",
     )
     .await
@@ -40681,14 +40685,12 @@ async fn a_memo_a_task_session_retires_leaves_every_later_prompt() {
     }
 }
 
-/// Suggest a Preview from the session running in `fixture`, the way
-/// `verkstead preview` does, and hand back what the server answered.
-async fn suggest_a_preview(fixture: &Grilling, title: &str, command: &str) -> (StatusCode, String) {
-    let body = serde_saphyr::to_string(&verkstead_schema::PreviewSuggestion {
-        title: title.to_owned(),
-        command: command.to_owned(),
-    })
-    .unwrap();
+/// Suggest a Preview from the session running in `fixture`, `written` read
+/// the way `verkstead preview` reads its stdin, and hand back what the server
+/// answered.
+async fn suggest_a_preview(fixture: &Grilling, title: &str, written: &str) -> (StatusCode, String) {
+    let body = serde_saphyr::to_string(&verkstead_schema::PreviewSuggestion::read(title, written))
+        .unwrap();
 
     fetch(
         &fixture.app,
@@ -40729,10 +40731,21 @@ async fn previews(fixture: &Grilling) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The descriptions standing on the Conversation's view, rendered, in order.
+async fn descriptions(fixture: &Grilling) -> Vec<Option<String>> {
+    fixture
+        .view()
+        .await
+        .previews
+        .into_iter()
+        .map(|preview| preview.description)
+        .collect()
+}
+
 /// A task session's preview lands on the Conversation's view, and the same
-/// title again replaces its command rather than adding a row — while a retire
-/// of a title that does not stand is refused by name, and one that does takes
-/// it off the view.
+/// title again replaces its command and its description rather than adding a
+/// row — while a retire of a title that does not stand is refused by name, and
+/// one that does takes it off the view.
 #[tokio::test]
 async fn a_task_session_suggests_a_preview_and_the_same_title_replaces_it() {
     let fixture = grilling(&a_backlog_that_says_so(
@@ -40762,12 +40775,43 @@ async fn a_task_session_suggests_a_preview_and_the_same_title_replaces_it() {
         "and the reply is its title"
     );
 
-    let (status, body) = suggest_a_preview(&fixture, "Serve", "cargo run -- serve").await;
+    let (status, body) = suggest_a_preview(
+        &fixture,
+        "Serve",
+        "cargo run -- serve\n\nStarts the server on `8422`.\n",
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = suggest_a_preview(
+        &fixture,
+        "Build and test",
+        "cargo test\n\nRuns **every** suite.\n",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    assert_eq!(
+        descriptions(&fixture).await,
+        [
+            Some("<p>Runs <strong>every</strong> suite.</p>\n".to_owned()),
+            Some("<p>Starts the server on <code>8422</code>.</p>\n".to_owned()),
+        ],
+        "each description is served rendered",
+    );
 
     let (status, body) =
         suggest_a_preview(&fixture, "Build and test", "cargo test --workspace").await;
     assert_eq!(status, StatusCode::OK, "{body}");
+
+    assert_eq!(
+        descriptions(&fixture).await,
+        [
+            None,
+            Some("<p>Starts the server on <code>8422</code>.</p>\n".to_owned()),
+        ],
+        "and the same title again without one clears the one that stood",
+    );
 
     assert_eq!(
         previews(&fixture).await,

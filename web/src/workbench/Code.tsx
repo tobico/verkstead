@@ -4148,7 +4148,8 @@ const STAYING = 150;
 ///
 /// **And each row has a card**, in the Menu's chrome beside it, holding the
 /// command a press would type — readable before it is pressed (ADR-0024's
-/// amendment). One card at a time, opened three ways:
+/// amendment) — under the description the agent wrote for it, where it wrote
+/// one, as the server rendered it. One card at a time, opened three ways:
 ///
 /// - a mouse resting on the row, read off the pointer's type rather than left
 ///   to `:hover`, and waited for the way the sidebar waits — slowed below
@@ -4415,6 +4416,11 @@ function Previews(props: {
               onPointerEnter={entered}
               onPointerLeave={left}
             >
+              <Show when={preview().description}>
+                {(html) => (
+                  <div class={styles.previewAbout} innerHTML={html()} />
+                )}
+              </Show>
               <pre>
                 <code>{preview().command}</code>
               </pre>

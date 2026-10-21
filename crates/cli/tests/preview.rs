@@ -69,6 +69,11 @@ fn too_long() -> String {
     "x".repeat(4 * 1024 + 1)
 }
 
+/// A command with a description over its maximum by one byte under it.
+fn too_long_a_description() -> String {
+    format!("cargo test\n\n{}\n", "x".repeat(2 * 1024 + 1))
+}
+
 /// Every shape refused, with what each refusal says.
 fn malformed() -> Vec<(&'static str, String, &'static str)> {
     vec![
@@ -87,9 +92,19 @@ fn malformed() -> Vec<(&'static str, String, &'static str)> {
         (
             "Build and test",
             "cargo build\ncargo test\n".to_owned(),
-            "has a newline in it",
+            "runs onto a second line",
+        ),
+        (
+            "Build and test",
+            "cargo build\ncargo test\n\nBuilds it.\n".to_owned(),
+            "runs onto a second line",
         ),
         ("Build and test", too_long(), "over the maximum of 4096"),
+        (
+            "Build and test",
+            too_long_a_description(),
+            "the preview's description is 2049 bytes, over the maximum of 2048",
+        ),
     ]
 }
 
@@ -100,15 +115,21 @@ fn a_malformed_preview_is_refused_without_a_request() {
     }
 }
 
-/// The heredoc's own trailing newline is not a newline in the command, and a
-/// command of exactly the maximum is not over it: both reach the server, which
-/// refuses them here for want of a session rather than for their shape.
+/// The heredoc's own trailing newline is not a newline in the command, a
+/// command of exactly the maximum is not over it, and nor is a description of
+/// exactly its own under a blank line: each reaches the server, which refuses
+/// it here for want of a session rather than for its shape.
 #[test]
-fn a_trailing_newline_and_the_maximum_itself_are_sent() {
+fn a_trailing_newline_a_description_and_the_maximums_themselves_are_sent() {
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::start(tmp.path().join("verkstead.db"));
 
-    for command in ["cargo test\n".to_owned(), "x".repeat(4 * 1024) + "\n"] {
+    for command in [
+        "cargo test\n".to_owned(),
+        "x".repeat(4 * 1024) + "\n",
+        "cargo test\n\nRuns **every** suite.\n".to_owned(),
+        format!("cargo test\n\n\n{}\n\n", "x".repeat(2 * 1024)),
+    ] {
         refused_saying(
             &preview(&["Build and test"], &server.url(), &command),
             "no session running in this Conversation",
@@ -124,11 +145,11 @@ fn a_malformed_preview_sent_by_hand_is_refused_by_the_server() {
     let server = Server::start(tmp.path().join("verkstead.db"));
 
     for (title, command, said) in malformed() {
-        let body = serde_saphyr::to_string(&verkstead_schema::PreviewSuggestion {
-            title: title.to_owned(),
-            command,
-        })
-        .unwrap();
+        // As the fields the CLI would have sent, before its own check: a
+        // second line that is not blank arrives as a command holding a newline.
+        let body =
+            serde_saphyr::to_string(&verkstead_schema::PreviewSuggestion::read(title, &command))
+                .unwrap();
 
         let mut reply = ureq::post(format!("{}/api/v1/previews", server.url()))
             .config()

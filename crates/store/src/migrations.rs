@@ -109,6 +109,7 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     pull_requests_that_named_no_base_branch(pool).await?;
     stages_that_never_said_which_one_they_were(pool).await?;
     memos_left_before_there_were_titles(pool).await?;
+    previews_suggested_before_there_were_descriptions(pool).await?;
     profiles_whose_name_was_unique_everywhere(pool).await
 }
 
@@ -139,6 +140,36 @@ async fn memos_left_before_there_were_titles(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await
         .context("giving the Memos left before this a title to have")?;
+
+    Ok(())
+}
+
+/// Give every Preview suggested before a session could describe one the
+/// column that holds the description (ADR-0024).
+///
+/// Nobody has one: the description arrives with the column, and every row this
+/// reaches was suggested as a title and a command alone. So the column's own
+/// emptiness is the whole of the rewrite, and its card holds the command alone,
+/// as it did.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn previews_suggested_before_there_were_descriptions(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('previews') WHERE name = ?")
+            .bind("description")
+            .fetch_optional(pool)
+            .await
+            .context("looking for whether a Preview has a description")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE previews ADD COLUMN description TEXT")
+        .execute(pool)
+        .await
+        .context("giving the Previews suggested before this a description to have")?;
 
     Ok(())
 }

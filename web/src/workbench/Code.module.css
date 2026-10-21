@@ -369,6 +369,16 @@
   margin-bottom: 0;
 }
 
+/* The description the agent wrote, rendered by the server, above the command:
+   its own first and last blocks sit flush, as the card's do. */
+.previewAbout > :first-child {
+  margin-top: 0;
+}
+
+.previewAbout > :last-child {
+  margin-bottom: 0;
+}
+
 /* The command wraps rather than scrolling: a card is read, not worked in, and
    a long line cut off at its edge would hide the very part being looked for. */
 .previewCard pre {

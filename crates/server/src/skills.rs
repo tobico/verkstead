@@ -4899,6 +4899,7 @@ mod tests {
         store::Preview {
             title: title.to_owned(),
             command: command.to_owned(),
+            description: None,
             left_by: "the session that worked task 01".to_owned(),
             at: "2026-10-15T09:00:00.000Z".to_owned(),
         }

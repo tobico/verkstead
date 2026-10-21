@@ -1935,6 +1935,7 @@ async fn a_press_on_a_preview_with_a_live_terminal_only_refocuses_it() {
         fixture.id,
         "Build and test",
         "Write-Output ('the preview ' + 'ran')",
+        None,
         "a test",
     )
     .await

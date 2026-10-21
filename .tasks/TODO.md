@@ -16,5 +16,5 @@ words already there.
 
 - [x] 01: A retyped Preview starts from the worktree root — [details](01-retyped-preview-starts-from-the-root.md)
 - [x] 02: A hover card over a Preview's row, holding its command — [details](02-hover-card-over-a-preview.md)
-- [ ] 03: A description reaches the card — [details](03-a-description-reaches-the-card.md)
+- [x] 03: A description reaches the card — [details](03-a-description-reaches-the-card.md)
 - [ ] 04: The agent is told about descriptions — [details](04-the-agent-is-told-about-descriptions.md)

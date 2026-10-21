@@ -15,8 +15,8 @@ mod set;
 mod validate;
 
 pub use api::{
-    ApiError, MAX_MEMO_BYTES, MAX_PREVIEW_COMMAND_BYTES, MemoLeaving, MemoLeft, PreviewLeft,
-    PreviewSuggestion, ResponseAccepted, SetCreated,
+    ApiError, MAX_MEMO_BYTES, MAX_PREVIEW_COMMAND_BYTES, MAX_PREVIEW_DESCRIPTION_BYTES,
+    MemoLeaving, MemoLeft, PreviewLeft, PreviewSuggestion, ResponseAccepted, SetCreated,
 };
 pub use liveness::Liveness;
 pub use nudge::{Nudge, Nudged};

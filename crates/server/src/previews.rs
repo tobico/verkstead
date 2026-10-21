@@ -7,9 +7,11 @@
 //! investigation commits nothing, so every other kind is refused by name,
 //! saying which may.
 //!
-//! **Keyed on its title.** The same title again replaces the command in place
-//! and stamps it with the session suggesting it now; a retire takes the title
-//! back, and one that does not stand is refused by name. Neither puts anything
+//! **Keyed on its title.** The same title again replaces the command and the
+//! description in place — one suggested without a description clears the one
+//! that stood, what the agent last said being what stands — and stamps it
+//! with the session suggesting it now; a retire takes the title back, and one
+//! that does not stand is refused by name. Neither puts anything
 //! on the Timeline: both announce the Conversation's Nudge, which is what
 //! re-reads the view the Previews are served on.
 
@@ -35,7 +37,9 @@ pub(crate) async fn suggest(
     body: String,
 ) -> Response {
     let suggestion = match serde_saphyr::from_str::<PreviewSuggestion>(&body) {
-        Ok(asked) => PreviewSuggestion::new(&asked.title, &asked.command),
+        Ok(asked) => {
+            PreviewSuggestion::new(&asked.title, &asked.command, asked.description.as_deref())
+        }
         Err(error) => {
             return refused(
                 conversation_id,
@@ -60,6 +64,7 @@ pub(crate) async fn suggest(
         conversation_id,
         &suggestion.title,
         &suggestion.command,
+        suggestion.description.as_deref(),
         &left_by,
     )
     .await

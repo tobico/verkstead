@@ -22070,6 +22070,40 @@ describe("the previews in the code pane", () => {
     );
   });
 
+  /// The description the agent wrote, as the server rendered it, above the
+  /// command; and a row with none holds the command alone.
+  it("shows a row's description above its command", async () => {
+    withPreviews(
+      [
+        {
+          title: "Build and test",
+          command: "cargo test",
+          description: "<p>Runs <strong>every</strong> suite.</p>",
+        },
+        { title: "Serve", command: "cargo run -- serve" },
+      ],
+      [],
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+    await drawn(container, `.${shell.detailsPane} .${codePane.nothing}`);
+    const [build, serve] = rows(container);
+
+    fireEvent.focus(build!);
+    const [card] = cards();
+    const [about, code] = [...card!.children];
+    expect(about!.className).toBe(codePane.previewAbout);
+    expect(about!.innerHTML).toBe("<p>Runs <strong>every</strong> suite.</p>");
+    expect(code!.matches("pre")).toBe(true);
+    expect(shown()).toBe("cargo test");
+    fireEvent.blur(build!);
+
+    fireEvent.focus(serve!);
+    expect([...cards()[0]!.children].map((child) => child.tagName)).toEqual([
+      "PRE",
+    ]);
+    expect(shown()).toBe("cargo run -- serve");
+  });
+
   /// In the Menu's chrome — the wash, the border, the round and the lift a
   /// menu's drop stands off the page by.
   it("draws the card in the menu's chrome", () => {

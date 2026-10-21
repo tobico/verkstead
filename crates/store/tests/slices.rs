@@ -269,10 +269,10 @@ fn ids_in(slice: &Slice, table: &str, column: &str) -> BTreeSet<i64> {
         .collect()
 }
 
-/// A Preview crosses with its command and its stamp, under the id the far end
-/// gave the Conversation.
+/// A Preview crosses with its command, its description and its stamp, under
+/// the id the far end gave the Conversation.
 #[tokio::test]
-async fn a_preview_crosses_with_its_command_and_stamp() {
+async fn a_preview_crosses_with_its_command_description_and_stamp() {
     let moved = moved("rate-limiting").await;
 
     let here = standing_previews(&moved.here.pool, moved.worked.id)
@@ -283,6 +283,10 @@ async fn a_preview_crosses_with_its_command_and_stamp() {
         .unwrap();
 
     assert_eq!(here.len(), 1, "the fixture suggested one: {here:?}");
+    assert!(
+        here[0].description.is_some(),
+        "with a description: {here:?}"
+    );
     assert_eq!(there, here, "and it crossed as it stood");
 }
 
