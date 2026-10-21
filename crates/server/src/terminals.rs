@@ -1193,6 +1193,21 @@ pub(crate) async fn open(
 
             Pressed::Retype { number, terminal } => {
                 moved();
+
+                // From the worktree root, which the run before may have left:
+                // `cd web && pnpm dev` leaves the shell in `web/`, and the line
+                // typed again there fails on its own first step. A shell that
+                // cannot be read is sent back too, the line being harmless at
+                // the root — see [`homeward`].
+                let root = conversation
+                    .worktree
+                    .as_deref()
+                    .and_then(|root| homeward(busy::directory(&terminal).as_deref(), root));
+
+                if let Some(back) = root {
+                    typed(&terminal, &back, conversation_id, number).await;
+                }
+
                 typed(&terminal, &preview.command, conversation_id, number).await;
 
                 return Ok(TerminalOpened::Retyped { number });
@@ -1551,6 +1566,21 @@ async fn previewing(
 }
 
 /// Write a Preview's command into `terminal`, followed by a return.
+/// The line that takes a retyped Preview's shell back to the worktree `root`,
+/// where `standing` — the shell's working directory, as the kernel reports it —
+/// says it has moved off it, or nothing says where it is. `None` where it is
+/// still at the root, and the command is typed alone.
+///
+/// Compared as paths rather than strings, so a trailing separator is not a
+/// move; and quoted in single quotes, which bash, zsh, fish and PowerShell all
+/// read as a literal. A root holding a single quote is not handled.
+fn homeward(standing: Option<&std::path::Path>, root: &std::path::Path) -> Option<String> {
+    match standing {
+        Some(standing) if standing == root => None,
+        _ => Some(format!("cd '{}'", root.display())),
+    }
+}
+
 async fn typed(terminal: &Terminal, command: &str, conversation_id: i64, number: i64) {
     let mut line = command.as_bytes().to_vec();
     line.push(b'\r');
@@ -2173,5 +2203,23 @@ mod tests {
         drop(opening);
 
         assert_eq!(terminals.running(), 0);
+    }
+
+    /// A retyped Preview's shell is sent back to the root where it stands
+    /// elsewhere or cannot be read, and left alone at the root — a trailing
+    /// separator being no move.
+    #[test]
+    fn a_retype_goes_home_only_from_somewhere_else() {
+        use std::path::Path;
+
+        let root = Path::new("/work/tree");
+
+        assert_eq!(homeward(Some(Path::new("/work/tree")), root), None);
+        assert_eq!(homeward(Some(Path::new("/work/tree/")), root), None);
+        assert_eq!(
+            homeward(Some(Path::new("/work/tree/web")), root).as_deref(),
+            Some("cd '/work/tree'"),
+        );
+        assert_eq!(homeward(None, root).as_deref(), Some("cd '/work/tree'"));
     }
 }

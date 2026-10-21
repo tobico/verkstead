@@ -39839,6 +39839,104 @@ async fn a_press_on_a_preview_with_a_live_terminal_follows_what_is_in_front() {
     std::fs::write(directory.join("previewed"), "").unwrap();
 }
 
+/// A retyped Preview starts from the worktree root (ADR-0024, *Back to the
+/// root, and a card on the row*): a run that moved the shell is followed, on
+/// the next press, by a `cd` back to the root typed as a line of its own and
+/// then the command — which runs, where without the line its own `cd` would
+/// fail — and a run that left the shell where it was is followed by the
+/// command alone.
+#[tokio::test]
+async fn a_retyped_preview_starts_from_the_worktree_root() {
+    use verkstead_render::InFront;
+
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let root = fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+    std::fs::create_dir_all(std::path::Path::new(&root).join("web")).unwrap();
+
+    // The word is put together by the shell, so that the echo of the line
+    // typed is never what the grid is found holding.
+    let pool = open_database(&fixture.database).await.unwrap();
+    verkstead_store::suggest_preview(
+        &pool,
+        fixture.id,
+        "Moves",
+        "cd web && printf 'the move %s\\n' ran",
+        "a test",
+    )
+    .await
+    .unwrap();
+    verkstead_store::suggest_preview(
+        &pool,
+        fixture.id,
+        "Stays",
+        "printf 'the stay %s\\n' ran",
+        "a test",
+    )
+    .await
+    .unwrap();
+
+    let at = fixture.listening().await;
+    let _pane = a_code_pane(at, fixture.id).await;
+    let back = format!("cd '{root}'");
+
+    for (title, word) in [("Moves", "the move ran"), ("Stays", "the stay ran")] {
+        let press = || async {
+            post::<TerminalOpened>(
+                &fixture.app,
+                &format!("/api/ui/conversations/{}/terminals", fixture.id),
+                &serde_json::json!({ "preview": title }),
+            )
+            .await
+        };
+
+        let TerminalOpened::Opened { number } = press().await else {
+            panic!("the first press opens a terminal for {title}");
+        };
+
+        let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+        watcher.resize(300, 40).await;
+        watcher.until(|grid| grid.matches(word).count() == 1).await;
+        until_in_front(&fixture, number, |terminal| {
+            terminal.in_front == Some(InFront::Shell)
+        })
+        .await;
+
+        assert_eq!(press().await, TerminalOpened::Retyped { number });
+
+        let showing = watcher.until(|grid| grid.matches(word).count() == 2).await;
+        let homeward = showing.iter().position(|row| row.contains(&back));
+
+        match title {
+            "Moves" => {
+                let homeward = homeward.unwrap_or_else(|| {
+                    panic!("a retype after a move goes back to {root} first: {showing:?}")
+                });
+                let rerun = showing
+                    .iter()
+                    .rposition(|row| row.contains("cd web"))
+                    .unwrap();
+                assert!(
+                    homeward < rerun,
+                    "the line back to the root comes before the command: {showing:?}",
+                );
+            }
+            _ => assert_eq!(
+                homeward, None,
+                "a shell still at the root gets the command alone: {showing:?}",
+            ),
+        }
+    }
+}
+
 /// A Code pane attached to the Conversation, the way the pane says it is
 /// drawn: the socket held open for as long as what comes back is.
 async fn a_code_pane(
@@ -40309,7 +40407,9 @@ fn the_terminals_shell_said() -> String {
     let named = verkstead_server::terminals::busy::named(&shell);
 
     format!(
-        "A terminal here runs `{named}`, at `{shell}`: write a preview's command for that shell."
+        "A terminal here runs `{named}`, at `{shell}`: write a preview's command for that shell. \
+         Write one that leaves the shell where it found it — a `--dir` or a `-C` over a `cd` \
+         joined by `&&` — since the up arrow replays it as written."
     )
 }
 

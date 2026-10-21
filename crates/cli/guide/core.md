@@ -595,7 +595,10 @@ interactive shell **in the Conversation's own worktree**, so it is written
 from the root of the repository and **for the shell the terminal runs** —
 which is not this sandbox's, and which your prompt names. Join steps with that
 shell's own `&&` or `;`, and put anything longer in a script the branch
-carries, then make the preview the line that runs it.
+carries, then make the preview the line that runs it. **Leave the shell where
+you found it** — `pnpm --dir web dev` over `cd web && pnpm dev`, a
+`--manifest-path` or a `-C` over a `cd` joined by `&&` — since the up arrow in
+that terminal replays the line as it was written.
 
 **A preview is for the human's hand, not a test suite.** What they watch or
 click through: *Run the server*, *Build and open the app*, *Serve the docs* —
@@ -627,7 +630,9 @@ Suggest one again under its title when its command changes, and retire one
 that no longer runs.
 
 A terminal here runs `fish`, at `/run/current-system/sw/bin/fish`: write a
-preview's command for that shell.
+preview's command for that shell. Write one that leaves the shell where it
+found it — a `--dir` or a `-C` over a `cd` joined by `&&` — since the up arrow
+replays it as written.
 ```
 
 A preview stands until it is retired: through a steer and a follow-up alike,

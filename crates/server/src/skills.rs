@@ -955,7 +955,9 @@ pub(crate) fn previewed(
 
     format!(
         "{}\n\n# The previews standing\n\n{listed}\n\nA terminal here runs {}: write a \
-         preview's command for that shell.\n",
+         preview's command for that shell. Write one that leaves the shell where it \
+         found it — a `--dir` or a `-C` over a `cd` joined by `&&` — since the up \
+         arrow replays it as written.\n",
         prompt.trim_end(),
         shell_said(shell),
     )
@@ -4925,7 +4927,9 @@ mod tests {
                  Suggest one again under its title when its command changes, and retire \
                  one that no longer runs.\n\n\
                  A terminal here runs `fish`, at `/run/current-system/sw/bin/fish`: \
-                 write a preview's command for that shell.\n"
+                 write a preview's command for that shell. Write one that leaves the \
+                 shell where it found it — a `--dir` or a `-C` over a `cd` joined by \
+                 `&&` — since the up arrow replays it as written.\n"
             ),
             "{prompt:?}"
         );
@@ -4948,7 +4952,9 @@ mod tests {
              anything to try, whether or not a manual test looks called for, so it is \
              there whenever the human decides one is.\n\n\
              A terminal here runs `sh`, at `/bin/sh`: write a preview's command for \
-             that shell.\n"
+             that shell. Write one that leaves the shell where it found it — a \
+             `--dir` or a `-C` over a `cd` joined by `&&` — since the up arrow \
+             replays it as written.\n"
         );
     }
 

@@ -688,6 +688,8 @@ fn the_guide_says_how_to_suggest_a_preview() {
             "with a newline in it",
             "in the Conversation's own worktree",
             "for the shell the terminal runs",
+            "Leave the shell where you found it",
+            "the up arrow in that terminal replays the line as it was written",
             "not a test suite",
             "*Run the tests* only where watching them run is the point",
             "replaces its command in place",
