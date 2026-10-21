@@ -1565,7 +1565,6 @@ async fn previewing(
     }
 }
 
-/// Write a Preview's command into `terminal`, followed by a return.
 /// The line that takes a retyped Preview's shell back to the worktree `root`,
 /// where `standing` — the shell's working directory, as the kernel reports it —
 /// says it has moved off it, or nothing says where it is. `None` where it is
@@ -1581,6 +1580,7 @@ fn homeward(standing: Option<&std::path::Path>, root: &std::path::Path) -> Optio
     }
 }
 
+/// Write a Preview's command into `terminal`, followed by a return.
 async fn typed(terminal: &Terminal, command: &str, conversation_id: i64, number: i64) {
     let mut line = command.as_bytes().to_vec();
     line.push(b'\r');
