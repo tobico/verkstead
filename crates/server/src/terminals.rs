@@ -1571,11 +1571,20 @@ async fn previewing(
 /// still at the root, and the command is typed alone.
 ///
 /// Compared as paths rather than strings, so a trailing separator is not a
-/// move; and quoted in single quotes, which bash, zsh, fish and PowerShell all
-/// read as a literal. A root holding a single quote is not handled.
+/// move — and against the root with its symlinks resolved too, since that is
+/// how the kernel reports where the shell stands: a worktree under a symlinked
+/// home, `/home` → `/var/home`, would otherwise never be at its own root. The
+/// line itself names the root as recorded, and is quoted in single quotes,
+/// which bash, zsh, fish and PowerShell all read as a literal. A root holding a
+/// single quote is not handled.
 fn homeward(standing: Option<&std::path::Path>, root: &std::path::Path) -> Option<String> {
     match standing {
-        Some(standing) if standing == root => None,
+        Some(standing)
+            if standing == root
+                || std::fs::canonicalize(root).is_ok_and(|resolved| resolved == standing) =>
+        {
+            None
+        }
         _ => Some(format!("cd '{}'", root.display())),
     }
 }
@@ -2221,5 +2230,26 @@ mod tests {
             Some("cd '/work/tree'"),
         );
         assert_eq!(homeward(None, root).as_deref(), Some("cd '/work/tree'"));
+    }
+
+    /// A root recorded through a symlink is the root the kernel reports with
+    /// the link resolved, so a shell standing there is not sent back to it.
+    #[cfg(unix)]
+    #[test]
+    fn a_root_reached_through_a_symlink_is_still_the_root() {
+        let held = tempfile::tempdir().unwrap();
+        let real = held.path().join("real");
+        std::fs::create_dir_all(real.join("web")).unwrap();
+        let linked = held.path().join("linked");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+
+        let resolved = std::fs::canonicalize(&real).unwrap();
+
+        assert_eq!(homeward(Some(&resolved), &linked), None);
+        assert_eq!(
+            homeward(Some(&resolved.join("web")), &linked),
+            Some(format!("cd '{}'", linked.display())),
+            "and one standing off it is sent back by the path as recorded",
+        );
     }
 }
