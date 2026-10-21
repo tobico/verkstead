@@ -154,6 +154,87 @@ the nudge the brief asked for. Written into the prompt alone, with no Guide
 section, was rejected as the memo's teaching was placed: the Guide is where
 the verb's contract is quoted, and a skill is read before a prompt is.
 
+## Back to the root, and a card on the row
+
+*Amended 2026-10-21, after the previews had been in use.* Two things the
+first version left out, settled in the grilling of that day. The backlog that
+builds them is `.tasks/` on the `preview-task-cwd-and-hover` branch.
+
+**A retype starts from the worktree root.** *Typed into a terminal, as the
+human would have* types the command again into a shell that is in front — and
+the run before it may have moved that shell: `cd web && pnpm dev` leaves it in
+`web/`, so the second press types `cd web` into a shell already there and the
+command fails on its own first step. The agent writes such commands often,
+because they are what a human would type. So on a retype the server reads the
+shell's working directory — off the same foreground pid it already reads the
+shell's *name* off for the busy reading: a link under `/proc` on Linux, the
+vnode path info `proc_pidinfo` answers on a Mac — and where it is not the
+worktree root types `cd '<root>'` as a line of its own, then the command.
+Where it cannot be read the line is typed anyway, harmless at the root; where
+the shell is still at the root the command is typed alone. Nothing changes on
+a first press, which opens a shell at the root, and nothing on Windows, which
+never retypes. Linux and macOS, the two platforms that retype, are the two the
+directory can be read on, which is what makes this the whole fix rather than
+a fix for one of them.
+
+Rejected: **always typing the `cd` line before a retype**, reading nothing —
+a long path typed above every repeat press, for the sake of the one in several
+that needs it; **opening a new terminal when the shell has moved**, leaving
+the old tab — a tab per press for the Preview that moves the shell every
+time, and the run's output and the up arrow left in the one before; and
+**changing nothing, telling the agent to write commands that stay put** —
+true of the up arrow and not enforceable. The last is kept as a sentence in
+the Guide and in the prompt's shell line, because the up arrow does still
+replay the line as written.
+
+**A card on the row, holding what a press would type.** *The box, and the
+icon* drew each Preview as its title and a play icon, and the human had no way
+to see the command short of pressing it. Each row now has a card beside it,
+in the Menu's chrome: the Preview's **description** rendered where it has
+one, and the command as a code block under it. A mouse resting on the row
+opens it — read off the pointer's type rather than left to `:hover`, as the
+sidebar's expanding list is — and leaving closes it; keyboard focus opens it
+and Enter presses the row; Escape closes it. On touch, where nothing hovers, a
+row is two taps on every row alike: the first opens its card and runs nothing,
+a second on the same row is the press, a tap away closes it. The browser's
+own `title` attribute, which the viewer's two other hovers use, was rejected
+for holding no markdown. A long press or right-click opening the card, the
+context menu's own gesture, was the recommendation and was rejected by the
+human for the two taps: a tap is what a finger does first. An info icon on
+the row was rejected as a second target on a row that is one press. A line
+saying which session suggested the Preview and when was offered and left
+out: the card is for what a press would do, not for the record.
+
+**The description.** Markdown the agent writes under the command on stdin,
+after a blank line, the way a commit has a subject and a body:
+
+    verkstead preview "Build and test" <<'SH'
+    cargo build && cargo run -- serve
+
+    Builds the server and starts it on port 8422.
+    SH
+
+A second line that is not blank is still refused, as a newline in the command
+was, so a command wrapped by accident never becomes a silent description. At
+most 2 KiB — a paragraph or two, what a card can hold — where a memo takes
+8 KiB. Optional. The same title suggested again replaces the row whole, so a
+suggestion with no description clears the one that stood: what the agent last
+said is what stands, and a description outliving the command it explained
+would be the one wrong thing a stale card could say. Stored as a column of
+the previews table, carried on a transfer with it, rendered to HTML by the
+server as a memo's markdown is, and listed under each standing Preview in the
+building session's prompt beside its command, so the next session can keep
+it current. Stdin as YAML with `command` and `description` keys was rejected
+for breaking the one-line contract every existing suggestion relies on; a
+`--describe` verb of its own was rejected as a second call to make for one
+suggestion.
+
+**The word is *description***, which CONTEXT.md avoids for a Brief, a Commit
+Summary and a Preface — each a specific thing with a name of its own — and
+which is right here precisely because this is not one: it is a generic
+account of what a Preview is for, and nothing in the app is called one.
+*Caption* was the recommendation and was declined.
+
 ## The word
 
 **Preview**, defined in `CONTEXT.md`. *Script* says what the command is in and
