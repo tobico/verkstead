@@ -190,11 +190,15 @@ enum Command {
     /// session's work by hand, which the human runs from the Code pane with a
     /// press.
     ///
-    /// The command on stdin, one line of at most 4 KiB written for the
-    /// terminal's own shell; the trailing newline a heredoc ends in is dropped.
+    /// The command on stdin, read the way a commit message is: the first line
+    /// is the command, of at most 4 KiB written for the terminal's own shell,
+    /// and whatever follows a blank line is its description, markdown of at
+    /// most 2 KiB that the card over its row shows. A second line that is not
+    /// blank is refused, and the trailing newline a heredoc ends in is dropped.
     /// Only a building session may suggest one: a backlog task, the finish, a
     /// stage's planning, an inline run or a steered instruction. A title that
-    /// already stands has its command replaced. Accepted, it prints the title
+    /// already stands has its command and its description replaced, so one
+    /// suggested again with no description is left with none. Accepted, it prints the title
     /// as YAML — `title: Build and test` — on stdout and exits 0; refused, it
     /// exits non-zero and says why on stderr, and nothing is suggested.
     ///

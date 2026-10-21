@@ -40472,7 +40472,8 @@ async fn every_building_session_is_told_to_suggest_a_preview_when_none_stands() 
 }
 
 /// A grilling is told nothing of the Previews, being refused the verb, and a
-/// steered instruction is told the ones standing, title over command.
+/// steered instruction is told the ones standing, title over command, with a
+/// description under its command where one was written.
 #[tokio::test]
 async fn a_steered_instruction_is_told_the_previews_and_a_grilling_is_not() {
     let fixture = grilling(
@@ -40498,6 +40499,16 @@ async fn a_steered_instruction_is_told_the_previews_and_a_grilling_is_not() {
         "cargo run -- serve",
         None,
         "the session that worked task 01",
+    )
+    .await
+    .unwrap();
+    verkstead_store::suggest_preview(
+        &pool,
+        fixture.id,
+        "Serve the docs",
+        "mdbook serve docs",
+        Some("Serves the book on port 3000.\n\nThe *Guide* chapter is the one to read."),
+        "the session that worked task 02",
     )
     .await
     .unwrap();
@@ -40535,11 +40546,13 @@ async fn a_steered_instruction_is_told_the_previews_and_a_grilling_is_not() {
             && instructed.contains(&format!(
                 "# The previews standing\n\n\
                  **Build and test**\n\n    cargo run -- serve\n\n\
+                 **Serve the docs**\n\n    mdbook serve docs\n\n\
+                 Serves the book on port 3000.\n\nThe *Guide* chapter is the one to read.\n\n\
                  Suggest one again under its title when its command changes, and retire \
                  one that no longer runs.\n\n{}\n",
                 the_terminals_shell_said(),
             )),
-        "a steered instruction is told the Preview standing: {instructed:?}",
+        "a steered instruction is told the Previews standing: {instructed:?}",
     );
 }
 

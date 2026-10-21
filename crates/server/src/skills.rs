@@ -908,8 +908,8 @@ pub(crate) fn left(prompt: &str, memos: &[store::StandingMemo], retiring: bool) 
 }
 
 /// The same prompt again, with the Previews standing on the Conversation
-/// listed under it, title and command, and the shell a terminal runs named
-/// (ADR-0024).
+/// listed under it, title over command and the description under that where
+/// one was written, and the shell a terminal runs named (ADR-0024).
 ///
 /// **Only where `building`** — the sessions that may suggest one, which are the
 /// ones that may retire a Memo: every other kind is refused `verkstead
@@ -943,7 +943,15 @@ pub(crate) fn previewed(
     } else {
         let rows: Vec<String> = previews
             .iter()
-            .map(|preview| format!("**{}**\n\n    {}", preview.title, preview.command))
+            .map(|preview| match &preview.description {
+                Some(description) => format!(
+                    "**{}**\n\n    {}\n\n{}",
+                    preview.title,
+                    preview.command,
+                    description.trim(),
+                ),
+                None => format!("**{}**\n\n    {}", preview.title, preview.command),
+            })
             .collect();
 
         format!(
@@ -2148,9 +2156,10 @@ mod tests {
         }
     }
 
-    /// The same four skills teach suggesting a preview and point at the
-    /// Guide's section for it, and no other skill names the command: their
-    /// sessions are refused it. See ADR-0024.
+    /// The same four skills teach suggesting a preview, with a description in
+    /// the heredoc's body, and point at the Guide's section for it, and no
+    /// other skill names the command: their sessions are refused it. See
+    /// ADR-0024.
     #[test]
     fn only_the_building_skills_teach_the_preview() {
         let teaching = [NEXT_TASK, IMPLEMENTING, NEXT_STAGE, INSTRUCTION];
@@ -2161,7 +2170,12 @@ mod tests {
             if teaching.contains(&name) {
                 assert!(
                     skill.contains("## Suggesting a preview")
-                        && skill.contains("verkstead preview \"Build and test\" <<'SH'")
+                        && skill.contains(
+                            "verkstead preview \"Build and test\" <<'SH' \
+                             cargo build && cargo run -- serve \
+                             Starts the server on port 8422"
+                        )
+                        && skill.contains("What follows a blank line is the description")
                         && skill.contains("verkstead preview --retire \"Build and test\"")
                         && skill.contains("*The previews standing*")
                         && skill.contains("The Guide's *Suggesting a preview* section"),
@@ -4937,6 +4951,39 @@ mod tests {
         assert!(
             prompt.find("# The Brief this started from") < prompt.find("# The previews standing"),
             "under the kind's own sections: {prompt:?}"
+        );
+    }
+
+    /// A Preview with a description lists it under its command, as the markdown
+    /// the agent wrote, so the next session can keep it current; one with none
+    /// lists as it always did.
+    #[test]
+    fn a_building_prompt_lists_a_previews_description_under_its_command() {
+        let described = store::Preview {
+            description: Some(
+                "Builds the server and starts it on port 8422.\n\nOpen `localhost:8422`."
+                    .to_owned(),
+            ),
+            ..preview("Build and test", "cargo build && cargo run -- serve")
+        };
+
+        let prompt = previewed(
+            "Read the next-task skill.\n",
+            &[described, preview("Serve the docs", "mdbook serve docs")],
+            "/bin/sh",
+            true,
+        );
+
+        assert!(
+            prompt.contains(
+                "# The previews standing\n\n\
+                 **Build and test**\n\n    cargo build && cargo run -- serve\n\n\
+                 Builds the server and starts it on port 8422.\n\nOpen `localhost:8422`.\n\n\
+                 **Serve the docs**\n\n    mdbook serve docs\n\n\
+                 Suggest one again under its title when its command changes, and retire \
+                 one that no longer runs.\n\n"
+            ),
+            "{prompt:?}"
         );
     }
 
