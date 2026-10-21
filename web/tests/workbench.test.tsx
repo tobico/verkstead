@@ -21919,6 +21919,171 @@ describe("the previews in the code pane", () => {
       "This preview is no longer here.",
     );
   });
+
+  /// The card a row has, holding what a press would type (ADR-0024's
+  /// amendment). Drawn at the body, so asked for there.
+  function cards(): HTMLElement[] {
+    return [...document.querySelectorAll<HTMLElement>(`.${codePane.previewCard}`)];
+  }
+
+  /// The one card standing, and the command its code block holds.
+  function shown(): string | undefined {
+    const all = cards();
+    expect(all.length).toBeLessThanOrEqual(1);
+    return all[0]?.querySelector("pre > code")?.textContent ?? undefined;
+  }
+
+  const mouse = (x: number, y = 10) => ({
+    pointerType: "mouse",
+    pointerId: 1,
+    clientX: x,
+    clientY: y,
+  });
+
+  const finger = { pointerType: "touch", pointerId: 2, button: 0 };
+
+  /// A tap, as a finger's arrives: the press, the focus it brings, the click.
+  function tap(target: Element): void {
+    fireEvent.pointerDown(target, finger);
+    fireEvent.focus(target);
+    fireEvent.pointerUp(target, finger);
+    fireEvent.click(target);
+  }
+
+  /// The pane with its previews drawn and ready to be pressed in.
+  async function ready(): Promise<{
+    container: HTMLElement;
+    fetching: ReturnType<typeof serving>;
+  }> {
+    const fetching = withPreviews(
+      PREVIEWS,
+      [],
+      whenever(
+        TERMINALS_OF_IT,
+        json({ Opened: { number: 3 } } satisfies TerminalOpened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+    await drawn(container, `.${shell.detailsPane} .${codePane.nothing}`);
+    return { container, fetching };
+  }
+
+  it("shows a row's command in a card under a mouse resting on it", async () => {
+    const { container, fetching } = await ready();
+    const [, serve] = rows(container);
+
+    fireEvent.pointerEnter(serve!, mouse(20));
+    expect(shown()).toBeUndefined();
+    await waitFor(() => expect(shown()).toBe("cargo run -- serve"));
+    expect(serve!.getAttribute("aria-describedby")).toBe(cards()[0]!.id);
+
+    // A crossing onto the card keeps it; leaving the card too lets it go.
+    fireEvent.pointerLeave(serve!, mouse(300));
+    fireEvent.pointerEnter(cards()[0]!, mouse(310));
+    await new Promise((done) => setTimeout(done, 300));
+    expect(shown()).toBe("cargo run -- serve");
+    fireEvent.pointerLeave(cards()[0]!, mouse(600));
+    await waitFor(() => expect(shown()).toBeUndefined());
+
+    // And nothing was pressed.
+    expect(opened(fetching)).toEqual([]);
+  });
+
+  /// A pointer only crossing the box on its way to the groups never flashes a
+  /// card, and a finger's pointer never arms the hover at all.
+  it("shows no card under a pointer crossing a row, nor a finger's", async () => {
+    const { container } = await ready();
+    const [build] = rows(container);
+
+    fireEvent.pointerEnter(build!, mouse(0));
+    fireEvent.pointerMove(build!, mouse(60));
+    fireEvent.pointerMove(build!, mouse(120));
+    fireEvent.pointerLeave(build!, mouse(200));
+
+    fireEvent.pointerEnter(build!, { ...finger, clientX: 10, clientY: 10 });
+    await new Promise((done) => setTimeout(done, 300));
+    expect(cards()).toEqual([]);
+  });
+
+  it("opens the card on a first tap and runs the preview on a second", async () => {
+    const { container, fetching } = await ready();
+    const [build, serve] = rows(container);
+
+    tap(build!);
+    expect(shown()).toBe("cargo test");
+    expect(opened(fetching)).toEqual([]);
+
+    // Another row's first tap is the same, and its card replaces the first.
+    tap(serve!);
+    expect(shown()).toBe("cargo run -- serve");
+    expect(opened(fetching)).toEqual([]);
+
+    tap(serve!);
+    expect(cards()).toEqual([]);
+    await waitFor(() => expect(opened(fetching)).toEqual([{ preview: "Serve" }]));
+  });
+
+  it("closes the card on a tap away, and runs nothing", async () => {
+    const { container, fetching } = await ready();
+    const [build] = rows(container);
+
+    tap(build!);
+    expect(shown()).toBe("cargo test");
+
+    // A tap on the card itself leaves it standing.
+    fireEvent.pointerDown(cards()[0]!, finger);
+    expect(shown()).toBe("cargo test");
+
+    const elsewhere = container.querySelector(`.${codePane.previewsHead}`)!;
+    fireEvent.pointerDown(elsewhere, finger);
+    fireEvent.blur(build!);
+    fireEvent.click(elsewhere);
+    expect(cards()).toEqual([]);
+
+    // And the row's next tap is a first one again.
+    tap(build!);
+    expect(shown()).toBe("cargo test");
+    expect(opened(fetching)).toEqual([]);
+  });
+
+  it("shows the card under the keyboard's focus, runs on Enter, closes on Escape", async () => {
+    const { container, fetching } = await ready();
+    const [build] = rows(container);
+
+    fireEvent.focus(build!);
+    expect(shown()).toBe("cargo test");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(cards()).toEqual([]);
+
+    fireEvent.blur(build!);
+    fireEvent.focus(build!);
+    expect(shown()).toBe("cargo test");
+    fireEvent.blur(build!);
+    expect(cards()).toEqual([]);
+
+    // Enter on a button is the click it makes, with no pointer behind it.
+    fireEvent.focus(build!);
+    fireEvent.click(build!, { detail: 0 });
+    await waitFor(() =>
+      expect(opened(fetching)).toEqual([{ preview: "Build and test" }]),
+    );
+  });
+
+  /// In the Menu's chrome — the wash, the border, the round and the lift a
+  /// menu's drop stands off the page by.
+  it("draws the card in the menu's chrome", () => {
+    const rule = /\.previewCard \{[^}]*\}/.exec(codeCss)![0];
+    for (const said of [
+      "background: var(--card);",
+      "border: 1px solid var(--edge);",
+      "border-radius: 0.6rem;",
+      "box-shadow: var(--lift);",
+    ]) {
+      expect(rule).toContain(said);
+      expect(menuCss).toMatch(new RegExp(`\\.drop \\{[^}]*${said.replace(/[()]/g, "\\$&")}`));
+    }
+  });
 });
 
 describe("the code pane saying it is drawn", () => {
