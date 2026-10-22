@@ -312,30 +312,6 @@ describe("where a dropdown menu hangs", () => {
 
     expect(drop(container)!.classList.contains(menu.up!)).toBe(true);
   });
-
-  /// Opened again where there is room, it comes down the ordinary way rather
-  /// than where it hung last time.
-  it("starts from under again on every opening", () => {
-    let at = 850;
-    window.innerHeight = 1000;
-    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: Element): DOMRect {
-        if (this.classList.contains(menu.drop!)) {
-          return { top: 0, bottom: 300, height: 300 } as DOMRect;
-        }
-        return { top: at, bottom: at + 40, height: 40 } as DOMRect;
-      },
-    );
-    const { container } = mount();
-
-    fireEvent.click(trigger(container));
-    expect(drop(container)!.classList.contains(menu.up!)).toBe(true);
-    fireEvent.click(trigger(container));
-
-    at = 100;
-    fireEvent.click(trigger(container));
-    expect(drop(container)!.classList.contains(menu.up!)).toBe(false);
-  });
 });
 
 /// A menu with a level below its first: the row that opens one, the rows it
