@@ -151,7 +151,7 @@ export function Menu(props: {
   /// menu rather than doing something.
   children: () => JSX.Element;
 }): JSX.Element {
-  // `true` while the menu hangs open under the trigger.
+  // `true` while the menu hangs open off the trigger.
   const [open, setOpen] = createSignal(false);
 
   // The drop's own id, for the `aria-controls` that ties it to the trigger.

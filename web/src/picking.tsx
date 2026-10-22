@@ -1067,9 +1067,8 @@ export function dropping(props: {
       : drop.height;
 
     // Over the anchor or under it by the rule every dropdown shares. Which side
-    // that is changes
-    // nothing about *which* rows — the list is capped and scrolls from its top
-    // either way.
+    // that is changes nothing about *which* rows — the list is capped and
+    // scrolls from its top either way.
     const over = hangsOver(anchor, asked);
 
     // How wide the rows will stand: the anchor's width, which is what they are
