@@ -24,6 +24,7 @@ import { json, whenever } from "./serving";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 /// A member of the cluster, by its Device Id, and what its row is called.
@@ -126,7 +127,18 @@ describe("the item at the foot of the sidebar", () => {
 });
 
 describe("the popup it opens", () => {
+  /// Measured, as every menu's side is: the item stands at the foot of the
+  /// pane, which is the foot of the window, and jsdom lays nothing out — so it
+  /// is told that, and how tall the card is.
   it("hangs over the item rather than under it", async () => {
+    window.innerHeight = 800;
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: Element): DOMRect {
+        return this.classList.contains(dropdown.drop!)
+          ? ({ top: 0, bottom: 120, height: 120 } as DOMRect)
+          : ({ top: 760, bottom: 790, height: 30 } as DOMRect);
+      },
+    );
     forwardingThese(() => [forward(3000)]);
     const { container } = mountSidebar("/");
 

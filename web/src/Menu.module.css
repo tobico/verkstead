@@ -82,9 +82,10 @@
   box-shadow: var(--lift);
 }
 
-/* And the same card hung over its trigger rather than under it, for a trigger at
-   the bottom of what it stands in — the sidebar's foot, which is stuck to the
-   bottom of the pane. The same gap and the same far end, from the other edge. */
+/* And the same card hung over its trigger rather than under it, wherever `Menu`
+   measures no room under it — the sidebar's foot, stuck to the bottom of the
+   pane, or a composer pushed down to the window's by a long Brief. The same gap
+   and the same far end, from the other edge. */
 .drop.up {
   top: auto;
   bottom: calc(100% + 0.3rem);
