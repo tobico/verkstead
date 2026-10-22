@@ -133,10 +133,13 @@ already there when the human decides to try it:
 
     verkstead preview "Build and test" <<'SH'
     cargo build && cargo run -- serve
+
+    Starts the server on port 8422: open the viewer and try the Code pane.
     SH
 
-Suggest it again under the same title when the way to run the work changes,
-and retire one that no longer runs:
+What follows a blank line is the description the human reads when they hover
+its row: say there what the title cannot. Suggest it again under the same
+title when the way to run the work changes, and retire one that no longer runs:
 
     verkstead preview --retire "Build and test"
 

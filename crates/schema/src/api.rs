@@ -150,28 +150,66 @@ pub struct MemoLeft {
 /// as the rule.
 pub const MAX_PREVIEW_COMMAND_BYTES: usize = 4 * 1024;
 
-/// What `POST …/api/v1/previews` takes: the title the Preview goes by, and
-/// the one line typed into a terminal to try the work.
+/// The most a Preview's description may hold, in bytes (ADR-0024): a
+/// paragraph or two, which is what its card holds.
+pub const MAX_PREVIEW_DESCRIPTION_BYTES: usize = 2 * 1024;
+
+/// What `POST …/api/v1/previews` takes: the title the Preview goes by, the
+/// one line typed into a terminal to try the work, and the markdown its card
+/// shows above that line, where there is any.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreviewSuggestion {
     pub title: String,
     pub command: String,
+
+    /// What the Preview is for, in more words than its title holds. Left off
+    /// the wire where there is none, so a server from before descriptions
+    /// takes a suggestion without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 impl PreviewSuggestion {
-    /// The suggestion as it is stored: the title trimmed, and the command
-    /// trimmed of the trailing newline a heredoc always ends in, before
-    /// anything is checked.
-    pub fn new(title: &str, command: &str) -> Self {
+    /// The suggestion as it is stored: the title trimmed, the command trimmed
+    /// of the trailing newline a heredoc always ends in, and the description
+    /// trimmed of its leading and trailing blank lines — and none at all where
+    /// that leaves it blank — before anything is checked.
+    pub fn new(title: &str, command: &str, description: Option<&str>) -> Self {
         PreviewSuggestion {
             title: title.trim().to_owned(),
             command: command.trim_end_matches(['\n', '\r']).to_owned(),
+            description: description.and_then(trimmed_of_blank_lines),
+        }
+    }
+
+    /// The suggestion `verkstead preview` reads off stdin, the way a commit
+    /// message is read: the first line is the command, and what follows the
+    /// first blank line is the description.
+    ///
+    /// A second line that is not blank leaves the whole of what was written
+    /// standing as the command, newline and all, so that [`Self::refused`]
+    /// refuses it as a command that runs onto a second line — a command wrapped
+    /// by accident never becomes a description.
+    pub fn read(title: &str, written: &str) -> Self {
+        let written = written.trim_end_matches(['\n', '\r']);
+
+        let Some((command, rest)) = written.split_once('\n') else {
+            return PreviewSuggestion::new(title, written, None);
+        };
+
+        let (second, description) = rest.split_once('\n').unwrap_or((rest, ""));
+
+        if second.trim().is_empty() {
+            PreviewSuggestion::new(title, command, Some(description))
+        } else {
+            PreviewSuggestion::new(title, written, None)
         }
     }
 
     /// Why the suggestion is refused before it goes anywhere, or `None` where
     /// it may be left: an empty title, an empty command, a newline anywhere in
-    /// the command, or a command over [`MAX_PREVIEW_COMMAND_BYTES`].
+    /// the command, a command over [`MAX_PREVIEW_COMMAND_BYTES`], or a
+    /// description over [`MAX_PREVIEW_DESCRIPTION_BYTES`].
     pub fn refused(&self) -> Option<String> {
         if self.title.trim().is_empty() {
             return Some(
@@ -188,21 +226,46 @@ impl PreviewSuggestion {
 
         if self.command.contains(['\n', '\r']) {
             return Some(
-                "the preview's command has a newline in it: it is typed into a shell as one \
-                 line, so join the steps with the shell's own separator"
+                "the preview's command runs onto a second line: it is typed into a shell as one \
+                 line, so join the steps with the shell's own separator, and leave a blank line \
+                 after it before any description"
                     .to_owned(),
             );
         }
 
-        (self.command.len() > MAX_PREVIEW_COMMAND_BYTES).then(|| {
-            format!(
+        if self.command.len() > MAX_PREVIEW_COMMAND_BYTES {
+            return Some(format!(
                 "the preview's command is {} bytes, over the maximum of {} (4 KiB): put the \
                  steps in a script and run that",
                 self.command.len(),
                 MAX_PREVIEW_COMMAND_BYTES
+            ));
+        }
+
+        let description = self.description.as_deref().unwrap_or_default();
+
+        (description.len() > MAX_PREVIEW_DESCRIPTION_BYTES).then(|| {
+            format!(
+                "the preview's description is {} bytes, over the maximum of {} (2 KiB): keep it \
+                 to a paragraph or two saying what the preview is for",
+                description.len(),
+                MAX_PREVIEW_DESCRIPTION_BYTES
             )
         })
     }
+}
+
+/// `written` without its leading and trailing blank lines, or `None` where
+/// nothing else is left. A line's own indentation stays, being markdown.
+fn trimmed_of_blank_lines(written: &str) -> Option<String> {
+    let lines: Vec<&str> = written
+        .lines()
+        .map(|line| line.trim_end_matches('\r'))
+        .collect();
+    let first = lines.iter().position(|line| !line.trim().is_empty())?;
+    let last = lines.iter().rposition(|line| !line.trim().is_empty())?;
+
+    Some(lines[first..=last].join("\n"))
 }
 
 /// What `POST …/api/v1/previews` returns once a Preview stands: its title,
@@ -238,5 +301,55 @@ impl ApiError {
             error: error.into(),
             violations,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PreviewSuggestion;
+
+    /// What `verkstead preview` reads off `written`: the command and the
+    /// description.
+    fn read(written: &str) -> (String, Option<String>) {
+        let read = PreviewSuggestion::read("Build and test", written);
+        (read.command, read.description)
+    }
+
+    #[test]
+    fn one_line_is_a_command_alone() {
+        assert_eq!(read("cargo test\n"), ("cargo test".to_owned(), None));
+        assert_eq!(read("cargo test"), ("cargo test".to_owned(), None));
+        assert_eq!(read("cargo test\r\n"), ("cargo test".to_owned(), None));
+    }
+
+    /// What follows the blank line, trimmed of the blank lines around it, and
+    /// none at all where only blank lines follow.
+    #[test]
+    fn a_blank_line_starts_the_description() {
+        assert_eq!(
+            read("cargo test\n\n\nRuns it.\n\n    indented\n\n\n"),
+            (
+                "cargo test".to_owned(),
+                Some("Runs it.\n\n    indented".to_owned())
+            ),
+        );
+        assert_eq!(
+            read("cargo test\r\n\r\nRuns it.\r\n"),
+            ("cargo test".to_owned(), Some("Runs it.".to_owned())),
+        );
+        assert_eq!(read("cargo test\n  \n \n"), ("cargo test".to_owned(), None));
+    }
+
+    /// A second line that is not blank stays in the command, to be refused.
+    #[test]
+    fn a_second_line_is_kept_in_the_command_and_refused() {
+        let read = PreviewSuggestion::read("Build and test", "cargo build\ncargo test\n");
+
+        assert_eq!(read.command, "cargo build\ncargo test");
+        assert_eq!(read.description, None);
+        assert!(
+            read.refused()
+                .is_some_and(|why| why.contains("runs onto a second line"))
+        );
     }
 }

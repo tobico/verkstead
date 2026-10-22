@@ -181,6 +181,66 @@ fn running(_pid: u32) -> Option<String> {
     None
 }
 
+/// Where the process in the foreground of `terminal` is standing — which, read
+/// with the shell in front, is the shell's working directory: what a Preview's
+/// retype asks, to say whether the run before it moved the shell off the
+/// worktree root (ADR-0024, *Back to the root, and a card on the row*).
+///
+/// As the kernel reports it, and nothing normalised: the worktree is bound
+/// inside the Sandbox at its own path, so what comes back compares against the
+/// record's path as it stands. `None` where it cannot be read — no foreground,
+/// a pid gone between the asking and the reading, or a platform that never
+/// retypes.
+pub fn directory(terminal: &Terminal) -> Option<std::path::PathBuf> {
+    standing(terminal.foreground()?)
+}
+
+/// The working directory of `pid`, which `/proc` keeps as a link.
+#[cfg(target_os = "linux")]
+fn standing(pid: u32) -> Option<std::path::PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+}
+
+/// And on a Mac, by the vnode path info `proc_pidinfo` answers for it: the
+/// current directory's path, terminated inside a buffer of `MAXPATHLEN`.
+#[cfg(target_os = "macos")]
+fn standing(pid: u32) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let mut info = std::mem::MaybeUninit::<libc::proc_vnodepathinfo>::zeroed();
+    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_vnodepathinfo>()).ok()?;
+
+    let read = unsafe {
+        libc::proc_pidinfo(
+            libc::c_int::try_from(pid).ok()?,
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+
+    if read != size {
+        return None;
+    }
+
+    let info = unsafe { info.assume_init() };
+    let path: &[libc::c_char] = info.pvi_cdir.vip_path.as_flattened();
+    let path: Vec<u8> = path
+        .iter()
+        .take_while(|&&byte| byte != 0)
+        .map(|&byte| byte as u8)
+        .collect();
+
+    (!path.is_empty()).then(|| std::path::PathBuf::from(std::ffi::OsStr::from_bytes(&path)))
+}
+
+/// And everywhere else, which is Windows: it never retypes, so nothing asks.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn standing(_pid: u32) -> Option<std::path::PathBuf> {
+    None
+}
+
 /// What to call the shell a terminal was started on: the last component of the
 /// path it is spawned as.
 ///

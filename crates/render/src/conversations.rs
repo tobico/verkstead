@@ -1067,8 +1067,9 @@ pub struct TransferredTo {
     pub id: i64,
 }
 
-/// One Preview as the page receives it: the title its row is drawn with, and
-/// the command a press types into a terminal.
+/// One Preview as the page receives it: the title its row is drawn with, the
+/// command a press types into a terminal, and the description its card shows
+/// above the command.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct PreviewView {
@@ -1077,6 +1078,24 @@ pub struct PreviewView {
 
     /// The one line typed into the terminal.
     pub command: String,
+
+    /// What it is for, rendered and sanitized by the server on the way out as
+    /// every piece of agent markdown on this wire is. Absent where the session
+    /// that suggested it wrote none, and the card holds the command alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub description: Option<String>,
+}
+
+impl PreviewView {
+    /// The Preview as it stands, its description rendered.
+    pub fn new(title: String, command: String, description: Option<&str>) -> Self {
+        PreviewView {
+            title,
+            command,
+            description: description.map(crate::markdown::to_html),
+        }
+    }
 }
 
 /// A pending steer as the page receives it: when the press was made, and the

@@ -419,6 +419,7 @@ import {
   onMount,
   type JSX,
 } from "solid-js";
+import { Portal } from "solid-js/web";
 
 import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
@@ -4121,6 +4122,21 @@ function zoned(box: DOMRect, x: number, y: number): Zone {
 /// listener means handing back the very same function.
 const refuseScroll = (event: Event): void => event.preventDefault();
 
+/// How slow a mouse over a preview's row has to be going, in CSS pixels a
+/// millisecond, before it is taken as resting there and the row's card opens —
+/// the sidebar's own `SETTLED`, for the same reason: a hand reaching for a row
+/// slows to well under it, and one crossing the box on its way to the groups
+/// does not.
+const RESTING = 0.25;
+
+/// And how long a mouse over a row may send no move before it is taken as
+/// stopped, in milliseconds.
+const STILL = 60;
+
+/// How long a card stays after the mouse has left its row, in milliseconds,
+/// for a hand crossing from the row to the card to arrive before it goes.
+const STAYING = 150;
+
 /// The previews standing on the conversation, as a box above the tree: a row
 /// each, oldest first, the title with a play icon at its right that becomes the
 /// terminal icon while its run stands (ADR-0024).
@@ -4129,11 +4145,227 @@ const refuseScroll = (event: Event): void => event.preventDefault();
 /// is, and what it does is the pane's — decided by the server, and a terminal
 /// opened for the preview in the active group, exactly where **New terminal**
 /// puts one, where there is none to show.
+///
+/// **And each row has a card**, in the Menu's chrome beside it, holding the
+/// command a press would type — readable before it is pressed (ADR-0024's
+/// amendment) — under the description the agent wrote for it, where it wrote
+/// one, as the server rendered it. One card at a time, opened three ways:
+///
+/// - a mouse resting on the row, read off the pointer's type rather than left
+///   to `:hover`, and waited for the way the sidebar waits — slowed below
+///   `RESTING` or stopped for `STILL` — so a pointer only crossing the box
+///   never flashes one; it goes `STAYING` after the pointer has left both the
+///   row and the card;
+/// - the keyboard's focus on the row, and focus leaving it closes it, Enter
+///   and Space still being the button's press;
+/// - **a first tap**, on every row alike: on touch the first tap opens the
+///   card and runs nothing, a second on the same row is the press, and a tap
+///   anywhere else closes the card and runs nothing either.
+///
+/// Escape closes whichever is open, as it closes a menu.
 function Previews(props: {
   previews: PreviewView[];
   running: (title: string) => boolean;
   press: (title: string) => void;
 }): JSX.Element {
+  /// Which row's card is open and how it was, which is what says what closes
+  /// it: focus leaving closes only one focus opened, and a mouse leaving only
+  /// one a mouse did.
+  const [open, setOpen] = createSignal<{
+    title: string;
+    by: "mouse" | "focus" | "touch";
+    row: HTMLElement;
+  } | null>(null);
+
+  /// The card's own id, which the row it belongs to is described by.
+  const card = createUniqueId();
+  let drawn: HTMLDivElement | undefined;
+
+  /// Where and when the mouse over a row was last seen, while it is being
+  /// watched for resting; and the waits for one that has stopped and one that
+  /// has left.
+  let last: { x: number; y: number; at: number; row: HTMLElement } | undefined;
+  let stopping: ReturnType<typeof setTimeout> | undefined;
+  let leaving: ReturnType<typeof setTimeout> | undefined;
+
+  /// Whether the press now landing began with a finger, and whether the focus
+  /// arriving with it is a pointer's rather than the keyboard's. Set by each
+  /// press on a row and spent by what follows it.
+  let tapping = false;
+  let pointing = false;
+
+  const show = (row: HTMLElement, by: "mouse" | "focus" | "touch") => {
+    clearTimeout(leaving);
+    leaving = undefined;
+    setOpen({ title: row.dataset.preview!, by, row });
+  };
+
+  const shut = () => {
+    clearTimeout(stopping);
+    clearTimeout(leaving);
+    stopping = leaving = last = undefined;
+    setOpen(null);
+  };
+
+  const rest = () => {
+    const row = last?.row;
+    clearTimeout(stopping);
+    stopping = last = undefined;
+    if (row !== undefined) {
+      show(row, "mouse");
+    }
+  };
+
+  /// A mouse coming onto a row, or back onto the card or its row inside the
+  /// wait after it left, which keeps the card.
+  const entered = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") {
+      return;
+    }
+
+    clearTimeout(leaving);
+    leaving = undefined;
+    const row = event.currentTarget as HTMLElement;
+    if (row === drawn || open()?.row === row) {
+      return;
+    }
+
+    last = { x: event.clientX, y: event.clientY, at: performance.now(), row };
+    clearTimeout(stopping);
+    stopping = setTimeout(rest, STILL);
+  };
+
+  /// A mouse moving over a row, timed against where it was last — the
+  /// sidebar's `moved`, a move that went nowhere being no speed at all.
+  const moved = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse" || last === undefined) {
+      return;
+    }
+
+    const at = performance.now();
+    const travelled = Math.hypot(event.clientX - last.x, event.clientY - last.y);
+    const elapsed = at - last.at;
+    if (travelled === 0) {
+      return;
+    }
+
+    if (elapsed > 0 && travelled / elapsed < RESTING) {
+      rest();
+      return;
+    }
+
+    last = { ...last, x: event.clientX, y: event.clientY, at };
+    clearTimeout(stopping);
+    stopping = setTimeout(rest, STILL);
+  };
+
+  /// And a mouse leaving a row or the card: a crossing that never rested is
+  /// forgotten, and a card a mouse opened goes after the wait.
+  const left = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") {
+      return;
+    }
+
+    clearTimeout(stopping);
+    stopping = last = undefined;
+    if (open()?.by === "mouse") {
+      clearTimeout(leaving);
+      leaving = setTimeout(shut, STAYING);
+    }
+  };
+
+  /// A press on a row, heard on the way down: whether it is a finger's, and
+  /// that the focus it brings is not the keyboard's.
+  const pressing = (event: PointerEvent) => {
+    tapping = event.pointerType !== "mouse";
+    pointing = true;
+  };
+
+  /// The click a press ends in, or the one Enter and Space make. A finger's
+  /// first tap on a row opens its card and goes no further; every other click
+  /// is the press, and the card goes with it.
+  const clicked = (event: MouseEvent, title: string) => {
+    const row = event.currentTarget as HTMLElement;
+    const tapped = tapping;
+    tapping = pointing = false;
+    if (tapped && open()?.row !== row) {
+      show(row, "touch");
+      return;
+    }
+
+    shut();
+    props.press(title);
+  };
+
+  /// Focus arriving from the keyboard opens the row's card; one a pointer's
+  /// press brought is that press's to decide.
+  const focused = (event: FocusEvent) => {
+    if (pointing) {
+      pointing = false;
+      return;
+    }
+
+    show(event.currentTarget as HTMLElement, "focus");
+  };
+
+  const blurred = (event: FocusEvent) => {
+    const now = open();
+    if (now?.by === "focus" && now.row === event.currentTarget) {
+      shut();
+    }
+  };
+
+  /// A tap anywhere but a row or the card closes a card a tap opened, and is
+  /// left to land where it was put; Escape closes any.
+  onMount(() => {
+    const elsewhere = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (
+        open()?.by === "touch" &&
+        !open()!.row.contains(target) &&
+        !drawn?.contains(target) &&
+        target?.closest(`.${styles.preview}`) == null
+      ) {
+        shut();
+      }
+    };
+    const escaped = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && open() !== null) {
+        shut();
+      }
+    };
+
+    document.addEventListener("pointerdown", elsewhere, true);
+    document.addEventListener("keydown", escaped);
+    onCleanup(() => {
+      document.removeEventListener("pointerdown", elsewhere, true);
+      document.removeEventListener("keydown", escaped);
+    });
+  });
+
+  onCleanup(() => {
+    clearTimeout(stopping);
+    clearTimeout(leaving);
+  });
+
+  /// The preview the open card is for, while it still stands.
+  const shown = () => {
+    const title = open()?.title;
+    return props.previews.find((preview) => preview.title === title);
+  };
+
+  /// Where the card goes: beside the row, over the groups, where there is room
+  /// to the right of the side column — and hung under it where the pane has
+  /// stacked and there is not. Fixed to the window and drawn at the body,
+  /// because the box scrolls and would clip anything standing out of it.
+  const placed = (row: HTMLElement): JSX.CSSProperties => {
+    const at = row.getBoundingClientRect();
+    const beside = at.right + 8 + 320 <= window.innerWidth;
+    return beside
+      ? { left: `${at.right + 8}px`, top: `${at.top}px` }
+      : { left: `${at.left}px`, top: `${at.bottom + 4}px` };
+  };
+
   return (
     <section class={styles.previews} aria-labelledby="code-previews">
       <h3 id="code-previews" class={styles.previewsHead}>
@@ -4147,7 +4379,17 @@ function Previews(props: {
               <button
                 type="button"
                 class={styles.preview}
-                onClick={() => props.press(preview.title)}
+                data-preview={preview.title}
+                aria-describedby={
+                  open()?.title === preview.title ? card : undefined
+                }
+                onPointerEnter={entered}
+                onPointerMove={moved}
+                onPointerLeave={left}
+                onPointerDown={pressing}
+                onFocus={focused}
+                onBlur={blurred}
+                onClick={(event) => clicked(event, preview.title)}
               >
                 <span class={styles.previewTitle}>{preview.title}</span>
                 <Icon
@@ -4159,6 +4401,33 @@ function Previews(props: {
           )}
         </For>
       </ul>
+
+      <Show when={shown()}>
+        {(preview) => (
+          <Portal>
+            <div
+              ref={drawn}
+              id={card}
+              class={`${styles.previewCard} markdown`}
+              style={(() => {
+                const now = open();
+                return now === null ? undefined : placed(now.row);
+              })()}
+              onPointerEnter={entered}
+              onPointerLeave={left}
+            >
+              <Show when={preview().description}>
+                {(html) => (
+                  <div class={styles.previewAbout} innerHTML={html()} />
+                )}
+              </Show>
+              <pre>
+                <code>{preview().command}</code>
+              </pre>
+            </div>
+          </Portal>
+        )}
+      </Show>
     </section>
   );
 }

@@ -39589,6 +39589,7 @@ async fn a_terminal_opened_for_a_preview_runs_its_command_in_the_shell() {
         fixture.id,
         "Build and test",
         "printf 'the preview %s\\n' ran",
+        None,
         "a test",
     )
     .await
@@ -39837,6 +39838,106 @@ async fn a_press_on_a_preview_with_a_live_terminal_follows_what_is_in_front() {
     );
 
     std::fs::write(directory.join("previewed"), "").unwrap();
+}
+
+/// A retyped Preview starts from the worktree root (ADR-0024, *Back to the
+/// root, and a card on the row*): a run that moved the shell is followed, on
+/// the next press, by a `cd` back to the root typed as a line of its own and
+/// then the command — which runs, where without the line its own `cd` would
+/// fail — and a run that left the shell where it was is followed by the
+/// command alone.
+#[tokio::test]
+async fn a_retyped_preview_starts_from_the_worktree_root() {
+    use verkstead_render::InFront;
+
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let root = fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+    std::fs::create_dir_all(std::path::Path::new(&root).join("web")).unwrap();
+
+    // The word is put together by the shell, so that the echo of the line
+    // typed is never what the grid is found holding.
+    let pool = open_database(&fixture.database).await.unwrap();
+    verkstead_store::suggest_preview(
+        &pool,
+        fixture.id,
+        "Moves",
+        "cd web && printf 'the move %s\\n' ran",
+        None,
+        "a test",
+    )
+    .await
+    .unwrap();
+    verkstead_store::suggest_preview(
+        &pool,
+        fixture.id,
+        "Stays",
+        "printf 'the stay %s\\n' ran",
+        None,
+        "a test",
+    )
+    .await
+    .unwrap();
+
+    let at = fixture.listening().await;
+    let _pane = a_code_pane(at, fixture.id).await;
+    let back = format!("cd '{root}'");
+
+    for (title, word) in [("Moves", "the move ran"), ("Stays", "the stay ran")] {
+        let press = || async {
+            post::<TerminalOpened>(
+                &fixture.app,
+                &format!("/api/ui/conversations/{}/terminals", fixture.id),
+                &serde_json::json!({ "preview": title }),
+            )
+            .await
+        };
+
+        let TerminalOpened::Opened { number } = press().await else {
+            panic!("the first press opens a terminal for {title}");
+        };
+
+        let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+        watcher.resize(300, 40).await;
+        watcher.until(|grid| grid.matches(word).count() == 1).await;
+        until_in_front(&fixture, number, |terminal| {
+            terminal.in_front == Some(InFront::Shell)
+        })
+        .await;
+
+        assert_eq!(press().await, TerminalOpened::Retyped { number });
+
+        let showing = watcher.until(|grid| grid.matches(word).count() == 2).await;
+        let homeward = showing.iter().position(|row| row.contains(&back));
+
+        match title {
+            "Moves" => {
+                let homeward = homeward.unwrap_or_else(|| {
+                    panic!("a retype after a move goes back to {root} first: {showing:?}")
+                });
+                let rerun = showing
+                    .iter()
+                    .rposition(|row| row.contains("cd web"))
+                    .unwrap();
+                assert!(
+                    homeward < rerun,
+                    "the line back to the root comes before the command: {showing:?}",
+                );
+            }
+            _ => assert_eq!(
+                homeward, None,
+                "a shell still at the root gets the command alone: {showing:?}",
+            ),
+        }
+    }
 }
 
 /// A Code pane attached to the Conversation, the way the pane says it is
@@ -40309,7 +40410,9 @@ fn the_terminals_shell_said() -> String {
     let named = verkstead_server::terminals::busy::named(&shell);
 
     format!(
-        "A terminal here runs `{named}`, at `{shell}`: write a preview's command for that shell."
+        "A terminal here runs `{named}`, at `{shell}`: write a preview's command for that shell. \
+         Write one that leaves the shell where it found it — a `--dir` or a `-C` over a `cd` \
+         joined by `&&` — since the up arrow replays it as written."
     )
 }
 
@@ -40369,7 +40472,8 @@ async fn every_building_session_is_told_to_suggest_a_preview_when_none_stands() 
 }
 
 /// A grilling is told nothing of the Previews, being refused the verb, and a
-/// steered instruction is told the ones standing, title over command.
+/// steered instruction is told the ones standing, title over command, with a
+/// description under its command where one was written.
 #[tokio::test]
 async fn a_steered_instruction_is_told_the_previews_and_a_grilling_is_not() {
     let fixture = grilling(
@@ -40393,7 +40497,18 @@ async fn a_steered_instruction_is_told_the_previews_and_a_grilling_is_not() {
         fixture.id,
         "Build and test",
         "cargo run -- serve",
+        None,
         "the session that worked task 01",
+    )
+    .await
+    .unwrap();
+    verkstead_store::suggest_preview(
+        &pool,
+        fixture.id,
+        "Serve the docs",
+        "mdbook serve docs",
+        Some("Serves the book on port 3000.\n\nThe *Guide* chapter is the one to read."),
+        "the session that worked task 02",
     )
     .await
     .unwrap();
@@ -40431,11 +40546,13 @@ async fn a_steered_instruction_is_told_the_previews_and_a_grilling_is_not() {
             && instructed.contains(&format!(
                 "# The previews standing\n\n\
                  **Build and test**\n\n    cargo run -- serve\n\n\
+                 **Serve the docs**\n\n    mdbook serve docs\n\n\
+                 Serves the book on port 3000.\n\nThe *Guide* chapter is the one to read.\n\n\
                  Suggest one again under its title when its command changes, and retire \
                  one that no longer runs.\n\n{}\n",
                 the_terminals_shell_said(),
             )),
-        "a steered instruction is told the Preview standing: {instructed:?}",
+        "a steered instruction is told the Previews standing: {instructed:?}",
     );
 }
 
@@ -40581,14 +40698,12 @@ async fn a_memo_a_task_session_retires_leaves_every_later_prompt() {
     }
 }
 
-/// Suggest a Preview from the session running in `fixture`, the way
-/// `verkstead preview` does, and hand back what the server answered.
-async fn suggest_a_preview(fixture: &Grilling, title: &str, command: &str) -> (StatusCode, String) {
-    let body = serde_saphyr::to_string(&verkstead_schema::PreviewSuggestion {
-        title: title.to_owned(),
-        command: command.to_owned(),
-    })
-    .unwrap();
+/// Suggest a Preview from the session running in `fixture`, `written` read
+/// the way `verkstead preview` reads its stdin, and hand back what the server
+/// answered.
+async fn suggest_a_preview(fixture: &Grilling, title: &str, written: &str) -> (StatusCode, String) {
+    let body = serde_saphyr::to_string(&verkstead_schema::PreviewSuggestion::read(title, written))
+        .unwrap();
 
     fetch(
         &fixture.app,
@@ -40629,10 +40744,21 @@ async fn previews(fixture: &Grilling) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The descriptions standing on the Conversation's view, rendered, in order.
+async fn descriptions(fixture: &Grilling) -> Vec<Option<String>> {
+    fixture
+        .view()
+        .await
+        .previews
+        .into_iter()
+        .map(|preview| preview.description)
+        .collect()
+}
+
 /// A task session's preview lands on the Conversation's view, and the same
-/// title again replaces its command rather than adding a row — while a retire
-/// of a title that does not stand is refused by name, and one that does takes
-/// it off the view.
+/// title again replaces its command and its description rather than adding a
+/// row — while a retire of a title that does not stand is refused by name, and
+/// one that does takes it off the view.
 #[tokio::test]
 async fn a_task_session_suggests_a_preview_and_the_same_title_replaces_it() {
     let fixture = grilling(&a_backlog_that_says_so(
@@ -40662,12 +40788,43 @@ async fn a_task_session_suggests_a_preview_and_the_same_title_replaces_it() {
         "and the reply is its title"
     );
 
-    let (status, body) = suggest_a_preview(&fixture, "Serve", "cargo run -- serve").await;
+    let (status, body) = suggest_a_preview(
+        &fixture,
+        "Serve",
+        "cargo run -- serve\n\nStarts the server on `8422`.\n",
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = suggest_a_preview(
+        &fixture,
+        "Build and test",
+        "cargo test\n\nRuns **every** suite.\n",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    assert_eq!(
+        descriptions(&fixture).await,
+        [
+            Some("<p>Runs <strong>every</strong> suite.</p>\n".to_owned()),
+            Some("<p>Starts the server on <code>8422</code>.</p>\n".to_owned()),
+        ],
+        "each description is served rendered",
+    );
 
     let (status, body) =
         suggest_a_preview(&fixture, "Build and test", "cargo test --workspace").await;
     assert_eq!(status, StatusCode::OK, "{body}");
+
+    assert_eq!(
+        descriptions(&fixture).await,
+        [
+            None,
+            Some("<p>Starts the server on <code>8422</code>.</p>\n".to_owned()),
+        ],
+        "and the same title again without one clears the one that stood",
+    );
 
     assert_eq!(
         previews(&fixture).await,

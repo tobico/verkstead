@@ -7,8 +7,9 @@
 //! than a reading of the record, and a card for every replacement of *Build and
 //! test* would be the Timeline recording the agent's housekeeping.
 //!
-//! **Keyed on its title.** The same title suggested again replaces the command
-//! and the stamp in place, keeping the row where it was in the list; retiring
+//! **Keyed on its title.** The same title suggested again replaces the row
+//! whole in place — command, description and stamp, so one suggested without a
+//! description clears the one that stood — keeping the row where it was in the list; retiring
 //! one deletes the row, there being nothing on the Timeline pointing at it to
 //! keep.
 
@@ -23,6 +24,10 @@ pub struct Preview {
 
     /// The one line typed into a terminal to try the work.
     pub command: String,
+
+    /// What it is for, as markdown its card shows above the command, where the
+    /// session that last suggested it wrote any.
+    pub description: Option<String>,
 
     /// The words of the session that last suggested it, on the Memo's pattern
     /// — *the session that worked task 03*.
@@ -42,6 +47,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              conversation_id INTEGER NOT NULL REFERENCES conversations(id),
              title           TEXT NOT NULL,
              command         TEXT NOT NULL,
+             description     TEXT,
              left_by         TEXT NOT NULL,
              at              TEXT NOT NULL,
              PRIMARY KEY (conversation_id, title)
@@ -54,8 +60,9 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
-/// Suggest a Preview on a Conversation, or replace the command and the stamp
-/// of the one standing under the same title.
+/// Suggest a Preview on a Conversation, or replace the command, the
+/// description and the stamp of the one standing under the same title — a
+/// `None` description clearing the one that stood.
 ///
 /// `false` means there is no such Conversation. Whether the session suggesting
 /// it may, and whether the suggestion is well formed, are the caller's to have
@@ -65,17 +72,20 @@ pub async fn suggest_preview(
     conversation_id: i64,
     title: &str,
     command: &str,
+    description: Option<&str>,
     left_by: &str,
 ) -> Result<bool> {
     let suggested = sqlx::query(
-        "INSERT INTO previews (conversation_id, title, command, left_by, at)
-         SELECT id, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        "INSERT INTO previews (conversation_id, title, command, description, left_by, at)
+         SELECT id, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          FROM conversations WHERE id = ?
          ON CONFLICT (conversation_id, title) DO UPDATE
-         SET command = excluded.command, left_by = excluded.left_by, at = excluded.at",
+         SET command = excluded.command, description = excluded.description,
+             left_by = excluded.left_by, at = excluded.at",
     )
     .bind(title)
     .bind(command)
+    .bind(description)
     .bind(left_by)
     .bind(conversation_id)
     .execute(pool)
@@ -102,8 +112,8 @@ pub async fn retire_preview(pool: &SqlitePool, conversation_id: i64, title: &str
 /// Every Preview standing on a Conversation, oldest first: in the order each
 /// title was first suggested.
 pub async fn standing_previews(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Preview>> {
-    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
-        "SELECT title, command, left_by, at FROM previews
+    let rows: Vec<(String, String, Option<String>, String, String)> = sqlx::query_as(
+        "SELECT title, command, description, left_by, at FROM previews
          WHERE conversation_id = ? ORDER BY rowid",
     )
     .bind(conversation_id)
@@ -113,9 +123,10 @@ pub async fn standing_previews(pool: &SqlitePool, conversation_id: i64) -> Resul
 
     Ok(rows
         .into_iter()
-        .map(|(title, command, left_by, at)| Preview {
+        .map(|(title, command, description, left_by, at)| Preview {
             title,
             command,
+            description,
             left_by,
             at,
         })

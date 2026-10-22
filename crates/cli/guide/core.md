@@ -203,7 +203,7 @@ work with — **Suggesting a preview** below — verbatim too:
 ```
 Suggest a preview: a title and the one-line command that tries this session's work by hand, which the human runs from the Code pane with a press.
 
-The command on stdin, one line of at most 4 KiB written for the terminal's own shell; the trailing newline a heredoc ends in is dropped. Only a building session may suggest one: a backlog task, the finish, a stage's planning, an inline run or a steered instruction. A title that already stands has its command replaced. Accepted, it prints the title as YAML — `title: Build and test` — on stdout and exits 0; refused, it exits non-zero and says why on stderr, and nothing is suggested.
+The command on stdin, read the way a commit message is: the first line is the command, of at most 4 KiB written for the terminal's own shell, and whatever follows a blank line is its description, markdown of at most 2 KiB that the card over its row shows. A second line that is not blank is refused, and the trailing newline a heredoc ends in is dropped. Only a building session may suggest one: a backlog task, the finish, a stage's planning, an inline run or a steered instruction. A title that already stands has its command and its description replaced, so one suggested again with no description is left with none. Accepted, it prints the title as YAML — `title: Build and test` — on stdout and exits 0; refused, it exits non-zero and says why on stderr, and nothing is suggested.
 
 `--retire <title>` takes one back instead: nothing is read from stdin, and nothing is printed on stdout.
 
@@ -580,6 +580,9 @@ way a memo is written:
 ```
 verkstead preview "Build and test" <<'SH'
 cargo build && cargo run -- serve
+
+Builds the server and starts it on port 8422. Open the viewer at
+`http://localhost:8422` and try the Code pane.
 SH
 ```
 
@@ -589,21 +592,33 @@ Accepted, it prints the title on stdout and exits 0:
 title: Build and test
 ```
 
+**Stdin is read the way a commit message is.** The first line is the command,
+and whatever follows a blank line is its **description**: markdown, of at most
+2 KiB, that the card over the preview's row shows above the command when the
+human hovers it. Say there what the title cannot — what it starts, where to
+look, what to try. A preview with no body has no description, and its card
+holds the command alone.
+
 **The command is one line**, of at most 4 KiB, refused empty or with a newline
-in it; the trailing newline a heredoc ends in is dropped. It is typed into an
+in it — a second line that is not blank is refused rather than taken for a
+description; the trailing newline a heredoc ends in is dropped. It is typed into an
 interactive shell **in the Conversation's own worktree**, so it is written
 from the root of the repository and **for the shell the terminal runs** —
 which is not this sandbox's, and which your prompt names. Join steps with that
 shell's own `&&` or `;`, and put anything longer in a script the branch
-carries, then make the preview the line that runs it.
+carries, then make the preview the line that runs it. **Leave the shell where
+you found it** — `pnpm --dir web dev` over `cd web && pnpm dev`, a
+`--manifest-path` or a `-C` over a `cd` joined by `&&` — since the up arrow in
+that terminal replays the line as it was written.
 
 **A preview is for the human's hand, not a test suite.** What they watch or
 click through: *Run the server*, *Build and open the app*, *Serve the docs* —
 and *Run the tests* only where watching them run is the point.
 
 **Keep it current.** The same title suggested again replaces its command in
-place, so as the way to run the work changes, suggest it again rather than
-adding a second; and **retire one that no longer runs**, by its title:
+place, and its description along with it — one suggested again with no body
+is left with none — so as the way to run the work changes, suggest it again,
+description and all, rather than adding a second; and **retire one that no longer runs**, by its title:
 
 ```
 verkstead preview --retire "Build and test"
@@ -613,8 +628,9 @@ Accepted, that prints nothing on stdout. A title that does not stand is
 refused by name. The human cannot remove one — the list is yours to keep true.
 
 Every building session is shown the previews standing, in its prompt, under
-this heading — and shown it when none stands too, over a line saying so, which
-is the cue to suggest the first:
+this heading, each title over its command and its description under that —
+and shown it when none stands too, over a line saying so, which is the cue to
+suggest the first:
 
 ```
 # The previews standing
@@ -623,11 +639,16 @@ is the cue to suggest the first:
 
     cargo build && cargo run -- serve
 
+Builds the server and starts it on port 8422. Open the viewer at
+`http://localhost:8422` and try the Code pane.
+
 Suggest one again under its title when its command changes, and retire one
 that no longer runs.
 
 A terminal here runs `fish`, at `/run/current-system/sw/bin/fish`: write a
-preview's command for that shell.
+preview's command for that shell. Write one that leaves the shell where it
+found it — a `--dir` or a `-C` over a `cd` joined by `&&` — since the up arrow
+replays it as written.
 ```
 
 A preview stands until it is retired: through a steer and a follow-up alike,

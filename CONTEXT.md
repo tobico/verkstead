@@ -3383,7 +3383,14 @@ called as any tab is. A press on the Preview while its terminal is live is the
 server's decision: the run in front refocuses the tab, the shell in front
 refocuses and types the command again, anything else in front opens a new
 Terminal — and where the foreground cannot be read, which is Windows, it
-refocuses and never types again. Retiring the Preview leaves the terminal.
+refocuses and never types again. **A retype starts from the worktree root**:
+the last run may have left the shell elsewhere — `cd web && pnpm dev` leaves
+it in `web/` — so the server reads the shell's working directory off the
+foreground it already reads the name of, and where it is not the root, or
+cannot be read, types `cd '<root>'` as a line of its own before the command;
+a shell still at the root gets the command alone, and a first press never
+gets the line, the shell starting at the root. Retiring the Preview leaves
+the terminal.
 The same server-held pseudo-terminal, virtual terminal and xterm window as a
 Screen, save that a tab keeps what scrolled past it where a Screen keeps
 nothing — the server holds the grid alone either way, so those lines are the
@@ -3414,7 +3421,14 @@ whichever device it lives on, and does not open the card. See ADR-0025. Down one
 box above the tree where any stand and no box where none do: a row per
 Preview, the title with a play icon at its right that becomes the terminal
 icon while its run stands, the whole row the press, lit as a row of the tree
-is. Under it a **tree**
+is. **Each row has a card**, in the Menu's chrome beside it, holding the
+Preview's description rendered where it has one and its command as a code
+block under that — what a press would type, readable before it is pressed.
+A mouse resting on the row opens it, read off the pointer's type rather than
+left to `:hover`, and leaving closes it; keyboard focus opens it and Enter
+presses the row; Escape closes it. **On touch a row is two taps**, on every
+row alike: the first opens its card and runs nothing, a second on the same
+row is the press, and a tap away closes the card. One card at a time. Under it a **tree**
 with a root per Worktree — the Conversation's own first, then each Companion,
 a read-only one opening read-only — hiding what git ignores and `.git`, marked
 where git says a file is modified or untracked, with new file, new folder,
@@ -3599,17 +3613,27 @@ replaces the command in place, and `verkstead preview --retire <title>` takes
 it back — the agent alone, the human having no Remove. **Building sessions
 only**, the **Memo**'s rule, refused by name from every other kind. One line
 of at most 4 KiB, refused empty or with a newline in it, written for the
-**Terminal**'s own shell, which the prompt names. Stands until retired, through
-a **Steer** and a **Follow-up** alike, being true of the branch rather than of
-the round.
-**Drawn in Code** as a row of the Previews box above the tree, and **run in a
+**Terminal**'s own shell, which the prompt names — and asked to leave that
+shell where it found it, a `--dir` or a `-C` over a `cd` joined by `&&`,
+since the up arrow replays the line as written. **And a description**: the
+markdown after a blank line under the command on stdin, the way a commit has
+a subject and a body, saying what the Preview is for in more words than the
+title holds. Optional, at most 2 KiB, and a second line that is not blank is
+refused as a newline in the command is, so a command wrapped by accident
+never becomes a description. The same title suggested again replaces the
+row whole, description included, so a suggestion without one clears what
+stood. Stands until retired, through a **Steer** and a **Follow-up** alike,
+being true of the branch rather than of the round.
+**Drawn in Code** as a row of the Previews box above the tree, its card
+holding the description rendered over the command, and **run in a
 Terminal** opened for it, the command typed as the human would have typed it —
 both entries have the rules. Every building session's prompt lists the
-standing Previews, title and command, under a heading of its own, shown over a
-hint when none stand; every other kind's prompt carries no such heading. See
-ADR-0024.
+standing Previews, title, command and description, under a heading of its
+own, shown over a hint when none stand; every other kind's prompt carries no
+such heading. See ADR-0024.
 _Avoid_: script (what the command is in, not what it is for), launcher, run
-configuration, task (that is a backlog's), command (what a Preview holds)
+configuration, task (that is a backlog's), command (what a Preview holds),
+tooltip and hint (the card holds markdown, not a line), caption
 
 **Agent Profile**:
 A coding-agent account Verkstead can run a session under: an agent type, the

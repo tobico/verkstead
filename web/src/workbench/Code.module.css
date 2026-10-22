@@ -335,6 +335,57 @@
   opacity: 0.75;
 }
 
+/* A preview's card, beside its row and over the groups: what a press would
+   type, readable before it is pressed (ADR-0024). In the Menu's chrome — the
+   same wash, border, round and lift off the page a menu's drop has, see
+   `.drop` in `Menu.module.css` — because it is the same thing, a card standing
+   in front of what it covers. Fixed to the window at the place `Previews`
+   works out, being drawn at the body rather than inside a box that scrolls.
+
+   A column, so a block above the command — the description — takes its place
+   without the card being laid out again. The blocks are the agent's markdown
+   rules, as everywhere else, and the card holds the padding. */
+.previewCard {
+  position: fixed;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  max-width: min(20rem, calc(100vw - 2rem));
+  padding: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  box-shadow: var(--lift);
+}
+
+.previewCard > :first-child {
+  margin-top: 0;
+}
+
+.previewCard > :last-child {
+  margin-bottom: 0;
+}
+
+/* The description the agent wrote, rendered by the server, above the command:
+   its own first and last blocks sit flush, as the card's do. */
+.previewAbout > :first-child {
+  margin-top: 0;
+}
+
+.previewAbout > :last-child {
+  margin-bottom: 0;
+}
+
+/* The command wraps rather than scrolling: a card is read, not worked in, and
+   a long line cut off at its edge would hide the very part being looked for. */
+.previewCard pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Code's tab bar, holding a Conversation's own terminals one per tab — see
    `Code.tsx`.
 

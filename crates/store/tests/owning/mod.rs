@@ -304,6 +304,7 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
             id,
             "Build and test",
             "cargo run -- serve",
+            Some("Starts the server on port 8422."),
             "the session that worked task 03",
         )
         .await

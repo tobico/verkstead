@@ -53,9 +53,16 @@ async fn a_preview_stands_oldest_first_with_its_stamp() {
 
     for (title, command) in [("Build and test", "cargo test"), ("Serve", "cargo run")] {
         assert!(
-            suggest_preview(&pool, id, title, command, "the session that worked task 01")
-                .await
-                .unwrap()
+            suggest_preview(
+                &pool,
+                id,
+                title,
+                command,
+                None,
+                "the session that worked task 01"
+            )
+            .await
+            .unwrap()
         );
     }
 
@@ -81,6 +88,7 @@ async fn the_same_title_again_replaces_it_in_place() {
         id,
         "Build and test",
         "cargo test",
+        None,
         "the session that worked task 01",
     )
     .await
@@ -90,6 +98,7 @@ async fn the_same_title_again_replaces_it_in_place() {
         id,
         "Serve",
         "cargo run",
+        None,
         "the session that worked task 01",
     )
     .await
@@ -99,6 +108,7 @@ async fn the_same_title_again_replaces_it_in_place() {
         id,
         "Build and test",
         "cargo test --workspace",
+        None,
         "the session that worked task 02",
     )
     .await
@@ -131,6 +141,7 @@ async fn a_preview_puts_nothing_on_the_timeline() {
         id,
         "Build and test",
         "cargo test",
+        None,
         "the finish session",
     )
     .await
@@ -150,6 +161,7 @@ async fn retiring_takes_only_that_title_back() {
         id,
         "Build and test",
         "cargo test",
+        None,
         "the finish session",
     )
     .await
@@ -159,6 +171,7 @@ async fn retiring_takes_only_that_title_back() {
         other,
         "Build and test",
         "npm test",
+        None,
         "the finish session",
     )
     .await
@@ -192,9 +205,104 @@ async fn a_preview_on_no_conversation_is_said_so() {
             42,
             "Build and test",
             "cargo test",
+            None,
             "the finish session"
         )
         .await
         .unwrap()
+    );
+}
+
+/// A description stands beside its command, and the same title suggested
+/// again without one clears it: the row is replaced whole.
+#[tokio::test]
+async fn the_same_title_without_a_description_clears_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool, "rate-limiting").await;
+
+    suggest_preview(
+        &pool,
+        id,
+        "Build and test",
+        "cargo test",
+        Some("Runs **every** suite."),
+        "the session that worked task 01",
+    )
+    .await
+    .unwrap();
+
+    let [standing] = <[_; 1]>::try_from(standing_previews(&pool, id).await.unwrap()).unwrap();
+    assert_eq!(
+        standing.description.as_deref(),
+        Some("Runs **every** suite.")
+    );
+
+    suggest_preview(
+        &pool,
+        id,
+        "Build and test",
+        "cargo test",
+        None,
+        "the session that worked task 02",
+    )
+    .await
+    .unwrap();
+
+    let [standing] = <[_; 1]>::try_from(standing_previews(&pool, id).await.unwrap()).unwrap();
+    assert_eq!(standing.description, None);
+}
+
+/// A database whose previews table was made before there were descriptions
+/// gains the column when it is next opened, its Previews reading back with
+/// none — and opening one made since, column and all, changes nothing.
+#[tokio::test]
+async fn a_database_from_before_descriptions_gains_the_column() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("verkstead.db");
+
+    let pool = open_database(&path).await.unwrap();
+    let id = conversation(&pool, "rate-limiting").await;
+    suggest_preview(
+        &pool,
+        id,
+        "Build and test",
+        "cargo test",
+        None,
+        "the session that worked task 01",
+    )
+    .await
+    .unwrap();
+    sqlx::query("ALTER TABLE previews DROP COLUMN description")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let pool = open_database(&path).await.unwrap();
+
+    let [standing] = <[_; 1]>::try_from(standing_previews(&pool, id).await.unwrap()).unwrap();
+    assert_eq!(
+        (standing.command.as_str(), standing.description),
+        ("cargo test", None)
+    );
+
+    suggest_preview(
+        &pool,
+        id,
+        "Serve",
+        "cargo run",
+        Some("Starts it."),
+        "the session that worked task 02",
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let pool = open_database(&path).await.unwrap();
+    let previews = standing_previews(&pool, id).await.unwrap();
+    assert_eq!(
+        previews[1].description.as_deref(),
+        Some("Starts it."),
+        "and a description written since survives the next opening",
     );
 }

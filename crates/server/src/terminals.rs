@@ -1193,6 +1193,21 @@ pub(crate) async fn open(
 
             Pressed::Retype { number, terminal } => {
                 moved();
+
+                // From the worktree root, which the run before may have left:
+                // `cd web && pnpm dev` leaves the shell in `web/`, and the line
+                // typed again there fails on its own first step. A shell that
+                // cannot be read is sent back too, the line being harmless at
+                // the root — see [`homeward`].
+                let root = conversation
+                    .worktree
+                    .as_deref()
+                    .and_then(|root| homeward(busy::directory(&terminal).as_deref(), root));
+
+                if let Some(back) = root {
+                    typed(&terminal, &back, conversation_id, number).await;
+                }
+
                 typed(&terminal, &preview.command, conversation_id, number).await;
 
                 return Ok(TerminalOpened::Retyped { number });
@@ -1547,6 +1562,30 @@ async fn previewing(
                 }
             }
         }
+    }
+}
+
+/// The line that takes a retyped Preview's shell back to the worktree `root`,
+/// where `standing` — the shell's working directory, as the kernel reports it —
+/// says it has moved off it, or nothing says where it is. `None` where it is
+/// still at the root, and the command is typed alone.
+///
+/// Compared as paths rather than strings, so a trailing separator is not a
+/// move — and against the root with its symlinks resolved too, since that is
+/// how the kernel reports where the shell stands: a worktree under a symlinked
+/// home, `/home` → `/var/home`, would otherwise never be at its own root. The
+/// line itself names the root as recorded, and is quoted in single quotes,
+/// which bash, zsh, fish and PowerShell all read as a literal. A root holding a
+/// single quote is not handled.
+fn homeward(standing: Option<&std::path::Path>, root: &std::path::Path) -> Option<String> {
+    match standing {
+        Some(standing)
+            if standing == root
+                || std::fs::canonicalize(root).is_ok_and(|resolved| resolved == standing) =>
+        {
+            None
+        }
+        _ => Some(format!("cd '{}'", root.display())),
     }
 }
 
@@ -2173,5 +2212,44 @@ mod tests {
         drop(opening);
 
         assert_eq!(terminals.running(), 0);
+    }
+
+    /// A retyped Preview's shell is sent back to the root where it stands
+    /// elsewhere or cannot be read, and left alone at the root — a trailing
+    /// separator being no move.
+    #[test]
+    fn a_retype_goes_home_only_from_somewhere_else() {
+        use std::path::Path;
+
+        let root = Path::new("/work/tree");
+
+        assert_eq!(homeward(Some(Path::new("/work/tree")), root), None);
+        assert_eq!(homeward(Some(Path::new("/work/tree/")), root), None);
+        assert_eq!(
+            homeward(Some(Path::new("/work/tree/web")), root).as_deref(),
+            Some("cd '/work/tree'"),
+        );
+        assert_eq!(homeward(None, root).as_deref(), Some("cd '/work/tree'"));
+    }
+
+    /// A root recorded through a symlink is the root the kernel reports with
+    /// the link resolved, so a shell standing there is not sent back to it.
+    #[cfg(unix)]
+    #[test]
+    fn a_root_reached_through_a_symlink_is_still_the_root() {
+        let held = tempfile::tempdir().unwrap();
+        let real = held.path().join("real");
+        std::fs::create_dir_all(real.join("web")).unwrap();
+        let linked = held.path().join("linked");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+
+        let resolved = std::fs::canonicalize(&real).unwrap();
+
+        assert_eq!(homeward(Some(&resolved), &linked), None);
+        assert_eq!(
+            homeward(Some(&resolved.join("web")), &linked),
+            Some(format!("cd '{}'", linked.display())),
+            "and one standing off it is sent back by the path as recorded",
+        );
     }
 }

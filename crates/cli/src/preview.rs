@@ -2,10 +2,13 @@
 //! (ADR-0024).
 //!
 //! The title as the argument and the command on stdin, the way `verkstead
-//! memo` takes its markdown. A suggestion the server would refuse for its shape
-//! — an empty title or command, a newline in the command, or a command over the
-//! maximum — is refused here before anything is sent, as a courtesy; whether
-//! this session may suggest one at all is the server's to say.
+//! memo` takes its markdown — and under the command, after a blank line, the
+//! markdown description its card shows, read the way a commit message is. A
+//! suggestion the server would refuse for its shape — an empty title or
+//! command, a command that runs onto a second line, or a command or a
+//! description over its maximum — is refused here before anything is sent, as
+//! a courtesy; whether this session may suggest one at all is the server's to
+//! say.
 //!
 //! **Stdout carries the title and nothing else**, as YAML; the confirmation in
 //! words goes to stderr.
@@ -20,12 +23,12 @@ use crate::client::Client;
 /// Suggest the command on stdin under `title`, and print the title it stands
 /// under.
 pub fn preview(title: &str, server: &str) -> Result<()> {
-    let mut command = String::new();
+    let mut written = String::new();
     std::io::stdin()
-        .read_to_string(&mut command)
+        .read_to_string(&mut written)
         .context("reading the preview's command from stdin")?;
 
-    let suggestion = PreviewSuggestion::new(title, &command);
+    let suggestion = PreviewSuggestion::read(title, &written);
 
     if let Some(why) = suggestion.refused() {
         bail!("{why}");

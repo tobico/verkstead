@@ -661,7 +661,8 @@ fn the_guides_quoted_preview_contract_is_the_real_one() {
 /// A preview is suggested during the work, beside the memo and before the
 /// signal, and the section carries the brief's rule — suggest one the moment
 /// anything could be tried — with both invocations, the bounds, what the
-/// command is written for, and the heading a building session reads them under.
+/// command is written for, the description under it and what replaces it, and
+/// the heading a building session reads them under.
 #[test]
 fn the_guide_says_how_to_suggest_a_preview() {
     for agent_type in ["claude", "codex", "grok", "opencode"] {
@@ -684,13 +685,20 @@ fn the_guide_says_how_to_suggest_a_preview() {
             "refused by name",
             "verkstead preview \"Build and test\" <<'SH'",
             "title: Build and test",
+            "Stdin is read the way a commit message is",
+            "whatever follows a blank line is its **description**",
+            "2 KiB",
+            "a second line that is not blank is refused",
             "4 KiB",
             "with a newline in it",
             "in the Conversation's own worktree",
             "for the shell the terminal runs",
+            "Leave the shell where you found it",
+            "the up arrow in that terminal replays the line as it was written",
             "not a test suite",
             "*Run the tests* only where watching them run is the point",
-            "replaces its command in place",
+            "replaces its command in place, and its description along with it",
+            "one suggested again with no body is left with none",
             "retire one that no longer runs",
             "verkstead preview --retire \"Build and test\"",
             "# The previews standing",
@@ -701,6 +709,15 @@ fn the_guide_says_how_to_suggest_a_preview() {
                 "{agent_type}'s preview section should say {phrase:?}, got:\n{preview}"
             );
         }
+        assert!(
+            preview.contains(
+                "<<'SH'\ncargo build && cargo run -- serve\n\nBuilds the server and starts it"
+            ) && preview.contains(
+                "    cargo build && cargo run -- serve\n\nBuilds the server and starts it"
+            ),
+            "{agent_type}'s preview section should show the heredoc with a body, and the \
+             description under its command in the prompt, got:\n{preview}"
+        );
     }
 }
 

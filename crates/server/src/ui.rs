@@ -2516,9 +2516,12 @@ pub(crate) async fn conversation_view(
     let previews = match store::standing_previews(&state.pool, id).await {
         Ok(previews) => previews
             .into_iter()
-            .map(|preview| verkstead_render::PreviewView {
-                title: preview.title,
-                command: preview.command,
+            .map(|preview| {
+                verkstead_render::PreviewView::new(
+                    preview.title,
+                    preview.command,
+                    preview.description.as_deref(),
+                )
             })
             .collect(),
         Err(error) => {
