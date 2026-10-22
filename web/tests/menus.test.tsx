@@ -14,7 +14,7 @@
 
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextMenu, Menu, Nested } from "../src/Menu";
 // The one menu, both ways: the hashed names to query the page by, and the
@@ -225,6 +225,92 @@ describe("a dropdown menu", () => {
     fireEvent.click(trigger(container));
 
     expect(drop(container)).toBeNull();
+  });
+});
+
+/// Which side of the trigger the card hangs, measured against the window by
+/// the rule the pickers hang their rows by.
+describe("where a dropdown menu hangs", () => {
+  /// A window 1000 tall, a trigger standing at `at` and 40 tall, and a card
+  /// however tall `card()` says it is now. jsdom lays nothing out, so both
+  /// boxes are told.
+  function laid(at: number, card: () => number): void {
+    window.innerHeight = 1000;
+
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: Element): DOMRect {
+        if (this.classList.contains(menu.drop!)) {
+          return { top: 0, bottom: card(), height: card() } as DOMRect;
+        }
+        return { top: at, bottom: at + 40, height: 40 } as DOMRect;
+      },
+    );
+  }
+
+  const observing = window.ResizeObserver;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.ResizeObserver = observing;
+  });
+
+  it("comes down under the trigger where there is room for it", () => {
+    laid(100, () => 300);
+    const { container } = mount();
+
+    fireEvent.click(trigger(container));
+
+    expect(drop(container)!.classList.contains(menu.up!)).toBe(false);
+  });
+
+  /// The compose page with a long Brief: the setup row at the foot of the
+  /// window, and the Repo panel and the `+` menu with nowhere under it to go.
+  it("hangs over the trigger where there is not", () => {
+    laid(850, () => 300);
+    const { container } = mount();
+
+    fireEvent.click(trigger(container));
+
+    expect(drop(container)!.classList.contains(menu.up!)).toBe(true);
+  });
+
+  /// Where neither side fits, the side that shows more of it — not the top of
+  /// the window just because the bottom was short.
+  it("stays under where neither side fits and under is roomier", () => {
+    laid(300, () => 900);
+    const { container } = mount();
+
+    fireEvent.click(trigger(container));
+
+    expect(drop(container)!.classList.contains(menu.up!)).toBe(false);
+  });
+
+  /// A nested level far taller than the rows it replaced, or rows that were
+  /// still being read as it opened: the card is measured again as it grows.
+  it("is measured again when the card changes size", () => {
+    // Written rather than stubbed, `setup.ts` having defined the property
+    // rather than assigned it.
+    let resized = (): void => {};
+    window.ResizeObserver = class {
+      constructor(told: () => void) {
+        resized = told;
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    } as unknown as typeof ResizeObserver;
+
+    let tall = 100;
+    laid(700, () => tall);
+    const { container } = mount();
+
+    fireEvent.click(trigger(container));
+    expect(drop(container)!.classList.contains(menu.up!)).toBe(false);
+
+    tall = 400;
+    resized();
+
+    expect(drop(container)!.classList.contains(menu.up!)).toBe(true);
   });
 });
 

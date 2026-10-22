@@ -45,6 +45,7 @@ import {
   Show,
   createContext,
   createSignal,
+  createEffect,
   createUniqueId,
   onCleanup,
   onMount,
@@ -53,6 +54,7 @@ import {
 import type { JSX } from "solid-js";
 
 import styles from "./Menu.module.css";
+import { hangsOver } from "./hanging";
 
 /// A level of a menu below its first: what the row that opens it reads as, and
 /// the rows it holds.
@@ -121,14 +123,6 @@ export function Menu(props: {
   /// one, so a panel is a plain labelled group and the row paint in
   /// `Menu.module.css` stays off it.
   panel?: boolean;
-  /// Whether the card hangs **over** the trigger rather than under it, for a
-  /// trigger that stands at the bottom of what it is drawn in: the sidebar's
-  /// foot is stuck to the bottom edge of the pane, and a card dropped under it
-  /// would fall off the window.
-  ///
-  /// Said by the caller rather than measured, because where a trigger stands is
-  /// a fact about the page it was written into: a foot is always at the foot.
-  up?: boolean;
   /// Whether the trigger takes a press. A disabled trigger still says what it
   /// says — a badge with a locking in flight is the case this is for.
   disabled?: boolean;
@@ -157,7 +151,7 @@ export function Menu(props: {
   /// menu rather than doing something.
   children: () => JSX.Element;
 }): JSX.Element {
-  // `true` while the menu hangs open under the trigger.
+  // `true` while the menu hangs open off the trigger.
   const [open, setOpen] = createSignal(false);
 
   // The drop's own id, for the `aria-controls` that ties it to the trigger.
@@ -188,6 +182,55 @@ export function Menu(props: {
   };
 
   props.closer?.(shut);
+
+  // Whether the card hangs **over** the trigger rather than under it: measured,
+  // where there is not the room under it — the sidebar's foot is stuck to the
+  // bottom of the pane, and a long Brief pushes the composer's setup row down
+  // to the window's — by the rule the pickers hang their rows by.
+  const [up, setUp] = createSignal(false);
+
+  // The card while it is down, for the measure.
+  let drop: HTMLDivElement | undefined;
+
+  // Made as the card comes down — in an effect, which runs once it is on the
+  // page and before the browser paints, so nobody sees it hang the wrong way
+  // first — and again whenever it changes size, which is not rare: a nested
+  // level can be far taller than the rows it replaced, and rows still being
+  // read land after the card is open. Put back to the ordinary way round as
+  // the card goes, so the next opening starts from that rather than from the
+  // last answer.
+  //
+  // The card stays hung off the trigger rather than fixed to the window, as
+  // the pickers' rows are: nothing clips these, and a pane taller than the
+  // window scrolls the card along with the trigger it came out of. So the only
+  // thing the measure says is which side.
+  createEffect(() => {
+    if (!open() || !drop) {
+      setUp(false);
+      return;
+    }
+
+    const card = drop;
+    const measure = () => {
+      setUp(
+        hangsOver(
+          trigger.getBoundingClientRect(),
+          card.getBoundingClientRect().height,
+        ),
+      );
+    };
+
+    measure();
+
+    // Guarded rather than assumed, as the right-click menu's is: a page with no
+    // observer to give still has a card measured once as it opens, which is
+    // most of the answer.
+    if (typeof ResizeObserver === "undefined") return;
+
+    const watching = new ResizeObserver(measure);
+    watching.observe(card);
+    onCleanup(() => watching.disconnect());
+  });
 
   // The way out that needs no aim: a menu drawn over the page has to be
   // dismissible from the keyboard. The other way — a press on the page — is the
@@ -233,10 +276,11 @@ export function Menu(props: {
           class={[
             styles.drop,
             props.panel && styles.panel,
-            props.up && styles.up,
+            up() && styles.up,
           ]
             .filter(Boolean)
             .join(" ")}
+          ref={drop}
           id={id}
           role={props.panel ? "group" : "menu"}
           aria-label={props.name}

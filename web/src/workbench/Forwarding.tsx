@@ -19,8 +19,9 @@
 //! blank paper; it keeps its room there all the same, wrapped under the switch
 //! where the expanded pane would wrap it. See `Archived.module.css`.
 //!
-//! The popup hangs over the item rather than under it, the item standing at the
-//! bottom of the pane; it is the one menu the app has, so it closes the ways
+//! The popup hangs over the item rather than under it — measured, as every
+//! menu's side is, and there is no room under an item at the bottom of the
+//! pane; it is the one menu the app has, so it closes the ways
 //! every menu does and hands the focus back to the item on Escape. A × is not
 //! one of those ways: it takes its row away and leaves the rest standing, so
 //! several can be ended in one visit — and the item goes with the last of them.
@@ -64,7 +65,6 @@ export function Forwarding(): JSX.Element {
     <Show when={forwards().length > 0}>
       <Menu
         class={styles.forwarding!}
-        up
         name="Forwarded ports"
         trigger={
           <>

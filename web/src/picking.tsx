@@ -102,6 +102,7 @@ import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
 import { HarnessMark } from "./HarnessMark";
 import { Icon } from "./Icon";
 import type { AgentType } from "./agents";
+import { hangsOver } from "./hanging";
 import styles from "./picking.module.css";
 
 /// What either control says where nothing is chosen, unless the caller says
@@ -1065,15 +1066,10 @@ export function dropping(props: {
       ? rows.scrollHeight + rows.offsetHeight - rows.clientHeight
       : drop.height;
 
-    // Over the anchor only where the rows do not fit under it, and then only
-    // where there is more room over it: the ordinary way round is the one to be
-    // in wherever being in it costs nothing, and where neither side fits the
-    // rows go to whichever side shows more of them. Which side that is changes
-    // nothing about *which* rows — the list is capped and scrolls from its top
-    // either way.
-    const over =
-      anchor.bottom + asked > window.innerHeight &&
-      anchor.top > window.innerHeight - anchor.bottom;
+    // Over the anchor or under it by the rule every dropdown shares. Which side
+    // that is changes nothing about *which* rows — the list is capped and
+    // scrolls from its top either way.
+    const over = hangsOver(anchor, asked);
 
     // How wide the rows will stand: the anchor's width, which is what they are
     // handed, or their own where a caller has asked for more of them than that.
