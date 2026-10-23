@@ -16,5 +16,5 @@ each task builds to words already there.
 
 - [x] 01: A picture is served by its blob id — [details](01-a-picture-is-served-by-its-blob-id.md)
 - [x] 02: The renderer marks a picture and the viewer draws it — [details](02-the-renderer-marks-a-picture-and-the-viewer-draws-it.md)
-- [ ] 03: A tap opens a picture at full size — [details](03-a-tap-opens-a-picture-at-full-size.md)
+- [x] 03: A tap opens a picture at full size — [details](03-a-tap-opens-a-picture-at-full-size.md)
 - [ ] 04: A share carries its pictures — [details](04-a-share-carries-its-pictures.md)

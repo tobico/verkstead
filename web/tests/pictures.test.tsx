@@ -6,7 +6,7 @@
 //! the bytes come from a stub here, which is the one thing the fixture names
 //! without carrying.
 
-import { cleanup, render, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CommitEvent, CommitPane, SetView } from "../src/api/types";
@@ -301,5 +301,122 @@ describe("a picture in a commit's pane", () => {
 
     await waitFor(() => expect(container.querySelector(".diffPictures")).toBeNull());
     expect(container.querySelector(".diffPictureCode .diffHunk")).toBeTruthy();
+  });
+});
+
+/// The picture open at full size, where one is.
+function full(): HTMLDialogElement | null {
+  return document.querySelector<HTMLDialogElement>("dialog.diffPictureFull[open]");
+}
+
+/// The box a side of a file is drawn in, once it is drawn.
+async function drawn(page: ParentNode, path: string, word: string): Promise<HTMLButtonElement> {
+  const file = fold(page, path);
+  let box: HTMLButtonElement | undefined;
+  await waitFor(() => {
+    box = [...file.querySelectorAll<HTMLButtonElement>("button.diffPictureBox")].find(
+      (one) => one.closest("figure")?.querySelector("figcaption")?.textContent === word,
+    );
+    expect(box, `expected ${word} of ${path} drawn`).toBeTruthy();
+  });
+  return box!;
+}
+
+describe("a picture pressed", () => {
+  it("opens at full size in a Set's Diff, with its word and path", async () => {
+    const { container, fetching } = await opened(...SERVED);
+    scrollNear();
+
+    const before = await drawn(container, "assets/mark.svg", "Before");
+    const src = before.querySelector("img")!.getAttribute("src");
+    const diff = container.querySelector("#diff")!.innerHTML;
+
+    fireEvent.click(before);
+
+    const dialog = full();
+    expect(dialog).toBeTruthy();
+    expect(dialog!.querySelector(".diffPictureFullWord")?.textContent).toBe("Before");
+    expect(dialog!.querySelector(".diffPictureFullPath")?.textContent).toBe("assets/mark.svg");
+    expect(dialog!.querySelector(".diffPictureBox img")?.getAttribute("src"), "the bytes already fetched").toBe(src);
+
+    expect(container.querySelector("#diff")!.innerHTML, "the Diff behind it is unchanged").toBe(diff);
+    expect(askedFor(fetching, SVG_BEFORE_AT), "nothing fetched again").toBe(1);
+  });
+
+  it("opens either side of a pair", async () => {
+    const { container } = await opened(...SERVED);
+    scrollNear();
+
+    fireEvent.click(await drawn(container, "assets/mark.svg", "After"));
+
+    expect(full()!.querySelector(".diffPictureFullWord")?.textContent).toBe("After");
+  });
+
+  it("opens at full size in a commit's pane", async () => {
+    const read = vi.fn((picture: { blob: string }) => Promise.resolve(new Blob([picture.blob])));
+    const { container } = render(() => (
+      <Opened
+        commit={{ id: 7, sha: "0".repeat(40), subject: "feat: a mark", repo: null } as CommitEvent}
+        pane={{ summary: null, diagrams: false, diff: PICTURED.diff[0]!.diff }}
+        back={() => {}}
+        instead={<p />}
+        read={read}
+      />
+    ));
+    scrollNear();
+
+    fireEvent.click(await drawn(container, "assets/icon.png", "After"));
+
+    expect(full()!.querySelector(".diffPictureFullPath")?.textContent).toBe("assets/icon.png");
+    expect(read, "once, to draw it in the Diff").toHaveBeenCalledTimes(3);
+  });
+
+  const ways: [string, (dialog: HTMLDialogElement) => void][] = [
+    ["Escape", () => fireEvent.keyDown(document, { key: "Escape" })],
+    ["a press on the backdrop", (dialog) => fireEvent.click(dialog)],
+    ["its control", (dialog) => fireEvent.click(dialog.querySelector("button[aria-label='Close']")!)],
+  ];
+
+  for (const [way, close] of ways) {
+    it(`closes on ${way}, handing the focus back to the picture`, async () => {
+      const { container } = await opened(...SERVED);
+      scrollNear();
+
+      const before = await drawn(container, "assets/mark.svg", "Before");
+      fireEvent.click(before);
+      const dialog = full()!;
+
+      close(dialog);
+
+      expect(full()).toBeNull();
+      expect(document.querySelector("dialog.diffPictureFull"), "taken off the page").toBeNull();
+      expect(document.activeElement).toBe(before);
+    });
+  }
+
+  it("stays open on a press inside its card", async () => {
+    const { container } = await opened(...SERVED);
+    scrollNear();
+
+    fireEvent.click(await drawn(container, "assets/mark.svg", "Before"));
+    fireEvent.click(full()!.querySelector("img")!);
+
+    expect(full()).toBeTruthy();
+  });
+
+  it("opens nothing where the picture was not drawn", async () => {
+    const { container } = await opened(
+      whenever(SVG_BEFORE_AT, bytes("<svg/>", "mark.svg")),
+      whenever(SVG_AFTER_AT, bytes("<svg/>", "mark.svg")),
+      whenever(PNG_AFTER_AT, json({ error: "This picture is no longer there." }, 404)),
+    );
+    scrollNear();
+
+    const png = fold(container, "assets/icon.png");
+    await waitFor(() => expect(png.querySelector("figure")).toBeNull());
+
+    expect(png.querySelector("button"), "a sentence is not a press").toBeNull();
+    fireEvent.click(png.querySelector(".diffNote")!);
+    expect(full()).toBeNull();
   });
 });

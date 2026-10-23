@@ -18,9 +18,18 @@
 //! becomes the sentence. A picture that fetched but will not draw is left to the
 //! browser's own broken-image mark.
 //!
+//! **A press opens a picture at full size**, over the page in a dialog painted
+//! as `Modal.tsx`'s card is: the same object URL, so nothing is fetched again,
+//! drawn at its own size and no larger than the window, under its side's word
+//! and its path. A picture that fell back is a sentence, and opens nothing.
+//!
 //! None of it is Solid, for `diagrams.ts`'s reason: one routine run over the
 //! injected markup by both the Set sheet and the commit pane, wherever either is
-//! drawn.
+//! drawn — so the dialog is `Modal.tsx`'s native `dialog` written out by hand.
+
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
+
+import { icon } from "./diagrams";
 
 /// One placeholder's worth: what the bytes are fetched by, and what to draw
 /// them as.
@@ -41,8 +50,10 @@ const SECTION = "diffPictures";
 const CODE = "diffPictureCode";
 const NOTE = "diffNote";
 
-/// And this module's own, painted beside them.
+/// And this module's own, painted beside them: the box a picture is drawn in,
+/// which is also the button that opens it, and the dialog it opens into.
 const BOX = "diffPictureBox";
+const FULL = "diffPictureFull";
 
 /// Said where a picture was and is not any more, when the server gave no
 /// sentence of its own: the blob gone with its worktree, or no server to ask.
@@ -68,6 +79,17 @@ export function drawPictures(how: Drawing): () => void {
   const figures = [...how.root.querySelectorAll<HTMLElement>(PLACEHOLDER)];
   let gone = false;
 
+  // The picture open at full size, where one is. Never two: the dialog puts
+  // the page behind it out of reach.
+  let open: HTMLDialogElement | null = null;
+
+  const opened = (dialog: HTMLDialogElement) => {
+    open = dialog;
+    dialog.addEventListener("close", () => {
+      if (open === dialog) open = null;
+    });
+  };
+
   const load = (figure: HTMLElement) => {
     const picture = placed(figure);
 
@@ -78,7 +100,7 @@ export function drawPictures(how: Drawing): () => void {
 
     url(how.read, picture).then(
       (src) => {
-        if (!gone) draw(figure, picture, src);
+        if (!gone) draw(figure, picture, src, opened);
       },
       (error: unknown) => {
         if (!gone) fail(figure, said(error));
@@ -91,13 +113,18 @@ export function drawPictures(how: Drawing): () => void {
     return () => {};
   }
 
+  // A page that has gone takes its open picture with it: the dialog stands on
+  // the body, outside anything the page unmounted.
+  const stop = () => {
+    gone = true;
+    open?.close();
+  };
+
   // A browser with no observer to ask is one that is drawn all at once rather
   // than not at all.
   if (typeof IntersectionObserver === "undefined") {
     figures.forEach(load);
-    return () => {
-      gone = true;
-    };
+    return stop;
   }
 
   const watching = new IntersectionObserver(
@@ -116,7 +143,7 @@ export function drawPictures(how: Drawing): () => void {
   figures.forEach((figure) => watching.observe(figure));
 
   return () => {
-    gone = true;
+    stop();
     watching.disconnect();
   };
 }
@@ -147,17 +174,95 @@ function url(read: Reader, picture: Picture): Promise<string> {
   return asked;
 }
 
-/// The picture, in its box on the chequerboard under its side's word.
-function draw(figure: HTMLElement, picture: Picture, src: string): void {
-  const box = document.createElement("div");
+/// The picture, in its box on the chequerboard under its side's word. The box
+/// is a button, and a press on it opens the picture at full size.
+function draw(
+  figure: HTMLElement,
+  picture: Picture,
+  src: string,
+  opened: (dialog: HTMLDialogElement) => void,
+): void {
+  // Read before the box goes in, which has no text but would be in the way.
+  const word = (figure.textContent ?? "").trim();
+
+  const box = document.createElement("button");
+  box.type = "button";
   box.className = BOX;
+  box.setAttribute("aria-label", `Open ${word} ${picture.path}`.replace(/\s+/g, " "));
+  box.append(img(src, word, picture.path));
+  box.addEventListener("click", () => opened(full(box, word, picture.path, src)));
 
-  const img = document.createElement("img");
-  img.src = src;
-  img.alt = `${figure.textContent ?? ""} ${picture.path}`.trim();
-
-  box.append(img);
   figure.append(box);
+}
+
+function img(src: string, word: string, path: string): HTMLImageElement {
+  const drawn = document.createElement("img");
+  drawn.src = src;
+  drawn.alt = `${word} ${path}`.trim();
+  return drawn;
+}
+
+/// One picture at full size: a dialog over the page, opened from `from` and
+/// handing the focus back to it on the way shut.
+///
+/// Every way out is `Modal.tsx`'s: Escape is the platform's, a press on the
+/// backdrop lands on the dialog itself — which is why the card inside carries
+/// the padding — and the card's own control closes it.
+function full(from: HTMLElement, word: string, path: string, src: string): HTMLDialogElement {
+  const dialog = document.createElement("dialog");
+  dialog.className = FULL;
+  dialog.setAttribute("aria-label", `${word} ${path}`.trim());
+
+  const card = document.createElement("div");
+  card.className = `${FULL}Card`;
+
+  const head = document.createElement("div");
+  head.className = `${FULL}Head`;
+
+  const caption = document.createElement("p");
+  caption.className = `${FULL}Caption`;
+  const side = document.createElement("span");
+  side.className = `${FULL}Word`;
+  side.textContent = word;
+  const where = document.createElement("span");
+  where.className = `${FULL}Path`;
+  where.textContent = path;
+  caption.append(side, where);
+
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = `${FULL}Close`;
+  close.setAttribute("aria-label", "Close");
+  close.append(icon(faXmark));
+  close.addEventListener("click", () => dialog.close());
+
+  head.append(caption, close);
+
+  const box = document.createElement("div");
+  box.className = `${BOX} ${FULL}Box`;
+  box.append(img(src, word, path));
+
+  card.append(head, box);
+  dialog.append(card);
+
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+
+  // The browser hands the focus back on its own; said here as well, for a
+  // dialog that is taken off the body before the browser gets to.
+  dialog.addEventListener("close", () => {
+    dialog.remove();
+    if (from.isConnected) from.focus();
+  });
+
+  // On the body rather than in the Diff, for `diagrams.ts`'s reason: the pane
+  // is scrolled and clipped in ways this should not have to know about, and
+  // the box in the Diff keeps its place.
+  document.body.append(dialog);
+  dialog.showModal();
+
+  return dialog;
 }
 
 /// The sentence a failed read is drawn as: the server's own, where it said one.

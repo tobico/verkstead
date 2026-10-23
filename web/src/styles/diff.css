@@ -173,6 +173,117 @@
   object-fit: contain;
 }
 
+/* In the Diff the box is the button that opens the picture at full size, so
+   it sheds a button's own paint and keeps the box's. */
+button.diffPictureBox {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  border: 0;
+  cursor: zoom-in;
+}
+
+/* A picture at full size: `Modal.tsx`'s dialog and card, written out for the
+   plain-DOM routine in `set/pictures.ts`, and as wide as the picture rather
+   than a form's width — never wider than the window, rising from the bottom
+   edge on a phone and centred past one. */
+.diffPictureFull {
+  width: fit-content;
+  max-width: calc(100% - 2rem);
+  padding: 0;
+  margin: auto auto 1rem;
+  color: inherit;
+  background: none;
+  border: 0;
+}
+
+.diffPictureFull::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.diffPictureFullCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 80vh;
+  padding: 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.8rem;
+}
+
+.diffPictureFullHead {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.diffPictureFullCaption {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 0.5rem;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.diffPictureFullWord {
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.diffPictureFullPath {
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffPictureFullClose {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .diffPictureFullClose:hover {
+    color: inherit;
+    background: var(--edge);
+  }
+}
+
+.diffPictureFullClose > svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+
+/* Its own size, and no larger than the card the window leaves it: the card's
+   height less its padding, the head and the gap. */
+.diffPictureFullBox {
+  max-height: none;
+  min-height: 0;
+}
+
+.diffPictureFullBox > img {
+  max-height: calc(80vh - 6rem);
+}
+
+@media (min-width: 30rem) {
+  .diffPictureFull {
+    margin: auto;
+  }
+}
+
 /* A file's hunks travel under its pictures for the fallback, and stay out of
    sight while the pictures stand. A picture that cannot be fetched takes the
    section away, which is what brings them back. */
