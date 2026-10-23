@@ -21,6 +21,9 @@ ammonia.workspace = true
 pulldown-cmark.workspace = true
 syntect.workspace = true
 two-face.workspace = true
+# A picture in a share's Diff, written into its placeholder as a `data:` URI —
+# a share has no server to fetch it from (ADR-0026, *Shares*).
+base64.workspace = true
 
 # The TypeScript emitter. It writes the viewer's types out of a test — see the
 # `typescript` feature — so nothing it produces is compiled into anything that

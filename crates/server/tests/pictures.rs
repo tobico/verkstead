@@ -14,9 +14,11 @@ use std::process::{Command, Stdio};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
+use verkstead_render::SharedConversation;
 use verkstead_schema::{ApiError, SetCreated};
 use verkstead_server::{open_database, router, store};
 
@@ -497,4 +499,152 @@ async fn a_picture_over_two_megabytes_is_refused() {
         said(&body),
         "This picture is larger than 2 MB, so it isn't drawn."
     );
+}
+
+// And in a share, which is one file with no server behind it: every picture
+// the server can read is written into its placeholder as the file is made
+// (ADR-0026, *Shares*), by the rules the endpoint above serves it by.
+
+/// The share of a Conversation, as the file is made from it.
+async fn share(app: &Router, conversation: i64) -> SharedConversation {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/ui/conversations/{conversation}/share.json"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+/// What a placeholder carries once its picture has been read in.
+fn inlined(media_type: &str, bytes: &[u8]) -> String {
+    format!(
+        r#"data-src="data:{media_type};base64,{}""#,
+        BASE64_STANDARD.encode(bytes)
+    )
+}
+
+/// Every Diff block of every Set the share carries, as one page of markup.
+fn sheets(shared: &SharedConversation) -> String {
+    shared
+        .sets
+        .iter()
+        .flat_map(|set| &set.diff)
+        .map(|block| block.diff.html.as_str())
+        .collect()
+}
+
+/// A Set's pictures travel inside the file: a tracked edit's before out of the
+/// object database and its after off the Worktree, a file git has never heard
+/// of, and a read-write companion's, out of its own Worktree.
+#[tokio::test]
+async fn a_share_carries_the_pictures_of_its_sets_inside_it() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, companions) = grilling(&pool, dir.path()).await;
+
+    std::fs::write(worktree.join("logo.svg"), REDRAWN).unwrap();
+    std::fs::write(worktree.join("badge.svg"), BADGE).unwrap();
+    std::fs::write(companions[0].join("logo.svg"), REDRAWN).unwrap();
+    composed(&pool, conversation).await;
+
+    let html = sheets(&share(&app, conversation).await);
+
+    assert_eq!(
+        html.matches(r#"class="diffPicture""#).count(),
+        5,
+        "a pair in each repository and the one new file:\n{html}"
+    );
+    assert_eq!(
+        html.matches("data-src=").count(),
+        5,
+        "every one of them read in:\n{html}"
+    );
+    assert_eq!(html.matches(&inlined("image/svg+xml", LOGO)).count(), 2);
+    assert_eq!(html.matches(&inlined("image/svg+xml", REDRAWN)).count(), 2);
+    assert_eq!(html.matches(&inlined("image/svg+xml", BADGE)).count(), 1);
+}
+
+/// A commit's pictures travel inside the file too, read out of the repository
+/// it landed in.
+#[tokio::test]
+async fn a_share_carries_the_pictures_of_its_commits_inside_it() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling(&pool, dir.path()).await;
+
+    std::fs::write(worktree.join("logo.svg"), REDRAWN).unwrap();
+    std::fs::write(worktree.join("icon.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "redraw the logo"]);
+    record(&pool, conversation, &git(&worktree, &["rev-parse", "HEAD"])).await;
+
+    let shared = share(&app, conversation).await;
+    let [commit] = &shared.commits[..] else {
+        panic!("one commit on the Timeline");
+    };
+    let html = &commit.pane.diff.as_ref().expect("the commit's diff").html;
+
+    assert_eq!(html.matches(r#"class="diffPicture""#).count(), 3, "{html}");
+    assert!(html.contains(&inlined("image/svg+xml", LOGO)), "{html}");
+    assert!(html.contains(&inlined("image/svg+xml", REDRAWN)), "{html}");
+    assert!(
+        html.contains(&inlined("image/png", b"\x89PNG\r\n\x1a\n")),
+        "{html}"
+    );
+}
+
+/// A picture that cannot be read as the share is made — the Worktree moved on
+/// from the file its Diff named — is left a placeholder, and the SVG's hunks
+/// still travel under it, for the viewer to fall back to as it does from one it
+/// cannot fetch.
+#[tokio::test]
+async fn a_picture_gone_at_share_time_is_left_for_the_viewer_to_fall_back_from() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling(&pool, dir.path()).await;
+
+    std::fs::write(worktree.join("badge.svg"), BADGE).unwrap();
+    composed(&pool, conversation).await;
+    std::fs::write(worktree.join("badge.svg"), REDRAWN).unwrap();
+
+    let html = sheets(&share(&app, conversation).await);
+
+    assert_eq!(html.matches(r#"class="diffPicture""#).count(), 1, "{html}");
+    assert!(!html.contains("data-src="), "{html}");
+    assert!(html.contains("diffPictureCode"), "{html}");
+}
+
+/// Record a commit made in the Conversation's own repository on its Timeline,
+/// the way the sweep does.
+async fn record(pool: &SqlitePool, conversation: i64, sha: &str) {
+    let repo = store::load_conversation(pool, conversation)
+        .await
+        .unwrap()
+        .unwrap()
+        .repo
+        .id;
+
+    store::record_commit(
+        pool,
+        conversation,
+        repo,
+        &store::Commit {
+            sha: sha.to_owned(),
+            subject: "redraw the logo".to_owned(),
+            files: 2,
+            insertions: 1,
+            deletions: 1,
+            summary: None,
+            repo: None,
+            merge: false,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
 }

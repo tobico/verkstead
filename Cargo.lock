@@ -3311,6 +3311,7 @@ name = "verkstead-render"
 version = "0.2.2"
 dependencies = [
  "ammonia",
+ "base64",
  "pulldown-cmark",
  "serde",
  "serde_json",

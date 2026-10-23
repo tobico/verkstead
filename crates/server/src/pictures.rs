@@ -22,10 +22,10 @@
 //! Blocking: git is a process and a file is read whole, so the endpoint calls
 //! this from a blocking task, as the file read and the commit pane's render do.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sha1::{Digest, Sha1};
-use verkstead_render::FileRoot;
+use verkstead_render::{FileRoot, PictureReader};
 
 use crate::files::{Bound, MAX_BYTES, bound};
 use crate::repos::{bytes, feeding};
@@ -80,6 +80,40 @@ pub(crate) fn read(worktree: &Path, id: &str, path: &str) -> Picture {
     }
 
     worktree_copy(worktree, &id, path)
+}
+
+/// The repositories a share reads its pictures out of, by the names its Diffs
+/// call them: what the renderer is handed so that each picture travels in the
+/// file as a `data:` URI rather than being fetched (ADR-0026, *Shares*).
+///
+/// Read by the rules the endpoint serves them by — [`read`], the Worktree
+/// standing in for an after blob not yet staged, under the same cap — and a
+/// picture that does not come back [`Picture::Found`] is left a placeholder,
+/// which the share's viewer falls back from as the workbench's does from one
+/// it cannot fetch.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Inlining {
+    repos: Vec<(String, PathBuf)>,
+}
+
+impl Inlining {
+    /// The repositories, each by its name and where it is checked out.
+    pub(crate) fn of(repos: impl IntoIterator<Item = (String, PathBuf)>) -> Self {
+        Self {
+            repos: repos.into_iter().collect(),
+        }
+    }
+}
+
+impl PictureReader for Inlining {
+    fn read(&self, repo: &str, path: &str, blob: &str) -> Option<Vec<u8>> {
+        let (_, worktree) = self.repos.iter().find(|(name, _)| name == repo)?;
+
+        match read(worktree, blob, path) {
+            Picture::Found(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
 }
 
 /// The blob `id` names in the object database, or `None` where git has no

@@ -18,6 +18,11 @@
 //! becomes the sentence. A picture that fetched but will not draw is left to the
 //! browser's own broken-image mark.
 //!
+//! **A share carries its pictures.** It is one file with no server behind it,
+//! so the server writes each picture it could read into its placeholder as a
+//! `data:` URI, and that is drawn without a fetch. One it could not read is a
+//! placeholder like any other, and with no reader to ask it falls back.
+//!
 //! **A press opens a picture at full size**, over the page in a dialog painted
 //! as `Modal.tsx`'s card is: the same object URL, so nothing is fetched again,
 //! drawn at its own size and no larger than the window, under its side's word
@@ -93,6 +98,14 @@ export function drawPictures(how: Drawing): () => void {
   const load = (figure: HTMLElement) => {
     const picture = placed(figure);
 
+    // A share's placeholder carries its picture, read in as the file was
+    // written: drawn as it is, with nothing to fetch.
+    const carried = inlined(figure);
+    if (picture !== null && carried !== null) {
+      draw(figure, picture, carried, opened);
+      return;
+    }
+
     if (how.read === undefined || picture === null) {
       fail(figure, GONE);
       return;
@@ -154,6 +167,15 @@ function placed(figure: HTMLElement): Picture | null {
 
   if (!repo || !blob || !path || !type) return null;
   return { repo, blob, path, type };
+}
+
+/// The picture a share wrote into its placeholder, as the `data:` URI it is
+/// drawn from — or `null` where it carries none, and so has to be fetched.
+/// Nothing but a `data:` URI is taken: a placeholder is never a way to have
+/// the page fetch something.
+function inlined(figure: HTMLElement): string | null {
+  const src = figure.dataset.src;
+  return src?.startsWith("data:") ? src : null;
 }
 
 /// The object URL a picture is drawn from, fetched the first time its id is

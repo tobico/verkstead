@@ -852,7 +852,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         return no_such_set(&id);
     };
 
-    match set_reading(&state, id).await {
+    match set_reading(&state, id, None).await {
         Ok(reading) => Json(reading).into_response(),
         Err(refusal) => refusal,
     }
@@ -865,7 +865,14 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
 /// the Timeline — see [`share_bundle`]. A share composed from a second rendering
 /// of its own would be a second reading of one decision, which is the whole
 /// reason the sheet is one component in the viewer too.
-pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading, HttpResponse> {
+///
+/// `inlining` is what a share reads the pictures in the Diff with, so that they
+/// travel in the file; the endpoint passes none, and its pictures are fetched.
+pub(crate) async fn set_reading(
+    state: &AppState,
+    id: i64,
+    inlining: Option<crate::pictures::Inlining>,
+) -> Result<SetReading, HttpResponse> {
     let stored = match store::load_set(&state.pool, id).await {
         Ok(Some(stored)) => stored,
         Ok(None) => return Err(no_such_set(&id.to_string())),
@@ -973,7 +980,17 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
     // work to do on an async worker thread while other requests wait behind it.
     let set_id = stored.id;
     let view = tokio::task::spawn_blocking(move || {
-        verkstead_render::set_view(set_id, conversation, set, standing, ending, attachments)
+        verkstead_render::set_view(
+            set_id,
+            conversation,
+            set,
+            standing,
+            ending,
+            attachments,
+            inlining
+                .as_ref()
+                .map(|inlining| inlining as &dyn verkstead_render::PictureReader),
+        )
     })
     .await;
 
@@ -3309,10 +3326,15 @@ async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpRe
     // In Timeline order, and only the readable ones: an unreadable Set is a row
     // this build cannot draw a sheet for, and its row does not board a share
     // anyway.
+    //
+    // With every picture in their Diffs read in as it goes, out of the
+    // Worktrees the endpoint would have fetched them from: a share has nothing
+    // to fetch with.
+    let inlining = shared_worktrees(state, view.id).await?;
     let mut sets = Vec::new();
 
     for asked in view.timeline.iter().filter_map(question_set) {
-        match set_reading(state, asked).await? {
+        match set_reading(state, asked, Some(inlining.clone())).await? {
             SetReading::Set(view) => sets.push(*view),
             SetReading::Unreadable(_) => {}
         }
@@ -3325,6 +3347,26 @@ async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpRe
         .unwrap_or_default();
 
     Ok(verkstead_render::shared(view, sets, commits, taken))
+}
+
+/// What a share's Set sheets read their pictures out of: the Worktrees the
+/// pictures endpoint reads them out of, by the same names — see [`picture`].
+async fn shared_worktrees(
+    state: &AppState,
+    id: i64,
+) -> Result<crate::pictures::Inlining, HttpResponse> {
+    match store::load_conversation(&state.pool, id).await {
+        Ok(conversation) => Ok(crate::pictures::Inlining::of(
+            conversation
+                .iter()
+                .flat_map(crate::diffs::writable)
+                .map(|reading| (reading.repo, reading.worktree)),
+        )),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's worktrees for a share failed");
+            Err(unavailable("The conversation couldn't be read."))
+        }
+    }
 }
 
 /// The same composition, for a caller with nobody waiting on a response.
@@ -3390,7 +3432,7 @@ async fn shared_commits(
         // anything about, which is the same nothing a collected commit is —
         // see [`SharedCommit::held`].
         let repo = match store::commit_repo(&state.pool, id, event).await {
-            Ok(repo) => repo.map(|repo| repo.path),
+            Ok(repo) => repo,
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a commit for a share failed");
                 return Err(unavailable("The conversation's commits couldn't be read."));
@@ -3406,9 +3448,26 @@ async fn shared_commits(
         landed
             .into_iter()
             .map(|(event, repo, commit)| {
-                let patch = repo.and_then(|repo| crate::commits::patch(&repo, &commit.sha));
+                let patch = repo
+                    .as_ref()
+                    .and_then(|repo| crate::commits::patch(&repo.path, &commit.sha));
 
-                verkstead_render::shared_commit(event, commit.summary.as_deref(), patch.as_deref())
+                // A picture in the diff is read out of the repository it landed
+                // in, and travels in the file — the commit pane's own fetch,
+                // done now.
+                let inlining = repo.as_ref().map(|repo| {
+                    crate::pictures::Inlining::of([(repo.name.clone(), repo.path.clone())])
+                });
+
+                verkstead_render::shared_commit(
+                    event,
+                    commit.summary.as_deref(),
+                    patch.as_deref(),
+                    repo.as_ref().map(|repo| repo.name.as_str()),
+                    inlining
+                        .as_ref()
+                        .map(|inlining| inlining as &dyn verkstead_render::PictureReader),
+                )
             })
             .collect()
     })
@@ -3645,7 +3704,12 @@ async fn commit_pane(
         crate::commits::patch(&repo.path, &commit.sha)
             .as_deref()
             .map(|patch| {
-                verkstead_render::commit_pane(commit.summary.as_deref(), patch, Some(&repo.name))
+                verkstead_render::commit_pane(
+                    commit.summary.as_deref(),
+                    patch,
+                    Some(&repo.name),
+                    None,
+                )
             })
     })
     .await;

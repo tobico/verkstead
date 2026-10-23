@@ -132,6 +132,7 @@ pub use view::{
 };
 
 pub mod diff;
+pub use diff::PictureReader;
 pub mod markdown;
 pub use view::set_view;
 
