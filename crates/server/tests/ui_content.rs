@@ -374,7 +374,7 @@ fn decided_every_way() -> Response {
 fn modified_and_untracked_diff() -> String {
     concat!(
         "diff --git a/src/limits.rs b/src/limits.rs\n",
-        "index 4cb29ea..ddc897f 100644\n",
+        "index 4cb29eadbe56cc67350049ed0f2b7f36d38d8073..ddc897fe19447f6329849e3832480775bb1b34e9 100644\n",
         "--- a/src/limits.rs\n",
         "+++ b/src/limits.rs\n",
         "@@ -1,4 +1,4 @@\n",
@@ -384,7 +384,7 @@ fn modified_and_untracked_diff() -> String {
         " }\n",
         "diff --git a/notes.txt b/notes.txt\n",
         "new file mode 100644\n",
-        "index 0000000..cdd6835\n",
+        "index 0000000000000000000000000000000000000000..cdd683536d35e837f4c17aae44c834f2d629ab13\n",
         "--- /dev/null\n",
         "+++ b/notes.txt\n",
         "@@ -0,0 +1,2 @@\n",
@@ -399,7 +399,7 @@ fn modified_and_untracked_diff() -> String {
 fn companion_diff() -> String {
     concat!(
         "diff --git a/src/set.rs b/src/set.rs\n",
-        "index 4cb29ea..ddc897f 100644\n",
+        "index 4cb29eadbe56cc67350049ed0f2b7f36d38d8073..ddc897fe19447f6329849e3832480775bb1b34e9 100644\n",
         "--- a/src/set.rs\n",
         "+++ b/src/set.rs\n",
         "@@ -1,3 +1,3 @@\n",

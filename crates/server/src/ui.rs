@@ -27,7 +27,7 @@ use axum::Json;
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, SET_COOKIE};
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, SET_COOKIE, X_CONTENT_TYPE_OPTIONS};
 use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{delete, get, post, put};
 use time::OffsetDateTime;
@@ -360,6 +360,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/commit/{event}",
             get(commit_pane),
         )
+        // And one picture either diff names, by the blob id on its `index`
+        // line: the bytes a question set's Diff or a commit's pane draws as a
+        // picture rather than as code, read out of the repository the diff came
+        // from rather than stored anywhere (ADR-0026) — see [`picture`].
+        .route("/api/ui/conversations/{id}/pictures", get(picture))
         // And the backlog opened, which is every task document `.tasks/` holds.
         // Named by the Conversation alone: a backlog is read off the Worktree
         // rather than remembered, so there is no Event id to reach it by — see
@@ -3657,6 +3662,109 @@ async fn commit_pane(
     };
 
     Json(rendered).into_response()
+}
+
+/// `GET /api/ui/conversations/{id}/pictures?repo=<name>&id=<blob>&path=<path>`
+/// — the bytes of one picture a diff names.
+///
+/// `repo` is the name a Diff's block carries — the Conversation's own
+/// repository or a read-write companion's — and resolves to the Worktree the
+/// Diff was composed from, through the same [`crate::diffs::writable`]; a name
+/// that is neither is refused. `id` is the blob id off the diff's `index` line,
+/// whole or abbreviated, and `path` is the file's path in the diff, which is
+/// where the Worktree stands in for a blob not yet staged — see
+/// [`crate::pictures`].
+///
+/// **Served as a download, never as a page.** `octet-stream`, `nosniff` and an
+/// attachment disposition, the way an attachment's bytes go out, so an SVG
+/// navigated to directly is a file saved rather than a document that runs its
+/// script. The viewer is what turns the bytes into an `img`.
+async fn picture(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(asking): Query<Picturing>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_worktree();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return no_such_worktree(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's worktrees failed");
+            return unavailable("This conversation's worktrees couldn't be read.");
+        }
+    };
+
+    let Some(reading) = crate::diffs::writable(&conversation)
+        .into_iter()
+        .find(|reading| reading.repo == asking.repo)
+    else {
+        return no_such_worktree();
+    };
+
+    // Off the runtime: git is a process, and a Worktree file is read and hashed.
+    let read = tokio::task::spawn_blocking(move || {
+        crate::pictures::read(&reading.worktree, &asking.id, &asking.path)
+    })
+    .await;
+
+    let picture = match read {
+        Ok(picture) => picture,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a picture failed");
+            return unavailable("The picture couldn't be read.");
+        }
+    };
+
+    match picture {
+        crate::pictures::Picture::Found(bytes) => (
+            [
+                (CONTENT_TYPE, "application/octet-stream"),
+                (X_CONTENT_TYPE_OPTIONS, "nosniff"),
+                (CONTENT_DISPOSITION, "attachment"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        crate::pictures::Picture::Gone => refused(
+            StatusCode::NOT_FOUND,
+            ApiError::new("This picture is no longer there."),
+        ),
+        crate::pictures::Picture::TooLarge => refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::new("This picture is larger than 2 MB, so it isn't drawn."),
+        ),
+        crate::pictures::Picture::Outside => refused(
+            StatusCode::FORBIDDEN,
+            ApiError::new("That isn't in this repository's worktree."),
+        ),
+        crate::pictures::Picture::UnderGit => refused(
+            StatusCode::FORBIDDEN,
+            ApiError::new("Pictures aren't read from inside a repository's .git."),
+        ),
+    }
+}
+
+/// What a picture is asked for by: the repository a Diff's block names, the
+/// blob id off its `index` line, and the file's path in the diff.
+#[derive(Debug, serde::Deserialize)]
+struct Picturing {
+    repo: String,
+    id: String,
+    path: String,
+}
+
+/// No Worktree of the repository a picture was asked of — a Conversation that
+/// is not there, one with nothing checked out, or a name it does not carry.
+/// One sentence for all of them: there is nowhere to read the picture from
+/// either way.
+fn no_such_worktree() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("This conversation has no worktree of that repository."),
+    )
 }
 
 /// `GET /api/ui/conversations/{id}/terminals` — which of the Conversation's

@@ -3362,6 +3362,7 @@ dependencies = [
  "serde",
  "serde-saphyr",
  "serde_json",
+ "sha1",
  "sha2 0.10.9",
  "sqlx",
  "tempfile",
