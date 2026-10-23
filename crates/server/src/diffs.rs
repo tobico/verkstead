@@ -147,8 +147,13 @@ fn blocks(worktrees: Vec<Reading>) -> Vec<RepoDiff> {
 fn uncommitted(worktree: &Path) -> Option<String> {
     // Tracked changes, staged and unstaged, in one patch. Before the first
     // commit there is no HEAD to compare against and the index stands in.
-    let mut diff =
-        git(worktree, &["diff", "HEAD"]).or_else(|| git(worktree, &["diff", "--cached"]))?;
+    //
+    // `--full-index` on every read, so that each file's `index` line names the
+    // whole blob id on each side: that id is what a picture in the Diff is
+    // fetched by later, out of the object database or out of this Worktree —
+    // see [`crate::pictures`] (ADR-0026, *Fetched by blob id*).
+    let mut diff = git(worktree, &["diff", "--full-index", "HEAD"])
+        .or_else(|| git(worktree, &["diff", "--full-index", "--cached"]))?;
 
     // An untracked file has nothing to diff against, so it is compared with the
     // empty file. `--no-index` exits 1 when the two differ, which for a
@@ -156,7 +161,14 @@ fn uncommitted(worktree: &Path) -> Option<String> {
     for path in untracked(worktree) {
         if let Some(patch) = accepting(
             worktree,
-            &["diff", "--no-index", "--", "/dev/null", &path],
+            &[
+                "diff",
+                "--full-index",
+                "--no-index",
+                "--",
+                "/dev/null",
+                &path,
+            ],
             &[0, 1],
         ) {
             diff.push_str(&patch);

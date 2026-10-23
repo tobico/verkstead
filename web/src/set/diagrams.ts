@@ -438,7 +438,7 @@ function button(of: IconDefinition, label: string): HTMLButtonElement {
 /// a viewBox and a path, so what is needed is an `svg` around it and nothing else.
 ///
 /// Hidden from a screen reader, which has the button's own label to read instead.
-function icon(of: IconDefinition): SVGElement {
+export function icon(of: IconDefinition): SVGElement {
   const drawn = document.createElementNS(SVG, "svg");
   drawn.setAttribute("viewBox", `0 0 ${of.icon[0]} ${of.icon[1]}`);
   drawn.setAttribute("aria-hidden", "true");

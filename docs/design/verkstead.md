@@ -1107,7 +1107,7 @@ Timeline events:
 | Brief | inline, always: the server's rendering clamped to three lines under an ellipsis, drafting or frozen | the composer while its round drafts — one box holding the field that saves itself with the setup along its bottom edge, and the start under it; the frozen document and what the round was configured with, once it is past drafting |
 | Agent output | *Agent run*, turn count and liveness mark, over the reading of what it was launched under; pinned as well while it runs | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
-| Commit | subject, +/− and changed-line counts | boxed Message (diagram drawn) above the server-rendered diff viewer |
+| Commit | subject, +/− and changed-line counts | boxed Message (diagram drawn) above the server-rendered diff viewer, a picture file drawn as Before and After (ADR-0026) |
 | Task list | inline, pinned *and* on the record where the backlog landed | every task document, each a boxed markdown section in backlog order |
 | Stage list | inline, pinned *and* on the record where the roadmap landed | every stage brief, each a boxed markdown section in roadmap order, done state on the heading |
 | PR | name + id, pinned *and* on the record where it happened | fetched commit list and comments |

@@ -1164,7 +1164,7 @@ fn unreadable(error: &std::io::Error) -> FileReading {
 /// handed, so a path spelled with either is a request somebody wrote by hand,
 /// and lexical folding is the step that gets a bound wrong. What a symlink out
 /// of a checkout does is caught below, on the resolved pair.
-fn bound<'a>(roots: &'a [FileRoot], path: &Path) -> Bound<'a> {
+pub(crate) fn bound<'a>(roots: &'a [FileRoot], path: &Path) -> Bound<'a> {
     if !path.is_absolute() || path.components().any(|part| !plain(&part)) {
         return Bound::Outside;
     }
@@ -1211,7 +1211,7 @@ fn bound<'a>(roots: &'a [FileRoot], path: &Path) -> Bound<'a> {
 /// different sentence in front of the human — and they are the same four
 /// whether what was asked for was a folder or a file, which is why this is one
 /// shape rather than two.
-enum Bound<'a> {
+pub(crate) enum Bound<'a> {
     Inside {
         root: &'a FileRoot,
         /// The path as the filesystem has it, which is what is opened from here

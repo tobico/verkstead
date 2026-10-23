@@ -40,6 +40,8 @@ import type {
   Response,
   SetView,
 } from "../api/types";
+import { readPicture } from "../api/client";
+import { useDevice } from "../reaching";
 import { setWrapping, wrapping } from "../remembered";
 import { DIRECTION, DIRECTION_LABEL, DIRECTIONS } from "../directions";
 import { PaneHead } from "../workbench/PaneHead";
@@ -114,6 +116,9 @@ export function Sheet(props: {
   // more, so a reader who asked for wrapping gets it without the Diff arriving
   // unwrapped and reflowing into it.
   const [wrapped, setWrapped] = createSignal(wrapping());
+
+  // Which device the Set is on, which is where its pictures are read from.
+  const device = useDevice();
 
   /// Turn wrapping on or off for this device, and for every Diff it opens after
   /// this one.
@@ -250,7 +255,17 @@ export function Sheet(props: {
       {/* Between the Preface and the Questions: the Preface says what the agent
           is asking about, and the Diff is the evidence for it. */}
       <Show when={props.set.diff.length > 0}>
-        <Diff blocks={props.set.diff} wrapped={wrapped()} flip={flip} />
+        <Diff
+          blocks={props.set.diff}
+          wrapped={wrapped()}
+          flip={flip}
+          read={
+            props.readOnly
+              ? undefined
+              : (picture) =>
+                  readPicture(device(), props.set.conversation, picture)
+          }
+        />
       </Show>
       {/* The record, or the sheet to fill in — and on a read-only sheet the
           record whichever it is. Which of the two is decided from the Set as it

@@ -864,6 +864,10 @@ pub(crate) fn touched(repo: &Path, base: &str, branch: &str) -> bool {
 /// nothing to — on a commit with one parent, a root commit included, the output
 /// is the ordinary diff byte for byte.
 ///
+/// `--full-index` so that each file's `index` line names whole blob ids — one
+/// per parent before the `..` on a combined diff — which is what a picture in
+/// the pane is fetched by (ADR-0026, *Fetched by blob id*).
+///
 /// `None` where the repository will not say — a commit that has been garbage
 /// collected, or a repository that has moved out from under Verkstead.
 pub(crate) fn patch(repo: &Path, sha: &str) -> Option<String> {
@@ -875,6 +879,7 @@ pub(crate) fn patch(repo: &Path, sha: &str) -> Option<String> {
             "-p",
             "--cc",
             "--root",
+            "--full-index",
             "--end-of-options",
             sha,
         ],
@@ -1203,9 +1208,62 @@ mod tests {
         );
         assert!(patch.contains("+# a repository"));
         assert!(
-            verkstead_render::commit_pane(None, &patch).diff.is_some(),
+            verkstead_render::commit_pane(None, &patch, None, None)
+                .diff
+                .is_some(),
             "and it renders",
         );
+    }
+
+    /// Every file's `index` line names whole blob ids, which is what a picture
+    /// in the pane is fetched by (ADR-0026) — a root commit's added file
+    /// against the zeroed id as well as an edit.
+    #[test]
+    fn a_patch_names_whole_blob_ids() {
+        let dir = repository();
+        let path = dir.path();
+
+        let root = patch(path, &head(path)).unwrap();
+        assert_eq!(
+            index_ids(&root),
+            vec![vec!["0".repeat(40), rev(path, "HEAD:README.md")]],
+            "{root:?}",
+        );
+
+        std::fs::write(path.join("README.md"), "# a repository\n\nWith words.\n").unwrap();
+        run(path, &["commit", "-am", "docs: say more"]);
+
+        let edit = patch(path, &head(path)).unwrap();
+        assert_eq!(
+            index_ids(&edit),
+            vec![vec![
+                rev(path, "HEAD^:README.md"),
+                rev(path, "HEAD:README.md")
+            ]],
+            "{edit:?}",
+        );
+    }
+
+    /// The ids on every `index` line of a patch, before and after alike.
+    fn index_ids(patch: &str) -> Vec<Vec<String>> {
+        patch
+            .lines()
+            .filter_map(|line| line.strip_prefix("index "))
+            .map(|ids| {
+                ids.split(' ')
+                    .next()
+                    .unwrap()
+                    .split([',', '.'])
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// What git resolves `name` to, in full.
+    fn rev(path: &Path, name: &str) -> String {
+        git(path, &["rev-parse", name]).unwrap().trim().to_owned()
     }
 
     /// The patch is what the renderer splits on `diff --git`, so anything the
@@ -1280,8 +1338,19 @@ mod tests {
             !patch.contains("unrelated.md"),
             "and what the base brought in on its own is not: {patch:?}",
         );
+        assert_eq!(
+            index_ids(&patch),
+            vec![vec![
+                rev(path, "HEAD^1:README.md"),
+                rev(path, "HEAD^2:README.md"),
+                rev(path, "HEAD:README.md"),
+            ]],
+            "and its index line names one whole id per parent, then the merge's",
+        );
         assert!(
-            verkstead_render::commit_pane(None, &patch).diff.is_some(),
+            verkstead_render::commit_pane(None, &patch, None, None)
+                .diff
+                .is_some(),
             "and the pane has something to show",
         );
     }

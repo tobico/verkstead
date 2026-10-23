@@ -183,6 +183,10 @@ serde_json.workspace = true
 # miss one. Already in the tree under p256, so what this line adds to a build is
 # nothing.
 sha2 = "0.10"
+# Hashing a Worktree file the way git hashes a blob, which is how a picture
+# only in the Worktree is matched to the id its diff names (ADR-0026) — see
+# `src/pictures.rs`. Already in the tree, so this adds nothing to a build.
+sha1 = "0.10"
 sqlx.workspace = true
 # A directory to clone a gist into on the way to publishing a share, cleaned up
 # by dropping it — see `publishing`. A dependency rather than a dev-dependency

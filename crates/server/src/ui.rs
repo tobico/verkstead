@@ -27,7 +27,7 @@ use axum::Json;
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, SET_COOKIE};
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, SET_COOKIE, X_CONTENT_TYPE_OPTIONS};
 use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{delete, get, post, put};
 use time::OffsetDateTime;
@@ -360,6 +360,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/commit/{event}",
             get(commit_pane),
         )
+        // And one picture either diff names, by the blob id on its `index`
+        // line: the bytes a question set's Diff or a commit's pane draws as a
+        // picture rather than as code, read out of the repository the diff came
+        // from rather than stored anywhere (ADR-0026) — see [`picture`].
+        .route("/api/ui/conversations/{id}/pictures", get(picture))
         // And the backlog opened, which is every task document `.tasks/` holds.
         // Named by the Conversation alone: a backlog is read off the Worktree
         // rather than remembered, so there is no Event id to reach it by — see
@@ -847,7 +852,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         return no_such_set(&id);
     };
 
-    match set_reading(&state, id).await {
+    match set_reading(&state, id, None).await {
         Ok(reading) => Json(reading).into_response(),
         Err(refusal) => refusal,
     }
@@ -860,7 +865,14 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
 /// the Timeline — see [`share_bundle`]. A share composed from a second rendering
 /// of its own would be a second reading of one decision, which is the whole
 /// reason the sheet is one component in the viewer too.
-pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading, HttpResponse> {
+///
+/// `inlining` is what a share reads the pictures in the Diff with, so that they
+/// travel in the file; the endpoint passes none, and its pictures are fetched.
+pub(crate) async fn set_reading(
+    state: &AppState,
+    id: i64,
+    inlining: Option<crate::pictures::Inlining>,
+) -> Result<SetReading, HttpResponse> {
     let stored = match store::load_set(&state.pool, id).await {
         Ok(Some(stored)) => stored,
         Ok(None) => return Err(no_such_set(&id.to_string())),
@@ -968,7 +980,17 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
     // work to do on an async worker thread while other requests wait behind it.
     let set_id = stored.id;
     let view = tokio::task::spawn_blocking(move || {
-        verkstead_render::set_view(set_id, conversation, set, standing, ending, attachments)
+        verkstead_render::set_view(
+            set_id,
+            conversation,
+            set,
+            standing,
+            ending,
+            attachments,
+            inlining
+                .as_ref()
+                .map(|inlining| inlining as &dyn verkstead_render::PictureReader),
+        )
     })
     .await;
 
@@ -3304,10 +3326,15 @@ async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpRe
     // In Timeline order, and only the readable ones: an unreadable Set is a row
     // this build cannot draw a sheet for, and its row does not board a share
     // anyway.
+    //
+    // With every picture in their Diffs read in as it goes, out of the
+    // Worktrees the endpoint would have fetched them from: a share has nothing
+    // to fetch with.
+    let inlining = shared_worktrees(state, view.id).await?;
     let mut sets = Vec::new();
 
     for asked in view.timeline.iter().filter_map(question_set) {
-        match set_reading(state, asked).await? {
+        match set_reading(state, asked, Some(inlining.clone())).await? {
             SetReading::Set(view) => sets.push(*view),
             SetReading::Unreadable(_) => {}
         }
@@ -3320,6 +3347,23 @@ async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpRe
         .unwrap_or_default();
 
     Ok(verkstead_render::shared(view, sets, commits, taken))
+}
+
+/// What a share's Set sheets read their pictures out of: the repositories the
+/// pictures endpoint reads them out of, by the same names — see [`picture`].
+async fn shared_worktrees(
+    state: &AppState,
+    id: i64,
+) -> Result<crate::pictures::Inlining, HttpResponse> {
+    match store::load_conversation(&state.pool, id).await {
+        Ok(conversation) => Ok(crate::pictures::Inlining::of(
+            conversation.iter().flat_map(crate::pictures::sources),
+        )),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's worktrees for a share failed");
+            Err(unavailable("The conversation couldn't be read."))
+        }
+    }
 }
 
 /// The same composition, for a caller with nobody waiting on a response.
@@ -3385,7 +3429,7 @@ async fn shared_commits(
         // anything about, which is the same nothing a collected commit is —
         // see [`SharedCommit::held`].
         let repo = match store::commit_repo(&state.pool, id, event).await {
-            Ok(repo) => repo.map(|repo| repo.path),
+            Ok(repo) => repo,
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a commit for a share failed");
                 return Err(unavailable("The conversation's commits couldn't be read."));
@@ -3401,9 +3445,33 @@ async fn shared_commits(
         landed
             .into_iter()
             .map(|(event, repo, commit)| {
-                let patch = repo.and_then(|repo| crate::commits::patch(&repo, &commit.sha));
+                let patch = repo
+                    .as_ref()
+                    .and_then(|repo| crate::commits::patch(&repo.path, &commit.sha));
 
-                verkstead_render::shared_commit(event, commit.summary.as_deref(), patch.as_deref())
+                // A picture in the diff is read out of the repository it landed
+                // in, and travels in the file — the commit pane's own fetch,
+                // done now. A commit's blobs are all stored, so there is no
+                // Worktree to stand in for any of them.
+                let inlining = repo.as_ref().map(|repo| {
+                    crate::pictures::Inlining::of([(
+                        repo.name.clone(),
+                        crate::pictures::Source {
+                            repo: repo.path.clone(),
+                            worktree: None,
+                        },
+                    )])
+                });
+
+                verkstead_render::shared_commit(
+                    event,
+                    commit.summary.as_deref(),
+                    patch.as_deref(),
+                    repo.as_ref().map(|repo| repo.name.as_str()),
+                    inlining
+                        .as_ref()
+                        .map(|inlining| inlining as &dyn verkstead_render::PictureReader),
+                )
             })
             .collect()
     })
@@ -3622,7 +3690,7 @@ async fn commit_pane(
     // the registry, moved out from under Verkstead — is the *gone* a collected
     // commit already is, and answers the same way.
     let repo = match store::commit_repo(&state.pool, id, event).await {
-        Ok(Some(repo)) => repo.path,
+        Ok(Some(repo)) => repo,
         Ok(None) => return no_such_commit(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a commit failed");
@@ -3635,9 +3703,18 @@ async fn commit_pane(
     // an async worker thread is the wrong place for either: a large diff run
     // inline here would hold up every other request sharing that thread.
     let rendered = tokio::task::spawn_blocking(move || {
-        crate::commits::patch(&repo, &commit.sha)
+        // The repository's name goes in beside the patch, as what a picture in
+        // the diff is fetched back out of.
+        crate::commits::patch(&repo.path, &commit.sha)
             .as_deref()
-            .map(|patch| verkstead_render::commit_pane(commit.summary.as_deref(), patch))
+            .map(|patch| {
+                verkstead_render::commit_pane(
+                    commit.summary.as_deref(),
+                    patch,
+                    Some(&repo.name),
+                    None,
+                )
+            })
     })
     .await;
 
@@ -3657,6 +3734,111 @@ async fn commit_pane(
     };
 
     Json(rendered).into_response()
+}
+
+/// `GET /api/ui/conversations/{id}/pictures?repo=<name>&id=<blob>&path=<path>`
+/// — the bytes of one picture a diff names.
+///
+/// `repo` is the name a Diff's block carries — the Conversation's own
+/// repository or a read-write companion's — and resolves to that repository as
+/// it was registered, with the Worktree the Diff was composed from beside it
+/// while there still is one — see [`crate::pictures::sources`]; a name that is
+/// neither is refused. Registered rather than checked out, so that a closed
+/// Conversation, whose Worktrees are gone, still draws what it committed. `id`
+/// is the blob id off the diff's `index` line, whole or abbreviated, and `path`
+/// is the file's path in the diff, which is where the Worktree stands in for a
+/// blob not yet staged — see [`crate::pictures`].
+///
+/// **Served as a download, never as a page.** `octet-stream`, `nosniff` and an
+/// attachment disposition, the way an attachment's bytes go out, so an SVG
+/// navigated to directly is a file saved rather than a document that runs its
+/// script. The viewer is what turns the bytes into an `img`.
+async fn picture(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(asking): Query<Picturing>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return no_picture_source();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return no_picture_source(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's repositories failed");
+            return unavailable("This conversation's repositories couldn't be read.");
+        }
+    };
+
+    let Some((_, source)) = crate::pictures::sources(&conversation)
+        .into_iter()
+        .find(|(name, _)| *name == asking.repo)
+    else {
+        return no_picture_source();
+    };
+
+    // Off the runtime: git is a process, and a Worktree file is read and hashed.
+    let read = tokio::task::spawn_blocking(move || {
+        crate::pictures::read(&source, &asking.id, &asking.path)
+    })
+    .await;
+
+    let picture = match read {
+        Ok(picture) => picture,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a picture failed");
+            return unavailable("The picture couldn't be read.");
+        }
+    };
+
+    match picture {
+        crate::pictures::Picture::Found(bytes) => (
+            [
+                (CONTENT_TYPE, "application/octet-stream"),
+                (X_CONTENT_TYPE_OPTIONS, "nosniff"),
+                (CONTENT_DISPOSITION, "attachment"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        crate::pictures::Picture::Gone => refused(
+            StatusCode::NOT_FOUND,
+            ApiError::new("This picture is no longer there."),
+        ),
+        crate::pictures::Picture::TooLarge => refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::new("This picture is larger than 2 MB, so it isn't drawn."),
+        ),
+        crate::pictures::Picture::Outside => refused(
+            StatusCode::FORBIDDEN,
+            ApiError::new("That isn't in this repository's worktree."),
+        ),
+        crate::pictures::Picture::UnderGit => refused(
+            StatusCode::FORBIDDEN,
+            ApiError::new("Pictures aren't read from inside a repository's .git."),
+        ),
+    }
+}
+
+/// What a picture is asked for by: the repository a Diff's block names, the
+/// blob id off its `index` line, and the file's path in the diff.
+#[derive(Debug, serde::Deserialize)]
+struct Picturing {
+    repo: String,
+    id: String,
+    path: String,
+}
+
+/// No repository a Diff of this Conversation could have come out of by the
+/// name a picture was asked of — a Conversation that is not there, a read-only
+/// companion, or a name it does not carry. One sentence for all of them: there
+/// is nowhere to read the picture from either way.
+fn no_picture_source() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("No diff in this conversation comes from that repository."),
+    )
 }
 
 /// `GET /api/ui/conversations/{id}/terminals` — which of the Conversation's

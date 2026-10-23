@@ -339,6 +339,10 @@ pub struct Answered {
 /// Conversation stands, which this crate never asks about, and `attachments` is
 /// the record of what was put on the Set's Answers, which is the same. Everything
 /// else on the way out is rendering, which is all of it.
+///
+/// `pictures` fills the pictures in the Diff in, for a sheet that travels with
+/// no server behind it — see [`crate::diff::PictureReader`]. The workbench's
+/// sheet is handed none, and its pictures are fetched.
 pub fn set_view(
     id: i64,
     conversation: i64,
@@ -346,6 +350,7 @@ pub fn set_view(
     standing: Standing,
     ending: Option<Ending>,
     attachments: Vec<crate::conversations::AttachmentView>,
+    pictures: Option<&dyn crate::diff::PictureReader>,
 ) -> SetView {
     // An empty Preface is the same as none at all: no point drawing the section
     // for it. The Postscript is nothing but the same thing said at the other end
@@ -355,7 +360,7 @@ pub fn set_view(
 
     let questions = viewed(set.questions);
 
-    let blocks = diffed(&set.diffs, set.diff.as_deref());
+    let blocks = diffed(&set.diffs, set.diff.as_deref(), pictures);
 
     // The chooser's own material, rendered here with everything else the agent
     // wrote — see [`crate::conversations::proposal_view`].
@@ -417,7 +422,11 @@ fn rendered(written: Option<&str>) -> Option<String> {
 /// companion's block drawn alone keeps its name — it is somebody else's
 /// repository whether or not the work's own had anything uncommitted in it that
 /// day — which is the rule a commit card follows, asked the same way round.
-fn diffed(composed: &[verkstead_schema::RepoDiff], single: Option<&str>) -> Vec<RepoDiffView> {
+fn diffed(
+    composed: &[verkstead_schema::RepoDiff],
+    single: Option<&str>,
+    pictures: Option<&dyn crate::diff::PictureReader>,
+) -> Vec<RepoDiffView> {
     use crate::diff;
 
     // The name to draw, whether it is the Conversation's own repository, and
@@ -441,7 +450,7 @@ fn diffed(composed: &[verkstead_schema::RepoDiff], single: Option<&str>) -> Vec<
     let mut first = 1;
 
     for (repo, own, patch) in patches {
-        let Some(view) = diff::block(patch, first) else {
+        let Some(view) = diff::block(patch, first, repo, pictures) else {
             continue;
         };
         first += view.paths.len();

@@ -221,6 +221,8 @@ mod paths;
 /// and a suite that proves a handshake completes has to be able to stand one
 /// up and dial it.
 pub mod peer;
+/// The bytes of a picture a diff names, fetched by its blob id (ADR-0026).
+mod pictures;
 /// The named pipe the server listens on beside its socket, which is what a
 /// sandboxed Windows session asks Verkstead through — the one way in when that
 /// platform's boundary was an AppContainer, and a transport that has stayed

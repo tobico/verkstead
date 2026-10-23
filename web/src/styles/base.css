@@ -52,6 +52,11 @@
   --removed-wash: #fbeceb;
   --hunk: #f2ede6;
 
+  /* The chequerboard a picture in the Diff is drawn on: two greys, so that
+     what is transparent in it reads as that rather than as the card. */
+  --check-light: #ffffff;
+  --check-dark: #e6e6e6;
+
   /* A run that has stopped. Its own name rather than borrowing the Diff's
      `--removed`, because it means something else — nothing was deleted, the work
      is waiting on you — and the two would drift apart the moment either was
@@ -108,6 +113,9 @@
     --removed: #e0857a;
     --removed-wash: #2d1f1d;
     --hunk: #26241f;
+
+    --check-light: #2c2c2c;
+    --check-dark: #222222;
 
     /* The light-mode red is far too dark to read on this paper, so this is the
        same hue lifted: 6.2:1 as text on the card, and 6.9:1 the other way round

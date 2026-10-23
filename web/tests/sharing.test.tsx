@@ -20,7 +20,7 @@ import {
   waitFor,
 } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // The column every page of the app sits in, which is what a share has to sit in
 // too — see the test that holds the two together.
@@ -38,6 +38,7 @@ import type {
 import { sized } from "../src/Attaching";
 import pill from "../src/Attaching.module.css";
 import { drawDiagrams } from "../src/set/diagrams";
+import { forgetPictures, GONE } from "../src/set/pictures";
 import { Share } from "../src/share/Share";
 // What the summary under a Brief says of a branch nobody has named.
 import { UNNAMED } from "../src/workbench/Brief";
@@ -53,6 +54,7 @@ import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
 import followingUp from "./fixtures/set-following-up.json" with { type: "json" };
 import locked from "./fixtures/set-locked.json" with { type: "json" };
+import pictured from "./fixtures/set-pictured.json" with { type: "json" };
 import shared from "./fixtures/share.json" with { type: "json" };
 
 const SHARED = shared as unknown as SharedConversation;
@@ -68,6 +70,7 @@ const ANSWERING = readable(answering);
 const LOCKED = readable(locked);
 const ALONGSIDE = readable(alongside);
 const FOLLOWING_UP = readable(followingUp);
+const PICTURED = readable(pictured);
 
 /// What `import("mermaid")` means inside a share, which is the module the share
 /// build aliases the package to. Imported through a name so that the alias, and
@@ -917,6 +920,131 @@ describe("a commit in a share", () => {
     expect(details.querySelector('[role="menuitem"]')).toBeNull();
     expect(details.querySelector("textarea")).toBeNull();
     expect(details.textContent).not.toContain("Close");
+  });
+});
+
+/// The bytes behind each blob the pictured fixture names: an SVG edited, and a
+/// PNG added.
+const BYTES: Record<string, string> = {
+  "3b18e512dba79e4c8300dd08aeb37f8e728b8dad": "<svg><rect/></svg>",
+  a0423896973644771497bdc03eb99d5281615b51: "<svg><circle/></svg>",
+  e69de29bb2d1d6434b8b29ae775ad8c2e48c5391: "\x89PNG",
+};
+
+/// The pictured Set's markup as the server writes it into a share: each
+/// placeholder carrying its picture as a `data:` URI, spelled as
+/// `crates/render`'s own tests spell it.
+function carrying(html: string): string {
+  return html.replace(
+    /data-blob="([0-9a-f]+)" data-type="([^"]+)">/g,
+    (_, blob: string, type: string) =>
+      `data-blob="${blob}" data-type="${type}" data-src="data:${type};base64,${btoa(BYTES[blob]!)}">`,
+  );
+}
+
+/// The pictured Set, as a share carries it with its pictures read in.
+const CARRIED: SetView = {
+  ...PICTURED,
+  diff: PICTURED.diff.map((block) => ({
+    ...block,
+    diff: { ...block.diff, html: carrying(block.diff.html) },
+  })),
+};
+
+describe("the pictures a share carries", () => {
+  afterEach(() => {
+    forgetPictures();
+    vi.restoreAllMocks();
+  });
+
+  /// The one fold a path is drawn in.
+  const fold = (page: ParentNode, path: string): Element =>
+    [...page.querySelectorAll("details.diffFile")].find(
+      (one) => one.querySelector(".diffPath")?.textContent === path,
+    )!;
+
+  /// Read in as the file was written, and drawn with no server to ask: the
+  /// Before and After of the edit and the one picture of the file added.
+  it("draws every one in a set's diff, and asks nothing for any of them", async () => {
+    const asked = vi.spyOn(globalThis, "fetch");
+    const details = await opened(showing(CARRIED));
+
+    await waitFor(() =>
+      expect(details.querySelectorAll(".diffPictureBox img")).toHaveLength(3),
+    );
+
+    const svg = fold(details, "assets/mark.svg");
+    expect(
+      [...svg.querySelectorAll("figure.diffPicture")].map((figure) => [
+        figure.querySelector("figcaption")?.textContent,
+        figure.querySelector("img")?.getAttribute("src"),
+      ]),
+    ).toEqual([
+      ["Before", `data:image/svg+xml;base64,${btoa("<svg><rect/></svg>")}`],
+      ["After", `data:image/svg+xml;base64,${btoa("<svg><circle/></svg>")}`],
+    ]);
+    expect(fold(details, "assets/icon.png").querySelector("img")?.getAttribute("src")).toBe(
+      `data:image/png;base64,${btoa("\x89PNG")}`,
+    );
+
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("draws every one in a commit's pane the same way", async () => {
+    const asked = vi.spyOn(globalThis, "fetch");
+    const details = await opened(
+      showingCommit({ pane: { ...PANE, diff: CARRIED.diff[0]!.diff }, held: true }),
+    );
+
+    await waitFor(() =>
+      expect(details.querySelectorAll(".diffPictureBox img")).toHaveLength(3),
+    );
+    for (const img of details.querySelectorAll(".diffPictureBox img")) {
+      expect(img.getAttribute("src")).toMatch(/^data:image\//);
+    }
+
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  /// And a press opens one at full size, as it does in the workbench.
+  it("opens one at full size", async () => {
+    const details = await opened(showing(CARRIED));
+    const after = await waitFor(() => {
+      const box = fold(details, "assets/mark.svg").querySelectorAll<HTMLElement>(
+        ".diffPictureBox",
+      )[1];
+      expect(box).toBeTruthy();
+      return box!;
+    });
+
+    fireEvent.click(after);
+
+    const full = document.querySelector("dialog.diffPictureFull");
+    expect(full?.hasAttribute("open")).toBe(true);
+    expect(full?.querySelector("img")?.getAttribute("src")).toBe(
+      `data:image/svg+xml;base64,${btoa("<svg><circle/></svg>")}`,
+    );
+
+    (full as HTMLDialogElement).close();
+  });
+
+  /// One the server could not read as the file was made is a placeholder with
+  /// nothing in it, and draws what the workbench draws for one it cannot fetch:
+  /// the SVG's hunks, and a line for the raster.
+  it("falls back from one it could not carry as the workbench does", async () => {
+    const asked = vi.spyOn(globalThis, "fetch");
+    const details = await opened(showing(PICTURED));
+
+    const svg = fold(details, "assets/mark.svg");
+    await waitFor(() => expect(svg.querySelector(".diffPictures")).toBeNull());
+    expect(svg.querySelector(".diffNote")?.textContent).toBe(GONE);
+    expect(svg.querySelector(".diffPictureCode .diffHunk")).toBeTruthy();
+
+    const png = fold(details, "assets/icon.png");
+    expect(png.querySelector("figure")).toBeNull();
+    expect(png.querySelector(".diffNote")?.textContent).toBe(GONE);
+
+    expect(asked).not.toHaveBeenCalled();
   });
 });
 

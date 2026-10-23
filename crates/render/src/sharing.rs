@@ -141,14 +141,25 @@ pub struct SharedCommit {
 /// The summary is rendered either way. It was kept by the sweep that recorded
 /// the commit rather than read back out of git, so a commit that has gone still
 /// has its own account of itself to read.
-pub fn shared_commit(id: i64, summary: Option<&str>, patch: Option<&str>) -> SharedCommit {
+///
+/// `repo` is the name of the repository the commit landed in and `read` what
+/// reads a picture in its diff out of it, so that a picture travels in the file
+/// as a `data:` URI rather than being fetched — see
+/// [`crate::diff::PictureReader`].
+pub fn shared_commit(
+    id: i64,
+    summary: Option<&str>,
+    patch: Option<&str>,
+    repo: Option<&str>,
+    read: Option<&dyn crate::diff::PictureReader>,
+) -> SharedCommit {
     SharedCommit {
         id,
         // No patch renders as no diff, which is also what an empty commit and a
         // merge that resolved nothing render as — the flag beside it is what
         // tells the reader which of the two kinds of nothing they are looking
         // at.
-        pane: crate::conversations::commit_pane(summary, patch.unwrap_or_default()),
+        pane: crate::conversations::commit_pane(summary, patch.unwrap_or_default(), repo, read),
         held: patch.is_some(),
     }
 }

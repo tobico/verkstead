@@ -14,6 +14,7 @@
 //! The highlighter itself lives in `crate::highlight`, shared with the fenced
 //! blocks in the agent's markdown.
 
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use syntect::parsing::SyntaxReference;
 
 use crate::DiffView;
@@ -37,7 +38,21 @@ const AS_IT_ARRIVED: &str = "The diff as it arrived";
 /// contents can name the folds without reading them back out of the markup it
 /// was handed.
 pub fn to_html(diff: &str) -> Option<DiffView> {
-    block(diff, 1)
+    block(diff, 1, None, None)
+}
+
+/// What a picture's bytes are read with where they travel inside the markup
+/// rather than being fetched by the viewer: a share's, which is one file with
+/// no server behind it (ADR-0026, *Shares*).
+///
+/// The renderer is handed one of these rather than having its HTML rewritten
+/// afterwards. With none it writes placeholders the viewer fetches into; with
+/// one, each placeholder it can read carries its picture as a `data:` URI.
+pub trait PictureReader {
+    /// The bytes `blob` names in the repository called `repo`, `path` being
+    /// the file the diff names them by — or `None` where they cannot be read,
+    /// which leaves the placeholder as the viewer finds an unfetchable one.
+    fn read(&self, repo: &str, path: &str, blob: &str) -> Option<Vec<u8>>;
 }
 
 /// The same, for a patch that is one block of a Diff made of several: `first` is
@@ -46,7 +61,19 @@ pub fn to_html(diff: &str) -> Option<DiffView> {
 /// The positions run on rather than restarting per block, because they are ids
 /// on one page: two blocks that each numbered from one would put two `diff-1`s
 /// in it, and a jump would land on whichever came first.
-pub fn block(diff: &str, first: usize) -> Option<DiffView> {
+///
+/// `repo` is the name of the repository the patch came out of, which is what a
+/// picture in it is fetched back out of — see [`FileDiff::pictured`]. A patch
+/// with no repository to name draws every file as code, a picture included, as
+/// a Diff did before pictures were drawn.
+///
+/// `read` fills the pictures in, where there is one — see [`PictureReader`].
+pub fn block(
+    diff: &str,
+    first: usize,
+    repo: Option<&str>,
+    read: Option<&dyn PictureReader>,
+) -> Option<DiffView> {
     if diff.trim().is_empty() {
         return None;
     }
@@ -73,7 +100,7 @@ pub fn block(diff: &str, first: usize) -> Option<DiffView> {
 
     let mut html = String::new();
     for (position, file) in files.iter().enumerate() {
-        file.render(&mut html, first + position);
+        file.render(&mut html, first + position, repo, read);
     }
     Some(DiffView {
         html,
@@ -94,7 +121,23 @@ struct FileDiff {
     /// out.
     note: Option<&'static str>,
 
+    /// The blob ids off the file's `index` line: the side before the change, and
+    /// the side after it. `None` on a side that does not exist — git's id of all
+    /// zeroes, a file added or removed — and on both where the line itself is
+    /// missing, which is a rename or a mode change that left the bytes alone.
+    ///
+    /// A merge names one id per parent before the `..`, and its *before* is the
+    /// first parent's: the side the branch was merged into.
+    blobs: Option<Blobs>,
+
     hunks: Vec<Hunk>,
+}
+
+/// What an `index` line names: the blob before and the blob after.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Blobs {
+    before: Option<String>,
+    after: Option<String>,
 }
 
 /// One run of changed lines, with the `@@` line that introduces it.
@@ -242,6 +285,7 @@ fn files(diff: &str) -> Vec<FileDiff> {
                 path,
                 status: None,
                 note: None,
+                blobs: None,
                 hunks: Vec::new(),
             });
             parents_left.clear();
@@ -269,6 +313,8 @@ fn files(diff: &str) -> Vec<FileDiff> {
             if let Some(path) = worktree_path(field).or_else(|| removed_path.take()) {
                 file.path = path;
             }
+        } else if let Some(ids) = line.strip_prefix("index ") {
+            file.blobs = indexed(ids);
         } else if line.starts_with("new file mode") {
             file.status = Some("new file");
         } else if line.starts_with("deleted file mode") {
@@ -429,6 +475,59 @@ fn span(header: &str) -> Span {
     }
 }
 
+/// The blobs an `index` line names, from what follows its `index `.
+///
+/// Unified, `<before>..<after>`, or combined, `<parent>,<parent>..<after>`, and
+/// either with the file's mode after a space. A merge's *before* is its first
+/// parent's. A side of all zeroes is a side with no file on it.
+fn indexed(ids: &str) -> Option<Blobs> {
+    let ids = ids.split(' ').next().unwrap_or(ids);
+    let (before, after) = ids.split_once("..")?;
+    let before = before.split(',').next().unwrap_or(before);
+
+    let side = |id: &str| {
+        let real = !id.is_empty()
+            && id.bytes().all(|at| at.is_ascii_hexdigit())
+            && id.bytes().any(|at| at != b'0');
+        real.then(|| id.to_owned())
+    };
+
+    Some(Blobs {
+        before: side(before),
+        after: side(after),
+    })
+}
+
+/// The media type a file is drawn as a picture in, where its name says it is
+/// one: `.svg`, and the formats the Code pane draws.
+///
+/// Read off the extension for the Code pane's reason: what decides whether a
+/// browser draws it is this string, and a file named `.png` that is something
+/// else is a broken picture either way.
+fn picture_type(path: &str) -> Option<&'static str> {
+    let (_, extension) = path.rsplit_once('.')?;
+    if extension.contains('/') {
+        return None;
+    }
+
+    match extension.to_ascii_lowercase().as_str() {
+        "svg" => Some("image/svg+xml"),
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "avif" => Some("image/avif"),
+        "bmp" => Some("image/bmp"),
+        "ico" => Some("image/x-icon"),
+        _ => None,
+    }
+}
+
+/// Text as it goes inside a double-quoted attribute.
+fn attribute(text: &str) -> String {
+    escaped(text).replace('"', "&quot;")
+}
+
 /// The path from a `diff --git a/<path> b/<path>` line.
 ///
 /// Best-effort: the two halves are only separable by convention, and a path
@@ -461,7 +560,17 @@ fn worktree_path(field: &str) -> Option<String> {
 impl FileDiff {
     /// `position` is this file's place in the Diff, counting from one: the name
     /// the table of contents and a hash deep-link reach it by.
-    fn render(&self, out: &mut String, position: usize) {
+    ///
+    /// `repo` is what a picture in it is fetched out of, where there is one to
+    /// name — see [`Self::pictured`] — and `read` what fills it in, where it
+    /// is to travel inside the markup.
+    fn render(
+        &self,
+        out: &mut String,
+        position: usize,
+        repo: Option<&str>,
+        read: Option<&dyn PictureReader>,
+    ) {
         // Open, because a Diff is there to be read — but foldable, so a long
         // file can be got out of the way on a phone.
         out.push_str(&format!(
@@ -484,20 +593,78 @@ impl FileDiff {
         }
         out.push_str("</summary>");
 
-        if let Some(note) = self.note {
-            out.push_str(r#"<p class="diffNote">"#);
-            out.push_str(note);
-            out.push_str("</p>");
+        // A picture is drawn rather than read: a placeholder per side, which the
+        // viewer fetches the bytes into. Its hunks still travel, under the
+        // section and hidden while a picture stands, so that a picture that can
+        // no longer be fetched falls back to them with nothing rendered twice.
+        if let Some((repo, media_type, blobs)) = self.pictured(repo) {
+            out.push_str(r#"<div class="diffPictures">"#);
+            for (side, blob) in [("Before", &blobs.before), ("After", &blobs.after)] {
+                let Some(blob) = blob else {
+                    continue;
+                };
+                // Filled in where there is a reader and it found the bytes; a
+                // picture it could not read stays a placeholder, which in a
+                // share is one the viewer falls back from.
+                let inlined = read
+                    .and_then(|read| read.read(repo, &self.path, blob))
+                    .map(|bytes| {
+                        format!(
+                            r#" data-src="data:{media_type};base64,{}""#,
+                            BASE64_STANDARD.encode(bytes)
+                        )
+                    })
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    r#"<figure class="diffPicture" data-repo="{}" data-path="{}" data-blob="{}" data-type="{media_type}"{inlined}><figcaption>{side}</figcaption></figure>"#,
+                    attribute(repo),
+                    attribute(&self.path),
+                    attribute(blob),
+                ));
+            }
+            out.push_str("</div>");
+
+            if !self.hunks.is_empty() {
+                out.push_str(r#"<div class="diffPictureCode">"#);
+                self.hunks_into(out);
+                out.push_str("</div>");
+            }
+        } else {
+            if let Some(note) = self.note {
+                out.push_str(r#"<p class="diffNote">"#);
+                out.push_str(note);
+                out.push_str("</p>");
+            }
+            self.hunks_into(out);
         }
 
+        out.push_str("</details>");
+    }
+
+    fn hunks_into(&self, out: &mut String) {
         // Highlighting is keyed off the path, so it is settled once per file
         // rather than looked up per line.
         let syntax = for_path(&self.path);
         for hunk in &self.hunks {
             hunk.render(out, syntax);
         }
+    }
 
-        out.push_str("</details>");
+    /// Whether this file is drawn as a picture, and what from: the repository
+    /// its bytes are fetched out of, its media type, and the blobs each side
+    /// is.
+    ///
+    /// A picture by its name, with an `index` line naming at least one side. A
+    /// rename that left the bytes alone has no such line and draws as it always
+    /// did, and so does every file of a patch with no repository to fetch from.
+    fn pictured<'a>(&'a self, repo: Option<&'a str>) -> Option<(&'a str, &'static str, &'a Blobs)> {
+        let repo = repo?;
+        let media_type = picture_type(&self.path)?;
+        let blobs = self
+            .blobs
+            .as_ref()
+            .filter(|blobs| blobs.before.is_some() || blobs.after.is_some())?;
+        Some((repo, media_type, blobs))
     }
 
     /// How many lines this file gains and loses.
@@ -586,7 +753,7 @@ fn numbered(number: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{AS_IT_ARRIVED, files, numbered, to_html};
+    use super::{AS_IT_ARRIVED, Blobs, PictureReader, block, files, numbered, to_html};
 
     /// The markup for a Diff that has something in it — what most of these
     /// tests are looking at, the paths beside it being their own two tests.
@@ -1146,6 +1313,276 @@ mod tests {
             ["The diff as it arrived"],
             "the one fold has no path to go by, so the nav calls it what the \
              fold calls itself",
+        );
+    }
+
+    /// The markup for a Diff out of a named repository, which is what a picture
+    /// in it is fetched from.
+    fn pictured(diff: &str) -> String {
+        block(diff, 1, Some("verkstead"), None).unwrap().html
+    }
+
+    const BEFORE: &str = "4cb29eadbe56cc67350049ed0f2b7f36d38d8073";
+    const AFTER: &str = "ddc897fe19447f6329849e3832480775bb1b34e9";
+    const ZERO: &str = "0000000000000000000000000000000000000000";
+
+    /// An SVG edited, and a PNG added — a raster git says only differs.
+    fn svg_and_png() -> String {
+        format!(
+            concat!(
+                "diff --git a/assets/mark.svg b/assets/mark.svg\n",
+                "index {before}..{after} 100644\n",
+                "--- a/assets/mark.svg\n",
+                "+++ b/assets/mark.svg\n",
+                "@@ -1 +1 @@\n",
+                "-<svg><rect/></svg>\n",
+                "+<svg><circle/></svg>\n",
+                "diff --git a/assets/logo.png b/assets/logo.png\n",
+                "new file mode 100644\n",
+                "index {zero}..{after}\n",
+                "Binary files /dev/null and b/assets/logo.png differ\n",
+            ),
+            before = BEFORE,
+            after = AFTER,
+            zero = ZERO,
+        )
+    }
+
+    #[test]
+    fn the_index_line_names_the_blob_on_each_side() {
+        let files = files(&svg_and_png());
+
+        assert_eq!(
+            files[0].blobs,
+            Some(Blobs {
+                before: Some(BEFORE.to_owned()),
+                after: Some(AFTER.to_owned()),
+            }),
+            "the mode after the ids is not part of either",
+        );
+        assert_eq!(
+            files[1].blobs,
+            Some(Blobs {
+                before: None,
+                after: Some(AFTER.to_owned()),
+            }),
+            "an id of all zeroes is a side with no file on it",
+        );
+    }
+
+    #[test]
+    fn a_merges_index_line_takes_its_first_parent_as_the_before() {
+        let files = files(MERGE);
+
+        assert_eq!(
+            files[0].blobs,
+            Some(Blobs {
+                before: Some("6e8d6bb".to_owned()),
+                after: Some("20b5b51".to_owned()),
+            }),
+            "one id per parent before the `..`, and the first is the side the \
+             branch was merged into",
+        );
+    }
+
+    #[test]
+    fn an_edited_picture_is_a_before_and_an_after() {
+        let html = pictured(&svg_and_png());
+        let svg = &html[..html.find(r#"id="diff-2""#).unwrap()];
+
+        assert!(
+            svg.contains(&format!(
+                r#"<div class="diffPictures"><figure class="diffPicture" data-repo="verkstead" data-path="assets/mark.svg" data-blob="{BEFORE}" data-type="image/svg+xml"><figcaption>Before</figcaption></figure><figure class="diffPicture" data-repo="verkstead" data-path="assets/mark.svg" data-blob="{AFTER}" data-type="image/svg+xml"><figcaption>After</figcaption></figure></div>"#
+            )),
+            "a placeholder per side, naming the bytes rather than carrying \
+             them:\n{svg}"
+        );
+        assert!(
+            svg.contains(r#"<div class="diffPictureCode"><div class="diffHunk">"#),
+            "an SVG's hunks still travel, under the pictures, for the stylesheet \
+             to hide while a picture stands:\n{svg}"
+        );
+        assert!(
+            svg.contains(">+1<") && svg.contains(">−1<"),
+            "the summary row keeps its tally:\n{svg}"
+        );
+    }
+
+    #[test]
+    fn an_added_raster_is_one_picture_and_no_note() {
+        let html = pictured(&svg_and_png());
+        let png = &html[html.find(r#"id="diff-2""#).unwrap()..];
+
+        assert_eq!(png.matches(r#"class="diffPicture""#).count(), 1, "{png}");
+        assert!(
+            png.contains(&format!(
+                r#"data-blob="{AFTER}" data-type="image/png"><figcaption>After</figcaption>"#
+            )),
+            "{png}"
+        );
+        assert!(
+            !png.contains("diffNote") && !png.contains("diffPictureCode"),
+            "a raster is drawn rather than said to be binary, and has no hunks \
+             to fall back to:\n{png}"
+        );
+        assert!(png.contains(">new file<"), "{png}");
+    }
+
+    #[test]
+    fn a_deleted_picture_is_its_before_alone() {
+        let diff = format!(
+            concat!(
+                "diff --git a/old.svg b/old.svg\n",
+                "deleted file mode 100644\n",
+                "index {before}..{zero}\n",
+                "--- a/old.svg\n",
+                "+++ /dev/null\n",
+                "@@ -1 +0,0 @@\n",
+                "-<svg/>\n",
+            ),
+            before = BEFORE,
+            zero = ZERO,
+        );
+        let html = pictured(&diff);
+
+        assert_eq!(html.matches(r#"class="diffPicture""#).count(), 1, "{html}");
+        assert!(
+            html.contains(&format!(
+                r#"data-blob="{BEFORE}" data-type="image/svg+xml"><figcaption>Before</figcaption>"#
+            )),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn a_merged_picture_is_drawn_against_its_first_parent() {
+        let diff = concat!(
+            "diff --cc mark.svg\n",
+            "index 6e8d6bb,6addb9b..20b5b51\n",
+            "--- a/mark.svg\n",
+            "+++ b/mark.svg\n",
+            "@@@ -1 -1 +1 @@@\n",
+            "- <svg>a</svg>\n",
+            " -<svg>b</svg>\n",
+            "++<svg>c</svg>\n",
+        );
+        let html = pictured(diff);
+
+        assert!(
+            html.contains(
+                r#"data-blob="6e8d6bb" data-type="image/svg+xml"><figcaption>Before</figcaption>"#
+            ),
+            "{html}"
+        );
+        assert!(
+            html.contains(
+                r#"data-blob="20b5b51" data-type="image/svg+xml"><figcaption>After</figcaption>"#
+            ),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn a_rename_that_left_the_bytes_alone_draws_as_it_did() {
+        let diff = concat!(
+            "diff --git a/old.svg b/new.svg\n",
+            "similarity index 100%\n",
+            "rename from old.svg\n",
+            "rename to new.svg\n",
+        );
+
+        assert_eq!(
+            pictured(diff),
+            rendered(diff),
+            "with no `index` line there are no bytes named to draw"
+        );
+        assert!(!pictured(diff).contains("diffPicture"));
+    }
+
+    #[test]
+    fn a_patch_with_no_repository_draws_its_pictures_as_code() {
+        let html = rendered(&svg_and_png());
+
+        assert!(!html.contains("diffPicture"), "{html}");
+        assert!(html.contains("Its contents aren't shown."), "{html}");
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_picture_draws_as_it_did() {
+        assert_eq!(
+            block(MODIFIED_AND_NEW, 1, Some("verkstead"), None).unwrap(),
+            to_html(MODIFIED_AND_NEW).unwrap(),
+        );
+    }
+
+    /// A reader holding one blob, the way a share's reads its repository: the
+    /// after side of `svg_and_png`'s pictures, and nothing else.
+    struct Holding;
+
+    impl PictureReader for Holding {
+        fn read(&self, repo: &str, _path: &str, blob: &str) -> Option<Vec<u8>> {
+            (repo == "verkstead" && blob == AFTER).then(|| b"<svg/>".to_vec())
+        }
+    }
+
+    #[test]
+    fn a_reader_writes_the_picture_into_its_placeholder() {
+        let html = block(&svg_and_png(), 1, Some("verkstead"), Some(&Holding))
+            .unwrap()
+            .html;
+        let png = &html[html.find(r#"id="diff-2""#).unwrap()..];
+
+        // `<svg/>` in base64, typed as the placeholder is.
+        assert!(
+            png.contains(&format!(
+                r#"data-blob="{AFTER}" data-type="image/png" data-src="data:image/png;base64,PHN2Zy8+"><figcaption>After</figcaption>"#
+            )),
+            "{png}"
+        );
+    }
+
+    #[test]
+    fn a_picture_the_reader_cannot_find_stays_a_placeholder() {
+        let html = block(&svg_and_png(), 1, Some("verkstead"), Some(&Holding))
+            .unwrap()
+            .html;
+        let svg = &html[..html.find(r#"id="diff-2""#).unwrap()];
+
+        assert!(
+            svg.contains(&format!(
+                r#"data-blob="{BEFORE}" data-type="image/svg+xml"><figcaption>Before</figcaption>"#
+            )),
+            "the before side was not read, so it is left for the viewer to fall              back from:\n{svg}"
+        );
+        assert_eq!(svg.matches("data-src=").count(), 1, "{svg}");
+        assert!(svg.contains("diffPictureCode"), "{svg}");
+    }
+
+    #[test]
+    fn with_no_reader_nothing_is_written_in() {
+        assert!(!pictured(&svg_and_png()).contains("data-src"));
+    }
+
+    #[test]
+    fn what_a_placeholder_names_stays_inside_its_attributes() {
+        let diff = format!(
+            concat!(
+                "diff --git a/a\"b<c>.svg b/a\"b<c>.svg\n",
+                "index {before}..{after} 100644\n",
+                "--- a/a\"b<c>.svg\n",
+                "+++ b/a\"b<c>.svg\n",
+                "@@ -1 +1 @@\n",
+                "-x\n",
+                "+y\n",
+            ),
+            before = BEFORE,
+            after = AFTER,
+        );
+        let html = block(&diff, 1, Some(r#"re"po"#), None).unwrap().html;
+
+        assert!(
+            html.contains(r#"data-repo="re&quot;po" data-path="a&quot;b&lt;c&gt;.svg""#),
+            "{html}"
         );
     }
 }

@@ -1215,6 +1215,31 @@ export async function readAttachment(
   return new File([await response.blob()], name);
 }
 
+/// The bytes of one picture a Diff names, by the blob id off its `index` line:
+/// out of the repository the Diff's block came from, with `path` being where
+/// the worktree stands in for a blob not yet staged.
+///
+/// A `Blob` rather than anything drawn, because the server sends a picture as a
+/// download and never as a page — see `set/pictures`, which is what puts it in
+/// an `img`. A refusal comes back in the server's own sentence.
+export async function readPicture(
+  device: Device,
+  id: number,
+  picture: { repo: string; blob: string; path: string },
+): Promise<Blob> {
+  const query = new URLSearchParams({
+    repo: picture.repo,
+    id: picture.blob,
+    path: picture.path,
+  });
+  const at = on(device, `/api/ui/conversations/${id}/pictures?${query}`);
+
+  const response = await fetch(at, { headers: { accept: "*/*" } });
+  await refused(at, response);
+
+  return response.blob();
+}
+
 /// And take one off again, by the row's own id: two files on one Conversation
 /// may share a name, and neither of them is a key.
 export function removeAttachment(

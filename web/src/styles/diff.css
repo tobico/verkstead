@@ -122,6 +122,189 @@
   }
 }
 
+/* A picture file, drawn rather than read (ADR-0026): the renderer writes a
+   placeholder per side, `set/pictures.ts` fetches the bytes into an `img` in a
+   box of its own, and the pair sits side by side, half the width each. */
+.diffPictures {
+  display: flex;
+  gap: 0.8rem;
+  padding: 0.6rem 0.8rem 0.8rem;
+  border-top: 1px solid var(--edge);
+}
+
+.diffPicture {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.diffPicture > figcaption {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+/* The chequerboard, in two greys of the scheme's own, so a picture's
+   transparency reads as transparency; and no taller than about a third of the
+   screen, the picture fitted inside and never drawn past its own size. */
+.diffPictureBox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-height: 33vh;
+  padding: 0.5rem;
+  border-radius: 0.4rem;
+  background-color: var(--check-light);
+  background-image: conic-gradient(
+    var(--check-dark) 25%,
+    transparent 0 50%,
+    var(--check-dark) 0 75%,
+    transparent 0
+  );
+  background-size: 1rem 1rem;
+}
+
+.diffPictureBox > img {
+  max-width: 100%;
+  max-height: calc(33vh - 1rem);
+  object-fit: contain;
+}
+
+/* In the Diff the box is the button that opens the picture at full size, so
+   it sheds a button's own paint and keeps the box's. */
+button.diffPictureBox {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  border: 0;
+  cursor: zoom-in;
+}
+
+/* A picture at full size: `Modal.tsx`'s dialog and card, written out for the
+   plain-DOM routine in `set/pictures.ts`, and as wide as the picture rather
+   than a form's width — never wider than the window, rising from the bottom
+   edge on a phone and centred past one. */
+.diffPictureFull {
+  width: fit-content;
+  max-width: calc(100% - 2rem);
+  padding: 0;
+  margin: auto auto 1rem;
+  color: inherit;
+  background: none;
+  border: 0;
+}
+
+.diffPictureFull::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.diffPictureFullCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 80vh;
+  padding: 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.8rem;
+}
+
+.diffPictureFullHead {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.diffPictureFullCaption {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 0.5rem;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.diffPictureFullWord {
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.diffPictureFullPath {
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffPictureFullClose {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .diffPictureFullClose:hover {
+    color: inherit;
+    background: var(--edge);
+  }
+}
+
+.diffPictureFullClose > svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+
+/* Its own size, and no larger than the card the window leaves it: the card's
+   height less its padding, the head and the gap. */
+.diffPictureFullBox {
+  max-height: none;
+  min-height: 0;
+}
+
+.diffPictureFullBox > img {
+  max-height: calc(80vh - 6rem);
+}
+
+@media (min-width: 30rem) {
+  .diffPictureFull {
+    margin: auto;
+  }
+}
+
+/* A file's hunks travel under its pictures for the fallback, and stay out of
+   sight while the pictures stand. A picture that cannot be fetched takes the
+   section away, which is what brings them back. */
+.diffPictures + .diffPictureCode {
+  display: none;
+}
+
+/* What a fallen-back raster says in its figure's place sits inside the
+   section's padding, which is the line it draws already. */
+.diffPictures > .diffNote {
+  padding: 0;
+  border-top: 0;
+}
+
+/* On a phone the pair stacks, Before over After. */
+@media (width < 40rem) {
+  .diffPictures {
+    flex-direction: column;
+  }
+}
+
 /* The lines are wrapped in a box as wide as the longest of them, which is what
    gives the line below a scrolled width to fill. Without it each line measured
    itself against the *visible* width instead — `code` is inline, so the `pre` was
