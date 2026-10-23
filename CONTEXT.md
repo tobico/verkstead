@@ -5800,6 +5800,17 @@ of them but the Conversation's own drawn alone — an unlabelled block means the
 work's own repo, so naming it there would be naming it twice, and a companion's
 block is named however alone it is. Which is the rule a commit card follows,
 asked the same way round.
+**A picture file is drawn as a picture.** A file with a picture's extension — an
+SVG, or any format the Code pane opens as a picture — is drawn in the Diff as a
+picture rather than read as code: *Before* and *After* side by side for an edit,
+one picture for a file added or removed, on a chequerboard, and a press opens it
+at full size. Nothing is stored for it: every file in a patch names its exact
+bytes by git's blob ids, and the viewer fetches a picture by that id out of the
+repository its block came from as the fold scrolls near — the Worktree standing
+in for a file not yet staged, while it still matches. A picture no longer there
+to fetch falls back to an SVG's hunks, or a line for a raster. The same in a
+commit's pane, which reads through the same renderer, and a Share carries its
+pictures inside the file ([ADR-0026](docs/adr/0026-pictures-in-the-diff.md)).
 _Avoid_: patch, changeset
 
 **Diagram**:
