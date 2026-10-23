@@ -3627,7 +3627,7 @@ async fn commit_pane(
     // the registry, moved out from under Verkstead — is the *gone* a collected
     // commit already is, and answers the same way.
     let repo = match store::commit_repo(&state.pool, id, event).await {
-        Ok(Some(repo)) => repo.path,
+        Ok(Some(repo)) => repo,
         Ok(None) => return no_such_commit(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a commit failed");
@@ -3640,9 +3640,13 @@ async fn commit_pane(
     // an async worker thread is the wrong place for either: a large diff run
     // inline here would hold up every other request sharing that thread.
     let rendered = tokio::task::spawn_blocking(move || {
-        crate::commits::patch(&repo, &commit.sha)
+        // The repository's name goes in beside the patch, as what a picture in
+        // the diff is fetched back out of.
+        crate::commits::patch(&repo.path, &commit.sha)
             .as_deref()
-            .map(|patch| verkstead_render::commit_pane(commit.summary.as_deref(), patch))
+            .map(|patch| {
+                verkstead_render::commit_pane(commit.summary.as_deref(), patch, Some(&repo.name))
+            })
     })
     .await;
 

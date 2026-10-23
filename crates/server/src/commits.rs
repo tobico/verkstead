@@ -1208,7 +1208,9 @@ mod tests {
         );
         assert!(patch.contains("+# a repository"));
         assert!(
-            verkstead_render::commit_pane(None, &patch).diff.is_some(),
+            verkstead_render::commit_pane(None, &patch, None)
+                .diff
+                .is_some(),
             "and it renders",
         );
     }
@@ -1346,7 +1348,9 @@ mod tests {
             "and its index line names one whole id per parent, then the merge's",
         );
         assert!(
-            verkstead_render::commit_pane(None, &patch).diff.is_some(),
+            verkstead_render::commit_pane(None, &patch, None)
+                .diff
+                .is_some(),
             "and the pane has something to show",
         );
     }

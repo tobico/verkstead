@@ -122,6 +122,78 @@
   }
 }
 
+/* A picture file, drawn rather than read (ADR-0026): the renderer writes a
+   placeholder per side, `set/pictures.ts` fetches the bytes into an `img` in a
+   box of its own, and the pair sits side by side, half the width each. */
+.diffPictures {
+  display: flex;
+  gap: 0.8rem;
+  padding: 0.6rem 0.8rem 0.8rem;
+  border-top: 1px solid var(--edge);
+}
+
+.diffPicture {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.diffPicture > figcaption {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+/* The chequerboard, in two greys of the scheme's own, so a picture's
+   transparency reads as transparency; and no taller than about a third of the
+   screen, the picture fitted inside and never drawn past its own size. */
+.diffPictureBox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-height: 33vh;
+  padding: 0.5rem;
+  border-radius: 0.4rem;
+  background-color: var(--check-light);
+  background-image: conic-gradient(
+    var(--check-dark) 25%,
+    transparent 0 50%,
+    var(--check-dark) 0 75%,
+    transparent 0
+  );
+  background-size: 1rem 1rem;
+}
+
+.diffPictureBox > img {
+  max-width: 100%;
+  max-height: calc(33vh - 1rem);
+  object-fit: contain;
+}
+
+/* A file's hunks travel under its pictures for the fallback, and stay out of
+   sight while the pictures stand. A picture that cannot be fetched takes the
+   section away, which is what brings them back. */
+.diffPictures + .diffPictureCode {
+  display: none;
+}
+
+/* What a fallen-back raster says in its figure's place sits inside the
+   section's padding, which is the line it draws already. */
+.diffPictures > .diffNote {
+  padding: 0;
+  border-top: 0;
+}
+
+/* On a phone the pair stacks, Before over After. */
+@media (width < 40rem) {
+  .diffPictures {
+    flex-direction: column;
+  }
+}
+
 /* The lines are wrapped in a box as wide as the longest of them, which is what
    gives the line below a scrolled width to fill. Without it each line measured
    itself against the *visible* width instead — `code` is inline, so the `pre` was

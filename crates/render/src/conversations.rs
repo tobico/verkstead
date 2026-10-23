@@ -3450,7 +3450,11 @@ pub struct CommitRecord {
 /// patch with nothing in it comes back as nothing to show, exactly as an empty
 /// attached Diff does — and so does a summary of nothing but whitespace, which
 /// the pane would otherwise draw as a gap above the diff.
-pub fn commit_pane(summary: Option<&str>, patch: &str) -> CommitPane {
+///
+/// `repo` is the name of the repository the commit is in, which is what a
+/// picture in its diff is fetched back out of; with none, a picture draws as
+/// code — see [`crate::diff::block`].
+pub fn commit_pane(summary: Option<&str>, patch: &str, repo: Option<&str>) -> CommitPane {
     let summary = summary
         .map(crate::markdown::to_html)
         .filter(|html| !html.trim().is_empty());
@@ -3464,7 +3468,7 @@ pub fn commit_pane(summary: Option<&str>, patch: &str) -> CommitPane {
             .as_deref()
             .is_some_and(crate::markdown::holds_diagram),
         summary,
-        diff: crate::diff::to_html(patch),
+        diff: crate::diff::block(patch, 1, repo),
     }
 }
 

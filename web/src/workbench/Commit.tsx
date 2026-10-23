@@ -70,7 +70,7 @@ import app from "../App.module.css";
 import { Card } from "../Card";
 import { PaneSticky } from "../Panes";
 import { Switch as Toggle } from "../Switch";
-import { loadCommitPane } from "../api/client";
+import { loadCommitPane, readPicture } from "../api/client";
 import type { CommitEvent, CommitPane, ConversationView } from "../api/types";
 import { setWrapping, wrapping } from "../remembered";
 import { useReading } from "../freshness";
@@ -83,6 +83,8 @@ import type { Section } from "../set/outline";
 // files, and what the wrap switch does to the lines inside them. One definition
 // wherever a Diff is read — the renderer's own markup inside it is global.
 import diffStyles from "../set/Diff.module.css";
+import { pictured } from "../set/Diff";
+import type { Reader } from "../set/pictures";
 import { files, spied } from "../set/outline";
 import styles from "./Commit.module.css";
 import { PaneHead } from "./PaneHead";
@@ -181,6 +183,7 @@ export function Commit(props: {
       commit={props.commit}
       pane={opened.data}
       back={props.back}
+      read={(picture) => readPicture(device(), props.conversation.id, picture)}
       instead={
         <Switch fallback={<Empty>This commit changed no files.</Empty>}>
           <Match when={opened.isPending}>
@@ -215,6 +218,9 @@ export function Opened(props: {
   /// failed, a commit that changed nothing, a commit the repository has lost —
   /// and only the caller knows which of them this is.
   instead: JSX.Element;
+  /// How a picture in the diff is fetched, out of the repository the commit is
+  /// in — and none where there is no server to ask.
+  read?: Reader;
 }): JSX.Element {
   // How this device wants diffs drawn — the same setting a question set's
   // attached diff is read with, because it is a setting about reading diffs
@@ -312,7 +318,11 @@ export function Opened(props: {
             </div>
             {/* The per-file folds and their anchors are stamped by the
                 renderer, since this arrives already rendered. */}
-            <div class={diffStyles.diffFiles} innerHTML={diff().html} />
+            <div
+              class={diffStyles.diffFiles}
+              innerHTML={diff().html}
+              ref={(files) => pictured(files, () => diff().html, props.read)}
+            />
           </section>
         )}
       </Show>

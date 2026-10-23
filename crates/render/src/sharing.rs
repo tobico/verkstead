@@ -148,7 +148,7 @@ pub fn shared_commit(id: i64, summary: Option<&str>, patch: Option<&str>) -> Sha
         // merge that resolved nothing render as — the flag beside it is what
         // tells the reader which of the two kinds of nothing they are looking
         // at.
-        pane: crate::conversations::commit_pane(summary, patch.unwrap_or_default()),
+        pane: crate::conversations::commit_pane(summary, patch.unwrap_or_default(), None),
         held: patch.is_some(),
     }
 }

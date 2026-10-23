@@ -13,14 +13,19 @@
 //! drawn as the whole of the Diff, an unlabelled block meaning the work's own
 //! repo already. A companion's block is named however alone it is, exactly as a
 //! commit card is.
+//!
+//! A picture file in it is drawn rather than read: the renderer leaves a
+//! placeholder per side and `pictures.ts` fetches the bytes into it as its fold
+//! scrolls near.
 
-import { For, Show } from "solid-js";
+import { For, Show, createEffect, on, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 
 import app from "../App.module.css";
 import { Switch } from "../Switch";
 import type { RepoDiffView } from "../api/types";
 import styles from "./Diff.module.css";
+import { drawPictures, type Reader } from "./pictures";
 
 /// The attached Diff, and the one setting that governs how it is read.
 ///
@@ -35,6 +40,9 @@ export function Diff(props: {
   blocks: RepoDiffView[];
   wrapped: boolean;
   flip: (on: boolean) => void;
+  /// How a picture in it is fetched, and none where there is no server to ask —
+  /// a share's, where every picture falls back to what the patch holds.
+  read?: Reader;
 }): JSX.Element {
   return (
     <section
@@ -56,10 +64,28 @@ export function Diff(props: {
             </Show>
             {/* The per-file anchors are stamped by the renderer, since this
                 arrives already rendered. */}
-            <div class={styles.diffFiles} innerHTML={block.diff.html} />
+            <div
+              class={styles.diffFiles}
+              innerHTML={block.diff.html}
+              ref={(files) => pictured(files, () => block.diff.html, props.read)}
+            />
           </>
         )}
       </For>
     </section>
   );
+}
+
+/// Draw the pictures in a block of injected markup, and again whenever the
+/// markup is assigned afresh: a new assignment is new placeholders.
+///
+/// Following the HTML rather than the mount, for the reason the commit pane's
+/// Message does: assigning it is a render effect, and those are all through
+/// before this runs.
+export function pictured(
+  root: HTMLElement,
+  html: () => string,
+  read: Reader | undefined,
+): void {
+  createEffect(on(html, () => onCleanup(drawPictures({ root, read }))));
 }

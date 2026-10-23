@@ -441,7 +441,7 @@ fn diffed(composed: &[verkstead_schema::RepoDiff], single: Option<&str>) -> Vec<
     let mut first = 1;
 
     for (repo, own, patch) in patches {
-        let Some(view) = diff::block(patch, first) else {
+        let Some(view) = diff::block(patch, first, repo) else {
             continue;
         };
         first += view.paths.len();

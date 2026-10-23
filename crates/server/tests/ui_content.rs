@@ -421,6 +421,33 @@ fn own_block() -> RepoDiff {
     }
 }
 
+/// The Conversation's own block of a Diff with pictures in it: an SVG edited,
+/// which is a pair, and a PNG added, which is git's one line about a binary
+/// file. Whole ids on both, which is what `--full-index` leaves on every patch
+/// and what the viewer fetches each side by.
+fn pictured_block() -> RepoDiff {
+    RepoDiff {
+        repo: "verkstead".to_owned(),
+        own: true,
+        diff: concat!(
+            "diff --git a/assets/mark.svg b/assets/mark.svg\n",
+            "index 3b18e512dba79e4c8300dd08aeb37f8e728b8dad..a0423896973644771497bdc03eb99d5281615b51 100644\n",
+            "--- a/assets/mark.svg\n",
+            "+++ b/assets/mark.svg\n",
+            "@@ -1,3 +1,3 @@\n",
+            " <svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\">\n",
+            "-  <rect width=\"16\" height=\"16\" fill=\"#a34b12\"/>\n",
+            "+  <circle cx=\"8\" cy=\"8\" r=\"8\" fill=\"#a34b12\"/>\n",
+            " </svg>\n",
+            "diff --git a/assets/icon.png b/assets/icon.png\n",
+            "new file mode 100644\n",
+            "index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391\n",
+            "Binary files /dev/null and b/assets/icon.png differ\n",
+        )
+        .to_owned(),
+    }
+}
+
 /// And a read-write companion's, which is named wherever it is drawn: it is
 /// somebody else's repository however little else is uncommitted.
 fn companion_block() -> RepoDiff {
@@ -1743,6 +1770,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     alongside.diffs = vec![own_block(), companion_block()];
     let (_, json) = set_json(&app, &pool, &alongside).await;
     write("set-alongside.json", &json);
+
+    // And a Set whose Diff holds pictures, which draws each as a picture rather
+    // than as code: the placeholders the viewer fetches into are the renderer's.
+    let (_dir, pool, app) = fresh_app().await;
+    let mut pictured = marked_up_set();
+    pictured.diffs = vec![pictured_block()];
+    let (_, json) = set_json(&app, &pool, &pictured).await;
+    write("set-pictured.json", &json);
 
     // The same Set answered, which is the same page read rather than filled in
     // — with a file on two of its Answers, because a settled Set carries what
