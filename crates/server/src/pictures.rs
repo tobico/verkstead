@@ -15,6 +15,13 @@
 //! hash still matches — and refused once the file has changed, that being a
 //! picture the diff no longer describes.
 //!
+//! **Out of the registered repository, not the Worktree.** A Worktree borrows
+//! its repository's object database rather than holding one, and it goes when
+//! the Conversation is closed while the record it drew pictures for stays
+//! readable. So the object database is asked through the repository as it was
+//! registered, which outlives every checkout of it, and the Worktree is only
+//! where the stand-in reads — see [`Source`].
+//!
 //! An id is matched as a prefix throughout, both against the object database
 //! and against the Worktree's hash, so a seven-character id out of an older
 //! Set is drawn wherever it is still unambiguous.
@@ -55,14 +62,55 @@ pub(crate) enum Picture {
     UnderGit,
 }
 
-/// The picture `id` names in the repository checked out at `worktree`, with
-/// the file at `path` under it standing in where the object database has no
-/// such blob.
+/// Where one repository's pictures are read from: the repository as it was
+/// registered, whose object database holds every blob that was ever staged or
+/// committed, and the Worktree the Conversation checked it out in, while it
+/// still has one — which is where a file not yet staged is read instead.
+#[derive(Debug, Clone)]
+pub(crate) struct Source {
+    pub(crate) repo: PathBuf,
+    pub(crate) worktree: Option<PathBuf>,
+}
+
+/// Every repository a Diff of `conversation` can have come out of, by the name
+/// its block carries: its own, and each read-write companion's — the ones
+/// [`crate::diffs::writable`] composes a Diff from — whether or not a Worktree
+/// of it is still recorded. A closed Conversation has none, and its pictures
+/// are still read out of the repositories they were committed to.
+pub(crate) fn sources(conversation: &crate::store::Conversation) -> Vec<(String, Source)> {
+    let own = (
+        conversation.repo.name.clone(),
+        Source {
+            repo: conversation.repo.path.clone(),
+            worktree: conversation.worktree.clone(),
+        },
+    );
+
+    let companions = conversation
+        .companions
+        .iter()
+        .filter(|companion| companion.mode == crate::store::CompanionMode::ReadWrite)
+        .map(|companion| {
+            (
+                companion.repo.name.clone(),
+                Source {
+                    repo: companion.repo.path.clone(),
+                    worktree: companion.worktree.clone(),
+                },
+            )
+        });
+
+    std::iter::once(own).chain(companions).collect()
+}
+
+/// The picture `id` names in `source`'s repository, with the file at `path`
+/// under its Worktree standing in where the object database has no such blob.
 ///
 /// `path` is the diff's own, relative to the Worktree, and is bound the way the
 /// Code pane binds a file read — see [`crate::files::bound`]: nothing outside
-/// the Worktree, a symlink out of it included, and nothing under `.git`.
-pub(crate) fn read(worktree: &Path, id: &str, path: &str) -> Picture {
+/// the Worktree, a symlink out of it included, and nothing under `.git`. With no
+/// Worktree there is nothing to stand in, and a blob git does not have is gone.
+pub(crate) fn read(source: &Source, id: &str, path: &str) -> Picture {
     // Hex and nothing else, which is what keeps a revision — `HEAD:secrets` —
     // out of `cat-file`: an id is the one thing this is asked for by. Four is
     // the shortest abbreviation git resolves, and the zeroed id is the side of
@@ -75,11 +123,14 @@ pub(crate) fn read(worktree: &Path, id: &str, path: &str) -> Picture {
         return Picture::Gone;
     }
 
-    if let Some(stored) = stored(worktree, &id) {
+    if let Some(stored) = stored(&source.repo, &id) {
         return stored;
     }
 
-    worktree_copy(worktree, &id, path)
+    match &source.worktree {
+        Some(worktree) => worktree_copy(worktree, &id, path),
+        None => Picture::Gone,
+    }
 }
 
 /// The repositories a share reads its pictures out of, by the names its Diffs
@@ -93,12 +144,12 @@ pub(crate) fn read(worktree: &Path, id: &str, path: &str) -> Picture {
 /// it cannot fetch.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Inlining {
-    repos: Vec<(String, PathBuf)>,
+    repos: Vec<(String, Source)>,
 }
 
 impl Inlining {
-    /// The repositories, each by its name and where it is checked out.
-    pub(crate) fn of(repos: impl IntoIterator<Item = (String, PathBuf)>) -> Self {
+    /// The repositories, each by its name and where it is read from.
+    pub(crate) fn of(repos: impl IntoIterator<Item = (String, Source)>) -> Self {
         Self {
             repos: repos.into_iter().collect(),
         }
@@ -107,9 +158,9 @@ impl Inlining {
 
 impl PictureReader for Inlining {
     fn read(&self, repo: &str, path: &str, blob: &str) -> Option<Vec<u8>> {
-        let (_, worktree) = self.repos.iter().find(|(name, _)| name == repo)?;
+        let (_, source) = self.repos.iter().find(|(name, _)| name == repo)?;
 
-        match read(worktree, blob, path) {
+        match read(source, blob, path) {
             Picture::Found(bytes) => Some(bytes),
             _ => None,
         }
@@ -122,9 +173,9 @@ impl PictureReader for Inlining {
 /// Asked through `--batch-check` first, which resolves a short id and says the
 /// object's type and size without reading it: the cap is asked of the size
 /// before any byte is.
-fn stored(worktree: &Path, id: &str) -> Option<Picture> {
+fn stored(repo: &Path, id: &str) -> Option<Picture> {
     let checked = feeding(
-        worktree,
+        repo,
         &[
             "cat-file",
             "--batch-check=%(objectname) %(objecttype) %(objectsize)",
@@ -144,7 +195,7 @@ fn stored(worktree: &Path, id: &str) -> Option<Picture> {
         return Some(Picture::TooLarge);
     }
 
-    let read = bytes(worktree, &["cat-file", "blob", name], &[0])?;
+    let read = bytes(repo, &["cat-file", "blob", name], &[0])?;
 
     // And again on what was read, for the reason the Code pane checks twice.
     if read.len() as u64 > MAX_BYTES {
@@ -246,6 +297,15 @@ mod tests {
         (dir, path)
     }
 
+    /// A repository read with its own checkout as the Worktree, which is what
+    /// these tests have: the one directory both reads are made in.
+    fn checked_out(repo: &Path) -> Source {
+        Source {
+            repo: repo.to_owned(),
+            worktree: Some(repo.to_owned()),
+        }
+    }
+
     const SVG: &[u8] = b"<svg xmlns=\"http://www.w3.org/2000/svg\"><rect/></svg>\n";
 
     fn git(dir: &Path, args: &[&str]) -> String {
@@ -281,13 +341,16 @@ mod tests {
         // Off the disk, so that the bytes can only have come out of git.
         std::fs::remove_file(repo.join("logo.svg")).unwrap();
 
-        assert_eq!(read(&repo, &id, "logo.svg"), Picture::Found(SVG.to_vec()));
         assert_eq!(
-            read(&repo, &id[..7], "logo.svg"),
+            read(&checked_out(&repo), &id, "logo.svg"),
             Picture::Found(SVG.to_vec())
         );
         assert_eq!(
-            read(&repo, &id.to_ascii_uppercase(), "logo.svg"),
+            read(&checked_out(&repo), &id[..7], "logo.svg"),
+            Picture::Found(SVG.to_vec())
+        );
+        assert_eq!(
+            read(&checked_out(&repo), &id.to_ascii_uppercase(), "logo.svg"),
             Picture::Found(SVG.to_vec())
         );
     }
@@ -298,7 +361,11 @@ mod tests {
         let tree = git(&repo, &["rev-parse", "HEAD^{tree}"]);
 
         for asked in ["HEAD:logo.svg", "HEAD", "abc", "", &"0".repeat(40), &tree] {
-            assert_eq!(read(&repo, asked, "logo.svg"), Picture::Gone, "{asked:?}");
+            assert_eq!(
+                read(&checked_out(&repo), asked, "logo.svg"),
+                Picture::Gone,
+                "{asked:?}"
+            );
         }
     }
 
@@ -309,19 +376,39 @@ mod tests {
         let id = blob_id(b"<svg>new</svg>");
 
         assert_eq!(
-            read(&repo, &id, "new.svg"),
+            read(&checked_out(&repo), &id, "new.svg"),
             Picture::Found(b"<svg>new</svg>".to_vec())
         );
         assert_eq!(
-            read(&repo, &id[..7], "new.svg"),
+            read(&checked_out(&repo), &id[..7], "new.svg"),
             Picture::Found(b"<svg>new</svg>".to_vec())
         );
 
         std::fs::write(repo.join("new.svg"), b"<svg>changed</svg>").unwrap();
-        assert_eq!(read(&repo, &id, "new.svg"), Picture::Gone);
+        assert_eq!(read(&checked_out(&repo), &id, "new.svg"), Picture::Gone);
 
         std::fs::remove_file(repo.join("new.svg")).unwrap();
-        assert_eq!(read(&repo, &id, "new.svg"), Picture::Gone);
+        assert_eq!(read(&checked_out(&repo), &id, "new.svg"), Picture::Gone);
+    }
+
+    /// A Conversation closed is one with no Worktree left: what was stored is
+    /// still read out of the repository, and a file only the Worktree held has
+    /// gone with it.
+    #[test]
+    fn with_no_worktree_a_stored_blob_is_still_read_and_nothing_stands_in() {
+        let (_dir, repo) = repository();
+        let id = git(&repo, &["rev-parse", "HEAD:logo.svg"]);
+        std::fs::write(repo.join("new.svg"), b"<svg>new</svg>").unwrap();
+        let closed = Source {
+            repo: repo.clone(),
+            worktree: None,
+        };
+
+        assert_eq!(read(&closed, &id, "logo.svg"), Picture::Found(SVG.to_vec()));
+        assert_eq!(
+            read(&closed, &blob_id(b"<svg>new</svg>"), "new.svg"),
+            Picture::Gone
+        );
     }
 
     #[test]
@@ -330,10 +417,13 @@ mod tests {
         std::fs::write(dir.path().join("outside.svg"), b"<svg/>").unwrap();
         let id = blob_id(b"<svg/>");
 
-        assert_eq!(read(&repo, &id, "../outside.svg"), Picture::Outside);
+        assert_eq!(
+            read(&checked_out(&repo), &id, "../outside.svg"),
+            Picture::Outside
+        );
         assert_eq!(
             read(
-                &repo,
+                &checked_out(&repo),
                 &id,
                 &dir.path().join("outside.svg").display().to_string()
             ),
@@ -344,11 +434,14 @@ mod tests {
         {
             std::os::unix::fs::symlink(dir.path().join("outside.svg"), repo.join("link.svg"))
                 .unwrap();
-            assert_eq!(read(&repo, &id, "link.svg"), Picture::Outside);
+            assert_eq!(read(&checked_out(&repo), &id, "link.svg"), Picture::Outside);
         }
 
         std::fs::write(repo.join(".git/picture.svg"), b"<svg/>").unwrap();
-        assert_eq!(read(&repo, &id, ".git/picture.svg"), Picture::UnderGit);
+        assert_eq!(
+            read(&checked_out(&repo), &id, ".git/picture.svg"),
+            Picture::UnderGit
+        );
     }
 
     #[test]
@@ -358,10 +451,16 @@ mod tests {
         std::fs::write(repo.join("large.png"), &large).unwrap();
         let id = blob_id(&large);
 
-        assert_eq!(read(&repo, &id, "large.png"), Picture::TooLarge);
+        assert_eq!(
+            read(&checked_out(&repo), &id, "large.png"),
+            Picture::TooLarge
+        );
 
         git(&repo, &["add", "large.png"]);
         std::fs::remove_file(repo.join("large.png")).unwrap();
-        assert_eq!(read(&repo, &id, "large.png"), Picture::TooLarge);
+        assert_eq!(
+            read(&checked_out(&repo), &id, "large.png"),
+            Picture::TooLarge
+        );
     }
 }

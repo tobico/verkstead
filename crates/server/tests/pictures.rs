@@ -412,6 +412,83 @@ async fn a_blob_named_by_a_commit_comes_back() {
     }
 }
 
+/// A closed Conversation has no Worktrees left, and what it committed is still
+/// drawn: the blobs are read out of the repositories as they were registered,
+/// its own and a read-write companion's, in the pane and in a share alike.
+/// What only a Worktree held went with it.
+#[tokio::test]
+async fn a_closed_conversation_still_draws_what_it_committed() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, companions) = grilling(&pool, dir.path()).await;
+
+    // Asked about while staged, so a Set's Diff names it too, then committed.
+    std::fs::write(worktree.join("logo.svg"), REDRAWN).unwrap();
+    git(&worktree, &["add", "logo.svg"]);
+    composed(&pool, conversation).await;
+    git(&worktree, &["commit", "-m", "redraw the logo"]);
+    record(&pool, conversation, &git(&worktree, &["rev-parse", "HEAD"])).await;
+    let ours = git(&worktree, &["rev-parse", "HEAD:logo.svg"]);
+
+    std::fs::write(companions[0].join("logo.svg"), REDRAWN).unwrap();
+    git(&companions[0], &["commit", "-am", "redraw the logo"]);
+    let theirs = git(&companions[0], &["rev-parse", "HEAD:logo.svg"]);
+
+    std::fs::write(worktree.join("badge.svg"), BADGE).unwrap();
+    let only_checked_out = git(&worktree, &["hash-object", "badge.svg"]);
+
+    // Closed the way a close leaves it: the record forgets every Worktree, and
+    // the directories are given back to git.
+    store::close_conversation(&pool, conversation)
+        .await
+        .unwrap();
+    let repo = dir.path().join("verkstead");
+    git(
+        &repo,
+        &["worktree", "remove", "--force", &worktree.to_string_lossy()],
+    );
+    git(
+        &dir.path().join("askance"),
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            &companions[0].to_string_lossy(),
+        ],
+    );
+
+    for (repo, id) in [("verkstead", &ours), ("askance", &theirs)] {
+        let (status, _, body) = picture(&app, conversation, repo, id, "logo.svg").await;
+        assert_eq!(status, StatusCode::OK, "{repo}: {}", said(&body));
+        assert_eq!(body, REDRAWN, "{repo}");
+    }
+
+    let (status, _, body) = picture(
+        &app,
+        conversation,
+        "verkstead",
+        &only_checked_out,
+        "badge.svg",
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(said(&body), "This picture is no longer there.");
+
+    let shared = share(&app, conversation).await;
+    let [commit] = &shared.commits[..] else {
+        panic!("one commit on the Timeline");
+    };
+    let html = &commit.pane.diff.as_ref().expect("the commit's diff").html;
+    assert!(html.contains(&inlined("image/svg+xml", LOGO)), "{html}");
+    assert!(html.contains(&inlined("image/svg+xml", REDRAWN)), "{html}");
+
+    let sheets = sheets(&shared);
+    assert!(sheets.contains(&inlined("image/svg+xml", LOGO)), "{sheets}");
+    assert!(
+        sheets.contains(&inlined("image/svg+xml", REDRAWN)),
+        "{sheets}"
+    );
+}
+
 /// A file only in the Worktree is served while it still hashes to the id its
 /// Diff named, and refused with a sentence once it has changed.
 #[tokio::test]
@@ -437,7 +514,7 @@ async fn a_file_only_in_the_worktree_is_served_until_it_changes() {
 }
 
 /// The stand-in reaches nothing outside the Worktree and nothing under `.git`,
-/// and a repository the Conversation has no Worktree of — a read-only
+/// and a repository no Diff of the Conversation comes out of — a read-only
 /// companion's, or one it does not carry at all — is refused before anything
 /// is read.
 #[tokio::test]
@@ -468,7 +545,7 @@ async fn what_the_endpoint_will_not_reach_is_refused() {
         assert_eq!(status, StatusCode::NOT_FOUND, "{repo}");
         assert_eq!(
             said(&body),
-            "This conversation has no worktree of that repository."
+            "No diff in this conversation comes from that repository."
         );
     }
 }

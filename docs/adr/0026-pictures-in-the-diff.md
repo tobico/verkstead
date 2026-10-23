@@ -46,7 +46,10 @@ combined diff. The repository holds the *before* blob always, and the *after*
 blob the moment the file is staged or committed — which is what becomes of
 work the human approves. While a set is still open and the file is only in
 the worktree, the worktree copy is served as long as it still hashes to that
-id. So the renderer writes a placeholder naming the repo, the path, the id and
+id. The object database is asked through the repository as it was registered
+rather than through the worktree, which only borrows it and goes when the
+Conversation is closed: a closed Conversation still draws what it committed.
+So the renderer writes a placeholder naming the repo, the path, the id and
 the media type, and the viewer fetches the bytes as the fold scrolls near,
 over the API it already uses, caching by id for the life of the page. Older
 sets carry seven-character ids, which git resolves wherever they are
