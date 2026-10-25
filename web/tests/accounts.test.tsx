@@ -17,7 +17,11 @@ import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { OnboardingView, ProfileEdit } from "../src/api/types";
+import type {
+  OnboardingView,
+  ProfileEdit,
+  ProfileEntry,
+} from "../src/api/types";
 import { AGENT_NAME } from "../src/agents";
 import { KNOWN_MODELS, prettify } from "../src/models";
 import { Accounts } from "../src/setup/Accounts";
@@ -358,6 +362,32 @@ describe("the press onwards", () => {
     expect(
       fetching.mock.calls.filter(([, init]) => init?.method === "POST"),
     ).toEqual([]);
+  });
+});
+
+describe("the step opened again", () => {
+  /// Back from the step after it, with the Claude Code account kept already:
+  /// its card starts unticked, so the press does not offer to keep it again.
+  it("leaves unticked an account whose Profile is kept already", async () => {
+    serving(
+      whenever(
+        PROFILES,
+        json([{ ...(profiles as ProfileEntry[])[0]!, name: null }]),
+      ),
+    );
+    const { container } = mount({
+      ...PART_WAY,
+      steps: { ...PART_WAY.steps, accounts: true },
+    });
+
+    await waitFor(() =>
+      expect(tick(container, "Claude")!.checked).toBe(false),
+    );
+    expect(onwards(container).textContent).toBe("Next");
+
+    // And ticking it again is asking for it, which the press then names.
+    fireEvent.click(tick(container, "Claude")!);
+    expect(onwards(container).textContent).toBe("Keep 1 profile");
   });
 });
 

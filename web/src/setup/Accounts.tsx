@@ -21,7 +21,9 @@
 //! account and needs no name to tell it from another.
 //!
 //! **The press names what it does: Keep N profile(s), or Next** once a Profile
-//! stands saved and nothing is ticked. It needs at least one Profile — ticked
+//! stands saved and nothing is ticked. A card whose harness already has the
+//! unnamed Profile a tick would save starts unticked — the step opened again
+//! from the one after it — so the press does not offer to keep what is kept. It needs at least one Profile — ticked
 //! here, or made in the form. That is one of the three things the objective is
 //! and the only one a step could walk past: clearing the mode with nothing
 //! saved would land somebody on exactly the empty state a skip was rejected
@@ -48,8 +50,9 @@ import { Copy } from "../Copy";
 import { HarnessMark } from "../HarnessMark";
 import { Icon } from "../Icon";
 import { AGENT_NAME, type AgentType } from "../agents";
-import { createProfile } from "../api/client";
+import { createProfile, listProfiles } from "../api/client";
 import { harnessAbsent } from "../broken";
+import { useReading } from "../freshness";
 import type {
   AccountView,
   OnboardingView,
@@ -138,14 +141,33 @@ export function Accounts(props: {
   /// Which harness one found account belongs to.
   const agent = (found: AccountView): AgentType => found.account.agent_type;
 
+  // The Profiles saved, once the step stands met — the frame's own read under
+  // the same key, so this is the list it draws the rail's line from rather than
+  // a second request. Nothing to ask for before then: no Profile is saved.
+  const profiles = useReading(() => ({
+    queryKey: ["profiles"],
+    queryFn: () => listProfiles(null),
+    enabled: props.reading.steps.accounts,
+    freshness: { reconcile: "id" },
+  }));
+
+  /// Whether this account's harness already has the unnamed Profile a tick
+  /// would save — which is what the server answers `DefaultTaken` about.
+  const kept = (found: AccountView): boolean =>
+    profiles.data?.some(
+      (profile) =>
+        profile.name === null && profile.account.agent_type === agent(found),
+    ) ?? false;
+
   /// Whether a card is ticked: what was said about it, or — where nothing has
-  /// been — whether its harness is on the machine.
+  /// been — whether its harness is on the machine and has no Profile of it
+  /// saved yet.
   ///
   /// An account with no binary can never be ticked, whatever was said about it
   /// before the harness was uninstalled: a Profile of it is one no session
   /// could be launched under.
   const ticked = (found: AccountView): boolean =>
-    found.harness && (chosen()[agent(found)] ?? true);
+    found.harness && (chosen()[agent(found)] ?? !kept(found));
 
   /// The cards a press would save.
   const taking = (): AccountView[] => props.reading.accounts.filter(ticked);
