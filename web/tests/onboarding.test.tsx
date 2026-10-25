@@ -216,6 +216,143 @@ describe("the rail", () => {
   });
 });
 
+describe("the phone's Steps sheet", () => {
+  /// The header's button, which the stylesheet draws only below 60rem.
+  function steps(container: ParentNode): HTMLButtonElement {
+    return [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Steps",
+    )!;
+  }
+
+  /// The sheet, where it is up.
+  function sheet(container: ParentNode): HTMLDialogElement | null {
+    return container.querySelector<HTMLDialogElement>("dialog[open]");
+  }
+
+  /// Which rows on the sheet carry an Open.
+  function openable(dialog: ParentNode): Array<string | undefined> {
+    return rows(dialog)
+      .filter((row) =>
+        [...row.querySelectorAll("button")].some(
+          (button) => button.textContent === "Open",
+        ),
+      )
+      .map((row) => row.dataset.step);
+  }
+
+  it("is nowhere until Steps is pressed", async () => {
+    const { container } = mount(FRESH);
+
+    await waitFor(() => expect(steps(container)).toBeTruthy());
+    expect(container.querySelector("dialog")).toBeNull();
+  });
+
+  it("lists the three steps as the rail does", async () => {
+    const { container } = mount(PART_WAY);
+
+    await waitFor(() => expect(steps(container)).toBeTruthy());
+    fireEvent.click(steps(container));
+
+    const dialog = sheet(container)!;
+    expect(dialog).toBeTruthy();
+    expect(headings(dialog)).toEqual(STEPS.map((step) => TITLES[step]));
+    expect(rows(dialog).map((row) => row.dataset.met)).toEqual([
+      "yes",
+      "no",
+      "no",
+    ]);
+    expect(summaries(dialog)[0]).toBe("A sandbox, git, and Claude Code");
+    // Its own Open is the way into a step, so no heading there is a press.
+    expect(dialog.querySelector("h2 button")).toBeNull();
+  });
+
+  /// Open on a met step that is not the open one, and nowhere else: not on the
+  /// step already open, and not on one nobody has met, which would be the skip.
+  it("offers Open only on a met step that is not open", async () => {
+    localStorage.setItem(SETUP_STEP, "accounts");
+    const { container } = mount(PART_WAY);
+
+    await waitFor(() => expect(steps(container)).toBeTruthy());
+    fireEvent.click(steps(container));
+
+    expect(openable(sheet(container)!)).toEqual(["dependencies"]);
+  });
+
+  it("draws no Open on the step that is open, met or not", async () => {
+    const { container } = mount(PART_WAY);
+
+    await waitFor(() => expect(steps(container)).toBeTruthy());
+    fireEvent.click(steps(container));
+
+    expect(openable(sheet(container)!)).toEqual([]);
+  });
+
+  it("opens the step Open is on, and goes", async () => {
+    localStorage.setItem(SETUP_STEP, "accounts");
+    const { container } = mount(PART_WAY);
+
+    await waitFor(() => expect(steps(container)).toBeTruthy());
+    fireEvent.click(steps(container));
+    const open = [...sheet(container)!.querySelectorAll("button")].find(
+      (button) => button.textContent === "Open",
+    )!;
+    fireEvent.click(open);
+
+    expect(sheet(container)).toBeNull();
+    expect(opened(container)).toBe("dependencies");
+    expect(container.querySelector(`.${styles.title}`)!.textContent).toBe(
+      TITLES.dependencies,
+    );
+  });
+
+  it("goes on Close, on Escape, and on a press on the veil", async () => {
+    const { container } = mount(PART_WAY);
+
+    await waitFor(() => expect(steps(container)).toBeTruthy());
+
+    fireEvent.click(steps(container));
+    const close = [...sheet(container)!.querySelectorAll("button")].find(
+      (button) => button.textContent === "Close",
+    )!;
+    fireEvent.click(close);
+    expect(sheet(container)).toBeNull();
+
+    fireEvent.click(steps(container));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(sheet(container)).toBeNull();
+
+    // A press on the backdrop is reported as a press on the dialog itself.
+    fireEvent.click(steps(container));
+    fireEvent.click(sheet(container)!);
+    expect(sheet(container)).toBeNull();
+    // And the step that was open stays open.
+    expect(opened(container)).toBe("dependencies");
+  });
+});
+
+/// The phone's header strip, which names the open step beside its dots.
+describe("the header's strip", () => {
+  it("fills the open step's dot and names it", async () => {
+    localStorage.setItem(SETUP_STEP, "accounts");
+    const { container } = mount(PART_WAY);
+
+    await waitFor(() =>
+      expect(container.querySelector(`.${styles.strip}`)).toBeTruthy(),
+    );
+    const strip = container.querySelector(`.${styles.strip}`)!;
+    expect(
+      [...strip.querySelectorAll("li")].map((dot) =>
+        dot.classList.contains(styles.here!),
+      ),
+    ).toEqual([false, true, false]);
+    expect(strip.querySelector(`.${styles.where}`)!.textContent).toBe(
+      TITLES.accounts,
+    );
+    // Not a fourth list of rows for anything to find the frame's steps by.
+    expect(strip.querySelector("[data-step]")).toBeNull();
+  });
+});
+
 describe("the lines under a met step", () => {
   it("joins two names with and, and more with the serial comma", () => {
     expect(listed(["git"])).toBe("git");
@@ -315,7 +452,7 @@ describe("the step this device is on", () => {
     const { container, fetching } = mount(PART_WAY);
 
     await waitFor(() => expect(rows(container)).toHaveLength(3));
-    fireEvent.click(container.querySelector("button")!);
+    fireEvent.click(container.querySelector("h2 button")!);
 
     await waitFor(() => expect(opened(container)).toBe("dependencies"));
     expect(localStorage.getItem(SETUP_STEP)).toBe("dependencies");

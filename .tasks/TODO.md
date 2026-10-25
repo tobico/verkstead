@@ -17,7 +17,7 @@ folder, `CONTEXT.md`, `docs/copy.md` and the code.
 ## Tasks
 
 - [x] 01: The machine on the wire, and the rail — [details](01-the-rail.md)
-- [ ] 02: The phone — [details](02-the-phone.md)
+- [x] 02: The phone — [details](02-the-phone.md)
 - [ ] 03: Choosing — [details](03-choosing.md)
 - [ ] 04: Installing and by hand — [details](04-installing-and-by-hand.md)
 - [ ] 05: Agent profiles — [details](05-agent-profiles.md)

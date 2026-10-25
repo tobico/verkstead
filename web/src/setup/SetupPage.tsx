@@ -40,12 +40,23 @@
 //! at one width. The rail is the brand, the three steps and what the page is
 //! reading; the paper is the open step, under its number and title, with a foot
 //! pinned to the bottom of it that the frame owns and the step presses in —
-//! see [`Foot`](./Foot.tsx). Narrower than that, the rail stands over the
-//! paper as one column.
+//! see [`Foot`](./Foot.tsx).
+//!
+//! **Narrower than that, the rail folds into a header** over the paper: the
+//! brand, a strip of three dots naming the open step, and a Steps button that
+//! opens the rail's own list in the app's one [`Modal`](../Modal.tsx), at the
+//! top of the window where the strip it stands for is. The list there is the
+//! rail's, with an Open on the end of a met step rather than its heading being
+//! the press: a heading on a card a thumb is reaching into is no target. And
+//! the foot stays stuck to the bottom of the window, its press the whole width
+//! of it.
 
 import { For, Show, createSignal, type JSX } from "solid-js";
+import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 
 import { DragBar } from "../DragBar";
+import { Icon } from "../Icon";
+import { Modal } from "../Modal";
 import { listProfiles, loadOnboarding } from "../api/client";
 import type { OnboardingView } from "../api/types";
 import { useReading } from "../freshness";
@@ -75,6 +86,10 @@ import styles from "./SetupPage.module.css";
 /// The wizard, whole.
 export function SetupPage(): JSX.Element {
   const [open, setOpen] = createSignal<Step>(openStep());
+
+  // Whether the phone's Steps sheet is up. Never up from 60rem, where there is
+  // no button to have opened it.
+  const [listing, setListing] = createSignal(false);
 
   // What the open step has asked for, where it has asked for anything: the
   // dependencies step reads faster while an install of its own is going, and
@@ -179,43 +194,86 @@ export function SetupPage(): JSX.Element {
             <img src="/icons/icon-192.png" alt="" />
             Verkstead
           </h1>
+          {/* The phone's way to the list the rail holds, which the header
+              has no room for. */}
+          <Show when={onboarding.data}>
+            <button
+              type="button"
+              class={styles.listing}
+              aria-haspopup="dialog"
+              onClick={() => setListing(true)}
+            >
+              Steps
+              <Icon of={faChevronDown} class={styles.caret!} />
+            </button>
+          </Show>
           <p class={styles.label}>Setup</p>
 
           <Show when={onboarding.data}>
             {(view) => (
               <>
-                <ol class={styles.steps}>
-                  <For each={STEPS}>
-                    {(step) => (
-                      <li
-                        class={styles.step}
-                        classList={{ [styles.open!]: open() === step }}
-                        data-step={step}
-                        data-met={met(view().steps, step) ? "yes" : "no"}
-                        aria-current={open() === step ? "step" : undefined}
-                      >
-                        <StepHead
-                          step={step}
-                          met={met(view().steps, step)}
-                          open={open() === step}
-                          show={show}
-                        />
-                        <Show when={summary(view(), step)}>
-                          {(line) => <p class={styles.summary}>{line()}</p>}
-                        </Show>
-                      </li>
-                    )}
-                  </For>
-                </ol>
+                <Strip open={open()} />
 
-                <p class={styles.reading}>
-                  <span class={styles.dot} aria-hidden="true" />
-                  {reading(view())}
-                </p>
+                <div class={styles.listed}>
+                  <StepList
+                    view={view()}
+                    open={open()}
+                    summary={(step) => summary(view(), step)}
+                    show={show}
+                  />
+
+                  <p class={styles.reading}>
+                    <span class={styles.dot} aria-hidden="true" />
+                    {reading(view())}
+                  </p>
+                </div>
               </>
             )}
           </Show>
         </div>
+
+        {/* The rail's list on a phone, over a veil. Nothing of it is on the
+            page until Steps is pressed, which is why the rail's own rows stay
+            the only ones a narrow page's frame has. */}
+        <Modal
+          class={styles.sheet!}
+          open={listing() && onboarding.data !== undefined}
+          close={() => setListing(false)}
+          name="Steps"
+        >
+          <div class={styles.sheetHead}>
+            {/* The brand as the header draws it, and not a second heading:
+                the page's one `h1` is still the header's, under this veil. */}
+            <p class={styles.brand}>
+              <img src="/icons/icon-192.png" alt="" />
+              Verkstead
+            </p>
+            <button
+              type="button"
+              class={styles.close}
+              onClick={() => setListing(false)}
+            >
+              Close
+            </button>
+          </div>
+          <p class={styles.label}>Setup</p>
+
+          <StepList
+            view={onboarding.data!}
+            open={open()}
+            summary={(step) => summary(onboarding.data!, step)}
+            show={(step) => {
+              show(step);
+              setListing(false);
+            }}
+            sheet
+          />
+
+          <p class={styles.reading}>
+            <span class={styles.dot} aria-hidden="true" />
+            {reading(onboarding.data!)}
+          </p>
+        </Modal>
 
         <div class={styles.paper}>
           <Show
@@ -292,18 +350,103 @@ function reading(view: OnboardingView): string {
     : `Reading ${view.machine} every ${PROBE / 1000} s`;
 }
 
+/// The three steps as the rail lists them, and as the phone's sheet lists them
+/// again: a mark, a name, and what meeting the step came to under it.
+///
+/// The one difference is where the way back into a met step is. In the rail it
+/// is the heading itself; on the sheet it is an Open on the end of the row,
+/// because what a thumb on a phone reaches for is a word that says it will
+/// open something. Neither draws one on an unmet step — see [`StepHead`].
+function StepList(props: {
+  view: OnboardingView;
+  open: Step;
+  summary: (step: Step) => string | null;
+  show: (step: Step) => void;
+  sheet?: boolean;
+}): JSX.Element {
+  return (
+    <ol class={styles.steps}>
+      <For each={STEPS}>
+        {(step) => {
+          const isMet = (): boolean => met(props.view.steps, step);
+          const isOpen = (): boolean => props.open === step;
+
+          return (
+            <li
+              class={styles.step}
+              classList={{ [styles.open!]: isOpen() }}
+              data-step={step}
+              data-met={isMet() ? "yes" : "no"}
+              aria-current={isOpen() ? "step" : undefined}
+            >
+              <div class={styles.row}>
+                <StepHead
+                  step={step}
+                  met={isMet()}
+                  open={isOpen()}
+                  show={props.show}
+                  pressable={!props.sheet}
+                />
+                <Show when={props.sheet && isMet() && !isOpen()}>
+                  <button
+                    type="button"
+                    class={styles.reach}
+                    onClick={() => props.show(step)}
+                  >
+                    Open
+                  </button>
+                </Show>
+              </div>
+              <Show when={props.summary(step)}>
+                {(line) => <p class={styles.summary}>{line()}</p>}
+              </Show>
+            </li>
+          );
+        }}
+      </For>
+    </ol>
+  );
+}
+
+/// The phone's header strip: the three steps as dots, the open one filled,
+/// and the open one's name beside them.
+///
+/// Hidden from a screen reader, which has the paper's own *Step N of 3* and
+/// title to read this from: the strip is a picture of where the open step
+/// stands, and read aloud it would be the same two facts a second time.
+function Strip(props: { open: Step }): JSX.Element {
+  return (
+    <div class={styles.strip} aria-hidden="true">
+      <ol class={styles.dots}>
+        <For each={STEPS}>
+          {(step, index) => (
+            <li
+              class={styles.pip}
+              classList={{ [styles.here!]: props.open === step }}
+            >
+              {index() + 1}
+            </li>
+          )}
+        </For>
+      </ol>
+      <span class={styles.where}>{TITLES[props.open]}</span>
+    </div>
+  );
+}
+
 /// One step's heading in the rail: what it is called, whether it is met, and —
 /// where it is — the press that opens it again.
 ///
 /// A button only for a step that stands met and is not open, because that is
 /// the only one there is anything to go back to: an unmet step reached by
 /// pressing past the one in front of it would be the skip ADR-0016 refused,
-/// drawn as navigation.
+/// drawn as navigation. And never on the sheet, which draws its own Open.
 function StepHead(props: {
   step: Step;
   met: boolean;
   open: boolean;
   show: (step: Step) => void;
+  pressable: boolean;
 }): JSX.Element {
   /// The mark and the name, which is the heading either way round. An unmet
   /// step's mark is its number, drawn by the stylesheet so the heading reads
@@ -330,7 +473,10 @@ function StepHead(props: {
 
   return (
     <h2 class={styles.head}>
-      <Show when={props.met && !props.open} fallback={named()}>
+      <Show
+        when={props.pressable && props.met && !props.open}
+        fallback={named()}
+      >
         <button
           type="button"
           class={styles.reopen}
