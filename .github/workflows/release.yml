@@ -1139,11 +1139,41 @@ jobs:
       # these: `lipo` neither reads nor copies it, and the script states 0755
       # over the file it writes. But a half nothing can run is the first thing
       # anybody debugging this leg would try to run, and the bit costs a line.
+      # **A release never publishes an ad-hoc Mac app** (ADR-0027, *The
+      # release*): Squirrel.Mac refuses an ad-hoc signed update, so one shipped
+      # would be a version no Mac could update to or from. The pack itself
+      # signs ad-hoc when it is given no certificate, which is what a checkout,
+      # a pull request and the probe branch want — so it is this leg that
+      # refuses, before anything is packed, naming the secret it has not got.
+      # `docs/releasing.md` says how each is made.
+      #
+      # Repository secrets rather than an environment's, so that a throwaway
+      # workflow on another branch can be handed the same certificate.
+      - name: The Developer ID certificate is in the secrets
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          missing=0
+          for secret in CSC_LINK CSC_KEY_PASSWORD; do
+            if [ -z "${!secret}" ]; then
+              echo "::error::The repository has no $secret secret," \
+                "so this Mac app would be signed ad-hoc and could never update."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
       - name: Pack the app
         working-directory: desktop
         env:
           ARM64: ${{ github.workspace }}/sidecar/verkstead-macos-arm64
           X64: ${{ github.workspace }}/sidecar/verkstead-macos-x64
+          # electron-builder's own names: the base64 of the `.p12` and its
+          # password, which the pack imports into a keychain of its own and
+          # throws away after. Its log says whose identity it signed with.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: |
           chmod +x "$ARM64" "$X64"
           pnpm run pack "$ARM64" "$X64"
@@ -1213,10 +1243,31 @@ jobs:
       # Over the bundle and over the sidecar inside it: the pack signs the app
       # and everything electron-builder knows to be in it, and the sidecar is an
       # extra resource that arrived from another job.
+      #
+      # **And that the seal is a Developer ID's, under the hardened runtime**,
+      # over both again: notarization refuses anything less, Squirrel.Mac
+      # refuses an ad-hoc update, and the sidecar is the binary every session
+      # is spawned from — a bundle signed properly around a sidecar signed
+      # ad-hoc is one Apple's notary sends back. `codesign -dv` prints an
+      # `Authority=` line per certificate in the chain, the leaf's first, and
+      # the runtime among its `flags=`; it prints them to standard error.
       - name: The signature survived the packing
         run: |
           codesign --verify --strict --verbose=2 "$APP"
           codesign --verify --strict "$APP/Contents/Resources/cli/verkstead"
+
+          for signed in "$APP" "$APP/Contents/Resources/cli/verkstead"; do
+            shown=$(codesign -dv --verbose=2 "$signed" 2>&1)
+            printf '%s\n' "$shown" | grep -E '^(Authority|Identifier|TeamIdentifier|CodeDirectory)'
+            if ! printf '%s\n' "$shown" | grep -q '^Authority=Developer ID Application: '; then
+              echo "::error::$signed is not signed by a Developer ID Application certificate."
+              exit 1
+            fi
+            if ! printf '%s\n' "$shown" | grep -Eq 'flags=[^ ]*runtime'; then
+              echo "::error::$signed is not signed with the hardened runtime."
+              exit 1
+            fi
+          done
 
       # And that the icon a downloader drags into Applications resolves to a
       # file macOS can read. The Finder icon is the one thing about this bundle
@@ -1457,9 +1508,9 @@ jobs:
       # inside the bundle from a Conversation over this checkout.
       #
       # **What this leg is for beyond the other two is the signature.** The
-      # bundle is ad-hoc signed rather than by a Developer ID, and the
       # notification centre is the one part of macOS that may decline an app it
-      # cannot place; Electron says so with a `failed` event, which the app logs.
+      # cannot place, which an ad-hoc bundle was and a Developer ID one should
+      # not be; Electron says so with a `failed` event, which the app logs.
       # So the line saying it was shown, the absence of that refusal, and
       # `usernoted` presenting it are all read. Measured on macos-15: an ad-hoc
       # bundle installed in `/Applications` is presented, and the same bundle

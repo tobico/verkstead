@@ -30,6 +30,13 @@
 //! Plain JavaScript and outside `src/`, for the reason `start.mjs` is: it is
 //! what packs the app rather than part of it.
 //!
+//! **And on a Mac, which signature the app gets.** A Developer ID when
+//! electron-builder's own `CSC_LINK` and `CSC_KEY_PASSWORD` hand it one, and
+//! ad-hoc when they do not — which is said here rather than in
+//! `electron-builder.yml` because a configuration file cannot read whether a
+//! variable is set. Either way the log says which, and afterwards by whose
+//! name, out of the bundle that was packed (ADR-0027, *The release*).
+//!
 //! `pnpm run pack` rather than `pnpm pack`, which is pnpm's own command for
 //! something else entirely. Everything after `--` is handed to
 //! electron-builder, so a developer who wants one target of several can say so.
@@ -253,6 +260,72 @@ function builder() {
   return createRequire(import.meta.url).resolve("electron-builder/cli.js");
 }
 
+/// Where electron-builder leaves the universal app before it images it, which is
+/// what the signature is read back off. `directories.output` and the arch, in
+/// electron-builder's own spelling.
+const PACKED_APP = join(ROOT, "target", "electron", "out", "mac-universal", "Verkstead.app");
+
+/// Whether this pack has a Developer ID to sign with: electron-builder's own
+/// variable for the certificate, which it imports for the length of the pack.
+/// The password beside it is the certificate's business, and a wrong or a
+/// missing one is electron-builder's refusal to read it rather than this
+/// script's guess.
+function developerId() {
+  const link = process.env.CSC_LINK;
+  return link !== undefined && link.trim() !== "";
+}
+
+/// What electron-builder is told on top of the configuration about signing,
+/// and the line saying so.
+///
+/// Nothing, given a certificate: the configuration is the Developer ID one.
+/// Without one, the ad-hoc signature every release before ADR-0027 shipped,
+/// with the hardened runtime off beside it — see the `mac:` section of
+/// `electron-builder.yml` for why the two go together.
+function signing() {
+  if (!MAC) {
+    return [];
+  }
+
+  if (developerId()) {
+    process.stdout.write("Signing with the Developer ID certificate in CSC_LINK\n");
+    return [];
+  }
+
+  process.stdout.write("Signing ad-hoc, because CSC_LINK names no Developer ID certificate\n");
+  return ["--config.mac.identity=-", "--config.mac.hardenedRuntime=false"];
+}
+
+/// Say whose signature the packed app carries, read off the bundle rather than
+/// off which branch was taken: `codesign -dv` prints an `Authority=` line per
+/// certificate in the chain for a real identity and `Signature=adhoc` for the
+/// other, and the runtime among its flags.
+///
+/// A pack told to build one architecture alone leaves no universal app, and
+/// that is a developer's choice rather than a failure, so it is said and left.
+function signed() {
+  if (!statSync(PACKED_APP, { throwIfNoEntry: false })?.isDirectory()) {
+    process.stdout.write(`There is no app at ${PACKED_APP}, so its signature goes unread\n`);
+    return;
+  }
+
+  const run = spawnSync("codesign", ["-dv", "--verbose=2", PACKED_APP], { encoding: "utf8" });
+  // codesign writes what it displays to standard error.
+  const said = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+
+  if (run.error !== undefined || run.status !== 0) {
+    die(`codesign could not read the signature on ${PACKED_APP}:`, "", said.trimEnd());
+  }
+
+  const authority = said.match(/^Authority=(.*)$/m)?.[1];
+  const runtime = /flags=\S*runtime/.test(said) ? ", with the hardened runtime" : "";
+  process.stdout.write(
+    authority !== undefined
+      ? `The app is signed by ${authority}${runtime}\n`
+      : `The app is signed ad-hoc${runtime}\n`,
+  );
+}
+
 const binaries = cli();
 
 process.stdout.write(`The sidecar is ${binaries.join(" and ")}\n`);
@@ -261,9 +334,15 @@ stage(binaries);
 // No platform flag: electron-builder packs for the machine it is running on,
 // which is what each of the three artifacts has always been built by — and what
 // keeps this one command rather than one per platform.
-const packing = spawn(process.execPath, [builder(), ...args], {
+const packing = spawn(process.execPath, [builder(), ...signing(), ...args], {
   cwd: DESKTOP,
   stdio: "inherit",
 });
 
-packing.on("exit", (code, signal) => process.exit(signal !== null ? 1 : (code ?? 0)));
+packing.on("exit", (code, signal) => {
+  const status = signal !== null ? 1 : (code ?? 0);
+  if (status === 0 && MAC) {
+    signed();
+  }
+  process.exit(status);
+});

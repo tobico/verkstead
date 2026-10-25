@@ -176,23 +176,41 @@ mac:
   # which is what a Mac groups the app under.
   category: public.app-category.developer-tools
 
-  # **Ad-hoc signed, which is not the signing this roadmap decided against.**
-  # `null` here would skip code signing outright, and Apple silicon refuses to
-  # execute a Mach-O carrying no signature at all — so the app would not start on
-  # half the Macs it is built for. `-` is `codesign --sign -` through
-  # @electron/osx-sign, which is exactly what the Rust bundle this replaced did
-  # by hand. It buys nothing from Gatekeeper: there is no Developer ID, the
-  # download is unsigned in the sense `README.md` means, and the three
-  # steps it describes stay (ADR-0020).
-  identity: "-"
+  # **Signed with a Developer ID when the pack is given one, and ad-hoc when it
+  # is not** (ADR-0027, *The release*): Squirrel.Mac, which electron-updater
+  # drives, refuses an ad-hoc signed update, and notarization wants a
+  # Developer ID and the hardened runtime both. So no `identity` is written
+  # here: electron-builder takes the certificate from `CSC_LINK` and
+  # `CSC_KEY_PASSWORD`, imports it into a keychain of its own for the length of
+  # the pack, and signs with the Developer ID Application identity it finds
+  # there.
+  #
+  # **And the ad-hoc half is `scripts/pack.mjs`'s**, because it is the absence
+  # of those two variables that decides it and a configuration file cannot read
+  # one. Given no `CSC_LINK`, the script says `identity: "-"` and
+  # `hardenedRuntime: false` on electron-builder's command line, which is
+  # exactly the bundle every release before this one shipped — a developer's
+  # checkout, a pull request and a fork all pack it. Never unsigned: an Apple
+  # silicon Mac refuses to execute a Mach-O carrying no signature at all, which
+  # `identity: null` would be. And never ad-hoc *with* the runtime: library
+  # validation would weigh frameworks with no Team ID against an app with none,
+  # and that is the bundle electron-builder's own schema warns may not launch.
+  #
+  # The sidecar in `Contents/Resources/cli` is signed with the rest, by the same
+  # identity and under the same runtime: @electron/osx-sign signs every Mach-O
+  # it finds in the bundle, and the release leg reads both signatures back.
+  hardenedRuntime: true
 
-  # **And the hardened runtime goes off beside it.** It defaults on, and
-  # electron-builder's own schema warns what that means under an ad-hoc
-  # signature: library validation, which rejects the pre-signed Electron
-  # framework for carrying a different Team ID — an app that packs and then will
-  # not launch. Nothing here is notarized, which is the only thing the hardened
-  # runtime is required for.
-  hardenedRuntime: false
+  # **The entitlements Electron wants under that runtime**, written down rather
+  # than left to the template electron-builder falls back on, so that a bump of
+  # it cannot change what the app is allowed without a diff here. They are that
+  # template's three as of electron-builder 26.15: V8's JIT, the unsigned
+  # executable memory it maps besides, and library validation off — the last
+  # being what lets the Electron framework, signed before it reached this
+  # bundle, load into it. The same file for the app and for everything inside
+  # it, which is what the template is used as too.
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
 
   # **No `LSUIElement`, said as a line about what is not here.** That key is what
   # made the Rust bundle a menu-bar app with no Dock tile, and ADR-0020 retires

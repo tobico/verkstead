@@ -43,6 +43,81 @@ line above: a machine holding the Windows Installer package earlier Releases
 shipped is not updated across to the exe, and installing the exe over it once
 is what moves it.
 
+## The Mac's signing secrets
+
+A Release's Mac app is signed with a Developer ID and notarized
+([ADR-0027](adr/0027-cluster-updates.md), *The release*): Squirrel.Mac, which
+the app updates itself through, refuses an ad-hoc signed update. Both need
+things only the maintainer holds, kept as five **repository** secrets —
+repository rather than an environment's, so that a throwaway workflow on
+another branch can be handed the same certificate. **A run missing either
+certificate secret fails its Mac leg before it packs**, naming the one it has
+not got, and publishes nothing; a pack anywhere else — a checkout, a pull
+request, a fork — has no secrets and signs ad-hoc, saying so in its log.
+
+Made once, in this order.
+
+1. **Enrol in the Apple Developer Program as an individual**, at
+   [developer.apple.com/programs/enroll](https://developer.apple.com/programs/enroll/),
+   with an Apple Account that has two-factor authentication on. An individual
+   enrolment needs no company and no D-U-N-S number; the name a downloader
+   is shown as the developer is your legal name. It is paid yearly, and the
+   enrolment holder is the Account Holder, the only role that can make the
+   certificate below.
+
+2. **Make a Developer ID Application certificate**, on a Mac. In Keychain
+   Access, **Keychain Access → Certificate Assistant → Request a Certificate
+   From a Certificate Authority**, with your email, *Saved to disk*. Then at
+   [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/certificates/list),
+   **+**, **Developer ID Application**, upload that request, download the
+   `.cer` and open it, which puts it in the login keychain beside the private
+   key the request made. *Developer ID Application* — not *Installer*, which
+   signs `.pkg` files, and not *Apple Development*, which no Mac outside your
+   team trusts.
+
+3. **Export it as a `.p12`.** In Keychain Access under **My Certificates**,
+   the row reading *Developer ID Application: <your name> (<team id>)* —
+   expanded, it has the private key under it, and a `.p12` without the key
+   cannot sign — **Export**, as *Personal Information Exchange (.p12)*, under a
+   password of its own. That file and its password are the whole of the
+   signing identity: keep the file somewhere other than this machine's
+   Downloads, and the password in your password manager.
+
+4. **Make an App Store Connect API key**, which is what notarization
+   authenticates with. At
+   [App Store Connect → Users and Access → Integrations](https://appstoreconnect.apple.com/access/integrations/api),
+   **Team Keys**, **+**, any name, the *Developer* access. Download the
+   `AuthKey_<key id>.p8` — it can be downloaded once, and a lost one is
+   revoked and made again — and note the **Key ID** on its row and the
+   **Issuer ID** above the list.
+
+5. **Put the five into the repository's secrets.** From a checkout, with
+   `gh` signed in as somebody who can administer the repository:
+
+   ```console
+   $ base64 -i Certificates.p12 | gh secret set CSC_LINK
+   $ gh secret set CSC_KEY_PASSWORD             # the .p12's password, typed at the prompt
+   $ gh secret set APPLE_API_KEY < AuthKey_ABC123DEFG.p8
+   $ gh secret set APPLE_API_KEY_ID --body ABC123DEFG
+   $ gh secret set APPLE_API_ISSUER --body 01234567-89ab-cdef-0123-456789abcdef
+   ```
+
+   | Secret | What it holds |
+   | --- | --- |
+   | `CSC_LINK` | The `.p12`, base64-encoded |
+   | `CSC_KEY_PASSWORD` | The password the `.p12` was exported under |
+   | `APPLE_API_KEY` | The contents of the `.p8` |
+   | `APPLE_API_KEY_ID` | The key's Key ID |
+   | `APPLE_API_ISSUER` | The team's Issuer ID |
+
+   The names are electron-builder's own: the two `CSC_` ones are what it reads
+   a certificate from, and the leg writes `APPLE_API_KEY` out to a file and
+   hands electron-builder that file's path under the same name.
+
+A Developer ID certificate lasts five years and the API key until it is
+revoked. Renewing either is steps 2–3 or step 4 again and the same `gh secret
+set`; nothing in the repository names them.
+
 ## The order, and what a failure leaves
 
 Each of these waits on the one above it.
