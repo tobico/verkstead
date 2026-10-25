@@ -67,8 +67,7 @@ Directory, the settings and Launch on startup are left as they were.
 **Taking it off Windows again** starts before Verkstead is uninstalled, because
 the uninstaller knows nothing of the account sessions ran as or of what was
 granted to it. Quit Verkstead, then run `verkstead session-account remove` in
-an elevated terminal, and uninstall Verkstead from **Installed apps** after it.
-It reads every record Verkstead kept under its Data Directory of the
+an elevated terminal. It reads every record Verkstead kept under its Data Directory of the
 access-control entries it wrote on your directories, takes each one off with a
 line saying which, and then deletes the account, the `C:\Users` directory
 Windows made for it the first time a session ran, and its password out of the
@@ -80,7 +79,8 @@ deletes the account regardless, still naming the paths. Run again on a machine
 whose account is already gone, it takes off whatever entries the records still
 name. A Conversation's own grants, on its Worktree and the Repo's git
 directory, stand for as long as the Conversation is open, Verkstead running or
-not, and come off when it closes or when the account is removed.
+not, and come off when it closes or when the account is removed. Then
+uninstall Verkstead from **Installed apps**.
 
 **Sessions run on all three, and on all three behind a boundary.** One
 description of what a session may reach — its Worktree, the Repo's git
