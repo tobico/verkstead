@@ -944,6 +944,37 @@ async fn a_conversation_started_anywhere_is_first_on_every_sidebar() {
     );
 }
 
+/// A member's row whose rank is not a well-formed key does not stop a start
+/// here: the start ranks above this device's own rows instead, as it would with
+/// no member list held at all.
+#[tokio::test]
+async fn a_members_bad_rank_does_not_stop_a_start() {
+    let (a, b) = linked_up().await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    let here = a.holding_a_repo().await;
+    let there = b.holding_a_repo().await;
+
+    let broken = a.starts(here, "the-broken").await;
+    store::rank_conversation(&a.pool, broken, "!!-not-a-key")
+        .await
+        .unwrap();
+    a.nudges.announce(Nudge::Conversations);
+
+    // B holds the broken rank at the top of its merged list before it starts.
+    b.sidebar_saying(|rows| rows.len() == 1).await;
+
+    b.presses_new_conversation(there).await;
+
+    let on_b = b.sidebar_saying(|rows| rows.len() == 2).await;
+    assert_eq!(
+        whose(&on_b),
+        [Some(A), None],
+        "B's start went in, under the row it could not rank above: {on_b:#?}",
+    );
+}
+
 /// A member whose mark is the hub's own — a WSL seen from a Linux, one macOS
 /// seen from another — is drawn by its name alone: the row carries no OS word.
 #[tokio::test]

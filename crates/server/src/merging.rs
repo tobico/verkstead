@@ -730,15 +730,30 @@ pub(crate) async fn ranks(state: &AppState) -> anyhow::Result<Vec<Ranked>> {
 ///
 /// `None` where the merge cannot be read, said in the log rather than refused: a
 /// Conversation not started because of the sidebar's order would be a far worse
-/// thing than one drawn a row too low.
+/// thing than one drawn a row too low. And `None` too where the top is a rank
+/// nothing can be minted above — a member's row that is not a well-formed key —
+/// because the store would refuse the start over it, and a member's bad row is
+/// not this device's to fail on.
 pub(crate) async fn top(state: &AppState) -> Option<String> {
-    match ranks(state).await {
-        Ok(rows) => rows.into_iter().next().map(|row| row.rank),
+    let top = match ranks(state).await {
+        Ok(rows) => rows.into_iter().next().map(|row| row.rank)?,
         Err(why) => {
             tracing::error!(
                 error = ?why,
                 "the merged list could not be read, so a new Conversation is ranked above \
                  this device's own rows alone",
+            );
+            return None;
+        }
+    };
+
+    match verkstead_store::ranks::between(None, Some(&top), &state.device) {
+        Ok(_) => Some(top),
+        Err(why) => {
+            tracing::error!(
+                error = ?why,
+                "the top of the merged list is not a rank a new Conversation can go above, so \
+                 it is ranked above this device's own rows alone",
             );
             None
         }
