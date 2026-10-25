@@ -30,6 +30,7 @@ const SHEETS = import.meta.glob("../src/**/*.css", {
 const LABELLED = [
   "../src/setup/SetupPage.module.css",
   "../src/setup/Dependencies.module.css",
+  "../src/setup/Accounts.module.css",
 ];
 
 describe("the viewer's type", () => {

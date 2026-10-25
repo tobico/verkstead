@@ -95,11 +95,12 @@
 //! for the picked type's own, blank, a path typed for one type's account meaning
 //! nothing in another's.
 //!
-//! It is the one row of this form that is not a native control: each type is
-//! offered under its own brand mark, which an `<option>` cannot hold, so the
-//! type is picked with the app's own listbox — see
-//! [`../picking.tsx`](../picking.tsx). Everything else here is a text field or a
-//! tick, and stays one.
+//! It is a segmented control of the four, each under its own brand mark —
+//! radios under one legend, drawn as one bar with the chosen segment raised —
+//! and it stands first, over the name, as the setup wizard's boards draw the
+//! form. The models under the paths are chips: a tick each, drawn in the ember
+//! when picked. The form is drawn this one way for the wizard and the settings
+//! page alike, it being one form. Everything else here is a text field.
 //!
 //! A type is offered only once it can launch the real binary, which is what
 //! keeps the picker from being a lie — and offering is said apart from drawing,
@@ -122,7 +123,15 @@ import {
   faPlus,
 } from "@fortawesome/free-solid-svg-icons";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createSignal,
+  createUniqueId,
+  type JSX,
+} from "solid-js";
 
 import { CardButton } from "../CardButton";
 import { Check } from "../Check";
@@ -151,7 +160,6 @@ import { useReading } from "../freshness";
 import { rowPress } from "../rows";
 import { KNOWN_MODELS, known, prettify } from "../models";
 import { Empty, ErrorLine, Note } from "../notices";
-import { Listbox } from "../picking";
 import { PaneHead } from "../workbench/PaneHead";
 import app from "../App.module.css";
 import styles from "./ProfileList.module.css";
@@ -878,6 +886,9 @@ export function ProfileForm(props: {
   // while it is being typed. Its own signal rather than one of the form's
   // fields, because it is not part of the profile until it is added.
   const [typing, setTyping] = createSignal("");
+  // What the agent picker's radios are grouped under, so that two forms on one
+  // page would be two groups rather than one.
+  const id = createUniqueId();
 
   /// What is in the fields: what was typed, or what the caller started them
   /// with.
@@ -1011,6 +1022,50 @@ export function ProfileForm(props: {
 
   return (
     <form class={styles.form} onSubmit={submit}>
+      {/* Which agent this account is for, first, over the fields it decides:
+          picking another type is asking for that type's own paths, so what
+          is under this changes with it and nothing typed for the old one
+          is carried across.
+
+          A segmented control of the four rather than a dropdown, because
+          they are four and each is known by its brand mark at a glance:
+          radios under one legend, the mark and the name in each, the
+          chosen one raised. A profile of a type this build draws but does
+          not offer reads as none of them chosen, which is the honest
+          reading of a row that is not on offer. Its account is untouched by
+          that: what the form sends is what was read back, until another
+          type is picked. */}
+      <fieldset class={styles.agents}>
+        <legend>Agent</legend>
+
+        <div class={styles.segments}>
+          <For each={AGENT_TYPES}>
+            {(agent_type) => (
+              <label
+                class={styles.segment}
+                onClick={rowPress(() => {
+                  // Pressing the chosen one again is not asking for its
+                  // fields to be emptied.
+                  if (form().account.agent_type !== agent_type) {
+                    pickedType(agent_type);
+                  }
+                })}
+              >
+                <input
+                  type="radio"
+                  name={`${id}-agent_type`}
+                  value={agent_type}
+                  checked={form().account.agent_type === agent_type}
+                  onChange={() => pickedType(agent_type)}
+                />
+                <HarnessMark of={agent_type} class={styles.segmentMark} />
+                {AGENT_NAME[agent_type]}
+              </label>
+            )}
+          </For>
+        </div>
+      </fieldset>
+
       {/* Left empty where there is nothing to tell apart, which is the
           ordinary case: one account per agent, read by the agent's own
           mark and the model beside it. An agent takes one such profile,
@@ -1028,119 +1083,6 @@ export function ProfileForm(props: {
         placeholder="work"
         value={form().name ?? ""}
         onInput={(ev) => typedName(ev.currentTarget.value)}
-      />
-
-      {/* Ticked rather than typed, and no default among them: the list
-          says what this account can launch, and which of them a session
-          runs is picked when the session is set up.
-
-          A fieldset with a legend rather than a label, because this is one
-          question with several answers and a `<label for>` names one
-          control. */}
-      <fieldset class={styles.models}>
-        <legend>Models</legend>
-
-        <ul class={styles.picks}>
-          <For each={offered()}>
-            {(model) => (
-              <li>
-                {/* Pressed as a row — see `rowPress`, and the press a label
-                    stops forwarding once a hand has slid. */}
-                <label
-                  onClick={rowPress(() =>
-                    pick(model, !form().models.includes(model)),
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    checked={form().models.includes(model)}
-                    onChange={(ev) => pick(model, ev.currentTarget.checked)}
-                  />
-                  {prettify(model)}
-                  {/* And whose it is, where it is not this account's:
-                      inside the label rather than beside it, unlike the
-                      id below, because it is about the tick rather than
-                      about the model — a reader who cannot see the row
-                      hears it as part of what they are ticking. */}
-                  <Show when={elsewhere(model)}>
-                    {(agent) => (
-                      <span class={styles.elsewhere}>
-                        {AGENT_NAME[agent()]}'s model, which this account can't
-                        launch
-                      </span>
-                    )}
-                  </Show>
-                </label>
-                {/* The id beside the name, for whoever is checking: the
-                    name is this viewer's word and the id is what the
-                    session is launched with. Outside the label so it is
-                    not read out as part of the tick's name, and not drawn
-                    at all beside one the list does not know — there the id
-                    is the name already. */}
-                <Show when={known(model)}>
-                  <code>{model}</code>
-                </Show>
-              </li>
-            )}
-          </For>
-        </ul>
-
-        {/* The way past the list. It goes stale the week another model
-            ships, and a profile that could not be given the new one until
-            Verkstead was rebuilt would be a form standing in front of the
-            work. What is added here is a pick like any other: it joins the
-            ticks above, ticked, and unticking it takes it away again. */}
-        <label for="profile-model">Another model id</label>
-        <div class={styles.byHand}>
-          <input
-            id="profile-model"
-            type="text"
-            autocapitalize="off"
-            autocorrect="off"
-            spellcheck={false}
-            placeholder="claude-opus-6"
-            value={typing()}
-            onInput={(ev) => setTyping(ev.currentTarget.value)}
-            // Return adds the id rather than saving the profile, which is
-            // what a return in a text field does to a form left alone.
-            onKeyDown={(ev) => {
-              if (ev.key === "Enter") {
-                ev.preventDefault();
-                add();
-              }
-            }}
-          />
-          <button type="button" disabled={typing().trim() === ""} onClick={add}>
-            Add
-          </button>
-        </div>
-      </fieldset>
-
-      {/* Which agent this account is for, over the fields it decides:
-          picking another type is asking for that type's own paths, so what
-          is under this changes with it and nothing typed for the old one
-          is carried across. */}
-      <label for="profile-agent_type">Agent</label>
-      {/* The app's own listbox rather than a `<select>`, because each row
-          carries that backend's brand mark and an `<option>` holds
-          nothing but text — the one row of this form where there is
-          something to draw beside the words.
-
-          A profile of a type this build draws but does not offer reads as
-          nothing chosen rather than as whichever type happens to be first,
-          which is the listbox's own guarantee and the honest reading of a
-          row that is not on offer. Its account is untouched by that: what
-          the form sends is what was read back, until another type is
-          picked. */}
-      <Listbox
-        id="profile-agent_type"
-        class={styles.agentType}
-        options={AGENT_TYPES}
-        value={(agent_type) => agent_type}
-        label={(agent_type) => AGENT_NAME[agent_type]}
-        mark={(agent_type) => agent_type}
-        chosen={form().account.agent_type}
-        pick={(picked) => pickedType(picked as AgentType)}
       />
 
       {/* The account, in whatever shape its agent type keeps one: the
@@ -1169,6 +1111,87 @@ export function ProfileForm(props: {
           </>
         )}
       </For>
+
+      {/* Picked rather than typed, and no default among them: the list
+          says what this account can launch, and which of them a session
+          runs is picked when the session is set up.
+
+          A fieldset with a legend rather than a label, because this is one
+          question with several answers and a `<label for>` names one
+          control. Each answer is a chip — a checkbox inside a label, the
+          box hidden and the chip drawn ticked in the ember instead — with
+          the id it stands for as the chip's title, for whoever is
+          checking what a session will be launched with. */}
+      <fieldset class={styles.models}>
+        <legend>Models</legend>
+
+        <ul class={styles.picks}>
+          <For each={offered()}>
+            {(model) => (
+              <li>
+                {/* Pressed as a chip — see `rowPress`, and the press a label
+                    stops forwarding once a hand has slid. */}
+                <label
+                  class={styles.chip}
+                  title={known(model) ? model : undefined}
+                  onClick={rowPress(() =>
+                    pick(model, !form().models.includes(model)),
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={form().models.includes(model)}
+                    onChange={(ev) => pick(model, ev.currentTarget.checked)}
+                  />
+                  {prettify(model)}
+                  {/* And whose it is, where it is not this account's:
+                      inside the label, because it is about the tick — a
+                      reader who cannot see the chip hears it as part of
+                      what they are ticking. */}
+                  <Show when={elsewhere(model)}>
+                    {(agent) => (
+                      <span class={styles.elsewhere}>
+                        {AGENT_NAME[agent()]}'s model, which this account can't
+                        launch
+                      </span>
+                    )}
+                  </Show>
+                </label>
+              </li>
+            )}
+          </For>
+        </ul>
+
+        {/* The way past the list. It goes stale the week another model
+            ships, and a profile that could not be given the new one until
+            Verkstead was rebuilt would be a form standing in front of the
+            work. What is added here is a pick like any other: it joins the
+            chips above, ticked, and unticking it takes it away again. */}
+        <label for="profile-model">Another model id</label>
+        <div class={styles.byHand}>
+          <input
+            id="profile-model"
+            type="text"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck={false}
+            placeholder="claude-opus-6"
+            value={typing()}
+            onInput={(ev) => setTyping(ev.currentTarget.value)}
+            // Return adds the id rather than saving the profile, which is
+            // what a return in a text field does to a form left alone.
+            onKeyDown={(ev) => {
+              if (ev.key === "Enter") {
+                ev.preventDefault();
+                add();
+              }
+            }}
+          />
+          <button type="button" disabled={typing().trim() === ""} onClick={add}>
+            Add
+          </button>
+        </div>
+      </fieldset>
 
       {/* The memory switch, for every agent type alike: whether a session is
           given the account's memory and transcripts, or starts with an empty

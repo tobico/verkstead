@@ -312,6 +312,7 @@ export function SetupPage(): JSX.Element {
                     <Accounts
                       reading={view()}
                       onwards={() => onwards("accounts")}
+                      reopen={() => show("dependencies")}
                     />
                   </Show>
                   {/* And the last of the three, whose press is the wizard

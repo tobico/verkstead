@@ -7,42 +7,46 @@
 //! ever found, and each arrives here as the account the profile create would be
 //! handed. Nothing on this side knows what a `.claude` is.
 //!
-//! **A row is offered ticked where its harness is on the machine and greyed
-//! where it is not.** An account whose binary is missing is not something to
-//! make a Profile of yet: the step before this one is where that is installed,
-//! and this page ticks the row when it lands.
+//! **A found account is a card, offered ticked where its harness is on the
+//! machine and drawn quiet where it is not.** The whole card is the press, and
+//! a ticked one takes the ember's edge. An account whose binary is missing is
+//! not something to make a Profile of yet: it has no box, a Not installed pill
+//! after its name, and a Go to step 1 on its right — drawn only while step 1
+//! is met, which is the rail's own rule and the only time there is a way back.
+//! The page ticks the card when the harness lands.
 //!
 //! **A ticked one is saved with no name and every model this build knows for
 //! its harness.** Both are the settings page's to change afterwards; nothing
 //! here asks anybody to type either, because an account found in a home is one
 //! account and needs no name to tell it from another.
 //!
-//! **Next needs at least one Profile** — ticked here, or made in the form
-//! under the rows. It is one of the three things the objective is and the only
-//! one a step could walk past: clearing the mode with nothing saved would land
-//! somebody on exactly the empty state a skip was rejected for, until the next
-//! start put them through the wizard again.
+//! **The press names what it does: Keep N profile(s), or Next** once a Profile
+//! stands saved and nothing is ticked. It needs at least one Profile — ticked
+//! here, or made in the form. That is one of the three things the objective is
+//! and the only one a step could walk past: clearing the mode with nothing
+//! saved would land somebody on exactly the empty state a skip was rejected
+//! for, until the next start put them through the wizard again. Held, its
+//! reason stands beside it.
 //!
-//! **And nothing found is a state rather than a gap.** It says what to run to
-//! make an account, keeps probing on the frame's own ten-second cadence — see
-//! [`./SetupPage.tsx`](./SetupPage.tsx) — and the link under it still reaches
-//! the form for an account that lives somewhere else entirely.
+//! **Nothing found is a state rather than a gap.** A card says so, with a
+//! Watching dot over the frame's own ten-second cadence — see
+//! [`./SetupPage.tsx`](./SetupPage.tsx) — and what to run to make an account.
 //!
-//! **That form is behind a link.** Naming an account by hand is the way in for
-//! a machine whose accounts are kept somewhere other than this server's home,
-//! which is the uncommon one: the ordinary machine ticks a row and presses
-//! Next, and a form of paths and models standing open under those rows
-//! reads as work the step is asking for. So the section starts as its own
-//! heading drawn as a link, and a press puts the whole of it — heading,
-//! explainer and form — where the link stood. It never shuts again: nothing on
-//! this step wants the room back. And it starts shut in the nothing-found state
-//! as well, that state already saying what to run and this page reading the
-//! machine again every ten seconds, with the link right under it.
+//! **The form is behind a dashed card.** Naming an account by hand is the way
+//! in for a machine whose accounts are kept somewhere other than this server's
+//! home, which is the uncommon one: the ordinary machine ticks a card and
+//! presses on, and a form of paths and models standing open under those cards
+//! reads as work the step is asking for. A press opens the card in place into
+//! the form, and it never shuts again: nothing on this step wants the room
+//! back. It starts shut in the nothing-found state as well.
 
+import { faArrowRight, faPlus } from "@fortawesome/free-solid-svg-icons";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 
+import { Copy } from "../Copy";
 import { HarnessMark } from "../HarnessMark";
+import { Icon } from "../Icon";
 import { AGENT_NAME, type AgentType } from "../agents";
 import { createProfile } from "../api/client";
 import { harnessAbsent } from "../broken";
@@ -53,11 +57,15 @@ import type {
   ProfileSaved,
 } from "../api/types";
 import { KNOWN_MODELS } from "../models";
-import { ErrorLine, Note } from "../notices";
+import { ErrorLine } from "../notices";
 import { rowPress } from "../rows";
-import { BLANK_PROFILE, PROFILE_REFUSAL, ProfileForm } from "../profiles/ProfileList";
+import {
+  BLANK_PROFILE,
+  PROFILE_REFUSAL,
+  ProfileForm,
+} from "../profiles/ProfileList";
 import { Foot } from "./Foot";
-import { Mark } from "./Mark";
+import { PROBE } from "./steps";
 import styles from "./Accounts.module.css";
 
 /// What to run to make an account of each harness: the program itself, once, in
@@ -85,19 +93,26 @@ const KEPT: Record<AgentType, string[]> = {
   OpenCode: ["~/.config/opencode", "~/.local/share/opencode"],
 };
 
+/// Why the press is held, beside it.
+const HELD = "Tick an account, or save one";
+
 /// The step, over the reading the page last had.
 export function Accounts(props: {
   /// How this machine stands, as the server last said.
   reading: OnboardingView;
 
-  /// And the step after this one, opened by Next once there is a Profile.
+  /// And the step after this one, opened by the press once there is a Profile.
   onwards: () => void;
+
+  /// The step before this one, opened again from an account whose harness is
+  /// missing. Offered only while that step is met.
+  reopen: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
 
-  // Which rows the human has changed their mind about. The tick's own default
+  // Which cards the human has changed their mind about. The tick's own default
   // is the harness being there, and this is what has been said since — kept per
-  // harness rather than per row, so a re-read arriving every ten seconds cannot
+  // harness rather than per card, so a re-read arriving every ten seconds cannot
   // put a tick back that somebody has just taken off.
   const [chosen, setChosen] = createSignal<Partial<Record<AgentType, boolean>>>(
     {},
@@ -106,15 +121,15 @@ export function Accounts(props: {
 
   // Whether the form for an account nothing found is open. Its own signal, and
   // for the reason `chosen` above is one: the page is re-read every ten seconds
-  // while this step is unmet, and a section somebody has just opened is not
+  // while this step is unmet, and a card somebody has just opened is not
   // something a re-read may shut under them.
   const [naming, setNaming] = createSignal(false);
 
-  // The heading that stands where the link stood, so that the keyboard has
-  // somewhere to land. Opening the section is the one press that takes its own
-  // control away, and a focus dropped on the page would put the next Tab back
-  // at the top of it.
-  let named: HTMLHeadingElement | undefined;
+  // The card's title once it is open, so that the keyboard has somewhere to
+  // land. Opening the card is the one press that takes its own control away,
+  // and a focus dropped on the page would put the next Tab back at the top of
+  // it.
+  let named: HTMLParagraphElement | undefined;
 
   createEffect(() => {
     if (naming()) named?.focus();
@@ -123,7 +138,7 @@ export function Accounts(props: {
   /// Which harness one found account belongs to.
   const agent = (found: AccountView): AgentType => found.account.agent_type;
 
-  /// Whether a row is ticked: what was said about it, or — where nothing has
+  /// Whether a card is ticked: what was said about it, or — where nothing has
   /// been — whether its harness is on the machine.
   ///
   /// An account with no binary can never be ticked, whatever was said about it
@@ -132,13 +147,24 @@ export function Accounts(props: {
   const ticked = (found: AccountView): boolean =>
     found.harness && (chosen()[agent(found)] ?? true);
 
-  /// The rows a press of Next would save.
+  /// The cards a press would save.
   const taking = (): AccountView[] => props.reading.accounts.filter(ticked);
 
-  /// Whether Next is pressable: a Profile is saved already, or this press
+  /// Whether the press is pressable: a Profile is saved already, or this press
   /// would save one.
   const ready = (): boolean =>
     props.reading.steps.accounts || taking().length > 0;
+
+  /// What the press says: what it keeps, or Next where it keeps nothing.
+  const press = (): string => {
+    const count = taking().length;
+
+    if (count === 0) {
+      return "Next";
+    }
+
+    return count === 1 ? "Keep 1 profile" : `Keep ${count} profiles`;
+  };
 
   const save = useMutation(() => ({
     // One at a time and stopping at the first refusal, because each is its own
@@ -167,9 +193,9 @@ export function Accounts(props: {
     },
   }));
 
-  /// What Next does: save whatever is ticked, and go on once it is written
-  /// down. A step reopened with everything already saved has nothing to save
-  /// and goes straight on.
+  /// What the press does: save whatever is ticked, and go on once it is
+  /// written down. A step reopened with everything already saved has nothing
+  /// to save and goes straight on.
   const onwards = () => {
     setRefused(null);
 
@@ -195,179 +221,236 @@ export function Accounts(props: {
     <div class={styles.step}>
       <p class={styles.standing}>
         A session runs under an agent profile: an account on this machine and
-        the models it can be launched on. The accounts found in this server's
-        home are below.
+        the models it can be launched on.
+        <Show when={props.reading.accounts.length > 0}>
+          {" "}
+          Tick the ones to keep.
+        </Show>
       </p>
 
       <Show
         when={props.reading.accounts.length > 0}
         fallback={<Nothing reading={props.reading} />}
       >
-        <ul class={styles.rows}>
-          <For each={props.reading.accounts}>
-            {(found) => (
-              <Row
-                found={found}
-                ticked={ticked(found)}
-                tick={(on) => {
-                  setChosen({ ...chosen(), [agent(found)]: on });
-                  setRefused(null);
-                }}
-              />
-            )}
-          </For>
-        </ul>
+        <section class={styles.group}>
+          <p class={styles.label}>
+            Found in ~
+            <span class={styles.gloss}>
+              {props.reading.accounts.length === 1
+                ? "1 account"
+                : `${props.reading.accounts.length} accounts`}
+            </span>
+          </p>
+
+          <ul class={styles.cards}>
+            <For each={props.reading.accounts}>
+              {(found) => (
+                <Card
+                  found={found}
+                  ticked={ticked(found)}
+                  tick={(on) => {
+                    setChosen({ ...chosen(), [agent(found)]: on });
+                    setRefused(null);
+                  }}
+                  reopen={
+                    props.reading.steps.dependencies ? props.reopen : undefined
+                  }
+                />
+              )}
+            </For>
+          </ul>
+        </section>
       </Show>
-
-      <div class={styles.onwards}>
-        <Foot>
-          <button
-            type="button"
-            class={styles.next}
-            disabled={!ready() || save.isPending}
-            onClick={onwards}
-          >
-            Next
-          </button>
-        </Foot>
-
-        <Show when={!ready()}>
-          <Note>
-            Verkstead runs nothing without an agent profile. Tick an account
-            above, or save one from the form below.
-          </Note>
-        </Show>
-
-        <Show when={refused()}>
-          {(outcome) => (
-            <ErrorLine class={styles.failure}>
-              {PROFILE_REFUSAL[outcome()]}
-            </ErrorLine>
-          )}
-        </Show>
-        <Show when={save.isError}>
-          <ErrorLine class={styles.failure}>
-            The profile couldn't be saved. {save.error?.message}
-          </ErrorLine>
-        </Show>
-      </div>
 
       {/* And the way in for an account that is not in this server's home at
           all — one kept under another login, or on another disk. The same form
           the settings page saves a Profile with, because it is the same
           Profile.
 
-          Behind a link until it is asked for, and the heading is the link: the
-          press replaces it with the section it names, and there is no way back
-          — see `naming` above. */}
-      <section class={styles.byHand}>
-        <Show
-          when={naming()}
-          fallback={
-            <button
-              type="button"
-              class={styles.naming}
-              aria-expanded="false"
-              onClick={() => setNaming(true)}
-            >
-              Or name an account yourself
-            </button>
-          }
-        >
+          A dashed card until it is asked for: the press opens it in place
+          into the form, and there is no way back — see `naming` above. */}
+      <Show
+        when={naming()}
+        fallback={
+          <button
+            type="button"
+            class={styles.naming}
+            aria-expanded="false"
+            data-naming
+            onClick={() => setNaming(true)}
+          >
+            <Icon of={faPlus} class={styles.plus} />
+            <span class={styles.text}>
+              <span class={styles.title}>Name an account yourself</span>
+              <span class={styles.quiet}>
+                For an account kept outside this server's home.
+              </span>
+            </span>
+          </button>
+        }
+      >
+        <section class={styles.named}>
           {/* Reachable by the focus without standing in the tab order: it is
-              what the press that opened the section left behind. */}
-          <h3 ref={named} tabindex="-1">
-            Or Name an Account Yourself
-          </h3>
-          <p class={styles.standing}>
-            Name an account kept outside this server's home here, the way the
-            settings page does.
+              what the press that opened the card left behind. */}
+          <p ref={named} class={styles.title} tabindex="-1">
+            Name an account yourself
+          </p>
+          <p class={styles.quiet}>
+            For an account kept outside this server's home.
           </p>
 
           <ProfileForm
             initial={() => BLANK_PROFILE}
-            submit="Save"
+            submit="Save profile"
             save={createProfile}
             saved={read}
           />
+        </section>
+      </Show>
+
+      <Show when={refused()}>
+        {(outcome) => <ErrorLine>{PROFILE_REFUSAL[outcome()]}</ErrorLine>}
+      </Show>
+      <Show when={save.isError}>
+        <ErrorLine>
+          The profile couldn't be saved. {save.error?.message}
+        </ErrorLine>
+      </Show>
+
+      <Foot>
+        <Show when={!ready()}>
+          <span class={styles.held}>{HELD}</span>
         </Show>
-      </section>
+
+        <button
+          type="button"
+          class={styles.next}
+          disabled={!ready() || save.isPending}
+          onClick={onwards}
+        >
+          {press()}
+          <Icon of={faArrowRight} class={styles.arrow} />
+        </button>
+      </Foot>
     </div>
   );
 }
 
-/// One account that was found: whose it is, where it is kept, and whether it is
-/// being taken on.
-function Row(props: {
+/// One account that was found, as a card: whose it is, where it is kept, and
+/// whether it is being taken on.
+function Card(props: {
   found: AccountView;
   ticked: boolean;
   tick: (on: boolean) => void;
+
+  /// Opens step 1, where this account's harness is installed — offered only
+  /// while that step is met.
+  reopen: (() => void) | undefined;
 }): JSX.Element {
   const agent = (): AgentType => props.found.account.agent_type;
 
+  /// The mark, the name and where the account is kept: the card's middle,
+  /// whether or not it is a press.
+  const reading = (): JSX.Element => (
+    <>
+      <HarnessMark of={agent()} class={styles.harness} />
+      <span class={styles.text}>
+        <span class={styles.name}>
+          {AGENT_NAME[agent()]}
+          <Show when={!props.found.harness}>
+            <span class={styles.pill}>Not installed</span>
+          </Show>
+        </span>
+        <span class={styles.kept}>
+          <For each={KEPT[agent()]}>{(path) => <code>{path}</code>}</For>
+        </span>
+        {/* An account whose harness is missing is one there is nothing to
+            run: the card is drawn so that it is not a surprise later, and
+            step 1 is where it is put right.
+
+            The finding is said in the words every other site says it in — a
+            mirror of a member's profile whose harness is not here reads broken
+            in this sentence too, see [`../broken.ts`] — and what is added
+            after it is this step's own. */}
+        <Show when={!props.found.harness}>
+          <span class={styles.quiet}>
+            {harnessAbsent(agent())} Install it and this account can be taken
+            on.
+          </span>
+        </Show>
+      </span>
+    </>
+  );
+
   return (
     <li
-      class={styles.row}
+      class={styles.card}
+      classList={{ [styles.chosen!]: props.ticked }}
       data-account={agent()}
       data-harness={props.found.harness ? "yes" : "no"}
     >
-      {/* The whole row is what is ticked, so the row answers the press rather
-          than the box a label forwards one to — and stops forwarding the moment
-          a hand slides. An account with no binary on the machine is refused
-          there, its box being disabled, which is what the greyed row says. See
-          `rowPress`. */}
-      <label
-        class={styles.head}
-        onClick={rowPress(() => props.tick(!props.ticked))}
+      <Show
+        when={props.found.harness}
+        fallback={
+          <div class={styles.inner}>
+            {reading()}
+            <Show when={props.reopen}>
+              {(reopen) => (
+                <button
+                  type="button"
+                  class={styles.reopen}
+                  onClick={() => reopen()()}
+                >
+                  Go to step 1
+                </button>
+              )}
+            </Show>
+          </div>
+        }
       >
-        <input
-          type="checkbox"
-          checked={props.ticked}
-          disabled={!props.found.harness}
-          onChange={(ev) => props.tick(ev.currentTarget.checked)}
-        />
-        <Mark standing={props.ticked ? "met" : "waiting"} />
-        <span class={styles.name}>
-          <HarnessMark of={agent()} class={styles.harness} />
-          {AGENT_NAME[agent()]}
-        </span>
-      </label>
-
-      <p class={styles.kept}>
-        <For each={KEPT[agent()]}>{(path) => <code>{path}</code>}</For>
-      </p>
-
-      {/* An account whose harness is missing is one there is nothing to run:
-          the row is drawn so that it is not a surprise later, and the step
-          before this one is where it is put right.
-
-          The finding is said in the words every other site says it in — a
-          mirror of a member's profile whose harness is not here reads broken in
-          this sentence too, see [`../broken.ts`] — and what is added after it
-          is this step's own, there being a step above to point at. */}
-      <Show when={!props.found.harness}>
-        <Note>
-          {harnessAbsent(agent())} Install it in the step above and this account
-          can be taken on.
-        </Note>
+        {/* The whole card is what is ticked, so the card answers the press
+            rather than the box a label forwards one to — and stops forwarding
+            the moment a hand slides. See `rowPress`. */}
+        <label
+          class={styles.inner}
+          onClick={rowPress(() => props.tick(!props.ticked))}
+        >
+          {reading()}
+          <input
+            type="checkbox"
+            class={styles.box}
+            checked={props.ticked}
+            onChange={(ev) => props.tick(ev.currentTarget.checked)}
+          />
+        </label>
       </Show>
     </li>
   );
 }
 
-/// A home with no account in it: what to run to make one, and the promise that
-/// this page will notice.
+/// A home with no account in it: a card saying so, that this page is watching
+/// for one, and what to run to make one.
 ///
 /// One line per harness that is on the machine, because those are the ones that
 /// can be run at all — and every one of them where none is, since a machine
-/// with no harness has the step above to finish first and nothing here to
+/// with no harness has the step before to finish first and nothing here to
 /// choose between.
 function Nothing(props: { reading: OnboardingView }): JSX.Element {
   return (
     <div class={styles.nothing}>
-      <p class={styles.standing}>
-        No agent account was found in this server's home. Log one in and it
-        appears here. This page reads the machine again every ten seconds.
+      <div class={styles.top}>
+        <p class={styles.title}>No account in ~ yet</p>
+        {/* The frame's own cadence behind the word, for whoever wants to
+            know how often "watching" is. */}
+        <span
+          class={styles.watching}
+          title={`Reading ${props.reading.machine} every ${PROBE / 1000} s`}
+        >
+          Watching
+        </span>
+      </div>
+      <p class={styles.quiet}>
+        Log one in on {props.reading.machine} and it appears here.
       </p>
 
       <ul class={styles.logins}>
@@ -378,7 +461,11 @@ function Nothing(props: { reading: OnboardingView }): JSX.Element {
                 <HarnessMark of={agent} class={styles.harness} />
                 {AGENT_NAME[agent]}
               </span>
-              <pre>{LOGIN[agent]}</pre>
+              <span class={styles.command}>
+                <span class={styles.prompt}>$</span>
+                <pre>{LOGIN[agent]}</pre>
+                <Copy of={LOGIN[agent]} class={styles.copy} />
+              </span>
             </li>
           )}
         </For>

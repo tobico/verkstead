@@ -896,7 +896,8 @@ describe("the rows of repositories to clone", () => {
 /// to spread.
 ///
 /// Two things earn it. A row that carries a **mark** beside its words, which is
-/// the four pairing pickers and the profile form's harness type; and a list with
+/// the pairing pickers — the profile form's harness type is a segmented bar of
+/// radios instead, four marks side by side needing no list; and a list with
 /// rows at its foot that **press** rather than pick, which is the Repo's, where
 /// **Create repo** and **Open repo** stand behind the rule, and the Git
 /// section's Author dropdown, where **Add author** does — an `<option>` that
@@ -913,7 +914,7 @@ describe("where the listbox is drawn at all", () => {
   /// Read for the element rather than for the word: the browsing path field
   /// names this control in its own header, having borrowed the chrome and the
   /// keyboard off it, and naming one is not drawing one.
-  it("is drawn by the four modules whose rows have earned it", () => {
+  it("is drawn by the three modules whose rows have earned it", () => {
     const drawing = Object.entries(SOURCES)
       .filter(([path]) => path !== "../src/picking.tsx")
       .filter(([, source]) => /<Listbox\b/.test(source))
@@ -921,7 +922,6 @@ describe("where the listbox is drawn at all", () => {
       .sort();
 
     expect(drawing).toEqual([
-      "../src/profiles/ProfileList.tsx",
       "../src/settings/Git.tsx",
       "../src/workbench/Setup.tsx",
       "../src/workbench/Steer.tsx",

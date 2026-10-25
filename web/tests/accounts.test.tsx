@@ -21,6 +21,7 @@ import type { OnboardingView, ProfileEdit } from "../src/api/types";
 import { AGENT_NAME } from "../src/agents";
 import { KNOWN_MODELS, prettify } from "../src/models";
 import { Accounts } from "../src/setup/Accounts";
+import styles from "../src/setup/Accounts.module.css";
 import { SetupPage } from "../src/setup/SetupPage";
 import { SETUP_STEP } from "../src/setup/steps";
 import { json, serving, whenever } from "./serving";
@@ -57,21 +58,30 @@ function client(): QueryClient {
   });
 }
 
+/// A machine part-way through whose first step is not met: the way back to it
+/// is the rail's own rule, and there is none.
+const UNMET: OnboardingView = {
+  ...PART_WAY,
+  steps: { ...PART_WAY.steps, dependencies: false },
+};
+
 /// The step alone, over a machine that stands as `machine` says.
 ///
 /// A query client because saving is a mutation and what it invalidates is the
 /// page's own reading; no router, the step reading nothing off the URL.
 function mount(machine: OnboardingView) {
   const onwards = vi.fn();
+  const reopen = vi.fn();
   const queries = client();
 
   return {
     ...render(() => (
       <QueryClientProvider client={queries}>
-        <Accounts reading={machine} onwards={onwards} />
+        <Accounts reading={machine} onwards={onwards} reopen={reopen} />
       </QueryClientProvider>
     )),
     onwards,
+    reopen,
   };
 }
 
@@ -88,30 +98,27 @@ function mountPage() {
   ));
 }
 
-/// One account's row.
+/// One account's card.
 function row(container: ParentNode, agent: string): HTMLElement {
   return container.querySelector<HTMLElement>(`[data-account="${agent}"]`)!;
 }
 
-/// And its tick.
-function tick(container: ParentNode, agent: string): HTMLInputElement {
-  return row(container, agent).querySelector("input[type=checkbox]")!;
+/// And its tick, where it has one.
+function tick(container: ParentNode, agent: string): HTMLInputElement | null {
+  return row(container, agent).querySelector("input[type=checkbox]");
 }
 
-/// The link the form for an account nothing found stands behind, and the press
-/// that opens it: it is the section's own heading drawn as a link, so it is
-/// found by the words the heading has.
+/// The dashed card the form for an account nothing found stands behind, and
+/// the press that opens it.
 function naming(container: ParentNode): HTMLButtonElement | undefined {
-  return [...container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Or name an account yourself",
+  return (
+    container.querySelector<HTMLButtonElement>("[data-naming]") ?? undefined
   );
 }
 
-/// The press onwards, found by its own words the way the step before it is.
+/// The press onwards, which names what it does.
 function onwards(container: ParentNode): HTMLButtonElement {
-  return [...container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Next",
-  )!;
+  return container.querySelector<HTMLButtonElement>(`.${styles.next}`)!;
 }
 
 /// What the page put on the wire when it wrote to the profiles.
@@ -160,19 +167,72 @@ describe("the accounts that were found", () => {
   /// The harness being there is what says an account is one to take on: a
   /// Profile of a backend that is not installed is one no session could be
   /// launched under.
-  it("ticks the one whose harness is on the machine and greys the one that is not", () => {
+  it("ticks the one whose harness is on the machine and quiets the one that is not", () => {
     const { container } = mount(PART_WAY);
 
     expect(row(container, "Claude").dataset.harness).toBe("yes");
-    expect(tick(container, "Claude").checked).toBe(true);
-    expect(tick(container, "Claude").disabled).toBe(false);
+    expect(tick(container, "Claude")!.checked).toBe(true);
+    expect(row(container, "Claude").classList).toContain(styles.chosen);
 
+    // No box at all on an account there is nothing to run: a pill after its
+    // name, and the sentence every other site says it in.
     expect(row(container, "Codex").dataset.harness).toBe("no");
-    expect(tick(container, "Codex").checked).toBe(false);
-    expect(tick(container, "Codex").disabled).toBe(true);
+    expect(tick(container, "Codex")).toBeNull();
+    expect(row(container, "Codex").classList).not.toContain(styles.chosen);
+    expect(
+      row(container, "Codex").querySelector(`.${styles.pill}`)!.textContent,
+    ).toBe("Not installed");
     expect(row(container, "Codex").textContent).toContain(
       `${AGENT_NAME.Codex} isn't on this machine.`,
     );
+  });
+
+  /// Under a label that says where they were looked for, and how many.
+  it("counts them under where they were found", () => {
+    const { container } = mount(PART_WAY);
+
+    expect(container.querySelector(`.${styles.label}`)!.textContent).toBe(
+      "Found in ~2 accounts",
+    );
+  });
+
+  /// A ticked card takes the ember's edge, and an unticked one gives it back.
+  it("draws the tick on the card", () => {
+    const { container } = mount(PART_WAY);
+
+    fireEvent.click(tick(container, "Claude")!);
+
+    expect(tick(container, "Claude")!.checked).toBe(false);
+    expect(row(container, "Claude").classList).not.toContain(styles.chosen);
+  });
+});
+
+describe("the way back to step 1", () => {
+  /// Step 1 is where a missing harness is installed, and while it is met it
+  /// is a step the rail would open too.
+  it("opens step 1 from an account whose harness is missing", () => {
+    const { container, reopen } = mount(PART_WAY);
+
+    const back = [...row(container, "Codex").querySelectorAll("button")].find(
+      (button) => button.textContent === "Go to step 1",
+    );
+
+    expect(back).toBeTruthy();
+    fireEvent.click(back!);
+    expect(reopen).toHaveBeenCalled();
+    expect(
+      [...row(container, "Claude").querySelectorAll("button")].map(
+        (button) => button.textContent,
+      ),
+    ).toEqual([]);
+  });
+
+  /// And while it is unmet there is no way back to draw: pressing it would be
+  /// the skip ADR-0016 refused, the rail's own rule.
+  it("draws none while step 1 is unmet", () => {
+    const { container } = mount(UNMET);
+
+    expect(row(container, "Codex").querySelector("button")).toBeNull();
   });
 });
 
@@ -257,13 +317,30 @@ describe("the press onwards", () => {
 
     expect(onwards(container).disabled).toBe(false);
 
-    fireEvent.click(tick(container, "Claude"));
+    fireEvent.click(tick(container, "Claude")!);
 
-    expect(tick(container, "Claude").checked).toBe(false);
+    expect(tick(container, "Claude")!.checked).toBe(false);
     expect(onwards(container).disabled).toBe(true);
-    expect(container.textContent).toContain(
-      "Verkstead runs nothing without an agent profile.",
+    expect(onwards(container).textContent).toBe("Next");
+    expect(container.querySelector(`.${styles.held}`)!.textContent).toBe(
+      "Tick an account, or save one",
     );
+  });
+
+  /// It names what it will do: keep the ticked accounts, one or several.
+  it("names how many profiles it keeps", () => {
+    const { container } = mount(PART_WAY);
+
+    expect(onwards(container).textContent).toBe("Keep 1 profile");
+    expect(container.querySelector(`.${styles.held}`)).toBeNull();
+
+    const both: OnboardingView = {
+      ...PART_WAY,
+      accounts: PART_WAY.accounts.map((found) => ({ ...found, harness: true })),
+    };
+    const { container: two } = mount(both);
+
+    expect(onwards(two).textContent).toBe("Keep 2 profiles");
   });
 
   /// And a Profile that is already saved is a step there is nothing left to do
@@ -273,6 +350,7 @@ describe("the press onwards", () => {
     const { container, onwards: next } = mount(A_PROFILE);
 
     expect(onwards(container).disabled).toBe(false);
+    expect(onwards(container).textContent).toBe("Next");
 
     fireEvent.click(onwards(container));
 
@@ -284,13 +362,21 @@ describe("the press onwards", () => {
 });
 
 describe("a home with no account in it", () => {
-  it("says what to run to make one, and offers the link under it", () => {
+  it("says what to run to make one, and offers the card under it", () => {
     const { container } = mount(NOTHING_FOUND);
 
     expect(container.querySelector("[data-account]")).toBeNull();
+    expect(container.textContent).toContain("No account in ~ yet");
     expect(container.textContent).toContain(
-      "No agent account was found in this server's home.",
+      "Log one in on ada-box and it appears here.",
     );
+
+    // Watching, with the frame's cadence behind the word.
+    const watching = container.querySelector<HTMLElement>(
+      `.${styles.watching}`,
+    )!;
+    expect(watching.textContent).toBe("Watching");
+    expect(watching.title).toBe("Reading ada-box every 10 s");
 
     // One line per harness that is on the machine, because those are the ones
     // that can be run at all.
@@ -303,8 +389,15 @@ describe("a home with no account in it", () => {
       "claude",
     );
 
+    // And one press to copy it.
+    expect(
+      [...container.querySelectorAll("[data-login] button")].map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(["Copy"]);
+
     // And the way to the same form the settings page saves a Profile with, for
-    // an account that is kept somewhere else entirely — a link here as
+    // an account that is kept somewhere else entirely — shut here as
     // everywhere else, because the empty state already says what to run and
     // this page reads the machine again every ten seconds.
     expect(naming(container)).toBeTruthy();
@@ -314,31 +407,31 @@ describe("a home with no account in it", () => {
 
 /// The form for an account kept somewhere other than this server's home, which
 /// is the uncommon way past the step and so is not standing open under the rows.
-describe("the link the form stands behind", () => {
+describe("the card the form stands behind", () => {
   it("keeps the form off the step until it is pressed", () => {
     const { container } = mount(PART_WAY);
 
     expect(screen.queryByLabelText(/^Name/)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save profile" })).toBeNull();
 
     fireEvent.click(naming(container)!);
 
     expect(screen.getByLabelText(/^Name/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save profile" })).toBeTruthy();
   });
 
-  /// The link is the heading, so what is left where it stood is the heading
-  /// itself — and the section does not shut again, there being nothing on this
-  /// step that wants the room back.
-  it("leaves the heading in its place, and no way back", () => {
+  /// The card opens in place, its title where it was, and the focus on it —
+  /// and it does not shut again, there being nothing on this step that wants
+  /// the room back.
+  it("opens in place, with no way back", () => {
     const { container } = mount(PART_WAY);
 
     fireEvent.click(naming(container)!);
 
     expect(naming(container)).toBeUndefined();
-    expect(
-      [...container.querySelectorAll("h3")].map((head) => head.textContent),
-    ).toContain("Or Name an Account Yourself");
+    expect(document.activeElement?.textContent).toBe(
+      "Name an account yourself",
+    );
   });
 });
 
@@ -362,15 +455,13 @@ describe("while the step is open", () => {
     const { container } = mountPage();
 
     await waitFor(() =>
-      expect(container.textContent).toContain(
-        "No agent account was found in this server's home.",
-      ),
+      expect(container.textContent).toContain("No account in ~ yet"),
     );
 
     await vi.advanceTimersByTimeAsync(10_000);
 
     await waitFor(() => expect(row(container, "Claude")).toBeTruthy());
-    expect(tick(container, "Claude").checked).toBe(true);
+    expect(tick(container, "Claude")!.checked).toBe(true);
   });
 
   /// And that re-read is not allowed to shut a section somebody has just
@@ -424,7 +515,7 @@ describe("the form under the rows", () => {
     fireEvent.input(screen.getByLabelText(/Config file/), {
       target: { value: "/home/you/accounts/work/.claude.json" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
 
     await waitFor(() => expect(onwards(container).disabled).toBe(false));
   });
