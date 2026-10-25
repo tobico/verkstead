@@ -64,7 +64,7 @@ import { band } from "../head";
 import { Empty, ErrorLine } from "../notices";
 import { bridge } from "../settings/bridge";
 import { Accounts } from "./Accounts";
-import { Dependencies, running } from "./Dependencies";
+import { Dependencies } from "./Dependencies";
 import { FootContext } from "./Foot";
 import { Git } from "./Git";
 import { Mark } from "./Mark";
@@ -125,6 +125,15 @@ export function SetupPage(): JSX.Element {
     }
   };
 
+  /// How often the machine is read again over a reading: what the open step
+  /// asked for, and otherwise every ten seconds while that step is unmet and
+  /// not at all once it is met. One rule for the query and for the line at the
+  /// foot of the rail, so that the line never names a cadence nothing keeps.
+  const cadence = (
+    wanted: number | null,
+    view: OnboardingView | undefined,
+  ): number | false => wanted ?? (met(view?.steps, open()) ? false : PROBE);
+
   const onboarding = useReading(() => {
     // Read here rather than inside the interval below, so that a step asking
     // for a different cadence is a change to the query's own options: the
@@ -134,12 +143,10 @@ export function SetupPage(): JSX.Element {
     return {
       queryKey: ["onboarding"],
       queryFn: loadOnboarding,
-      // What the open step asked for, and otherwise: re-read while that step is
-      // unmet, and stop once it is met. Read off the query's own last answer
-      // rather than off a signal beside it, because the thing being asked about
-      // is exactly what the last read said.
-      refetchInterval: (query) =>
-        wanted ?? (met(query.state.data?.steps, open()) ? false : PROBE),
+      // Read off the query's own last answer rather than off a signal beside
+      // it, because the thing being asked about is exactly what the last read
+      // said.
+      refetchInterval: (query) => cadence(wanted, query.state.data),
       // Merged rather than replaced, keyed by what a dependency row carries: the
       // page is re-read under somebody who is reading it, and a rebuild would
       // take the open step's own controls down every ten seconds. The accounts
@@ -227,10 +234,10 @@ export function SetupPage(): JSX.Element {
                     show={show}
                   />
 
-                  <p class={styles.reading}>
-                    <span class={styles.dot} aria-hidden="true" />
-                    {reading(view())}
-                  </p>
+                  <Reading
+                    machine={view().machine}
+                    every={cadence(asked(), view())}
+                  />
                 </div>
               </>
             )}
@@ -274,10 +281,10 @@ export function SetupPage(): JSX.Element {
             sheet
           />
 
-          <p class={styles.reading}>
-            <span class={styles.dot} aria-hidden="true" />
-            {reading(onboarding.data!)}
-          </p>
+          <Reading
+            machine={onboarding.data!.machine}
+            every={cadence(asked(), onboarding.data)}
+          />
         </Modal>
 
         <div class={styles.paper}>
@@ -349,12 +356,36 @@ export function SetupPage(): JSX.Element {
 }
 
 /// The line at the foot of the rail: which machine the page is reading, and
-/// how often — the frame's two cadences, the faster while a run of
-/// Verkstead's own is going.
-function reading(view: OnboardingView): string {
-  return running(view.run)
-    ? `Reading ${view.machine} every ${RUNNING / 1000} s while it installs`
-    : `Reading ${view.machine} every ${PROBE / 1000} s`;
+/// how often — the frame's own cadence, or the faster one a run of
+/// Verkstead's own is read at.
+///
+/// Where nothing is being read again — the open step stands met — the line
+/// names the machine the page was read from and no cadence, and its dot goes
+/// quiet: a line saying *every 10 s* over a page that asks nothing would be
+/// the one thing on it that was not so.
+function Reading(props: {
+  machine: string;
+  every: number | false;
+}): JSX.Element {
+  const line = (): string => {
+    if (props.every === false) {
+      return `Read from ${props.machine}`;
+    }
+
+    const said = `Reading ${props.machine} every ${props.every / 1000} s`;
+
+    return props.every === RUNNING ? `${said} while it installs` : said;
+  };
+
+  return (
+    <p
+      class={styles.reading}
+      data-reading={props.every === false ? "no" : "yes"}
+    >
+      <span class={styles.dot} aria-hidden="true" />
+      {line()}
+    </p>
+  );
 }
 
 /// The three steps as the rail lists them, and as the phone's sheet lists them

@@ -306,6 +306,11 @@
   background: var(--added);
 }
 
+/* Quiet where nothing is being read again: the open step stands met. */
+.reading[data-reading="no"] .dot {
+  background: var(--ink-soft);
+}
+
 .paper {
   flex: 1;
   display: flex;

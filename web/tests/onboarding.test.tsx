@@ -191,6 +191,17 @@ describe("the rail", () => {
     );
   });
 
+  /// An open step that stands met is read no more, and the line names no
+  /// cadence nothing keeps.
+  it("names no cadence while nothing is read again", async () => {
+    const { container } = mount(PART_WAY);
+
+    await waitFor(() =>
+      expect(container.textContent).toContain("Read from ada-box"),
+    );
+    expect(container.textContent).not.toContain("every 10 s");
+  });
+
   /// What meeting a step came to: the rows the machine has, and the harnesses
   /// the Profiles saved run.
   it("says what a met step came to under it", async () => {
