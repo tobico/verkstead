@@ -25,12 +25,14 @@ only across a restart — so what a row shows is fresh by construction, with
 no poll for it. A route of its own, and a field in the discovery record,
 were considered and not taken: both would say the same thing a second way.
 
-**Every Devices row shows it, with two tags.** The version under the name,
-as the Annex's Components row shows its own; a tag when it differs from the
-device drawing the page, and a tag when a newer stable release exists than
-the one that row runs. The version alone, and the release tag alone, were
-offered and not taken: the differing tag is what the incident wanted. The
-words of the tags are the deferred wording Set's (1381), not this record's.
+**Every Devices row shows it, with two marks.** The version under the name,
+as the Annex's Components row shows its own; drawn in a colour of its own,
+with no word, when it differs from the device drawing the page; and a tag
+when a newer stable release exists than the one that row runs. The version
+alone, and the release tag alone, were offered and not taken: the differing
+mark is what the incident wanted. The differing version as a bare coloured
+number is the deferred wording Set's answer (1381); the newer-release tag's
+words are still that Set's to settle.
 
 **A failed call to a member names the gap.** Where a call to a member fails
 and the two versions differ, the trouble line it leaves gains a sentence

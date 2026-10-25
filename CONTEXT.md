@@ -1809,8 +1809,9 @@ _Avoid_: device info, device metadata, machine details, the device's profile
 **Devices**:
 The list of every **Device** this workbench is one of, and the third section of
 the **Remote Access** pane. One row each: the OS icon, the name, the
-release it runs with a tag where that differs from this device's or a newer
-release exists, and the addresses under them — with *this device* on this
+release it runs — in a colour of its own where that differs from this
+device's, and with a tag where a newer release exists — and the addresses
+under them — with *this device* on this
 machine's own row, where another's carries an Unlink; and **Update** on any
 row whose install can update itself
 ([ADR-0027](docs/adr/0027-cluster-updates.md)).

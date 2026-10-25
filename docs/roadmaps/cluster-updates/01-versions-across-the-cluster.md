@@ -4,9 +4,10 @@
 
 Every row in the Devices section shows the release that device runs, under
 its name, the way the Annex's Components row shows its own — this device's
-row included. A row whose version differs from this device's carries a tag
-saying so, and a row whose version is older than the latest stable release
-carries a tag saying a newer release exists. A member from before this stage
+row included. A row whose version differs from this device's draws that
+version in a colour of its own, with no word beside it, and a row whose
+version is older than the latest stable release carries a tag saying a newer
+release exists. A member from before this stage
 shows no version, which is itself the sign to update it. Where a call to a
 member fails and the two versions differ, the trouble line it leaves names
 both versions in a sentence. Demonstrable with two devices a release apart:
@@ -24,7 +25,7 @@ the winvm incident, as it should have read.
   the identity is re-read when that stream is taken up, and nothing polls for
   it. Ordinary members are not re-read on any timer today, and this stage
   does not add one.
-- **Two tags, both.** *Differs from this device* and *a newer release
+- **Two marks, both.** *Differs from this device* and *a newer release
   exists*. The version alone, and the release tag alone, were offered and not
   taken. The newer-release verdict is the Update Notice's own daily check,
   which is stable releases only and in memory; the tag compares each row's
@@ -33,9 +34,11 @@ the winvm incident, as it should have read.
   tolerate-it rules stay. The sentence is the one place the incident becomes
   legible, so it belongs on every trouble line a member's call can leave,
   mirroring's first.
-- **The words of the tags are the deferred wording Set's** (Set 1381, whose
-  answers reach this stage's sessions), and the trouble line follows
-  `docs/copy.md`'s refusal rule: what is true, then the one action.
+- **A differing version is just the number, differently coloured, with no
+  word** — the human's answer to the deferred wording Set (1381). Only the
+  newer-release mark is a tag, and its words are still open. The trouble
+  line follows `docs/copy.md`'s refusal rule: what is true, then the one
+  action.
 
 ## Proposed tasks (provisional)
 
@@ -49,10 +52,12 @@ the winvm incident, as it should have read.
    stream is taken up, so a member that restarted on a new release shows it
    without a press.
    - Restart a member on a new binary; its row changes without reloading.
-3. **The two tags** — *differs* against this device's version and *newer
-   release* against the Update Notice's verdict, drawn as the *unreachable*
-   tag is.
-   - With the check off or unanswered, only the *differs* tag can appear.
+3. **The two marks** — *differs* against this device's version, drawn as the
+   version line in a colour of its own with no word; and *newer release*
+   against the Update Notice's verdict, a tag drawn as the *unreachable* tag
+   is.
+   - A member a release behind shows its number coloured, and no word.
+   - With the check off or unanswered, only the *differs* colour can appear.
 4. **The gap on the trouble line** — a member's call that fails while the
    versions differ leaves a line naming both.
    - winvm's Profile failure reads *winvm is on 0.2.0 and this device is on

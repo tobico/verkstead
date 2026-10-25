@@ -3,10 +3,12 @@
 ## Goal
 
 On a desktop install, this device's Devices row has **Update** whenever a
-newer stable release exists. A press shows a confirm card naming the sessions
-running here and saying they will be stopped and resumed; on Update the app
-downloads the release with electron-updater while the row reads *updating…*,
-relaunches on the new version, and the row shows that version. A version that
+newer stable release exists. A press shows a confirm card, *Update wolf?*,
+whose body names the version and the sessions running here and says they will
+be stopped and resumed; on Update the app downloads the release with
+electron-updater while the row reads *updating…*, the row reads
+*restarting…* once the server goes quiet, and the app relaunches on the new
+version and the row shows that version. A version that
 does not come up shows the app's dialog as today and leaves a trouble line on
 the row. An install that cannot update itself — the NixOS module, a dev
 checkout, a bare `verkstead serve` — shows its version and a line saying how
@@ -29,6 +31,13 @@ a published release, and in the suite against a local update feed.
   stops them and startup re-drives each driven Conversation through the
   harness's own resume, as after any restart. Refusing while a session runs,
   as the Annex's Update does, was not taken.
+- **The words are the deferred wording Set's answers** (1381). The card's
+  question is *Update <device>?* — *Update crow?* — with the version in its
+  body beside the sessions. The row reads *updating…*, as the Annex row's
+  state word does, then *restarting…* once the device goes quiet. On this
+  device's own row the server that draws the state is the one going away, so
+  *restarting…* is the viewer's: a row reading *updating…* whose server stops
+  answering reads *restarting…* until the page reconnects.
 - **No rollback.** The dialog, the trouble line, and a higher release.
 - **Stable releases only**, as the Update Notice counts them.
 - **Signed update metadata.** `latest*.yml` is published beside the assets
@@ -61,12 +70,14 @@ a published release, and in the suite against a local update feed.
 3. **The update exchange** — a route the row presses, the stdout line the
    server says, the app driving electron-updater on it, and the progress the
    app posts back with the Workbench Key, read as the row's state.
-   - The row reads *updating…* from the press until the app relaunches.
+   - The row reads *updating…* from the press, then *restarting…* once the
+     server stops answering, until the app relaunches.
    - A failed download leaves the row's trouble line with the updater's
      reason.
 4. **The press** — Update on this device's row when a newer stable release
-   exists, the confirm card naming running sessions, and the README
-   *Updating* section the Update Notice links to.
+   exists, the confirm card naming the device, the version and the running
+   sessions, and the README *Updating* section the Update Notice links to.
+   - On wolf, the card reads *Update wolf?* with the version in its body.
    - With two sessions running, the card names both; Update proceeds.
 5. **A feed for the suite** — electron-updater pointed at a local feed so the
    desktop tests can prove the exchange without GitHub.
