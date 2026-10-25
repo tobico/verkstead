@@ -368,8 +368,9 @@ newly signed build would have needed for its first months.
 
 **It reopens on any of three things**: a company in Australia, which can
 validate for Azure Artifact Signing as an organisation; Microsoft opening
-individual validation to Australia; or an application to SignPath Foundation.
-Nothing else found changes the answer.
+individual validation to Australia; or Verkstead becoming widely used enough
+to show it on SignPath Foundation's application. Nothing else found changes
+the answer.
 
 **And if it reopens, it lands like this.** Sign the bare
 `verkstead-windows-x64.exe` in its own matrix leg, so the sidecar packed into
@@ -396,11 +397,12 @@ not taken up.
   the United States and Canada, and an organisation — which can validate from
   Australia — is a company the maintainer will not form.
 - **SignPath Foundation**, which signs open-source projects free under its own
-  certificate through its GitHub Action. Verkstead meets every written term —
-  an OSI licence, a public repository, free downloads, active maintenance, a
-  release already made, no malware — and approval is at the foundation's
-  discretion. Rejected by the maintainer on fit and standing: the publisher a
-  downloader would see is *SignPath Foundation*, not the person who made it.
+  certificate through its GitHub Action, the publisher a downloader sees being
+  *SignPath Foundation*. Verkstead meets the published terms — an OSI licence,
+  a public repository, free downloads, active maintenance, a release already
+  made, no malware — but the application form also requires links or
+  information showing that the project is widely used or trusted. Rejected:
+  Verkstead has none to give yet.
 - **SSL.com's Individual Validated certificate with eSigner**, sold worldwide,
   whose command-line tool and GitHub Action sign headless from a username, a
   password and a TOTP secret, so it fits a hosted runner. Rejected on cost: a
