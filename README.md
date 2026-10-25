@@ -47,21 +47,28 @@ menu bar. Drag **Verkstead** into Applications. The app is unsigned
 
 That is once per copy of the app; a newer download asks again.
 
-**`Verkstead-x86_64.msi`**, on Windows: the same app installed into your own
-profile, with no administrator asked for, an icon in the notification area and
-`verkstead` on your `PATH` for a terminal opened after the install. It is
-unsigned too, so SmartScreen stops it behind *Windows protected your PC*:
-click **More info**, then **Run anyway**. Once per download; right-clicking the
-msi, **Properties**, and ticking **Unblock** does the same beforehand. It
-stays unsigned because every route open to its maintainer, an individual in
-Australia, was weighed and declined, and a signed build would start behind the
-same window until downloads earned it a reputation
+**`Verkstead-x86_64.exe`**, on Windows: an installer that puts the same app
+into your own profile, at `%LOCALAPPDATA%\Programs\Verkstead`, with no
+administrator asked for, an icon in the notification area and `verkstead` on
+your `PATH` for a terminal opened after the install. It is unsigned too, so
+SmartScreen stops it behind *Windows protected your PC*: click **More info**,
+then **Run anyway**. Once per download; right-clicking the exe, **Properties**,
+and ticking **Unblock** does the same beforehand. It stays unsigned because
+every route open to its maintainer, an individual in Australia, was weighed and
+declined, and a signed build would start behind the same window until downloads
+earned it a reputation
 ([ADR-0020](docs/adr/0020-electron-desktop.md#amended-the-windows-build-stays-unsigned)).
 
-**Taking it off Windows again** starts before the msi is uninstalled, because
-the msi knows nothing of the account sessions ran as or of what was granted to
-it. Quit Verkstead, then run `verkstead session-account remove` in an elevated
-terminal. It reads every record Verkstead kept under its Data Directory of the
+**A machine that has the earlier Windows Installer package of Verkstead**
+installs this exe over it once, by hand. The installer finds the old install
+and removes it before putting its own in the same place, and the Data
+Directory, the settings and Launch on startup are left as they were.
+
+**Taking it off Windows again** starts before Verkstead is uninstalled, because
+the uninstaller knows nothing of the account sessions ran as or of what was
+granted to it. Quit Verkstead, then run `verkstead session-account remove` in
+an elevated terminal, and uninstall Verkstead from **Installed apps** after it.
+It reads every record Verkstead kept under its Data Directory of the
 access-control entries it wrote on your directories, takes each one off with a
 line saying which, and then deletes the account, the `C:\Users` directory
 Windows made for it the first time a session ran, and its password out of the
@@ -108,7 +115,8 @@ every string on a screen, and the reasons behind them.
 and the loop for working on Verkstead itself.
 
 **[Releasing](docs/releasing.md)** — the one workflow that turns a version
-number into the published binaries, the AppImage, the dmg and the msi.
+number into the published binaries, the AppImage, the dmg and the Windows
+installer.
 
 ## Licence
 

@@ -18,7 +18,7 @@ function downloadFor(platform, userAgent, touchPoints) {
     return { label: "macOS", asset: "Verkstead-universal.dmg" };
   }
   const windows = p ? p.startsWith("win") : /windows/i.test(ua);
-  if (windows) return { label: "Windows", asset: "Verkstead-x86_64.msi" };
+  if (windows) return { label: "Windows", asset: "Verkstead-x86_64.exe" };
   const linux = p ? p === "linux" || p.startsWith("linux") : /linux/i.test(ua);
   if (linux) {
     if (/aarch64|arm/i.test(ua) || /aarch64|arm/.test(p)) return null;

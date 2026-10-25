@@ -18,14 +18,30 @@ without its `v` — `0.1.2`, or `0.1.0-rc.1`. Or from a terminal:
 $ gh workflow run release.yml -f version=0.1.2
 ```
 
-The number is the one input a run has, and so the one thing about it that can
-be a typo. The first job to touch it refuses anything that is not semver's own
+The number is the one input a run must have, and so the one thing about it
+that can be a typo. The first job to touch it refuses anything that is not semver's own
 shape, refuses a leading `v` — the `v` belongs to the tag and the workflow adds
 it — and refuses a version whose tag already exists.
 
 What `main` is at the moment you press the button is what gets released, so
 that is the thing to have settled first: the run takes `main`'s head, and every
 artifact is built from it.
+
+**The note** is the other input, and it is optional: one line, put above the
+notes GitHub generates, and left empty the notes are those alone.
+
+```console
+$ gh workflow run release.yml -f version=0.3.0 \
+    -f note='On Windows, install this exe once by hand over the earlier Windows Installer package. It removes that package first.'
+```
+
+It is for what somebody already running the last Release has to do by hand to
+take this one, which the generated list of what landed never says. Most
+releases have nothing of the kind and leave it empty. The first release whose
+Windows download is `Verkstead-x86_64.exe` is the one that needs it, with the
+line above: a machine holding the Windows Installer package earlier Releases
+shipped is not updated across to the exe, and installing the exe over it once
+is what moves it.
 
 ## The order, and what a failure leaves
 
@@ -39,8 +55,8 @@ Each of these waits on the one above it.
 2. **Prepare.** The workspace version in [`Cargo.toml`](../Cargo.toml) is set
    to the release's — `Cargo.lock` with it, which carries a version per
    workspace crate, and [`desktop/package.json`](../desktop/package.json)
-   beside them, that being where electron-builder reads the msi's product
-   version and nothing else bumps it — and committed to `main` by
+   beside them, that being where electron-builder reads the Windows
+   installer's version and nothing else bumps it — and committed to `main` by
    `github-actions[bot]` as `chore: version <version>`. Everything below is
    built from that commit by sha rather than from `main`, so an hour-long
    release and a branch that moves under it are not the same thing.
@@ -50,10 +66,10 @@ Each of these waits on the one above it.
 4. **Eight legs**, each building its artifact and then running it: five bare
    CLI binaries, and beside them one desktop app per desktop platform — the
    Linux one as `Verkstead-x86_64.AppImage`, the macOS one as
-   `Verkstead-universal.dmg`, the Windows one as `Verkstead-x86_64.msi`.
+   `Verkstead-universal.dmg`, the Windows one as `Verkstead-x86_64.exe`.
 5. **Publish.** The tag is made on the prepare commit, annotated, and pushed;
    then the Release is created under it with all eight artifacts and generated
-   notes.
+   notes, the note above them where the run was given one.
 6. **Manifest.** [`nix/release.json`](../nix/release.json) is written from the
    published assets and committed to `main`, so the flake fetches what was just
    published.
@@ -116,37 +132,35 @@ The Windows desktop leg compiles nothing either, and it is the one with an
 installer in it. It waits on the whole of the matrix above and downloads
 `verkstead-windows-x64.exe` — the binary that matrix built and ran — then hands
 it to `pnpm run pack`, which packs the Electron app around that sidecar and
-wraps the result in `Verkstead-x86_64.msi` through electron-builder's WiX
-target ([ADR-0020](adr/0020-electron-desktop.md)). It stays on `windows-2025`
-all the same: the install and every assertion after it want a real Windows to
-happen on. That package is per-user throughout — the app under
+wraps the result in `Verkstead-x86_64.exe` through electron-builder's `nsis`
+target ([ADR-0027](adr/0027-cluster-updates.md)), the one electron-updater
+can update. It stays on `windows-2025` all the same: makensis is a Windows
+program, and the install and every assertion after it want a real Windows to
+happen on. That installer is per-user throughout and one-click, with no wizard
+and no administrator asked for — the app under
 `%LOCALAPPDATA%\Programs\Verkstead`, the shortcut in the user's own Start menu,
-and the CLI's own directory inside the install appended to the user's `PATH` —
-because the app is unsigned
+its record under `HKCU`, and the CLI's own directory inside the install
+appended to the user's `PATH` — because the app is unsigned
 ([ADR-0020](adr/0020-electron-desktop.md#amended-the-windows-build-stays-unsigned)
 says why) and elevation would buy a downloader nothing they wanted. That
 directory rather than the install root, which holds a launcher named for the
 product: Windows resolves a lookup without regard to case, and a root on
-`PATH` would answer `verkstead guide` with a window. Nothing here installs a
-WiX toolset either — electron-builder fetches its own, which is one fewer
-unpinned tool than the leg that compiled Rust on this runner had. There is no
-floor to hold any of it to: what an AppImage promises about glibc and a bundle
-about macOS 12, an exe gets from the C runtime Windows itself ships.
-
-One thing about that package cannot say what the tag says. A Windows Installer
-version is four numbers and only the first three of them are ever compared —
-electron-builder writes `major.minor.patch.0` out of `desktop/package.json`,
-which `prepare` gives the release's version with its pre-release suffix taken
-off — so `v0.1.0-rc.1` and `v0.1.0-rc.2` both arrive in **Installed apps** as
-`0.1.0`. Which is why the package allows an upgrade from a version reading the
-same as its own, and the second rc replaces the first rather than standing
-beside it.
+`PATH` would answer `verkstead guide` with a window. The directory's name and
+the `PATH` entry are what
+[`desktop/build/installer.nsh`](../desktop/build/installer.nsh) adds to
+electron-builder's template, the include script the configuration names: the
+target puts a per-user install under the package's name otherwise, and has no
+key for a `PATH` entry at all. Nothing here installs NSIS either —
+electron-builder fetches its own, which is one fewer unpinned tool than the leg
+that compiled Rust on this runner had. There is no floor to hold any of it to:
+what an AppImage promises about glibc and a bundle about macOS 12, an exe gets
+from the C runtime Windows itself ships.
 
 Each desktop leg then asserts the artifact itself rather than what was lying
 beside it: the AppImage is run as the file that is uploaded, the dmg is mounted
-and run out of the mount, and the msi is installed and everything afterwards
-asked of the install it left. What they assert is the same three things — it
-starts, it serves a document with the viewer's bundle named in it, and its own
+and run out of the mount, and the exe is installed silently, with `/S`, and
+everything afterwards asked of the install it left. What they assert is the
+same three things — it starts, it serves a document with the viewer's bundle named in it, and its own
 log says an icon went up — and each of them is bounded, because the failures
 these apps draw are dialogs and a dialog nobody dismisses would hold a runner
 for six hours. The Linux leg mounts the file before it reads anything out of it,
@@ -158,21 +172,30 @@ Every leg then asserts a fourth, and it is the one the running app cannot be
 asked for: the half of the binary a *session* gets. In the AppImage and the
 bundle that is the binary inside the artifact, run by path and asked for `ask`;
 on Windows it is `verkstead guide` in a terminal opened after the install, which
-is the same claim through the door an msi has — the `PATH` entry it wrote. An
-artifact carrying the app alone would pass every assertion above it and hand
-each session it spawned a binary with no `ask` in it. The Windows leg checks
-three more that are the installer's own. The install is in the user's profile
-with its record under `HKCU`. The Start-menu entry opens the launcher at the
-install root rather than the console program inside it, and opens no console
-with it — a subsystem being a fact about the file, read out of its PE header
-rather than off a run. **And an msi installed over an msi leaves one product,
-one `PATH` entry and one Start-menu entry**, which is the assertion no other
-leg has an equivalent of: over itself, which exercises the same-version rule
-above deterministically, and over the last Release's msi, which is what tests
-the UpgradeCode carried over from the package this one replaces. Where there
-is no Release to fetch that second half is skipped, with a warning saying in
-as many words that the upgrade went unchecked. The dmg's leg adds four of its
-own, and every one of them is about something a run of the app cannot report.
+is the same claim through the door an installer has — the `PATH` entry it
+wrote. An artifact carrying the app alone would pass every assertion above it
+and hand each session it spawned a binary with no `ask` in it. The Windows leg
+checks more that are the installer's own. The install is in the user's profile
+with its record under `HKCU` and none under `HKLM`. The Start-menu entry opens
+the launcher at the install root rather than the console program inside it, and
+opens no console with it — a subsystem being a fact about the file, read out of
+its PE header rather than off a run. **The exe installed over itself leaves one
+row in Installed apps, one `PATH` entry and one Start-menu entry**, which is
+the shape electron-updater's update takes and the check that the include
+script's `PATH` addition never doubles. **And installed over the last
+Release's Windows Installer package, it leaves the same counts and no package**:
+the include script finds that package by the UpgradeCode every earlier Release
+installed under, and removes it before extracting anything, and the leg reads
+Windows Installer's own record for this user afterwards and finds nothing, with
+the Run value Launch on startup wrote still naming the launcher. Where the last
+Release carries no such package that half is skipped, with a warning saying in
+as many words that it went unchecked — every run after the first Release that
+ships the exe alone, at which point the check and the removal retire together.
+Last, **the uninstaller takes it all away and leaves the Data Directory**: run
+the way Installed apps would run it, it removes the install directory, the
+Start-menu entry, the row and the `PATH` entry, and the Data Directory is still
+there afterwards. The dmg's leg adds four of its own, and every one of them is
+about something a run of the app cannot report.
 
 That the app comes back out of the image sealed, over the bundle and over the
 sidecar inside it: the reason that was first written is gone — the bundle's
@@ -211,9 +234,10 @@ keeps a pre-release off `releases/latest`, which is the url an install command
 asks for. It is also the only difference, the run being the same run either
 way, so a rehearsal really does rehearse.
 
-The compiled binary drops the hyphen and everything after it, for the reason
-the msi does: `v0.1.0-rc.1` and `v0.1.0-rc.2` are both a `Cargo.toml` reading
-`0.1.0`, which is what `verkstead --version` prints. The tag is the only place
+The compiled binary drops the hyphen and everything after it, and so does
+every installer's version: a pre-release rehearses the release of its number,
+so `v0.1.0-rc.1` and `v0.1.0-rc.2` are both a `Cargo.toml` reading `0.1.0`,
+which is what `verkstead --version` prints and what **Installed apps** says. The tag is the only place
 the difference between two release candidates lives, and `prepare` is where
 that truncation happens.
 
@@ -284,10 +308,10 @@ newcomer actually follows.
    session, and what the app reads is the launch event `loginwindow` alone
    sends.
 
-5. **The msi, downloaded in a browser and opened** on a Windows machine. In a
+5. **The exe, downloaded in a browser and opened** on a Windows machine. In a
    browser deliberately, for the reason the dmg is: the mark SmartScreen reads
-   is put on the file by whatever downloaded it, and `curl` puts on nothing — a
-   package fetched with it installs with no warning at all, and that warning is
+   is put on the file by whatever downloaded it, and `curl` puts on nothing — an
+   installer fetched with it runs with no warning at all, and that warning is
    the one part of this install no workflow can rehearse.
 
    Walk past it the way

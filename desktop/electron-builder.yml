@@ -249,9 +249,8 @@ win:
         - x64
 
 # **An NSIS installer, because that is what electron-updater updates**
-# (ADR-0027). The msi this replaces could not be: electron-updater's Windows
-# update runs the new NSIS installer over the old install, and an msi is not
-# one.
+# (ADR-0027): its Windows update runs the new installer over the old install,
+# and an install made any other way is not one it can run over.
 nsis:
   # Written down rather than defaulted, for the reason the AppImage's and the
   # dmg's are: `release.yml` checks this name, `README.md` spells it, and
@@ -270,8 +269,8 @@ nsis:
   # shown under and the one `src/main.ts` sets.
   createDesktopShortcut: false
 
-  # **The row in Installed apps says `Verkstead`**, as the msi's did, rather
-  # than electron-builder's `Verkstead 0.2.2`: the version has a column of its
+  # **The row in Installed apps says `Verkstead`**, rather than
+  # electron-builder's `Verkstead 0.2.2`: the version has a column of its
   # own there, and the release leg finds the row by this name.
   uninstallDisplayName: "${productName}"
 
@@ -284,8 +283,8 @@ nsis:
   #   would be an unsigned program asking for the machine.
   # - `oneClick` is on, so there is no wizard: a progress banner, and the
   #   install.
-  # - `runAfterFinish` is on: the installer starts the app when it finishes, as
-  #   the msi did. Never for a silent install — `/S`, which is how the release
+  # - `runAfterFinish` is on: the installer starts the app when it finishes.
+  #   Never for a silent install — `/S`, which is how the release
   #   leg installs it — unless that install also says `--force-run`.
   # - `deleteAppDataOnUninstall` is off, and has to stay off: what it deletes
   #   is `%APPDATA%\Verkstead`, which is the Data Directory — every Repo,

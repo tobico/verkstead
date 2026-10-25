@@ -1638,7 +1638,7 @@ pub(crate) enum Standing {
 ///
 /// **Two, and both of them seen.** A third was written and taken out again: a
 /// parent directory called `WindowsApps`, where an app-execution alias stands
-/// and where an MSIX package would put one. No machine here has ever had that
+/// and where a Microsoft Store package would put one. No machine here has ever had that
 /// alias, and the cost of guessing wrong is not a row's wrong sentence — this
 /// answer refuses a session outright, with nothing on the Profile to overrule
 /// it, so a `claude.exe` alias standing in the directory every Windows user

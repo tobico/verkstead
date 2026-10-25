@@ -20,4 +20,4 @@ Roadmap stage: [03: The Windows installer](docs/roadmaps/cluster-updates/03-the-
 
 - [x] 01: The NSIS installer, installed on the runner — [details](01-the-nsis-installer.md)
 - [x] 02: Installing over what is already there — [details](02-installing-over-what-is-there.md)
-- [ ] 03: The words — [details](03-the-words.md)
+- [x] 03: The words — [details](03-the-words.md)

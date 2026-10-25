@@ -38,12 +38,22 @@ name: Release
 # The version is typed without its `v`, the way `Cargo.toml` and the flake both
 # spell one, because that is the number a person has in mind. Everything that
 # wants the other spelling derives it — see `TAG` below.
+#
+# The note is the one thing a release says in words of its own. It is put above
+# the generated notes, and is for what somebody installing over the last
+# Release has to do by hand: `docs/releasing.md` says when one is needed. Left
+# empty, the notes are the generated ones alone.
 on:
   workflow_dispatch:
     inputs:
       version:
         description: The version to release, without a leading v (0.1.2, or 0.1.0-rc.1)
         required: true
+        type: string
+      note:
+        description: A line put above the generated notes, for what an upgrader has to do by hand (empty for none)
+        required: false
+        default: ''
         type: string
 
 # Read at the top, so that the jobs which compile the dependency tree and run
@@ -151,11 +161,11 @@ jobs:
 
       # The workspace version, which every crate here takes, edited in the one
       # place it is written. A hyphen is semver's own spelling of a
-      # pre-release, and a Cargo version has nowhere to put one that the
-      # Windows Installer version could also carry — three numbers and nothing
-      # after them — so `v0.1.0-rc.1` and `v0.1.0-rc.2` are both a manifest
-      # reading `0.1.0`. That is the same rule from both ends: the tag keeps
-      # the pre-release, the compiled binary does not.
+      # pre-release, and it stops at the tag: a pre-release rehearses the
+      # release of its number, so what it builds says that number, and
+      # `v0.1.0-rc.1` and `v0.1.0-rc.2` are both a manifest reading `0.1.0`.
+      # That is the same rule from both ends: the tag keeps the pre-release,
+      # the compiled binary and the installers do not.
       #
       # awk rather than sed because `version = ` appears in `[workspace.
       # package]` and could appear in any table below it; the section is
@@ -2595,17 +2605,26 @@ jobs:
       #
       # Notes are generated rather than written. There is nobody to write them
       # at the moment a release is coined, and a release with an empty body is
-      # worse than one listing what landed since the last tag.
+      # worse than one listing what landed since the last tag. The `note`
+      # input, where there is one, is `--notes`, which `gh` puts above the
+      # generated notes. It is read through the environment like the version,
+      # and left off entirely when it is empty, so a release without one is
+      # published exactly as before.
       - name: Publish the Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          NOTE: ${{ inputs.note }}
         run: |
           case "$TAG" in
             *-*) prerelease=(--prerelease) ;;
             *) prerelease=() ;;
           esac
-          gh release create "$TAG" --generate-notes "${prerelease[@]}" \
+          note=()
+          if [ -n "$NOTE" ]; then
+            note=(--notes "$NOTE")
+          fi
+          gh release create "$TAG" --generate-notes "${note[@]}" "${prerelease[@]}" \
             binaries/verkstead-* desktop-assets/*
 
       # What GitHub says it now has, in the log of the run that put it there —
