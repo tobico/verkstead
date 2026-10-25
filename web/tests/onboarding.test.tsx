@@ -417,6 +417,17 @@ describe("the foot", () => {
       TITLES.accounts,
     );
   });
+
+  /// The first step's run and its by-hand screen are titled for what they are
+  /// doing, and the step's own title is back once the step is left.
+  it("titles the paper for the install screen while a run goes", async () => {
+    const { container } = mount(INSTALLING);
+    const title = () =>
+      container.querySelector(`.${styles.title}`)?.textContent;
+
+    await waitFor(() => expect(title()).toBe("Installing"));
+    expect(container.textContent).toContain("Step 1 of 3");
+  });
 });
 
 describe("the step this device is on", () => {

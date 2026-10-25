@@ -5,7 +5,8 @@
    about — the rows to tick, the run's own bar, or the rows and the commands
    that put them right — and the presses at the foot of it. The one grid is the
    checkbox screen's four harnesses, two by two as the boards draw them; every
-   other row is read down, on a phone as often as on a desktop. */
+   other row is read down, on a phone as often as on a desktop. The boards are
+   `docs/design/setup-wizard/01-*`. */
 
 .step {
   display: flex;
@@ -16,47 +17,6 @@
 .standing {
   margin: 0;
   line-height: 1.5;
-}
-
-/* The nine machines, as the pressed-or-not buttons in a group the workbench's
-   terminals already use: they are all always there, `aria-pressed` is the one
-   word that says which is showing, and the strip scrolls where a phone cannot
-   hold all nine. */
-.tabs {
-  display: flex;
-  gap: 0.25rem;
-  align-items: center;
-  max-width: 100%;
-  padding: 0.2rem;
-  overflow-x: auto;
-  background: var(--paper);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
-}
-
-.tab {
-  flex: none;
-  padding: 0.35rem 0.7rem;
-  font: inherit;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-  background: none;
-  border: 0;
-  border-radius: 0.4rem;
-  cursor: pointer;
-  white-space: nowrap;
-  user-select: none;
-}
-
-.tab[aria-pressed="true"] {
-  color: var(--paper);
-  background: var(--accent);
-}
-
-.rows {
-  margin: 0;
-  padding: 0;
-  list-style: none;
 }
 
 /* The checkbox screen's three groups — see `GROUPS` in `Dependencies.tsx` —
@@ -239,67 +199,6 @@ label.inner {
   background: var(--code-wash);
 }
 
-/* Where a session looks for a program, which is the server's own list rather
-   than a sentence about one — see `Dependencies.tsx`. Drawn above the rows and
-   under the tabs, because it is a fact about this machine whichever tab is
-   showing. */
-.looks {
-  padding: 0.6rem 0.7rem;
-  background: var(--paper);
-  border: 1px solid var(--edge);
-  border-radius: 0.5rem;
-}
-
-.looking {
-  margin: 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-/* The directories themselves, numbered: the order is the whole of what the list
-   says, the first entry holding the program a session gets. */
-.path {
-  margin: 0.4rem 0 0;
-  padding-left: 1.4rem;
-  overflow-x: auto;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 0.8rem;
-}
-
-.path li {
-  white-space: nowrap;
-}
-
-/* And that the list was read once, at startup — see `Dependencies.tsx`. Under
-   the list rather than inside its box: the box is what this machine is, and
-   this is what Verkstead does with it. Two classes deep to take the gap off the
-   note's own margin, the way every other parent here tightens one. */
-.step .restart {
-  margin-top: 0;
-}
-
-/* One thing a session needs. Separated by a rule rather than by cards inside a
-   card: the step is already one surface, and seven boxes on it would be a page
-   of borders. */
-.row {
-  padding: 0.75rem 0;
-  border-top: 1px solid var(--edge);
-}
-
-.row:last-child {
-  border-bottom: 1px solid var(--edge);
-}
-
-/* The hint screen's rows: the name and the mark on one line, with what the
-   row is for at the end of it — and under the name on a narrow window, where
-   the two would not fit. */
-.head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: baseline;
-}
-
 .name {
   display: flex;
   flex-wrap: wrap;
@@ -360,110 +259,6 @@ label.inner {
 .seen code {
   font-family: ui-monospace, SFMono-Regular, monospace;
   overflow-wrap: anywhere;
-}
-
-.instruction {
-  margin-top: 0.5rem;
-}
-
-/* The second way to get the same program, under the one that leads. Indented
-   behind a rule rather than boxed: it is the same instruction one step back,
-   and a box would read as a second row. */
-.alternative {
-  margin-top: 0.6rem;
-  padding-left: 0.7rem;
-  border-left: 2px solid var(--edge);
-}
-
-.or {
-  margin: 0 0 0.35rem;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-/* The alternative's own instruction sits straight under that word. */
-.alternative .instruction {
-  margin-top: 0;
-}
-
-/* The line to paste, and the press that copies it. The command scrolls rather
-   than wrapping: a wrapped shell line reads as two commands. */
-.command {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  padding: 0.45rem 0.6rem;
-  background: var(--paper);
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-}
-
-.command pre {
-  flex: 1;
-  margin: 0;
-  overflow-x: auto;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 0.85rem;
-}
-
-.copy {
-  flex: none;
-  padding: 0.2rem 0.5rem;
-  font: inherit;
-  font-size: 0.8rem;
-  color: var(--ink-soft);
-  background: none;
-  border: 1px solid var(--edge);
-  border-radius: 0.35rem;
-  cursor: pointer;
-}
-
-.vendor {
-  margin: 0;
-  font-size: 0.9rem;
-  word-break: break-all;
-}
-
-/* What the run made of a row, in the machine's own words: a dismissed dialog, a
-   package manager's refusal, a rebuild's last lines, or a row no archive here
-   carries, its line breaks kept. Quiet rather than alarming — the screen it is
-   drawn on is the one that says what to do about it. */
-.failed {
-  margin: 0.35rem 0 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-  overflow-wrap: anywhere;
-  white-space: pre-line;
-}
-
-/* How far the run has got: the bar and the count beside it, which say the same
-   thing for the eye and for the reader. */
-.run {
-  display: flex;
-  gap: 0.6rem;
-  align-items: center;
-}
-
-.bar {
-  flex: 1;
-  width: 100%;
-  height: 0.6rem;
-  accent-color: var(--accent);
-}
-
-.count {
-  flex: none;
-  font-size: 0.85rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-soft);
-}
-
-/* And what it is doing at this moment, in the server's words: it names this
-   machine and the packages this distribution calls them, so nothing written
-   here could stand in for it. */
-.status {
-  margin: 0;
-  line-height: 1.5;
 }
 
 /* The presses at the foot of a screen, with whatever stands beside them — the
@@ -531,8 +326,18 @@ label.inner {
   cursor: pointer;
 }
 
+/* The by-hand screen's Back, under the press on a phone as the frame's own is,
+   and Back and Cancel at the foot's far left from 60rem, where the frame draws
+   its Back. */
+.back {
+  order: 1;
+  align-self: center;
+}
+
 @media (min-width: 60rem) {
-  .byHand {
+  .byHand,
+  .back,
+  .cancel {
     order: -1;
     margin-right: auto;
   }
@@ -545,7 +350,7 @@ label.inner {
   padding: 0.5rem 1.1rem;
   font: inherit;
   color: var(--ink);
-  background: none;
+  background: var(--card);
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
   cursor: pointer;
@@ -556,23 +361,18 @@ label.inner {
   opacity: 0.65;
 }
 
-/* How many of the rows the hint screen is about have since been found, beside
-   the press they release: a count rather than a sentence, because it moves
-   while somebody is reading it. */
-.counter {
-  font-size: 0.85rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-soft);
-}
-
 @media (hover: hover) {
-  .tab:not([aria-pressed="true"]):hover {
-    color: var(--ink);
-  }
-
   .copy:hover {
     color: var(--accent);
     border-color: var(--accent);
+  }
+
+  .or:hover {
+    text-decoration: underline;
+  }
+
+  .failedPill:hover {
+    filter: brightness(0.97);
   }
 
   .byHand:hover {
@@ -590,10 +390,9 @@ label.inner {
   }
 }
 
-/* The one install a whole tab stands on — the Mac's Homebrew, above the rows
-   and under the note about the PATH. Boxed the way the PATH list is: it is a
-   fact about the tab rather than about any one row, and a row is what it would
-   read as under the rule below. */
+/* The one install a whole choice of machine stands on — the Mac's Homebrew,
+   under the select and above the rows. Boxed the way the PATH list is: it is a
+   fact about the machine chosen rather than about any one row. */
 .before {
   padding: 0.6rem 0.7rem;
   background: var(--paper);
@@ -612,11 +411,347 @@ label.inner {
   margin-top: 0.4rem;
 }
 
-/* And what one tab says about itself, where two of them are the same operating
-   system: the Intel Mac's sentence, drawn where the other Mac's Homebrew line
-   is. A note rather than a box, that box being for something to run and this
+/* And what one choice says about itself, where two of them are the same
+   operating system: the Intel Mac's sentence, drawn where the other Mac's
+   Homebrew line is. A note rather than a box, that box being for something to run and this
    being something to know. Two classes deep to take the gap off the note's own
    margin, the way every other parent here tightens one. */
 .step .about {
   margin-top: 0;
+}
+
+/* The install screen — see `Installing` in `Dependencies.tsx`. How many of the
+   ticked rows are in, over the bar. */
+.run {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.count {
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The bar in the ember on a track of the hunk's brown, as thin as the board
+   draws it: drawn by hand rather than left to the platform, whose bar is a
+   different height in every browser. */
+.bar {
+  width: 100%;
+  height: 0.3rem;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: var(--code-wash);
+  color: var(--accent);
+  overflow: hidden;
+}
+
+.bar::-webkit-progress-bar {
+  background: var(--code-wash);
+}
+
+.bar::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.bar::-moz-progress-bar {
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+/* What the run is doing, in the server's words: it names this machine and the
+   packages this distribution calls them, so nothing written here could stand
+   in for it. */
+.status {
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* And the same line while the run waits on a password dialog, in an ember
+   callout with where to answer it under it. The wash is mixed from the paper,
+   so the dark theme follows on its own. */
+.callout {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  background: color-mix(in srgb, var(--accent) 10%, var(--paper));
+  border-radius: 0.6rem;
+}
+
+.bang {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.answer {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The word on the row the run is on. */
+.going {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+
+/* The by-hand screen — see `Hints` in `Dependencies.tsx`. What is still
+   missing on the left, and which machine the commands are for on the right. */
+.over {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.4rem;
+}
+
+.missingCount {
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.choosing {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.select {
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.45rem;
+  cursor: pointer;
+}
+
+/* One card holding a block per row, a rule between each. */
+.blocks {
+  margin: 0;
+  padding: 0 1rem;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.75rem;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1rem 0;
+}
+
+.block + .block {
+  border-top: 1px solid var(--edge);
+}
+
+/* A block's ring, name and why on one line, with the pill on the end of it —
+   and the why under the name on a narrow window, where the two would not
+   fit. */
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* On a phone the why takes a line of its own under the name, so the pill stays
+   on the name's line rather than dropping to one under both; beside the name
+   from 60rem, as the boards draw it. */
+.head .why {
+  order: 1;
+  flex-basis: 100%;
+  padding-left: 1.35rem;
+}
+
+@media (min-width: 60rem) {
+  .head .why {
+    order: 0;
+    flex-basis: auto;
+    padding-left: 0;
+  }
+}
+
+/* What a run made of a row, as a pill that opens it. */
+.failedPill {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  margin-left: auto;
+  padding: 0.15rem 0.6rem;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--removed);
+  background: var(--removed-wash);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.caret {
+  font-size: 0.8em;
+}
+
+/* And what it said, opened: the machine's own words in a red wash, their line
+   breaks kept — a dismissed dialog, a package manager's refusal, a rebuild's
+   last lines. */
+.said {
+  padding: 0.6rem 0.75rem;
+  background: var(--removed-wash);
+  border-radius: 0.45rem;
+}
+
+.saidLabel {
+  margin: 0 0 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--removed);
+}
+
+.failed {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.instruction {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* The line to paste, after a prompt, and the press that copies it. The command
+   scrolls rather than wrapping: a wrapped shell line reads as two commands. */
+.command {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+  background: var(--code-wash);
+  border-radius: 0.45rem;
+}
+
+.prompt {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.command pre {
+  flex: 1;
+  margin: 0;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+}
+
+.copy {
+  flex: none;
+  padding: 0.2rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+
+.vendor {
+  margin: 0;
+  font-size: 0.9rem;
+  word-break: break-all;
+}
+
+/* What the command does not say for itself, under it. */
+.note {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+/* The other way to get the same program, behind a word in the ember. */
+.or {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  align-self: flex-start;
+  padding: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* And opened: indented behind a rule rather than boxed, being the same
+   instruction one step back. */
+.alternative {
+  padding-left: 0.7rem;
+  border-left: 2px solid var(--edge);
+}
+
+/* Where a session looks for a program, under the rows: the server's own list,
+   which is a fact about this machine whichever one the commands are for, and
+   that it was read once. */
+.looks {
+  display: flex;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.pathLabel {
+  flex: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+
+.looking {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The directories themselves, one a line: the order is the whole of what the
+   list says, the first entry holding the program a session gets. */
+.path {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+}
+
+.path li {
+  white-space: nowrap;
+}
+
+.restart {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
 }

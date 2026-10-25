@@ -75,6 +75,11 @@ export type Instruction = {
   /// second is a line to paste exactly as much as the first is, and a line to
   /// paste is a line with a copy button beside it.
   alternative?: Instruction;
+
+  /// And where this one comes from, as the link to it reads where it is an
+  /// alternative: *Or from npm*, *Or from Homebrew*. Kept beside the command
+  /// rather than read out of it, because a NixOS line names no tool at all.
+  from?: string;
 };
 
 /// One operating system's answers: what the tab is called, and an instruction
@@ -244,6 +249,7 @@ const OPENCODE_NATIVE: Instruction = {
 function npm(pkg: string, node: string): Instruction {
   return {
     command: `sudo npm install -g ${pkg}`,
+    from: "npm",
     note:
       "A -g install puts the binary in /usr/local/bin or /usr/bin, which a " +
       `session reaches with nothing else to set. Without npm yet: ${node}.`,
@@ -254,6 +260,7 @@ function npm(pkg: string, node: string): Instruction {
 function windowsNpm(pkg: string): Instruction {
   return {
     command: `npm install -g ${pkg}`,
+    from: "npm",
     note:
       "A -g install puts the binary in %APPDATA%\\npm, which Node's own " +
       "installer puts on your PATH. Without npm yet: winget install --id " +
@@ -275,6 +282,7 @@ function orElse(lead: Instruction, packaged: Instruction): Instruction {
 function nixos(attribute: string, note?: string): Instruction {
   return {
     command: `environment.systemPackages = [ pkgs.${attribute} ];`,
+    from: "nixpkgs",
     note:
       (note ? `${note} ` : "") +
       "In configuration.nix, then sudo nixos-rebuild switch. A nix profile " +
@@ -357,6 +365,7 @@ export const GUIDES: Record<Distro, Guide> = {
           "opens the same dialog.",
         alternative: {
           command: "brew install git",
+          from: "Homebrew",
           note:
             "Homebrew's git. It needs the command line tools above installed " +
             "first.",

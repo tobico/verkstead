@@ -21,7 +21,7 @@
 //! **Install is the wizard's run** (ADR-0024: *Install from the pane is the
 //! wizard's run*), for a machine that skipped the row at setup: the same plan
 //! and the same units, and the same two screens drawn in this pane — the
-//! install screen while it goes, and the hint screen with the row's own
+//! install screen while it goes, and the by-hand screen with the row's own
 //! instruction where a restart is owed or something failed. They are the
 //! wizard's components over the wizard's reading rather than copies of them, so
 //! there is one of each. A run already going, from this pane or another
@@ -161,7 +161,7 @@ export function ComponentsPane(props: {
   const components = useComponents();
   const queries = useQueryClient();
 
-  // Whether the hint screen is up: set by a run this pane watched end with the
+  // Whether the by-hand screen is up: set by a run this pane watched end with the
   // WSL row still missing, and put down by its Back or its Next.
   const [hinting, setHinting] = createSignal(false);
 
@@ -196,7 +196,7 @@ export function ComponentsPane(props: {
   const wsl = (): DependencyView | undefined =>
     onboarding.data?.dependencies.find((row) => row.dependency === "Wsl");
 
-  /// A run is over: the row reads what the probe now says, and the hint screen
+  /// A run is over: the row reads what the probe now says, and the by-hand screen
   /// comes up where the row is still missing — a restart owed, or a step that
   /// failed — with the row's own instruction on it.
   const landed = (reading: OnboardingView): void => {
@@ -258,7 +258,7 @@ export function ComponentsPane(props: {
       queries.setQueryData(["onboarding"], reading),
   }));
 
-  /// Leave the hint screen for the row, read again.
+  /// Leave the by-hand screen for the row, read again.
   const unhint = (): void => {
     setHinting(false);
     void queries.invalidateQueries({ queryKey: ["components"] });
@@ -288,6 +288,9 @@ export function ComponentsPane(props: {
           {(run) => (
             <div class={styles.screen}>
               <Installing
+                machine={onboarding.data!.machine}
+                platform={onboarding.data!.platform}
+                rows={wsl() === undefined ? [] : [wsl()!]}
                 run={run()}
                 stopping={stop.isPending}
                 cancel={() => stop.mutate()}
@@ -304,6 +307,8 @@ export function ComponentsPane(props: {
                 detected={
                   wsl() === undefined || absent(wsl()!.state) ? 0 : 1
                 }
+                ready={wsl() !== undefined && !absent(wsl()!.state)}
+                skipping={false}
                 back={unhint}
                 onwards={unhint}
               />

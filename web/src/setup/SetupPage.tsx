@@ -97,6 +97,11 @@ export function SetupPage(): JSX.Element {
   // a step that has nothing to say, which is the frame's own rule standing.
   const [asked, setAsked] = createSignal<number | null>(null);
 
+  // And what the open step has called the paper, where it has: the
+  // dependencies step's run and its by-hand screen are titled for what they
+  // are rather than for the step. The step's own title otherwise.
+  const [retitled, setRetitled] = createSignal<string | null>(null);
+
   /// Open a step, and remember on this device that it is the one open.
   const show = (step: Step): void => {
     setOpen(step);
@@ -292,7 +297,7 @@ export function SetupPage(): JSX.Element {
                 <p class={styles.eyebrow}>
                   Step {STEPS.indexOf(open()) + 1} of {STEPS.length}
                 </p>
-                <h2 class={styles.title}>{TITLES[open()]}</h2>
+                <h2 class={styles.title}>{retitled() ?? TITLES[open()]}</h2>
 
                 <div class={styles.body}>
                   <Show when={open() === "dependencies"}>
@@ -300,6 +305,7 @@ export function SetupPage(): JSX.Element {
                       reading={view()}
                       onwards={() => onwards("dependencies")}
                       poll={setAsked}
+                      name={setRetitled}
                     />
                   </Show>
                   <Show when={open() === "accounts"}>
