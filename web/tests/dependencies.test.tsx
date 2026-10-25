@@ -1095,6 +1095,36 @@ describe("the hint screen", () => {
     expect(onwards(container).disabled).toBe(false);
   });
 
+  /// Somebody copying commands into a terminal who reloads is put back where
+  /// they were, over every row still missing — not on the ticks, there having
+  /// been no run to fail one.
+  it("lands a reload back on the screen opened by hand", () => {
+    const first = mount(PART_WAY);
+    byHand(first.container);
+    first.unmount();
+
+    const { container } = mount(PART_WAY);
+
+    expect(drawn(container)).toEqual(["Codex", "Grok", "OpenCode", "Gh"]);
+    expect(onwards(container).textContent).toBe("Next");
+  });
+
+  /// And a device whose earlier run failed a row, which then chose to install
+  /// by hand, reloads onto the by-hand list rather than onto the run's: every
+  /// row missing, and nothing being skipped.
+  it("lands a reload on the by-hand list, not the run's, after a run failed", () => {
+    const first = mount(ONE_FAILED);
+    byHand(first.container);
+    const listed = drawn(first.container);
+    first.unmount();
+
+    const { container } = mount(ONE_FAILED);
+
+    expect(drawn(container)).toEqual(listed);
+    expect(listed.length).toBeGreaterThan(1);
+    expect(onwards(container).textContent).toBe("Next");
+  });
+
   /// A row lands where it was rather than leaving the list: the count is what
   /// moves, and a list that emptied itself would be a screen with nothing on it
   /// saying nothing had happened.

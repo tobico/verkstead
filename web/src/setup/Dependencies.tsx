@@ -120,8 +120,10 @@ import {
 import {
   PROBE,
   RUNNING,
+  keepReached,
   keepScreen,
   openScreen,
+  reached,
   type Screen,
 } from "./steps";
 import styles from "./Dependencies.module.css";
@@ -331,13 +333,15 @@ export function Dependencies(props: {
   // reading, so that a row landing while somebody watches moves the counter
   // instead of leaving the list.
   const [hinted, setHinted] = createSignal<Dependency[]>(
-    screen() === "hints" ? failing(props.reading) : [],
+    screen() === "hints" ? hints(props.reading) : [],
   );
 
   // And whether that screen was reached by a run, which is what makes leaving
-  // a row behind on it a skip: a reload lands back on it only where the run
-  // failed a row, so that is a run too.
-  const [ran, setRan] = createSignal(screen() === "hints");
+  // a row behind on it a skip. A reload asks the device, which kept how it got
+  // there — see `reached`.
+  const [ran, setRan] = createSignal(
+    screen() === "hints" && reached() === "run",
+  );
 
   // And what the server said about a press it would not take.
   const [refused, setRefused] = createSignal<string | null>(null);
@@ -389,11 +393,8 @@ export function Dependencies(props: {
   const byHand = (): void => {
     setRefused(null);
     setRan(false);
-    setHinted(
-      props.reading.dependencies
-        .filter((row) => absent(row.state))
-        .map((row) => row.dependency),
-    );
+    setHinted(missing(props.reading));
+    keepReached("choice");
     show("hints");
   };
 
@@ -521,6 +522,7 @@ export function Dependencies(props: {
 
     setHinted(left);
     setRan(true);
+    keepReached("run");
     show("hints");
   });
 
@@ -582,16 +584,32 @@ export function Dependencies(props: {
 ///
 /// A run that is going is the install screen whatever this device was left on —
 /// somebody pressed Next here a moment ago, or on the phone beside it. Anything
-/// else is the checkbox screen, unless the device was left past it and there is
-/// still something the run could not install to say.
+/// else is the checkbox screen, unless the device was left past it and the
+/// by-hand screen it was on still has something to say: a row the run could
+/// not install, or — where it was opened by hand — any row still missing.
 function opening(reading: OnboardingView): Screen {
   if (running(reading.run)) {
     return "installing";
   }
 
-  return openScreen() !== "choosing" && failing(reading).length > 0
+  return openScreen() !== "choosing" && hints(reading).length > 0
     ? "hints"
     : "choosing";
+}
+
+/// The rows a by-hand screen a reload lands on is about, by how this device
+/// reached it: every row still missing where that was by hand, and the rows
+/// the run failed where it was a run.
+function hints(reading: OnboardingView): Dependency[] {
+  return reached() === "choice" ? missing(reading) : failing(reading);
+}
+
+/// Every row this machine has not got, ticked or not: what the by-hand screen
+/// lists when it is opened by hand.
+function missing(reading: OnboardingView): Dependency[] {
+  return reading.dependencies
+    .filter((row) => absent(row.state))
+    .map((row) => row.dependency);
 }
 
 /// Whether a run is still going: one that has been started and has not reached
