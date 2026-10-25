@@ -7,7 +7,7 @@
 //!
 //! Two shapes of test, as the two steps before it have. **What is drawn** is
 //! asked of the step on its own. **What a press does** is asked of the whole
-//! app, because the answer is which app there is: the last Next takes
+//! app, because the answer is which app there is: the last press takes
 //! onboarding mode off, and what that means is the workbench standing at
 //! `/compose` where the wizard was.
 
@@ -113,12 +113,17 @@ function field(container: ParentNode, id: string): HTMLInputElement {
   return container.querySelector<HTMLInputElement>(`#${id}`)!;
 }
 
-/// And what is said under it about where its value came from.
-function source(container: ParentNode, id: string): string | undefined {
-  return (
-    field(container, id).parentElement?.querySelector("p[data-source]")?.textContent ??
-    undefined
+/// And what is said inside its box about where its value came from: the short
+/// hint, and the whole sentence that is the hint's title.
+function source(
+  container: ParentNode,
+  id: string,
+): { short: string; whole: string } | undefined {
+  const hint = field(container, id).parentElement?.querySelector<HTMLElement>(
+    "[data-source]",
   );
+
+  return hint ? { short: hint.textContent ?? "", whole: hint.title } : undefined;
 }
 
 /// What the step says a token has to be able to do, a line per flavour of
@@ -134,10 +139,49 @@ function wanted(container: ParentNode): string[] {
 }
 
 /// The press onwards, found by its own words the way the steps before it are.
+/// It always reads the same, whether it will save or finish.
 function onwards(container: ParentNode): HTMLButtonElement {
   return [...container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Next",
+    (button) => button.textContent === "Finish setup",
   )!;
+}
+
+/// What the save answers where GitHub named the account but not every scope.
+const UNSCOPED: SettingsSaved = {
+  ...SAVED,
+  verified: { Account: { login: "ada", missing: ["gist"] } },
+};
+
+/// The step alone over a machine that offers nothing, saving to `answer`, with
+/// the three fields filled in by hand.
+async function filled(answer: SettingsSaved) {
+  const fetching = serving(
+    whenever(PREFILL, json(NOTHING)),
+    whenever(SETTINGS, json(UNSET)),
+    whenever(SETTINGS, json(answer), "POST"),
+    whenever(FINISHED, json(SET_UP), "POST"),
+  );
+
+  const { container } = drawn(client());
+
+  await waitFor(() => expect(onwards(container)).toBeTruthy());
+
+  for (const [id, value] of [
+    ["setup-author-name", "Ada Lovelace"],
+    ["setup-author-email", "ada@example.com"],
+    ["setup-github-token", "ghp_thetoken"],
+  ] as const) {
+    fireEvent.input(field(container, id), { target: { value } });
+  }
+
+  return { container, fetching };
+}
+
+/// How many times the settings were saved.
+function saves(fetching: ReturnType<typeof serving>): number {
+  return fetching.mock.calls.filter(
+    ([asked, init]) => String(asked) === SETTINGS && init?.method === "POST",
+  ).length;
 }
 
 /// What the page put on the wire when it saved the settings.
@@ -175,16 +219,20 @@ describe("what the fields open with", () => {
       expect(field(container, "setup-author-name").value).toBe("Ada Lovelace"),
     );
 
-    expect(source(container, "setup-author-name")).toContain(
-      "git config --global",
-    );
+    expect(source(container, "setup-author-name")).toEqual({
+      short: "git config",
+      whole: "From this machine's git config --global.",
+    });
     expect(field(container, "setup-author-email").value).toBe(
       "ada@example.com",
     );
     expect(field(container, "setup-github-token").value).toBe(
       "ghp_intheenvironment",
     );
-    expect(source(container, "setup-github-token")).toContain("GH_TOKEN");
+    expect(source(container, "setup-github-token")).toEqual({
+      short: "GH_TOKEN",
+      whole: "From GH_TOKEN, in this server's own environment.",
+    });
   });
 
   /// A machine that could say nothing leaves them empty: a field to type in
@@ -235,11 +283,13 @@ describe("what the fields open with", () => {
   });
 
   /// git refuses a commit with no author, so both halves are required — which
-  /// is the one thing that holds this step's Next.
-  it("refuses Next until both halves of the author are there", async () => {
+  /// is the one thing that holds this step's press, and the line beside it
+  /// says so.
+  it("refuses the press until both halves of the author are there", async () => {
     const { container } = mount(NOTHING);
 
     await waitFor(() => expect(onwards(container).disabled).toBe(true));
+    expect(container.textContent).toContain("Both author fields are needed");
 
     fireEvent.input(field(container, "setup-author-name"), {
       target: { value: "Ada Lovelace" },
@@ -250,10 +300,11 @@ describe("what the fields open with", () => {
       target: { value: "ada@example.com" },
     });
     expect(onwards(container).disabled).toBe(false);
+    expect(container.textContent).not.toContain("Both author fields are needed");
   });
 });
 
-describe("what Next saves", () => {
+describe("what the press saves", () => {
   /// Nothing is written until it is pressed: a prefill is a proposal, and the
   /// press is the human telling Verkstead it is right.
   it("writes nothing until it is pressed", async () => {
@@ -348,10 +399,9 @@ describe("what Next saves", () => {
 });
 
 describe("what the save answers", () => {
-  /// The login is shown rather than typed, and the wizard waits one more press
-  /// for it to be read: a token that authenticates as the *wrong* account is
-  /// the mistake nothing else here would catch.
-  it("shows the account the token authenticates as, and does not close yet", async () => {
+  /// A token GitHub verified with every scope is a clean answer, so the press
+  /// that saved it is the press that finishes.
+  it("finishes in one press where GitHub verified every scope", async () => {
     const { container, fetching } = mount(FOUND);
 
     await waitFor(() =>
@@ -360,15 +410,52 @@ describe("what the save answers", () => {
 
     fireEvent.click(onwards(container));
 
-    await waitFor(() => screen.getByText("ada"));
+    await waitFor(() => expect(wrote(fetching, FINISHED)).toBe(true));
+    expect(saves(fetching)).toBe(1);
+  });
+
+  /// A scope GitHub did not give it holds the step for one more press: whose
+  /// the token is and what it can't do are read, Saved stands beside the
+  /// press, and the next press goes on without the scope.
+  it("stays for a missing scope, and finishes on the next press", async () => {
+    const { container, fetching } = await filled(UNSCOPED);
+
+    fireEvent.click(onwards(container));
+
+    await waitFor(() => expect(container.textContent).toContain("Saved"));
+    expect(container.textContent).toContain("GitHub says it's ada.");
+    expect(container.textContent).toContain(
+      "It can't publish a share without the gist scope.",
+    );
     expect(wrote(fetching, FINISHED)).toBe(false);
 
     // The press that follows the save, once the save is over: the button is
     // refused while a request of its own is out, the way every press in this
     // app is.
     await waitFor(() => expect(onwards(container).disabled).toBe(false));
+    expect(onwards(container).textContent).toBe("Finish setup");
     fireEvent.click(onwards(container));
+
     await waitFor(() => expect(wrote(fetching, FINISHED)).toBe(true));
+    expect(saves(fetching)).toBe(1);
+  });
+
+  /// And typing anything after it clears Saved, so the next press saves what
+  /// was typed rather than skipping past it.
+  it("saves again once anything is typed after the answer", async () => {
+    const { container, fetching } = await filled(UNSCOPED);
+
+    fireEvent.click(onwards(container));
+    await waitFor(() => expect(container.textContent).toContain("Saved"));
+    await waitFor(() => expect(onwards(container).disabled).toBe(false));
+
+    fireEvent.input(field(container, "setup-github-token"), {
+      target: { value: "ghp_another" },
+    });
+    expect(container.textContent).not.toContain("Saved");
+
+    fireEvent.click(onwards(container));
+    await waitFor(() => expect(saves(fetching)).toBe(2));
   });
 
   /// A save with no token to verify has nothing to be read, so the press that
@@ -397,26 +484,9 @@ describe("what the save answers", () => {
   });
 
   /// And a token GitHub would not answer for says so, with everything the human
-  /// typed still in front of them.
-  it("says why a token could not be verified, and keeps what was typed", async () => {
-    const fetching = serving(
-      whenever(PREFILL, json(NOTHING)),
-      whenever(SETTINGS, json(UNSET)),
-      whenever(SETTINGS, json(REFUSED), "POST"),
-      whenever(FINISHED, json(SET_UP), "POST"),
-    );
-
-    const { container } = drawn(client());
-
-    await waitFor(() => expect(onwards(container)).toBeTruthy());
-
-    for (const [id, value] of [
-      ["setup-author-name", "Ada Lovelace"],
-      ["setup-author-email", "ada@example.com"],
-      ["setup-github-token", "ghp_thewrongone"],
-    ] as const) {
-      fireEvent.input(field(container, id), { target: { value } });
-    }
+  /// typed still in front of them — and the next press goes on without it.
+  it("says why a token could not be verified, and finishes on the next press", async () => {
+    const { container, fetching } = await filled(REFUSED);
 
     fireEvent.click(onwards(container));
 
@@ -424,15 +494,20 @@ describe("what the save answers", () => {
       expect(container.textContent).toContain("HTTP 401: Bad credentials"),
     );
 
+    expect(container.textContent).toContain("Saved");
     expect(wrote(fetching, FINISHED)).toBe(false);
     expect(field(container, "setup-author-name").value).toBe("Ada Lovelace");
-    expect(field(container, "setup-github-token").value).toBe(
-      "ghp_thewrongone",
-    );
+    expect(field(container, "setup-github-token").value).toBe("ghp_thetoken");
+
+    await waitFor(() => expect(onwards(container).disabled).toBe(false));
+    fireEvent.click(onwards(container));
+
+    await waitFor(() => expect(wrote(fetching, FINISHED)).toBe(true));
+    expect(saves(fetching)).toBe(1);
   });
 });
 
-describe("the last Next", () => {
+describe("the press that finishes", () => {
   /// Which is the whole wizard ending: the mode goes off for this run and the
   /// app lands on the compose page. Driven through the gate, because what is
   /// being asked is which of the two apps the browser is holding — see

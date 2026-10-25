@@ -14,7 +14,7 @@
 //! and a prefill somebody confirms is still telling. So the fields open with
 //! whatever `git config --global` and the server's own environment could offer,
 //! each labelled with where it was found, and **nothing is written until
-//! Next**. A field the server found nothing for opens empty, and one
+//! the press**. A field the server found nothing for opens empty, and one
 //! Verkstead already holds a value for shows that value rather than a prefill:
 //! see `loadGitPrefill` in `../api/client.ts`.
 //!
@@ -25,18 +25,20 @@
 //! here: a token that authenticates as the *wrong* account is the mistake this
 //! catches, and it can only be caught by showing whose it is.
 //!
-//! **Which is why a token stops the wizard for one more press.** A save that
-//! verified something has something to be read — the login, a scope GitHub did
-//! not give it, or why GitHub would not answer — so the step stays up with the
-//! answer on it and Next closes the wizard next time. A save with no token
-//! to verify has nothing to stop for and goes straight on.
+//! **Which is why a token can stop the wizard for one more press.** The press
+//! always reads *Finish setup*, and where the answer is clean it is the press
+//! that finishes: no token to verify, or one GitHub verified with every scope.
+//! The step stays up only where the token is not good enough as it stands —
+//! GitHub refused it, or named a scope it was not given — with the answer on
+//! it, and the next press goes on without the scope or the token.
 //!
-//! **And the last Next takes the mode off for this run.** Nothing is
+//! **And the press that finishes takes the mode off for this run.** Nothing is
 //! written by it: the author went through the save a moment before, and the
 //! mode is a fact about this process — see `crates/server/src/onboarding.rs`.
 //! What comes back is the machine read again with the mode off, which is what
 //! makes every URL a page again; the app lands on `/compose` from there.
 
+import { faArrowRight, faCheck } from "@fortawesome/free-solid-svg-icons";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Show, createSignal, type JSX } from "solid-js";
 
@@ -54,7 +56,8 @@ import type {
   TokenEdit,
 } from "../api/types";
 import { useReading } from "../freshness";
-import { ErrorLine, Note } from "../notices";
+import { Icon } from "../Icon";
+import { ErrorLine } from "../notices";
 import { heldAuthor, heldConfig } from "../settings/held";
 import { TokenScopes } from "../settings/scopes";
 import { utcStamp } from "../set/when";
@@ -67,30 +70,38 @@ import styles from "./Git.module.css";
 /// what the server says is *where*, and how that place is named is the same
 /// sentence on every Verkstead.
 ///
-/// A function apiece rather than an element apiece: an element is a node, and a
-/// node drawn under two fields would be one field taking it off the other.
-const SOURCES: Record<Source, () => JSX.Element> = {
-  GitConfig: () => (
-    <>
-      From this machine's <code>git config --global</code>.
-    </>
-  ),
-  GhToken: () => (
-    <>
-      From <code>GH_TOKEN</code>, in this server's own environment.
-    </>
-  ),
-  GithubToken: () => (
-    <>
-      From <code>GITHUB_TOKEN</code>, in this server's own environment.
-    </>
-  ),
-  HostGh: () => (
-    <>
-      From the login this machine's <code>gh</code> is holding.
-    </>
-  ),
+/// Two lengths of it: the short name drawn inside the field, and the whole
+/// sentence as that name's title, so nothing the step used to say under the
+/// field is lost by its moving in.
+const SOURCES: Record<Source, { short: string; whole: string }> = {
+  GitConfig: {
+    short: "git config",
+    whole: "From this machine's git config --global.",
+  },
+  GhToken: {
+    short: "GH_TOKEN",
+    whole: "From GH_TOKEN, in this server's own environment.",
+  },
+  GithubToken: {
+    short: "GITHUB_TOKEN",
+    whole: "From GITHUB_TOKEN, in this server's own environment.",
+  },
+  HostGh: {
+    short: "gh login",
+    whole: "From the login this machine's gh is holding.",
+  },
 };
+
+/// Whether a save's answer leaves nothing to read: no token was verified, or
+/// GitHub named the account and every scope it asked about is there. Anything
+/// else — a refusal, or a scope missing — holds the step for one more press.
+function clean(answer: SettingsSaved): boolean {
+  const verified = answer.verified;
+  return (
+    verified === null ||
+    ("Account" in verified && verified.Account.missing.length === 0)
+  );
+}
 
 /// What the machine offered for one field: a prefill, `null` where it offered
 /// nothing, and `undefined` for the moment before the read has landed. The
@@ -210,9 +221,10 @@ export function Git(): JSX.Element {
       queries.setQueryData(["settings"], answer.settings);
       setSaved(answer);
 
-      // A save with no token to verify has nothing to be read, so the press
-      // that made it is the press that finishes.
-      if (answer.verified === null) {
+      // A clean answer has nothing to be read, so the press that made it is
+      // the press that finishes: no token to verify, or one GitHub verified
+      // with every scope it asked about.
+      if (clean(answer)) {
         finish.mutate();
       }
     },
@@ -237,8 +249,9 @@ export function Git(): JSX.Element {
     },
   }));
 
-  /// What Next does: save what is in the fields, or — where that has been
-  /// done and there was an answer about the token to read — close the wizard.
+  /// What Finish setup does: save what is in the fields, or — where that has
+  /// been done and there was an answer about the token to read — close the
+  /// wizard without the scope or the token.
   const onwards = () => {
     if (saved()) {
       finish.mutate();
@@ -279,8 +292,7 @@ export function Git(): JSX.Element {
     <div class={styles.step}>
       <p class={styles.standing}>
         Every commit a session makes is by this author, and every pull request
-        it opens is by this token. git needs the whole author. The token can be
-        left empty.
+        it opens is by this token.
       </p>
 
       {/* Fields in a plain block rather than in a `form`: the press is a
@@ -288,60 +300,52 @@ export function Git(): JSX.Element {
           form here would be a second way to make the same request — one of
           them saving and closing the wizard from a stray Enter. */}
       <div class={styles.form}>
-        <section>
-          <h3>Git Author</h3>
+        <section class={styles.card}>
+          <div class={styles.head}>
+            <h3>Git Author</h3>
+            <span class={styles.aside}>Both are needed</span>
+          </div>
 
-          <Field
-            id="setup-author-name"
-            label="Name"
-            placeholder="Ada Lovelace"
-            value={authorName()}
-            source={from(name(), held(told()?.git_author.name), found()?.name)}
-            write={typing(setName)}
-          />
+          <div class={styles.pair}>
+            <Field
+              id="setup-author-name"
+              label="Name"
+              placeholder="Ada Lovelace"
+              value={authorName()}
+              source={from(
+                name(),
+                held(told()?.git_author.name),
+                found()?.name,
+              )}
+              write={typing(setName)}
+            />
 
-          <Field
-            id="setup-author-email"
-            label="Email"
-            type="email"
-            placeholder="ada@example.com"
-            value={authorEmail()}
-            source={from(
-              email(),
-              held(told()?.git_author.email),
-              found()?.email,
-            )}
-            write={typing(setEmail)}
-          />
+            <Field
+              id="setup-author-email"
+              label="Email"
+              type="email"
+              placeholder="ada@example.com"
+              value={authorEmail()}
+              source={from(
+                email(),
+                held(told()?.git_author.email),
+                found()?.email,
+              )}
+              write={typing(setEmail)}
+            />
+          </div>
         </section>
 
-        <section>
-          <h3>GitHub Token</h3>
+        <section class={styles.card}>
+          <div class={styles.head}>
+            <h3>GitHub Token</h3>
+            <span class={styles.pill}>Optional</span>
+          </div>
 
-          <Note>
+          <p class={styles.quiet}>
             Every session is handed it, and Verkstead reads pull requests and
-            reviews with it. Leave it empty if GitHub isn't in use here.
-          </Note>
-
-          {/* And what it has to be able to do, in the words the settings page
-              says them in: this is the moment somebody is on GitHub's own
-              form, and a box ticked there is cheaper than a session that could
-              not push. */}
-          <TokenScopes class={styles.scopes} />
-
-          {/* A token already configured is never sent back to a page — see the
-              settings pane, where the same rule is why the field there is
-              write-only. So what is said about one is its last four characters
-              and when it was written, and the box under it replaces it. */}
-          <Show when={told()?.github_token}>
-            {(configured) => (
-              <p class={styles.source}>
-                A token ending <code>{configured().last_four}</code> is already
-                saved, from {utcStamp(configured().at)}. Typing here replaces
-                it.
-              </p>
-            )}
-          </Show>
+            reviews with it.
+          </p>
 
           <Field
             id="setup-github-token"
@@ -354,54 +358,76 @@ export function Git(): JSX.Element {
             write={typing(setToken)}
           />
 
-          {/* What GitHub made of it, which is the whole reason a token stops
+          {/* A token already configured is never sent back to a page — see the
+              settings pane, where the same rule is why the field there is
+              write-only. So what is said about one is its last four characters
+              and when it was written, and the box above replaces it. */}
+          <Show when={told()?.github_token}>
+            {(configured) => (
+              <p class={styles.quiet}>
+                A token ending <code>{configured().last_four}</code> is already
+                saved, from {utcStamp(configured().at)}. Typing here replaces
+                it.
+              </p>
+            )}
+          </Show>
+
+          {/* What it has to be able to do, in the words the settings page
+              says them in: this is the moment somebody is on GitHub's own
+              form, and a box ticked there is cheaper than a session that could
+              not push. Once GitHub has answered about a token, the answer
+              stands where the list did, as the boards draw it. */}
+          <Show when={verified() === null}>
+            <TokenScopes class={styles.scopes} />
+          </Show>
+
+          {/* What GitHub made of it, which is the whole reason a token can stop
               this step for one more press: an account that is not the one the
               human meant is the mistake nothing else would catch. */}
           <Show when={login()}>
             {(who) => (
-              <p class={styles.verified}>
-                GitHub says it's <span class={styles.login}>{who()}</span>.
+              <p class={`${styles.callout} ${styles.verified}`}>
+                <Icon of={faCheck} class={styles.mark!} />
+                <span>
+                  GitHub says it's <span class={styles.login}>{who()}</span>.
+                </span>
               </p>
             )}
           </Show>
 
           <Show when={missing().length > 0}>
-            <p class={styles.unscoped}>
-              It can't publish a share without the{" "}
-              <code class={styles.scope}>{missing().join(", ")}</code> scope.
-              That can be put right later in the settings.
+            <p class={`${styles.callout} ${styles.unscoped}`}>
+              <span class={styles.mark} aria-hidden="true">
+                !
+              </span>
+              <span>
+                It can't publish a share without the{" "}
+                <code class={styles.scope}>{missing().join(", ")}</code> scope.
+                That can be put right later in the settings.
+              </span>
             </p>
           </Show>
 
           <Show when={refused()}>
             {(why) => (
-              <ErrorLine class={styles.unverified}>
-                It's saved, but GitHub wouldn't say whose it is. {why()}
-                Correct it above, or press <strong>Next</strong> again to go on
-                without it.
-              </ErrorLine>
+              <p
+                class={`${styles.callout} ${styles.unverified}`}
+                role="alert"
+              >
+                <span class={styles.mark} aria-hidden="true">
+                  !
+                </span>
+                <span>
+                  It's saved, but GitHub wouldn't say whose it is. {why()}{" "}
+                  Correct it above, or press <strong>Finish setup</strong>{" "}
+                  again to go on without it.
+                </span>
+              </p>
             )}
           </Show>
         </section>
 
         <div class={styles.onwards}>
-          <Foot>
-            <button
-              type="button"
-              class={styles.next}
-              disabled={!authored() || working()}
-              onClick={onwards}
-            >
-              Next
-            </button>
-          </Foot>
-
-          <Show when={!authored()}>
-            <Note>
-              git refuses a commit with no author. Fill in both fields.
-            </Note>
-          </Show>
-
           <Show when={save.isError}>
             <ErrorLine class={styles.failure}>
               Nothing was saved. {save.error?.message}
@@ -413,14 +439,35 @@ export function Git(): JSX.Element {
               {finish.error?.message}
             </ErrorLine>
           </Show>
+
+          <Foot>
+            {/* Why the press is held, or — once a save has left something to
+                read — that it went through: the press after it goes on. */}
+            <Show when={!authored()}>
+              <span class={styles.held}>Both author fields are needed</span>
+            </Show>
+            <Show when={authored() && saved()}>
+              <span class={styles.saved}>Saved</span>
+            </Show>
+
+            <button
+              type="button"
+              class={styles.next}
+              disabled={!authored() || working()}
+              onClick={onwards}
+            >
+              Finish setup
+              <Icon of={faArrowRight} class={styles.arrow} />
+            </button>
+          </Foot>
         </div>
       </div>
     </div>
   );
 }
 
-/// One field: its label, its box, and — under a value nobody typed — where it
-/// was found.
+/// One field: its label, its box, and — inside the box, for a value nobody
+/// typed — where it was found, with the whole sentence as the hint's title.
 function Field(props: {
   id: string;
   label: string;
@@ -434,24 +481,32 @@ function Field(props: {
   return (
     <div class={styles.field}>
       <label for={props.id}>{props.label}</label>
-      <Show when={props.note}>{(note) => <Note>{note()}</Note>}</Show>
-      <input
-        id={props.id}
-        type={props.type ?? "text"}
-        autocapitalize="off"
-        autocorrect="off"
-        autocomplete="off"
-        spellcheck={false}
-        placeholder={props.placeholder}
-        value={props.value}
-        onInput={(ev) => props.write(ev.currentTarget.value)}
-      />
-      <Show when={props.source}>
-        {(found) => (
-          <p class={styles.source} data-source={found().source}>
-            {SOURCES[found().source]()}
-          </p>
-        )}
+      <div class={styles.box}>
+        <input
+          id={props.id}
+          type={props.type ?? "text"}
+          autocapitalize="off"
+          autocorrect="off"
+          autocomplete="off"
+          spellcheck={false}
+          placeholder={props.placeholder}
+          value={props.value}
+          onInput={(ev) => props.write(ev.currentTarget.value)}
+        />
+        <Show when={props.source}>
+          {(found) => (
+            <span
+              class={styles.source}
+              data-source={found().source}
+              title={SOURCES[found().source].whole}
+            >
+              {SOURCES[found().source].short}
+            </span>
+          )}
+        </Show>
+      </div>
+      <Show when={props.note}>
+        {(note) => <p class={styles.note}>{note()}</p>}
       </Show>
     </div>
   );

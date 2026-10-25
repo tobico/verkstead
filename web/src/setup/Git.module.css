@@ -1,15 +1,14 @@
 /* The git step — see `Git.tsx`.
 
-   A column inside the step's card, like the two steps before it: the line that
-   says what git asks for, the three fields, and the press that saves them and
-   closes the wizard. The fields are laid out the way the settings page lays its
-   own out — a label over a full-width box — because they are the same three
-   fields, asked for on a machine nobody has set up yet. */
+   Two cards on the paper, as the boards draw them: *Git Author*, with Name and
+   Email side by side from 60rem and stacked below it, and *GitHub Token*, with
+   the list of scopes or GitHub's answer under its field. Where a prefilled
+   value came from is a short hint inside its box, on the right. */
 
 .step {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 1.5rem;
 }
 
 .standing {
@@ -17,90 +16,198 @@
   line-height: 1.5;
 }
 
-.form section {
-  margin-bottom: 1.25rem;
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
-.form h3 {
-  margin: 0 0 0.4rem;
-  font-size: 1rem;
+/* One card: a heading with something quiet beside it, and what it asks for. */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1.125rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.75rem;
 }
 
-/* One field: its label, its box, and — where the value came off the machine —
-   where that was. */
-.field {
-  margin-bottom: 0.85rem;
+.head {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
 }
 
+.head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* *Both are needed*, at the card's far right. */
+.aside {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* *Optional*, after the heading — the pill the accounts step draws. */
+.pill {
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--code-wash);
+  white-space: nowrap;
+}
+
+.quiet {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.quiet code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Name and Email: stacked on a phone, side by side from the wide breakpoint. */
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.85rem 0.75rem;
+}
+
+/* One field: its label, its box, and a quiet line under it where it has one. */
 .field label {
   display: block;
-  margin-bottom: 0.35rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-.field input {
-  display: block;
-  width: 100%;
-  padding: 0.5rem 0.6rem;
-  font: inherit;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  color: inherit;
-  background: var(--paper);
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-}
-
-/* What a token has to be able to do, between the line saying what it is for and
-   the box it is pasted into — see `../settings/scopes.tsx`, which is where the
-   words are. */
-.scopes {
-  margin: 0.5rem 0 0.85rem;
-}
-
-/* Where a prefilled value was found, under the box holding it. Quiet, because
-   it is not an instruction: it is there so that a value nobody typed can be
-   checked before it is confirmed. */
-.source {
-  margin: 0.35rem 0 0;
+  margin-bottom: 0.4rem;
   font-size: 0.85rem;
-  color: var(--ink-soft);
+  font-weight: 500;
 }
 
-.source code {
+/* The box is drawn around the input and the hint together, so the hint sits
+   inside it on the right and never under what is typed. */
+.box {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  height: 2.5rem;
+  box-sizing: border-box;
+  padding: 0 0.75rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.5rem;
+}
+
+.box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.box input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 0.9rem;
+  color: inherit;
+  background: none;
+  border: 0;
+  outline: none;
+}
+
+.box input[type="password"] {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
-/* What GitHub said about the token that was just saved: whose it is, and — on
-   its own line, being a different thing to do about it — what it may not do. */
-.verified {
-  margin: 0.5rem 0;
+/* Where a prefilled value was found: *git config*, *GH_TOKEN*. Quiet, because
+   it is not an instruction — the whole sentence is its title. */
+.source {
+  flex: none;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.note {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* What GitHub said about the token that was just saved, each in a callout of
+   its own: whose it is in green, a scope it lacks in the ember, and a refusal
+   in red. The washes are the palette's, so dark follows on its own. */
+.callout {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.875rem;
   line-height: 1.5;
+  border-radius: 0.5rem;
+}
+
+.mark {
+  flex: none;
+  font-weight: 700;
+}
+
+.verified {
+  background: var(--added-wash);
+}
+
+.verified .mark {
+  color: var(--added);
+}
+
+.unscoped {
+  background: color-mix(in srgb, var(--accent) 10%, var(--card));
+}
+
+.unscoped .mark {
+  color: var(--accent);
+}
+
+.unverified {
+  background: var(--removed-wash);
+}
+
+.unverified .mark {
+  color: var(--removed);
 }
 
 .login {
   font-weight: 600;
 }
 
-.unscoped,
-.unverified {
-  margin: 0.5rem 0;
-  line-height: 1.5;
-}
-
 .scope {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
+/* What went wrong with a press, as lines of the form's own column: the press
+   itself is in the frame's foot — see `Foot.tsx`. */
 .onwards {
-  margin-top: 0.3rem;
+  display: contents;
 }
 
-/* The press onwards, drawn as the two steps before it draw theirs. It is the
-   last one: it saves what is in the fields, and — once there is an answer about
-   the token to read — the press after it closes the wizard. */
+.failure {
+  margin: 0;
+}
+
+/* The press onwards, drawn as the two steps before it draw theirs. */
 .next {
-  padding: 0.5rem 1.1rem;
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 1.1rem;
   font: inherit;
   font-weight: 600;
   color: var(--paper);
@@ -112,11 +219,30 @@
 
 .next:disabled {
   cursor: not-allowed;
-  opacity: 0.65;
+  opacity: 0.45;
 }
 
-.failure {
-  margin-top: 0.5rem;
+.arrow {
+  font-size: 0.85em;
+}
+
+/* Why the press is held, in one line beside it. */
+.held {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* And that a save went through while the step stays up to be read. */
+.saved {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--added);
+}
+
+@media (min-width: 60rem) {
+  .pair {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
 }
 
 @media (hover: hover) {

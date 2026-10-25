@@ -21,5 +21,5 @@ folder, `CONTEXT.md`, `docs/copy.md` and the code.
 - [x] 03: Choosing — [details](03-choosing.md)
 - [x] 04: Installing and by hand — [details](04-installing-and-by-hand.md)
 - [x] 05: Agent profiles — [details](05-agent-profiles.md)
-- [ ] 06: Who the work is committed as — [details](06-the-author.md)
+- [x] 06: Who the work is committed as — [details](06-the-author.md)
 - [ ] 07: Dark, copy and the record — [details](07-dark-copy-and-the-record.md)
