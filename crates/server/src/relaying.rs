@@ -5,8 +5,9 @@
 //! **The browser stays same-origin and knows nothing about this.** It asks the
 //! device it opened, over the origin it already has and the cookie it already
 //! holds, and what it gets back is what the far end said — method, path, query,
-//! body and status carried through, and the answer handed over untouched. The
-//! other half of the hop is [`crate::peer::workbench`], which is where a
+//! body and status carried through, and the answer handed over untouched but
+//! for one sentence: a refusal from a member a release apart names the gap
+//! (ADR-0027, *Seeing versions*; see [`handed_back_apart`]). The other half of the hop is [`crate::peer::workbench`], which is where a
 //! member's call lands.
 //!
 //! **A prefix of its own** — `/api/ui/members/{device}/…` — rather than a
@@ -215,7 +216,7 @@ async fn relay(State(state): State<AppState>, request: Request) -> Response {
 
                 bridging::bridged(taking, answered)
             }
-            None => handed_back(answered),
+            None => handed_back_apart(&devices, &device, answered).await,
         },
 
         Err(Unrelayed::ThisDevice) => refused(
@@ -290,6 +291,84 @@ fn handed_back(answered: reqwest::Response) -> Response {
         .collect();
 
     (status, headers, Body::from_stream(answered.bytes_stream())).into_response()
+}
+
+/// The most of a member's refusal this device reads to add the gap to it: a
+/// refusal is a sentence, and one longer than this is handed back as it came.
+const MOST_A_REFUSAL_IS: u64 = 64 * 1024;
+
+/// The same, except that **a refusal from a member a release apart names the
+/// gap** — *winvm is on 0.2.0 and this device is on 0.2.2. Update winvm.* —
+/// after what it said, the way every trouble line a member's call leaves does
+/// (ADR-0027, *Seeing versions*). See [`crate::updates::gap`].
+///
+/// **The one answer this hop opens.** Everything else is carried through as it
+/// came, and so is a refusal wherever the two devices run one release, or it is
+/// not the JSON refusal a Verkstead answers with, or it is longer than
+/// [`MOST_A_REFUSAL_IS`]. And only its `error` sentence moves: every other field
+/// in it, and its status, are the member's own, so a page reading a `413` by
+/// name still reads it.
+async fn handed_back_apart(
+    devices: &Devices,
+    device: &str,
+    answered: reqwest::Response,
+) -> Response {
+    let status = answered.status();
+
+    let refusing = status.is_client_error() || status.is_server_error();
+    let in_json = answered
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|kind| kind.to_str().ok())
+        .is_some_and(|kind| kind.starts_with("application/json"));
+    let short = answered
+        .content_length()
+        .is_some_and(|length| length <= MOST_A_REFUSAL_IS);
+
+    if !(refusing && in_json && short) {
+        return handed_back(answered);
+    }
+
+    let Some(gap) = gap_to(Some(devices), device).await else {
+        return handed_back(answered);
+    };
+
+    let mut headers: HeaderMap<HeaderValue> = answered
+        .headers()
+        .iter()
+        .filter(|(name, _)| !NOT_HANDED_BACK.contains(&name.as_str()))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
+
+    let said = match bounded(answered, MOST_A_REFUSAL_IS as usize).await {
+        Ok(said) => said,
+        Err(why) => {
+            let refusal = unreadable(Some(devices), device, format!("{why:#}")).await;
+            return refused(refusal.status, ApiError::new(refusal.saying));
+        }
+    };
+
+    // Read as a value rather than as an [`ApiError`], so that whatever else the
+    // member's refusal carries goes back with it.
+    let mut refusal: serde_json::Value = match serde_json::from_slice(&said) {
+        Ok(refusal) => refusal,
+        Err(_) => return (status, headers, Body::from(said)).into_response(),
+    };
+
+    let Some(error) = refusal.get_mut("error") else {
+        return (status, headers, Body::from(said)).into_response();
+    };
+
+    let Some(sentence) = error.as_str() else {
+        return (status, headers, Body::from(said)).into_response();
+    };
+
+    *error = serde_json::Value::String(format!("{sentence} {gap}"));
+
+    // The body is a different length now, and is framed again here.
+    headers.remove(CONTENT_LENGTH);
+
+    (status, headers, Body::from(refusal.to_string())).into_response()
 }
 
 /// A call on its way to a member: what [`crate::peer::dialling::Peers::relay`]
@@ -879,26 +958,25 @@ async fn unreadable(devices: Option<&Devices>, device: &str, why: String) -> Ref
 /// The row is read again here rather than carried down from [`called`], this
 /// being a sentence only a refusal is ever written for.
 async fn apart(devices: Option<&Devices>, device: &str, said: String) -> String {
-    let Some(devices) = devices else {
-        return said;
-    };
-
-    let Ok(members) = devices.membership().rows().await else {
-        return said;
-    };
-
-    let Some(member) = members.into_iter().find(|member| member.device == device) else {
-        return said;
-    };
-
-    match crate::updates::gap(
-        &member.name,
-        member.version.as_deref(),
-        devices.version().as_deref(),
-    ) {
+    match gap_to(devices, device).await {
         Some(gap) => format!("{said} {gap}"),
         None => said,
     }
+}
+
+/// The gap between `device`'s release and this device's, as
+/// [`crate::updates::gap`] says it: `None` where they agree, and where there is
+/// no row to read the member's off.
+async fn gap_to(devices: Option<&Devices>, device: &str) -> Option<String> {
+    let devices = devices?;
+    let members = devices.membership().rows().await.ok()?;
+    let member = members.into_iter().find(|member| member.device == device)?;
+
+    crate::updates::gap(
+        &member.name,
+        member.version.as_deref(),
+        devices.version().as_deref(),
+    )
 }
 
 /// What a device is called, for the sentence a [`Refusal`] carries.
