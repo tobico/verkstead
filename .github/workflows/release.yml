@@ -2164,8 +2164,9 @@ jobs:
       #
       # **Where the last Release has no msi, that half is skipped with a
       # warning** saying it went unchecked, so a skip cannot be read off the log
-      # as a pass. The first Release to ship this installer is the last to carry
-      # an msi, so from the one after it this half skips itself every run. It
+      # as a pass. The Release before the first to ship this installer is the
+      # last to carry an msi, so from the second Release that ships it this
+      # half skips itself every run. It
       # retires with the removal code in `desktop/build/installer.nsh`, which
       # is there for machines still holding that msi.
       #

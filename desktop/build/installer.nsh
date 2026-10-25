@@ -1,4 +1,4 @@
-# The two things the NSIS installer cannot be told, said in its own language.
+# The three things the NSIS installer cannot be told, said in its own language.
 #
 # **This is the include electron-builder's `nsis` target reads** — named by
 # `include` in `electron-builder.yml`, and found in `build/` because that is the

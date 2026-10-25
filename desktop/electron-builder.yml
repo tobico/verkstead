@@ -257,9 +257,10 @@ nsis:
   # electron-builder's own pattern would put the version in the middle of both.
   artifactName: Verkstead-x86_64.exe
 
-  # **The two things no key here says** — the install directory, which would
-  # otherwise be named for the package, and the CLI's directory on this user's
-  # `PATH`. See the script, which says what it does and why each is not a key.
+  # **The three things no key here says** — the install directory, which would
+  # otherwise be named for the package, the CLI's directory on this user's
+  # `PATH`, and the removal of the msi earlier Releases installed. See the
+  # script, which says what it does and why each is not a key.
   include: build/installer.nsh
 
   # **The Start-menu entry is what this download promises, and nothing else.**
