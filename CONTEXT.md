@@ -345,7 +345,7 @@ run. Jira-style lexorank was rejected for that pass, and a dense integer per row
 for what it cost: the whole table rewritten on every drag, which is a sentence
 that cannot be sent to two devices that each own part of the list.
 **A start ranks above the whole Merged List**, every member's rows as well as
-its own, as the device it was pressed on holds that list — so a Conversation
+its own, as the device the start reaches holds that list — so a Conversation
 started anywhere is first on every sidebar, however few rows its own device
 has. **The device is suffixed because that held list can be behind.** It is a
 Nudge behind each member, and not there at all for a member not yet reached, so
