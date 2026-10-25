@@ -15,17 +15,23 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/App";
-import type { OnboardingView } from "../src/api/types";
+import type { OnboardingView, ProfileEntry } from "../src/api/types";
 import { SetupPage } from "../src/setup/SetupPage";
 import styles from "../src/setup/SetupPage.module.css";
 import { SETUP_STEP, STEPS, TITLES } from "../src/setup/steps";
+import { harnesses, listed } from "../src/setup/summaries";
 import { askedFor, json, serving, whenever } from "./serving";
 import fresh from "./fixtures/onboarding-fresh.json" with { type: "json" };
 import installing from "./fixtures/onboarding-installing.json" with { type: "json" };
 import partWay from "./fixtures/onboarding-part-way.json" with { type: "json" };
+import ready from "./fixtures/onboarding-ready.json" with { type: "json" };
+import profiles from "./fixtures/profiles.json" with { type: "json" };
 
 /// The one path this page talks to.
 const ONBOARDING = "/api/ui/onboarding";
+
+/// And the one it reads once the second step is met, for the line under it.
+const PROFILES = "/api/ui/profiles";
 
 /// A bare machine: nothing installed, no Profile, no author, and so no step
 /// met at all.
@@ -39,12 +45,21 @@ const PART_WAY = partWay as OnboardingView;
 /// asking to be read faster than the frame would have read it.
 const INSTALLING = installing as OnboardingView;
 
+/// And one with every step met, whose rail has a line under the first two.
+const READY = ready as OnboardingView;
+
+/// The Profiles saved on it: three accounts, all of them Claude Code.
+const PROFILE_LIST = profiles as ProfileEntry[];
+
 /// The wizard alone, over a machine that stands as `machine` says.
 ///
 /// No router: the page reads nothing off the URL, and what the URL has to be
 /// for it to be reached at all is `setup-routes.test.tsx`'s subject.
 function mount(machine: OnboardingView) {
-  const fetching = serving(whenever(ONBOARDING, json(machine)));
+  const fetching = serving(
+    whenever(ONBOARDING, json(machine)),
+    whenever(PROFILES, json(PROFILE_LIST)),
+  );
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -67,6 +82,18 @@ function rows(container: ParentNode): HTMLElement[] {
 /// What the three steps are called, as the frame drew them.
 function headings(container: ParentNode): Array<string | null> {
   return rows(container).map((row) => row.querySelector("h2")!.textContent);
+}
+
+/// The line under each step, or `null` where there is none.
+function summaries(container: ParentNode): Array<string | null> {
+  return rows(container).map(
+    (row) => row.querySelector(`.${styles.summary}`)?.textContent ?? null,
+  );
+}
+
+/// The paper's foot.
+function foot(container: ParentNode): HTMLElement | null {
+  return container.querySelector<HTMLElement>(`.${styles.foot}`);
 }
 
 /// And which step is the open one.
@@ -134,6 +161,124 @@ describe("the wizard's frame", () => {
       row.querySelector("h2 button"),
     );
     expect(pressable.map((row) => row.dataset.step)).toEqual(["dependencies"]);
+  });
+});
+
+describe("the rail", () => {
+  /// The brand is the page's heading, and the steps are under it.
+  it("is headed by the brand", async () => {
+    const { container } = mount(FRESH);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(3));
+    expect(container.querySelector("h1")!.textContent).toBe("Verkstead");
+  });
+
+  it("names the machine it is reading, and how often", async () => {
+    const { container } = mount(FRESH);
+
+    await waitFor(() =>
+      expect(container.textContent).toContain("Reading ada-box every 10 s"),
+    );
+  });
+
+  it("says it reads faster while a run is installing", async () => {
+    const { container } = mount(INSTALLING);
+
+    await waitFor(() =>
+      expect(container.textContent).toContain(
+        "Reading ada-box every 2 s while it installs",
+      ),
+    );
+  });
+
+  /// What meeting a step came to: the rows the machine has, and the harnesses
+  /// the Profiles saved run.
+  it("says what a met step came to under it", async () => {
+    const { container } = mount(READY);
+
+    await waitFor(() => expect(summaries(container)[1]).toBe("Claude Code"));
+    expect(summaries(container)).toEqual([
+      "A sandbox, git, and Claude Code",
+      "Claude Code",
+      null,
+    ]);
+  });
+
+  it("says nothing under a step that is not met", async () => {
+    const { container } = mount(PART_WAY);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(3));
+    expect(summaries(container)).toEqual([
+      "A sandbox, git, and Claude Code",
+      null,
+      null,
+    ]);
+  });
+});
+
+describe("the lines under a met step", () => {
+  it("joins two names with and, and more with the serial comma", () => {
+    expect(listed(["git"])).toBe("git");
+    expect(listed(["Claude Code", "Codex"])).toBe("Claude Code and Codex");
+    expect(listed(["A sandbox", "git", "Claude Code"])).toBe(
+      "A sandbox, git, and Claude Code",
+    );
+  });
+
+  /// Each harness once, however many accounts run under it.
+  it("names each harness once", () => {
+    const codex = {
+      ...PROFILE_LIST[0]!,
+      id: 9,
+      account: { agent_type: "Codex", home: "/srv/accounts/codex" },
+    } as ProfileEntry;
+
+    expect(harnesses([codex, ...PROFILE_LIST])).toBe("Claude Code and Codex");
+  });
+});
+
+describe("the foot", () => {
+  /// The step's press stands in the frame's foot rather than under its rows.
+  it("holds the open step's press", async () => {
+    const { container } = mount(FRESH);
+
+    await waitFor(() => expect(foot(container)).toBeTruthy());
+    expect(
+      [...foot(container)!.querySelectorAll("button")].map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(["Next"]);
+  });
+
+  /// Back opens the step before, and there is none before the first.
+  it("goes back to the step before", async () => {
+    localStorage.setItem(SETUP_STEP, "accounts");
+    const { container } = mount(PART_WAY);
+
+    await waitFor(() => expect(foot(container)).toBeTruthy());
+    const back = [...foot(container)!.querySelectorAll("button")].find(
+      (button) => button.textContent === "Back",
+    )!;
+    fireEvent.click(back);
+
+    await waitFor(() => expect(opened(container)).toBe("dependencies"));
+    expect(
+      [...foot(container)!.querySelectorAll("button")].map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(["Next"]);
+  });
+
+  it("titles the paper with the open step", async () => {
+    localStorage.setItem(SETUP_STEP, "accounts");
+    const { container } = mount(PART_WAY);
+
+    await waitFor(() =>
+      expect(container.textContent).toContain("Step 2 of 3"),
+    );
+    expect(container.querySelector(`.${styles.title}`)!.textContent).toBe(
+      TITLES.accounts,
+    );
   });
 });
 
@@ -234,7 +379,7 @@ describe("how often the machine is read again", () => {
     const fetching = serving(whenever(ONBOARDING, json(PART_WAY)));
 
     render(() => <App />);
-    await waitFor(() => screen.getByText("Set Up Verkstead"));
+    await waitFor(() => screen.getByText("Setup"));
 
     const before = askedFor(fetching, ONBOARDING);
     await vi.advanceTimersByTimeAsync(60_000);

@@ -16,6 +16,17 @@
   padding: 0;
 }
 
+/* And the wizard, once it is wide enough to be a rail beside a paper: the rail
+   runs down the window's left edge, so the column gives the window up to it.
+   Narrower than that the wizard is one column, read at the column every page
+   is. `data-wizard` is the wizard's own section — see `SetupPage.tsx`. */
+@media (min-width: 60rem) {
+  .shell:has([data-wizard]) {
+    max-width: none;
+    padding: 0;
+  }
+}
+
 /* What a page is made of, wherever the page is. Three names that no one page
    owns — the Set page, the settings, the repos and the profiles head their
    sections with two of them, and the Set page and the Timeline both grow a

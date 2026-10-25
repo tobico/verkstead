@@ -25,6 +25,7 @@ import { SetupPage } from "../src/setup/SetupPage";
 import { SETUP_STEP } from "../src/setup/steps";
 import { json, serving, whenever } from "./serving";
 import partWay from "./fixtures/onboarding-part-way.json" with { type: "json" };
+import profiles from "./fixtures/profiles.json" with { type: "json" };
 
 /// The one path this step writes to. What it reads is the wizard’s own, served
 /// in whatever order the page asks for it.
@@ -404,6 +405,8 @@ describe("the form under the rows", () => {
   it("releases the press once a Profile is saved from the form", async () => {
     serving(
       whenever(PROFILES, json("Saved"), "POST"),
+      // The Profiles the rail names under the step once it is met.
+      whenever(PROFILES, json(profiles)),
       json(NOTHING_FOUND),
       json(A_PROFILE),
     );

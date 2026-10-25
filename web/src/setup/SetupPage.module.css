@@ -1,62 +1,116 @@
 /* The wizard — see `SetupPage.tsx`.
 
-   Read down as one column at the measure `styles/base.css` sets for prose: it
-   is the one page in the app that is a sequence rather than a workbench, and
-   somebody is walking it once. No panes and no sidebar, because there is
-   nothing yet for either of them to hold. */
+   A rail beside a paper from 60rem, the width the workbench breaks at
+   (`BESIDE` in `widths.ts`): the rail holds the brand, the three steps and
+   what the page is reading, and the paper holds the open step with its foot
+   pinned to the bottom. The page takes the whole window there rather than the
+   column every other page is read at — see `.shell:has([data-wizard])` in
+   `App.module.css`, where the shell gives it up.
+
+   Narrower than that, the rail stands over the paper as one column. */
+
+/* The sizes are the boards' — `docs/design/setup-wizard/` — written in rem
+   against the body's 16px: a title of 26px, a secondary line of 13.5px, and
+   labels of 11.5px set in capitals. */
 
 .setup {
-  padding: 1.5rem 0 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
-.setup h1 {
-  margin: 0 0 0.5rem;
-  font-size: 1.4rem;
+/* The rail is drawn on the hunk colour, which is exactly the shade the boards
+   draw it in, light and dark: a warm step down from the paper that says this is
+   the frame's rather than the step's. No token of its own, there being nothing
+   it would ever be set to that `--hunk` is not. */
+.rail {
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem;
+  border-radius: 0.75rem;
+  background: var(--hunk);
 }
 
-/* The line under the title, in the quiet every other page says how things
-   stand in. */
-.standing {
-  margin: 0 0 1.5rem;
+/* The page's one `h1`: the mark and the word, as the workbench's sidebar heads
+   itself — see `Wordmark.module.css` — at the size of the rail it heads. */
+.brand {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin: 0;
+  font-size: 1rem;
+}
+
+.brand img {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+/* What the brand is doing here, in the labels' capitals. Written as *Setup*
+   and set in capitals here, so a screen reader reads a word rather than
+   spelling one. */
+.label {
+  margin: 2rem 0 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--ink-soft);
-  line-height: 1.5;
 }
 
 .steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* One step: a card of the same paper the settings' sections are drawn on, with
-   the ones that are not open sitting quieter than the one that is. */
+/* One step. The open one sits on a card; the rest sit on the rail. */
 .step {
-  margin-bottom: 0.75rem;
-  padding: 1rem 1.1rem;
-  border: 1px solid var(--edge);
-  border-radius: 0.75rem;
-  background: var(--card);
+  padding: 0.6rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
 }
 
 .open {
-  border-color: var(--accent);
+  border-color: var(--edge);
+  background: var(--card);
 }
 
 .head {
-  display: flex;
-  gap: 0.6rem;
-  align-items: center;
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink-soft);
+}
+
+.open .head,
+.step[data-met="yes"] .head {
+  color: var(--ink);
+}
+
+.open .head {
+  font-weight: 600;
+}
+
+/* The mark and the name on one line, the mark held to the name's first line
+   where the name wraps. The heading itself when it is not a press, and the
+   button inside it when it is. */
+.head,
+.reopen {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
 }
 
 /* A met step's heading is the press that opens it again, and it is a heading
    first: no button chrome, the line it was already on, and the pointer to say
    it can be pressed. */
 .reopen {
-  display: flex;
-  gap: 0.6rem;
-  align-items: center;
+  width: 100%;
   padding: 0;
   border: 0;
   background: none;
@@ -66,16 +120,190 @@
   cursor: pointer;
 }
 
+/* An unmet step's mark is its number in a ring, and the open one's ring is
+   filled with the ember. The number is the stylesheet's, so the heading reads
+   as the step's name alone. */
+.number,
+.ticked {
+  flex: none;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.number {
+  border: 1px solid var(--edge);
+  background: var(--card);
+}
+
+.number::before {
+  content: attr(data-number);
+}
+
+.open .number {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--paper);
+  font-weight: 600;
+}
+
+/* And a met one's is the tick, on a wash of the green it is drawn in. */
+.ticked {
+  background: color-mix(in srgb, var(--added) 12%, transparent);
+  font-size: 0.75rem;
+}
+
+.name {
+  padding-top: 0.1rem;
+}
+
+/* What meeting the step came to, under its name and in line with it. */
+.summary {
+  margin: 0.15rem 0 0 2.25rem;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: var(--ink-soft);
+}
+
+/* What the page is reading, and how often, at the foot of the rail. */
+.reading {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 1.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.dot {
+  flex: none;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--added);
+}
+
+.paper {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Which step this is of the three, in the ember and the labels' capitals. */
+.eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.title {
+  margin: 0.4rem 0 0.75rem;
+  font-size: 1.625rem;
+  line-height: 1.25;
+}
+
+/* The step's own standing line — the first paragraph each step draws — in the
+   quiet the boards set it in. */
+.body > * > p:first-child {
+  color: var(--ink-soft);
+}
+
+/* The foot: Back on the left, the step's press on the right. Pinned to the
+   bottom of the paper, so a step longer than the window keeps its press in
+   reach, on the paper's own colour so what scrolls passes under it. */
+.foot {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: auto;
+  padding: 1.5rem 0;
+  background: var(--paper);
+}
+
+/* The step's end of it, which is the right whether or not there is a Back. */
+.press {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-left: auto;
+}
+
+/* What a step hands the foot arrives in a box of the frame's making — see
+   `Foot.tsx` — laid out as the end it is in. And a step drawn with no frame
+   draws its press in a box of the same shape, where it stands. */
+.pressing,
+.unframed {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.unframed {
+  margin-top: 0.3rem;
+}
+
+/* Back, drawn as the quiet half of the foot: the paper's card with an edge,
+   where the press beside it is the ember. */
+.back {
+  padding: 0.5rem 1.1rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
 /* Behind the query, like every other hover state in the viewer: a rule a phone
    can reach is one it paints on whatever was last tapped and leaves there. */
 @media (hover: hover) {
   .reopen:hover {
     color: var(--accent);
   }
+
+  .back:hover {
+    border-color: var(--ink-soft);
+  }
 }
 
-/* What the open step is about, under its heading. Empty until that step's
-   own component lands — two of the three still arrive with their own tasks. */
-.body:not(:empty) {
-  margin-top: 0.9rem;
+@media (min-width: 60rem) {
+  .setup {
+    display: grid;
+    grid-template-columns: 290px minmax(0, 1fr);
+    gap: 0;
+    min-height: calc(100vh - var(--band, 0px));
+  }
+
+  /* The rail the whole height of the window, and staying there while a long
+     step scrolls beside it. */
+  .rail {
+    position: sticky;
+    top: var(--band, 0px);
+    box-sizing: border-box;
+    height: calc(100vh - var(--band, 0px));
+    border-radius: 0;
+  }
+
+  /* And the reading at its very foot. */
+  .reading {
+    margin-top: auto;
+  }
+
+  /* The step at the boards' 42rem, three and a half from the rail. */
+  .paper {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: calc(42rem + 7rem);
+    padding: 3.5rem 3.5rem 0;
+  }
 }

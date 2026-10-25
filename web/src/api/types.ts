@@ -4093,6 +4093,17 @@ platform: Platform,
  */
 distro: Distro, 
 /**
+ * And what this machine calls itself: its hostname, the word the devices
+ * pane and the install run's status line already name it by.
+ *
+ * **For the wizard's rail, which says what it is reading.** The page
+ * re-reads the machine on an interval while a step waits on it, and the
+ * line at the foot of the rail names the machine being read rather than
+ * saying *this machine* — a phone on the tailnet walking the wizard is not
+ * standing at the box, and the name is how it knows which box it is.
+ */
+machine: string, 
+/**
  * Every row of the dependencies step, in the order it is drawn.
  */
 dependencies: Array<DependencyView>, 

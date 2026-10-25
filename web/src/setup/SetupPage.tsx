@@ -31,30 +31,45 @@
 //!
 //! **Which step is open is this device's**, kept in browser storage and never
 //! sent anywhere — see `steps.ts`. A step that stands met can be opened again
-//! by pressing its heading, which is the whole of the navigation the frame has:
-//! moving *forward* is each step's own Next, and a step nobody has met yet
-//! is not one to skip into.
+//! by pressing its heading, or by Back from the step after it, which is the
+//! whole of the navigation the frame has: moving *forward* is each step's own
+//! press, and a step nobody has met yet is not one to skip into.
+//!
+//! **Drawn as a rail beside a paper once the window is wide** — the same 60rem
+//! the workbench breaks at (`BESIDE` in `widths.ts`), so the two change shape
+//! at one width. The rail is the brand, the three steps and what the page is
+//! reading; the paper is the open step, under its number and title, with a foot
+//! pinned to the bottom of it that the frame owns and the step presses in —
+//! see [`Foot`](./Foot.tsx). Narrower than that, the rail stands over the
+//! paper as one column.
 
 import { For, Show, createSignal, type JSX } from "solid-js";
 
 import { DragBar } from "../DragBar";
-import { loadOnboarding } from "../api/client";
+import { listProfiles, loadOnboarding } from "../api/client";
+import type { OnboardingView } from "../api/types";
 import { useReading } from "../freshness";
+import { band } from "../head";
 import { Empty, ErrorLine } from "../notices";
+import { bridge } from "../settings/bridge";
 import { Accounts } from "./Accounts";
-import { Dependencies } from "./Dependencies";
+import { Dependencies, running } from "./Dependencies";
+import { FootContext } from "./Foot";
 import { Git } from "./Git";
 import { Mark } from "./Mark";
 import {
   PROBE,
+  RUNNING,
   STEPS,
   TITLES,
   after,
+  before,
   keepStep,
   met,
   openStep,
   type Step,
 } from "./steps";
+import { harnesses, present } from "./summaries";
 import styles from "./SetupPage.module.css";
 
 /// The wizard, whole.
@@ -73,13 +88,13 @@ export function SetupPage(): JSX.Element {
     keepStep(step);
   };
 
-  /// What a step's own Next does: open the one after it.
+  /// What a step's own press does once it is over: open the one after it.
   ///
   /// Pressed once the step has done whatever it was for — the accounts step
   /// saves what is ticked before it presses this — so what arrives here is a
   /// step that is over rather than one being skipped.
   ///
-  /// The last step's Next is the wizard *finishing* rather than a step
+  /// The last step's press is the wizard *finishing* rather than a step
   /// opening — the mode going off and the app landing on `/compose` — so it
   /// never arrives here: see [`Git`](./Git.tsx), which does that itself.
   const onwards = (step: Step): void => {
@@ -114,97 +129,202 @@ export function SetupPage(): JSX.Element {
     };
   });
 
+  // The Profiles saved, for the line the rail draws under a met second step —
+  // the settings' own read, which the accounts step already invalidates when it
+  // saves. Only once that step is met: before then there is no line to draw,
+  // and nothing to ask the server for.
+  const profiles = useReading(() => ({
+    queryKey: ["profiles"],
+    queryFn: () => listProfiles(null),
+    enabled: met(onboarding.data?.steps, "accounts"),
+    freshness: { reconcile: "id" },
+  }));
+
+  /// What the rail says under a step that stands met, where it says anything.
+  const summary = (view: OnboardingView, step: Step): string | null => {
+    if (!met(view.steps, step)) {
+      return null;
+    }
+
+    switch (step) {
+      case "dependencies":
+        return present(view.dependencies);
+      case "accounts":
+        return profiles.data === undefined ? null : harnesses(profiles.data);
+      // Met is the wizard over, and nobody is reading the rail by then.
+      case "git":
+        return null;
+    }
+  };
+
+  // The right-hand end of the paper's foot, made before anything is drawn into
+  // it so that the step's press has somewhere to go the moment it is drawn.
+  const foot = document.createElement("div");
+  foot.className = styles.press!;
+
   return (
     <>
       <DragBar />
-      <section class={styles.setup}>
-        <h1>Set Up Verkstead</h1>
-        <p class={styles.standing}>
-          A few things need settling before any work can start. Nothing else is
-          reachable until they are.
-        </p>
+      {/* How tall the drag bar over it stands, which is nothing in a browser:
+          the rail is the window's height less that, and sticks under it. */}
+      <section
+        class={styles.setup}
+        data-wizard
+        style={{ "--band": `${bridge() === null ? 0 : band()}px` }}
+      >
+        <div class={styles.rail}>
+          {/* The brand rather than a title: this is Verkstead before it is
+              anything, and what it is doing is the label under it. */}
+          <h1 class={styles.brand}>
+            <img src="/icons/icon-192.png" alt="" />
+            Verkstead
+          </h1>
+          <p class={styles.label}>Setup</p>
 
-        <Show
-          when={onboarding.data}
-          fallback={
-            <Show
-              when={onboarding.isError}
-              fallback={<Empty>Reading this machine…</Empty>}
-            >
-              <ErrorLine>This machine couldn't be read.</ErrorLine>
-            </Show>
-          }
-        >
-          {(view) => (
-            <ol class={styles.steps}>
-              <For each={STEPS}>
-                {(step) => (
-                  <li
-                    class={styles.step}
-                    classList={{ [styles.open!]: open() === step }}
-                    data-step={step}
-                    data-met={met(view().steps, step) ? "yes" : "no"}
-                    aria-current={open() === step ? "step" : undefined}
-                  >
-                    <StepHead
-                      step={step}
-                      met={met(view().steps, step)}
-                      open={open() === step}
-                      show={show}
+          <Show when={onboarding.data}>
+            {(view) => (
+              <>
+                <ol class={styles.steps}>
+                  <For each={STEPS}>
+                    {(step) => (
+                      <li
+                        class={styles.step}
+                        classList={{ [styles.open!]: open() === step }}
+                        data-step={step}
+                        data-met={met(view().steps, step) ? "yes" : "no"}
+                        aria-current={open() === step ? "step" : undefined}
+                      >
+                        <StepHead
+                          step={step}
+                          met={met(view().steps, step)}
+                          open={open() === step}
+                          show={show}
+                        />
+                        <Show when={summary(view(), step)}>
+                          {(line) => <p class={styles.summary}>{line()}</p>}
+                        </Show>
+                      </li>
+                    )}
+                  </For>
+                </ol>
+
+                <p class={styles.reading}>
+                  <span class={styles.dot} aria-hidden="true" />
+                  {reading(view())}
+                </p>
+              </>
+            )}
+          </Show>
+        </div>
+
+        <div class={styles.paper}>
+          <Show
+            when={onboarding.data}
+            fallback={
+              <Show
+                when={onboarding.isError}
+                fallback={<Empty>Reading this machine…</Empty>}
+              >
+                <ErrorLine>This machine couldn't be read.</ErrorLine>
+              </Show>
+            }
+          >
+            {(view) => (
+              <FootContext.Provider value={foot}>
+                <p class={styles.eyebrow}>
+                  Step {STEPS.indexOf(open()) + 1} of {STEPS.length}
+                </p>
+                <h2 class={styles.title}>{TITLES[open()]}</h2>
+
+                <div class={styles.body}>
+                  <Show when={open() === "dependencies"}>
+                    <Dependencies
+                      reading={view()}
+                      onwards={() => onwards("dependencies")}
+                      poll={setAsked}
                     />
-                    {/* And under the open one, what that step is about. */}
-                    <Show when={open() === step}>
-                      <div class={styles.body}>
-                        <Show when={step === "dependencies"}>
-                          <Dependencies
-                            reading={view()}
-                            onwards={() => onwards(step)}
-                            poll={setAsked}
-                          />
-                        </Show>
-                        <Show when={step === "accounts"}>
-                          <Accounts
-                            reading={view()}
-                            onwards={() => onwards(step)}
-                          />
-                        </Show>
-                        {/* And the last of the three, whose Next is the
-                            wizard finishing rather than a step opening — which is
-                            why it takes no `onwards`: what it goes on to is the
-                            app itself. */}
-                        <Show when={step === "git"}>
-                          <Git />
-                        </Show>
-                      </div>
-                    </Show>
-                  </li>
-                )}
-              </For>
-            </ol>
-          )}
-        </Show>
+                  </Show>
+                  <Show when={open() === "accounts"}>
+                    <Accounts
+                      reading={view()}
+                      onwards={() => onwards("accounts")}
+                    />
+                  </Show>
+                  {/* And the last of the three, whose press is the wizard
+                      finishing rather than a step opening — which is why it
+                      takes no `onwards`: what it goes on to is the app itself. */}
+                  <Show when={open() === "git"}>
+                    <Git />
+                  </Show>
+                </div>
+
+                <div class={styles.foot}>
+                  {/* Back to the step before, which is always met: a step is
+                      only ever open once the ones before it are. */}
+                  <Show when={before(open())}>
+                    {(back) => (
+                      <button
+                        type="button"
+                        class={styles.back}
+                        onClick={() => show(back())}
+                      >
+                        Back
+                      </button>
+                    )}
+                  </Show>
+                  {foot}
+                </div>
+              </FootContext.Provider>
+            )}
+          </Show>
+        </div>
       </section>
     </>
   );
 }
 
-/// One step's heading: what it is called, whether it is met, and — where it is —
-/// the press that opens it again.
+/// The line at the foot of the rail: which machine the page is reading, and
+/// how often — the frame's two cadences, the faster while a run of
+/// Verkstead's own is going.
+function reading(view: OnboardingView): string {
+  return running(view.run)
+    ? `Reading ${view.machine} every ${RUNNING / 1000} s while it installs`
+    : `Reading ${view.machine} every ${PROBE / 1000} s`;
+}
+
+/// One step's heading in the rail: what it is called, whether it is met, and —
+/// where it is — the press that opens it again.
 ///
-/// A button only for a step that stands met, because that is the only one there
-/// is anything to go back to: an unmet step reached by pressing past the one in
-/// front of it would be the skip ADR-0016 refused, drawn as navigation.
+/// A button only for a step that stands met and is not open, because that is
+/// the only one there is anything to go back to: an unmet step reached by
+/// pressing past the one in front of it would be the skip ADR-0016 refused,
+/// drawn as navigation.
 function StepHead(props: {
   step: Step;
   met: boolean;
   open: boolean;
   show: (step: Step) => void;
 }): JSX.Element {
-  /// The mark and the name, which is the heading either way round.
+  /// The mark and the name, which is the heading either way round. An unmet
+  /// step's mark is its number, drawn by the stylesheet so the heading reads
+  /// as the name alone.
   const named = (): JSX.Element => (
     <>
-      <Mark standing={props.met ? "met" : "waiting"} />
-      {TITLES[props.step]}
+      <Show
+        when={props.met}
+        fallback={
+          <span
+            class={styles.number}
+            data-number={STEPS.indexOf(props.step) + 1}
+            aria-hidden="true"
+          />
+        }
+      >
+        <span class={styles.ticked}>
+          <Mark standing="met" />
+        </span>
+      </Show>
+      <span class={styles.name}>{TITLES[props.step]}</span>
     </>
   );
 
@@ -222,4 +342,3 @@ function StepHead(props: {
     </h2>
   );
 }
-

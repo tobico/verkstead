@@ -85,6 +85,7 @@ import type {
 } from "../api/types";
 import { ErrorLine, Note } from "../notices";
 import { rowPress } from "../rows";
+import { Foot } from "./Foot";
 import { Mark, type Standing } from "./Mark";
 import {
   DISTROS,
@@ -106,7 +107,7 @@ import styles from "./Dependencies.module.css";
 /// The harnesses are [`AGENT_NAME`]'s, which is what they are called everywhere
 /// else in the app: a row saying *Claude* beside a Profile list saying *Claude
 /// Code* would be two names for one backend.
-const NAMES: Record<Dependency, string> = {
+export const NAMES: Record<Dependency, string> = {
   Sandbox: "A sandbox",
   Git: "git",
   Claude: AGENT_NAME.Claude,
@@ -511,14 +512,16 @@ function Choosing(props: {
       </ul>
 
       <div class={styles.onwards}>
-        <button
-          type="button"
-          class={styles.next}
-          disabled={!props.ready || props.pressing}
-          onClick={() => props.press()}
-        >
-          Next
-        </button>
+        <Foot>
+          <button
+            type="button"
+            class={styles.next}
+            disabled={!props.ready || props.pressing}
+            onClick={() => props.press()}
+          >
+            Next
+          </button>
+        </Foot>
 
         <Show when={!props.ready}>
           <Note>
@@ -583,14 +586,16 @@ export function Installing(props: {
             half-installed machine is worse than a fully installed one — so
             Cancel skips what has not started and says so until the unit under
             way is over. */}
-        <button
-          type="button"
-          class={styles.cancel}
-          disabled={props.run.cancelling || props.stopping}
-          onClick={() => props.cancel()}
-        >
-          {props.run.cancelling ? "Cancelling…" : "Cancel"}
-        </button>
+        <Foot>
+          <button
+            type="button"
+            class={styles.cancel}
+            disabled={props.run.cancelling || props.stopping}
+            onClick={() => props.cancel()}
+          >
+            {props.run.cancelling ? "Cancelling…" : "Cancel"}
+          </button>
+        </Foot>
       </div>
     </>
   );
@@ -705,22 +710,28 @@ export function Hints(props: {
         {/* Back rather than a way of unticking a row here: what a row nobody
             wants after all is, is a tick to take off, and the screen with the
             ticks on it is the one before this. */}
-        <button type="button" class={styles.back} onClick={() => props.back()}>
-          Back
-        </button>
+        <Foot>
+          <button
+            type="button"
+            class={styles.back}
+            onClick={() => props.back()}
+          >
+            Back
+          </button>
 
-        <button
-          type="button"
-          class={styles.next}
-          disabled={!met()}
-          onClick={() => props.onwards()}
-        >
-          Next
-        </button>
+          <span class={styles.counter} data-detected>
+            {props.detected}/{props.rows.length} detected
+          </span>
 
-        <span class={styles.counter} data-detected>
-          {props.detected}/{props.rows.length} detected
-        </span>
+          <button
+            type="button"
+            class={styles.next}
+            disabled={!met()}
+            onClick={() => props.onwards()}
+          >
+            Next
+          </button>
+        </Foot>
       </div>
     </>
   );

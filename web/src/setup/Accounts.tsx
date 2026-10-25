@@ -56,6 +56,7 @@ import { KNOWN_MODELS } from "../models";
 import { ErrorLine, Note } from "../notices";
 import { rowPress } from "../rows";
 import { BLANK_PROFILE, PROFILE_REFUSAL, ProfileForm } from "../profiles/ProfileList";
+import { Foot } from "./Foot";
 import { Mark } from "./Mark";
 import styles from "./Accounts.module.css";
 
@@ -219,14 +220,16 @@ export function Accounts(props: {
       </Show>
 
       <div class={styles.onwards}>
-        <button
-          type="button"
-          class={styles.next}
-          disabled={!ready() || save.isPending}
-          onClick={onwards}
-        >
-          Next
-        </button>
+        <Foot>
+          <button
+            type="button"
+            class={styles.next}
+            disabled={!ready() || save.isPending}
+            onClick={onwards}
+          >
+            Next
+          </button>
+        </Foot>
 
         <Show when={!ready()}>
           <Note>

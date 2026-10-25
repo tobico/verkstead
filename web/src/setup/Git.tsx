@@ -58,6 +58,7 @@ import { ErrorLine, Note } from "../notices";
 import { heldAuthor, heldConfig } from "../settings/held";
 import { TokenScopes } from "../settings/scopes";
 import { utcStamp } from "../set/when";
+import { Foot } from "./Foot";
 import { COMPOSE } from "./steps";
 import styles from "./Git.module.css";
 
@@ -384,14 +385,16 @@ export function Git(): JSX.Element {
         </section>
 
         <div class={styles.onwards}>
-          <button
-            type="button"
-            class={styles.next}
-            disabled={!authored() || working()}
-            onClick={onwards}
-          >
-            Next
-          </button>
+          <Foot>
+            <button
+              type="button"
+              class={styles.next}
+              disabled={!authored() || working()}
+              onClick={onwards}
+            >
+              Next
+            </button>
+          </Foot>
 
           <Show when={!authored()}>
             <Note>

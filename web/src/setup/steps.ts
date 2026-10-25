@@ -68,6 +68,13 @@ export function after(step: Step): Step | null {
   return STEPS[STEPS.indexOf(step) + 1] ?? null;
 }
 
+/// And the step before this one, or `null` at the start — which is where the
+/// frame's Back goes, and always a met step: one is only ever open once the
+/// ones before it are.
+export function before(step: Step): Step | null {
+  return STEPS[STEPS.indexOf(step) - 1] ?? null;
+}
+
 /// Where this device's open step is kept. Namespaced like everything else this
 /// app leaves in a browser.
 export const SETUP_STEP = "verkstead.setup-step";

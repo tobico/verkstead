@@ -1137,9 +1137,9 @@ const STRIP = rules(barely).find((rule) => rule.selects === ".drag")?.declares;
 /// is the reading that leaves the wizard as the only page there is.
 const FRESH = fresh as OnboardingView;
 
-/// The wizard's own heading, and what the app answers a path nothing has: the
+/// The label under the wizard's brand, and what the app answers a path nothing has: the
 /// two of the three pages that draw anything at all.
-const WIZARD = "Set Up Verkstead";
+const WIZARD = "Setup";
 const MISSED = "There's no page at this address.";
 
 /// What the machine answers with, which is a value or a hang: how long the read

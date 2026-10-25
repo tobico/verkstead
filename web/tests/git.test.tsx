@@ -487,6 +487,6 @@ describe("the last Next", () => {
     // The workbench, at the page the wizard hands over to.
     await waitFor(() => screen.getByText("Save as draft"));
     expect(window.location.pathname).toBe("/compose");
-    expect(screen.queryByText("Set Up Verkstead")).toBeNull();
+    expect(screen.queryByText("Setup")).toBeNull();
   });
 });

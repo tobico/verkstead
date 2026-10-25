@@ -58,6 +58,11 @@ use verkstead_server::{open_database, router_onboarding_asking_github, store};
 /// probed by a `PATH` walk asks of one.
 const A_PROGRAM: &str = "#!/bin/sh\nexit 0\n";
 
+/// What the suite's machine calls itself, which is the name the rail's reading
+/// line says — the same one `tests/installing.rs` gives its machine, so every
+/// fixture the viewer is drawn over names the one box.
+const HOSTNAME: &str = "ada-box";
+
 /// A `bwrap` that makes the namespace it was asked for, which is the one row
 /// answered by a run rather than a walk.
 const MAKES_A_NAMESPACE: &str = A_PROGRAM;
@@ -150,7 +155,8 @@ fn served_holding(dir: &Path, pool: &SqlitePool, programs: &[(&str, &str)], held
             github_token: held.github_token.map(str::to_owned),
             ..Environment::default()
         },
-    );
+    )
+    .called(HOSTNAME.to_owned());
 
     router_onboarding_asking_github(pool.clone(), dir.to_owned(), machine, host_gh(dir, held))
 }
