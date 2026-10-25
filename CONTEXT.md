@@ -1808,9 +1808,12 @@ _Avoid_: device info, device metadata, machine details, the device's profile
 
 **Devices**:
 The list of every **Device** this workbench is one of, and the third section of
-the **Remote Access** pane. One row each: the OS icon, the name, and the
-addresses under them — with *this device* on this machine's own row, where
-another's carries an Unlink.
+the **Remote Access** pane. One row each: the OS icon, the name, the
+release it runs with a tag where that differs from this device's or a newer
+release exists, and the addresses under them — with *this device* on this
+machine's own row, where another's carries an Unlink; and **Update** on any
+row whose install can update itself
+([ADR-0027](docs/adr/0027-cluster-updates.md)).
 **A section of that pane rather than a settings section of its own**, because
 linking is how this machine is reached as much as the serve and the key are.
 There is no word of its own in the settings' openings, no card and no route: the
@@ -5931,6 +5934,9 @@ _Avoid_: tick, refresh signal, ping, change event, notification
 
 **Update Notice**:
 The banner the viewer shows when the server has learned that a newer release
-exists than the one it is running, linking to the update instructions. Informs
-only — nothing is installed on the human's behalf.
+exists than the one it is running, linking to the update instructions. On a
+desktop install it also carries **Update all**, which tells every reachable
+member to update itself and then this device last
+([ADR-0027](docs/adr/0027-cluster-updates.md)); the banner itself still only
+informs, and nothing is installed until a press.
 _Avoid_: upgrade prompt, new-version alert
