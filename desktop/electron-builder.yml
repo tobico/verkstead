@@ -11,9 +11,8 @@
 # it.
 #
 # Unsigned, as the Rust artifacts were: there is no Developer ID and no
-# authenticode certificate, and an unsigned package is what the adoption
-# documents already describe. Why Windows stays that way, and what would
-# reopen it, is ADR-0020's *Amended: the Windows build stays unsigned*.
+# authenticode certificate. Why Windows stays that way, and what would reopen
+# it, is ADR-0020's *Amended: the Windows build stays unsigned*.
 
 appId: net.tobico.Verkstead
 productName: Verkstead
