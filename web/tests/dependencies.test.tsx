@@ -418,7 +418,7 @@ describe("the checkbox screen", () => {
     expect(drawn(group("Optional"))).toEqual(["Gh"]);
 
     expect(group("Required").querySelector("h3")!.textContent).toBe(
-      "RequiredEvery session needs both",
+      "RequiredEvery session needs both.",
     );
     expect(group("An agent").querySelector("h3")!.textContent).toBe(
       "An agentAt least one",

@@ -144,12 +144,12 @@ export const NAMES: Record<Dependency, string> = {
 
 /// And what each is for, which is also which of them hold the step up.
 const WHY: Record<Dependency, string> = {
-  Sandbox: "Every session runs inside one",
-  Git: "Every conversation is a branch and a worktree",
-  Claude: "One harness is enough",
-  Codex: "One harness is enough",
-  Grok: "One harness is enough",
-  OpenCode: "One harness is enough",
+  Sandbox: "Every session runs inside one.",
+  Git: "Every conversation is a branch and a worktree.",
+  Claude: "One harness is enough.",
+  Codex: "One harness is enough.",
+  Grok: "One harness is enough.",
+  OpenCode: "One harness is enough.",
   Gh: "Pull requests and reviews",
   Wsl: "Sessions on Linux, on this PC",
 };
@@ -254,7 +254,7 @@ const GROUPS: Array<{
 }> = [
   {
     label: "Required",
-    gloss: "Every session needs both",
+    gloss: "Every session needs both.",
     holds: (dependency) => GATING.includes(dependency),
     tiled: false,
   },

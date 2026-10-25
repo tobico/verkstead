@@ -323,7 +323,7 @@ describe("the press onwards", () => {
     expect(onwards(container).disabled).toBe(true);
     expect(onwards(container).textContent).toBe("Next");
     expect(container.querySelector(`.${styles.held}`)!.textContent).toBe(
-      "Tick an account, or save one",
+      "Tick an account, or save one.",
     );
   });
 

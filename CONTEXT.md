@@ -2522,15 +2522,15 @@ above the rows on every platform, a session's `PATH` being the server's own
 rather than anything the wizard could write down.
 
 **The verdict is reached once, at startup**, and the mode stays on until the
-wizard's last Next takes it off. There is no skip and no re-entry: nothing
-inside a run puts it back on, so deleting the last Profile mid-run is the
-settings page's own empty state to say rather than a first-run page thrown over
-work somebody has, and finishing the wizard is the one thing that ends it. What
-the wizard *shows* is a different thing from the verdict and is probed at every
-read — a `PATH` walked, one trivial `bwrap` run, the server's home looked in —
-so an install that lands in another window ticks its row within ten seconds
-without anybody touching the page, and a workbench nobody has open asks the
-machine nothing at all.
+wizard's last press, *Finish setup*, takes it off. There is no skip and no
+re-entry: nothing inside a run puts it back on, so deleting the last Profile
+mid-run is the settings page's own empty state to say rather than a first-run
+page thrown over work somebody has, and finishing the wizard is the one thing
+that ends it. What the wizard *shows* is a different thing from the verdict and
+is probed at every read — a `PATH` walked, one trivial `bwrap` run, the
+server's home looked in — so an install that lands in another window ticks its
+row within ten seconds without anybody touching the page, and a workbench
+nobody has open asks the machine nothing at all.
 
 **Three steps, in the order a machine is set up in**, and the order is not the
 human's to pick: an account is an account under a harness, and the harness has
@@ -2542,27 +2542,32 @@ the one that can be too old to connect — and says once above the rows that the
 `PATH` was read at startup, so a directory an install has just made wants
 Verkstead started again from a shell that names it; the second offers
 the agent accounts already in the server's home as Profiles and holds its
-Next until there is one, because a step that walked past a Profile would
+press until there is one, because a step that walked past a Profile would
 clear the mode onto the empty state a skip was rejected for; the third asks for
 the first **Author** over fields prefilled with whatever the machine could say for
 itself, each labelled with where it was found. Which step is open is a fact
 about the browser in front of you and is kept on the device, never on the wire.
-The last Next clears the mode and lands on the compose page.
+*Finish setup* clears the mode and lands on the compose page. The page is a
+rail of the three steps beside the open one, folding into a header with a
+**Steps** sheet on a phone, and the rail's foot names the machine being read,
+so a phone walking the wizard knows which box it is reading.
 
-**The first step installs what it names** (2026-09-11). An absent row carries
-a checkbox where its tick would be, the gating rows ticked by default, and Next
-installs what is ticked: one elevated package-manager run through the same
-platform dialog the operator grant goes through, which an app install has and a
-daemon has not — a server with no way to ask sends every ticked row to the hint
-screen without asking — then the vendor installers as the user. A directory
-Verkstead installs into is written to `session_path` in `config.yaml` and
-composed ahead of the server's own `PATH`, the one thing added that the `PATH`
-did not name. Three screens: the checkboxes, an install
+**The first step installs what it names** (2026-09-11). An absent row carries a
+checkbox where its tick would be, the gating rows ticked by default, and the
+press, *Install N*, installs what is ticked: one elevated package-manager run
+through the same platform dialog the operator grant goes through, which an app
+install has and a daemon has not — a server with no way to ask sends every
+ticked row to the hint screen without asking — then the vendor installers as
+the user. A directory Verkstead installs into is written to `session_path` in
+`config.yaml` and composed ahead of the server's own `PATH`, the one thing
+added that the `PATH` did not name. Three screens: the checkboxes, an install
 screen with a progress bar and a status line that moves on by itself, and a
-**hint screen** drawing only the ticked rows still absent with their
-instructions, its Next held with an *n/m detected* counter until every one is
-there. On Windows the sandbox row is the session account, probed and gating,
-made by the elevated verb when ticked.
+**hint screen** with the instructions for what is still absent — the ticked
+rows a run left absent, or every missing row where *Install by hand instead*
+opened it from the checkboxes — its Next released on the objective rather than
+on every row it lists, and reading **Skip** after a run that left a ticked row
+missing (2026-10-25). On Windows the sandbox row is the session account, probed
+and gating, made by the elevated verb when ticked.
 
 **Not the compose page's setup card**, which is a draft's own row of pickers —
 the Repo, the branch and base, the companions, the three Pairings — and was here

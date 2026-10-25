@@ -41,7 +41,10 @@ from the notes in these places:
 
 - *Copy*: the step titles and the page heading stay **Title Case**, as
   `docs/copy.md`'s heading rule has them; the boards' sentence-case titles
-  are not followed. Everything else is sentence case as drawn.
+  are not followed. Everything else is sentence case as drawn, and a
+  complete sentence carries its full stop where the boards drop it (*Every
+  session needs both.*, *Tick an account, or save one.*); the rail's
+  summaries take the serial comma (*A sandbox, git, and Claude Code*).
 - *Scope*: there is **one wire change**. The onboarding reading gains a
   `machine` field so the rail's reading line can name the machine.
 - *Frame*: the rail's brand is the page's visible h1 with SETUP under it;

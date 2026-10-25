@@ -303,7 +303,7 @@ export function Git(): JSX.Element {
         <section class={styles.card}>
           <div class={styles.head}>
             <h3>Git Author</h3>
-            <span class={styles.aside}>Both are needed</span>
+            <span class={styles.aside}>Both are needed.</span>
           </div>
 
           <div class={styles.pair}>
@@ -444,7 +444,7 @@ export function Git(): JSX.Element {
             {/* Why the press is held, or — once a save has left something to
                 read — that it went through: the press after it goes on. */}
             <Show when={!authored()}>
-              <span class={styles.held}>Both author fields are needed</span>
+              <span class={styles.held}>Both author fields are needed.</span>
             </Show>
             <Show when={authored() && saved()}>
               <span class={styles.saved}>Saved</span>

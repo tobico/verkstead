@@ -289,7 +289,7 @@ describe("what the fields open with", () => {
     const { container } = mount(NOTHING);
 
     await waitFor(() => expect(onwards(container).disabled).toBe(true));
-    expect(container.textContent).toContain("Both author fields are needed");
+    expect(container.textContent).toContain("Both author fields are needed.");
 
     fireEvent.input(field(container, "setup-author-name"), {
       target: { value: "Ada Lovelace" },
@@ -300,7 +300,7 @@ describe("what the fields open with", () => {
       target: { value: "ada@example.com" },
     });
     expect(onwards(container).disabled).toBe(false);
-    expect(container.textContent).not.toContain("Both author fields are needed");
+    expect(container.textContent).not.toContain("Both author fields are needed.");
   });
 });
 

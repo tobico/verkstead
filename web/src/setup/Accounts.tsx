@@ -94,7 +94,7 @@ const KEPT: Record<AgentType, string[]> = {
 };
 
 /// Why the press is held, beside it.
-const HELD = "Tick an account, or save one";
+const HELD = "Tick an account, or save one.";
 
 /// The step, over the reading the page last had.
 export function Accounts(props: {
