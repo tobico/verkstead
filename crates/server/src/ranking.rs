@@ -39,10 +39,12 @@
 //! the price of serving the merge from memory, and it is a great deal smaller
 //! than a round trip per row of the sidebar.
 //!
-//! **Two rows at one key is the exception, and the gap is opened first.** Two
-//! devices each ranking above their own top mint the *same* key — the first rows
-//! of two devices rather than a rare case, and they sit at the top of the list
-//! where cards are dropped most. The two sort apart, which is what the merge
+//! **Two rows at one key is the exception, and the gap is opened first.** A start
+//! ranks above the top of the merged list its device holds — see
+//! [`merging::top`] — but a held list is a Nudge behind, so two devices starting
+//! in that moment each rank above the same top and mint the *same* key, as did
+//! every pair of first rows from before a start looked past its own device. They
+//! sit at the top of the list where cards are dropped most. The two sort apart, which is what the merge
 //! needs of them, but no rank sits between them: every rank at that key reads
 //! `key-<device>`, and the row being moved carries its own. So `ranks::between`
 //! refuses, and this module re-ranks the *lower* of the pair through its own
@@ -126,8 +128,8 @@ pub(crate) async fn dropped(state: &AppState, moved: DroppedRow) -> Result<(), R
     let under = under_the_gap(&rows, above.as_deref(), &moved.row);
 
     let rank = match (above.as_deref(), under.as_deref()) {
-        // The one pair with nothing between them, which is the first rows of two
-        // devices: the lower of the two moves down first, and the dropped row
+        // The one pair with nothing between them, which is two devices' starts
+        // minted off one top: the lower of the two moves down first, and the dropped row
         // goes into what that opened.
         (Some(above), Some(under)) if ranks::at_one_key(above, under) => {
             let opened = open_the_gap(state, &rows, under, &moved.row).await?;
