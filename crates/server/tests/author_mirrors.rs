@@ -21,7 +21,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::AuthorEntry;
 use verkstead_schema::Nudge;
-use verkstead_server::device::reading::Reading;
+use verkstead_server::device::reading::{RUNNING, Reading};
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::onboarding::Machine;
@@ -41,7 +41,8 @@ const B: &str = "0011223344556677889900aabbccddee";
 /// And a third nobody links to: what it is for is the row A holds of *it*.
 const C: &str = "ff11223344556677889900aabbccddee";
 
-/// What A is written down as on B, which is what a mirror's device mark says.
+/// What A is written down as on B, which is what a mirror's device mark says —
+/// and what A says of itself, so that a take-up of its stream finds it so.
 const A_MACHINE: &str = "the-workstation";
 const A_OS: &str = "macOS 15.1";
 
@@ -90,6 +91,15 @@ impl Verkstead {
             None,
             vec![format!("127.0.0.1:{}", address.port())],
         );
+
+        // A says of itself what every row for it here says, so that a member
+        // reading its identity again on taking up its stream finds that row as
+        // it stands — see [`A_MACHINE`].
+        let reading = if id == A {
+            reading.calling_itself(A_MACHINE, A_OS)
+        } else {
+            reading
+        };
 
         let cluster = Devices::of(
             device.clone(),
@@ -155,7 +165,7 @@ impl Verkstead {
                 addresses,
                 fingerprint: other.fingerprint().to_owned(),
                 kept_by: None,
-                version: None,
+                version: Some(RUNNING.to_owned()),
             },
         )
         .await

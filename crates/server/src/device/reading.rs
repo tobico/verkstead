@@ -148,7 +148,15 @@ pub struct Reading {
     /// And the release of Verkstead this device says it runs: [`RUNNING`] on a
     /// running server, and stated by a suite that is putting two releases in
     /// one cluster — see [`Reading::running`].
-    version: Option<String>,
+    ///
+    /// Shared by every clone, so a suite can restart the member on another
+    /// release under a running server — see [`Reading::now_running`].
+    version: Arc<std::sync::RwLock<Option<String>>>,
+
+    /// And the name and OS word it answers with where a suite has said them,
+    /// in place of the hostname and the platform's word — see
+    /// [`Reading::calling_itself`]. `None` on a running server.
+    called: Option<(String, String)>,
 }
 
 /// The release this binary is, which is what a device says it runs: the
@@ -209,7 +217,8 @@ impl Reading {
             answered: Arc::default(),
             answer_held_for: HELD_FOR,
             forwarding_at: None,
-            version: Some(RUNNING.to_owned()),
+            version: Arc::new(std::sync::RwLock::new(Some(RUNNING.to_owned()))),
+            called: None,
         }
     }
 
@@ -236,7 +245,8 @@ impl Reading {
             answered: Arc::default(),
             answer_held_for: HELD_FOR,
             forwarding_at: None,
-            version: Some(RUNNING.to_owned()),
+            version: Arc::new(std::sync::RwLock::new(Some(RUNNING.to_owned()))),
+            called: None,
         }
     }
 
@@ -266,7 +276,8 @@ impl Reading {
             answered: Arc::default(),
             answer_held_for: HELD_FOR,
             forwarding_at: None,
-            version: Some(RUNNING.to_owned()),
+            version: Arc::new(std::sync::RwLock::new(Some(RUNNING.to_owned()))),
+            called: None,
         }
     }
 
@@ -333,9 +344,37 @@ impl Reading {
     /// two of them.
     pub fn running(self, version: Option<&str>) -> Reading {
         Reading {
-            version: version.map(str::to_owned),
+            version: Arc::new(std::sync::RwLock::new(version.map(str::to_owned))),
             ..self
         }
+    }
+
+    /// The same, answering as `name` on `os` rather than this machine's
+    /// hostname and its platform's word.
+    ///
+    /// For a suite whose devices are all one machine: a member's row is what it
+    /// last said of itself, and a take-up reads that again — so a suite that
+    /// writes a member down as *the-laptop* has the member say so, rather than
+    /// writing down the one hostname every device in it shares and reading
+    /// right for the wrong reason.
+    pub fn calling_itself(self, name: &str, os: &str) -> Reading {
+        Reading {
+            called: Some((name.to_owned(), os.to_owned())),
+            ..self
+        }
+    }
+
+    /// Say `version` from now on, in place of the release this reading was
+    /// stated with — for every clone of it at once.
+    ///
+    /// For a suite restarting a member on another binary: what is being asked
+    /// is what this device's view of it makes of the new release, and a server
+    /// started again would be a second server rather than the same member.
+    pub fn now_running(&self, version: Option<&str>) {
+        *self
+            .version
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = version.map(str::to_owned);
     }
 
     /// Say `advertised` from now on, in place of the list this reading was
@@ -396,7 +435,11 @@ impl Reading {
             os: self.os(),
             addresses: self.addresses().await,
             kept_by: self.keeper().map(|keeper| keeper.device().to_owned()),
-            version: self.version.clone(),
+            version: self
+                .version
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
         }
     }
 
@@ -409,13 +452,19 @@ impl Reading {
     /// cannot disagree, and so that a suite stating a WSL has stated it for
     /// both at once.
     pub(crate) fn name(&self) -> String {
-        platform::hostname()
+        match &self.called {
+            Some((name, _)) => name.clone(),
+            None => platform::hostname(),
+        }
     }
 
     /// And the word for the operating system it is running: the platform's own
     /// everywhere but under WSL.
     pub(crate) fn os(&self) -> String {
-        platform::os_word(self.platform, self.kernel.as_deref())
+        match &self.called {
+            Some((_, os)) => os.clone(),
+            None => platform::os_word(self.platform, self.kernel.as_deref()),
+        }
     }
 
     /// Every address this device can be reached on, in the order a peer should

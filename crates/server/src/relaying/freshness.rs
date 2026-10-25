@@ -46,6 +46,7 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 use verkstead_schema::Nudge;
+use verkstead_store::Member;
 
 use crate::nudge::Nudges;
 use crate::peer::Members;
@@ -286,6 +287,19 @@ async fn read(device: &str, members: &Members, peers: &Peers, nudges: &Nudges) -
     // page last read anything, and a Nudge that reached nobody costs nothing.
     nudges.announce_of(&member.device, Nudge::Everything);
 
+    // And what the member is, read again beside the stream rather than in front
+    // of it: a take-up is the one moment a restart of either end is sure to
+    // pass through, so a member back on another release is drawn on it here.
+    //
+    // Held for as long as this read is, so that a stream let go of because the
+    // device was unlinked takes the read with it: a reading that landed after
+    // the unlink would write the row back.
+    let _reading_again = Beside(tokio::spawn(read_again(
+        member.clone(),
+        peers.clone(),
+        nudges.clone(),
+    )));
+
     tracing::info!(
         device,
         "this device is holding the member's Nudge stream, and announcing what comes down it \
@@ -333,6 +347,54 @@ async fn read(device: &str, members: &Members, peers: &Peers, nudges: &Nudges) -
     );
 
     Held::Ended
+}
+
+/// Read `member`'s identity again, now that its stream has been taken up, and
+/// tell this device's pages where the row it is drawn from has moved
+/// (ADR-0027, *Seeing versions*).
+///
+/// **Fresh by construction rather than polled.** A release changes only across
+/// a restart, and a restart of either end ends the stream and has it taken up
+/// again — so a take-up is where the version a member runs can have changed,
+/// and nowhere else. Nothing reads an ordinary member on a timer, and this adds
+/// none.
+///
+/// **[`Nudge::Devices`] only where the row moved.** That Nudge has mirroring and
+/// the Author mirroring read every member again, so one said on every take-up
+/// would be a sweep of the whole cluster each time any stream came back; the
+/// row this stream was taken up against is what the answer is held up to.
+///
+/// **And a read that fails is a line in the log and nothing else.** The stream
+/// is up whatever this comes to, and the row stays as the last reading left
+/// it.
+async fn read_again(member: Member, peers: Peers, nudges: Nudges) {
+    match peers.identity(&member).await {
+        Ok(identity) => {
+            let moved = identity.name != member.name
+                || identity.os != member.os
+                || identity.addresses != member.addresses
+                || identity.version != member.version;
+
+            if moved {
+                nudges.announce(Nudge::Devices);
+            }
+        }
+
+        Err(why) => tracing::warn!(
+            device = %member.device,
+            "a member's Nudge stream was taken up and its identity could not be read again, \
+             so its row stays as it was: {why:#}",
+        ),
+    }
+}
+
+/// A task running beside a stream, ended when the stream's reading is.
+struct Beside(JoinHandle<()>);
+
+impl Drop for Beside {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// The call the stream is taken up with: the member's own `/api/ui/nudges`, read

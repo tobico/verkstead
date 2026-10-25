@@ -39,7 +39,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{ConversationView, ProfileEntry};
 use verkstead_schema::Nudge;
-use verkstead_server::device::reading::Reading;
+use verkstead_server::device::reading::{RUNNING, Reading};
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::onboarding::Machine;
@@ -64,8 +64,9 @@ const C: &str = "ff11223344556677889900aabbccddee";
 /// row, which is what a mirrored row says.
 ///
 /// Stated rather than read off a machine, because they are the membership row's
-/// — a member's name and OS are what it last said about itself at an exchange,
-/// and nothing in a cluster asks a device for them again. And deliberately not
+/// — a member's name and OS are what it last said about itself, at an exchange
+/// or when its stream was taken up — and A says them of itself to match. And
+/// deliberately not
 /// this box's own words: every device in this suite is one machine, so a row
 /// that took B's hostname for A's would read right for the wrong reason.
 const A_MACHINE: &str = "the-workstation";
@@ -149,6 +150,15 @@ impl Verkstead {
             vec![format!("127.0.0.1:{}", address.port())],
         );
 
+        // A says of itself what every row for it here says, so that a member
+        // reading its identity again on taking up its stream finds that row as
+        // it stands — see [`A_MACHINE`].
+        let reading = if id == A {
+            reading.calling_itself(A_MACHINE, A_OS)
+        } else {
+            reading
+        };
+
         let cluster = Devices::of(
             device.clone(),
             reading.clone(),
@@ -218,7 +228,7 @@ impl Verkstead {
                 addresses,
                 fingerprint: other.fingerprint().to_owned(),
                 kept_by: None,
-                version: None,
+                version: Some(RUNNING.to_owned()),
             },
         )
         .await

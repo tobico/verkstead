@@ -26,6 +26,8 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
+use axum::middleware::{self, Next};
+use axum::response::IntoResponse;
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -34,19 +36,19 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
-use verkstead_render::Submitted;
+use verkstead_render::{DevicesView, Submitted};
 use verkstead_schema::{Answer, QuestionSet, Response};
-use verkstead_server::device::reading::Reading;
+use verkstead_server::device::reading::{RUNNING, Reading};
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::peer::joining::Joins;
 use verkstead_server::peer::{self, Members};
-use verkstead_server::platform::Platform;
+use verkstead_server::platform::{self, Platform};
 use verkstead_server::remote::Tailscale;
 use verkstead_server::{
     open_database, router_answering_devices_telling, router_over_the_link_telling, store,
 };
-use verkstead_store::{Linking, record_member};
+use verkstead_store::{Linking, Member, members, record_member};
 
 /// The device every Conversation started here is ranked by, named the way a
 /// cluster names one (ADR-0020, *Ranks*).
@@ -98,6 +100,9 @@ struct Verkstead {
     /// Where the other device dials it, on a port the machine picked.
     address: SocketAddr,
 
+    /// And what its reading advertises, which a member is recorded at.
+    advertising: std::sync::Mutex<String>,
+
     /// Held for the length of the test: the identity and the database live in
     /// it.
     _dir: tempfile::TempDir,
@@ -108,6 +113,16 @@ impl Verkstead {
     /// Listener up — serving the viewer's namespace behind the Member Gate, over
     /// the Nudge channel this holds.
     async fn answering(id: &str) -> Verkstead {
+        Verkstead::serving(id, Answers::ItsIdentity).await
+    }
+
+    /// The same, refusing every read of its identity while serving everything
+    /// else — a member whose stream is taken up and whose identity is not.
+    async fn refusing_its_identity(id: &str) -> Verkstead {
+        Verkstead::serving(id, Answers::NotItsIdentity).await
+    }
+
+    async fn serving(id: &str, answers: Answers) -> Verkstead {
         let dir = tempfile::tempdir().unwrap();
         let pool = open_database(&dir.path().join("verkstead.db"))
             .await
@@ -128,14 +143,28 @@ impl Verkstead {
             vec![format!("127.0.0.1:{}", address.port())],
         );
 
-        tokio::spawn(listener.serving(peer::router(
+        let mut serving = peer::router(
             device.clone(),
             reading.clone(),
             members.clone(),
             Joins::none(),
             nudges.clone(),
             router_over_the_link_telling(pool.clone(), dir.path().to_owned(), nudges.clone()),
-        )));
+        );
+
+        if answers == Answers::NotItsIdentity {
+            serving = serving.layer(middleware::from_fn(
+                |asked: Request<Body>, onwards: Next| async move {
+                    if asked.uri().path() == peer::IDENTITY {
+                        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                    }
+
+                    onwards.run(asked).await
+                },
+            ));
+        }
+
+        tokio::spawn(listener.serving(serving));
 
         Verkstead {
             device,
@@ -144,6 +173,7 @@ impl Verkstead {
             reading,
             nudges,
             address,
+            advertising: std::sync::Mutex::new(format!("127.0.0.1:{}", address.port())),
             _dir: dir,
         }
     }
@@ -179,23 +209,46 @@ impl Verkstead {
         }))
     }
 
-    /// The one address it advertises.
-    fn at(&self) -> String {
-        format!("127.0.0.1:{}", self.address.port())
+    /// The one address it advertises, which is its Peer Listener's own until a
+    /// test moves it behind a [`Link`].
+    fn advertised(&self) -> String {
+        self.advertising.lock().unwrap().clone()
     }
 
-    /// Write `other` down as one of this device's members, at `addresses`.
-    async fn linked_to(&self, other: &Device, addresses: Vec<String>) {
+    /// Advertise `link` from now on, as a machine reached through it would.
+    fn behind(&self, link: &Link) {
+        *self.advertising.lock().unwrap() = link.at();
+        self.reading.moving_to(vec![link.at()]);
+    }
+
+    /// The row this device holds for `device`.
+    async fn row_for(&self, device: &str) -> Member {
+        members(&self.pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|member| member.device == device)
+            .expect("the device is a member here")
+    }
+
+    /// Write `other` down as one of this device's members, as it says of itself
+    /// — its name, its OS, the addresses it advertises and the release it runs.
+    ///
+    /// As it says rather than anything else, because a take-up reads the
+    /// member's identity again and a row that disagreed with it would be a row
+    /// that moved: every take-up here would then announce the Devices Nudge the
+    /// tests below are about.
+    async fn linked_to(&self, other: &Verkstead) {
         record_member(
             &self.pool,
             &Linking {
-                device: other.id().to_owned(),
-                name: "somewhere-else".to_owned(),
+                device: other.device.id().to_owned(),
+                name: platform::hostname(),
                 os: "Linux".to_owned(),
-                addresses,
-                fingerprint: other.fingerprint().to_owned(),
+                addresses: vec![other.advertised()],
+                fingerprint: other.device.fingerprint().to_owned(),
                 kept_by: None,
-                version: None,
+                version: Some(RUNNING.to_owned()),
             },
         )
         .await
@@ -230,6 +283,13 @@ impl Verkstead {
     }
 }
 
+/// Whether a Verkstead answers a read of its identity.
+#[derive(PartialEq, Eq)]
+enum Answers {
+    ItsIdentity,
+    NotItsIdentity,
+}
+
 /// The streams one device is holding, given back when the test drops it.
 struct Holding(JoinHandle<()>);
 
@@ -245,27 +305,36 @@ fn no_tailscale() -> Tailscale {
     Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422)
 }
 
-/// A and B, linked both ways, with work in B's store — and A's row for B at
-/// whatever `reaching` says instead of B's own address.
+/// A and B, linked both ways, with work in B's store.
 ///
 /// Both ways because a link is both ways: A dials B pinned on B's fingerprint,
 /// and B admits A because A's certificate is one it holds a membership for.
-async fn linked(reaching: impl Fn(&Verkstead) -> String) -> (Verkstead, Verkstead) {
+async fn linked_up() -> (Verkstead, Verkstead) {
+    linked(Verkstead::answering(B).await).await
+}
+
+/// The same, with `b` as B — however it answers, and wherever it advertises.
+async fn linked(b: Verkstead) -> (Verkstead, Verkstead) {
     let a = Verkstead::answering(A).await;
-    let b = Verkstead::answering(B).await;
 
     b.holding_work().await;
 
-    a.linked_to(&b.device, vec![reaching(&b)]).await;
-    b.linked_to(&a.device, vec![a.at()]).await;
+    a.linked_to(&b).await;
+    b.linked_to(&a).await;
 
     (a, b)
 }
 
-/// The same, with A reaching B at B's own address, which is every test here but
-/// the one about a link that drops.
-async fn linked_up() -> (Verkstead, Verkstead) {
-    linked(Verkstead::at).await
+/// And the same, B reached through a [`Link`] that can be cut.
+async fn linked_through_a_link() -> (Verkstead, Verkstead, Link) {
+    let b = Verkstead::answering(B).await;
+    let link = Link::to(b.address).await;
+
+    b.behind(&link);
+
+    let (a, b) = linked(b).await;
+
+    (a, b, link)
 }
 
 /// A link between two devices as something that can be **cut**: a socket on the
@@ -491,6 +560,37 @@ async fn post<T: DeserializeOwned>(app: &Router, path: &str, body: &serde_json::
     serde_json::from_str(&said).unwrap_or_else(|why| panic!("POST {path} answered {said}: {why}"))
 }
 
+/// The Devices section as the open page reads it.
+async fn devices(app: &Router) -> DevicesView {
+    let answered = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/ui/devices")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(answered.status(), StatusCode::OK);
+
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+/// The release the Devices section draws on `device`'s row.
+async fn drawn_running(app: &Router, device: &str) -> Option<String> {
+    devices(app)
+        .await
+        .members
+        .into_iter()
+        .find(|member| member.identity.device == device)
+        .expect("the device is drawn")
+        .identity
+        .version
+}
+
 /// A Set with nothing but a title, put straight into a store.
 fn bare(title: &str) -> QuestionSet {
     QuestionSet {
@@ -593,13 +693,7 @@ async fn this_devices_own_news_carries_no_device() {
 /// the stream it was holding ends.
 #[tokio::test]
 async fn a_stream_whose_link_drops_is_taken_up_again() {
-    let b = Verkstead::answering(B).await;
-    let link = Link::to(b.address).await;
-
-    let a = Verkstead::answering(A).await;
-    b.holding_work().await;
-    a.linked_to(&b.device, vec![link.at()]).await;
-    b.linked_to(&a.device, vec![a.at()]).await;
+    let (a, b, link) = linked_through_a_link().await;
 
     let workbench = a.workbench();
     let mut page = Listening::open(&workbench).await;
@@ -663,4 +757,114 @@ async fn a_members_news_does_not_go_round_the_cluster() {
     // One Set answered once, said once. Nothing comes back from B about what A
     // just announced, and nothing goes round again.
     page.nothing_more().await;
+}
+
+/// A member restarted on another release is drawn on it on this device's open
+/// Devices section, with nothing pressed and nothing reloaded (ADR-0027,
+/// *Seeing versions*).
+///
+/// **The restart is the two things a restart is to this device**: the release
+/// the member answers with moves, and the stream A holds to it ends. Nothing
+/// polls — what reads the new release is the stream being taken up again.
+#[tokio::test]
+async fn a_member_restarted_on_another_release_is_drawn_on_it() {
+    let (a, b, link) = linked_through_a_link().await;
+
+    let workbench = a.workbench();
+    let mut page = Listening::open(&workbench).await;
+    let _holding = a.holding();
+
+    assert_eq!(
+        page.nudge().await,
+        json!({ "kind": "everything", "device": B }),
+    );
+
+    // The read beside that take-up settled before the member restarts, so that
+    // what reads the new release is the take-up after the restart.
+    page.nothing_more().await;
+
+    b.reading.now_running(Some("0.9.0"));
+    link.cut();
+
+    assert_eq!(
+        page.nudge_within(TAKEN_UP_AGAIN).await,
+        json!({ "kind": "everything", "device": B }),
+    );
+
+    assert_eq!(
+        page.nudge().await,
+        json!({ "kind": "devices" }),
+        "the row moved, so the Devices section is told to read it again",
+    );
+
+    assert_eq!(
+        drawn_running(&workbench, B).await.as_deref(),
+        Some("0.9.0"),
+        "and what it reads is the release the member came back on",
+    );
+}
+
+/// And a take-up that finds the member as its row already says announces no
+/// Devices Nudge: that Nudge has every mirror read every member again, and a
+/// stream comes back far more often than a member changes.
+#[tokio::test]
+async fn a_take_up_that_finds_nothing_moved_says_nothing_of_the_devices() {
+    let (a, _b, link) = linked_through_a_link().await;
+
+    let workbench = a.workbench();
+    let mut page = Listening::open(&workbench).await;
+    let _holding = a.holding();
+
+    assert_eq!(
+        page.nudge().await,
+        json!({ "kind": "everything", "device": B }),
+    );
+
+    page.nothing_more().await;
+
+    link.cut();
+
+    assert_eq!(
+        page.nudge_within(TAKEN_UP_AGAIN).await,
+        json!({ "kind": "everything", "device": B }),
+    );
+
+    page.nothing_more().await;
+}
+
+/// A member whose identity cannot be read when its stream is taken up keeps
+/// the stream and the row: the read is beside the stream rather than in front
+/// of it, and a reading that did not come is nothing learned about the device.
+///
+/// B runs another release than its row says, so a read that had come would
+/// have moved the row — which is what makes the row standing still mean
+/// something.
+#[tokio::test]
+async fn a_member_whose_identity_cannot_be_read_keeps_its_stream_and_its_row() {
+    let (a, b) = linked(Verkstead::refusing_its_identity(B).await).await;
+    b.reading.now_running(Some("0.9.0"));
+
+    let before = a.row_for(B).await;
+
+    let workbench = a.workbench();
+    let mut page = Listening::open(&workbench).await;
+    let _holding = a.holding();
+
+    assert_eq!(
+        page.nudge().await,
+        json!({ "kind": "everything", "device": B }),
+    );
+
+    page.nothing_more().await;
+
+    assert_eq!(a.row_for(B).await, before, "the row stays as it was");
+
+    // And the stream is still the one news arrives down.
+    let set = b.asking("still there?").await;
+    answer_on_the_member(&workbench, set).await;
+
+    assert_eq!(
+        page.nudge().await,
+        json!({ "kind": "set", "conversation": THERE, "device": B }),
+    );
 }

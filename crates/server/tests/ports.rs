@@ -42,14 +42,14 @@ use verkstead_render::{
 use verkstead_schema::{Nudge, Nudged};
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
-use verkstead_server::device::reading::Reading;
+use verkstead_server::device::reading::{RUNNING, Reading};
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::nudge::Nudges;
 use verkstead_server::onboarding::Machine;
 use verkstead_server::peer::joining::Joins;
 use verkstead_server::peer::{self, Members};
-use verkstead_server::platform::Platform;
+use verkstead_server::platform::{self, Platform};
 use verkstead_server::remote::Tailscale;
 use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
@@ -116,6 +116,11 @@ struct Verkstead {
     reading: Reading,
     address: SocketAddr,
 
+    /// Where it advertises itself instead of its own Peer Listener: the
+    /// [`Link`] a member reaches it over, where there is one — see
+    /// [`Verkstead::behind`].
+    behind: std::sync::Mutex<Option<String>>,
+
     /// The workbench its own browser talks to, where it runs terminals — `None`
     /// on A, which runs none in this file.
     own: Option<Router>,
@@ -148,13 +153,28 @@ impl Verkstead {
     /// offered to anybody. On a Peer Listener of its own, which a member reaches
     /// once its [`Link`] is pointed at it.
     async fn restarted(&self) -> Verkstead {
-        Verkstead::answering_as(
+        let again = Verkstead::answering_as(
             self.device.clone(),
             self.pool.clone(),
             self.dir.clone(),
             self.own.is_some(),
         )
-        .await
+        .await;
+
+        if let Some(link) = self.behind.lock().unwrap().clone() {
+            again.behind(link);
+        }
+
+        again
+    }
+
+    /// Advertise `link` from now on, as a machine reached over it would: a
+    /// member reads what this one advertises whenever it takes up its stream,
+    /// and one still saying its own listener would have its row dialled round
+    /// the link.
+    fn behind(&self, link: String) {
+        self.reading.moving_to(vec![link.clone()]);
+        *self.behind.lock().unwrap() = Some(link);
     }
 
     async fn answering_as(
@@ -221,6 +241,7 @@ impl Verkstead {
             members,
             reading,
             address,
+            behind: std::sync::Mutex::new(None),
             own,
             dir,
             _sandboxing: held,
@@ -268,18 +289,20 @@ impl Verkstead {
         format!("127.0.0.1:{}", self.address.port())
     }
 
-    /// Write `other` down as one of this device's members, at `addresses`.
+    /// Write `other` down as one of this device's members, at `addresses`, as
+    /// it says of itself — so that a take-up of its stream, which reads that
+    /// again, finds the row as it stands.
     async fn linked_to(&self, other: &Device, addresses: Vec<String>) {
         record_member(
             &self.pool,
             &Linking {
                 device: other.id().to_owned(),
-                name: "somewhere-else".to_owned(),
+                name: platform::hostname(),
                 os: "Linux".to_owned(),
                 addresses,
                 fingerprint: other.fingerprint().to_owned(),
                 kept_by: None,
-                version: None,
+                version: Some(RUNNING.to_owned()),
             },
         )
         .await
@@ -1362,6 +1385,7 @@ impl Verkstead {
                 members,
                 reading,
                 address,
+                behind: std::sync::Mutex::new(None),
                 own: Some(routers.workbench),
                 dir,
                 _sandboxing: Vec::new(),
@@ -1396,6 +1420,7 @@ async fn linked_forwarding_over_a_link() -> (Verkstead, Verkstead, Holding, Link
     there(&a, &b).await;
 
     let link = Link::to(b.address).await;
+    b.behind(link.at.to_string());
     a.linked_to(&b.device, vec![link.at.to_string()]).await;
 
     holding.0.push(staying.started());
@@ -1583,7 +1608,7 @@ async fn a_server_in_a_remote_terminal_is_forwarded_to_the_attaching_devices_loc
         vec![ForwardView {
             port,
             device: B.to_owned(),
-            name: "somewhere-else".to_owned(),
+            name: platform::hostname(),
             os: "Linux".to_owned(),
             conversation: THERE,
             title: read.forwards[0].title.clone(),
