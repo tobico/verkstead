@@ -20,17 +20,16 @@
 //!
 //! **The save is the settings page's own**, verification included. One request
 //! writes both files, so everything in `config.yaml` this step is not about
-//! rides along untouched — see [`heldConfig`](../settings/held.ts) — and the
-//! GitHub login is what that request answers with rather than anything typed
-//! here: a token that authenticates as the *wrong* account is the mistake this
-//! catches, and it can only be caught by showing whose it is.
+//! rides along untouched — see [`heldConfig`](../settings/held.ts) — and what
+//! GitHub made of the token is what that request answers with.
 //!
-//! **Which is why a token can stop the wizard for one more press.** The press
-//! always reads *Finish setup*, and where the answer is clean it is the press
-//! that finishes: no token to verify, or one GitHub verified with every scope.
-//! The step stays up only where the token is not good enough as it stands —
-//! GitHub refused it, or named a scope it was not given — with the answer on
-//! it, and the next press goes on without the scope or the token.
+//! **A token stops the wizard for one more press only where it is not good
+//! enough as it stands.** The press always reads *Finish setup*, and where the
+//! answer is clean it is the press that finishes: no token to verify, or one
+//! GitHub verified with every scope Verkstead uses. The step stays up only
+//! where GitHub refused the token, or named a scope it was not given — with the
+//! answer on it, and the next press goes on without the scope or the token,
+//! the token being outside the objective (ADR-0016, *The rail*).
 //!
 //! **And the press that finishes takes the mode off for this run.** Nothing is
 //! written by it: the author went through the save a moment before, and the
@@ -381,9 +380,10 @@ export function Git(): JSX.Element {
             <TokenScopes class={styles.scopes} />
           </Show>
 
-          {/* What GitHub made of it, which is the whole reason a token can stop
-              this step for one more press: an account that is not the one the
-              human meant is the mistake nothing else would catch. */}
+          {/* What GitHub made of it, drawn only on a step that stayed up — a
+              clean answer finishes the wizard before it could be read. So the
+              login is said beside the scope GitHub withheld, the one case of
+              a verified token that stops here. */}
           <Show when={login()}>
             {(who) => (
               <p class={`${styles.callout} ${styles.verified}`}>
