@@ -21,6 +21,11 @@
 # Windows looks a name up without regard to case, so a root on `PATH` would
 # answer `verkstead guide` with a window instead of the Guide (ADR-0020).
 #
+# **And the msi, which an NSIS installer cannot upgrade**: left alone, the two
+# would share one directory, with two rows in Installed apps, two `PATH`
+# entries, and an msi whose later uninstall deletes this install's files. So
+# the install removes it first (Set 1393 Q2).
+#
 # Every macro is LogicLib and registers rather than labels and variables: a
 # macro is inserted once in the installer and once in the uninstaller, a label
 # may only be said once, and electron-builder compiles with warnings as errors,
@@ -30,8 +35,8 @@
 !include WinMessages.nsh
 
 # **The retired msi's UpgradeCode**, which is the one identifier every Verkstead
-# msi was installed under — carried over from the Rust msi and never changed.
-# Nothing reads it yet: it is what a machine still holding the msi is found by.
+# msi was installed under — carried over from the Rust msi and never changed. It
+# is what a machine still holding the msi is found by: see `customCheckAppRunning`.
 !define MSI_UPGRADE_CODE "{A4727089-F5B9-40A6-A196-1856E8D6827A}"
 
 # What the install directory is called, under `%LOCALAPPDATA%\Programs`.
@@ -212,4 +217,84 @@
     ${EndIf}
   ${EndIf}
   !insertmacro restoreRegisters
+!macroend
+
+# **The msi install this replaces, taken away before anything is extracted.**
+# Every product installed under the msi's UpgradeCode is found with
+# `MsiEnumRelatedProducts` and uninstalled with `msiexec /x … /qn`. The msi was
+# per-user, so its uninstall asks for no administrator. A machine that never
+# had the msi finds nothing and is not changed.
+#
+# Collected first and removed after, because a product removed while the list
+# is being read moves the ones after it down an index. A product code is 38
+# characters, so the list is read back 38 at a time.
+#
+# **What it leaves is everything the msi did not own**: the Data Directory,
+# the settings, and Launch on Startup's Run value, which the app writes and no
+# installer does. The msi's `PATH` entry and Start-menu entry go with it, and
+# the install after this puts this installer's own back.
+#
+# **A removal that fails stops the install**, the way the template stops when
+# the uninstall of an earlier NSIS install fails: going on would leave the two
+# products sharing one directory, which is the state this is here to prevent.
+!macro removeMsi
+  !insertmacro saveRegisters
+  StrCpy $R1 ""
+  StrCpy $R2 0
+  ${Do}
+    System::Call 'msi::MsiEnumRelatedProductsW(w "${MSI_UPGRADE_CODE}", i 0, i R2, w .R3) i .R0'
+    ${If} $R0 != 0
+      ${Break}
+    ${EndIf}
+    StrCpy $R1 "$R1$R3"
+    IntOp $R2 $R2 + 1
+  ${Loop}
+
+  ${DoUntil} $R1 == ""
+    StrCpy $R3 $R1 38
+    StrCpy $R1 $R1 "" 38
+    DetailPrint "Removing the msi install of ${PRODUCT_NAME}, $R3."
+    # Said before the run, because a run that could not start sets nothing.
+    StrCpy $R0 "not started"
+    ClearErrors
+    ExecWait '"$SYSDIR\msiexec.exe" /x $R3 /qn /norestart' $R0
+    # 3010 is a removal that wants a restart to finish, and 1605 is a product
+    # already gone: both leave nothing for this install to share a directory with.
+    ${If} ${Errors}
+    ${OrIf} $R0 != 0
+    ${AndIf} $R0 != 3010
+    ${AndIf} $R0 != 1605
+      MessageBox MB_OK|MB_ICONEXCLAMATION "The earlier ${PRODUCT_NAME} install could not be removed. Uninstall ${PRODUCT_NAME} from Installed apps, then run this installer again." /SD IDOK
+      DetailPrint "msiexec /x $R3 ended with $R0."
+      SetErrorLevel 2
+      Quit
+    ${EndIf}
+  ${Loop}
+  !insertmacro restoreRegisters
+!macroend
+
+# **Where that happens: after the running app is stopped, before the files go
+# in.** The template has one point between the two, and it is this macro, which
+# replaces its running-app check — so the check is the template's own, inserted
+# here unchanged, with the msi's removal after it. The msi installed to this
+# same directory, so the check that finds a running Verkstead there finds the
+# msi's too and stops it, and the msi is not uninstalled from under a running
+# app.
+#
+# The names inserted are app-builder-lib's own (`allowOnlyOneInstallerInstance.nsh`),
+# held by the version the lockfile pins. A template that renamed them fails the
+# pack rather than the install. Defining this macro is also what tells the
+# template not to include the process lookup the check uses, so that is
+# included here.
+#
+# The uninstaller runs the same check, and removes no msi.
+!include "getProcessInfo.nsh"
+Var pid
+
+!macro customCheckAppRunning
+  !insertmacro IS_POWERSHELL_AVAILABLE
+  !insertmacro _CHECK_APP_RUNNING
+  !ifndef BUILD_UNINSTALLER
+    !insertmacro removeMsi
+  !endif
 !macroend

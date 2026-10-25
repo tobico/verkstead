@@ -2119,6 +2119,213 @@ jobs:
             exit 1
           fi
 
+      # **An install over what is already there**, which is the one shape of
+      # install a real machine makes after its first. Two halves, each followed
+      # by three counts — one row in Installed apps, one entry on this user's
+      # `PATH` naming the install, one Start-menu entry across both menus —
+      # because those are the three ways two products would show to whoever
+      # installed them. Asked after each half rather than once at the end, so
+      # that a failure says which install left two.
+      #
+      # **The first half is this exe over itself**, with nothing uninstalled in
+      # between: a second download of a version already installed, and the
+      # shape electron-updater's update takes. It is the check that
+      # `desktop/build/installer.nsh` adds its `PATH` entry once rather than once
+      # more.
+      #
+      # **The second half is this exe over the last Release's msi**, which an
+      # NSIS installer cannot upgrade: the include script finds the msi by its
+      # UpgradeCode and uninstalls it before anything is extracted (Set 1393
+      # Q2). So the order is the one a machine that ran that release is in —
+      # this install taken away, the msi installed, then this exe over it — and
+      # afterwards the msi is gone from Windows Installer's own record of this
+      # user's products, as well as from the three counts.
+      #
+      # **And the `PATH` entry is read as well as counted.** The msi's entry and
+      # this installer's name the same directory, so a count of one does not say
+      # whose survived. What is checked is that the one left is
+      # `resources\cli`, which is what a terminal needs.
+      #
+      # **Launch on Startup's Run value survives it.** That value is the app's,
+      # written through Electron's login-item API from the window, which nothing
+      # here can reach. So it is written the way that API writes it, before the
+      # install over the msi, and read back after it: still there, unchanged,
+      # and naming a `Verkstead.exe` that exists.
+      #
+      # **Where the last Release has no msi, that half is skipped with a
+      # warning** saying it went unchecked, so a skip cannot be read off the log
+      # as a pass. The first Release to ship this installer is the last to carry
+      # an msi, so from the one after it this half skips itself every run. It
+      # retires with the removal code in `desktop/build/installer.nsh`, which
+      # is there for machines still holding that msi.
+      #
+      # Before the uninstall step rather than after it, so that the install that
+      # step takes away is the one made over the msi.
+      - name: Installed over itself, and over the last Release's msi, it is still one
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+          # Every program below is a windows-subsystem one, so each is waited
+          # for through `Start-Process -Wait` — see the step that installed this
+          # in the first place.
+          run() {
+            said=$1
+            program=$2
+            arguments=$3
+            code=0
+            powershell -NoProfile -Command \
+              "exit (Start-Process -FilePath \"$program\" -ArgumentList '$arguments' -Wait -PassThru).ExitCode" ||
+              code=$?
+            if [ "$code" -ne 0 ]; then
+              echo "::error::$said failed (exit $code)."
+              exit 1
+            fi
+            echo "$said: done."
+          }
+
+          # The three counts and what they are counting, in one pass and printed
+          # whole, so that a count that is wrong shows what the machine holds.
+          # Looked for by the name a human reads, because what is being asked is
+          # what somebody opening Installed apps finds.
+          counts() {
+            powershell -NoProfile -Command "
+              \$menus = @(
+                (Join-Path \$env:APPDATA 'Microsoft\Windows\Start Menu\Programs'),
+                (Join-Path \$env:ProgramData 'Microsoft\Windows\Start Menu\Programs')
+              ) | Where-Object { Test-Path \$_ }
+              \$arp = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue |
+                Where-Object DisplayName -eq 'Verkstead')
+              \$path = @([Environment]::GetEnvironmentVariable('Path','User') -split ';' |
+                Where-Object { \$_ -like '*Verkstead*' })
+              \$menu = @(\$menus | ForEach-Object { Get-ChildItem \$_ -Recurse -Filter 'Verkstead*.lnk' -EA SilentlyContinue })
+              'arp=' + \$arp.Count
+              'path=' + \$path.Count
+              'menu=' + \$menu.Count
+              'says=Installed apps: ' + ((\$arp | ForEach-Object { \$_.DisplayVersion + ' at ' + (\$_.PSPath -replace '^.*::','') }) -join '; ')
+              'says=PATH: ' + (\$path -join '; ')
+              'says=Start menu: ' + ((\$menu | ForEach-Object { \$_.FullName }) -join '; ')
+            " | tr -d '\r'
+          }
+
+          # The msi products Windows Installer holds for this user, by name: a
+          # per-user msi is recorded under this key and nowhere an NSIS install
+          # writes.
+          msis() {
+            powershell -NoProfile -Command "
+              @(Get-ItemProperty 'HKCU:\Software\Microsoft\Installer\Products\*' -EA SilentlyContinue |
+                Where-Object ProductName -eq 'Verkstead').Count" | tr -d '\r'
+          }
+
+          # One of each, and the one `PATH` entry naming `resources\cli`.
+          # Compared with the case and a trailing separator taken off, for the
+          # reasons the steps above give.
+          one() {
+            said=$1
+            report=$(counts)
+            echo "After $said, the machine holds:"
+            printf '%s\n' "$report" | sed -n 's/^says=/  /p'
+            for pair in "arp=rows in Installed apps" "path=PATH entries" \
+              "menu=Start-menu entries"; do
+              got=$(printf '%s\n' "$report" | sed -n "s/^${pair%%=*}=//p")
+              if [ "$got" != 1 ]; then
+                echo "::error::After $said there are $got ${pair#*=} for Verkstead, and an install over another leaves one."
+                exit 1
+              fi
+            done
+
+            entry=$(printf '%s\n' "$report" | sed -n 's/^says=PATH: //p')
+            got=$(lower "$(cygpath -u "$entry" 2> /dev/null)")
+            if [ "${got%/}" != "$(lower "$INSTALL/resources/cli")" ]; then
+              echo "::error::After $said the one PATH entry is '$entry', and it is not $INSTALL/resources/cli."
+              exit 1
+            fi
+            echo "One row in Installed apps, one Start-menu entry, and the one PATH entry is $entry."
+          }
+
+          installer=$(cygpath -w "$INSTALLER")
+
+          # The first half.
+          run "Installing this exe over itself" "$installer" /S
+          one "installing it over itself"
+
+          # The second half, and the tag it is against: the last Release, since
+          # the tag for this one is `publish`'s to make. The Release is read
+          # before the asset, so that one with no msi is told apart from none.
+          tag=$(gh release view --json tagName --jq .tagName 2> release.err) || tag=
+          if [ -z "$tag" ]; then
+            echo "::warning::There is no Release to fetch an msi from, so the install over the msi went unchecked."
+            cat release.err
+            exit 0
+          fi
+          if [ -z "$(gh release view "$tag" --json assets \
+            --jq '.assets[].name | select(. == "Verkstead-x86_64.msi")')" ]; then
+            echo "::warning::The last Release, $tag, carries no Verkstead-x86_64.msi, so the install over the msi went unchecked."
+            exit 0
+          fi
+          gh release download "$tag" --pattern Verkstead-x86_64.msi --dir previous
+          ls -l previous
+
+          # This install taken away, the way Installed apps would take it.
+          quiet=$(powershell -NoProfile -Command "
+            (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue |
+              Where-Object DisplayName -eq 'Verkstead').QuietUninstallString" | tr -d '\r')
+          program=${quiet#\"}
+          program=${program%%\"*}
+          run "Uninstalling it to make room for $tag's msi" "$program" "${quiet#\""$program"\"}"
+          for _ in $(seq 60); do
+            [ ! -e "$INSTALL" ] && break
+            sleep 1
+          done
+
+          log=$(cygpath -w "$PWD/msiexec.log")
+          code=0
+          powershell -NoProfile -Command \
+            "exit (Start-Process msiexec -ArgumentList '/i',\"$(cygpath -w "$PWD/previous/Verkstead-x86_64.msi")\",'/qn','/norestart','/l*v',\"$log\" -Wait -PassThru).ExitCode" ||
+            code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error::Windows Installer refused $tag's msi (exit $code)."
+            tr -d '\000' < msiexec.log | tail -n 200
+            exit 1
+          fi
+          if [ "$(msis)" != 1 ]; then
+            echo "::error::$tag's msi installed, and Windows Installer does not hold it for this user."
+            exit 1
+          fi
+          echo "Windows Installer holds $tag's msi for this user."
+
+          # Launch on Startup, registered the way Electron's login-item API
+          # registers it: a value named `Verkstead`, holding the launcher in
+          # quotes and `--hidden` — see `desktop/src/startup.ts`.
+          start="\"$(cygpath -w "$INSTALL/Verkstead.exe")\" --hidden"
+          START="$start" powershell -NoProfile -Command \
+            "Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Verkstead -Value \$env:START"
+
+          run "Installing this exe over $tag's msi" "$installer" /S
+          one "installing it over $tag's msi"
+
+          if [ "$(msis)" != 0 ]; then
+            echo "::error::After installing over $tag's msi, Windows Installer still holds the msi for this user."
+            exit 1
+          fi
+          echo "Windows Installer holds no Verkstead msi any more."
+
+          kept=$(powershell -NoProfile -Command \
+            "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -EA SilentlyContinue).Verkstead" |
+            tr -d '\r')
+          echo "Launch on Startup's Run value says: $kept"
+          if [ "$kept" != "$start" ]; then
+            echo "::error::After installing over $tag's msi, the Run value is '$kept', and it was '$start'."
+            exit 1
+          fi
+          if [ ! -f "$INSTALL/Verkstead.exe" ]; then
+            echo "::error::The Run value names $INSTALL/Verkstead.exe, and there is nothing there."
+            exit 1
+          fi
+          echo "The Run value is as it was, and names the launcher this install put there."
+
       # **And the uninstall takes back everything the install put down**, which
       # is a promise to whoever installed this as much as the install is: the
       # files, the Start-menu entry, the row in Installed apps and — the one
