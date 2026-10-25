@@ -115,6 +115,11 @@ struct Verkstead {
     /// [`Verkstead::garbles`].
     garbling: Arc<AtomicBool>,
 
+    /// And whether it turns away an edit or a removal pressed on one of its
+    /// Profiles from a member, which is the other thing a member a release apart
+    /// can do — see [`Verkstead::refuses`].
+    refusing: Arc<AtomicBool>,
+
     /// Held for the length of the test: the identity, the database and the
     /// accounts the Profiles here name all live in it.
     dir: tempfile::TempDir,
@@ -188,21 +193,30 @@ impl Verkstead {
         );
 
         let garbling = Arc::new(AtomicBool::new(false));
+        let refusing = Arc::new(AtomicBool::new(false));
 
         // What a member reads of this device's Profiles, answered unreadably
-        // while the test says so.
+        // while the test says so — and a press on one of them, turned away.
         let over_the_link = over_the_link.layer(axum::middleware::from_fn({
             let garbling = garbling.clone();
+            let refusing = refusing.clone();
 
             move |asked: Request<Body>, next: axum::middleware::Next| {
-                let garbled = garbling.load(Ordering::SeqCst) && asked.uri().path() == PROFILES;
+                let path = asked.uri().path();
+                let garbled = garbling.load(Ordering::SeqCst) && path == PROFILES;
+                let refused = refusing.load(Ordering::SeqCst)
+                    && asked.method() == axum::http::Method::POST
+                    && path.starts_with(&format!("{PROFILES}/"));
 
                 async move {
-                    match garbled {
-                        true => {
+                    match (garbled, refused) {
+                        (true, _) => {
                             axum::response::IntoResponse::into_response("{\"not\": \"a list\"}")
                         }
-                        false => next.run(asked).await,
+                        (_, true) => {
+                            axum::response::IntoResponse::into_response(StatusCode::NOT_FOUND)
+                        }
+                        _ => next.run(asked).await,
                     }
                 }
             }
@@ -226,8 +240,44 @@ impl Verkstead {
             address,
             reading,
             garbling,
+            refusing,
             dir,
         }
+    }
+
+    /// Turn away every edit and removal pressed on its Profiles from a member,
+    /// with a `404`, or stop.
+    fn refuses(&self, refusing: bool) {
+        self.refusing.store(refusing, Ordering::SeqCst);
+    }
+
+    /// Wait until this device's row for `member` says it runs `version`, which
+    /// is the take-up of its Nudge stream having read it again.
+    async fn sees_running(&self, member: &str, version: &str) {
+        let mut last = None;
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                let view: DevicesView = reading(&self.workbench, "/api/ui/devices").await;
+
+                last = view
+                    .members
+                    .into_iter()
+                    .find(|row| row.identity.device == member)
+                    .expect("the member has a row")
+                    .identity
+                    .version;
+
+                if last.as_deref() == Some(version) {
+                    return;
+                }
+
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("the row never said {version}: it said {last:?}"));
     }
 
     /// Answer its Profiles with something no Verkstead can read, or stop.
@@ -285,6 +335,18 @@ impl Verkstead {
     /// Write `other` down as one of this device's members, at `addresses`, under
     /// the name and OS word it is to be shown as.
     async fn linked_to(&self, other: &Device, name: &str, os: &str, addresses: Vec<String>) {
+        self.linked_on(other, name, os, addresses, RUNNING).await;
+    }
+
+    /// The same, recording the member as running `version`.
+    async fn linked_on(
+        &self,
+        other: &Device,
+        name: &str,
+        os: &str,
+        addresses: Vec<String>,
+        version: &str,
+    ) {
         record_member(
             &self.pool,
             &Linking {
@@ -294,7 +356,7 @@ impl Verkstead {
                 addresses,
                 fingerprint: other.fingerprint().to_owned(),
                 kept_by: None,
-                version: Some(RUNNING.to_owned()),
+                version: Some(version.to_owned()),
             },
         )
         .await
@@ -1607,4 +1669,118 @@ async fn a_member_that_says_no_release_is_on_an_older_one() {
         )),
     )
     .await;
+}
+
+/// An edit pressed here over a mirror, refused at home by a member a release
+/// apart, says the refusal and both releases in one line.
+#[tokio::test]
+async fn a_press_refused_by_a_member_a_release_apart_names_the_gap() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+
+    a.reading.now_running(Some("0.0.1"));
+
+    b.linked_to(&a.device, A_MACHINE, A_OS, vec![a.at()]).await;
+    let (machine, os) = this_machine();
+    a.linked_to(&b.device, &machine, &os, vec![b.at()]).await;
+
+    let _holding = b.holding();
+
+    a.saves("work").await;
+
+    let landed = b
+        .profiles_saying(|rows| called(rows, "work").is_some())
+        .await;
+    let mirror = called(&landed, "work").unwrap().clone();
+
+    b.sees_running(A, "0.0.1").await;
+    a.refuses(true);
+
+    let (status, said) = b.saves_over(&mirror, Some("weekend")).await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{said}");
+    assert!(
+        said.contains(&format!(
+            "{A_MACHINE} refused it: 404 Not Found. {A_MACHINE} is on 0.0.1 and this device is \
+             on {RUNNING}. Update {A_MACHINE}."
+        )),
+        "the refusal, then the gap: {said}",
+    );
+}
+
+/// The same refusal from a member on this device's release reads as it always
+/// has.
+#[tokio::test]
+async fn a_press_refused_on_the_same_release_says_the_refusal_alone() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.saves("work").await;
+
+    let landed = b
+        .profiles_saying(|rows| called(rows, "work").is_some())
+        .await;
+    let mirror = called(&landed, "work").unwrap().clone();
+
+    a.refuses(true);
+
+    let (status, said) = b.saves_over(&mirror, Some("weekend")).await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{said}");
+
+    let error: verkstead_schema::ApiError = serde_json::from_str(&said).unwrap();
+
+    assert_eq!(
+        error.error,
+        format!("{A_MACHINE} refused it: 404 Not Found.")
+    );
+}
+
+/// And a member a release apart that cannot be reached is refused as one that
+/// cannot be reached: nothing it said is about its release.
+#[tokio::test]
+async fn an_unreachable_member_a_release_apart_is_refused_without_the_gap() {
+    let b = Verkstead::answering(B).await;
+
+    let away = tempfile::tempdir().unwrap();
+    let asleep = Device::stated(away.path(), A).unwrap();
+
+    b.linked_on(
+        &asleep,
+        A_MACHINE,
+        A_OS,
+        vec!["127.0.0.1:1".to_owned()],
+        "0.0.1",
+    )
+    .await;
+
+    store::record_mirror(
+        &b.pool,
+        &Mirror {
+            device: A.to_owned(),
+            id: 7,
+            login: true,
+        },
+        &store::ProfileFacts {
+            name: Some("work".to_owned()),
+            account: store::Account::Claude {
+                claude_dir: PathBuf::from("/home/you/accounts/work/.claude"),
+                config_file: PathBuf::from("/home/you/accounts/work/.claude.json"),
+            },
+            models: vec![MODEL.to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let rows = b.profiles().await;
+    let mirror = called(&rows, "work").expect("the row A last gave").clone();
+
+    let (status, said) = b.saves_over(&mirror, Some("weekend")).await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{said}");
+
+    let error: verkstead_schema::ApiError = serde_json::from_str(&said).unwrap();
+
+    assert_eq!(error.error, format!("{A_MACHINE} couldn't be reached."));
 }

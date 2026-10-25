@@ -792,10 +792,14 @@ pub(crate) async fn put_to(
     match devices.relay(device, call).await {
         Ok(answered) if answered.status().is_success() => Ok(answered),
 
-        Ok(answered) => Err(Refusal::theirs(format!(
-            "{named} refused it: {}.",
-            answered.status(),
-        ))),
+        Ok(answered) => Err(Refusal::theirs(
+            apart(
+                Some(devices),
+                device,
+                format!("{named} refused it: {}.", answered.status()),
+            )
+            .await,
+        )),
 
         Err(Unrelayed::Unreachable(_)) => {
             Err(Refusal::theirs(format!("{named} couldn't be reached.")))
@@ -854,10 +858,47 @@ pub(crate) async fn word_from<T: serde::de::DeserializeOwned>(
 /// the one path that would need it twice, and a membership read on the way to a
 /// sentence nobody usually sees is cheaper than a second one on every press.
 async fn unreadable(devices: Option<&Devices>, device: &str, why: String) -> Refusal {
-    Refusal::theirs(format!(
+    let said = format!(
         "{} answered in a way this device can't read: {why}.",
         called(devices, device).await,
-    ))
+    );
+
+    Refusal::theirs(apart(devices, device, said).await)
+}
+
+/// What a member that answered and refused is told as: `said`, and after it the
+/// gap between its release and this device's where the two differ — *winvm
+/// refused it: 404 Not Found. winvm is on 0.2.0 and this device is on 0.2.2.
+/// Update winvm.* See [`crate::updates::gap`].
+///
+/// **Only for a member that answered.** One that could not be reached, or is no
+/// longer a member, is not refusing anything a release could explain, so those
+/// sentences go out as they are. And the gap is said rather than acted on: the
+/// press was the far end's to refuse, and nothing here refuses on a skew.
+///
+/// The row is read again here rather than carried down from [`called`], this
+/// being a sentence only a refusal is ever written for.
+async fn apart(devices: Option<&Devices>, device: &str, said: String) -> String {
+    let Some(devices) = devices else {
+        return said;
+    };
+
+    let Ok(members) = devices.membership().rows().await else {
+        return said;
+    };
+
+    let Some(member) = members.into_iter().find(|member| member.device == device) else {
+        return said;
+    };
+
+    match crate::updates::gap(
+        &member.name,
+        member.version.as_deref(),
+        devices.version().as_deref(),
+    ) {
+        Some(gap) => format!("{said} {gap}"),
+        None => said,
+    }
 }
 
 /// What a device is called, for the sentence a [`Refusal`] carries.

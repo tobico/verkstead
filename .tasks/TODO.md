@@ -24,4 +24,4 @@ Roadmap stage: [01: Versions across the cluster](docs/roadmaps/cluster-updates/0
 - [x] 02: Re-read on take-up — [details](02-re-read-on-take-up.md)
 - [x] 03: The two marks — [details](03-the-two-marks.md)
 - [x] 04: A member's failed read on its row, naming the gap — [details](04-a-failed-read-on-the-row.md)
-- [ ] 05: The gap on a refused press — [details](05-the-gap-on-a-refused-press.md)
+- [x] 05: The gap on a refused press — [details](05-the-gap-on-a-refused-press.md)

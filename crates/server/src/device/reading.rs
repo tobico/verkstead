@@ -435,12 +435,17 @@ impl Reading {
             os: self.os(),
             addresses: self.addresses().await,
             kept_by: self.keeper().map(|keeper| keeper.device().to_owned()),
-            version: self
-                .version
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .clone(),
+            version: self.version(),
         }
+    }
+
+    /// The release this device says it runs, read at the moment of asking —
+    /// see [`Reading::running`].
+    pub(crate) fn version(&self) -> Option<String> {
+        self.version
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     /// What this machine is called, which is its hostname.

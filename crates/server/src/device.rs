@@ -944,6 +944,13 @@ impl Devices {
         self.reading.name()
     }
 
+    /// And the release it runs — see [`reading::Reading::version`]. What a
+    /// member's is compared against where a call to it fails, for the sentence
+    /// [`crate::updates::gap`] writes.
+    pub(crate) fn version(&self) -> Option<String> {
+        self.reading.version()
+    }
+
     /// And the word for its operating system — see [`reading::Reading::os`].
     /// The merged list compares a member's against it, leaving the member's
     /// mark off a row where the two are the same (see
