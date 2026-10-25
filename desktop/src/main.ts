@@ -410,7 +410,7 @@ async function run(): Promise<void> {
 
   // And the name Windows knows this application by, said before there is a
   // window to be named — which is what ties the window to the Start-menu entry
-  // the msi wrote (ADR-0020). That entry carries `System.AppUserModel.ID =
+  // the installer wrote (ADR-0020). That entry carries `System.AppUserModel.ID =
   // net.tobico.Verkstead`, and a window whose own id is something else is a
   // second, unnamed button on the taskbar beside it. Measured on Windows 11
   // under Electron 43 against the packed app: with nothing said here the window
