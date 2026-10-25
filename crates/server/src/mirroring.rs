@@ -73,7 +73,7 @@ use sqlx::SqlitePool;
 use verkstead_render::{ProfileAccount, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved};
 use verkstead_schema::Nudge;
 
-use crate::relaying::{self, Call, Refusal, Streamed, as_json, read_of};
+use crate::relaying::{self, Call, Read, Refusal, Streamed, Unread, answer_of, as_json};
 use crate::{AppState, store};
 
 /// How many files this process has written beside their own names, which is what
@@ -178,7 +178,10 @@ async fn held(state: AppState) {
                 // moment: a device linked while this server is up has Profiles
                 // to mirror, and one unlinked has mirrors to take away. Both are
                 // one pass over the membership.
-                (None, Nudge::Devices) => read_every_member(&state).await,
+                //
+                // Not this device's own pages being told a row's line moved,
+                // which is not the membership — see [`relaying::FailedReads`].
+                (None, Nudge::Devices) if !moved.kept_here => read_every_member(&state).await,
 
                 // Everything else this device announces is about its own work,
                 // and its own Profiles are rows in this store already.
@@ -380,7 +383,15 @@ async fn read_member(state: &AppState, device: &str) {
         return;
     };
 
-    let Some(said) = read_of(
+    // A read that did not land is drawn on the member's row as well as logged —
+    // see [`relaying::FailedReads`] — and the next one that does takes it away.
+    let failed = |why| {
+        devices
+            .failed_reads()
+            .failed(&state.nudges, device, Read::Profiles, why)
+    };
+
+    let said = match answer_of(
         devices,
         device,
         PROFILES.to_owned(),
@@ -388,12 +399,18 @@ async fn read_member(state: &AppState, device: &str) {
         MOST_THE_PROFILES_ARE,
     )
     .await
-    else {
-        return;
+    {
+        Ok(said) => said,
+        Err(why) => return failed(why),
     };
 
     let rows = match serde_json::from_slice::<Vec<ProfileEntry>>(&said) {
-        Ok(rows) => rows,
+        Ok(rows) => {
+            devices
+                .failed_reads()
+                .held(&state.nudges, device, Read::Profiles);
+            rows
+        }
 
         // A member running a Verkstead this one cannot read the Profiles of.
         // What it last said stands, which is the stance a read that never landed
@@ -405,7 +422,7 @@ async fn read_member(state: &AppState, device: &str) {
                 "a member answered its Agent Profiles in a way this device cannot read, so the \
                  mirrors of it stand: {why}",
             );
-            return;
+            return failed(Unread::Answered);
         }
     };
 

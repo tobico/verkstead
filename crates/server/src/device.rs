@@ -869,6 +869,10 @@ pub struct Devices {
     /// Annex's row to be drawn with. See [`Devices::annex_troubled`].
     annex_trouble: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 
+    /// And each member's background reads that did not land, which its row
+    /// carries as a line of its own — see [`crate::relaying::FailedReads`].
+    failed_reads: crate::relaying::FailedReads,
+
     /// And the Annex it keeps, booted at its start and terminated at its stop,
     /// where it is a Keeper with a way of having one — held here so that the
     /// install run that makes the box boots and links it through the same
@@ -913,6 +917,7 @@ impl Devices {
             annex_forward: crate::peer::annex_forward::Pointing::at_nothing(),
             peer_port: crate::peer::PEER_PORT,
             annex_trouble: std::sync::Arc::default(),
+            failed_reads: crate::relaying::FailedReads::default(),
             annexed: None,
             nudges: crate::nudge::Nudges::new(),
             tellings: Tellings::default(),
@@ -1098,6 +1103,11 @@ impl Devices {
     /// not come up at this start — see [`Devices::annex_troubled`]. Where there
     /// is no row to carry it, an Annex that has never been linked, it is said
     /// beside this device's own instead.
+    ///
+    /// **And a member's row carries the background reads of it that did not
+    /// land** — see [`crate::relaying::FailedReads`] — after the Annex's line
+    /// where it has both, and followed by the gap between its release and this
+    /// device's where there is one: [`crate::updates::gap`].
     pub(crate) async fn listing(&self) -> Result<DevicesView> {
         let mut members = self.members.listed().await?;
 
@@ -1118,8 +1128,32 @@ impl Devices {
             }
         }
 
+        let this = self.reading.identity(&self.device).await;
+
+        for member in &mut members {
+            let identity = &member.identity;
+
+            let Some(failed) = self.failed_reads.line(&identity.device, &identity.name) else {
+                continue;
+            };
+
+            let gap = crate::updates::gap(
+                &identity.name,
+                identity.version.as_deref(),
+                this.version.as_deref(),
+            );
+
+            member.trouble = Some(
+                [member.trouble.take(), Some(failed), gap]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+        }
+
         Ok(DevicesView {
-            this: self.reading.identity(&self.device).await,
+            this,
             members,
             pending: self.joins.pending(OffsetDateTime::now_utc()).await?,
             annex_trouble,
@@ -1134,6 +1168,12 @@ impl Devices {
             .annex_trouble
             .lock()
             .expect("the Annex's trouble is never poisoned") = why;
+    }
+
+    /// The background reads of each member that did not land, which every
+    /// reader of a member records against — see [`crate::relaying::FailedReads`].
+    pub(crate) fn failed_reads(&self) -> &crate::relaying::FailedReads {
+        &self.failed_reads
     }
 
     /// And what was last said, which the Annex's row on the Devices list is

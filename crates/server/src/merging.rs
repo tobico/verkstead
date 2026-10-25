@@ -100,7 +100,7 @@ use verkstead_render::{ConversationEntry, RowDevice, ShowingArchived};
 use verkstead_schema::Nudge;
 use verkstead_store::Member;
 
-use crate::relaying::read_of;
+use crate::relaying::{Read, Unread, answer_of};
 use crate::{AppState, platform, store};
 
 /// The path a member's own sidebar list is read at, which is the path this
@@ -505,7 +505,17 @@ async fn read_member(state: &AppState, device: &str) {
     // [`crate::ui::conversations`]. The dial itself is the one every read this
     // device makes of its own accord goes through, carrying no header of a
     // browser's and no body at all — see [`crate::relaying::read_of`].
-    let Some(said) = read_of(
+    //
+    // And one that did not land is drawn on the member's row as well as logged,
+    // the list and its archives as one read of its Conversations — see
+    // [`crate::relaying::FailedReads`].
+    let failed = |why| {
+        devices
+            .failed_reads()
+            .failed(&state.nudges, device, Read::Conversations, why)
+    };
+
+    let said = match answer_of(
         devices,
         device,
         format!("{LIST}?archived={showing}"),
@@ -513,8 +523,9 @@ async fn read_member(state: &AppState, device: &str) {
         MOST_A_LIST_IS,
     )
     .await
-    else {
-        return;
+    {
+        Ok(said) => said,
+        Err(why) => return failed(why),
     };
 
     let rows = match serde_json::from_slice::<Vec<ConversationEntry>>(&said) {
@@ -530,11 +541,11 @@ async fn read_member(state: &AppState, device: &str) {
                 "a member answered a list of Conversations this device cannot read, so what it \
                  last said stands: {why}",
             );
-            return;
+            return failed(Unread::Answered);
         }
     };
 
-    let Some(said) = read_of(
+    let said = match answer_of(
         devices,
         device,
         ARCHIVES.to_owned(),
@@ -542,8 +553,9 @@ async fn read_member(state: &AppState, device: &str) {
         MOST_A_LIST_IS,
     )
     .await
-    else {
-        return;
+    {
+        Ok(said) => said,
+        Err(why) => return failed(why),
     };
 
     let any_archived = match serde_json::from_slice::<ShowingArchived>(&said) {
@@ -557,9 +569,15 @@ async fn read_member(state: &AppState, device: &str) {
                 "a member answered its archives in a way this device cannot read, so what it last \
                  said stands: {why}",
             );
-            return;
+            return failed(Unread::Answered);
         }
     };
+
+    // The member answered, whichever question this was the answer to, so a
+    // failed read of its Conversations no longer stands.
+    devices
+        .failed_reads()
+        .held(&state.nudges, device, Read::Conversations);
 
     // An answer to an older question than the one already held changes nothing
     // a page could read, so there is nothing to announce.

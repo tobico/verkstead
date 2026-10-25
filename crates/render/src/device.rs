@@ -249,8 +249,15 @@ pub struct LinkedDevice {
     /// Drawn under the row, which reads *unreachable* beside it until the
     /// Annex answers (ADR-0024).
     ///
-    /// The Keeper's own finding, like the flag above, and only a Keeper has
-    /// one: `None` on every other row, and on an Annex that came up.
+    /// **And the background reads of this member that did not land** —
+    /// its Agent Profiles, its Authors, its Conversations — after the Annex's
+    /// line where there is both, and then the gap between its release and this
+    /// device's where they differ: *winvm's Agent Profiles couldn't be read.
+    /// winvm is on 0.2.0 and this device is on 0.2.2. Update winvm.* Held until
+    /// the next read of that kind lands.
+    ///
+    /// This device's own findings, like the flag above: `None` on a row with
+    /// none of either.
     #[serde(default)]
     pub trouble: Option<String>,
 

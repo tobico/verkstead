@@ -2491,7 +2491,11 @@ async fn a_failed_update_leaves_its_line_on_the_row_and_the_annex_answering() {
     let app = router_answering_devices_telling(keeper.pool.clone(), devices, keeper.nudges.clone());
     let kept = listing(&app).await;
     assert_eq!(kept.members.len(), 1);
-    assert_eq!(kept.members[0].trouble.as_deref(), Some(line));
+
+    // First on the row: the box here is a stand-in that answers none of the
+    // background reads a Keeper makes of its Annex, which the row says after it.
+    let trouble = kept.members[0].trouble.as_deref().unwrap_or_default();
+    assert!(trouble.starts_with(line), "the row read {trouble:?}");
 }
 
 /// What a Keeper says about the work in its `config.yaml`: every key the

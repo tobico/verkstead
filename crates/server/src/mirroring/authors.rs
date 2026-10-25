@@ -37,7 +37,7 @@ use verkstead_schema::Nudge;
 
 use super::{MOST_AN_OUTCOME_IS, Pressed};
 use crate::peer::authors::TOKEN;
-use crate::relaying::{Call, Streamed, as_json, asking, read_of, word_from};
+use crate::relaying::{Call, Read, Streamed, Unread, answer_of, as_json, asking, word_from};
 use crate::settings::{Author, Mirrored, Settings};
 use crate::{AppState, store};
 
@@ -241,7 +241,9 @@ async fn held(state: AppState) {
                     read_member(&state, &device).await
                 }
 
-                (None, Nudge::Devices) => read_every_member(&state).await,
+                // Not a row's line moving, which is not the membership — see
+                // [`crate::relaying::FailedReads`].
+                (None, Nudge::Devices) if !moved.kept_here => read_every_member(&state).await,
 
                 _ => {}
             },
@@ -322,7 +324,14 @@ async fn read_member(state: &AppState, device: &str) {
         return;
     };
 
-    let Some(said) = read_of(
+    // Drawn on the member's row as well as logged, as the Profiles' read is.
+    let failed = |why| {
+        devices
+            .failed_reads()
+            .failed(&state.nudges, device, Read::Authors, why)
+    };
+
+    let said = match answer_of(
         devices,
         device,
         AUTHORS.to_owned(),
@@ -330,19 +339,25 @@ async fn read_member(state: &AppState, device: &str) {
         MOST_THE_AUTHORS_ARE,
     )
     .await
-    else {
-        return;
+    {
+        Ok(said) => said,
+        Err(why) => return failed(why),
     };
 
     let rows = match serde_json::from_slice::<Vec<AuthorEntry>>(&said) {
-        Ok(rows) => rows,
+        Ok(rows) => {
+            devices
+                .failed_reads()
+                .held(&state.nudges, device, Read::Authors);
+            rows
+        }
         Err(why) => {
             tracing::warn!(
                 device,
                 "a member answered its Authors in a way this device cannot read, so the mirrors \
                  of it stand: {why}",
             );
-            return;
+            return failed(Unread::Answered);
         }
     };
 

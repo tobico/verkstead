@@ -29,6 +29,8 @@
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::Router;
 use axum::body::Body;
@@ -37,7 +39,7 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{ConversationView, ProfileEntry};
+use verkstead_render::{ConversationView, DevicesView, ProfileEntry};
 use verkstead_schema::Nudge;
 use verkstead_server::device::reading::{RUNNING, Reading};
 use verkstead_server::device::{Device, Devices};
@@ -104,6 +106,14 @@ struct Verkstead {
     cluster: Devices,
     workbench: Router,
     address: SocketAddr,
+
+    /// What it says of itself, which a suite moves onto another release.
+    reading: Reading,
+
+    /// And whether it answers its Profiles with something no Verkstead can
+    /// read, which is what a member a release apart looks like — see
+    /// [`Verkstead::garbles`].
+    garbling: Arc<AtomicBool>,
 
     /// Held for the length of the test: the identity, the database and the
     /// accounts the Profiles here name all live in it.
@@ -177,9 +187,30 @@ impl Verkstead {
             machine,
         );
 
+        let garbling = Arc::new(AtomicBool::new(false));
+
+        // What a member reads of this device's Profiles, answered unreadably
+        // while the test says so.
+        let over_the_link = over_the_link.layer(axum::middleware::from_fn({
+            let garbling = garbling.clone();
+
+            move |asked: Request<Body>, next: axum::middleware::Next| {
+                let garbled = garbling.load(Ordering::SeqCst) && asked.uri().path() == PROFILES;
+
+                async move {
+                    match garbled {
+                        true => {
+                            axum::response::IntoResponse::into_response("{\"not\": \"a list\"}")
+                        }
+                        false => next.run(asked).await,
+                    }
+                }
+            }
+        }));
+
         tokio::spawn(listener.serving(peer::router(
             device.clone(),
-            reading,
+            reading.clone(),
             members,
             Joins::none(),
             nudges.clone(),
@@ -193,8 +224,43 @@ impl Verkstead {
             cluster,
             workbench,
             address,
+            reading,
+            garbling,
             dir,
         }
+    }
+
+    /// Answer its Profiles with something no Verkstead can read, or stop.
+    fn garbles(&self, garbling: bool) {
+        self.garbling.store(garbling, Ordering::SeqCst);
+    }
+
+    /// The line this device's Devices section draws under `member`'s row, once
+    /// it says what the test is waiting for, or a panic saying what it did say.
+    async fn trouble_on(&self, member: &str, what: Option<&str>) {
+        let mut last = None;
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                let view: DevicesView = reading(&self.workbench, "/api/ui/devices").await;
+
+                last = view
+                    .members
+                    .into_iter()
+                    .find(|row| row.identity.device == member)
+                    .expect("the member has a row")
+                    .trouble;
+
+                if last.as_deref() == what {
+                    return;
+                }
+
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("the row never read {what:?}: it read {last:?}"));
     }
 
     /// Hold a Nudge stream to every member of this device's cluster, which is
@@ -1467,4 +1533,78 @@ async fn a_pairing_against_a_broken_mirror_still_reads_as_a_pairing() {
         "and the work is not ready to start, which is the pane saying it before \
          the press does",
     );
+}
+
+/// A member a release apart whose Profiles answer this device cannot read has
+/// that said on its Devices row, naming both releases and the one to update —
+/// the winvm incident, as it should have read. And the line goes once a read
+/// of them lands.
+#[tokio::test]
+async fn a_members_profiles_that_cannot_be_read_are_said_on_its_row_with_the_gap() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+
+    a.reading.now_running(Some("0.0.1"));
+    a.garbles(true);
+
+    b.linked_to(&a.device, A_MACHINE, A_OS, vec![a.at()]).await;
+    let (machine, os) = this_machine();
+    a.linked_to(&b.device, &machine, &os, vec![b.at()]).await;
+
+    let _holding = b.holding();
+
+    b.trouble_on(
+        A,
+        Some(&format!(
+            "{A_MACHINE}'s Agent Profiles couldn't be read. {A_MACHINE} is on 0.0.1 and this \
+             device is on {RUNNING}. Update {A_MACHINE}."
+        )),
+    )
+    .await;
+
+    a.garbles(false);
+    b.nudges.announce(Nudge::Devices);
+
+    b.trouble_on(A, None).await;
+}
+
+/// On the same release the failure is said alone.
+#[tokio::test]
+async fn on_the_same_release_the_failure_is_said_alone() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.garbles(true);
+    b.nudges.announce(Nudge::Devices);
+
+    b.trouble_on(
+        A,
+        Some(&format!("{A_MACHINE}'s Agent Profiles couldn't be read.")),
+    )
+    .await;
+}
+
+/// And a member that says no release at all is from before releases were said,
+/// so older than this device's.
+#[tokio::test]
+async fn a_member_that_says_no_release_is_on_an_older_one() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+
+    a.reading.now_running(None);
+    a.garbles(true);
+
+    b.linked_to(&a.device, A_MACHINE, A_OS, vec![a.at()]).await;
+    let (machine, os) = this_machine();
+    a.linked_to(&b.device, &machine, &os, vec![b.at()]).await;
+
+    let _holding = b.holding();
+
+    b.trouble_on(
+        A,
+        Some(&format!(
+            "{A_MACHINE}'s Agent Profiles couldn't be read. {A_MACHINE} is on an older release \
+             than this device's {RUNNING}. Update {A_MACHINE}."
+        )),
+    )
+    .await;
 }

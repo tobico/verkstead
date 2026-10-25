@@ -73,6 +73,7 @@
 pub(crate) mod bridging;
 pub(crate) mod freshness;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
@@ -89,6 +90,7 @@ use verkstead_schema::ApiError;
 
 use crate::AppState;
 use crate::device::{Devices, Unrelayed};
+use crate::nudge::Nudges;
 use crate::ui::{refused, unavailable};
 
 /// The prefix a relayed call stands under, with the Device Id as the segment
@@ -447,6 +449,20 @@ pub(crate) async fn read_of(
     about: &str,
     most: usize,
 ) -> Option<Vec<u8>> {
+    answer_of(devices, device, onwards, about, most).await.ok()
+}
+
+/// The same read, saying which way it did not land: [`Unread`].
+///
+/// What the background reads that draw their failure on the member's row are
+/// made with — see [`FailedReads`]. The others want only the body.
+pub(crate) async fn answer_of(
+    devices: &crate::device::Devices,
+    device: &str,
+    onwards: String,
+    about: &str,
+    most: usize,
+) -> Result<Vec<u8>, Unread> {
     let answered = match devices.relay(device, asking(onwards)).await {
         Ok(answered) => answered,
         Err(why) => {
@@ -455,7 +471,7 @@ pub(crate) async fn read_of(
                 "a member's {about} could not be read, so what it last said stands: {}",
                 unrelayed(&why),
             );
-            return None;
+            return Err(Unread::Unanswered);
         }
     };
 
@@ -465,19 +481,136 @@ pub(crate) async fn read_of(
             status = %answered.status(),
             "a member refused the read of its {about}, so what it last said stands",
         );
-        return None;
+        return Err(Unread::Answered);
     }
 
     match bounded(answered, most).await {
-        Ok(body) => Some(body),
+        Ok(body) => Ok(body),
         Err(why) => {
             tracing::warn!(
                 device,
                 "a member's {about} could not be read to the end: {why:#}"
             );
-            None
+            Err(Unread::Answered)
         }
     }
+}
+
+/// Which way a read of a member did not land.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unread {
+    /// No member answered: it is not there, or the link is down. Its row says
+    /// so already, reading *unreachable*, so this is no line of its own.
+    Unanswered,
+
+    /// It answered, and what it answered was a refusal, or more than this
+    /// device will hold, or something this device could not make out — which
+    /// is what two devices a release apart look like (ADR-0027, *Seeing
+    /// versions*), and what [`FailedReads`] puts on the row.
+    Answered,
+}
+
+/// What this device reads of each member of its own accord, as the row names
+/// it when a read fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Read {
+    Profiles,
+    Authors,
+    Conversations,
+}
+
+impl Read {
+    fn words(self) -> &'static str {
+        match self {
+            Read::Profiles => "Agent Profiles",
+            Read::Authors => "Authors",
+            Read::Conversations => "Conversations",
+        }
+    }
+}
+
+/// **The last failed background read of each member**, kind by kind, which is
+/// the line its Devices row carries until the next read of that kind lands.
+///
+/// Without it a member that answers this device in a way it cannot read — the
+/// winvm incident, a release apart — fails into the log and onto neither
+/// screen. In memory and nothing written down: it is about this run, and a
+/// start reads every member again.
+///
+/// Shared by every clone, the way the Annex's trouble beside it is.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FailedReads(Arc<Mutex<BTreeMap<String, BTreeSet<Read>>>>);
+
+impl FailedReads {
+    /// `device`'s read of `read` did not land, for `why`. Only a member that
+    /// answered leaves a line — see [`Unread`] — and the pages are told where
+    /// it is a new one.
+    pub(crate) fn failed(&self, nudges: &Nudges, device: &str, read: Read, why: Unread) {
+        if why == Unread::Unanswered {
+            return;
+        }
+
+        let new = self
+            .0
+            .lock()
+            .expect("the failed reads are never poisoned")
+            .entry(device.to_owned())
+            .or_default()
+            .insert(read);
+
+        if new {
+            told(nudges);
+        }
+    }
+
+    /// And it did land, which takes its line away.
+    pub(crate) fn held(&self, nudges: &Nudges, device: &str, read: Read) {
+        let gone = {
+            let mut failed = self.0.lock().expect("the failed reads are never poisoned");
+
+            let gone = failed
+                .get_mut(device)
+                .is_some_and(|reads| reads.remove(&read));
+
+            if failed.get(device).is_some_and(BTreeSet::is_empty) {
+                failed.remove(device);
+            }
+
+            gone
+        };
+
+        if gone {
+            told(nudges);
+        }
+    }
+
+    /// The sentence `device`'s row carries, under the `name` it is drawn with:
+    /// *winvm's Agent Profiles couldn't be read.* `None` where every read of it
+    /// landed.
+    pub(crate) fn line(&self, device: &str, name: &str) -> Option<String> {
+        let failed = self.0.lock().expect("the failed reads are never poisoned");
+        let words: Vec<&str> = failed
+            .get(device)?
+            .iter()
+            .map(|read| read.words())
+            .collect();
+
+        let listed = match words.as_slice() {
+            [] => return None,
+            [one] => (*one).to_owned(),
+            [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        };
+
+        Some(format!("{name}'s {listed} couldn't be read."))
+    }
+}
+
+/// The Devices section told its rows moved — to this device's own pages alone,
+/// this being nobody else's news, and marked so that the mirrors, which read
+/// every member again on a Devices Nudge, leave it be: what moved is a line, not
+/// the membership. See [`Nudges::announce_here`].
+fn told(nudges: &Nudges) {
+    nudges.announce_here(verkstead_schema::Nudge::Devices);
 }
 
 /// The call one of those is made with: a `GET` of `onwards` asking for JSON, on
@@ -844,5 +977,28 @@ mod tests {
             sends_bytes(&chunked),
             "and so does a body of no known length"
         );
+    }
+
+    /// Each read that did not land is named once, the lot in one sentence, and
+    /// a member that never answered leaves no line: its row reads unreachable.
+    #[test]
+    fn the_failed_reads_are_one_sentence_until_they_land() {
+        let nudges = Nudges::new();
+        let failed = FailedReads::default();
+
+        failed.failed(&nudges, "a", Read::Conversations, Unread::Answered);
+        failed.failed(&nudges, "a", Read::Profiles, Unread::Answered);
+        failed.failed(&nudges, "a", Read::Authors, Unread::Unanswered);
+
+        assert_eq!(
+            failed.line("a", "winvm").as_deref(),
+            Some("winvm's Agent Profiles and Conversations couldn't be read."),
+        );
+        assert_eq!(failed.line("b", "wolf"), None);
+
+        failed.held(&nudges, "a", Read::Profiles);
+        failed.held(&nudges, "a", Read::Conversations);
+
+        assert_eq!(failed.line("a", "winvm"), None);
     }
 }

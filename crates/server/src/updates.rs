@@ -110,6 +110,44 @@ impl Updates {
     }
 }
 
+/// **The gap between a member's release and this device's**, as a sentence
+/// and the one action after it: *winvm is on 0.2.0 and this device is on 0.2.2.
+/// Update winvm.* — or *Update this device.* where this device is the older
+/// one. A member that says no version is from before versions were said, so
+/// older than any (ADR-0027, *Seeing versions*): *winvm is on an older release
+/// than this device's 0.2.2. Update winvm.*
+///
+/// `None` where the two are the same, and where this device has no version to
+/// compare against. One sentence for every place a call to a member can fail,
+/// because it is the one place two devices a release apart become legible.
+pub(crate) fn gap(name: &str, theirs: Option<&str>, ours: Option<&str>) -> Option<String> {
+    let ours = ours?;
+
+    let Some(theirs) = theirs else {
+        return Some(format!(
+            "{name} is on an older release than this device's {ours}. Update {name}."
+        ));
+    };
+
+    if theirs == ours {
+        return None;
+    }
+
+    let this_is_older = match (semver::Version::parse(theirs), semver::Version::parse(ours)) {
+        (Ok(theirs), Ok(ours)) => ours < theirs,
+        _ => false,
+    };
+
+    let update = match this_is_older {
+        true => "this device".to_owned(),
+        false => name.to_owned(),
+    };
+
+    Some(format!(
+        "{name} is on {theirs} and this device is on {ours}. Update {update}."
+    ))
+}
+
 /// The release this binary was built as.
 fn running() -> semver::Version {
     semver::Version::parse(RUNNING).expect("the version cargo built this with is a semver version")
@@ -212,7 +250,7 @@ fn released(tag: &str) -> Option<semver::Version> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RUNNING, UpdateNotice, Updates, released};
+    use super::{RUNNING, UpdateNotice, Updates, gap, released};
 
     /// The server as it stands once GitHub has answered with `tag`.
     fn answered(tag: &str) -> Updates {
@@ -272,5 +310,33 @@ mod tests {
         assert!(!Updates::nothing_learned().newer_than(Some("0.0.1")));
         assert!(!answered("v99.0.0").newer_than(None));
         assert!(!answered("v99.0.0").newer_than(Some("not a version")));
+    }
+
+    /// The gap names both versions and the older device as the one to update.
+    #[test]
+    fn a_gap_says_both_releases_and_which_to_update() {
+        assert_eq!(
+            gap("winvm", Some("0.2.0"), Some("0.2.2")).as_deref(),
+            Some("winvm is on 0.2.0 and this device is on 0.2.2. Update winvm."),
+        );
+        assert_eq!(
+            gap("winvm", Some("0.10.0"), Some("0.9.0")).as_deref(),
+            Some("winvm is on 0.10.0 and this device is on 0.9.0. Update this device."),
+        );
+    }
+
+    /// A member that says no version is from before versions were said.
+    #[test]
+    fn a_member_with_no_version_is_on_an_older_release() {
+        assert_eq!(
+            gap("winvm", None, Some("0.2.2")).as_deref(),
+            Some("winvm is on an older release than this device's 0.2.2. Update winvm."),
+        );
+    }
+
+    #[test]
+    fn the_same_release_is_no_gap() {
+        assert_eq!(gap("winvm", Some("0.2.2"), Some("0.2.2")), None);
+        assert_eq!(gap("winvm", Some("0.2.0"), None), None);
     }
 }
