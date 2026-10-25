@@ -12,7 +12,8 @@
 #
 # Unsigned, as the Rust artifacts were: there is no Developer ID and no
 # authenticode certificate, and an unsigned package is what the adoption
-# documents already describe.
+# documents already describe. Why Windows stays that way, and what would
+# reopen it, is ADR-0020's *Amended: the Windows build stays unsigned*.
 
 appId: net.tobico.Verkstead
 productName: Verkstead
@@ -294,8 +295,9 @@ msi:
   # - `perMachine` is off, so the package installs into the profile —
   #   `ALLUSERS=2` with `MSIINSTALLPERUSER=1`, which is what redirects the
   #   package's `ProgramFiles64Folder` to `%LOCALAPPDATA%\Programs`. The app is
-  #   unsigned, and an installer asking for administrator would be an unsigned
-  #   program asking for the machine.
+  #   unsigned (ADR-0020, *Amended: the Windows build stays unsigned*), and an
+  #   installer asking for administrator would be an unsigned program asking
+  #   for the machine.
   # - `oneClick` is on, so there is no wizard: a progress window, and the
   #   install. The assisted installer would bring WiX's own UI with it and a
   #   per-machine choice in front of the decision above.

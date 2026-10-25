@@ -122,8 +122,9 @@ all the same: the install and every assertion after it want a real Windows to
 happen on. That package is per-user throughout — the app under
 `%LOCALAPPDATA%\Programs\Verkstead`, the shortcut in the user's own Start menu,
 and the CLI's own directory inside the install appended to the user's `PATH` —
-because the app is unsigned and elevation would buy a downloader nothing they
-wanted. That directory rather than the install root, which holds a launcher
+because the app is unsigned
+([ADR-0020](adr/0020-electron-desktop.md#amended-the-windows-build-stays-unsigned)
+says why) and elevation would buy a downloader nothing they wanted. That directory rather than the install root, which holds a launcher
 named for the product: Windows resolves a lookup without regard to case, and a
 root on `PATH` would answer `verkstead guide` with a window. Nothing here
 installs a WiX toolset either — electron-builder fetches its own, which is one

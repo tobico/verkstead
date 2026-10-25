@@ -152,7 +152,8 @@ desktop that misbehaves.
 ## Packaging
 
 **A top-level `desktop/` pnpm project beside `web/`, built by
-electron-builder** into the same three artifacts, unsigned as before: a
+electron-builder** into the same three artifacts, unsigned as before (on
+Windows for good, *Amended: the Windows build stays unsigned*, below): a
 universal dmg, an x86_64 AppImage, and an msi through electron-builder's WiX
 target with a fragment of our own putting the CLI on the user's PATH, which
 today's msi does and the adoption docs promise. What goes on it is the CLI's
@@ -340,3 +341,76 @@ does it. Proven on a `macos-15` runner rather than taken on trust.
   menu already carries.
 - **Sentence case, as the viewer writes.** Rejected for the platform's casing
   in the platform's bar.
+
+## Amended: the Windows build stays unsigned
+
+Decided in the grilling of 2026-10-24 (Sets 33, 34 and 35).
+
+**Packaging kept the three artifacts unsigned as before, and ADR-0012 had
+called signing a cost decision to revisit; it was revisited, and the msi stays
+unsigned.** The maintainer is an individual in Australia, part of no
+organisation, and will not form a company to take a warning off Windows. As of
+October 2026 that rules out the one route Microsoft itself offers, and every
+other route was weighed and declined for a reason of its own, set out below.
+What follows is the rule and the reason for each rather than its price list:
+the prices are rough and the country lists move, and it is the eligibility
+rules and the fit with `release.yml` that will still be worth reading next
+year.
+
+**Signing would not have taken SmartScreen away.** An EV certificate no longer
+skips it — Microsoft ended that bypass in 2024, and its own documents say
+Artifact Signing builds reputation over time as well — so every signed route
+still starts at *Windows protected your PC*, and the window fades only as
+downloads accrue to the publisher that signed them. What the money buys first is
+the blue window naming a publisher instead of *Unknown publisher*. So the
+README's steps, **More info** then **Run anyway**, are the same steps a
+newly signed build would have needed for its first months.
+
+**It reopens on any of three things**: a company in Australia, which can
+validate for Azure Artifact Signing as an organisation; Microsoft opening
+individual validation to Australia; or an application to SignPath Foundation.
+Nothing else found changes the answer.
+
+**And if it reopens, it lands like this.** Sign the bare
+`verkstead-windows-x64.exe` in its own matrix leg, so the sidecar packed into
+the msi is the same signed bytes the release ships beside it — this ADR makes
+the sidecar the released artifact. Let electron-builder sign the launcher and
+the msi in the `desktop-windows` leg, which it does unasked once a signing
+configuration is given: `signApp` signs the launcher, and the msi target calls
+`signIf` on the artifact. Set `forceCodeSigning`, so a leg that cannot sign
+fails the release rather than shipping unsigned again; and assert that
+`Get-AuthenticodeSignature` reads Valid on the msi, the launcher and the
+installed CLI. That is a pointer, not a design.
+
+Per-user install is unaffected, and the reason the comments give for it still
+holds: an installer asking for administrator would be an unsigned program
+asking for the machine. The Mac build is unchanged as well; notarization was
+not taken up.
+
+### Considered Options
+
+- **Azure Artifact Signing** (Trusted Signing until Microsoft renamed it in
+  2026): about US$10 a month, what Microsoft recommends for an app outside the
+  Store, and driven natively by the electron-builder `desktop/` pins through
+  `win.azureSignOptions`. Rejected: Microsoft validates individuals only in
+  the United States and Canada, and an organisation — which can validate from
+  Australia — is a company the maintainer will not form.
+- **SignPath Foundation**, which signs open-source projects free under its own
+  certificate through its GitHub Action. Verkstead meets every written term —
+  an OSI licence, a public repository, free downloads, active maintenance, a
+  release already made, no malware — and approval is at the foundation's
+  discretion. Rejected by the maintainer on fit and standing: the publisher a
+  downloader would see is *SignPath Foundation*, not the person who made it.
+- **SSL.com's Individual Validated certificate with eSigner**, sold worldwide,
+  whose command-line tool and GitHub Action sign headless from a username, a
+  password and a TOTP secret, so it fits a hosted runner. Rejected on cost: a
+  few hundred dollars a year, certificate and cloud key together.
+- **Certum's Open Source certificate on SimplySign**, about €50 a year for an
+  individual, the publisher shown as *Open Source Developer* and a name. Its
+  cloud key is a virtual smart card presented through a Windows desktop client
+  with a phone OTP, and nothing found says it runs unattended, so it would mean
+  signing by hand or a self-hosted runner — which `release.yml` is built not to
+  need. Rejected on fit as well as cost.
+- **A certificate on a USB token.** The CA/Browser Forum has required the key
+  in a hardware module since 2023, and a token cannot be plugged into GitHub's
+  runners. Rejected.
