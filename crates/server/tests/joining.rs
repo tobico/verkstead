@@ -51,7 +51,7 @@ use tower::ServiceExt;
 use verkstead_render::{AskingDevice, DevicesView};
 use verkstead_schema::Nudge;
 use verkstead_server::annex::{self, booting::Annexed};
-use verkstead_server::device::reading::Reading;
+use verkstead_server::device::reading::{RUNNING, Reading};
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::open_database;
@@ -531,6 +531,7 @@ async fn a_request_that_ran_out_is_refused_by_the_device_holding_it() {
             fingerprint: asking.device.fingerprint().to_owned(),
             asked_at: LONG_AGO.to_owned(),
             expires_at: LONG_AGO.to_owned(),
+            version: None,
         },
     )
     .await
@@ -769,6 +770,7 @@ async fn fill(asked: &Verkstead, expires_at: &str) {
                 fingerprint: format!("AA:BB:{held:02X}"),
                 asked_at: LONG_AGO.to_owned(),
                 expires_at: expires_at.to_owned(),
+                version: None,
             },
         )
         .await
@@ -1062,6 +1064,37 @@ async fn allow_records_the_device_asking_and_settles_the_request() {
     );
 }
 
+/// The release the asker answers with goes over on the join and is what its
+/// row reads at the Allow — one a release behind this device as one, and one
+/// from before the release was said as none — while this device's own row
+/// says the release it is.
+#[tokio::test]
+async fn allow_records_the_release_the_asker_said_it_runs() {
+    for (said, recorded) in [(Some("0.2.0"), Some("0.2.0")), (None, None)] {
+        let asked = Verkstead::answering().await;
+        let mut asking = Verkstead::asking().await;
+        asking.reading = asking.reading.clone().running(said);
+
+        let request = a_join_asked_of(&asked, &asking).await;
+
+        let over_here = asked.workbench_in_a_hurry();
+        press(&over_here, &request, "allow").await;
+
+        let listed = listing(&over_here).await;
+
+        assert_eq!(
+            listed.members[0].identity.version.as_deref(),
+            recorded,
+            "the row reads the release the asker said it runs, {said:?}",
+        );
+        assert_eq!(
+            listed.this.version.as_deref(),
+            Some(RUNNING),
+            "and this device's own row says the release it is",
+        );
+    }
+}
+
 /// Deny settles the request and records nothing.
 #[tokio::test]
 async fn deny_settles_the_request_and_records_nothing() {
@@ -1152,6 +1185,7 @@ async fn a_question_that_has_run_out_is_not_asked_about_and_cannot_be_allowed() 
             fingerprint: "AA:BB:CC:DD".to_owned(),
             asked_at: LONG_AGO.to_owned(),
             expires_at: LONG_AGO.to_owned(),
+            version: None,
         },
     )
     .await
@@ -2737,6 +2771,7 @@ async fn a_keepers_start_with_its_box_gone_forgets_its_annex_on_every_member() {
             addresses,
             fingerprint: of.device.fingerprint().to_owned(),
             kept_by: kept_by.map(str::to_owned),
+            version: None,
         };
 
     verkstead_store::record_member(&keeper.pool, &linking(&laptop, vec![laptop.at()], None))

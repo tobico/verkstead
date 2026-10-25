@@ -1686,6 +1686,9 @@ impl Devices {
                 // on: a member *is* a fingerprint.
                 fingerprint: held.fingerprint.clone(),
                 kept_by: None,
+
+                // And the release it said it runs when it asked.
+                version: held.version.clone(),
             })
             .await?;
 
@@ -1762,6 +1765,7 @@ impl Devices {
                 os: held.os.clone(),
                 addresses: held.addresses.clone(),
                 kept_by: None,
+                version: held.version.clone(),
             },
         )
         .await;
@@ -2606,6 +2610,7 @@ pub(crate) fn presenting(member: &verkstead_store::Member) -> DeviceIdentity {
         os: member.os.clone(),
         addresses: member.addresses.clone(),
         kept_by: member.kept_by.clone(),
+        version: member.version.clone(),
     }
 }
 

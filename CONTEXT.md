@@ -1804,6 +1804,12 @@ than failing — and a device on neither a tailnet nor a network still answers,
 having an id and a fingerprint, which is what somebody typing an address by
 hand is looking at. The address typed at link time is only the first one ever
 known: this list is what keeps a device that moved reachable.
+**And the release it runs**, *0.2.2* — the one part read off the binary
+answering rather than off the machine, and the version the Update Notice
+compares against ([ADR-0027](docs/adr/0027-cluster-updates.md), *Seeing
+versions*). A member's row takes whatever its last answer said, none included:
+a Verkstead from before the release was said answers none, and its row draws no
+version, which is itself the sign that it wants updating.
 _Avoid_: device info, device metadata, machine details, the device's profile
 
 **Devices**:

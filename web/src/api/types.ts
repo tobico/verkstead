@@ -2534,7 +2534,20 @@ addresses: Array<string>,
  * `None` is every device but an Annex, and what a Verkstead from before
  * the Annex existed answers by saying nothing.
  */
-kept_by: string | null, };
+kept_by: string | null, 
+/**
+ * And the release of Verkstead it is running, *0.2.2*: read off the
+ * binary answering rather than the machine, and drawn under the name on
+ * its Devices row (ADR-0027, *Seeing versions*).
+ *
+ * **A reading like the name, the OS and the addresses**, so a member's
+ * row takes whatever the last answer said, `None` included: a device
+ * moved back to an older Verkstead really does say none.
+ *
+ * `None` is what a Verkstead from before this field answers by saying
+ * nothing — which is itself the sign that it wants updating.
+ */
+version: string | null, };
 
 /**
  * The **Devices** list, as the Remote access pane reads it off this machine.

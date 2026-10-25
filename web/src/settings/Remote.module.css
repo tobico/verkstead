@@ -290,6 +290,15 @@
 /* And every address a peer could reach it on, set the way the tailnet name
    above is: exact strings, to be read character by character and typed into
    another machine. */
+/* The release it runs, *Verkstead 0.2.2*: an exact string, read the way an
+   address is and drawn the way the Annex's Components row draws its own. */
+.version {
+  margin: 0.25rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
 .addresses {
   margin: 0.25rem 0 0;
   font-family: ui-monospace, SFMono-Regular, monospace;

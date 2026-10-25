@@ -137,6 +137,9 @@ pub(crate) async fn announced(
 
         // And whose Annex it is, where the newcomer says it is one.
         kept_by: newcomer.kept_by,
+
+        // And the release it said it runs to the introducer.
+        version: newcomer.version,
     };
 
     if let Err(why) = told.members.refreshed(&linking).await {

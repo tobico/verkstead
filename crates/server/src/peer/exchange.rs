@@ -306,6 +306,7 @@ pub(crate) async fn record(
                 addresses: identity.addresses,
                 fingerprint: identity.fingerprint,
                 kept_by: identity.kept_by,
+                version: identity.version,
             })
             .await?;
 

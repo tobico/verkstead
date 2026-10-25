@@ -518,6 +518,7 @@ async fn a_member_is_not_drawn() {
             addresses: vec!["192.168.1.31".to_owned()],
             fingerprint: format!("AA:BB:CC:DD:{OVER_THERE}"),
             kept_by: None,
+            version: None,
         },
     )
     .await

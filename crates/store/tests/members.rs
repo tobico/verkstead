@@ -65,6 +65,7 @@ fn advertising(device: &str, name: &str, fingerprint: &str) -> Linking {
         ],
         fingerprint: fingerprint.to_owned(),
         kept_by: None,
+        version: Some("0.2.2".to_owned()),
     }
 }
 
@@ -80,6 +81,7 @@ fn renewing(device: &str, name: &str, presenting: &str, incoming: &str) -> Renew
         addresses: advertising.addresses,
         presenting: presenting.to_owned(),
         incoming: incoming.to_owned(),
+        version: advertising.version,
     }
 }
 
@@ -280,6 +282,106 @@ async fn the_annex_mark_is_taken_once_and_kept() {
         kept(C).as_deref(),
         Some(A),
         "and an Annex recorded again without its mark still has it",
+    );
+}
+
+/// The release a member says it runs is a reading, written by every recording
+/// — a member moved back to a Verkstead from before the version was said says
+/// none, and that is what its row then holds.
+#[tokio::test]
+async fn the_version_is_whatever_the_last_recording_said() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let version = |pool: SqlitePool| async move {
+        members(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|member| member.device == B)
+            .unwrap()
+            .version
+    };
+
+    record_member(&pool, &advertising(B, "winvm", B_FINGERPRINT))
+        .await
+        .unwrap();
+    assert_eq!(version(pool.clone()).await.as_deref(), Some("0.2.2"));
+
+    record_member(
+        &pool,
+        &Linking {
+            version: Some("0.2.0".to_owned()),
+            ..advertising(B, "winvm", B_FINGERPRINT)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(version(pool.clone()).await.as_deref(), Some("0.2.0"));
+
+    record_member(
+        &pool,
+        &Linking {
+            version: None,
+            ..advertising(B, "winvm", B_FINGERPRINT)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        version(pool.clone()).await,
+        None,
+        "a recording that says none is not one that leaves the last alone",
+    );
+
+    record_renewal(
+        &pool,
+        &Renewal {
+            version: Some("0.2.3".to_owned()),
+            ..renewing(B, "winvm", B_FINGERPRINT, RENEWED)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        version(pool.clone()).await.as_deref(),
+        Some("0.2.3"),
+        "and a renewal is a recording like any other",
+    );
+}
+
+/// A database made before members said their release opens, gains the column,
+/// and reads every row it already held as having said none.
+#[tokio::test]
+async fn a_database_from_before_the_version_gains_the_column() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("verkstead.db");
+    let pool = open_database(&path).await.unwrap();
+
+    record_member(&pool, &advertising(B, "winvm", B_FINGERPRINT))
+        .await
+        .unwrap();
+
+    // The column off, which is the whole of what says this database is one
+    // from before.
+    sqlx::query("ALTER TABLE members DROP COLUMN version")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let pool = open_database(&path).await.unwrap();
+    let listed = members(&pool).await.unwrap();
+
+    assert_eq!(listed.len(), 1, "the row it held is still there");
+    assert_eq!(listed[0].version, None, "and it said no release");
+
+    record_member(&pool, &advertising(B, "winvm", B_FINGERPRINT))
+        .await
+        .unwrap();
+    assert_eq!(
+        members(&pool).await.unwrap()[0].version.as_deref(),
+        Some("0.2.2"),
+        "and the column it gained is written by the next recording",
     );
 }
 

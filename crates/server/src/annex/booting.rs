@@ -1104,6 +1104,7 @@ mod tests {
                     addresses: vec!["127.0.0.1:1".to_owned()],
                     fingerprint: format!("{device}-fingerprint"),
                     kept_by: kept_by.map(str::to_owned),
+                    version: None,
                 },
             )
             .await

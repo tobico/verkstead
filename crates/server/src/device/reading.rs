@@ -1,5 +1,6 @@
 //! What a device reads off the machine it is on when another one asks what it
-//! is: its name, its OS and its addresses (ADR-0020).
+//! is: its name, its OS and its addresses (ADR-0020) — and, off the binary
+//! answering rather than the machine, the release it runs (ADR-0027).
 //!
 //! The other half of an identity. [`super`] keeps what a device *is* — an id
 //! and a certificate, invented once and read off the disk at every start — and
@@ -143,7 +144,16 @@ pub struct Reading {
     /// [`Reading::forwarded`]. `None` on a reading of a device that forwards
     /// nothing.
     forwarding_at: Option<u16>,
+
+    /// And the release of Verkstead this device says it runs: [`RUNNING`] on a
+    /// running server, and stated by a suite that is putting two releases in
+    /// one cluster — see [`Reading::running`].
+    version: Option<String>,
 }
+
+/// The release this binary is, which is what a device says it runs: the
+/// workspace's own version, the same one the Update Notice compares against.
+pub const RUNNING: &str = env!("CARGO_PKG_VERSION");
 
 /// The tailnet addresses as they were last read, and when.
 #[derive(Debug, Clone)]
@@ -199,6 +209,7 @@ impl Reading {
             answered: Arc::default(),
             answer_held_for: HELD_FOR,
             forwarding_at: None,
+            version: Some(RUNNING.to_owned()),
         }
     }
 
@@ -225,6 +236,7 @@ impl Reading {
             answered: Arc::default(),
             answer_held_for: HELD_FOR,
             forwarding_at: None,
+            version: Some(RUNNING.to_owned()),
         }
     }
 
@@ -254,6 +266,7 @@ impl Reading {
             answered: Arc::default(),
             answer_held_for: HELD_FOR,
             forwarding_at: None,
+            version: Some(RUNNING.to_owned()),
         }
     }
 
@@ -307,6 +320,20 @@ impl Reading {
     pub fn forwarding_at(self, port: u16) -> Reading {
         Reading {
             forwarding_at: Some(port),
+            ..self
+        }
+    }
+
+    /// The same, saying it runs `version` rather than [`RUNNING`] — or saying
+    /// nothing at all, which is what a Verkstead from before the version was
+    /// said answers.
+    ///
+    /// For a suite putting a member a release behind in front of this one: a
+    /// binary is the one release it is, and the cluster being asked about is
+    /// two of them.
+    pub fn running(self, version: Option<&str>) -> Reading {
+        Reading {
+            version: version.map(str::to_owned),
             ..self
         }
     }
@@ -369,6 +396,7 @@ impl Reading {
             os: self.os(),
             addresses: self.addresses().await,
             kept_by: self.keeper().map(|keeper| keeper.device().to_owned()),
+            version: self.version.clone(),
         }
     }
 

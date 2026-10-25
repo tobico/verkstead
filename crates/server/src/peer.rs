@@ -712,6 +712,7 @@ impl Members {
                     os: member.os,
                     addresses: member.addresses,
                     kept_by: member.kept_by,
+                    version: member.version,
                 },
             })
             .collect())

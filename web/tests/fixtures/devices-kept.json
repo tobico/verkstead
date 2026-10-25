@@ -10,7 +10,8 @@
         "fingerprint": "AA:BB:CC:DD:0011223344556677889900aabbccddee",
         "kept_by": null,
         "name": "laptop",
-        "os": "Windows"
+        "os": "Windows",
+        "version": null
       },
       "reachable": true,
       "trouble": null
@@ -24,7 +25,8 @@
         "fingerprint": "AA:BB:CC:DD:ffeeddccbbaa00998877665544332211",
         "kept_by": null,
         "name": "studio",
-        "os": "macOS"
+        "os": "macOS",
+        "version": null
       },
       "reachable": true,
       "trouble": null
@@ -40,6 +42,7 @@
     "fingerprint": "3A:7B:1F:04:C8:92:6D:5E:AA:11:B0:47:9C:3D:2E:88:F5:60:71:1C:D4:09:B6:3F:82:5A:0E:97:44:CB:2D:16",
     "kept_by": "0011223344556677889900aabbccddee",
     "name": "workbench",
-    "os": "Linux"
+    "os": "Linux",
+    "version": "0.2.2"
   }
 }

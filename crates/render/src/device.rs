@@ -109,6 +109,19 @@ pub struct DeviceIdentity {
     /// the Annex existed answers by saying nothing.
     #[serde(default)]
     pub kept_by: Option<String>,
+
+    /// And the release of Verkstead it is running, *0.2.2*: read off the
+    /// binary answering rather than the machine, and drawn under the name on
+    /// its Devices row (ADR-0027, *Seeing versions*).
+    ///
+    /// **A reading like the name, the OS and the addresses**, so a member's
+    /// row takes whatever the last answer said, `None` included: a device
+    /// moved back to an older Verkstead really does say none.
+    ///
+    /// `None` is what a Verkstead from before this field answers by saying
+    /// nothing — which is itself the sign that it wants updating.
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 /// What a device tells each of its members when it has made its certificate
@@ -316,4 +329,33 @@ pub enum FoundOn {
     /// that is not a Verkstead answers nothing this can read, and is no row at
     /// all.
     Tailscale,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A Verkstead from before the version answers without the field at all,
+    /// and that reads as having said none rather than as an answer refused.
+    #[test]
+    fn an_identity_without_a_version_says_none() {
+        let older: DeviceIdentity = serde_json::from_str(
+            r#"{"device":"aa","fingerprint":"3F:0A","name":"winvm","os":"Windows","addresses":[]}"#,
+        )
+        .expect("an older Verkstead's answer still reads");
+
+        assert_eq!(older.version, None);
+        assert_eq!(older.kept_by, None);
+    }
+
+    /// And one that says it is read back as it was said.
+    #[test]
+    fn an_identity_with_a_version_says_it() {
+        let newer: DeviceIdentity = serde_json::from_str(
+            r#"{"device":"aa","fingerprint":"3F:0A","name":"wolf","os":"Linux","addresses":[],"version":"0.2.2"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(newer.version.as_deref(), Some("0.2.2"));
+    }
 }

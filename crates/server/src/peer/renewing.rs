@@ -204,6 +204,9 @@ pub(crate) async fn renewed(
 
         // And the one the row is keyed on from now on.
         incoming: announced.incoming,
+
+        // And the release it says it runs.
+        version: announced.identity.version,
     };
 
     match renewing.members.renewing(&renewal).await {

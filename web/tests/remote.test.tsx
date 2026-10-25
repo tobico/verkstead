@@ -808,6 +808,27 @@ describe("the devices section", () => {
     ).toBe(2);
   });
 
+  /// Every row says the release its device runs, under the name — this
+  /// device's own, a member a release behind its own, and a member from before
+  /// the release was said nothing at all.
+  it("draws the release each device runs under its name", async () => {
+    mountPane(SERVING, LINKED);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const here = screen.getByText("this device").closest("li")!;
+    expect(here.textContent).toContain("Verkstead 0.2.2");
+
+    const behind = screen.getByText("laptop").closest("li")!;
+    expect(behind.textContent).toContain("Verkstead 0.2.0");
+
+    const older = screen.getByText("172.29.0.14").closest("li")!;
+    expect(
+      older.textContent,
+      "a member that said no release has no version line, rather than a guess",
+    ).not.toContain("Verkstead");
+  });
+
   /// And only one of them is this machine, whichever else is on the list.
   it("marks this device and no other", async () => {
     mountPane(SERVING, LINKED);

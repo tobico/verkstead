@@ -962,9 +962,9 @@ function unlinkable(list: DevicesView, of: DeviceIdentity): boolean {
   return of.kept_by === null && of.device !== list.this.kept_by;
 }
 
-/// One row: the OS mark, the name, and every address a peer could reach that
-/// device on — with *this device* beside the name on the one that is this
-/// machine.
+/// One row: the OS mark, the name, the release it runs, and every address a
+/// peer could reach that device on — with *this device* beside the name on the
+/// one that is this machine.
 ///
 /// One component for both because they are one thing drawn: what the pane shows
 /// of a device is the same three facts whether it is this one or another, and
@@ -1046,6 +1046,13 @@ function Row(props: {
             <span class={styles.away}>unreachable</span>
           </Show>
         </p>
+
+        {/* The release it runs, as the Annex's Components row draws its own.
+            None from a Verkstead from before the release was said, rather
+            than a guess. */}
+        <Show when={props.of.version}>
+          {(version) => <p class={styles.version}>Verkstead {version()}</p>}
+        </Show>
 
         <Show when={props.of.addresses.length > 0}>
           <p class={styles.addresses}>{props.of.addresses.join(", ")}</p>
