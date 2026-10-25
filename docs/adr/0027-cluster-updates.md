@@ -31,8 +31,9 @@ with no word, when it differs from the device drawing the page; and a tag
 when a newer stable release exists than the one that row runs. The version
 alone, and the release tag alone, were offered and not taken: the differing
 mark is what the incident wanted. The differing version as a bare coloured
-number is the deferred wording Set's answer (1381); the newer-release tag's
-words are still that Set's to settle.
+number is the deferred wording Set's answer (1381); the newer-release tag
+reads *update available*, set where *unreachable* stands and as that word is
+— settled at the stage's review (1398).
 
 **A failed call to a member names the gap.** Where a call to a member fails
 and the two versions differ, the trouble line it leaves gains a sentence
