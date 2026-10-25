@@ -286,9 +286,18 @@ function press(container: ParentNode, words: string): HTMLButtonElement {
   )!;
 }
 
-/// The press onwards, which reads the same on every screen of the wizard.
+/// The press onwards: *Next*, or on the checkbox screen *Install N* for the
+/// rows it would install.
 function onwards(container: ParentNode): HTMLButtonElement {
-  return press(container, "Next");
+  return [...container.querySelectorAll("button")].find((button) =>
+    /^(Next|Install \d+)$/.test(button.textContent ?? ""),
+  )!;
+}
+
+/// The checkbox screen's way past the run, to the commands for everything
+/// missing.
+function byHand(container: ParentNode): void {
+  fireEvent.click(press(container, "Install by hand instead"));
 }
 
 afterEach(() => {
@@ -360,7 +369,95 @@ describe("the checkbox screen", () => {
 
     expect(sandbox.dataset.state).toBe("Absent");
     expect(box(container, "Sandbox")!.checked).toBe(true);
-    expect(sandbox.textContent).toContain("there is no local account");
+  });
+
+  /// Three groups, each under its own label: the two rows nothing runs
+  /// without, the four harnesses as tiles, and the rest.
+  it("draws the rows in three groups, the harnesses as tiles", () => {
+    const { container } = mount(FRESH);
+    const group = (label: string) =>
+      container.querySelector<HTMLElement>(`[data-group="${label}"]`)!;
+
+    expect(drawn(group("Required"))).toEqual(["Sandbox", "Git"]);
+    expect(drawn(group("An agent"))).toEqual([
+      "Claude",
+      "Codex",
+      "Grok",
+      "OpenCode",
+    ]);
+    expect(drawn(group("Optional"))).toEqual(["Gh"]);
+
+    expect(group("Required").querySelector("h3")!.textContent).toBe(
+      "RequiredEvery session needs both",
+    );
+    expect(group("An agent").querySelector("h3")!.textContent).toBe(
+      "An agentAt least one",
+    );
+
+    // Each tile names the command a session launches.
+    expect(row(container, "OpenCode").querySelector("code")!.textContent).toBe(
+      "opencode",
+    );
+  });
+
+  /// A word for what the box and the tick say, and nothing else: which file a
+  /// row found is the hint screen's to say.
+  it("pills a row Installed or Missing, with no path under it", () => {
+    const { container } = mount(PART_WAY);
+    const git = row(container, "Git");
+
+    expect(git.textContent).toContain("Installed");
+    expect(git.textContent).not.toContain("Missing");
+    expect(row(container, "Gh").textContent).toContain("Missing");
+
+    expect(container.querySelector("[data-where]")).toBeNull();
+    expect(container.textContent).not.toContain("/machine/bin");
+  });
+
+  /// The press says what it will do.
+  it("names the press for the rows it would install, and Next for none", () => {
+    const { container } = mount(FRESH);
+
+    fireEvent.click(box(container, "Claude")!);
+    expect(onwards(container).textContent).toBe("Install 3");
+
+    fireEvent.click(box(container, "Sandbox")!);
+    expect(onwards(container).textContent).toBe("Install 2");
+
+    const { container: there } = mount(PART_WAY);
+    expect(onwards(there).textContent).toBe("Next");
+  });
+
+  /// And why it is held, as one line beside it rather than a paragraph.
+  it("says why the press is held beside it, and not once it is not", () => {
+    const { container } = mount(FRESH);
+    const said = () =>
+      container.textContent!.includes(
+        "A sandbox, git, and one agent are needed.",
+      );
+
+    expect(said()).toBe(true);
+
+    fireEvent.click(box(container, "Claude")!);
+    expect(said()).toBe(false);
+  });
+
+  /// Somebody installing by hand wants the commands for everything missing,
+  /// ticked or not — and nothing is started on the machine.
+  it("opens the hint screen over every missing row without starting a run", () => {
+    const fetching = serving(json(FRESH));
+    const { container } = mount(PART_WAY);
+
+    byHand(container);
+
+    expect(drawn(container)).toEqual(["Codex", "Grok", "OpenCode", "Gh"]);
+    expect(tabs(container).length).toBeGreaterThan(0);
+    expect(container.querySelector("progress")).toBeNull();
+    expect(fetching).not.toHaveBeenCalled();
+
+    // And Back is the ticks again.
+    fireEvent.click(press(container, "Back"));
+    expect(box(container, "Codex")).not.toBeNull();
   });
 
   /// Everything this screen used to carry about installing something by hand is
@@ -375,8 +472,9 @@ describe("the checkbox screen", () => {
   });
 
   /// A `bwrap` that is installed and will not make a namespace says why in its
-  /// own words, and the line naming the sysctl to set is the one worth reading.
-  it("puts the failed run's own words under the sandbox row", () => {
+  /// own words, and the line naming the sysctl to set is the one worth reading
+  /// — on the hint screen, where a row has the room for it.
+  it("puts the failed run's own words under the sandbox row by hand", () => {
     const { container } = mount(
       stating(FRESH, "Sandbox", {
         state: "Absent",
@@ -385,8 +483,27 @@ describe("the checkbox screen", () => {
       }),
     );
 
+    expect(row(container, "Sandbox").querySelector("pre")).toBeNull();
+
+    byHand(container);
+
     expect(row(container, "Sandbox").querySelector("pre")!.textContent).toBe(
       REFUSAL,
+    );
+  });
+
+  /// And the Windows sandbox row's own reason, the same way.
+  it("says why the Windows sandbox row is missing by hand", () => {
+    const { container } = mount(WINDOWS);
+
+    expect(row(container, "Sandbox").textContent).not.toContain(
+      "there is no local account",
+    );
+
+    byHand(container);
+
+    expect(row(container, "Sandbox").textContent).toContain(
+      "there is no local account",
     );
   });
 });
@@ -810,12 +927,35 @@ describe("how often the step asks for the machine", () => {
   });
 });
 
+/// Drawn on the hint screen, reached by hand: a row that is there has a path
+/// to say once it has landed under somebody watching, and a row that is not
+/// has where its name was seen.
 describe("where each program was found", () => {
+  /// The hint screen over every row a bare machine is missing, and then the
+  /// machine read again once some of them have landed.
+  function landing(machine: OnboardingView) {
+    const mounted = mount(FRESH);
+
+    byHand(mounted.container);
+    mounted.read(machine);
+
+    return mounted;
+  }
+
+  /// And over a machine as it is.
+  function hinted(machine: OnboardingView) {
+    const mounted = mount(machine);
+
+    byHand(mounted.container);
+
+    return mounted;
+  }
+
   /// Which `claude` a session got is the whole of what this feature is about: a
   /// distribution's, too old to connect, and the human's own under
   /// `~/.local/bin` are the same tick and two different programs.
   it("draws the resolved path under a row that is there", () => {
-    const { container } = mount(PART_WAY);
+    const { container } = landing(PART_WAY);
     const git = row(container, "Git").querySelector("[data-where]")!;
 
     expect(git.querySelector("[data-at]")!.textContent).toBe("/machine/bin/git");
@@ -826,7 +966,7 @@ describe("where each program was found", () => {
   /// installer leaves: the name a session resolved, and the version it really
   /// runs.
   it("draws the link's target after it where the two differ", () => {
-    const { container } = mount(PART_WAY);
+    const { container } = landing(PART_WAY);
     const claude = row(container, "Claude").querySelector("[data-where]")!;
 
     expect(claude.querySelector("[data-at]")!.textContent).toBe(
@@ -840,7 +980,7 @@ describe("where each program was found", () => {
   /// A row that named no file has nothing to draw: the sandbox on a Mac is
   /// Apple's own rather than a program anybody went looking for.
   it("draws nothing under a row that named no file", () => {
-    const { container } = mount(A_MAC);
+    const { container } = landing(A_MAC);
 
     expect(row(container, "Sandbox").querySelector("[data-where]")).toBeNull();
   });
@@ -849,7 +989,7 @@ describe("where each program was found", () => {
   /// has it, and what is wanted is the directory on the `PATH` Verkstead is
   /// started with rather than another install.
   it("says where a name was seen when a session cannot reach it", () => {
-    const { container } = mount(
+    const { container } = hinted(
       stating(
         PART_WAY,
         "Codex",
@@ -867,7 +1007,7 @@ describe("where each program was found", () => {
   /// A link into an install nothing binds, and one with nothing at the end of
   /// it: two different things to do about, so two different sentences.
   it("says where a link leads, and when it leads nowhere", () => {
-    const { container } = mount(
+    const { container } = hinted(
       stating(
         stating(
           PART_WAY,
@@ -903,7 +1043,7 @@ describe("where each program was found", () => {
   /// that a session is not launched as, so the row says which of the two it is
   /// and goes on drawing the install under it.
   it("says when the name is the desktop app rather than the CLI", () => {
-    const { container } = mount(
+    const { container } = hinted(
       stating(
         WINDOWS,
         "Claude",
@@ -942,7 +1082,7 @@ describe("where each program was found", () => {
   /// And a name on no `PATH` at all was seen nowhere: nothing is said under it
   /// but what to install.
   it("says nothing under a name that was seen nowhere", () => {
-    const { container } = mount(PART_WAY);
+    const { container } = hinted(PART_WAY);
     const grok = row(container, "Grok");
 
     expect(grok.dataset.state).toBe("Absent");

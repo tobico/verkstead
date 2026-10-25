@@ -6,16 +6,21 @@
 //! beside the open step and for the same reason.
 //!
 //! **The checkbox screen** is where the step opens. Every row the server drew is
-//! on it — the sandbox, `git`, the four harnesses, `gh` and, on Windows, WSL —
-//! and a row this machine has not got carries a checkbox where its mark would
-//! be, with the row's name as the label. The sandbox and `git` start ticked,
+//! on it, in three groups — *Required*, the sandbox and `git`; *An agent*, the
+//! four harnesses as tiles; and *Optional*, `gh` and, on Windows, WSL — and a
+//! row this machine has not got carries a checkbox, with the row's name as the
+//! label. A row that is there carries a tick and an *Installed* pill instead,
+//! and nothing else: which file it found is the hint screen's to say. The sandbox and `git` start ticked,
 //! those being the two rows nothing can run without; the harnesses and `gh`
 //! start unticked, because one harness is enough and GitHub is a choice. WSL
 //! starts unticked too, being a large download and maybe a restart, until the
 //! machine is part of the way to it — see [`ticksItself`] — and a machine whose
 //! firmware has virtualization off draws it refused, with no box. Next is
 //! pressable once the rows that are there plus the rows that are ticked would
-//! be a machine a session could start on, and what it does is start the run.
+//! be a machine a session could start on, and what it does is start the run —
+//! which is why it is called *Install N* for the rows it would install, and
+//! *Next* where there are none. *Install by hand instead* beside it opens the
+//! hint screen over every row this machine is missing, with no run.
 //!
 //! **Nothing here says in advance which rows cannot be installed.** What a
 //! package manager carries is a fact about the distribution rather than about
@@ -29,13 +34,15 @@
 //! hint screen where one did not.
 //!
 //! **The hint screen** is the step as it used to be, cut down to the rows that
-//! are still missing: the nine tabs of instructions, the list of directories a
+//! are still missing — the ticked ones the run failed, or every missing one
+//! where the human chose to install by hand: the nine tabs of instructions, the list of directories a
 //! session looks in, and the note that the list was read once. Next is held
 //! until every one of those rows is detected, with the count beside it, and
 //! Back returns to the checkbox screen — which is how a row nobody wants after
 //! all is unticked.
 //!
-//! **A row that is there says which file it is**, and a row that is not says
+//! **A row that is there says which file it is**, on the hint screen, and a row
+//! that is not says
 //! where the name was seen — the two halves this step gained when a session's
 //! `PATH` became the human's own. A stale `claude` in `/usr/bin` shadowing the
 //! current one under `~/.local/bin` is a tick either way and two different
@@ -57,6 +64,7 @@
 //! changes with the tab: the tab is which machine the commands are *for*, and
 //! whether a program is there is a fact about the machine the server is on.
 
+import { faArrowRight } from "@fortawesome/free-solid-svg-icons";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
   For,
@@ -71,6 +79,7 @@ import {
 
 import { Copy } from "../Copy";
 import { HarnessMark } from "../HarnessMark";
+import { Icon } from "../Icon";
 import { AGENT_NAME, type AgentType } from "../agents";
 import { cancelInstall, startInstall } from "../api/client";
 import type {
@@ -80,6 +89,7 @@ import type {
   DependencyView,
   Distro,
   OnboardingView,
+  Platform,
   RunView,
   Seen as SeenSomewhere,
 } from "../api/types";
@@ -126,8 +136,19 @@ const WHY: Record<Dependency, string> = {
   Codex: "One harness is enough",
   Grok: "One harness is enough",
   OpenCode: "One harness is enough",
-  Gh: "Optional: pull requests and reviews",
-  Wsl: "Optional: sessions on Linux, on this PC",
+  Gh: "Pull requests and reviews",
+  Wsl: "Sessions on Linux, on this PC",
+};
+
+/// The command a row is, in mono beside its name: what a harness tile names
+/// under the harness. The sandbox row's is its package, and only on Linux —
+/// see `Choice` — it being Apple's own on a Mac and an account on Windows; `git`
+/// and `gh` are named by their command already.
+const COMMANDS: Partial<Record<Dependency, string>> = {
+  Claude: "claude",
+  Codex: "codex",
+  Grok: "grok",
+  OpenCode: "opencode",
 };
 
 /// What a row that cannot be had here says, in place of a box.
@@ -186,6 +207,41 @@ const HARNESS = Object.keys(HARNESSES) as Dependency[];
 /// is theirs to say, and a wizard that ticked one for them would install an
 /// agent nobody asked for.
 const GATING: Dependency[] = ["Sandbox", "Git"];
+
+/// The three groups of the checkbox screen, in the order they are drawn: the
+/// two rows nothing runs without, the four a session needs one of, and the
+/// rest. A row the server drew that is in neither of the first two is the
+/// third's, which is where WSL goes on Windows — its own label already says it
+/// is optional.
+const GROUPS: Array<{
+  label: string;
+  gloss: string | null;
+  holds: (dependency: Dependency) => boolean;
+  tiled: boolean;
+}> = [
+  {
+    label: "Required",
+    gloss: "Every session needs both",
+    holds: (dependency) => GATING.includes(dependency),
+    tiled: false,
+  },
+  {
+    label: "An agent",
+    gloss: "At least one",
+    holds: (dependency) => HARNESS.includes(dependency),
+    tiled: true,
+  },
+  {
+    label: "Optional",
+    gloss: null,
+    holds: (dependency) =>
+      !GATING.includes(dependency) && !HARNESS.includes(dependency),
+    tiled: false,
+  },
+];
+
+/// What the press is held for, said beside it.
+const HELD = "A sandbox, git, and one agent are needed.";
 
 /// Whether a row starts ticked: one of those two, or a row this machine is
 /// already part of the way to — WSL turned on, or answering with no Annex in it
@@ -281,6 +337,19 @@ export function Dependencies(props: {
     };
 
     return settled("Sandbox") && settled("Git") && HARNESS.some(settled);
+  };
+
+  /// Open the hint screen over every row this machine is missing, ticked or
+  /// not, with no run: somebody installing by hand wants the commands for all
+  /// of it.
+  const byHand = (): void => {
+    setRefused(null);
+    setHinted(
+      props.reading.dependencies
+        .filter((row) => absent(row.state))
+        .map((row) => row.dependency),
+    );
+    show("hints");
   };
 
   /// The rows the hint screen draws, as the reading has them now.
@@ -392,6 +461,7 @@ export function Dependencies(props: {
             ready={would()}
             pressing={start.isPending}
             press={press}
+            byHand={byHand}
             refused={refused()}
           />
         </Match>
@@ -480,8 +550,8 @@ export function absent(state: DependencyState): boolean {
   return state.state === "Absent" || state.state === "Owed";
 }
 
-/// The checkbox screen: every row, a tick to put on the ones that are missing,
-/// and the press that installs them.
+/// The checkbox screen: every row in its group, a tick to put on the ones that
+/// are missing, and the press that installs them.
 function Choosing(props: {
   reading: OnboardingView;
   ticked: (row: DependencyView) => boolean;
@@ -489,53 +559,231 @@ function Choosing(props: {
   ready: boolean;
   pressing: boolean;
   press: () => void;
+  byHand: () => void;
   refused: string | null;
 }): JSX.Element {
+  /// How many rows the press would install, which is what it is called by.
+  const count = (): number =>
+    props.reading.dependencies.filter(props.ticked).length;
+
   return (
     <>
       <p class={styles.standing}>
-        A session runs inside a sandbox, works in a git worktree, and runs one
-        of four agents. Tick what this machine is missing and Verkstead installs
-        it.
+        Tick what {props.reading.machine} is missing and Verkstead installs it.
       </p>
 
-      <ul class={styles.rows}>
-        <For each={props.reading.dependencies}>
-          {(row) => (
-            <Row
-              row={row}
-              ticked={props.ticked(row)}
-              tick={(on) => props.tick(row, on)}
-            />
-          )}
-        </For>
-      </ul>
+      <For each={GROUPS}>
+        {(group) => {
+          const rows = (): DependencyView[] =>
+            props.reading.dependencies.filter((row) =>
+              group.holds(row.dependency),
+            );
 
-      <div class={styles.onwards}>
-        <Foot>
-          <button
-            type="button"
-            class={styles.next}
-            disabled={!props.ready || props.pressing}
-            onClick={() => props.press()}
-          >
-            Next
-          </button>
-        </Foot>
+          return (
+            <Show when={rows().length > 0}>
+              <section class={styles.group} data-group={group.label}>
+                <h3 class={styles.label}>
+                  {group.label}
+                  <Show when={group.gloss}>
+                    {(gloss) => <span class={styles.gloss}>{gloss()}</span>}
+                  </Show>
+                </h3>
 
+                <ul class={group.tiled ? styles.tiles : styles.card}>
+                  <For each={rows()}>
+                    {(row) => (
+                      <Choice
+                        row={row}
+                        platform={props.reading.platform}
+                        tiled={group.tiled}
+                        ticked={props.ticked(row)}
+                        tick={(on) => props.tick(row, on)}
+                      />
+                    )}
+                  </For>
+                </ul>
+              </section>
+            </Show>
+          );
+        }}
+      </For>
+
+      <Show when={props.refused}>
+        {(why) => (
+          <div class={styles.onwards}>
+            <ErrorLine class={styles.failure}>{why()}</ErrorLine>
+          </div>
+        )}
+      </Show>
+
+      <Foot>
         <Show when={!props.ready}>
-          <Note>
-            A session can't start without a sandbox, git, and one of the four
-            agents. This page reads the machine again every ten seconds, so an
-            install that lands ticks its row here.
-          </Note>
+          <span class={styles.held}>{HELD}</span>
         </Show>
 
-        <Show when={props.refused}>
-          {(why) => <ErrorLine class={styles.failure}>{why()}</ErrorLine>}
-        </Show>
-      </div>
+        <button
+          type="button"
+          class={styles.next}
+          disabled={!props.ready || props.pressing}
+          onClick={() => props.press()}
+        >
+          {count() === 0 ? "Next" : `Install ${count()}`}
+          <Icon of={faArrowRight} class={styles.arrow} />
+        </button>
+
+        {/* The quiet way past the run: the commands for everything missing,
+            for somebody who would rather type them. */}
+        <button
+          type="button"
+          class={styles.byHand}
+          onClick={() => props.byHand()}
+        >
+          Install by hand instead
+        </button>
+      </Foot>
     </>
+  );
+}
+
+/// One row of the checkbox screen: a line in a group's card, or a tile under
+/// *An agent*.
+///
+/// A row that is missing is a label round the whole of it with the box inside,
+/// so a press anywhere on it is a tick — see `rowPress`. A row that is there is
+/// a tick and an *Installed* pill and nothing to press, and a row that cannot be
+/// had here says why in place of the box.
+function Choice(props: {
+  row: DependencyView;
+  platform: Platform;
+  tiled: boolean;
+  ticked: boolean;
+  tick: (on: boolean) => void;
+}): JSX.Element {
+  const state = (): DependencyState => props.row.state;
+
+  /// Whether the row is one to tick: the machine has not got it.
+  const choosing = (): boolean => absent(state());
+
+  /// Why a row cannot be had here, where it cannot.
+  const barred = (): string | null => {
+    const said = state();
+
+    return said.state === "Refused" ? BARRED[said.barred] : null;
+  };
+
+  /// The command beside the name, where the name is not one already.
+  const command = (): string | undefined =>
+    props.row.dependency === "Sandbox"
+      ? props.platform === "Linux"
+        ? "bubblewrap"
+        : undefined
+      : COMMANDS[props.row.dependency];
+
+  const box = (): JSX.Element => (
+    <input
+      type="checkbox"
+      class={styles.box}
+      checked={props.ticked}
+      onChange={(ev) => props.tick(ev.currentTarget.checked)}
+    />
+  );
+
+  /// What stands where the box would on a row that is not being chosen: the
+  /// tick on a row that is there, and nothing on one that cannot be had.
+  const standing = (): JSX.Element => (
+    <Show when={state().state === "Present"}>
+      <span class={styles.mark}>
+        <Mark standing="met" />
+      </span>
+    </Show>
+  );
+
+  /// The pill on the end of a line, which says in a word what the box and the
+  /// tick say in a shape.
+  const pill = (): JSX.Element => (
+    <Switch>
+      <Match when={state().state === "Present"}>
+        <span class={styles.installed}>Installed</span>
+      </Match>
+      <Match when={choosing()}>
+        <span class={styles.missing}>Missing</span>
+      </Match>
+    </Switch>
+  );
+
+  const line = (): JSX.Element => (
+    <>
+      <Show when={choosing()} fallback={standing()}>
+        {box()}
+      </Show>
+      <span class={styles.text}>
+        <span class={styles.name}>
+          {NAMES[props.row.dependency]}
+          <Show when={command()}>
+            {(command) => <code class={styles.called}>{command()}</code>}
+          </Show>
+        </span>
+        <span class={styles.why}>{WHY[props.row.dependency]}</span>
+        <Show when={barred()}>
+          {(why) => (
+            <span class={styles.barred} data-barred>
+              {why()}
+            </span>
+          )}
+        </Show>
+      </span>
+      {pill()}
+    </>
+  );
+
+  /// A harness as a tile: its mark, and in the corner the box or the tick.
+  const tile = (): JSX.Element => (
+    <>
+      <span class={styles.top}>
+        <HarnessMark
+          of={HARNESSES[props.row.dependency] ?? null}
+          class={styles.harness}
+        />
+        <Show
+          when={choosing()}
+          fallback={
+            <span class={styles.corner}>
+              {standing()}
+              {pill()}
+            </span>
+          }
+        >
+          {box()}
+        </Show>
+      </span>
+      <span class={styles.name}>{NAMES[props.row.dependency]}</span>
+      <Show when={command()}>
+        {(command) => <code class={styles.called}>{command()}</code>}
+      </Show>
+    </>
+  );
+
+  const body = (): JSX.Element => (props.tiled ? tile() : line());
+
+  return (
+    <li
+      class={props.tiled ? styles.tile : styles.line}
+      classList={{ [styles.chosen!]: choosing() && props.ticked }}
+      data-dependency={props.row.dependency}
+      data-state={state().state}
+    >
+      <Show when={choosing()} fallback={<div class={styles.inner}>{body()}</div>}>
+        {/* The name labels the box by being inside it, and the row answers the
+            press rather than the box a label forwards one to — see
+            `rowPress`. */}
+        <label
+          class={styles.inner}
+          onClick={rowPress(() => props.tick(!props.ticked))}
+        >
+          {body()}
+        </label>
+      </Show>
+    </li>
   );
 }
 
@@ -737,25 +985,15 @@ export function Hints(props: {
   );
 }
 
-/// One row: what it is, whether this machine has it, what the run made of it,
-/// and — where the screen draws one — what to run by hand.
+/// One row of the hint screen: what it is, whether this machine has it, what
+/// the run made of it, what the probe found, and what to run by hand.
 function Row(props: {
   row: DependencyView;
 
-  /// Whether the row is ticked, and the press that changes that. Handed down by
-  /// the checkbox screen alone, and drawn only on a row that is missing: a row
-  /// that is there has its mark where the box would be.
-  ticked?: boolean;
-  tick?: (on: boolean) => void;
-
-  /// And what to run by hand, which the hint screen draws and no other does.
-  instruction?: Instruction;
+  /// What to run by hand.
+  instruction: Instruction;
 }): JSX.Element {
   const state = (): DependencyState => props.row.state;
-
-  /// Whether this row is one to tick: the screen offers it, and the machine has
-  /// not got it.
-  const choosing = (): boolean => props.tick !== undefined && absent(state());
 
   /// What a failed run said, which is only ever the Linux sandbox row's: a
   /// `bwrap` that is installed and will not make a namespace says why in its
@@ -798,53 +1036,23 @@ function Row(props: {
     return said.state === "Absent" ? said.seen : null;
   };
 
-  /// The head, whichever stands at the front of it — the mark, or the box that
-  /// is the whole of what the checkbox screen asks for.
-  const head = (leading: JSX.Element): JSX.Element => (
-    <>
-      {leading}
-      <span class={styles.name}>
-        <HarnessMark
-          of={HARNESSES[props.row.dependency] ?? null}
-          class={styles.harness}
-        />
-        {NAMES[props.row.dependency]}
-      </span>
-      <span class={styles.why}>{WHY[props.row.dependency]}</span>
-    </>
-  );
-
   return (
     <li
       class={styles.row}
       data-dependency={props.row.dependency}
       data-state={state().state}
     >
-      <Show
-        when={choosing()}
-        fallback={
-          <div class={styles.head}>
-            {head(<Mark standing={standing(state())} />)}
-          </div>
-        }
-      >
-        {/* The name labels the box by being inside it — the same wrapping the
-            accounts step's rows use, and the whole of what a row is asking. So
-            the row answers the press, rather than the box a label forwards one
-            to and stops forwarding the moment a hand slides — see `rowPress`. */}
-        <label
-          class={styles.head}
-          onClick={rowPress(() => props.tick?.(!(props.ticked ?? false)))}
-        >
-          {head(
-            <input
-              type="checkbox"
-              checked={props.ticked ?? false}
-              onChange={(ev) => props.tick?.(ev.currentTarget.checked)}
-            />,
-          )}
-        </label>
-      </Show>
+      <div class={styles.head}>
+        <Mark standing={standing(state())} />
+        <span class={styles.name}>
+        <HarnessMark
+          of={HARNESSES[props.row.dependency] ?? null}
+          class={styles.harness}
+        />
+        {NAMES[props.row.dependency]}
+      </span>
+        <span class={styles.why}>{WHY[props.row.dependency]}</span>
+      </div>
 
       <Show when={failed()}>
         {(why) => (

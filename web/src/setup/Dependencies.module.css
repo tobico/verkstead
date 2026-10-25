@@ -3,10 +3,9 @@
    A column inside the step's card, and the same column on each of the three
    screens: a line saying where the step has got to, whatever that screen is
    about — the rows to tick, the run's own bar, or the rows and the commands
-   that put them right — and the presses at the foot of it. Nothing is a grid: a
-   row is read down on a phone as often as it is scanned on a desktop, and what
-   a row has to show is a name, a mark and sometimes a command wider than
-   either. */
+   that put them right — and the presses at the foot of it. The one grid is the
+   checkbox screen's four harnesses, two by two as the boards draw them; every
+   other row is read down, on a phone as often as on a desktop. */
 
 .step {
   display: flex;
@@ -60,6 +59,186 @@
   list-style: none;
 }
 
+/* The checkbox screen's three groups — see `GROUPS` in `Dependencies.tsx` —
+   each under a label in the frame's tracked capitals with a quiet gloss beside
+   it, as the boards draw them. The label is typed in sentence case and only
+   set in capitals here. */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+
+.label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.gloss {
+  font-size: 0.8rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+/* One card holding a group's rows, a rule between each. */
+.card {
+  margin: 0;
+  padding: 0 1rem;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.75rem;
+}
+
+.line + .line {
+  border-top: 1px solid var(--edge);
+}
+
+/* A row's box or tick, its name and why, and the pill on the end. */
+.line .inner {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.85rem 0;
+}
+
+.text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+/* The four harnesses, two by two at every width, as the boards have them on a
+   phone too. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tile {
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.75rem;
+}
+
+.tile .inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 1rem;
+}
+
+/* The mark on the left of a tile's top, and the box or the tick on its
+   right. */
+.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.6rem;
+}
+
+.tile .harness {
+  width: 1.375rem;
+  height: 1.375rem;
+}
+
+.corner {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* A ticked tile, in the ember's edge and a wash of it — mixed from the card so
+   the dark theme follows on its own. */
+.tile.chosen {
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* A row being chosen is a `<label>` round the whole of it and a press anywhere
+   on it — see `rowPress` in `src/rows.ts`. */
+label.inner {
+  cursor: pointer;
+  user-select: none;
+}
+
+/* The box, in the ember, at the boards' 18px. */
+.box {
+  flex: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* And the tick that stands where the box would on a row that is there, on a
+   wash of its green the box's size. */
+.mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 0.3rem;
+  background: var(--added-wash);
+  font-size: 0.7rem;
+}
+
+/* The command a row is, beside its name or under a tile's. */
+.called {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--ink-soft);
+}
+
+/* Why a row cannot be had here, in place of its box. */
+.barred {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* What the box and the tick say, in a word. */
+.installed,
+.missing {
+  flex: none;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.installed {
+  color: var(--added);
+  background: var(--added-wash);
+}
+
+.missing {
+  color: var(--ink-soft);
+  background: var(--code-wash);
+}
+
 /* Where a session looks for a program, which is the server's own list rather
    than a sentence about one — see `Dependencies.tsx`. Drawn above the rows and
    under the tabs, because it is a fact about this machine whichever tab is
@@ -111,10 +290,9 @@
   border-bottom: 1px solid var(--edge);
 }
 
-/* The name and the mark on one line, with what the row is for at the end of it
-   — and under the name on a narrow window, where the two would not fit. On the
-   checkbox screen the mark's place is the box's, and the whole head is the
-   label that names it. */
+/* The hint screen's rows: the name and the mark on one line, with what the
+   row is for at the end of it — and under the name on a narrow window, where
+   the two would not fit. */
 .head {
   display: flex;
   flex-wrap: wrap;
@@ -122,16 +300,9 @@
   align-items: baseline;
 }
 
-/* The head of a row being chosen is a `<label>` round the whole of it and a
-   press anywhere on it, where the head of one that is only reporting is a `div`
-   — so this is the label's alone. See `rowPress` in `src/rows.ts`. */
-label.head {
-  cursor: pointer;
-  user-select: none;
-}
-
 .name {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.4rem;
   align-items: baseline;
   font-weight: 600;
@@ -318,7 +489,11 @@ label.head {
    short of what a session needs, and refused in the way a disabled control is
    everywhere else here. */
 .next {
-  padding: 0.5rem 1.1rem;
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 1.1rem;
   font: inherit;
   font-weight: 600;
   color: var(--paper);
@@ -330,7 +505,37 @@ label.head {
 
 .next:disabled {
   cursor: not-allowed;
-  opacity: 0.65;
+  opacity: 0.45;
+}
+
+.arrow {
+  font-size: 0.85em;
+}
+
+/* Why the press is held, in one line beside it. */
+.held {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The quiet way past the run: a word in the ember rather than a button, under
+   the press on a phone and at the foot's far left from 60rem. */
+.byHand {
+  align-self: center;
+  padding: 0.25rem 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+@media (min-width: 60rem) {
+  .byHand {
+    order: -1;
+    margin-right: auto;
+  }
 }
 
 /* The two presses that are not the way onwards — back to the ticks, and the
@@ -368,6 +573,10 @@ label.head {
   .copy:hover {
     color: var(--accent);
     border-color: var(--accent);
+  }
+
+  .byHand:hover {
+    text-decoration: underline;
   }
 
   .next:not(:disabled):hover {

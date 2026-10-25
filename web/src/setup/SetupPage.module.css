@@ -529,15 +529,20 @@ dialog.sheet > div {
     border-top: 0;
   }
 
+  /* The step's end takes what Back leaves, its press on the right, so a
+     quiet alternative a step puts first can stand at the far left. */
   .press {
+    flex: 1;
     flex-direction: row;
+    justify-content: flex-end;
     align-items: center;
-    margin-left: auto;
   }
 
   .pressing {
+    flex: 1;
     flex-direction: row;
     flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
     text-align: start;
   }

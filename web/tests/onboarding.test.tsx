@@ -384,7 +384,7 @@ describe("the foot", () => {
       [...foot(container)!.querySelectorAll("button")].map(
         (button) => button.textContent,
       ),
-    ).toEqual(["Next"]);
+    ).toEqual(["Install 2", "Install by hand instead"]);
   });
 
   /// Back opens the step before, and there is none before the first.
@@ -403,7 +403,7 @@ describe("the foot", () => {
       [...foot(container)!.querySelectorAll("button")].map(
         (button) => button.textContent,
       ),
-    ).toEqual(["Next"]);
+    ).toEqual(["Next", "Install by hand instead"]);
   });
 
   it("titles the paper with the open step", async () => {
