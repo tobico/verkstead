@@ -394,7 +394,7 @@ async fn both() -> (Verkstead, Verkstead, PathBuf) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&b.pool, registered.id, BRANCH, THIS_DEVICE)
+    let conversation = store::start_conversation(&b.pool, registered.id, BRANCH, THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered");

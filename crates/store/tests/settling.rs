@@ -71,7 +71,7 @@ async fn conversation(pool: &SqlitePool) -> anyhow::Result<i64> {
         .expect("nothing is registered at that path yet");
 
     Ok(
-        start_conversation(pool, repo.id, "answering-conveniences", THIS_DEVICE)
+        start_conversation(pool, repo.id, "answering-conveniences", THIS_DEVICE, None)
             .await?
             .expect("the Repo was just registered"),
     )

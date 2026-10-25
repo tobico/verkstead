@@ -54,7 +54,7 @@ async fn grilling(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(pool, repo.id, "rate-limiting", THIS_DEVICE)
+    let id = start_conversation(pool, repo.id, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -620,7 +620,7 @@ async fn a_conversation_that_is_not_grilling_has_no_grilling_to_end() {
         .await
         .unwrap()
         .unwrap();
-    let id = start_conversation(&pool, repo.id, "still-drafting", THIS_DEVICE)
+    let id = start_conversation(&pool, repo.id, "still-drafting", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

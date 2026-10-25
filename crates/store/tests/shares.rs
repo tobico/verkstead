@@ -38,7 +38,7 @@ async fn conversation(pool: &SqlitePool, branch: &str) -> i64 {
         .map(|repo| repo.id)
         .unwrap_or(1);
 
-    start_conversation(pool, repo, branch, THIS_DEVICE)
+    start_conversation(pool, repo, branch, THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo is registered")

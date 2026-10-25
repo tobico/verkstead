@@ -172,6 +172,7 @@ use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
 use crate::github::{Credential, Gh};
+use crate::merging;
 use crate::settings::{Author, Config, Signature, Unauthored};
 use crate::stages::{self, Next, Stage};
 use crate::store;
@@ -1063,8 +1064,15 @@ async fn start(
     let cut_from = stands.base().map(str::to_owned);
     let from = stands.from().to_owned();
 
-    let started =
-        store::start_conversation(&state.pool, conversation.repo.id, &branch, &state.device).await;
+    let top = merging::top(state).await;
+    let started = store::start_conversation(
+        &state.pool,
+        conversation.repo.id,
+        &branch,
+        &state.device,
+        top.as_deref(),
+    )
+    .await;
 
     let id = match started {
         Ok(Some(id)) => id,

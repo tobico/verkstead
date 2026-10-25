@@ -1752,18 +1752,23 @@ async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
 /// `device` is this Verkstead's own id, and what it is for is the Rank: the row
 /// is ranked above everything in the sidebar as it is written, with that id
 /// suffixed after the key (ADR-0020, *Ranks*) — see [`started`], where every
-/// start path's minting is.
+/// start path's minting is. `merged_top` is the rank at the top of the Merged
+/// List the server holds, every member's rows as well as this device's, and
+/// `None` where it holds nothing beyond its own: the row goes above that too, so
+/// a start on a device with fewer rows than another is still first everywhere.
 pub async fn start_conversation(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
     device: &str,
+    merged_top: Option<&str>,
 ) -> Result<Option<i64>> {
     started(
         pool,
         repo_id,
         branch,
         device,
+        merged_top,
         Named::Settled,
         Adopts::Nothing,
     )
@@ -1781,12 +1786,14 @@ pub async fn start_unnamed_conversation(
     repo_id: i64,
     branch: &str,
     device: &str,
+    merged_top: Option<&str>,
 ) -> Result<Option<i64>> {
     started(
         pool,
         repo_id,
         branch,
         device,
+        merged_top,
         Named::Prefilled,
         Adopts::Nothing,
     )
@@ -1811,12 +1818,14 @@ pub async fn start_adoption(
     branch: &str,
     roadmap: &str,
     device: &str,
+    merged_top: Option<&str>,
 ) -> Result<Option<i64>> {
     started(
         pool,
         repo_id,
         branch,
         device,
+        merged_top,
         Named::Prefilled,
         Adopts::Roadmap(roadmap),
     )
@@ -1898,11 +1907,20 @@ enum Named {
 /// suffix, being the same device's, so the suffix is no help at all here. See
 /// [`super::ranks`], and [`super::rank_the_conversations`], which is where the
 /// rows written before there were ranks got theirs.
+///
+/// **Above the Merged List's top as well as this table's.** `merged_top` is what
+/// the server holds of every member, and a device that ranked above its own rows
+/// alone would land a start under everything a busier member had minted — at
+/// the bottom of every sidebar in the cluster. The lower of the two strings is
+/// the top, the sidebar sorting ascending. The table is still read in here
+/// rather than trusted to the held merge, because the held merge is read before
+/// the transaction opens and is no help against the race above.
 async fn started(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
     device: &str,
+    merged_top: Option<&str>,
     named: Named,
     adopts: Adopts<'_>,
 ) -> Result<Option<i64>> {
@@ -1919,7 +1937,9 @@ async fn started(
     .await
     .context("reading the rank at the top of the sidebar")?;
 
-    let rank = super::ranks::between(None, top.as_deref(), device)?;
+    let top = [top.as_deref(), merged_top].into_iter().flatten().min();
+
+    let rank = super::ranks::between(None, top, device)?;
 
     // The registry is asked in the insert's own `SELECT` rather than before it,
     // for the reason the path's uniqueness is left to the index: a look taken

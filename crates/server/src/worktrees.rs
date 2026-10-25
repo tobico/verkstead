@@ -2349,10 +2349,11 @@ mod tests {
             .unwrap()
             .expect("nothing is registered at that path yet");
 
-        let id = store::start_conversation(&pool, registered.id, "rate-limiting", THIS_DEVICE)
-            .await
-            .unwrap()
-            .expect("the Repo was just registered");
+        let id =
+            store::start_conversation(&pool, registered.id, "rate-limiting", THIS_DEVICE, None)
+                .await
+                .unwrap()
+                .expect("the Repo was just registered");
 
         store::add_companion(&pool, id, alongside.id).await.unwrap();
 

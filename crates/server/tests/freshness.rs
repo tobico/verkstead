@@ -210,10 +210,11 @@ impl Verkstead {
                 .unwrap()
                 .expect("nothing is registered at that path yet");
 
-        let conversation = store::start_conversation(&self.pool, repo.id, BRANCH, THIS_DEVICE)
-            .await
-            .unwrap()
-            .expect("the Repo was just registered");
+        let conversation =
+            store::start_conversation(&self.pool, repo.id, BRANCH, THIS_DEVICE, None)
+                .await
+                .unwrap()
+                .expect("the Repo was just registered");
 
         assert_eq!(conversation, THERE);
     }

@@ -1136,7 +1136,7 @@ mod tests {
             .expect("nothing is registered at that path yet");
 
         let conversation =
-            store::start_conversation(&pool, repo.id, "outbound-retries", THIS_DEVICE)
+            store::start_conversation(&pool, repo.id, "outbound-retries", THIS_DEVICE, None)
                 .await
                 .unwrap()
                 .expect("the Repo was just registered");

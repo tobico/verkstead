@@ -475,7 +475,7 @@ async fn a_repo_with_live_work_on_it_is_refused() {
     added(register(&app, &repo).await);
     let id = listed(&app).await[0].id;
 
-    let going = store::start_conversation(&pool, id, "rate-limiting", THIS_DEVICE)
+    let going = store::start_conversation(&pool, id, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1489,7 +1489,7 @@ async fn an_idle_repo_is_repointed_to_the_other_author() {
     let registered = added(register_as(&app, &repo, "work").await);
 
     // Work that is over is no reason to keep the Author it was done as.
-    let over = store::start_conversation(&pool, registered.id, "rate-limiting", THIS_DEVICE)
+    let over = store::start_conversation(&pool, registered.id, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1516,7 +1516,7 @@ async fn a_repo_in_live_work_is_refused_a_repoint_naming_the_work() {
     let own = added(register_as(&app, &repository(src.path().join("verkstead")), "work").await);
     let beside = added(register_as(&app, &repository(src.path().join("askance")), "work").await);
 
-    let going = store::start_conversation(&pool, own.id, "rate-limiting", THIS_DEVICE)
+    let going = store::start_conversation(&pool, own.id, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

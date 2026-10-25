@@ -107,7 +107,7 @@ const HOSTED: &str = "https://tobico.github.io/verkstead/share-viewer.html";
 async fn drafting(pool: &SqlitePool) -> i64 {
     let repo = repo(pool).await;
 
-    let id = store::start_conversation(pool, repo, "sharing", THIS_DEVICE)
+    let id = store::start_conversation(pool, repo, "sharing", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -236,7 +236,7 @@ fn kind(event: &TimelineEvent) -> &'static str {
 async fn everything(pool: &SqlitePool) -> i64 {
     let repo = repo(pool).await;
 
-    let id = store::start_conversation(pool, repo, "sharing", THIS_DEVICE)
+    let id = store::start_conversation(pool, repo, "sharing", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -639,7 +639,7 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
         .unwrap()
         .id;
 
-    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE)
+    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -750,7 +750,7 @@ async fn a_share_carries_the_files_names_and_never_their_bytes() {
     .unwrap()
     .id;
 
-    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE)
+    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -827,7 +827,7 @@ async fn a_drafts_brief_boards_as_the_document_it_is() {
     let (_dir, pool, app) = app().await;
     let repo = repo(&pool).await;
 
-    let id = store::start_conversation(&pool, repo, "still-drafting", THIS_DEVICE)
+    let id = store::start_conversation(&pool, repo, "still-drafting", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -924,7 +924,7 @@ fn whole_set(preface: &str) -> QuestionSet {
 
 /// A Conversation with one Set on it, asked and unanswered.
 async fn asking(pool: &SqlitePool, repo: i64, branch: &str, set: &QuestionSet) -> (i64, i64) {
-    let id = store::start_conversation(pool, repo, branch, THIS_DEVICE)
+    let id = store::start_conversation(pool, repo, branch, THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1062,7 +1062,7 @@ async fn a_commit_that_drew_the_delta_says_the_share_needs_the_renderer_too() {
         .unwrap()
         .id;
 
-    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE)
+    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1109,7 +1109,7 @@ async fn a_set_this_build_cannot_read_boards_neither_row_nor_sheet() {
     let (_dir, pool, app) = app().await;
     let repo = repo(&pool).await;
 
-    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE)
+    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1251,7 +1251,7 @@ async fn a_share_carries_the_whole_diff_of_every_commit_on_it() {
         .unwrap()
         .id;
 
-    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE)
+    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1373,7 +1373,7 @@ async fn a_companions_commit_carries_its_own_repositorys_diff() {
         .unwrap()
         .id;
 
-    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE)
+    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1452,7 +1452,7 @@ async fn a_commit_the_repository_has_lost_says_so_rather_than_stopping_the_expor
         .unwrap()
         .id;
 
-    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE)
+    let id = store::start_conversation(&pool, repo, "sharing", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

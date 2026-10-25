@@ -488,10 +488,11 @@ async fn an_unlinked_device_is_off_every_conversations_ticks() {
         .await
         .unwrap()
         .unwrap();
-        let id = verkstead_store::start_conversation(&on.pool, repo.id, "ticked", on.device.id())
-            .await
-            .unwrap()
-            .unwrap();
+        let id =
+            verkstead_store::start_conversation(&on.pool, repo.id, "ticked", on.device.id(), None)
+                .await
+                .unwrap()
+                .unwrap();
 
         for device in ticked {
             verkstead_store::permit_device(&on.pool, id, device)

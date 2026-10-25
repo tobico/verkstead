@@ -996,7 +996,7 @@ mod tests {
             .id;
 
         let conversation =
-            store::start_unnamed_conversation(&pool, repo_id, "verkstead-7f3a", THIS_DEVICE)
+            store::start_unnamed_conversation(&pool, repo_id, "verkstead-7f3a", THIS_DEVICE, None)
                 .await
                 .unwrap()
                 .unwrap();
@@ -1792,10 +1792,11 @@ mod tests {
             .unwrap()
             .id;
 
-        let conversation = store::start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE)
-            .await
-            .unwrap()
-            .unwrap();
+        let conversation =
+            store::start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE, None)
+                .await
+                .unwrap()
+                .unwrap();
 
         (pool, conversation, repo_id)
     }

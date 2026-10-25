@@ -103,7 +103,7 @@ async fn moves(pool: &SqlitePool, id: i64) -> Vec<Lifecycle> {
 /// A drafting Conversation with a Brief written, ready to be grilled.
 async fn drafted(pool: &SqlitePool) -> i64 {
     let repo_id = repo(pool, "verkstead").await;
-    let id = start_conversation(pool, repo_id, "rate-limiting", THIS_DEVICE)
+    let id = start_conversation(pool, repo_id, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -116,7 +116,7 @@ async fn a_started_conversation_holds_its_repo_its_branch_and_the_default_rule()
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo is registered, so the Conversation should start");
@@ -140,7 +140,7 @@ async fn a_started_conversation_has_an_empty_brief_on_its_timeline() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -153,7 +153,7 @@ async fn a_conversation_cannot_be_started_against_a_repo_that_is_not_registered(
     let (_dir, pool) = fresh_pool().await;
 
     assert!(
-        start_conversation(&pool, 404, "amber-kestrel", THIS_DEVICE)
+        start_conversation(&pool, 404, "amber-kestrel", THIS_DEVICE, None)
             .await
             .unwrap()
             .is_none()
@@ -167,11 +167,11 @@ async fn conversations_are_listed_newest_first_with_the_repo_they_are_against() 
     let verkstead = repo(&pool, "verkstead").await;
     let askance = repo(&pool, "askance").await;
 
-    start_conversation(&pool, verkstead, "amber-kestrel", THIS_DEVICE)
+    start_conversation(&pool, verkstead, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
-    start_conversation(&pool, askance, "quiet-harbour", THIS_DEVICE)
+    start_conversation(&pool, askance, "quiet-harbour", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -196,7 +196,7 @@ async fn conversations_are_listed_newest_first_with_the_repo_they_are_against() 
 async fn a_brief_is_rewritten_in_place_rather_than_added_to() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -225,7 +225,7 @@ async fn a_brief_is_rewritten_in_place_rather_than_added_to() {
 async fn a_drafting_conversations_branch_and_base_commit_are_the_humans_to_change() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -253,7 +253,7 @@ async fn a_drafting_conversations_branch_and_base_commit_are_the_humans_to_chang
 async fn a_conversation_can_be_started_on_a_name_nobody_has_settled_on() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -271,11 +271,11 @@ async fn starting_the_work_leaves_an_invented_branch_name_to_be_replaced() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let invented = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let invented = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
-    let typed = start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE)
+    let typed = start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -327,11 +327,11 @@ async fn a_branch_stops_waiting_to_be_named_by_being_renamed_or_by_being_settled
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let renamed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let renamed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
-    let left = start_unnamed_conversation(&pool, repo_id, "brave-otter", THIS_DEVICE)
+    let left = start_unnamed_conversation(&pool, repo_id, "brave-otter", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -374,7 +374,7 @@ async fn a_branch_stops_waiting_to_be_named_by_being_renamed_or_by_being_settled
 async fn a_row_says_whether_its_branch_is_still_to_be_named() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -411,11 +411,11 @@ async fn following_a_rename_moves_the_name_and_not_whose_it_is() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let verksteads = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let verksteads = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
-    let theirs = start_conversation(&pool, repo_id, "throttling", THIS_DEVICE)
+    let theirs = start_conversation(&pool, repo_id, "throttling", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -458,7 +458,7 @@ async fn following_a_rename_moves_the_name_and_not_whose_it_is() {
 async fn handing_back_a_name_after_a_rename_leaves_the_branch_that_exists() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -480,7 +480,7 @@ async fn handing_back_a_name_after_a_rename_leaves_the_branch_that_exists() {
 async fn handing_the_branch_name_back_leaves_the_one_it_started_on() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -502,7 +502,7 @@ async fn handing_the_branch_name_back_leaves_the_one_it_started_on() {
 async fn inventing_another_name_replaces_the_one_the_conversation_started_on() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -521,11 +521,11 @@ async fn inventing_another_name_replaces_the_one_the_conversation_started_on() {
 async fn inventing_another_name_leaves_a_name_the_human_settled() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let theirs = start_conversation(&pool, repo_id, "throttling", THIS_DEVICE)
+    let theirs = start_conversation(&pool, repo_id, "throttling", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
-    let typed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let typed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -558,7 +558,7 @@ async fn inventing_another_name_leaves_a_name_the_human_settled() {
 async fn clearing_the_base_commit_restores_the_default_branch_rule() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -587,7 +587,7 @@ async fn clearing_the_base_commit_restores_the_default_branch_rule() {
 async fn nothing_about_a_conversation_past_drafting_can_be_edited() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -645,7 +645,7 @@ async fn a_conversation_and_its_brief_survive_the_database_being_reopened() {
 
     let pool = open_database(&database).await.unwrap();
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -686,7 +686,7 @@ async fn switching_a_drafts_repo_resets_its_base_and_drops_only_the_companion_it
     let askance = repo(&pool, "askance").await;
     let notes = repo(&pool, "notes").await;
 
-    let id = start_conversation(&pool, verkstead, "amber-kestrel", THIS_DEVICE)
+    let id = start_conversation(&pool, verkstead, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -783,7 +783,7 @@ async fn a_repo_switch_is_refused_while_a_roadmap_is_being_adopted() {
     let verkstead = repo(&pool, "verkstead").await;
     let askance = repo(&pool, "askance").await;
 
-    let id = start_adoption(&pool, verkstead, "amber-kestrel", "mvp", THIS_DEVICE)
+    let id = start_adoption(&pool, verkstead, "amber-kestrel", "mvp", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -894,7 +894,7 @@ async fn a_held_pull_request_is_the_target_where_nothing_else_names_one() {
 /// Which is the only way there is to one now — the start that made these is
 /// gone, and the row is written at the press. See [`hold_pull_request`].
 async fn held_by(pool: &sqlx::SqlitePool, repo_id: i64) -> i64 {
-    let id = start_unnamed_conversation(pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let id = start_unnamed_conversation(pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -911,11 +911,11 @@ async fn a_conversation_started_any_other_way_is_holding_no_pull_request() {
     let (_dir, pool) = fresh_pool().await;
     let verkstead = repo(&pool, "verkstead").await;
 
-    let ordinary = start_unnamed_conversation(&pool, verkstead, "amber-kestrel", THIS_DEVICE)
+    let ordinary = start_unnamed_conversation(&pool, verkstead, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
-    let roadmap = start_adoption(&pool, verkstead, "quiet-heron", "mvp", THIS_DEVICE)
+    let roadmap = start_adoption(&pool, verkstead, "quiet-heron", "mvp", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1341,7 +1341,7 @@ async fn the_list_carries_a_row_whose_state_word_is_unreadable() {
     let (_dir, pool) = fresh_pool().await;
     let readable = drafted(&pool).await;
     let repo_id = repo(&pool, "askance").await;
-    let broken = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let broken = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1681,7 +1681,7 @@ async fn an_adopting_conversation_records_the_roadmap_it_is_adopting() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp", THIS_DEVICE)
+    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo is registered, so the Conversation should start");
@@ -1701,7 +1701,7 @@ async fn a_conversation_started_the_ordinary_way_is_adopting_nothing() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let id = start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE)
+    let id = start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1722,7 +1722,7 @@ async fn an_adoption_cannot_be_started_against_a_repo_that_is_not_registered() {
     let (_dir, pool) = fresh_pool().await;
 
     assert!(
-        start_adoption(&pool, 404, "spring-otter", "mvp", THIS_DEVICE)
+        start_adoption(&pool, 404, "spring-otter", "mvp", THIS_DEVICE, None)
             .await
             .unwrap()
             .is_none()
@@ -1736,7 +1736,7 @@ async fn an_adoption_cannot_be_started_against_a_repo_that_is_not_registered() {
 async fn the_roadmap_being_adopted_survives_the_database_being_reopened() {
     let (dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp", THIS_DEVICE)
+    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1806,7 +1806,7 @@ async fn a_stage_with_no_label_is_told_from_a_conversation_with_no_row() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let before = start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE)
+    let before = start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1849,7 +1849,7 @@ async fn a_stage_with_no_label_is_told_from_a_conversation_with_no_row() {
          stage's rather than a roadmap-writer's",
     );
 
-    let never = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+    let never = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1865,7 +1865,7 @@ async fn a_stage_with_no_label_is_told_from_a_conversation_with_no_row() {
 /// A Conversation that has picked a direction, which is the one thing a pick
 /// needs: [`pick_direction`] is refused for anything but a grilling.
 async fn directed(pool: &SqlitePool, repo_id: i64, branch: &str, direction: Direction) -> i64 {
-    let id = start_conversation(pool, repo_id, branch, THIS_DEVICE)
+    let id = start_conversation(pool, repo_id, branch, THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -1895,6 +1895,7 @@ async fn stage(pool: &SqlitePool, repo_id: i64, roadmap: &str, label: &str) -> i
         repo_id,
         &format!("roadmaps/{roadmap}/{label}"),
         THIS_DEVICE,
+        None,
     )
     .await
     .unwrap()
@@ -2531,7 +2532,7 @@ async fn a_queue_holds_no_other_repos_stages_no_other_roadmaps_and_no_unlabelled
 
     // The Conversation that wrote the roadmap: a `stage_roadmaps` row with the
     // roadmap and no label.
-    let wrote = start_conversation(&pool, ours, "roadmaps/mvp", THIS_DEVICE)
+    let wrote = start_conversation(&pool, ours, "roadmaps/mvp", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -2815,7 +2816,7 @@ async fn an_event_of_an_unknown_kind_reads_as_a_notice_naming_it() {
 async fn an_edit_made_while_the_work_starts_waits_and_is_refused() {
     let (_dir, pool) = fresh_pool().await;
     let repo = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -2865,7 +2866,7 @@ async fn an_edit_made_while_the_work_starts_waits_and_is_refused() {
 async fn what_is_put_beside_the_brief_while_the_work_starts_waits_and_is_refused() {
     let (_dir, pool) = fresh_pool().await;
     let repo = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

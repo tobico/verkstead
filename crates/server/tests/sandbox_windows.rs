@@ -422,11 +422,16 @@ impl Grilling {
     /// point — a boundary that kept two Conversations apart by anything else
     /// would be one this fixture could not tell from a boundary that did not.
     async fn beside(&self, branch: &str) -> store::Conversation {
-        let id =
-            store::start_conversation(&self.pool, self.conversation.repo.id, branch, THIS_DEVICE)
-                .await
-                .unwrap()
-                .expect("the second Conversation starts");
+        let id = store::start_conversation(
+            &self.pool,
+            self.conversation.repo.id,
+            branch,
+            THIS_DEVICE,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("the second Conversation starts");
 
         store::set_grilling_pairing(&self.pool, id, self.profile.id, self.profile.model())
             .await
@@ -968,7 +973,7 @@ async fn grilling() -> Grilling {
     .unwrap()
     .expect("the Profile saves");
 
-    let id = store::start_conversation(&pool, repo_row.id, "rate-limiting", THIS_DEVICE)
+    let id = store::start_conversation(&pool, repo_row.id, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Conversation starts");

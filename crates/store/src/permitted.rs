@@ -119,7 +119,7 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        let id = crate::start_conversation(&pool, repo.id, "permitted", THIS_DEVICE)
+        let id = crate::start_conversation(&pool, repo.id, "permitted", THIS_DEVICE, None)
             .await
             .unwrap()
             .unwrap();
@@ -183,7 +183,7 @@ mod tests {
     async fn forgetting_a_member_takes_it_off_every_list() {
         let (_dir, pool, mine) = drafting().await;
         let repo = crate::registered_repos(&pool).await.unwrap()[0].clone();
-        let other = crate::start_conversation(&pool, repo.id, "other", THIS_DEVICE)
+        let other = crate::start_conversation(&pool, repo.id, "other", THIS_DEVICE, None)
             .await
             .unwrap()
             .unwrap();

@@ -119,7 +119,7 @@ async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&pool, repo.id, "solid-viewer", THIS_DEVICE)
+    let conversation = store::start_conversation(&pool, repo.id, "solid-viewer", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -1986,10 +1986,17 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // adopting and nothing at the Repo level supplies them, so unchosen is the
     // state this page opens in. The Repo's path is the one thing here the
     // filesystem decided, and it is pinned like every other.
-    let adopting = store::start_adoption(&pool, registered.id, "spring-otter", "mvp", THIS_DEVICE)
-        .await
-        .unwrap()
-        .unwrap();
+    let adopting = store::start_adoption(
+        &pool,
+        registered.id,
+        "spring-otter",
+        "mvp",
+        THIS_DEVICE,
+        None,
+    )
+    .await
+    .unwrap()
+    .unwrap();
 
     write(
         "conversation-adopting.json",
@@ -2010,7 +2017,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Its Brief is the human's, as every Review's is: nothing about the pull
     // request is read into it.
     let wrapping_up =
-        store::start_unnamed_conversation(&pool, registered.id, "quiet-heron", THIS_DEVICE)
+        store::start_unnamed_conversation(&pool, registered.id, "quiet-heron", THIS_DEVICE, None)
             .await
             .unwrap()
             .unwrap();
@@ -2116,10 +2123,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &pin_health(&get(&app, "/api/ui/profiles").await),
     );
 
-    let drafting = store::start_conversation(&pool, repos[0].id, "rate-limiting", THIS_DEVICE)
-        .await
-        .unwrap()
-        .unwrap();
+    let drafting =
+        store::start_conversation(&pool, repos[0].id, "rate-limiting", THIS_DEVICE, None)
+            .await
+            .unwrap()
+            .unwrap();
     pairings(&pool, drafting, &profiles).await;
     store::save_brief(
         &pool,
@@ -2189,7 +2197,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Started the way the New conversation button starts one, on a name nobody
     // has settled on: the row the viewer draws from this one is the Draft, which
     // is what a Conversation whose branch name is still Verkstead's own reads as.
-    store::start_unnamed_conversation(&pool, repos[1].id, "amber-kestrel", THIS_DEVICE)
+    store::start_unnamed_conversation(&pool, repos[1].id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -2200,10 +2208,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // by pressing the button, for the reason the Repos are registered this way —
     // going in the front way means a real repository to make a real worktree in,
     // which is `conversations.rs`'s subject and not this one's.
-    let grilling = store::start_conversation(&pool, repos[0].id, "outbound-retries", THIS_DEVICE)
-        .await
-        .unwrap()
-        .unwrap();
+    let grilling =
+        store::start_conversation(&pool, repos[0].id, "outbound-retries", THIS_DEVICE, None)
+            .await
+            .unwrap()
+            .unwrap();
     pairings(&pool, grilling, &profiles).await;
     store::save_brief(
         &pool,
@@ -2373,10 +2382,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Answered through `submit_response`, which is the one path a Response takes
     // — pressing the pick into the store by hand would write a fixture no Answer
     // could ever produce. What moves the Conversation is the tail landing, below.
-    let directing = store::start_conversation(&pool, repos[0].id, "usage-limits", THIS_DEVICE)
-        .await
-        .unwrap()
-        .unwrap();
+    let directing =
+        store::start_conversation(&pool, repos[0].id, "usage-limits", THIS_DEVICE, None)
+            .await
+            .unwrap()
+            .unwrap();
     pairings(&pool, directing, &profiles).await;
     store::save_brief(
         &pool,
@@ -2635,7 +2645,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // holds, read every time the Conversation is. So the backlog is written into
     // a temporary directory and the path is pinned afterwards, the way every
     // other filesystem reading here is.
-    let tasked = store::start_conversation(&pool, repos[0].id, "task-runner", THIS_DEVICE)
+    let tasked = store::start_conversation(&pool, repos[0].id, "task-runner", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -2817,7 +2827,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // It carries a Pause Event as well, written by hand the way a Verkstead of
     // before wrote one: those are the record of what happened, nothing rewrites
     // them, and a Timeline holding one still has to draw.
-    let waiting = store::start_conversation(&pool, repos[0].id, "deferred-asks", THIS_DEVICE)
+    let waiting = store::start_conversation(&pool, repos[0].id, "deferred-asks", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -2918,10 +2928,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Recorded rather than found, exactly as the commits above are recorded
     // rather than watched for: what a pull request does to a Conversation is
     // this file's subject, and whether `gh` can find one is `src/github.rs`'s.
-    let wrapping = store::start_conversation(&pool, repos[0].id, "rate-limiting", THIS_DEVICE)
-        .await
-        .unwrap()
-        .unwrap();
+    let wrapping =
+        store::start_conversation(&pool, repos[0].id, "rate-limiting", THIS_DEVICE, None)
+            .await
+            .unwrap()
+            .unwrap();
     pairings(&pool, wrapping, &profiles).await;
     store::save_brief(
         &pool,
@@ -3099,7 +3110,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Conversation is about the one its branch wrote — so there is a real
     // commit here and a real roadmap written over it. Both are pinned
     // afterwards, the way every other filesystem reading here is.
-    let staged = store::start_conversation(&pool, repos[0].id, "mvp-roadmap", THIS_DEVICE)
+    let staged = store::start_conversation(&pool, repos[0].id, "mvp-roadmap", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -4980,10 +4991,11 @@ async fn coded(pool: &SqlitePool, under: &Path) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(pool, registered.id, "code-pane", THIS_DEVICE)
-        .await
-        .unwrap()
-        .expect("the Repo was just registered");
+    let conversation =
+        store::start_conversation(pool, registered.id, "code-pane", THIS_DEVICE, None)
+            .await
+            .unwrap()
+            .expect("the Repo was just registered");
 
     let base = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
     let worktree = under.join("worktrees/verkstead-code-pane");

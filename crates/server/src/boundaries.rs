@@ -236,7 +236,7 @@ mod tests {
         repo: i64,
         state: Lifecycle,
     ) -> i64 {
-        let id = store::start_conversation(pool, repo, "rate-limiting", THIS_DEVICE)
+        let id = store::start_conversation(pool, repo, "rate-limiting", THIS_DEVICE, None)
             .await
             .unwrap()
             .expect("the Conversation starts");

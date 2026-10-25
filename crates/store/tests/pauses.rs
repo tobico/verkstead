@@ -38,7 +38,7 @@ async fn conversation(pool: &SqlitePool) -> i64 {
         .expect("nothing was registered at that path yet")
         .id;
 
-    start_conversation(pool, repo, "rate-limiting", THIS_DEVICE)
+    start_conversation(pool, repo, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered")
@@ -169,7 +169,7 @@ async fn a_pause_belongs_to_the_conversation_it_is_on() {
         .unwrap()
         .unwrap()
         .id;
-    let other = start_conversation(&pool, repo, "deferred-asks", THIS_DEVICE)
+    let other = start_conversation(&pool, repo, "deferred-asks", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

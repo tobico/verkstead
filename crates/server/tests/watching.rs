@@ -107,10 +107,11 @@ async fn grilling(pool: &SqlitePool, dir: &Path) -> (i64, PathBuf) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(pool, registered.id, "following", THIS_DEVICE)
-        .await
-        .unwrap()
-        .expect("the Repo was just registered");
+    let conversation =
+        store::start_conversation(pool, registered.id, "following", THIS_DEVICE, None)
+            .await
+            .unwrap()
+            .expect("the Repo was just registered");
 
     let worktree = dir.join("worktrees/verkstead-following");
     let base = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
@@ -141,7 +142,7 @@ async fn drafting(pool: &SqlitePool, dir: &Path) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    store::start_conversation(pool, registered.id, "following", THIS_DEVICE)
+    store::start_conversation(pool, registered.id, "following", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered")

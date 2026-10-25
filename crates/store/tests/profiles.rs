@@ -107,7 +107,7 @@ async fn conversation(pool: &SqlitePool) -> i64 {
         .unwrap()
         .unwrap();
 
-    start_conversation(pool, repo.id, "amber-kestrel", THIS_DEVICE)
+    start_conversation(pool, repo.id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap()
@@ -949,11 +949,11 @@ async fn a_removal_neither_writes_nor_clears_the_row_that_runs_no_session() {
         .unwrap()
         .unwrap();
 
-    let kept = start_conversation(&pool, repo.id, "amber-kestrel", THIS_DEVICE)
+    let kept = start_conversation(&pool, repo.id, "amber-kestrel", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
-    let paired = start_conversation(&pool, repo.id, "russet-heron", THIS_DEVICE)
+    let paired = start_conversation(&pool, repo.id, "russet-heron", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

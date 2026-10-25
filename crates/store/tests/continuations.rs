@@ -49,7 +49,7 @@ async fn conversation(pool: &SqlitePool) -> i64 {
         .expect("nothing was registered at that path yet")
         .id;
 
-    start_conversation(pool, repo, "rate-limiting", THIS_DEVICE)
+    start_conversation(pool, repo, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered")

@@ -346,7 +346,7 @@ async fn another_conversations_attachment_is_not_this_ones_to_remove() {
     let (_elsewhere, dir, app, pool, mine) = drafting().await;
 
     let repos: Vec<verkstead_render::RepoEntry> = get(&app, "/api/ui/repos").await;
-    let theirs = store::start_conversation(&pool, repos[0].id, "elsewhere", THIS_DEVICE)
+    let theirs = store::start_conversation(&pool, repos[0].id, "elsewhere", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

@@ -221,7 +221,7 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        let id = crate::start_conversation(&pool, repo.id, "mcp-servers", THIS_DEVICE)
+        let id = crate::start_conversation(&pool, repo.id, "mcp-servers", THIS_DEVICE, None)
             .await
             .unwrap()
             .unwrap();
@@ -320,7 +320,7 @@ mod tests {
     async fn one_conversations_servers_are_not_anothers() {
         let (_dir, pool, mine) = drafting().await;
         let repo = crate::registered_repos(&pool).await.unwrap()[0].clone();
-        let theirs = crate::start_conversation(&pool, repo.id, "other", THIS_DEVICE)
+        let theirs = crate::start_conversation(&pool, repo.id, "other", THIS_DEVICE, None)
             .await
             .unwrap()
             .unwrap();

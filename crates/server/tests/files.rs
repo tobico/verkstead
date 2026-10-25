@@ -71,10 +71,11 @@ async fn grilling_alongside(
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(pool, registered.id, "code-pane", THIS_DEVICE)
-        .await
-        .unwrap()
-        .expect("the Repo was just registered");
+    let conversation =
+        store::start_conversation(pool, registered.id, "code-pane", THIS_DEVICE, None)
+            .await
+            .unwrap()
+            .expect("the Repo was just registered");
 
     let worktree = dir.join("worktrees/verkstead-code-pane");
     let base = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
@@ -273,7 +274,7 @@ async fn a_conversation_with_no_worktree_has_no_roots() {
         .await
         .unwrap()
         .expect("nothing is registered at that path yet");
-    let drafting = store::start_conversation(&pool, repo.id, "code-pane", THIS_DEVICE)
+    let drafting = store::start_conversation(&pool, repo.id, "code-pane", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -1466,7 +1467,7 @@ async fn a_conversation_with_no_worktree_lists_no_files() {
         .await
         .unwrap()
         .expect("nothing is registered at that path yet");
-    let drafting = store::start_conversation(&pool, repo.id, "code-pane", THIS_DEVICE)
+    let drafting = store::start_conversation(&pool, repo.id, "code-pane", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -1609,7 +1610,7 @@ async fn a_conversation_with_no_worktree_marks_nothing() {
         .await
         .unwrap()
         .expect("nothing is registered at that path yet");
-    let drafting = store::start_conversation(&pool, repo.id, "code-pane", THIS_DEVICE)
+    let drafting = store::start_conversation(&pool, repo.id, "code-pane", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered");

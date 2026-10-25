@@ -58,7 +58,7 @@ async fn repo(pool: &SqlitePool) -> i64 {
 
 /// A Conversation on that Repo, started by this device.
 async fn start(pool: &SqlitePool, repo: i64, branch: &str) -> i64 {
-    start_conversation(pool, repo, branch, THIS_DEVICE)
+    start_conversation(pool, repo, branch, THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered")

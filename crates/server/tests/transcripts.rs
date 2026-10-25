@@ -62,10 +62,11 @@ async fn talking(said: usize) -> (tempfile::TempDir, SqlitePool, Router, i64, i6
     .unwrap()
     .unwrap();
 
-    let conversation = store::start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE)
-        .await
-        .unwrap()
-        .unwrap();
+    let conversation =
+        store::start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE, None)
+            .await
+            .unwrap()
+            .unwrap();
     let event = store::start_capture(&pool, conversation, None, None)
         .await
         .unwrap();
@@ -202,7 +203,7 @@ async fn a_cursor_that_cannot_be_carried_on_from_reads_the_record_whole() {
 async fn a_transcript_of_another_conversation_is_no_more_readable_with_a_cursor() {
     let (_dir, pool, app, _conversation, event) = talking(LOG.len()).await;
 
-    let elsewhere = store::start_conversation(&pool, 1, "another-branch", THIS_DEVICE)
+    let elsewhere = store::start_conversation(&pool, 1, "another-branch", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

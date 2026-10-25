@@ -66,7 +66,7 @@ async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&pool, repo.id, "notices", THIS_DEVICE)
+    let conversation = store::start_conversation(&pool, repo.id, "notices", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered");

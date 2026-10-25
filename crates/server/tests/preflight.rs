@@ -301,10 +301,11 @@ impl Verkstead {
     /// A Conversation on `repo`, with all three of its pickers filled in the
     /// way the composer fills them.
     async fn conversation(&self, repo: &store::Repo, profile: i64) -> i64 {
-        let id = store::start_conversation(&self.pool, repo.id, "amber-kestrel", self.device.id())
-            .await
-            .unwrap()
-            .expect("the Repo is registered");
+        let id =
+            store::start_conversation(&self.pool, repo.id, "amber-kestrel", self.device.id(), None)
+                .await
+                .unwrap()
+                .expect("the Repo is registered");
 
         let pairing = serde_json::json!({ "profile_id": profile, "model": MODEL }).to_string();
         let role =

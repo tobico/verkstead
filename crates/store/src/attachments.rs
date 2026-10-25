@@ -514,7 +514,7 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        let id = crate::start_conversation(&pool, repo.id, "attachments", THIS_DEVICE)
+        let id = crate::start_conversation(&pool, repo.id, "attachments", THIS_DEVICE, None)
             .await
             .unwrap()
             .unwrap();
@@ -566,7 +566,7 @@ mod tests {
     #[tokio::test]
     async fn another_conversations_attachment_is_not_this_ones() {
         let (_dir, pool, mine) = conversation().await;
-        let theirs = crate::start_conversation(&pool, 1, "elsewhere", THIS_DEVICE)
+        let theirs = crate::start_conversation(&pool, 1, "elsewhere", THIS_DEVICE, None)
             .await
             .unwrap()
             .unwrap();

@@ -63,10 +63,11 @@ async fn keyed() -> (tempfile::TempDir, SqlitePool, WorkbenchKey, Router, i64) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&pool, repo.id, "workbench-key", THIS_DEVICE)
-        .await
-        .unwrap()
-        .expect("the Repo was just registered");
+    let conversation =
+        store::start_conversation(&pool, repo.id, "workbench-key", THIS_DEVICE, None)
+            .await
+            .unwrap()
+            .expect("the Repo was just registered");
 
     let key = WorkbenchKey::issued(dir.path()).unwrap();
     let app = router_keyed_with_viewer::<Site>(pool.clone(), key.clone());
