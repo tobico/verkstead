@@ -6,6 +6,11 @@
 //! home, and because the viewer must not need GitHub to be reachable to draw a
 //! page.
 //!
+//! What it keeps is the latest stable release it found, whatever that means for
+//! this device, because the **Devices** section tags every row behind it — a
+//! member can be behind an up-to-date device (ADR-0027, *Seeing versions*). The
+//! banner's verdict is worked out of it as it is read.
+//!
 //! The verdict is held in memory and nothing is written to the store: it is
 //! cheap to work out again, and a server that has just started should ask rather
 //! than believe what it concluded a week ago. A poll that fails leaves the last
@@ -47,13 +52,15 @@ const ASKING: &str = concat!("verkstead/", env!("CARGO_PKG_VERSION"));
 /// against.
 const RUNNING: &str = env!("CARGO_PKG_VERSION");
 
-/// What the server has concluded about updating, as the handler reads it.
+/// The latest stable release the server has learned of, as the handlers read
+/// it: `None` until the check has an answer, and for as long as a server with
+/// the check turned off runs.
 ///
 /// Cheap to clone and shared with whatever task is doing the asking: the
-/// verdict is one small value replaced whole, so a reader never waits on more
+/// release is one small value replaced whole, so a reader never waits on more
 /// than the swap.
 #[derive(Clone)]
-pub(crate) struct Updates(Arc<RwLock<UpdateNotice>>);
+pub(crate) struct Updates(Arc<RwLock<Option<semver::Version>>>);
 
 impl Updates {
     /// Nothing learned yet — what a server answers between starting and its
@@ -61,20 +68,51 @@ impl Updates {
     /// for as long as it runs. It says there is nothing to update to, which is
     /// the honest thing to say when you do not know.
     pub(crate) fn nothing_learned() -> Self {
-        Self(Arc::new(RwLock::new(UpdateNotice::Current)))
+        Self(Arc::new(RwLock::new(None)))
     }
 
-    /// The verdict as it stands.
+    /// The verdict as it stands, for this device.
     pub(crate) fn notice(&self) -> UpdateNotice {
+        match self.latest() {
+            Some(released) if released > running() => UpdateNotice::Available {
+                version: released.to_string(),
+            },
+            _ => UpdateNotice::Current,
+        }
+    }
+
+    /// Whether a release newer than `version` exists — what tags a row of the
+    /// Devices section *update available*, this device's included.
+    ///
+    /// False where nothing has been learned, and for a device that says no
+    /// version or one that will not parse: the missing line under its name is
+    /// the sign for the first, and a tag guessed from the second would be a
+    /// guess.
+    pub(crate) fn newer_than(&self, version: Option<&str>) -> bool {
+        let Some(latest) = self.latest() else {
+            return false;
+        };
+
+        version
+            .and_then(|version| semver::Version::parse(version).ok())
+            .is_some_and(|version| latest > version)
+    }
+
+    fn latest(&self) -> Option<semver::Version> {
         self.0
             .read()
-            .expect("the verdict lock is never poisoned")
+            .expect("the release lock is never poisoned")
             .clone()
     }
 
-    fn learned(&self, notice: UpdateNotice) {
-        *self.0.write().expect("the verdict lock is never poisoned") = notice;
+    fn learned(&self, latest: Option<semver::Version>) {
+        *self.0.write().expect("the release lock is never poisoned") = latest;
     }
+}
+
+/// The release this binary was built as.
+fn running() -> semver::Version {
+    semver::Version::parse(RUNNING).expect("the version cargo built this with is a semver version")
 }
 
 /// Start asking, and hand back the verdict the handler reads.
@@ -108,7 +146,7 @@ pub(crate) fn watching(releases: Option<&str>) -> Updates {
     tokio::spawn(async move {
         loop {
             match ask(&client, &releases).await {
-                Ok(notice) => asking.learned(notice),
+                Ok(latest) => asking.learned(latest),
                 // Left standing rather than cleared. GitHub being out of reach
                 // is no reason to stop naming an update already learned of, and
                 // it costs nothing: tomorrow's cycle asks again.
@@ -130,8 +168,8 @@ struct Release {
     tag_name: String,
 }
 
-/// Ask once, and say what the answer means for this server.
-async fn ask(client: &reqwest::Client, releases: &str) -> Result<UpdateNotice> {
+/// Ask once, and say which release is the latest.
+async fn ask(client: &reqwest::Client, releases: &str) -> Result<Option<semver::Version>> {
     let response = client
         .get(releases)
         .send()
@@ -141,7 +179,7 @@ async fn ask(client: &reqwest::Client, releases: &str) -> Result<UpdateNotice> {
     // There is no latest release until there is one, and GitHub says so with a
     // 404. Nothing to update to, rather than something to report.
     if response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(UpdateNotice::Current);
+        return Ok(None);
     }
 
     let release: Release = response
@@ -151,43 +189,42 @@ async fn ask(client: &reqwest::Client, releases: &str) -> Result<UpdateNotice> {
         .await
         .context("reading what GitHub answered")?;
 
-    Ok(verdict(&release.tag_name))
+    Ok(released(&release.tag_name))
 }
 
-/// What one release tag means for the version this binary was built as.
+/// The release one tag names.
 ///
 /// A tag that will not parse is no news, same as no release at all: the
 /// alternative is telling the human to update to something we cannot name.
-fn verdict(tag: &str) -> UpdateNotice {
-    let running = semver::Version::parse(RUNNING)
-        .expect("the version cargo built this with is a semver version");
-
+fn released(tag: &str) -> Option<semver::Version> {
     // Releases are tagged `v0.1.0`; the version inside one is not.
-    let Ok(released) = semver::Version::parse(tag.trim_start_matches('v')) else {
+    let released = semver::Version::parse(tag.trim_start_matches('v')).ok();
+
+    if released.is_none() {
         tracing::debug!(
             tag,
             "the latest release is not tagged with a version we can read"
         );
-        return UpdateNotice::Current;
-    };
-
-    if released > running {
-        UpdateNotice::Available {
-            version: released.to_string(),
-        }
-    } else {
-        UpdateNotice::Current
     }
+
+    released
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{RUNNING, UpdateNotice, verdict};
+    use super::{RUNNING, UpdateNotice, Updates, released};
+
+    /// The server as it stands once GitHub has answered with `tag`.
+    fn answered(tag: &str) -> Updates {
+        let updates = Updates::nothing_learned();
+        updates.learned(released(tag));
+        updates
+    }
 
     #[test]
     fn a_higher_tag_is_an_update_named_without_its_v() {
         assert_eq!(
-            verdict("v99.0.0"),
+            answered("v99.0.0").notice(),
             UpdateNotice::Available {
                 version: "99.0.0".to_owned(),
             },
@@ -196,11 +233,44 @@ mod tests {
 
     #[test]
     fn the_running_version_is_nothing_to_update_to() {
-        assert_eq!(verdict(&format!("v{RUNNING}")), UpdateNotice::Current);
+        assert_eq!(
+            answered(&format!("v{RUNNING}")).notice(),
+            UpdateNotice::Current
+        );
     }
 
     #[test]
     fn a_tag_that_will_not_parse_is_no_news() {
-        assert_eq!(verdict("the-first-one"), UpdateNotice::Current);
+        assert_eq!(answered("the-first-one").notice(), UpdateNotice::Current);
+        assert!(!answered("the-first-one").newer_than(Some("0.0.1")));
+    }
+
+    /// The release is kept even where this device is on it, because a member
+    /// can still be behind it.
+    #[test]
+    fn a_device_behind_an_up_to_date_one_is_still_behind() {
+        let updates = answered(&format!("v{RUNNING}"));
+
+        assert!(updates.newer_than(Some("0.0.1")));
+        assert!(!updates.newer_than(Some(RUNNING)));
+    }
+
+    /// Compared as versions rather than as strings: 0.10.0 is after 0.9.0.
+    #[test]
+    fn versions_are_compared_as_versions() {
+        let updates = answered("v0.10.0");
+
+        assert!(updates.newer_than(Some("0.9.0")));
+        assert!(!updates.newer_than(Some("0.10.0")));
+        assert!(!updates.newer_than(Some("0.11.0")));
+    }
+
+    /// No answer yet, a device saying no version, and one saying a version
+    /// that will not parse are all no tag.
+    #[test]
+    fn what_cannot_be_compared_is_not_tagged() {
+        assert!(!Updates::nothing_learned().newer_than(Some("0.0.1")));
+        assert!(!answered("v99.0.0").newer_than(None));
+        assert!(!answered("v99.0.0").newer_than(Some("not a version")));
     }
 }

@@ -15,7 +15,8 @@
         "version": "0.2.0"
       },
       "reachable": true,
-      "trouble": null
+      "trouble": null,
+      "update_available": false
     },
     {
       "identity": {
@@ -30,7 +31,8 @@
         "version": null
       },
       "reachable": false,
-      "trouble": null
+      "trouble": null,
+      "update_available": false
     }
   ],
   "pending": [],
@@ -45,5 +47,6 @@
     "name": "workbench",
     "os": "Linux",
     "version": "0.2.2"
-  }
+  },
+  "this_update_available": false
 }

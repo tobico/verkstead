@@ -917,6 +917,8 @@ function List(props: {
       <Row
         of={props.of.this}
         here
+        differs={false}
+        newer={props.of.this_update_available}
         trouble={props.of.annex_trouble}
         keeper={keeperOf(props.of, props.of.this)}
       />
@@ -926,6 +928,8 @@ function List(props: {
           <Row
             of={member.identity}
             unreachable={!member.reachable}
+            differs={differs(props.of, member.identity)}
+            newer={member.update_available}
             trouble={member.trouble}
             keeper={keeperOf(props.of, member.identity)}
             open={
@@ -962,6 +966,18 @@ function unlinkable(list: DevicesView, of: DeviceIdentity): boolean {
   return of.kept_by === null && of.device !== list.this.kept_by;
 }
 
+/// Whether a member runs another release than this device, which draws its
+/// version line in a colour of its own. A member that says none has no line to
+/// colour, and one this device cannot read its own release off has nothing to
+/// differ from.
+function differs(list: DevicesView, of: DeviceIdentity): boolean {
+  return (
+    of.version !== null &&
+    list.this.version !== null &&
+    of.version !== list.this.version
+  );
+}
+
 /// One row: the OS mark, the name, the release it runs, and every address a
 /// peer could reach that device on — with *this device* beside the name on the
 /// one that is this machine.
@@ -989,6 +1005,13 @@ function unlinkable(list: DevicesView, of: DeviceIdentity): boolean {
 /// most of what an Unlink is for, and a press that greyed itself out on the one
 /// row somebody needs it on would be the feature refusing its own case.
 ///
+/// **The release is drawn in a colour of its own where it differs from this
+/// device's**, with no word beside it: the number is what says it, and the
+/// colour is what makes the eye find it (ADR-0027, *Seeing versions*). And a
+/// row behind the latest stable release reads *update available* where
+/// *unreachable* stands, set as that word is — the server's verdict, out of
+/// the Update Notice's own check, so a row is never tagged with the check off.
+///
 /// **And this device's own Annex's row is pressed whole**, opening the
 /// Components pane where the box is kept. On any other device the same row has
 /// no press: Components is the Keeper's.
@@ -996,6 +1019,10 @@ function Row(props: {
   of: DeviceIdentity;
   here?: boolean;
   unreachable?: boolean;
+  /// Whether its release differs from this device's — see [`differs`].
+  differs?: boolean;
+  /// And whether a newer stable release exists than the one it runs.
+  newer?: boolean;
   /// And why its box would not come up, on a Keeper's row for its own Annex
   /// that would not — drawn under the addresses, as the server said it. On
   /// the Keeper's own row where the Annex has no row yet to carry it.
@@ -1045,13 +1072,24 @@ function Row(props: {
             {" "}
             <span class={styles.away}>unreachable</span>
           </Show>
+          <Show when={props.newer}>
+            {" "}
+            <span class={styles.newer}>update available</span>
+          </Show>
         </p>
 
         {/* The release it runs, as the Annex's Components row draws its own.
             None from a Verkstead from before the release was said, rather
             than a guess. */}
         <Show when={props.of.version}>
-          {(version) => <p class={styles.version}>Verkstead {version()}</p>}
+          {(version) => (
+            <p
+              class={styles.version}
+              classList={{ [styles.differs!]: props.differs }}
+            >
+              Verkstead {version()}
+            </p>
+          )}
         </Show>
 
         <Show when={props.of.addresses.length > 0}>

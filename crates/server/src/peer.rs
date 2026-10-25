@@ -705,6 +705,7 @@ impl Members {
             .map(|member| LinkedDevice {
                 reachable: member.reachable,
                 trouble: None,
+                update_available: false,
                 identity: DeviceIdentity {
                     device: member.device,
                     fingerprint: member.fingerprint,

@@ -13,5 +13,6 @@
     "name": "workbench",
     "os": "Linux (WSL)",
     "version": "0.2.2"
-  }
+  },
+  "this_update_available": false
 }

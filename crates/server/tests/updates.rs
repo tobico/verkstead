@@ -20,8 +20,17 @@ use axum::{Json, response::IntoResponse};
 use clap::Parser;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use verkstead_render::UpdateNotice;
-use verkstead_server::{Config, open_database, router_checking_updates};
+use verkstead_render::{DevicesView, UpdateNotice};
+use verkstead_server::device::reading::Reading;
+use verkstead_server::device::{Device, Devices};
+use verkstead_server::peer::Members;
+use verkstead_server::peer::joining::Joins;
+use verkstead_server::platform::Platform;
+use verkstead_server::remote::Tailscale;
+use verkstead_server::{
+    Config, open_database, router_answering_devices_checking_updates, router_checking_updates,
+};
+use verkstead_store::{Linking, record_member};
 
 /// The release this test binary was built as, which is the version the server
 /// under test is comparing tags against.
@@ -296,4 +305,135 @@ async fn a_server_told_not_to_check_asks_nobody() {
         UpdateNotice::Current,
         "and the endpoint still answers, saying there is nothing to update to",
     );
+}
+
+/// The id this device is stated as, and the ones its members are.
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+const BEHIND: &str = "0011223344556677889900aabbccddee";
+const ON_THE_RELEASE: &str = "ffeeddccbbaa00998877665544332211";
+const SAYING_NONE: &str = "99887766554433221100aabbccddeeff";
+
+/// A device on 0.2.2 linked to one member a release behind it, one on the
+/// latest release, and one from before a member said its version — asking
+/// about newer releases at `releases`.
+async fn cluster_app(releases: &str) -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    for (device, version) in [
+        (BEHIND, Some("0.2.0")),
+        (ON_THE_RELEASE, Some("0.3.0")),
+        (SAYING_NONE, None),
+    ] {
+        record_member(
+            &pool,
+            &Linking {
+                device: device.to_owned(),
+                name: device[..4].to_owned(),
+                os: "Linux".to_owned(),
+                addresses: Vec::new(),
+                fingerprint: format!("AA:BB:{device}"),
+                kept_by: None,
+                version: version.map(str::to_owned),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    let reading = Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422),
+        Platform::HERE,
+        None,
+        Vec::new(),
+    )
+    .running(Some("0.2.2"));
+
+    let devices = Devices::of(
+        Device::stated(dir.path(), THIS_DEVICE).unwrap(),
+        reading,
+        Members::recorded(pool.clone()),
+        Joins::recorded(pool.clone()),
+    );
+
+    (
+        dir,
+        router_answering_devices_checking_updates(pool, devices, releases),
+    )
+}
+
+/// The Devices section as the pane reads it.
+async fn devices(app: &Router) -> DevicesView {
+    let http = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/ui/devices")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(http.status(), StatusCode::OK);
+
+    let body = http.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&body).unwrap()
+}
+
+/// Which rows read *update available*, this device's as `this`.
+fn tagged(view: &DevicesView) -> Vec<String> {
+    let mut tagged: Vec<String> = view
+        .members
+        .iter()
+        .filter(|member| member.update_available)
+        .map(|member| member.identity.device.clone())
+        .collect();
+
+    if view.this_update_available {
+        tagged.push("this".to_owned());
+    }
+
+    tagged.sort();
+    tagged
+}
+
+#[tokio::test]
+async fn every_row_behind_the_latest_release_is_tagged() {
+    let github = github().await;
+    let (_dir, app) = cluster_app(&github.releasing("v0.3.0")).await;
+
+    github.is_asked().await;
+    settle().await;
+
+    assert_eq!(
+        tagged(&devices(&app).await),
+        vec![BEHIND.to_owned(), "this".to_owned()],
+        "a row on the release, or saying none, is not tagged",
+    );
+}
+
+/// A member can be behind a device that is itself up to date, which is what
+/// keeping the release rather than the verdict is for.
+#[tokio::test]
+async fn a_member_behind_an_up_to_date_device_is_tagged() {
+    let github = github().await;
+    let (_dir, app) = cluster_app(&github.releasing("v0.2.2")).await;
+
+    github.is_asked().await;
+    settle().await;
+
+    assert_eq!(tagged(&devices(&app).await), vec![BEHIND.to_owned()]);
+}
+
+#[tokio::test]
+async fn with_no_answer_no_row_is_tagged() {
+    let unreachable = nowhere().await;
+    let (_dir, app) = cluster_app(&unreachable).await;
+
+    settle().await;
+
+    assert!(tagged(&devices(&app).await).is_empty());
 }

@@ -2609,7 +2609,14 @@ pending: Array<PendingJoin>,
  * Annex has a row, the line is on it instead — see
  * [`LinkedDevice::trouble`] — and this is `None`.
  */
-annex_trouble: string | null, };
+annex_trouble: string | null, 
+/**
+ * And whether a newer stable release exists than the one this device
+ * runs, which tags its row *update available* — see
+ * [`LinkedDevice::update_available`], which is the same verdict for a
+ * member.
+ */
+this_update_available: boolean, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -3652,7 +3659,18 @@ reachable: boolean,
  * The Keeper's own finding, like the flag above, and only a Keeper has
  * one: `None` on every other row, and on an Annex that came up.
  */
-trouble: string | null, };
+trouble: string | null, 
+/**
+ * And whether the version it last said is older than the latest stable
+ * release, which tags the row *update available* (ADR-0027, *Seeing
+ * versions*).
+ *
+ * **This device's finding, out of the Update Notice's own daily check**,
+ * so it is false while that check is off or unanswered, and on a row that
+ * says no version. Worked out by the server, so the viewer does no version
+ * arithmetic.
+ */
+update_available: boolean, };
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is

@@ -7927,7 +7927,7 @@ async fn devices(State(state): State<AppState>) -> HttpResponse {
         return unavailable("This server holds no device identity to answer for.");
     };
 
-    listed(&devices).await
+    listed(&state, &devices).await
 }
 
 /// `GET /api/ui/components` — what this machine has installed beyond what the
@@ -8345,13 +8345,17 @@ async fn are_asking(devices: &crate::device::Devices) -> HttpResponse {
 async fn moved(state: &AppState, devices: &crate::device::Devices) -> HttpResponse {
     state.nudges.announce(Nudge::Devices);
 
-    listed(devices).await
+    listed(state, devices).await
 }
 
 /// The Devices section as the pane reads it, which is what all of the above
 /// answer with: one reading, made at the moment it is asked for.
-async fn listed(devices: &crate::device::Devices) -> HttpResponse {
-    let view: DevicesView = match devices.listing().await {
+///
+/// **Each row tagged against the Update Notice's latest release** here, where
+/// the check's verdict is to hand: a row behind it reads *update available*,
+/// and with the check off or unanswered none does.
+async fn listed(state: &AppState, devices: &crate::device::Devices) -> HttpResponse {
+    let mut view: DevicesView = match devices.listing().await {
         Ok(view) => view,
         Err(why) => {
             return unavailable(&format!(
@@ -8359,6 +8363,11 @@ async fn listed(devices: &crate::device::Devices) -> HttpResponse {
             ));
         }
     };
+
+    view.this_update_available = state.updates.newer_than(view.this.version.as_deref());
+    for member in &mut view.members {
+        member.update_available = state.updates.newer_than(member.identity.version.as_deref());
+    }
 
     Json(view).into_response()
 }

@@ -287,9 +287,15 @@
   opacity: 0.55;
 }
 
-/* And every address a peer could reach it on, set the way the tailnet name
-   above is: exact strings, to be read character by character and typed into
-   another machine. */
+/* And *update available*, on a row behind the latest stable release: where
+   *unreachable* stands and set as it is, because it is the same kind of thing
+   said — a fact about the row, not an error. */
+.newer {
+  margin-inline-start: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
 /* The release it runs, *Verkstead 0.2.2*: an exact string, read the way an
    address is and drawn the way the Annex's Components row draws its own. */
 .version {
@@ -298,6 +304,17 @@
   font-size: 0.8rem;
   color: var(--ink-soft);
 }
+
+/* And in a colour of its own where it is not this device's release, with no
+   word beside it: the number says what is different, and the colour is what
+   finds it on a list of them. */
+.differs {
+  color: var(--differs);
+}
+
+/* And every address a peer could reach it on, set the way the tailnet name
+   above is: exact strings, to be read character by character and typed into
+   another machine. */
 
 .addresses {
   margin: 0.25rem 0 0;

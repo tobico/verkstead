@@ -1123,6 +1123,7 @@ impl Devices {
             members,
             pending: self.joins.pending(OffsetDateTime::now_utc()).await?,
             annex_trouble,
+            this_update_available: false,
         })
     }
 

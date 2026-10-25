@@ -60,6 +60,7 @@ import type {
 } from "../src/api/types";
 import { listenForNudges } from "../src/nudge";
 import { RemoteCard, RemotePane } from "../src/settings/Remote";
+import remote from "../src/settings/Remote.module.css";
 import devices from "./fixtures/devices.json" with { type: "json" };
 import devicesBesideAnAnnex from "./fixtures/devices-beside-an-annex.json" with { type: "json" };
 import devicesDiscovered from "./fixtures/devices-discovered.json" with { type: "json" };
@@ -827,6 +828,70 @@ describe("the devices section", () => {
       older.textContent,
       "a member that said no release has no version line, rather than a guess",
     ).not.toContain("Verkstead");
+  });
+
+  /// A member on another release than this device draws its number in a colour
+  /// of its own and says nothing beside it; one on the same release is drawn
+  /// plainly.
+  it("colours a release that differs from this device's, with no word", async () => {
+    const laptop = LINKED.members[0]!;
+    mountPane(SERVING, {
+      ...LINKED,
+      members: [
+        ...LINKED.members,
+        {
+          ...laptop,
+          identity: {
+            ...laptop.identity,
+            device: "77665544332211009988aabbccddeeff",
+            name: "desk",
+            version: "0.2.2",
+          },
+        },
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByText("desk")).toBeTruthy());
+
+    const line = (text: string) => screen.getByText(text).closest("p")!;
+
+    expect(line("Verkstead 0.2.0").classList).toContain(remote.differs);
+    expect(line("Verkstead 0.2.0").textContent).toBe("Verkstead 0.2.0");
+    expect(line("Verkstead 0.2.0").closest("li")!.textContent).not.toContain(
+      "update available",
+    );
+
+    for (const same of screen.getAllByText("Verkstead 0.2.2")) {
+      expect(same.closest("p")!.classList).not.toContain(remote.differs);
+    }
+  });
+
+  /// And a row the server finds behind the latest stable release reads
+  /// *update available* where *unreachable* stands — this device's own
+  /// included — and a row it does not, does not.
+  it("tags every row behind the latest release", async () => {
+    const [laptop, wsl] = LINKED.members;
+    mountPane(SERVING, {
+      ...LINKED,
+      this_update_available: true,
+      members: [
+        { ...laptop!, update_available: true },
+        { ...wsl!, update_available: false },
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const tagged = screen
+      .getAllByText("update available")
+      .map((tag) => tag.closest("li")!);
+
+    expect(tagged).toHaveLength(2);
+    expect(tagged).toContain(screen.getByText("this device").closest("li"));
+    expect(tagged).toContain(screen.getByText("laptop").closest("li"));
+    expect(screen.getAllByText("update available")[0]!.classList).toContain(
+      remote.newer,
+    );
   });
 
   /// And only one of them is this machine, whichever else is on the list.

@@ -1189,6 +1189,30 @@ pub fn router_answering_devices(pool: SqlitePool, devices: device::Devices) -> R
     router_answering_devices_telling(pool, devices, nudge::Nudges::new())
 }
 
+/// The same, asking about newer releases at `releases` the way
+/// [`router_checking_updates`] does — which is what tags a Devices row
+/// *update available*.
+pub fn router_answering_devices_checking_updates(
+    pool: SqlitePool,
+    devices: device::Devices,
+    releases: &str,
+) -> Router {
+    routed_telling(
+        pool,
+        updates::watching(Some(releases)),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        Some(devices),
+        nudge::Nudges::new(),
+    )
+}
+
 /// The same, over a Nudge stream the caller made.
 ///
 /// For the suite that stands a whole Verkstead up: a join arrives on the peer

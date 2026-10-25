@@ -214,6 +214,13 @@ pub struct DevicesView {
     /// [`LinkedDevice::trouble`] — and this is `None`.
     #[serde(default)]
     pub annex_trouble: Option<String>,
+
+    /// And whether a newer stable release exists than the one this device
+    /// runs, which tags its row *update available* — see
+    /// [`LinkedDevice::update_available`], which is the same verdict for a
+    /// member.
+    #[serde(default)]
+    pub this_update_available: bool,
 }
 
 /// One device linked to this one: what it says it is, and whether the last dial
@@ -246,6 +253,17 @@ pub struct LinkedDevice {
     /// one: `None` on every other row, and on an Annex that came up.
     #[serde(default)]
     pub trouble: Option<String>,
+
+    /// And whether the version it last said is older than the latest stable
+    /// release, which tags the row *update available* (ADR-0027, *Seeing
+    /// versions*).
+    ///
+    /// **This device's finding, out of the Update Notice's own daily check**,
+    /// so it is false while that check is off or unanswered, and on a row that
+    /// says no version. Worked out by the server, so the viewer does no version
+    /// arithmetic.
+    #[serde(default)]
+    pub update_available: bool,
 }
 
 /// One device nobody has typed an address for, as the **Discovered** list under
