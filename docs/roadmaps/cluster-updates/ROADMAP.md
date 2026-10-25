@@ -31,6 +31,6 @@ member to do until a device can update itself.
 
 - [ ] 01: Versions across the cluster — [brief](01-versions-across-the-cluster.md) — no dependencies
 - [ ] 02: A signed Mac release — [brief](02-a-signed-mac-release.md) — no dependencies
-- [ ] 03: The Windows installer — [brief](03-the-windows-installer.md) — no dependencies
+- [ ] 03: The Windows installer — [brief](03-the-windows-installer.md) — no dependencies *(in progress: `roadmaps/cluster-updates/03-the-windows-installer`)*
 - [ ] 04: The app updates this device — [brief](04-the-app-updates-this-device.md) — after 01, 02, 03
 - [ ] 05: Updating members — [brief](05-updating-members.md) — after 04
