@@ -116,8 +116,12 @@ const MOST_A_FRAME_IS: usize = 64 * 1024;
 /// what is left here is bookkeeping: a row with no task gets one, and a task
 /// whose row is gone is dropped. A task that has finished on its own is a member
 /// whose row it could not read, and it is started again on the next pass.
+///
+/// **The tasks are this loop's own**, ended with it rather than outliving it:
+/// a task let go of here takes its stream down, and the reading of the member
+/// beside that stream with it — see [`Holder`].
 pub(crate) async fn held(members: Members, peers: Peers, nudges: Nudges) {
-    let mut holding: HashMap<String, JoinHandle<()>> = HashMap::new();
+    let mut holding: HashMap<String, Holder> = HashMap::new();
 
     loop {
         match members.rows().await {
@@ -125,7 +129,7 @@ pub(crate) async fn held(members: Members, peers: Peers, nudges: Nudges) {
                 for member in &rows {
                     let already = holding
                         .get(&member.device)
-                        .is_some_and(|holder| !holder.is_finished());
+                        .is_some_and(|holder| !holder.0.is_finished());
 
                     if already {
                         continue;
@@ -133,12 +137,12 @@ pub(crate) async fn held(members: Members, peers: Peers, nudges: Nudges) {
 
                     holding.insert(
                         member.device.clone(),
-                        tokio::spawn(listening(
+                        Holder(tokio::spawn(listening(
                             member.device.clone(),
                             members.clone(),
                             peers.clone(),
                             nudges.clone(),
-                        )),
+                        ))),
                     );
                 }
 
@@ -146,15 +150,7 @@ pub(crate) async fn held(members: Members, peers: Peers, nudges: Nudges) {
                 // not a member of this cluster, so news of it is news about
                 // nothing: the stream goes, and the pages keep whatever they
                 // last read of it until they are drawn again.
-                holding.retain(|device, holder| {
-                    let still = rows.iter().any(|member| &member.device == device);
-
-                    if !still {
-                        holder.abort();
-                    }
-
-                    still
-                });
+                holding.retain(|device, _| rows.iter().any(|member| &member.device == device));
             }
 
             // Which leaves the streams that are up alone: they are held against
@@ -385,6 +381,19 @@ async fn read_again(member: Member, peers: Peers, nudges: Nudges) {
             "a member's Nudge stream was taken up and its identity could not be read again, \
              so its row stays as it was: {why:#}",
         ),
+    }
+}
+
+/// One member's [`listening`], ended when [`held`] lets go of it — and when
+/// `held` itself ends, which a server never does but a caller that drops it
+/// does: a task left running past that would go on taking the stream up, and
+/// reading the member's identity again beside it, writing down addresses for
+/// it after whoever dropped `held` had stopped expecting anything to.
+struct Holder(JoinHandle<()>);
+
+impl Drop for Holder {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
