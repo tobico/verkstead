@@ -651,10 +651,12 @@ async fn running_there(devices: &Devices) -> Result<(), String> {
     })
 }
 
-/// The line the Annex's row carries: `what`, and the first line of `why` as a
-/// sentence after it. The first line alone, because what a box says can be a
-/// YAML parser's caret diagram under it, which is the log's and not a row's.
-fn sentence(what: &str, why: &str) -> String {
+/// The trouble line a Devices row carries: `what`, and the first line of `why`
+/// as a sentence after it. The first line alone, because what a box says can
+/// be a YAML parser's caret diagram under it, and what the desktop app's
+/// updater says a stack, which are the log's and not a row's. The Annex's row
+/// and this device's own Update (see [`crate::updating`]) both draw it.
+pub(crate) fn sentence(what: &str, why: &str) -> String {
     let why = why.lines().next().unwrap_or_default().trim();
 
     if why.is_empty() {

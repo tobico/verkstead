@@ -90,7 +90,7 @@ impl Updating {
     /// Taken with no Update going as well, which is the relaunch that came up
     /// on another version telling a server that never saw the press.
     pub(crate) fn failed(&self, why: &str) {
-        let line = sentence("This device couldn't be updated", why);
+        let line = crate::annex::booting::sentence("This device couldn't be updated", why);
         tracing::warn!(%why, "the desktop app said this device's Update failed");
 
         let mut held = self.held();
@@ -107,25 +107,6 @@ impl Updating {
     pub(crate) fn trouble(&self) -> Option<String> {
         self.held().trouble.clone()
     }
-}
-
-/// The trouble line: `what`, and the first line of `why` as a sentence after
-/// it — the Annex row's shape. The first line alone, because what the updater
-/// says can carry a stack or a dump of headers under it, which is the log's.
-fn sentence(what: &str, why: &str) -> String {
-    let why = why.lines().next().unwrap_or_default().trim();
-
-    if why.is_empty() {
-        return format!("{what}.");
-    }
-
-    let stop = if why.ends_with(['.', '!', '?']) {
-        ""
-    } else {
-        "."
-    };
-
-    format!("{what}: {why}{stop}")
 }
 
 /// Why this device can't be updated from its row, where it can't — each
