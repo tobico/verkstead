@@ -45,7 +45,7 @@ click **Open**, and it does not ask again.
 **`Verkstead-x86_64.exe`**, on Windows: an installer that puts the same app
 into your own profile, at `%LOCALAPPDATA%\Programs\Verkstead`, with no
 administrator asked for, an icon in the notification area and `verkstead` on
-your `PATH` for a terminal opened after the install. It is unsigned too, so
+your `PATH` for a terminal opened after the install. It is unsigned, so
 SmartScreen stops it behind *Windows protected your PC*: click **More info**,
 then **Run anyway**. Once per download; right-clicking the exe, **Properties**,
 and ticking **Unblock** does the same beforehand. It stays unsigned because
