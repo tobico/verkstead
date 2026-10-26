@@ -123,7 +123,7 @@ impl Crow {
             .unwrap();
 
         for branch in RUNNING_THERE {
-            store::start_conversation(&pool, repo.id, branch, id)
+            store::start_conversation(&pool, repo.id, branch, id, None)
                 .await
                 .unwrap()
                 .unwrap();
