@@ -12,7 +12,7 @@
 #
 # The Mac app is signed with a Developer ID and notarized when the pack is
 # handed the secrets for both, and ad-hoc when it is not — see the `mac:`
-# section. The AppImage and the msi are unsigned, as the Rust artifacts were:
+# section. The AppImage and the exe are unsigned, as the Rust artifacts were:
 # there is no authenticode certificate. Why Windows stays that way, and what
 # would reopen it, is ADR-0020's *Amended: the Windows build stays unsigned*.
 
