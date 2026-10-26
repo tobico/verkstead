@@ -151,12 +151,18 @@ impl Updating {
     /// *updating…* for its trouble line, and the device stays on its version.
     /// Taken with no Update going as well, which is the relaunch that came up
     /// on another version telling a server that never saw the press.
-    pub(crate) fn failed(&self, why: &str) {
+    ///
+    /// `true` where this is an Update ending rather than the line it already
+    /// ended in said again, which is what is worth telling the human's
+    /// devices: once per press.
+    pub(crate) fn failed(&self, why: &str) -> bool {
         tracing::warn!(%why, "the desktop app said this device's Update failed");
 
         let mut held = self.held();
+        let ended = held.going.is_some() || held.failed.as_deref() != Some(why);
         held.going = None;
         held.failed = Some(why.to_owned());
+        ended
     }
 
     /// What the row is drawn with: the Update going, or `None`.
@@ -245,7 +251,11 @@ mod tests {
 
         updating.begin();
         updating.progressed(30);
-        updating.failed("sha512 checksum mismatch, expected abc, got def\n    at stack");
+        assert!(updating.failed("sha512 checksum mismatch, expected abc, got def\n    at stack"));
+        assert!(
+            !updating.failed("sha512 checksum mismatch, expected abc, got def\n    at stack"),
+            "the same line said again ends no Update"
+        );
 
         assert_eq!(updating.reading(), None);
         assert_eq!(

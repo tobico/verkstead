@@ -8015,14 +8015,26 @@ struct Failed {
 /// this device's Update failed: the row leaves *updating…* for its trouble
 /// line, carrying the reason, and the device stays on its version (ADR-0027:
 /// no rollback). Taken with no Update going too, which is a relaunch that came
-/// up on another version than the one it handed over to. Answered with
-/// nothing.
+/// up on another version than the one it handed over to. Raises one
+/// notification naming this device. Answered with nothing.
 async fn update_failed(State(state): State<AppState>, Json(failed): Json<Failed>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
         return unavailable("This server holds no device identity to answer for.");
     };
 
-    devices.updating().failed(&failed.why);
+    // And the human's devices told, once, in the row's own line with this
+    // device named as its members name it (Set 1416).
+    if devices.updating().failed(&failed.why)
+        && let Some(line) = devices.updating().trouble_naming(&devices.name())
+    {
+        crate::push::mentioned(
+            &state.pool,
+            crate::push::Word::NotUpdated {
+                name: devices.name(),
+                line,
+            },
+        );
+    }
     state.nudges.announce(Nudge::Devices);
 
     StatusCode::NO_CONTENT.into_response()

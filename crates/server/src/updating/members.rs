@@ -39,6 +39,12 @@
 //! so, until it turns up on the new release after all. Nothing is remembered
 //! for later (ADR-0027): the human presses again.
 //!
+//! **And a line from a press that was put to the member is a notification
+//! too**, one sentence naming it, to this device's phones — see
+//! [`MemberUpdates::raised`]. Success raises none, the row being where that
+//! is said, and nor does a member that wasn't reached, nothing having been
+//! tried on it.
+//!
 //! **Update all is every one of those presses at once, and then this
 //! device's own** — see [`all`]. Members first and this device last, because
 //! this device restarting ends the page's view of the rest (ADR-0027).
@@ -273,36 +279,59 @@ impl MemberUpdates {
     }
 
     /// And `press` ending in `line` rather than an Update: `true` where it
-    /// was still going.
+    /// was still going. Nobody is told but the row: see
+    /// [`MemberUpdates::raised`] for the line that is worth a phone.
     fn troubled(&self, device: &str, press: u64, line: String) -> bool {
-        self.ended(device, press, line, false)
+        self.ended(device, press, line, false).is_some()
     }
 
     /// The same, the line being the deadline's: see [`Held::late`].
+    #[cfg(test)]
     fn late(&self, device: &str, press: u64, line: String) -> bool {
-        self.ended(device, press, line, true)
+        self.ended(device, press, line, true).is_some()
     }
 
-    fn ended(&self, device: &str, press: u64, line: String, late: bool) -> bool {
-        {
+    /// `press` ending in `line`, and the human's devices told it in one
+    /// sentence naming the member (ADR-0027, *a notification only on
+    /// trouble*): `true` where it was still going.
+    ///
+    /// **Once per press**, because a press ends once: a line read again or
+    /// drawn again is no press ending. And not for a member that wasn't
+    /// reached or couldn't be dialled — nothing was attempted there, and its
+    /// row says so — which is [`MemberUpdates::troubled`] alone.
+    fn raised(&self, state: &AppState, device: &str, press: u64, line: String, late: bool) -> bool {
+        let Some(name) = self.ended(device, press, line.clone(), late) else {
+            return false;
+        };
+
+        tracing::info!(
+            device,
+            "a member's Update ended in trouble, so the devices are told"
+        );
+        crate::push::mentioned(&state.pool, crate::push::Word::NotUpdated { name, line });
+        true
+    }
+
+    /// Where `press` was still going: its member's name, the press having
+    /// ended in `line`.
+    fn ended(&self, device: &str, press: u64, line: String, late: bool) -> Option<String> {
+        let name = {
             let mut held = self.held();
 
-            let Some(held) = held
+            let held = held
                 .get_mut(device)
-                .filter(|held| held.press == press && held.going.is_some())
-            else {
-                return false;
-            };
+                .filter(|held| held.press == press && held.going.is_some())?;
 
             held.going = None;
             held.restarting = false;
             held.back_on = None;
             held.trouble = Some(line);
             held.late = late;
-        }
+            held.name.clone()
+        };
 
         self.moved();
-        true
+        Some(name)
     }
 
     /// `device`'s Nudge stream ended: where an Update is going on it, that is
@@ -500,12 +529,14 @@ pub(crate) async fn tell(state: &AppState, devices: &Devices, device: &str) -> R
                 }
 
                 None => {
-                    updates.troubled(
+                    updates.raised(
+                        state,
                         device,
                         press,
                         format!(
                             "{name} answered in a way this device can't read, so it wasn't updated."
                         ),
+                        false,
                     );
                 }
             }
@@ -522,14 +553,16 @@ pub(crate) async fn tell(state: &AppState, devices: &Devices, device: &str) -> R
                 .filter(|said| !said.is_empty())
                 .unwrap_or_else(|| format!("{name} refused the update: {status}."));
 
-            updates.troubled(device, press, why);
+            updates.raised(state, device, press, why, false);
         }
 
         Ok(answered) => {
-            updates.troubled(
+            updates.raised(
+                state,
                 device,
                 press,
                 format!("{name} refused the update: {}.", answered.status()),
+                false,
             );
         }
 
@@ -719,7 +752,7 @@ async fn following(state: AppState, device: String, press: u64) {
                     .map(|held| format!("{} didn't come back after its update.", held.name));
 
                 if let Some(line) = line
-                    && updates.late(&device, press, line)
+                    && updates.raised(&state, &device, press, line, true)
                 {
                     tracing::warn!(device, "a member told to update itself didn't come back in time");
                     state.nudges.announce_here(Nudge::Devices);
@@ -768,7 +801,7 @@ async fn came_back(
 
     let moved = match (said.updating, said.trouble) {
         (Some(update), _) => updates.going(device, press, update),
-        (None, Some(line)) => updates.troubled(device, press, line),
+        (None, Some(line)) => updates.raised(state, device, press, line, false),
         (None, None) => match updates.came_back_line(device, press, back) {
             Some(line) => {
                 tracing::warn!(
@@ -776,7 +809,7 @@ async fn came_back(
                     version = back.unwrap_or("none"),
                     "a member told to update itself came back on the release it ran",
                 );
-                updates.troubled(device, press, line)
+                updates.raised(state, device, press, line, false)
             }
             None => false,
         },
@@ -819,7 +852,9 @@ async fn read_back(state: &AppState, devices: &Devices, device: &str, press: u64
 
     let moved = match (said.updating, said.trouble) {
         (Some(update), _) => devices.members_updating().going(device, press, update),
-        (None, Some(line)) => devices.members_updating().troubled(device, press, line),
+        (None, Some(line)) => devices
+            .members_updating()
+            .raised(state, device, press, line, false),
         (None, None) => false,
     };
 

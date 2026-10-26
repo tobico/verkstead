@@ -572,6 +572,92 @@ impl Pressing {
     }
 }
 
+/// A device's notice stream, held open the way its desktop app holds it: every
+/// notification it pushes to its phones, read here instead.
+struct Notices {
+    body: Body,
+    buffered: String,
+}
+
+/// How long to go on listening for a notice that should not come.
+const SETTLING: Duration = Duration::from_millis(500);
+
+impl Notices {
+    /// Open on `workbench`; listening by the time it returns.
+    async fn held(workbench: &Router) -> Notices {
+        let answered = workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/ui/push/notices")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(answered.status(), StatusCode::OK);
+
+        Notices {
+            body: answered.into_body(),
+            buffered: String::new(),
+        }
+    }
+
+    /// The next notice, or `None` where none comes within `waiting`.
+    async fn within(&mut self, waiting: Duration) -> Option<serde_json::Value> {
+        tokio::time::timeout(waiting, async {
+            loop {
+                if let Some(end) = self.buffered.find("\n\n") {
+                    let frame: String = self.buffered.drain(..end + 2).collect();
+
+                    if frame.lines().any(|line| line == "event: notice") {
+                        let data = frame
+                            .lines()
+                            .find_map(|line| line.strip_prefix("data: "))
+                            .expect("a notice carries data");
+
+                        return serde_json::from_str(data).unwrap();
+                    }
+
+                    continue;
+                }
+
+                let chunk = self
+                    .body
+                    .frame()
+                    .await
+                    .expect("the stream ended")
+                    .unwrap()
+                    .into_data()
+                    .expect("the stream carries data frames");
+
+                self.buffered.push_str(std::str::from_utf8(&chunk).unwrap());
+            }
+        })
+        .await
+        .ok()
+    }
+
+    /// The one notice there is to be, as its title, landing on the Remote
+    /// access pane — and nothing after it.
+    async fn one(&mut self) -> String {
+        let notice = self.within(WAITING).await.expect("no notification came");
+
+        assert_eq!(notice["path"], "/settings/remote");
+        self.none().await;
+
+        notice["title"].as_str().unwrap().to_owned()
+    }
+
+    /// And none at all.
+    async fn none(&mut self) {
+        if let Some(notice) = self.within(SETTLING).await {
+            panic!("a notification that should not have been raised: {notice}");
+        }
+    }
+}
+
 /// The streams the pressing device holds, let go of when the test drops it.
 struct Holding(JoinHandle<()>);
 
@@ -711,6 +797,7 @@ async fn a_press_tells_the_member_and_its_row_follows_the_update() {
 async fn a_failure_on_the_member_is_its_rows_trouble_line() {
     let crow = Crow::installed_as(InstallKind::AppImage).await;
     let pressing = Pressing::linked_to(&crow).await;
+    let mut notices = Notices::held(&pressing.workbench).await;
 
     pressing.presses_update().await;
     crow.reports_failure("sha512 checksum mismatch, expected abc, got def\n    at stack")
@@ -725,6 +812,9 @@ async fn a_failure_on_the_member_is_its_rows_trouble_line() {
     let phone = crow_on(&pressing.second_workbench()).await;
     assert_eq!(phone.trouble.as_deref(), Some(LINE));
     assert_eq!(phone.updating, None);
+
+    // Raised once, in the row's own words, however often the row is read.
+    assert_eq!(notices.one().await, LINE);
 
     let pressed = pressing.presses_update().await;
     assert_eq!(pressed.trouble, None);
@@ -742,6 +832,7 @@ async fn a_member_unreachable_at_the_press_is_not_told() {
     drop(nowhere);
 
     let pressing = Pressing::linked_at(&crow, &address, COMING_BACK).await;
+    let mut notices = Notices::held(&pressing.workbench).await;
 
     let pressed = pressing.presses_update().await;
 
@@ -751,6 +842,9 @@ async fn a_member_unreachable_at_the_press_is_not_told() {
         Some("crow couldn't be reached, so it wasn't updated.")
     );
     assert!(crow.asking.lines().is_empty());
+
+    // Nothing was tried on it, and its row says so: no notification.
+    notices.none().await;
 }
 
 /// A member whose install can't update itself refuses by name, and its
@@ -759,6 +853,7 @@ async fn a_member_unreachable_at_the_press_is_not_told() {
 async fn a_member_refusing_by_name_is_its_rows_line() {
     let crow = Crow::installed_as(InstallKind::Nix).await;
     let pressing = Pressing::linked_to(&crow).await;
+    let mut notices = Notices::held(&pressing.workbench).await;
 
     let pressed = pressing.presses_update().await;
 
@@ -768,6 +863,11 @@ async fn a_member_refusing_by_name_is_its_rows_line() {
         Some("crow was installed with nix, so it's updated by hand.")
     );
     assert!(crow.asking.lines().is_empty());
+
+    assert_eq!(
+        notices.one().await,
+        "crow was installed with nix, so it's updated by hand."
+    );
 }
 
 /// crow, told and going, with the pressing device holding its stream and
@@ -799,6 +899,7 @@ async fn told_and_going(crow: &Crow, pressing: &Pressing) {
 async fn a_member_back_on_the_new_release_is_drawn_on_it() {
     let mut crow = Crow::installed_as(InstallKind::AppImage).await;
     let pressing = Pressing::linked_to(&crow).await;
+    let mut notices = Notices::held(&pressing.workbench).await;
 
     told_and_going(&crow, &pressing).await;
 
@@ -824,6 +925,9 @@ async fn a_member_back_on_the_new_release_is_drawn_on_it() {
     tokio::time::timeout(WAITING, pressing.devices.member_update_settled(CROW))
         .await
         .expect("the Update is over");
+
+    // Success is the row's to say.
+    notices.none().await;
 }
 
 /// Taken up again on the release it ran, crow's row carries one line naming
@@ -832,6 +936,7 @@ async fn a_member_back_on_the_new_release_is_drawn_on_it() {
 async fn a_member_back_on_the_release_it_ran_is_a_line_naming_both() {
     let mut crow = Crow::installed_as(InstallKind::AppImage).await;
     let pressing = Pressing::linked_to(&crow).await;
+    let mut notices = Notices::held(&pressing.workbench).await;
 
     told_and_going(&crow, &pressing).await;
 
@@ -842,12 +947,10 @@ async fn a_member_back_on_the_release_it_ran_is_a_line_naming_both() {
 
     let back = crow_comes_to(&pressing.workbench, |row| row.updating.is_none()).await;
     assert!(!back.restarting);
-    assert_eq!(
-        back.trouble.as_deref(),
-        Some(
-            format!("crow couldn't be updated: it came back on {RUNNING}, not {RELEASE}.").as_str()
-        )
-    );
+
+    let line = format!("crow couldn't be updated: it came back on {RUNNING}, not {RELEASE}.");
+    assert_eq!(back.trouble.as_deref(), Some(line.as_str()));
+    assert_eq!(notices.one().await, line);
 }
 
 /// And where crow's own app said so on relaunching, that is the one line,
@@ -888,6 +991,7 @@ async fn a_members_own_relaunch_line_is_the_one_line() {
 async fn a_member_that_never_comes_back_is_a_line_at_the_deadline() {
     let mut crow = Crow::installed_as(InstallKind::AppImage).await;
     let pressing = Pressing::linked_within(&crow, Duration::from_secs(3)).await;
+    let mut notices = Notices::held(&pressing.workbench).await;
 
     told_and_going(&crow, &pressing).await;
 
@@ -903,6 +1007,10 @@ async fn a_member_that_never_comes_back_is_a_line_at_the_deadline() {
     assert_eq!(
         late.trouble.as_deref(),
         Some("crow didn't come back after its update.")
+    );
+    assert_eq!(
+        notices.one().await,
+        "crow didn't come back after its update."
     );
 
     crow.comes_back_on(RELEASE);
@@ -934,6 +1042,8 @@ async fn update_all_updates_the_members_then_this_device_and_skips_a_sleeper() {
         row.running.len() == 2 && row.update_release.as_deref() == Some(RELEASE)
     })
     .await;
+
+    let mut notices = Notices::held(&pressing.workbench).await;
 
     let pressed = pressing.presses_update_all().await;
     assert!(pressed.updating_all);
@@ -972,6 +1082,57 @@ async fn update_all_updates_the_members_then_this_device_and_skips_a_sleeper() {
     let crow = member_in(&done, CROW);
     assert_eq!(crow.identity.version.as_deref(), Some(RELEASE));
     assert_eq!(crow.trouble, None);
+
+    // The sleeper's row says it; nothing was tried on it, and crow updated.
+    notices.none().await;
+}
+
+/// This device's own Update failing raises the same sentence, naming it, from
+/// its own server — and the app saying it again raises nothing more.
+#[tokio::test]
+async fn this_devices_own_failed_update_is_one_notification_naming_it() {
+    let crow = Crow::installed_as(InstallKind::AppImage).await;
+    let pressing = Pressing::linked_to(&crow).await;
+    let mut notices = Notices::held(&pressing.workbench).await;
+
+    let pressed = pressing
+        .workbench
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/ui/devices/this/update")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(pressed.status(), StatusCode::OK);
+    assert_eq!(pressing.asking.lines(), vec![ASKED.to_owned()]);
+
+    for _ in 0..2 {
+        let reported = pressing
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ui/devices/this/update/failed")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "why": "net::ERR_INTERNET_DISCONNECTED" }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reported.status(), StatusCode::NO_CONTENT);
+    }
+
+    assert_eq!(
+        notices.one().await,
+        "wolf couldn't be updated: net::ERR_INTERNET_DISCONNECTED."
+    );
 }
 
 /// Update all passes over a member updated by hand and an Annex in silence,
