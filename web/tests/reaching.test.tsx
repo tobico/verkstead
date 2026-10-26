@@ -490,6 +490,7 @@ const KEEPING: DevicesView = {
   pending: [],
   annex_trouble: null,
   this_update_available: false,
+  this_install: "Binary",
 };
 
 /// The two setup controls that once went to this device whatever page they
@@ -623,6 +624,7 @@ describe("the merged sidebar", () => {
     pending: [],
     annex_trouble: null,
     this_update_available: false,
+    this_install: "Binary",
   };
 
   /// The member's Conversation under the id it shares with this device's first
@@ -1049,6 +1051,7 @@ describe("a device with no cluster", () => {
     pending: [],
     annex_trouble: null,
     this_update_available: false,
+    this_install: "Binary",
   };
 
   function alone() {

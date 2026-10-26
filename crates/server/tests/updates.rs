@@ -20,7 +20,7 @@ use axum::{Json, response::IntoResponse};
 use clap::Parser;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use verkstead_render::{DevicesView, UpdateNotice};
+use verkstead_render::{DevicesView, InstallKind, UpdateNotice};
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::peer::Members;
@@ -317,6 +317,14 @@ const SAYING_NONE: &str = "99887766554433221100aabbccddeeff";
 /// latest release, and one from before a member said its version — asking
 /// about newer releases at `releases`.
 async fn cluster_app(releases: &str) -> (tempfile::TempDir, Router) {
+    cluster_app_installed_as(releases, InstallKind::Binary).await
+}
+
+/// The same cluster, this device installed as `install`.
+async fn cluster_app_installed_as(
+    releases: &str,
+    install: InstallKind,
+) -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -356,7 +364,8 @@ async fn cluster_app(releases: &str) -> (tempfile::TempDir, Router) {
         reading,
         Members::recorded(pool.clone()),
         Joins::recorded(pool.clone()),
-    );
+    )
+    .installed_as(install);
 
     (
         dir,
@@ -413,6 +422,26 @@ async fn every_row_behind_the_latest_release_is_tagged() {
         vec![BEHIND.to_owned(), "this".to_owned()],
         "a row on the release, or saying none, is not tagged",
     );
+}
+
+/// A NixOS module install behind the release is tagged like any other row, and
+/// says it is nix's, which is what draws the by-hand line and no Update.
+#[tokio::test]
+async fn a_nix_install_behind_the_release_says_it_is_nixs() {
+    let github = github().await;
+    let (_dir, app) = cluster_app_installed_as(&github.releasing("v0.3.0"), InstallKind::Nix).await;
+
+    github.is_asked().await;
+    settle().await;
+
+    let view = devices(&app).await;
+
+    assert!(
+        view.this_update_available,
+        "this device is behind the release"
+    );
+    assert_eq!(view.this_install, InstallKind::Nix);
+    assert!(!view.this_install.updates_itself());
 }
 
 /// A member can be behind a device that is itself up to date, which is what

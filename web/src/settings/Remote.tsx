@@ -210,6 +210,7 @@ import type {
   DeviceIdentity,
   DevicesView,
   DiscoveredDevice,
+  InstallKind,
   LinkedDevice,
   PendingJoin,
   RemoteView,
@@ -919,6 +920,7 @@ function List(props: {
         here
         differs={false}
         newer={props.of.this_update_available}
+        install={props.of.this_install}
         trouble={props.of.annex_trouble}
         keeper={keeperOf(props.of, props.of.this)}
       />
@@ -1023,6 +1025,9 @@ function Row(props: {
   differs?: boolean;
   /// And whether a newer stable release exists than the one it runs.
   newer?: boolean;
+  /// And what it was installed as, on this device's own row: an install that
+  /// can't update itself says how to update it by hand — see [`ByHand`].
+  install?: InstallKind;
   /// And why its box would not come up, on a Keeper's row for its own Annex
   /// that would not — drawn under the addresses, as the server said it. On
   /// the Keeper's own row where the Annex has no row yet to carry it.
@@ -1096,6 +1101,10 @@ function Row(props: {
           <p class={styles.addresses}>{props.of.addresses.join(", ")}</p>
         </Show>
 
+        <Show when={props.install} keyed>
+          {(install) => <ByHand install={install} />}
+        </Show>
+
         <Show when={props.trouble}>
           {(trouble) => <p class={styles.trouble}>{trouble()}</p>}
         </Show>
@@ -1114,6 +1123,38 @@ function Row(props: {
         )}
       </Show>
     </li>
+  );
+}
+
+/// How to update an install that can't update itself, under its addresses —
+/// and nothing for the three that can (ADR-0027, *A device updates itself*).
+///
+/// **Drawn whether or not *update available* is**, because it says what this
+/// install is as much as what to do: the row of an up-to-date NixOS host is
+/// where somebody finds out how the next release will reach it. Nothing is
+/// ever attempted on these, so there is no press beside the line.
+function ByHand(props: { install: InstallKind }): JSX.Element {
+  return (
+    <Choose>
+      <Match when={props.install === "Nix"}>
+        <p class={styles.byHand}>
+          Installed with nix. Update this device with <code>nix flake update</code>{" "}
+          and <code>nixos-rebuild switch</code>.
+        </p>
+      </Match>
+      <Match when={props.install === "Checkout"}>
+        <p class={styles.byHand}>
+          Built from a checkout. Update this device with <code>git pull</code>{" "}
+          and <code>cargo build</code>.
+        </p>
+      </Match>
+      <Match when={props.install === "Binary"}>
+        <p class={styles.byHand}>
+          Run from a downloaded binary. Update this device by downloading the
+          latest release's <code>verkstead</code>.
+        </p>
+      </Match>
+    </Choose>
   );
 }
 

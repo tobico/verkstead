@@ -136,6 +136,9 @@ mod grillings;
 /// session runs on — every sandbox binds one — so standing a router up that runs
 /// sessions means saying where they live.
 pub mod handoffs;
+/// What this Verkstead was installed as, which says whether its row on
+/// **Devices** can be offered an Update (ADR-0027).
+mod install;
 mod investigations;
 mod joins;
 /// The Workbench Key: the secret the human's browser holds and a session cannot
@@ -2712,6 +2715,9 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // read: the Devices section's presses go through it, and so does the one thing
     // in a cluster that nobody presses at all — the announcement of a certificate
     // this start made again, below.
+    let installed = install::of_this_process(started_by);
+    tracing::info!(install = ?installed, "Verkstead read what it was installed as");
+
     let devices = device::Devices::of(
         device.clone(),
         reading.clone(),
@@ -2756,7 +2762,11 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // And the pages to tell when the list moves with nobody pressing anything,
     // which is this start forgetting an Annex whose box has gone — see
     // [`device::Devices::forget_annex`].
-    .nudging(nudges.clone());
+    .nudging(nudges.clone())
+    // And what this start was installed as, which this device's row is offered
+    // an Update or a by-hand line for (ADR-0027) — read off the executable
+    // serving and said in the log, where a row that reads wrong is checked.
+    .installed_as(installed);
 
     let devices = match &annexed {
         Some(annexed) => devices.keeping_an_annex(annexed.clone()),

@@ -1821,6 +1821,12 @@ under them — with *this device* on this
 machine's own row, where another's carries an Unlink; and **Update** on any
 row whose install can update itself
 ([ADR-0027](docs/adr/0027-cluster-updates.md)).
+**What this device was installed as is read off its own executable at
+startup** — the AppImage's mount, a Mac bundle, the Windows install directory,
+the nix store, a checkout's `target/`, or anything else — and the desktop app's
+three artifacts are the kinds that update themselves. On this device's own row the
+other three draw a line saying how to update it by hand instead, with nothing
+to press: nothing is ever attempted on them.
 **A section of that pane rather than a settings section of its own**, because
 linking is how this machine is reached as much as the serve and the key are.
 There is no word of its own in the settings' openings, no card and no route: the

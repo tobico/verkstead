@@ -3444,7 +3444,7 @@ impl Executable {
 /// that is what the wrapper execed — so binding what the process says it is
 /// running would hand a session the binary without the wrapper's doing, and the
 /// CLI shells out to git for a Set's project, its branch and its Diff.
-fn unwrapped(path: &Path) -> PathBuf {
+pub(crate) fn unwrapped(path: &Path) -> PathBuf {
     let Some(wrapped) = path.file_name().and_then(OsStr::to_str) else {
         return path.to_owned();
     };

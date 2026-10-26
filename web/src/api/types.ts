@@ -2616,7 +2616,17 @@ annex_trouble: string | null,
  * [`LinkedDevice::update_available`], which is the same verdict for a
  * member.
  */
-this_update_available: boolean, };
+this_update_available: boolean, 
+/**
+ * And what this device was installed as, which says whether its row is
+ * offered an Update or a line saying how to update it by hand — see
+ * [`InstallKind`].
+ *
+ * **This device's alone**, beside `this` rather than inside it: the
+ * identity is what a member reads off the peer listener too, and what a
+ * member tells of its own install is a later stage's to decide.
+ */
+this_install: InstallKind, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -3392,6 +3402,17 @@ export type IgnoredCommentsEdit = "Keep" | { "Set": { rules: Array<IgnoreRule>, 
  * by — see [`TerminalOpened`].
  */
 export type InFront = "Run" | "Shell" | "Other" | "Unknown";
+
+/**
+ * What a Verkstead was installed as, read off its own executable at startup
+ * (ADR-0027, *A device updates itself*).
+ *
+ * **Three of them update themselves and three are updated by hand.** The
+ * desktop app's three artifacts are what electron-updater can replace; what
+ * nix, a checkout or a downloaded binary put there is the human's to replace
+ * the way they put it there, and nothing is ever attempted on one.
+ */
+export type InstallKind = "AppImage" | "MacApp" | "WindowsInstall" | "Nix" | "Checkout" | "Binary";
 
 /**
  * The press that starts one: the rows that were ticked.

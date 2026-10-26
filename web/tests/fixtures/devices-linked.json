@@ -48,5 +48,6 @@
     "os": "Linux",
     "version": "0.2.2"
   },
+  "this_install": "Binary",
   "this_update_available": false
 }

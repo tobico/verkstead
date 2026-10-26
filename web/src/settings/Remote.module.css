@@ -305,6 +305,19 @@
   color: var(--ink-soft);
 }
 
+/* How to update an install that can't update itself, under the addresses:
+   prose set as quietly as the version line above it, with the commands in it
+   in the monospace the addresses are. */
+.byHand {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.byHand code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
 /* And in a colour of its own where it is not this device's release, with no
    word beside it: the number says what is different, and the colour is what
    finds it on a list of them. */

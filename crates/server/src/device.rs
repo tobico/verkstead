@@ -889,6 +889,12 @@ pub struct Devices {
     /// And the tellings an Allow or a Deny left running after it answered —
     /// see [`Devices::allow`] and [`Tellings`].
     tellings: Tellings,
+
+    /// And what this device was installed as, which its row is offered an
+    /// Update or a by-hand line for — see [`crate::install`]. A bare binary
+    /// unless a start said otherwise, see [`Devices::installed_as`], which
+    /// offers nothing.
+    install: verkstead_render::InstallKind,
 }
 
 impl Devices {
@@ -921,6 +927,7 @@ impl Devices {
             annexed: None,
             nudges: crate::nudge::Nudges::new(),
             tellings: Tellings::default(),
+            install: verkstead_render::InstallKind::Binary,
         }
     }
 
@@ -993,6 +1000,13 @@ impl Devices {
     /// membership has no business making them.
     pub fn probing(self, probe: Probe) -> Devices {
         Devices { probe, ..self }
+    }
+
+    /// The same, read as installed as `install` — which a start reads off its
+    /// own executable (see [`crate::install::of_this_process`]) and a suite
+    /// says outright.
+    pub fn installed_as(self, install: verkstead_render::InstallKind) -> Devices {
+        Devices { install, ..self }
     }
 
     /// The same, holding what it forwards on `forwarding_on` rather than on both
@@ -1165,6 +1179,7 @@ impl Devices {
             pending: self.joins.pending(OffsetDateTime::now_utc()).await?,
             annex_trouble,
             this_update_available: false,
+            this_install: self.install,
         })
     }
 

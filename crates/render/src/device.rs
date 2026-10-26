@@ -221,6 +221,60 @@ pub struct DevicesView {
     /// member.
     #[serde(default)]
     pub this_update_available: bool,
+
+    /// And what this device was installed as, which says whether its row is
+    /// offered an Update or a line saying how to update it by hand — see
+    /// [`InstallKind`].
+    ///
+    /// **This device's alone**, beside `this` rather than inside it: the
+    /// identity is what a member reads off the peer listener too, and what a
+    /// member tells of its own install is a later stage's to decide.
+    #[serde(default)]
+    pub this_install: InstallKind,
+}
+
+/// What a Verkstead was installed as, read off its own executable at startup
+/// (ADR-0027, *A device updates itself*).
+///
+/// **Three of them update themselves and three are updated by hand.** The
+/// desktop app's three artifacts are what electron-updater can replace; what
+/// nix, a checkout or a downloaded binary put there is the human's to replace
+/// the way they put it there, and nothing is ever attempted on one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum InstallKind {
+    /// The desktop app out of `Verkstead-x86_64.AppImage`: its sidecar, run
+    /// from inside the image's mount.
+    AppImage,
+
+    /// The desktop app out of the dmg: its sidecar, run from inside the
+    /// bundle's `Contents/Resources/cli`.
+    MacApp,
+
+    /// The desktop app out of `Verkstead-x86_64.exe`: its sidecar, run from
+    /// the per-user directory the installer puts it in.
+    WindowsInstall,
+
+    /// Anything run out of the nix store, which on a host is the NixOS module.
+    Nix,
+
+    /// A build under a checkout's `target/`, which is what `pnpm start` and
+    /// `cargo run` both run.
+    Checkout,
+
+    /// Anything else, which is a downloaded `verkstead` started with `serve`.
+    #[default]
+    Binary,
+}
+
+impl InstallKind {
+    /// Whether electron-updater can take this install onto a newer release.
+    pub fn updates_itself(self) -> bool {
+        matches!(
+            self,
+            InstallKind::AppImage | InstallKind::MacApp | InstallKind::WindowsInstall
+        )
+    }
 }
 
 /// One device linked to this one: what it says it is, and whether the last dial

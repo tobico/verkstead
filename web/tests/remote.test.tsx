@@ -38,7 +38,7 @@
 //! `crates/server/tests/remote.rs` and `crates/server/tests/devices.rs`, whose
 //! subject those shapes are.
 
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import jsQR from "jsqr";
 import type { JSX } from "solid-js";
@@ -892,6 +892,61 @@ describe("the devices section", () => {
     expect(screen.getAllByText("update available")[0]!.classList).toContain(
       remote.newer,
     );
+  });
+
+  /// And this device's row says how to update it by hand where its install
+  /// can't update itself, with nothing to press: a NixOS host behind the
+  /// release reads the nix line beside *update available*.
+  it("says how to update a nix install by hand, with no press", async () => {
+    mountPane(SERVING, {
+      ...LINKED,
+      this_update_available: true,
+      this_install: "Nix",
+    });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const row = screen.getByText("this device").closest("li")!;
+
+    expect(row.textContent).toContain("update available");
+    expect(row.textContent).toContain(
+      "Installed with nix. Update this device with nix flake update and nixos-rebuild switch.",
+    );
+    expect(row.querySelector("button")).toBeNull();
+  });
+
+  /// A dev checkout and a bare binary each say their own line.
+  it("says how to update a checkout and a bare binary", async () => {
+    mountPane(SERVING, { ...LINKED, this_install: "Checkout" });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    expect(screen.getByText("this device").closest("li")!.textContent).toContain(
+      "Built from a checkout. Update this device with git pull and cargo build.",
+    );
+
+    cleanup();
+    mountPane(SERVING, { ...LINKED, this_install: "Binary" });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    expect(screen.getByText("this device").closest("li")!.textContent).toContain(
+      "Run from a downloaded binary.",
+    );
+  });
+
+  /// And an install that updates itself has no by-hand line, and no member's
+  /// row has one either: the install is this device's alone.
+  it("says nothing by hand for an install that updates itself", async () => {
+    for (const install of ["AppImage", "MacApp", "WindowsInstall"] as const) {
+      mountPane(SERVING, { ...LINKED, this_install: install });
+
+      await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+      expect(screen.queryByText(/Update this device/)).toBeNull();
+
+      cleanup();
+    }
   });
 
   /// And only one of them is this machine, whichever else is on the list.
