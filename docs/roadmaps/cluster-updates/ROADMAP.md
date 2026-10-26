@@ -33,4 +33,4 @@ member to do until a device can update itself.
 - [x] 02: A signed Mac release — [brief](02-a-signed-mac-release.md) — no dependencies
 - [x] 03: The Windows installer — [brief](03-the-windows-installer.md) — no dependencies
 - [x] 04: The app updates this device — [brief](04-the-app-updates-this-device.md) — after 01, 02, 03
-- [ ] 05: Updating members — [brief](05-updating-members.md) — after 04
+- [ ] 05: Updating members — [brief](05-updating-members.md) — after 04 *(in progress: `roadmaps/cluster-updates/05-updating-members`)*
