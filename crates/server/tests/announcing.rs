@@ -212,8 +212,14 @@ impl Verkstead {
 
     /// How it dials, for the questions that are about a call rather than about
     /// a press.
+    ///
+    /// **With a running server's deadlines rather than [`PATIENCE`]**, because
+    /// every call made through this one is meant to be answered — let in or
+    /// refused at the gate, but answered. Three hundred milliseconds for the
+    /// whole of an answer is a dial a loaded runner fails to finish, and that
+    /// reads exactly as a member answering at none of its addresses.
     fn peers(&self) -> Peers {
-        Peers::of(self.device.clone(), self.members.clone()).waiting(PATIENCE)
+        Peers::of(self.device.clone(), self.members.clone())
     }
 
     /// What it says about itself, which is what an announcement carries.
