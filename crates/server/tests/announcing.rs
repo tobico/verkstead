@@ -216,8 +216,9 @@ impl Verkstead {
     /// **With a running server's deadlines rather than [`PATIENCE`]**, because
     /// every call made through this one is meant to be answered — let in or
     /// refused at the gate, but answered. Three hundred milliseconds for the
-    /// whole of an answer is a dial a loaded runner fails to finish, and that
-    /// reads exactly as a member answering at none of its addresses.
+    /// whole of an answer, a handshake and a write, is a dial a loaded runner
+    /// fails to finish, and that reads exactly as a member answering at none of
+    /// its addresses.
     fn peers(&self) -> Peers {
         Peers::of(self.device.clone(), self.members.clone())
     }
