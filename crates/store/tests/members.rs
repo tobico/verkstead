@@ -14,7 +14,8 @@ use verkstead_store::{
     Linking, Renewal, Telling, announcement_made, announcements_owed, announcements_owed_to,
     changeover_over, forget_every_member, forget_every_member_but, forget_member, member_count,
     member_holding, member_reached_at, member_unreachable, members, members_yet_to_acknowledge,
-    open_database, owe_announcement, record_member, record_renewal, renewal_acknowledged,
+    open_database, owe_announcement, record_member, record_renewal, refresh_member,
+    renewal_acknowledged,
 };
 
 /// The two devices these tests link to, named by the ids a cluster names them
@@ -531,6 +532,36 @@ async fn a_forgotten_member_is_gone() {
     // And a device that is not a member is already not a member: unlinking one
     // twice is not a thing to fail.
     forget_member(&pool, B).await.unwrap();
+}
+
+/// A member brought up to date is rewritten as a recording would rewrite it,
+/// and a device that is no member is not made one: the read of a device
+/// unlinked while it was on the link lands on nothing.
+#[tokio::test]
+async fn a_refresh_writes_a_member_and_never_makes_one() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+
+    let mut renamed = advertising(B, "bench", B_FINGERPRINT);
+    renamed.addresses = vec!["192.168.1.40".to_owned()];
+    renamed.version = Some("0.3.0".to_owned());
+
+    assert!(refresh_member(&pool, &renamed).await.unwrap());
+
+    let listed = members(&pool).await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "bench");
+    assert_eq!(listed[0].addresses, vec!["192.168.1.40".to_owned()]);
+    assert_eq!(listed[0].version.as_deref(), Some("0.3.0"));
+
+    forget_member(&pool, B).await.unwrap();
+
+    assert!(!refresh_member(&pool, &renamed).await.unwrap());
+    assert!(members(&pool).await.unwrap().is_empty());
+    assert!(!member_holding(&pool, B_FINGERPRINT).await.unwrap());
 }
 
 // ---------------------------------------------------------------------------

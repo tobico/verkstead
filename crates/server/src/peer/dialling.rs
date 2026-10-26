@@ -431,8 +431,12 @@ impl Peers {
             );
         }
 
-        self.members
-            .refreshed(&Linking {
+        // Written only over a row that is still there: a device unlinked while
+        // this read was on the link is not made a member again by its answer —
+        // see [`verkstead_store::refresh_member`].
+        let still_a_member = self
+            .members
+            .brought_up_to_date(&Linking {
                 device: member.device.clone(),
                 name: identity.name.clone(),
                 os: identity.os.clone(),
@@ -457,6 +461,14 @@ impl Peers {
                 install: crate::install::kept(identity.install),
             })
             .await?;
+
+        if !still_a_member {
+            tracing::info!(
+                device = %member.device,
+                "a device answered what it is after it was unlinked, so nothing is written down",
+            );
+            return Ok(identity);
+        }
 
         // And where this member was in the middle of a changeover and has
         // answered under the certificate it was changing *to*, that changeover is

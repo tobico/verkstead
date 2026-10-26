@@ -546,9 +546,66 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
     .await
     .with_context(|| format!("recording device {} as a member", linking.device))?;
 
+    advertised(&mut tx, linking).await?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("recording device {} as a member", linking.device))
+}
+
+/// The same for a device that is **already a member**, and nothing at all for
+/// one that is not: `false`, and no row written, where there is none to bring
+/// up to date.
+///
+/// **What a read of a member's identity writes**, rather than
+/// [`record_member`]. That read goes over the link and back, and a device
+/// unlinked while it was on the way has no row for the answer to land in. Put
+/// back by an upsert, it would be a member again that nobody linked, and
+/// everything pruned for its going would be held of it again. Whether the row is
+/// there is asked by the write itself, so no unlink can fall between the two.
+pub async fn refresh_member(pool: &SqlitePool, linking: &Linking) -> Result<bool> {
+    let mut tx = writing(pool, "bringing a member up to date").await?;
+
+    let updated = sqlx::query(
+        "UPDATE members
+         SET name        = ?,
+             os          = ?,
+             fingerprint = ?,
+             last_seen   = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+             reachable   = 1,
+             version     = ?,
+             install     = ?
+         WHERE device = ?",
+    )
+    .bind(&linking.name)
+    .bind(&linking.os)
+    .bind(&linking.fingerprint)
+    .bind(&linking.version)
+    .bind(&linking.install)
+    .bind(&linking.device)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("bringing member {} up to date", linking.device))?;
+
+    if updated.rows_affected() == 0 {
+        return Ok(false);
+    }
+
+    advertised(&mut tx, linking).await?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("bringing member {} up to date", linking.device))?;
+
+    Ok(true)
+}
+
+/// The addresses `linking` advertised, written in place of the ones its row
+/// held, in the transaction the row is written in — see [`record_member`].
+async fn advertised(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, linking: &Linking) -> Result<()> {
     sqlx::query("DELETE FROM member_addresses WHERE device = ?")
         .bind(&linking.device)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .with_context(|| {
             format!(
@@ -562,7 +619,7 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
             .bind(&linking.device)
             .bind(position as i64)
             .bind(address)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .with_context(|| {
                 format!(
@@ -572,9 +629,7 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
             })?;
     }
 
-    tx.commit()
-        .await
-        .with_context(|| format!("recording device {} as a member", linking.device))
+    Ok(())
 }
 
 /// One member row as the query hands it back, in the order the `SELECT` names the

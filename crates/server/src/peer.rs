@@ -792,6 +792,24 @@ impl Members {
         }
     }
 
+    /// The same for a device that is already a member, and nothing for one
+    /// that is not: `false` where no row was there to bring up to date, which
+    /// is a device unlinked while it was being read — see
+    /// [`verkstead_store::refresh_member`]. A stated membership writes nothing
+    /// and says it did.
+    pub(crate) async fn brought_up_to_date(
+        &self,
+        linking: &verkstead_store::Linking,
+    ) -> Result<bool> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::refresh_member(pool, linking)
+                .await
+                .with_context(|| format!("recording what device {} says it is", linking.device)),
+
+            Recorded::Stated(_) => Ok(true),
+        }
+    }
+
     /// And mark one as answering nothing, which is what a dial that reached none
     /// of its addresses does — see [`verkstead_store::member_unreachable`].
     ///
