@@ -410,8 +410,13 @@ pub struct LinkedDevice {
     /// winvm is on 0.2.0 and this device is on 0.2.2. Update winvm.* Held until
     /// the next read of that kind lands.
     ///
+    /// **And, last, why the last Update pressed on it here didn't go**: its
+    /// own refusal by name, its updater's failure in its own words, or that it
+    /// was unreachable at the press and so wasn't updated — standing until the
+    /// next press (ADR-0027, *A device updates itself*).
+    ///
     /// This device's own findings, like the flag above: `None` on a row with
-    /// none of either.
+    /// none of them.
     #[serde(default)]
     pub trouble: Option<String>,
 
@@ -425,6 +430,37 @@ pub struct LinkedDevice {
     /// arithmetic.
     #[serde(default)]
     pub update_available: bool,
+
+    /// And that newer release, *0.3.0*, which its Update's confirm card names
+    /// — `None` wherever `update_available` is false.
+    #[serde(default)]
+    pub update_release: Option<String>,
+
+    /// And the branch each session running on it is running on, where its
+    /// Conversation is called by its branch — which its Update's confirm card
+    /// names as the sessions to be stopped and resumed (ADR-0027), as
+    /// [`DevicesView::this_running`] does for this device.
+    ///
+    /// **Read off the list this device already holds of that member**, the
+    /// sidebar's, rather than asked for: what it says is as fresh as the last
+    /// Nudge of that member's that moved its sidebar. Empty for a member never
+    /// heard from.
+    #[serde(default)]
+    pub running: Vec<String>,
+
+    /// And how many more are running there on a Draft, counted rather than
+    /// named — see [`DevicesView::this_running_drafts`].
+    #[serde(default)]
+    pub running_drafts: u32,
+
+    /// And its Update, where one pressed on this device is going: from the
+    /// press, with how much of the release is down once that member's desktop
+    /// app has said (ADR-0027, *A device updates itself*). Held by the device
+    /// that pressed, so every workbench of it draws the same row. `None` with
+    /// none going; a press that left a line rather than an Update says it in
+    /// `trouble`.
+    #[serde(default)]
+    pub updating: Option<ThisUpdating>,
 }
 
 /// One device nobody has typed an address for, as the **Discovered** list under

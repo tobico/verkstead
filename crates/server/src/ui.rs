@@ -64,6 +64,7 @@ use crate::device::Unlinkable;
 use crate::onboarding::Refusal;
 use crate::peer::workbench::OverTheLink;
 use crate::settings::{AtOnce, Cleanup, CleanupStep, Config, RuleTrouble};
+use crate::updating::members::Untold;
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -843,6 +844,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // that one is — the thing, and what is being done to it — rather than
         // as a `DELETE` on the row, because that is how every press in this
         // API is spelled and a second spelling would be a second convention.
+        .route(
+            "/api/ui/devices/members/{device}/update",
+            post(update_member),
+        )
         .route(
             "/api/ui/devices/members/{device}/unlink",
             post(unlink_device),
@@ -8276,6 +8281,49 @@ async fn cancel_join(State(state): State<AppState>, Path(request): Path<String>)
     moved(&state, &devices).await
 }
 
+/// `POST /api/ui/devices/members/{device}/update` — **Update** on a member's
+/// row: the member is told to update itself, and its row reads *updating…*
+/// from the answer on, or the line saying why not — refused by name, or
+/// unreachable and so not updated (ADR-0027, *A device updates itself*). See
+/// [`crate::updating::members`]. Answered with the Devices section read again,
+/// whatever the member made of it.
+///
+/// **Refused on an Annex**, which follows its Keeper's release, and on a
+/// device that is no member — neither is told anything.
+async fn update_member(State(state): State<AppState>, Path(device): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("This server holds no device identity to answer for.");
+    };
+
+    match crate::updating::members::tell(&state, &devices, &device).await {
+        Ok(()) => {}
+
+        Err(Untold::NoSuchMember) => {
+            return refused(
+                StatusCode::NOT_FOUND,
+                ApiError::new("That device isn't linked to this one."),
+            );
+        }
+
+        Err(Untold::Annex { name }) => {
+            return refused(
+                StatusCode::CONFLICT,
+                ApiError::new(format!(
+                    "{name} is an annex, so it's updated with its keeper."
+                )),
+            );
+        }
+
+        Err(Untold::Unreadable(why)) => {
+            return unavailable(&format!(
+                "The devices this one is linked to couldn't be read: {why:#}."
+            ));
+        }
+    }
+
+    listed(&state, &devices).await
+}
+
 /// `POST /api/ui/devices/members/{device}/unlink` — **Unlink**: take a device
 /// out of this cluster, for everybody (ADR-0020, *A cluster is a membership*).
 ///
@@ -8460,6 +8508,8 @@ async fn listed(state: &AppState, devices: &crate::device::Devices) -> HttpRespo
     (view.this_running, view.this_running_drafts) = running_here(state).await;
     for member in &mut view.members {
         member.update_available = state.updates.newer_than(member.identity.version.as_deref());
+        member.update_release = state.updates.newer(member.identity.version.as_deref());
+        (member.running, member.running_drafts) = state.merged.running_on(&member.identity.device);
     }
 
     Json(view).into_response()

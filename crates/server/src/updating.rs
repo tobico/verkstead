@@ -22,6 +22,8 @@
 //! over to, which is the new server being told what the old one never saw. The
 //! line stands until the next press, or the next start.
 
+pub(crate) mod members;
+
 use std::sync::{Arc, Mutex};
 
 use verkstead_render::{InstallKind, ThisUpdating};
@@ -88,11 +90,13 @@ pub(crate) struct Updating {
     asking: Asking,
 }
 
-/// The Update going, and the trouble line the last one that failed left.
+/// The Update going, and why the last one that failed did — the updater's own
+/// reason, which the trouble line is made of with the device named as whoever
+/// is drawing it calls it (see [`Updating::trouble_naming`]).
 #[derive(Debug, Default)]
 struct Held {
     going: Option<ThisUpdating>,
-    trouble: Option<String>,
+    failed: Option<String>,
 }
 
 impl Updating {
@@ -120,7 +124,7 @@ impl Updating {
                 return false;
             }
             held.going = Some(ThisUpdating::default());
-            held.trouble = None;
+            held.failed = None;
         }
 
         tracing::info!(
@@ -148,12 +152,11 @@ impl Updating {
     /// Taken with no Update going as well, which is the relaunch that came up
     /// on another version telling a server that never saw the press.
     pub(crate) fn failed(&self, why: &str) {
-        let line = crate::annex::booting::sentence("This device couldn't be updated", why);
         tracing::warn!(%why, "the desktop app said this device's Update failed");
 
         let mut held = self.held();
         held.going = None;
-        held.trouble = Some(line);
+        held.failed = Some(why.to_owned());
     }
 
     /// What the row is drawn with: the Update going, or `None`.
@@ -161,9 +164,23 @@ impl Updating {
         self.held().going
     }
 
-    /// And the trouble line the last Update that failed left, or `None`.
+    /// And the trouble line the last Update that failed left, or `None`, on
+    /// this device's own row.
     pub(crate) fn trouble(&self) -> Option<String> {
-        self.held().trouble.clone()
+        self.trouble_naming("This device")
+    }
+
+    /// The same line, the device named `who`: its name, where a member that
+    /// pressed asks — *crow couldn't be updated: …*, drawn on crow's row there
+    /// as it came. Worded as the Annex's row is, by
+    /// [`crate::annex::booting::sentence`].
+    pub(crate) fn trouble_naming(&self, who: &str) -> Option<String> {
+        let why = self.held().failed.clone()?;
+
+        Some(crate::annex::booting::sentence(
+            &format!("{who} couldn't be updated"),
+            &why,
+        ))
     }
 }
 
@@ -240,6 +257,20 @@ mod tests {
 
         updating.begin();
         assert_eq!(updating.trouble(), None);
+    }
+
+    /// And a member asked names itself in the same line.
+    #[test]
+    fn a_failure_names_the_device_it_is_asked_about() {
+        let updating = Updating::default();
+
+        updating.begin();
+        updating.failed("net::ERR_INTERNET_DISCONNECTED");
+
+        assert_eq!(
+            updating.trouble_naming("crow").as_deref(),
+            Some("crow couldn't be updated: net::ERR_INTERNET_DISCONNECTED.")
+        );
     }
 
     /// A failure is taken with no Update going: the relaunch's report.

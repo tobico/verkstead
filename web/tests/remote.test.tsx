@@ -54,6 +54,7 @@ import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
 import type {
   DevicesView,
   DiscoveredDevice,
+  LinkedDevice,
   Nudge,
   RemoteView,
   ServePress,
@@ -1249,6 +1250,155 @@ describe("the devices section", () => {
     expect(row.textContent).not.toContain("updating…");
     expect(row.textContent).toContain("update available");
     expect(screen.getByRole("button", { name: "Update" })).toBeTruthy();
+  });
+
+  /// A desktop member behind the release, answering, as its row is offered
+  /// Update with two sessions running there.
+  function aDesktopMember(): DevicesView {
+    const [laptop, wsl] = LINKED.members;
+
+    return {
+      ...LINKED,
+      members: [
+        {
+          ...laptop!,
+          identity: { ...laptop!.identity, install: "AppImage" },
+          update_available: true,
+          update_release: "0.3.0",
+          running: ["rate-limiting", "solid-viewer"],
+        },
+        wsl!,
+      ],
+    };
+  }
+
+  /// With `laptop`'s row changed by `change`.
+  function withTheLaptop(
+    list: DevicesView,
+    change: Partial<LinkedDevice>,
+  ): DevicesView {
+    return {
+      ...list,
+      members: list.members.map((member) =>
+        member.identity.name === "laptop" ? { ...member, ...change } : member,
+      ),
+    };
+  }
+
+  /// A desktop member behind the release has Update on its own row; the
+  /// press asks *Update laptop?* naming the release and both sessions
+  /// running there, and Update on the card tells it — the row then reads
+  /// *updating…*, and the percent once the member reports it, polled.
+  it("offers Update on a desktop member's row, asking by its name", async () => {
+    const behind = aDesktopMember();
+    let now: "asked" | "told" | "downloading" = "asked";
+    const told = withTheLaptop(behind, { updating: { percent: null } });
+    const downloading = withTheLaptop(behind, { updating: { percent: 40 } });
+    const device = behind.members[0]!.identity.device;
+
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      whenever("/api/ui/devices", () =>
+        json(now === "asked" ? behind : now === "told" ? told : downloading)(),
+      ),
+      theHeard(),
+      whenever(
+        `/api/ui/devices/members/${device}/update`,
+        () => {
+          now = "told";
+          return json(told)();
+        },
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    const press = await screen.findByRole("button", { name: "Update" });
+    expect(press.closest("li")).toBe(screen.getByText("laptop").closest("li"));
+
+    fireEvent.click(press);
+
+    const asked = await screen.findByText("Update laptop?");
+    expect(asked.closest("dialog")!.textContent).toContain(
+      "It restarts on Verkstead 0.3.0, and the sessions on rate-limiting and solid-viewer will be stopped and resumed.",
+    );
+    expect(askedFor(fetching, `/api/ui/devices/members/${device}/update`)).toBe(0);
+
+    fireEvent.click(updateOnTheCard());
+
+    await waitFor(() => expect(screen.getByText("updating…")).toBeTruthy());
+    const row = screen.getByText("laptop").closest("li")!;
+    expect(row.textContent).not.toContain("update available");
+    expect(within(row).queryByRole("button", { name: "Update" })).toBeNull();
+    expect(askedFor(fetching, `/api/ui/devices/members/${device}/update`)).toBe(1);
+
+    now = "downloading";
+    await waitFor(() => expect(screen.getByText("updating… 40%")).toBeTruthy(), {
+      timeout: 3_000,
+    });
+  });
+
+  /// And Cancel tells the member nothing.
+  it("tells a member nothing on Cancel", async () => {
+    const behind = aDesktopMember();
+    const device = behind.members[0]!.identity.device;
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(behind),
+      theHeard(),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+    await screen.findByText("Update laptop?");
+
+    fireEvent.click(screen.getByText("Cancel"));
+
+    await waitFor(() => expect(screen.queryByText("Update laptop?")).toBeNull());
+    expect(askedFor(fetching, `/api/ui/devices/members/${device}/update`)).toBe(0);
+  });
+
+  /// No Update on a member that is unreachable, on the release, or already
+  /// updating.
+  it("offers no Update on a member that can't be told now", async () => {
+    for (const change of [
+      { reachable: false },
+      { update_available: false, update_release: null },
+      { updating: { percent: 10 } },
+    ] satisfies Partial<LinkedDevice>[]) {
+      mountPane(SERVING, withTheLaptop(aDesktopMember(), change));
+
+      await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+      expect(
+        within(screen.getByText("laptop").closest("li")!).queryByRole("button", {
+          name: "Update",
+        }),
+        JSON.stringify(change),
+      ).toBeNull();
+
+      cleanup();
+    }
+  });
+
+  /// The line a member's Update left — its failure in its own words, or that
+  /// it was unreachable at the press — is drawn on its row, with Update
+  /// offered again.
+  it("draws the line a member's Update left on its row", async () => {
+    for (const line of [
+      "laptop couldn't be updated: sha512 checksum mismatch, expected abc, got def.",
+      "laptop couldn't be reached, so it wasn't updated.",
+    ]) {
+      mountPane(SERVING, withTheLaptop(aDesktopMember(), { trouble: line }));
+
+      const drawn = await screen.findByText(line);
+      const row = screen.getByText("laptop").closest("li")!;
+      expect(drawn.closest("li")).toBe(row);
+      expect(row.textContent).not.toContain("updating…");
+      expect(within(row).getByRole("button", { name: "Update" })).toBeTruthy();
+
+      cleanup();
+    }
   });
 
   /// A refused press says why under the list.

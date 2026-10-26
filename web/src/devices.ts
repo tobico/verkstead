@@ -26,9 +26,9 @@ import { useReading } from "./freshness";
 import type { Device } from "./reaching";
 import { repoParent } from "./remembered";
 
-/// How often the reading is asked again while this device's own Update is
-/// going: often enough that *restarting…* gives way to the new version within
-/// a second or so of the new server answering.
+/// How often the reading is asked again while an Update is going — this
+/// device's, or a member's pressed here: often enough that *restarting…* gives
+/// way to the new version within a second or so of the new server answering.
 const UPDATING = 1_000;
 
 /// Which mark stands beside a device's name, off the word for its operating
@@ -97,6 +97,13 @@ export function useDevices(on?: () => boolean) {
   const updating = (): boolean =>
     queries.getQueryData<DevicesView>(["devices"])?.this_updating != null;
 
+  /// And whether it says a member's is, pressed here: its progress reaches
+  /// this server with no Nudge either.
+  const memberUpdating = (): boolean =>
+    queries
+      .getQueryData<DevicesView>(["devices"])
+      ?.members.some((member) => member.updating != null) ?? false;
+
   return useReading(() => ({
     queryKey: ["devices"],
     queryFn: loadDevices,
@@ -106,7 +113,7 @@ export function useDevices(on?: () => boolean) {
     // Nudge, and the server that would send one is about to go. Kept polling
     // through the failed reads of the restart, so the page finds the new
     // server the moment it answers.
-    refetchInterval: () => (updating() ? UPDATING : false),
+    refetchInterval: () => (updating() || memberUpdating() ? UPDATING : false),
     // And a failed read is not retried meanwhile: a server that has stopped
     // answering is the restart, and the row says so at the first failure
     // rather than after the ordinary backoff.

@@ -79,11 +79,13 @@ pub(crate) async fn asked(State(state): State<AppState>) -> Response {
     Json(standing(devices)).into_response()
 }
 
-/// The two readings this device's own row is drawn with.
+/// The two readings this device's own row is drawn with, the trouble line
+/// naming this device as the member that pressed draws it: *crow couldn't be
+/// updated: …*.
 fn standing(devices: &Devices) -> MemberUpdate {
     MemberUpdate {
         updating: devices.updating().reading(),
-        trouble: devices.updating().trouble(),
+        trouble: devices.updating().trouble_naming(&devices.name()),
     }
 }
 

@@ -15,8 +15,12 @@
         "version": null
       },
       "reachable": true,
+      "running": [],
+      "running_drafts": 0,
       "trouble": null,
-      "update_available": false
+      "update_available": false,
+      "update_release": null,
+      "updating": null
     },
     {
       "identity": {
@@ -32,8 +36,12 @@
         "version": null
       },
       "reachable": true,
+      "running": [],
+      "running_drafts": 0,
       "trouble": null,
-      "update_available": false
+      "update_available": false,
+      "update_release": null,
+      "updating": null
     }
   ],
   "pending": [],

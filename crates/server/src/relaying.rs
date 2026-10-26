@@ -719,7 +719,7 @@ pub(crate) fn asking(onwards: String) -> Call {
 /// Read chunk by chunk rather than in one call, so the bound is applied as the
 /// bytes arrive: a body read whole and then measured is a body this device has
 /// already held.
-async fn bounded(answered: reqwest::Response, most: usize) -> anyhow::Result<Vec<u8>> {
+pub(crate) async fn bounded(answered: reqwest::Response, most: usize) -> anyhow::Result<Vec<u8>> {
     use tokio_stream::StreamExt;
 
     let mut body = answered.bytes_stream();

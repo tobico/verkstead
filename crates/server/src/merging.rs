@@ -264,6 +264,31 @@ impl MemberLists {
         })
     }
 
+    /// What every session running on `device` is running on, as its own list
+    /// last said: the branch of each whose Conversation is called by it, in
+    /// that list's order, and how many more are on a Draft — the reading its
+    /// Update's confirm card names, as [`crate::ui`]'s `running_here` is this
+    /// device's. Nothing where this device holds no list of it.
+    pub(crate) fn running_on(&self, device: &str) -> (Vec<String>, u32) {
+        let held = self.held();
+        let mut named = Vec::new();
+        let mut drafts = 0;
+
+        for row in held
+            .get(device)
+            .into_iter()
+            .flat_map(|held| &held.rows)
+            .filter(|row| row.working)
+        {
+            match settled(row.branch_named, row.state, row.naming) {
+                true => named.push(row.branch.clone()),
+                false => drafts += 1,
+            }
+        }
+
+        (named, drafts)
+    }
+
     /// What is held of each of `members`, and nothing of anybody else.
     ///
     /// **The membership is what prunes this.** A device that has been unlinked

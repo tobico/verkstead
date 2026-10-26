@@ -707,6 +707,10 @@ impl Members {
                 reachable: member.reachable,
                 trouble: None,
                 update_available: false,
+                update_release: None,
+                running: Vec::new(),
+                running_drafts: 0,
+                updating: None,
                 identity: DeviceIdentity {
                     device: member.device,
                     fingerprint: member.fingerprint,

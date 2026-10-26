@@ -893,6 +893,10 @@ pub struct Devices {
     /// And this device's own Update while one is going — see
     /// [`crate::updating`], every clone of this handle sharing it.
     updating: crate::updating::Updating,
+
+    /// And the Updates pressed here on members' rows — see
+    /// [`crate::updating::members`], every clone sharing them.
+    members_updating: crate::updating::members::MemberUpdates,
 }
 
 impl Devices {
@@ -926,6 +930,7 @@ impl Devices {
             nudges: crate::nudge::Nudges::new(),
             tellings: Tellings::default(),
             updating: crate::updating::Updating::default(),
+            members_updating: crate::updating::members::MemberUpdates::default(),
         }
     }
 
@@ -1031,6 +1036,12 @@ impl Devices {
     /// This device's own Update — see [`crate::updating`].
     pub(crate) fn updating(&self) -> &crate::updating::Updating {
         &self.updating
+    }
+
+    /// And the Updates pressed here on its members' rows — see
+    /// [`crate::updating::members`].
+    pub(crate) fn members_updating(&self) -> &crate::updating::members::MemberUpdates {
+        &self.members_updating
     }
 
     /// The same, holding what it forwards on `forwarding_on` rather than on both
@@ -1195,6 +1206,21 @@ impl Devices {
                     .collect::<Vec<_>>()
                     .join(" "),
             );
+        }
+
+        // And a member's Update pressed here: going, or the line its press
+        // left, last of the row's lines — see [`crate::updating::members`].
+        for member in &mut members {
+            let (updating, trouble) = self.members_updating.reading(&member.identity.device);
+
+            member.updating = updating;
+
+            if let Some(trouble) = trouble {
+                member.trouble = Some(match member.trouble.take() {
+                    Some(before) => format!("{before} {trouble}"),
+                    None => trouble,
+                });
+            }
         }
 
         Ok(DevicesView {

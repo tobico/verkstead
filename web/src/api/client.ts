@@ -2018,6 +2018,16 @@ export function updateThisDevice(): Promise<DevicesView> {
   return post<DevicesView>("/api/ui/devices/this/update");
 }
 
+/// **Update** on a member's row: the member is told to update itself, and its
+/// row reads *updating…* from the answer on — or the line saying why not, its
+/// own refusal or that it couldn't be reached (ADR-0027). Answered with the
+/// section read again whatever the member made of it.
+export function updateMember(device: string): Promise<DevicesView> {
+  return post<DevicesView>(
+    `/api/ui/devices/members/${encodeURIComponent(device)}/update`,
+  );
+}
+
 /// What this machine has installed beyond what the wizard checks: the Annex's
 /// row on a Windows Keeper, and `annex: null` everywhere else — which is what
 /// says the settings page draws no Components card.
