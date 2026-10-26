@@ -89,6 +89,7 @@ pub mod renewing;
 pub mod repos;
 pub mod transfers;
 pub mod unlinking;
+pub mod updating;
 pub mod workbench;
 
 use std::net::SocketAddr;
@@ -714,6 +715,7 @@ impl Members {
                     addresses: member.addresses,
                     kept_by: member.kept_by,
                     version: member.version,
+                    install: crate::install::said(member.install.as_deref()),
                 },
             })
             .collect())

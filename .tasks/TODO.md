@@ -18,7 +18,7 @@ Roadmap stage: [05: Updating members](docs/roadmaps/cluster-updates/05-updating-
 
 ## Tasks
 
-- [ ] 01: A member says what it is, and can be told — [details](01-a-member-says-what-it-is-and-can-be-told.md)
+- [x] 01: A member says what it is, and can be told — [details](01-a-member-says-what-it-is-and-can-be-told.md)
 - [ ] 02: Update on a member's row — [details](02-update-on-a-members-row.md)
 - [ ] 03: The member coming back — [details](03-the-member-coming-back.md)
 - [ ] 04: Update all — [details](04-update-all.md)

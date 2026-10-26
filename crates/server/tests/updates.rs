@@ -20,15 +20,19 @@ use axum::{Json, response::IntoResponse};
 use clap::Parser;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use verkstead_render::{DevicesView, InstallKind, ThisUpdating, UpdateNotice};
+use verkstead_render::{DevicesView, InstallKind, MemberUpdate, ThisUpdating, UpdateNotice};
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
-use verkstead_server::peer::Members;
+use verkstead_server::nudge::Nudges;
+use verkstead_server::onboarding::Machine;
 use verkstead_server::peer::joining::Joins;
+use verkstead_server::peer::{self, Members};
 use verkstead_server::platform::Platform;
 use verkstead_server::remote::Tailscale;
+use verkstead_server::updating::Asking;
 use verkstead_server::{
-    Config, open_database, router_answering_devices_checking_updates, router_checking_updates,
+    Config, Routers, open_database, router_answering_devices_checking_updates,
+    router_checking_updates, routers_answering_devices_telling,
 };
 use verkstead_store::{Linking, record_member};
 
@@ -345,6 +349,7 @@ async fn cluster_app_installed_as(
                 fingerprint: format!("AA:BB:{device}"),
                 kept_by: None,
                 version: version.map(str::to_owned),
+                install: None,
             },
         )
         .await
@@ -635,4 +640,143 @@ async fn with_no_answer_no_row_is_tagged() {
     settle().await;
 
     assert!(tagged(&devices(&app).await).is_empty());
+}
+
+/// A member called crow, installed as `install`, as the device pressing its
+/// row reaches it: the router it serves over the link, and what its desktop
+/// app hears.
+async fn member_installed_as(install: InstallKind) -> (tempfile::TempDir, Router, Asking) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let reading = Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422),
+        Platform::HERE,
+        None,
+        Vec::new(),
+    )
+    .calling_itself("crow", "Linux")
+    .running(Some("0.2.2"));
+
+    let asking = Asking::heard();
+
+    let devices = Devices::of(
+        Device::stated(dir.path(), BEHIND).unwrap(),
+        reading,
+        Members::recorded(pool.clone()),
+        Joins::recorded(pool.clone()),
+    )
+    .installed_as(install)
+    .asking_the_app(asking.clone());
+
+    let Routers { over_the_link, .. } =
+        routers_answering_devices_telling(pool, devices, Nudges::new(), Machine::here());
+
+    (dir, over_the_link, asking)
+}
+
+/// Tell a member to update itself, the way a press on its row does.
+async fn tell_to_update(member: &Router) -> (StatusCode, String) {
+    let http = member
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(peer::updating::UPDATE)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"release":"0.3.0"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = http.status();
+    let body = http.into_body().collect().await.unwrap().to_bytes();
+    (status, String::from_utf8(body.to_vec()).unwrap())
+}
+
+/// Ask a member how its Update stands.
+async fn member_update(member: &Router) -> MemberUpdate {
+    let http = member
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(peer::updating::UPDATE)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(http.status(), StatusCode::OK);
+
+    let body = http.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&body).unwrap()
+}
+
+/// A desktop member told to update itself says the line its app acts on, once
+/// however often it is told, and reads *updating…* when asked.
+#[tokio::test]
+async fn a_desktop_member_told_to_update_asks_its_app() {
+    let (_dir, member, asking) = member_installed_as(InstallKind::AppImage).await;
+
+    assert_eq!(member_update(&member).await, MemberUpdate::default());
+
+    let (status, answered) = tell_to_update(&member).await;
+    assert_eq!(status, StatusCode::OK, "{answered}");
+    let answered: MemberUpdate = serde_json::from_str(&answered).unwrap();
+    assert_eq!(answered.updating, Some(ThisUpdating { percent: None }));
+
+    assert_eq!(
+        asking.lines(),
+        vec!["verkstead-desktop: update this device".to_owned()]
+    );
+
+    let (status, _) = tell_to_update(&member).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(asking.lines().len(), 1, "a second telling reads the first");
+
+    assert_eq!(
+        member_update(&member).await,
+        MemberUpdate {
+            updating: Some(ThisUpdating { percent: None }),
+            trouble: None,
+        }
+    );
+}
+
+/// A member whose install can't update itself refuses by name, and its app
+/// is asked nothing.
+#[tokio::test]
+async fn a_member_that_cannot_update_itself_refuses_by_name() {
+    for (install, said) in [
+        (
+            InstallKind::Nix,
+            "crow was installed with nix, so it's updated by hand.\n",
+        ),
+        (
+            InstallKind::Checkout,
+            "crow was built from a checkout, so it's updated by hand.\n",
+        ),
+        (
+            InstallKind::Binary,
+            "crow wasn't started by the desktop app, so it can't update itself.\n",
+        ),
+    ] {
+        let (_dir, member, asking) = member_installed_as(install).await;
+
+        assert_eq!(
+            tell_to_update(&member).await,
+            (StatusCode::CONFLICT, said.to_owned()),
+            "{install:?}"
+        );
+        assert!(asking.lines().is_empty(), "{install:?}");
+        assert_eq!(
+            member_update(&member).await,
+            MemberUpdate::default(),
+            "{install:?}"
+        );
+    }
 }

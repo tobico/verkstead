@@ -38,7 +38,7 @@
 //! `crates/server/tests/remote.rs` and `crates/server/tests/devices.rs`, whose
 //! subject those shapes are.
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import jsQR from "jsqr";
 import type { JSX } from "solid-js";
@@ -936,7 +936,7 @@ describe("the devices section", () => {
   });
 
   /// And an install that updates itself has no by-hand line, and no member's
-  /// row has one either: the install is this device's alone.
+  /// row has one either where the member said nothing of its install.
   it("says nothing by hand for an install that updates itself", async () => {
     for (const install of ["AppImage", "MacApp", "WindowsInstall"] as const) {
       mountPane(SERVING, { ...LINKED, this_install: install });
@@ -947,6 +947,98 @@ describe("the devices section", () => {
 
       cleanup();
     }
+  });
+
+  /// A member's row says how to update it by hand where its install can't
+  /// update itself, naming the member, with no Update beside it — whether or
+  /// not a newer release exists.
+  it("says how to update a nix member by hand, naming it", async () => {
+    const [laptop, wsl] = LINKED.members;
+    mountPane(SERVING, {
+      ...LINKED,
+      members: [
+        { ...laptop!, identity: { ...laptop!.identity, install: "Nix" } },
+        {
+          ...wsl!,
+          identity: { ...wsl!.identity, install: "Checkout" },
+          update_available: true,
+        },
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const nix = screen.getByText("laptop").closest("li")!;
+    expect(nix.textContent).toContain(
+      "Installed with nix. Update laptop with nix flake update and nixos-rebuild switch.",
+    );
+    expect(within(nix).queryByRole("button", { name: "Update" })).toBeNull();
+
+    const checkout = screen.getByText("172.29.0.14").closest("li")!;
+    expect(checkout.textContent).toContain(
+      "Built from a checkout. Update workbench with git pull and cargo build.",
+    );
+    expect(within(checkout).queryByRole("button", { name: "Update" })).toBeNull();
+  });
+
+  /// A member from before the install kind was said can't be updated from
+  /// here, and says so once a newer release exists for it — and nothing
+  /// while it is on the release.
+  it("says an older member can't be updated from here", async () => {
+    const [laptop, wsl] = LINKED.members;
+    mountPane(SERVING, {
+      ...LINKED,
+      members: [{ ...laptop!, update_available: true }, wsl!],
+    });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const older = screen.getByText("laptop").closest("li")!;
+    expect(older.textContent).toContain(
+      "laptop is on a release that can't be updated from here. Update it on laptop.",
+    );
+    expect(within(older).queryByRole("button", { name: "Update" })).toBeNull();
+
+    expect(
+      screen.getByText("172.29.0.14").closest("li")!.textContent,
+      "a member on the release says nothing about updating",
+    ).not.toContain("can't be updated");
+  });
+
+  /// An Annex's row says it follows its Keeper rather than how to update it,
+  /// even where it says it was installed with nix and is behind the release.
+  it("says an Annex follows its Keeper", async () => {
+    const [laptop, annex] = KEEPING.members;
+    mountPane(SERVING, {
+      ...KEEPING,
+      members: [
+        laptop!,
+        {
+          ...annex!,
+          identity: { ...annex!.identity, install: "Nix" },
+          update_available: true,
+        },
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const row = screen
+      .getByText("Kept on this device's release, so it's updated when this device is.")
+      .closest("li")!;
+
+    expect(row.textContent).not.toContain("Installed with nix");
+    expect(row.textContent).not.toContain("can't be updated from here");
+    expect(within(row).queryByRole("button", { name: "Update" })).toBeNull();
+
+    cleanup();
+    mountPane(SERVING, BESIDE_AN_ANNEX);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Kept on laptop's release, so it's updated when laptop is."),
+      ).toBeTruthy(),
+    );
   });
 
   /// An install that updates itself, behind the release, has Update on its

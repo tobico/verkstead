@@ -32,10 +32,60 @@ use verkstead_render::{InstallKind, ThisUpdating};
 /// around a message can move it.
 pub(crate) const ASKING: &str = "verkstead-desktop: update this device";
 
+/// Where [`ASKING`] is said: on stdout, where the desktop app reads it, or into
+/// a list a suite reads instead.
+///
+/// **A seam for the one thing a suite can't read off a server in-process.** A
+/// press over the peer listener is the member's own press, and what says it
+/// was taken is the line its app acts on; a suite standing two devices up in
+/// one process has no stdout of each to read, so it hears the line here.
+#[derive(Debug, Clone, Default)]
+pub struct Asking {
+    heard: Option<Arc<Mutex<Vec<String>>>>,
+}
+
+impl Asking {
+    /// Said on stdout, which is what a running server does.
+    pub fn on_stdout() -> Asking {
+        Asking::default()
+    }
+
+    /// Said into a list instead, read back by [`Asking::lines`].
+    pub fn heard() -> Asking {
+        Asking {
+            heard: Some(Arc::default()),
+        }
+    }
+
+    /// Every line said into a list so far; nothing for one said on stdout.
+    pub fn lines(&self) -> Vec<String> {
+        self.heard
+            .as_ref()
+            .map(|heard| {
+                heard
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .clone()
+            })
+            .unwrap_or_default()
+    }
+
+    fn say(&self, line: &str) {
+        match &self.heard {
+            Some(heard) => heard
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .push(line.to_owned()),
+            None => println!("{line}"),
+        }
+    }
+}
+
 /// This device's Update, shared by every clone of the Devices handle.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Updating {
     held: Arc<Mutex<Held>>,
+    asking: Asking,
 }
 
 /// The Update going, and the trouble line the last one that failed left.
@@ -46,6 +96,14 @@ struct Held {
 }
 
 impl Updating {
+    /// No Update going, telling the app through `asking`.
+    pub(crate) fn asking(asking: Asking) -> Updating {
+        Updating {
+            held: Arc::default(),
+            asking,
+        }
+    }
+
     fn held(&self) -> std::sync::MutexGuard<'_, Held> {
         self.held
             .lock()
@@ -68,7 +126,7 @@ impl Updating {
         tracing::info!(
             "this device's Update was pressed, so the desktop app is asked to update it"
         );
-        println!("{ASKING}");
+        self.asking.say(ASKING);
 
         true
     }
@@ -109,19 +167,23 @@ impl Updating {
     }
 }
 
-/// Why this device can't be updated from its row, where it can't — each
-/// install that isn't the desktop app's by what it is, the way its by-hand line
-/// names it. `None` for the three electron-updater can replace.
-pub(crate) fn refusal(install: InstallKind) -> Option<&'static str> {
+/// Why a device can't be updated from its row, where it can't — each install
+/// that isn't the desktop app's by what it is, the way its by-hand line names
+/// it, and the device named as `who`: *This device* on its own row, and its
+/// name where a member was told (the Annex's `running_there` is the model).
+/// `None` for the three electron-updater can replace.
+pub(crate) fn refusal(install: InstallKind, who: &str) -> Option<String> {
     match install {
         InstallKind::AppImage | InstallKind::MacApp | InstallKind::WindowsInstall => None,
-        InstallKind::Nix => Some("This device was installed with nix, so it's updated by hand."),
-        InstallKind::Checkout => {
-            Some("This device was built from a checkout, so it's updated by hand.")
-        }
-        InstallKind::Binary => {
-            Some("This device wasn't started by the desktop app, so it can't update itself.")
-        }
+        InstallKind::Nix => Some(format!(
+            "{who} was installed with nix, so it's updated by hand."
+        )),
+        InstallKind::Checkout => Some(format!(
+            "{who} was built from a checkout, so it's updated by hand."
+        )),
+        InstallKind::Binary => Some(format!(
+            "{who} wasn't started by the desktop app, so it can't update itself."
+        )),
     }
 }
 
@@ -204,11 +266,32 @@ mod tests {
             InstallKind::MacApp,
             InstallKind::WindowsInstall,
         ] {
-            assert_eq!(refusal(install), None, "{install:?}");
+            assert_eq!(refusal(install, "This device"), None, "{install:?}");
             assert!(install.updates_itself());
         }
         for install in [InstallKind::Nix, InstallKind::Checkout, InstallKind::Binary] {
-            assert!(refusal(install).is_some(), "{install:?}");
+            assert!(refusal(install, "This device").is_some(), "{install:?}");
         }
+    }
+
+    /// A refusal names the device it is about.
+    #[test]
+    fn a_refusal_names_the_device() {
+        assert_eq!(
+            refusal(InstallKind::Nix, "crow").as_deref(),
+            Some("crow was installed with nix, so it's updated by hand.")
+        );
+    }
+
+    /// A press says the line once, into a list where a suite hears it.
+    #[test]
+    fn a_press_says_the_line_once() {
+        let asking = Asking::heard();
+        let updating = Updating::asking(asking.clone());
+
+        updating.begin();
+        updating.begin();
+
+        assert_eq!(asking.lines(), vec![ASKING.to_owned()]);
     }
 }

@@ -140,6 +140,7 @@ pub(crate) async fn announced(
 
         // And the release it said it runs to the introducer.
         version: newcomer.version,
+        install: crate::install::kept(newcomer.install),
     };
 
     if let Err(why) = told.members.refreshed(&linking).await {

@@ -40,15 +40,16 @@
 //! over what an answer holds rather than a second route to keep, which is what
 //! keeps *one router of routes* true; [`OverTheLink`] is how they know.
 //!
-//! **And two routes here are a member's own rather than the viewer's**: the news
+//! **And routes here are a member's own rather than the viewer's**: the news
 //! a member tells its members when it has something worth a phone — see
-//! [`super::news`] — and this device's Repos with their origins, which is what a
-//! member matches its own repository against, see [`super::repos`]. Neither is in
-//! the namespace and neither is on any browser's router, and both are built here
-//! all the same, because each answers out of this state: what the news is shown
-//! to is the push subscriptions this state holds, and the Repos are this store's
-//! registry, and a router over a second state would be answering for a second
-//! device.
+//! [`super::news`] — this device's Repos with their origins, which is what a
+//! member matches its own repository against, see [`super::repos`], and the
+//! Update a member's press tells this device to make, see [`super::updating`].
+//! None is in the namespace and none is on any browser's router, and all are
+//! built here all the same, because each answers out of this state: what the
+//! news is shown to is the push subscriptions this state holds, the Repos are
+//! this store's registry, and the Update is this device's own, and a router
+//! over a second state would be answering for a second device.
 //!
 //! **And the agents' half is not here.** A session's Conversation-scoped API
 //! answers the loopback and the named pipe, which is all a session ever dials,
@@ -115,8 +116,9 @@ pub(crate) struct OverTheLink;
 /// viewer's: the news a member tells its members when it has something worth a
 /// phone — see [`super::news`] — this device's Repos with their origins, see
 /// [`super::repos`], and the files of one of its accounts a session away from
-/// home is given, see [`super::account`], and the token a mirror of one of its
-/// Authors is copied from, see [`super::authors`].
+/// home is given, see [`super::account`], the token a mirror of one of its
+/// Authors is copied from, see [`super::authors`], and the Update a member's
+/// press tells it to make, see [`super::updating`].
 ///
 /// Built here because each answers out of this same state: what the news is shown
 /// to is the push subscriptions of *this* device's browsers, and the Repos are
@@ -134,6 +136,7 @@ pub(crate) fn served(state: AppState) -> Router {
         .merge(super::account::route())
         .merge(super::authors::route())
         .merge(super::memory::route())
+        .merge(super::updating::route())
         .with_state(state)
         .layer(axum::Extension(OverTheLink))
 }

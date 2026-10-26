@@ -5167,6 +5167,7 @@ mod tests {
             kept_by: None,
             direct: None,
             version: None,
+            install: None,
         }
     }
 

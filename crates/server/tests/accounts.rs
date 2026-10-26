@@ -311,6 +311,7 @@ impl Verkstead {
                 fingerprint: other.fingerprint().to_owned(),
                 kept_by: None,
                 version: Some(RUNNING.to_owned()),
+                install: Some("Binary".to_owned()),
             },
         )
         .await

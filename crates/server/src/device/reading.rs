@@ -42,7 +42,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
-use verkstead_render::DeviceIdentity;
+use verkstead_render::{DeviceIdentity, InstallKind};
 
 use crate::device::Device;
 use crate::peer::dialling::Peers;
@@ -153,6 +153,11 @@ pub struct Reading {
     /// release under a running server — see [`Reading::now_running`].
     version: Arc<std::sync::RwLock<Option<String>>>,
 
+    /// And what this device was installed as — see [`Reading::installed_as`].
+    /// A bare binary unless said otherwise, which is what a device that
+    /// cannot say what it is reads as.
+    install: Option<InstallKind>,
+
     /// And the name and OS word it answers with where a suite has said them,
     /// in place of the hostname and the platform's word — see
     /// [`Reading::calling_itself`]. `None` on a running server.
@@ -218,6 +223,7 @@ impl Reading {
             answer_held_for: HELD_FOR,
             forwarding_at: None,
             version: Arc::new(std::sync::RwLock::new(Some(RUNNING.to_owned()))),
+            install: Some(InstallKind::Binary),
             called: None,
         }
     }
@@ -246,6 +252,7 @@ impl Reading {
             answer_held_for: HELD_FOR,
             forwarding_at: None,
             version: Arc::new(std::sync::RwLock::new(Some(RUNNING.to_owned()))),
+            install: Some(InstallKind::Binary),
             called: None,
         }
     }
@@ -277,6 +284,7 @@ impl Reading {
             answer_held_for: HELD_FOR,
             forwarding_at: None,
             version: Arc::new(std::sync::RwLock::new(Some(RUNNING.to_owned()))),
+            install: Some(InstallKind::Binary),
             called: None,
         }
     }
@@ -347,6 +355,24 @@ impl Reading {
             version: Arc::new(std::sync::RwLock::new(version.map(str::to_owned))),
             ..self
         }
+    }
+
+    /// The same, saying it was installed as `install` — which a start reads
+    /// off its own executable (see [`crate::install::of_this_process`]) and a
+    /// suite says outright — or saying nothing at all, which is what a
+    /// Verkstead from before the install kind was said answers.
+    ///
+    /// On the reading rather than only on the Devices handle because it is
+    /// said to members, beside the release: their rows offer an Update or a
+    /// by-hand line off it (ADR-0027, *A device updates itself*).
+    pub fn installed_as(self, install: Option<InstallKind>) -> Reading {
+        Reading { install, ..self }
+    }
+
+    /// What this device says it was installed as — see
+    /// [`Reading::installed_as`].
+    pub(crate) fn install(&self) -> Option<InstallKind> {
+        self.install
     }
 
     /// The same, answering as `name` on `os` rather than this machine's
@@ -436,6 +462,7 @@ impl Reading {
             addresses: self.addresses().await,
             kept_by: self.keeper().map(|keeper| keeper.device().to_owned()),
             version: self.version(),
+            install: self.install,
         }
     }
 

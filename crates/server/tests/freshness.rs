@@ -36,7 +36,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
-use verkstead_render::{DevicesView, Submitted};
+use verkstead_render::{DevicesView, InstallKind, Submitted};
 use verkstead_schema::{Answer, QuestionSet, Response};
 use verkstead_server::device::reading::{RUNNING, Reading};
 use verkstead_server::device::{Device, Devices};
@@ -103,6 +103,9 @@ struct Verkstead {
     /// And what its reading advertises, which a member is recorded at.
     advertising: std::sync::Mutex<String>,
 
+    /// And what it says it was installed as, which a member is recorded as.
+    install: Option<InstallKind>,
+
     /// Held for the length of the test: the identity and the database live in
     /// it.
     _dir: tempfile::TempDir,
@@ -113,16 +116,22 @@ impl Verkstead {
     /// Listener up — serving the viewer's namespace behind the Member Gate, over
     /// the Nudge channel this holds.
     async fn answering(id: &str) -> Verkstead {
-        Verkstead::serving(id, Answers::ItsIdentity).await
+        Verkstead::serving(id, Answers::ItsIdentity, Some(InstallKind::Binary)).await
+    }
+
+    /// The same, saying it was installed as `install` — or saying nothing, as
+    /// a Verkstead from before the install kind was said does.
+    async fn installed_as(id: &str, install: Option<InstallKind>) -> Verkstead {
+        Verkstead::serving(id, Answers::ItsIdentity, install).await
     }
 
     /// The same, refusing every read of its identity while serving everything
     /// else — a member whose stream is taken up and whose identity is not.
     async fn refusing_its_identity(id: &str) -> Verkstead {
-        Verkstead::serving(id, Answers::NotItsIdentity).await
+        Verkstead::serving(id, Answers::NotItsIdentity, Some(InstallKind::Binary)).await
     }
 
-    async fn serving(id: &str, answers: Answers) -> Verkstead {
+    async fn serving(id: &str, answers: Answers, install: Option<InstallKind>) -> Verkstead {
         let dir = tempfile::tempdir().unwrap();
         let pool = open_database(&dir.path().join("verkstead.db"))
             .await
@@ -141,7 +150,8 @@ impl Verkstead {
             Platform::Linux,
             None,
             vec![format!("127.0.0.1:{}", address.port())],
-        );
+        )
+        .installed_as(install);
 
         let mut serving = peer::router(
             device.clone(),
@@ -174,6 +184,7 @@ impl Verkstead {
             nudges,
             address,
             advertising: std::sync::Mutex::new(format!("127.0.0.1:{}", address.port())),
+            install,
             _dir: dir,
         }
     }
@@ -232,13 +243,21 @@ impl Verkstead {
     }
 
     /// Write `other` down as one of this device's members, as it says of itself
-    /// — its name, its OS, the addresses it advertises and the release it runs.
+    /// — its name, its OS, the addresses it advertises, the release it runs and
+    /// what it was installed as.
     ///
     /// As it says rather than anything else, because a take-up reads the
     /// member's identity again and a row that disagreed with it would be a row
     /// that moved: every take-up here would then announce the Devices Nudge the
     /// tests below are about.
     async fn linked_to(&self, other: &Verkstead) {
+        self.recorded_as_installed(other, other.install.map(word))
+            .await;
+    }
+
+    /// The same, the row saying `other` was installed as `install` whatever it
+    /// says of itself — a row the next take-up has something to correct on.
+    async fn recorded_as_installed(&self, other: &Verkstead, install: Option<String>) {
         record_member(
             &self.pool,
             &Linking {
@@ -249,6 +268,7 @@ impl Verkstead {
                 fingerprint: other.device.fingerprint().to_owned(),
                 kept_by: None,
                 version: Some(RUNNING.to_owned()),
+                install,
             },
         )
         .await
@@ -591,6 +611,27 @@ async fn drawn_running(app: &Router, device: &str) -> Option<String> {
         .version
 }
 
+/// What the Devices section draws `device` as installed as.
+async fn drawn_installed(app: &Router, device: &str) -> Option<InstallKind> {
+    devices(app)
+        .await
+        .members
+        .into_iter()
+        .find(|member| member.identity.device == device)
+        .expect("the device is drawn")
+        .identity
+        .install
+}
+
+/// The word a member row keeps an install kind in, which is the wire's.
+fn word(install: InstallKind) -> String {
+    serde_json::to_value(install)
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
 /// A Set with nothing but a title, put straight into a store.
 fn bare(title: &str) -> QuestionSet {
     QuestionSet {
@@ -867,4 +908,55 @@ async fn a_member_whose_identity_cannot_be_read_keeps_its_stream_and_its_row() {
         page.nudge().await,
         json!({ "kind": "set", "conversation": THERE, "device": B }),
     );
+}
+
+/// A member says what it was installed as, and a take-up of its stream writes
+/// it on the row it is drawn from — the row here having said nothing, as one
+/// recorded before the kind was said does.
+#[tokio::test]
+async fn a_members_install_is_drawn_after_a_take_up() {
+    let (a, b) = linked(Verkstead::installed_as(B, Some(InstallKind::AppImage)).await).await;
+    a.recorded_as_installed(&b, None).await;
+
+    let workbench = a.workbench();
+    assert_eq!(drawn_installed(&workbench, B).await, None);
+
+    let mut page = Listening::open(&workbench).await;
+    let _holding = a.holding();
+
+    assert_eq!(
+        page.nudge().await,
+        json!({ "kind": "everything", "device": B }),
+    );
+    assert_eq!(
+        page.nudge().await,
+        json!({ "kind": "devices" }),
+        "the row moved, so the Devices section is told to read it again",
+    );
+
+    assert_eq!(
+        drawn_installed(&workbench, B).await,
+        Some(InstallKind::AppImage)
+    );
+}
+
+/// And a member from before the install kind was said reads none, whatever
+/// its row said before.
+#[tokio::test]
+async fn an_older_members_install_reads_none() {
+    let (a, b) = linked(Verkstead::installed_as(B, None).await).await;
+    a.recorded_as_installed(&b, Some(word(InstallKind::Nix)))
+        .await;
+
+    let workbench = a.workbench();
+    let mut page = Listening::open(&workbench).await;
+    let _holding = a.holding();
+
+    assert_eq!(
+        page.nudge().await,
+        json!({ "kind": "everything", "device": B }),
+    );
+    assert_eq!(page.nudge().await, json!({ "kind": "devices" }));
+
+    assert_eq!(drawn_installed(&workbench, B).await, None);
 }

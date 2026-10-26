@@ -259,6 +259,7 @@ impl Verkstead {
             addresses: vec![self.at()],
             kept_by: None,
             version: None,
+            install: None,
         }
     }
 }
@@ -464,6 +465,7 @@ async fn the_handover_carries_every_member_the_device_holds() {
             fingerprint: "AA:BB:CC:DD:EE:FF".to_owned(),
             kept_by: None,
             version: None,
+            install: None,
         },
     )
     .await

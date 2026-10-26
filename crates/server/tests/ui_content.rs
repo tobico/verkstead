@@ -4043,6 +4043,7 @@ async fn a_linked_devices_app() -> (tempfile::TempDir, Router) {
                 fingerprint: format!("AA:BB:CC:DD:{device}"),
                 kept_by: None,
                 version: version.map(str::to_owned),
+                install: None,
             },
         )
         .await
@@ -4109,6 +4110,7 @@ async fn an_annexed_devices_app(
                 fingerprint: format!("AA:BB:CC:DD:{device}"),
                 kept_by: kept_by.map(str::to_owned),
                 version: None,
+                install: None,
             },
         )
         .await
@@ -4328,6 +4330,7 @@ async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
             fingerprint: format!("AA:BB:CC:DD:{A_MEMBER}"),
             kept_by: None,
             version: None,
+            install: None,
         },
     )
     .await

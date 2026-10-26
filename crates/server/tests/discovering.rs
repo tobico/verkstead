@@ -519,6 +519,7 @@ async fn a_member_is_not_drawn() {
             fingerprint: format!("AA:BB:CC:DD:{OVER_THERE}"),
             kept_by: None,
             version: None,
+            install: None,
         },
     )
     .await

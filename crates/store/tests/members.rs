@@ -66,6 +66,7 @@ fn advertising(device: &str, name: &str, fingerprint: &str) -> Linking {
         fingerprint: fingerprint.to_owned(),
         kept_by: None,
         version: Some("0.2.2".to_owned()),
+        install: None,
     }
 }
 
@@ -82,6 +83,7 @@ fn renewing(device: &str, name: &str, presenting: &str, incoming: &str) -> Renew
         presenting: presenting.to_owned(),
         incoming: incoming.to_owned(),
         version: advertising.version,
+        install: None,
     }
 }
 

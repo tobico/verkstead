@@ -2776,6 +2776,7 @@ async fn a_keepers_start_with_its_box_gone_forgets_its_annex_on_every_member() {
             fingerprint: of.device.fingerprint().to_owned(),
             kept_by: kept_by.map(str::to_owned),
             version: None,
+            install: None,
         };
 
     verkstead_store::record_member(&keeper.pool, &linking(&laptop, vec![laptop.at()], None))

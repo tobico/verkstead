@@ -190,6 +190,7 @@ impl Verkstead {
                 fingerprint: other.fingerprint().to_owned(),
                 kept_by: None,
                 version: version.map(str::to_owned),
+                install: None,
             },
         )
         .await

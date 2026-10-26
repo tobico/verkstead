@@ -27,8 +27,10 @@ base64.workspace = true
 
 # The TypeScript emitter. It writes the viewer's types out of a test — see the
 # `typescript` feature — so nothing it produces is compiled into anything that
-# ships.
-ts-rs = { workspace = true, optional = true }
+# ships. Quiet about serde attributes it has no reading of — a field read
+# with `deserialize_with` is one — which it would otherwise print at every build
+# while emitting the field's type correctly all the same.
+ts-rs = { workspace = true, optional = true, features = ["no-serde-warnings"] }
 
 [features]
 default = ["typescript"]

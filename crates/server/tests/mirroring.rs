@@ -357,6 +357,7 @@ impl Verkstead {
                 fingerprint: other.fingerprint().to_owned(),
                 kept_by: None,
                 version: Some(version.to_owned()),
+                install: None,
             },
         )
         .await

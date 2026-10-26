@@ -1107,6 +1107,7 @@ mod tests {
                     fingerprint: format!("{device}-fingerprint"),
                     kept_by: kept_by.map(str::to_owned),
                     version: None,
+                    install: None,
                 },
             )
             .await

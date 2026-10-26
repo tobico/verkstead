@@ -122,6 +122,32 @@ pub struct DeviceIdentity {
     /// nothing — which is itself the sign that it wants updating.
     #[serde(default)]
     pub version: Option<String>,
+
+    /// And what it was installed as, read off the binary answering the way
+    /// the release is (ADR-0027, *A device updates itself*) — which says
+    /// whether a member's row can update it from here or shows how to update
+    /// it by hand — see [`InstallKind`].
+    ///
+    /// **A reading like the version**, so a member's row takes whatever the
+    /// last answer said, `None` included.
+    ///
+    /// `None` is a Verkstead from before this field, which says nothing — and
+    /// a newer one naming a kind this release has no word for, which is read
+    /// the same way rather than refusing the whole answer.
+    #[serde(default, deserialize_with = "an_install_known_here")]
+    pub install: Option<InstallKind>,
+}
+
+/// An install kind as a device said it, or `None` where it said one this
+/// release has no word for: a newer Verkstead's answer still reads, with
+/// nothing known about how it was installed.
+fn an_install_known_here<'de, D>(said: D) -> Result<Option<InstallKind>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let said: Option<serde_json::Value> = Option::deserialize(said)?;
+
+    Ok(said.and_then(|said| serde_json::from_value(said).ok()))
 }
 
 /// What a device tells each of its members when it has made its certificate
@@ -240,9 +266,9 @@ pub struct DevicesView {
     /// offered an Update or a line saying how to update it by hand — see
     /// [`InstallKind`].
     ///
-    /// **This device's alone**, beside `this` rather than inside it: the
-    /// identity is what a member reads off the peer listener too, and what a
-    /// member tells of its own install is a later stage's to decide.
+    /// The same reading as `this.install`, said here as well so that this
+    /// device's row never has to read a kind that is not there: this device
+    /// always knows what it is.
     #[serde(default)]
     pub this_install: InstallKind,
 
@@ -272,6 +298,39 @@ pub struct ThisUpdating {
     /// How much of the release electron-updater has downloaded, as a whole
     /// percentage — `None` until the app's first report.
     pub percent: Option<u8>,
+}
+
+/// What a device tells a member when its row's Update is pressed there: update
+/// yourself (ADR-0027, *A device updates itself*).
+///
+/// **Not a viewer type**, like [`RenewedCertificate`]: one Verkstead telling
+/// another, over the peer listener. The member's own desktop app fetches its
+/// own latest stable release, as this device's does for itself, so nothing
+/// here is a release to install — the version rides along for the log and to
+/// be compared against what the member comes back on.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct UpdateTold {
+    /// The release the pressing device expects the member to come back on,
+    /// *0.3.0* — `None` where it knew of none.
+    #[serde(default)]
+    pub release: Option<String>,
+}
+
+/// And a member's own Update as it stands, which is what it answers being told
+/// and what it answers being asked again: the same two readings its own
+/// Devices list draws its own row with, `this_updating` and
+/// `this_update_trouble`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MemberUpdate {
+    /// The Update going there, from the press until that server stops — see
+    /// [`ThisUpdating`].
+    #[serde(default)]
+    pub updating: Option<ThisUpdating>,
+
+    /// And why its last Update didn't take it onto the release, in its own
+    /// words, until its next press or its next start.
+    #[serde(default)]
+    pub trouble: Option<String>,
 }
 
 /// What a Verkstead was installed as, read off its own executable at startup
@@ -477,5 +536,35 @@ mod tests {
         .unwrap();
 
         assert_eq!(newer.version.as_deref(), Some("0.2.2"));
+    }
+
+    /// A Verkstead from before the install kind says none, and one that names
+    /// it is read back as it said.
+    #[test]
+    fn an_identity_says_its_install_where_it_has_one() {
+        let older: DeviceIdentity = serde_json::from_str(
+            r#"{"device":"aa","fingerprint":"3F:0A","name":"crow","os":"Linux","addresses":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(older.install, None);
+
+        let newer: DeviceIdentity = serde_json::from_str(
+            r#"{"device":"aa","fingerprint":"3F:0A","name":"crow","os":"Linux","addresses":[],"install":"AppImage"}"#,
+        )
+        .unwrap();
+        assert_eq!(newer.install, Some(InstallKind::AppImage));
+    }
+
+    /// And a kind this release has no word for reads as none, rather than
+    /// refusing the whole answer of a newer Verkstead.
+    #[test]
+    fn an_install_from_a_newer_verkstead_reads_as_none() {
+        let newer: DeviceIdentity = serde_json::from_str(
+            r#"{"device":"aa","fingerprint":"3F:0A","name":"crow","os":"Linux","addresses":[],"install":"Flatpak","version":"9.0.0"}"#,
+        )
+        .expect("a newer Verkstead's answer still reads");
+
+        assert_eq!(newer.install, None);
+        assert_eq!(newer.version.as_deref(), Some("9.0.0"));
     }
 }

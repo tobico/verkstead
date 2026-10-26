@@ -143,6 +143,45 @@ pub(crate) fn of_this_process(started_by: StartedBy) -> InstallKind {
     })
 }
 
+/// The word a member row keeps an install kind under — the wire's own, so a
+/// row read by a human says what the member said.
+pub(crate) fn word(install: InstallKind) -> &'static str {
+    match install {
+        InstallKind::AppImage => "AppImage",
+        InstallKind::MacApp => "MacApp",
+        InstallKind::WindowsInstall => "WindowsInstall",
+        InstallKind::Nix => "Nix",
+        InstallKind::Checkout => "Checkout",
+        InstallKind::Binary => "Binary",
+    }
+}
+
+/// And read back: `None` for a word this release has none for, which is a
+/// row a newer Verkstead wrote, and reads as a member that said none.
+pub(crate) fn from_word(said: &str) -> Option<InstallKind> {
+    [
+        InstallKind::AppImage,
+        InstallKind::MacApp,
+        InstallKind::WindowsInstall,
+        InstallKind::Nix,
+        InstallKind::Checkout,
+        InstallKind::Binary,
+    ]
+    .into_iter()
+    .find(|install| word(*install) == said)
+}
+
+/// What a member row keeps for the kind a device said, `None` kept as none —
+/// see [`word`].
+pub(crate) fn kept(install: Option<InstallKind>) -> Option<String> {
+    install.map(|install| word(install).to_owned())
+}
+
+/// And what a member row's kept word says, the other way — see [`from_word`].
+pub(crate) fn said(kept: Option<&str>) -> Option<InstallKind> {
+    kept.and_then(from_word)
+}
+
 /// A path as one spelling: forward slashes, and on Windows lower-cased, the
 /// filesystem there not reading case.
 ///
@@ -175,6 +214,28 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    /// Every kind is kept in the word the wire spells it with, and read back
+    /// as itself; a word from a newer Verkstead reads as none.
+    #[test]
+    fn a_kind_is_kept_in_the_wires_word() {
+        for install in [
+            InstallKind::AppImage,
+            InstallKind::MacApp,
+            InstallKind::WindowsInstall,
+            InstallKind::Nix,
+            InstallKind::Checkout,
+            InstallKind::Binary,
+        ] {
+            assert_eq!(
+                serde_json::to_value(install).unwrap(),
+                serde_json::json!(word(install))
+            );
+            assert_eq!(from_word(word(install)), Some(install));
+        }
+
+        assert_eq!(from_word("Flatpak"), None);
+    }
 
     /// A start on `platform` from `executable`, with nothing else said.
     fn started(platform: Platform, executable: &str, desktop: bool) -> InstallKind {

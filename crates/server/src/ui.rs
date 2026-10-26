@@ -7953,7 +7953,7 @@ async fn update_this(State(state): State<AppState>) -> HttpResponse {
         return unavailable("This server holds no device identity to answer for.");
     };
 
-    if let Some(why) = crate::updating::refusal(devices.install()) {
+    if let Some(why) = crate::updating::refusal(devices.install(), "This device") {
         return refused(StatusCode::CONFLICT, ApiError::new(why));
     }
 

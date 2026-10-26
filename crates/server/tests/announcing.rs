@@ -233,6 +233,7 @@ impl Verkstead {
             addresses: vec![self.at()],
             kept_by: None,
             version: None,
+            install: None,
         }
     }
 
@@ -644,6 +645,7 @@ async fn a_member_that_answers_nothing_is_dimmed_and_owed_the_telling() {
             fingerprint: "AA:BB:CC:DD:EE:FF".to_owned(),
             kept_by: None,
             version: None,
+            install: None,
         },
     )
     .await
@@ -857,6 +859,7 @@ async fn linking_again_keeps_the_keepers_own_rows_over_the_annexes() {
             fingerprint: "00:11:22".to_owned(),
             kept_by: None,
             version: None,
+            install: None,
         },
     )
     .await
@@ -895,6 +898,7 @@ async fn an_annex_announced_after_it_was_owed_carries_its_mark() {
         fingerprint: c.device.fingerprint().to_owned(),
         kept_by: None,
         version: None,
+        install: None,
     };
 
     verkstead_store::record_member(&a.pool, &away("127.0.0.1:1".to_owned()))
@@ -1044,5 +1048,6 @@ fn member_at(listening: &Verkstead, device: &str) -> verkstead_store::Member {
         kept_by: None,
         direct: None,
         version: None,
+        install: None,
     }
 }

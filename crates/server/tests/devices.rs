@@ -101,6 +101,7 @@ async fn linked(pool: &SqlitePool, device: &str, name: &str, os: &str, addresses
             fingerprint: format!("AA:BB:{device}"),
             kept_by: None,
             version: None,
+            install: None,
         },
     )
     .await

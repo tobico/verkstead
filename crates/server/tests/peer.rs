@@ -1063,6 +1063,7 @@ async fn recorded(pool: &SqlitePool, device: &Device) {
             fingerprint: device.fingerprint().to_owned(),
             kept_by: None,
             version: None,
+            install: None,
         },
     )
     .await

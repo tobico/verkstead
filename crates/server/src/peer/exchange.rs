@@ -307,6 +307,7 @@ pub(crate) async fn record(
                 fingerprint: identity.fingerprint,
                 kept_by: identity.kept_by,
                 version: identity.version,
+                install: crate::install::kept(identity.install),
             })
             .await?;
 

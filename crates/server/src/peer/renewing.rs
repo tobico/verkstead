@@ -207,6 +207,7 @@ pub(crate) async fn renewed(
 
         // And the release it says it runs.
         version: announced.identity.version,
+        install: crate::install::kept(announced.identity.install),
     };
 
     match renewing.members.renewing(&renewal).await {

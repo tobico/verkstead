@@ -1075,6 +1075,13 @@ function List(props: {
             unreachable={!member.reachable}
             differs={differs(props.of, member.identity)}
             newer={member.update_available}
+            install={
+              member.identity.kept_by === null
+                ? (member.identity.install ?? undefined)
+                : undefined
+            }
+            who={member.identity.name}
+            note={memberNote(props.of, member)}
             trouble={member.trouble}
             keeper={keeperOf(props.of, member.identity)}
             open={
@@ -1103,6 +1110,27 @@ function List(props: {
       </For>
     </ul>
   );
+}
+
+/// The line a member's row says about updating it where it can't say how by
+/// hand: an Annex follows its Keeper, which re-pins it to its own release at
+/// every start, and a member from before the install kind was said can't be
+/// updated from here — said only once a newer release exists for it.
+function memberNote(list: DevicesView, member: LinkedDevice): string | null {
+  const name = member.identity.name;
+  const keeper = keeperOf(list, member.identity);
+
+  if (keeper !== null) {
+    return keeper
+      ? `Kept on ${keeper}'s release, so it's updated when ${keeper} is.`
+      : "Kept on its keeper's release, so it's updated with it.";
+  }
+
+  if ((member.identity.install ?? null) === null && member.update_available) {
+    return `${name} is on a release that can't be updated from here. Update it on ${name}.`;
+  }
+
+  return null;
 }
 
 /// Whether a member's row is offered an Unlink: not an Annex's, and not
@@ -1185,6 +1213,11 @@ function differs(list: DevicesView, of: DeviceIdentity): boolean {
 /// *unreachable* stands, set as that word is — the server's verdict, out of
 /// the Update Notice's own check, so a row is never tagged with the check off.
 ///
+/// **And every row says how to update it by hand** where its install can't
+/// update itself, a member's naming the member — and an Annex's says it
+/// follows its Keeper instead, and a member too old to say its install says it
+/// can't be updated from here once a newer release exists: see [`memberNote`].
+///
 /// **And this device's own row carries Update** where its install updates
 /// itself and a newer stable release exists (ADR-0027, *A device updates
 /// itself*): *updating…* then stands where *update available* did, and
@@ -1201,9 +1234,15 @@ function Row(props: {
   differs?: boolean;
   /// And whether a newer stable release exists than the one it runs.
   newer?: boolean;
-  /// And what it was installed as, on this device's own row: an install that
-  /// can't update itself says how to update it by hand — see [`ByHand`].
+  /// And what it was installed as: an install that can't update itself says
+  /// how to update it by hand — see [`ByHand`].
   install?: InstallKind;
+  /// And what that line calls the device: *this device* on its own row, and
+  /// a member's name on the member's.
+  who?: string;
+  /// And a member's line about updating it where there is no by-hand line to
+  /// draw — see [`memberNote`].
+  note?: string | null;
   /// And the word for its Update while one is going, on this device's own
   /// row — see [`progress`]. Drawn where *update available* stands, in place
   /// of it.
@@ -1297,7 +1336,13 @@ function Row(props: {
         </Show>
 
         <Show when={props.install} keyed>
-          {(install) => <ByHand install={install} />}
+          {(install) => (
+            <ByHand install={install} who={props.who ?? "this device"} />
+          )}
+        </Show>
+
+        <Show when={props.note}>
+          {(note) => <p class={styles.byHand}>{note()}</p>}
         </Show>
 
         <Show when={props.failed}>
@@ -1340,29 +1385,30 @@ function Row(props: {
 
 /// How to update an install that can't update itself, under its addresses —
 /// and nothing for the three that can (ADR-0027, *A device updates itself*).
+/// The same line on a member's row as on this device's, naming the member.
 ///
 /// **Drawn whether or not *update available* is**, because it says what this
 /// install is as much as what to do: the row of an up-to-date NixOS host is
 /// where somebody finds out how the next release will reach it. Nothing is
 /// ever attempted on these, so there is no press beside the line.
-function ByHand(props: { install: InstallKind }): JSX.Element {
+function ByHand(props: { install: InstallKind; who: string }): JSX.Element {
   return (
     <Choose>
       <Match when={props.install === "Nix"}>
         <p class={styles.byHand}>
-          Installed with nix. Update this device with <code>nix flake update</code>{" "}
+          Installed with nix. Update {props.who} with <code>nix flake update</code>{" "}
           and <code>nixos-rebuild switch</code>.
         </p>
       </Match>
       <Match when={props.install === "Checkout"}>
         <p class={styles.byHand}>
-          Built from a checkout. Update this device with <code>git pull</code>{" "}
+          Built from a checkout. Update {props.who} with <code>git pull</code>{" "}
           and <code>cargo build</code>.
         </p>
       </Match>
       <Match when={props.install === "Binary"}>
         <p class={styles.byHand}>
-          Run from a downloaded binary. Update this device by downloading the
+          Run from a downloaded binary. Update {props.who} by downloading the
           latest release's <code>verkstead</code>.
         </p>
       </Match>

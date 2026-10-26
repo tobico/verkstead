@@ -890,12 +890,6 @@ pub struct Devices {
     /// see [`Devices::allow`] and [`Tellings`].
     tellings: Tellings,
 
-    /// And what this device was installed as, which its row is offered an
-    /// Update or a by-hand line for — see [`crate::install`]. A bare binary
-    /// unless a start said otherwise, see [`Devices::installed_as`], which
-    /// offers nothing.
-    install: verkstead_render::InstallKind,
-
     /// And this device's own Update while one is going — see
     /// [`crate::updating`], every clone of this handle sharing it.
     updating: crate::updating::Updating,
@@ -931,7 +925,6 @@ impl Devices {
             annexed: None,
             nudges: crate::nudge::Nudges::new(),
             tellings: Tellings::default(),
-            install: verkstead_render::InstallKind::Binary,
             updating: crate::updating::Updating::default(),
         }
     }
@@ -1009,14 +1002,30 @@ impl Devices {
 
     /// The same, read as installed as `install` — which a start reads off its
     /// own executable (see [`crate::install::of_this_process`]) and a suite
-    /// says outright.
+    /// says outright. Said on its reading, so that what its own row offers
+    /// and what it tells its members are one reading — see
+    /// [`reading::Reading::installed_as`].
     pub fn installed_as(self, install: verkstead_render::InstallKind) -> Devices {
-        Devices { install, ..self }
+        Devices {
+            reading: self.reading.installed_as(Some(install)),
+            ..self
+        }
     }
 
-    /// What this device was installed as — see [`Devices::installed_as`].
+    /// What this device was installed as, which its row is offered an Update
+    /// or a by-hand line for — see [`Devices::installed_as`]. A bare binary
+    /// where nothing said otherwise, which offers nothing.
     pub(crate) fn install(&self) -> verkstead_render::InstallKind {
-        self.install
+        self.reading.install().unwrap_or_default()
+    }
+
+    /// The same, telling the desktop app through `asking` rather than on
+    /// stdout — see [`crate::updating::Asking`].
+    pub fn asking_the_app(self, asking: crate::updating::Asking) -> Devices {
+        Devices {
+            updating: crate::updating::Updating::asking(asking),
+            ..self
+        }
     }
 
     /// This device's own Update — see [`crate::updating`].
@@ -1196,7 +1205,7 @@ impl Devices {
             this_update_available: None,
             this_running: Vec::new(),
             this_running_drafts: 0,
-            this_install: self.install,
+            this_install: self.install(),
             this_updating: self.updating.reading(),
             this_update_trouble: self.updating.trouble(),
         })
@@ -1769,8 +1778,11 @@ impl Devices {
                 fingerprint: held.fingerprint.clone(),
                 kept_by: None,
 
-                // And the release it said it runs when it asked.
+                // And the release it said it runs when it asked. What it was
+                // installed as is not held with a join, so it is said at the
+                // first take-up of its stream.
                 version: held.version.clone(),
+                install: None,
             })
             .await?;
 
@@ -1848,6 +1860,7 @@ impl Devices {
                 addresses: held.addresses.clone(),
                 kept_by: None,
                 version: held.version.clone(),
+                install: None,
             },
         )
         .await;
@@ -2693,6 +2706,7 @@ pub(crate) fn presenting(member: &verkstead_store::Member) -> DeviceIdentity {
         addresses: member.addresses.clone(),
         kept_by: member.kept_by.clone(),
         version: member.version.clone(),
+        install: crate::install::said(member.install.as_deref()),
     }
 }
 

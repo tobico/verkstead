@@ -137,6 +137,7 @@ impl Linked {
                 fingerprint: member.fingerprint().to_owned(),
                 kept_by: None,
                 version: None,
+                install: None,
             },
         )
         .await

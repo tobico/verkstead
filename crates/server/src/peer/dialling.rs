@@ -452,6 +452,9 @@ impl Peers {
                 // And the release it says it runs, which a recording always
                 // writes — see [`Linking::version`].
                 version: identity.version.clone(),
+
+                // And what it was installed as, written the same way.
+                install: crate::install::kept(identity.install),
             })
             .await?;
 
@@ -1787,6 +1790,7 @@ mod tests {
             kept_by: None,
             direct: None,
             version: None,
+            install: None,
         }
     }
 

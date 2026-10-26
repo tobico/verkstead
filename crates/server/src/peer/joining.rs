@@ -326,6 +326,10 @@ impl Joins {
                     addresses: held.addresses,
                     kept_by: None,
                     version: held.version,
+
+                    // Not held with a join: a member says it at its first
+                    // take-up, the way it says everything that moves.
+                    install: None,
                 },
             })
             .collect())
@@ -634,6 +638,7 @@ async fn kept(holding: &Holding, saying: DeviceIdentity, presented: String) -> R
         fingerprint: presented,
         kept_by: saying.kept_by,
         version: saying.version,
+        install: crate::install::kept(saying.install),
     };
 
     // And where this device reaches its Keeper directly, as the Keeper wrote
@@ -965,6 +970,7 @@ mod tests {
                 ],
                 kept_by: None,
                 version: Some("0.2.2".to_owned()),
+                install: None,
             }),
             None,
         );
@@ -981,6 +987,7 @@ mod tests {
             addresses: vec!["192.168.1.24".to_owned()],
             kept_by: None,
             version: Some("0.2.2".to_owned()),
+            install: None,
         };
 
         let said = |saying: DeviceIdentity| too_much(&saying).unwrap_or_default().to_owned();

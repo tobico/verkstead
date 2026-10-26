@@ -382,7 +382,7 @@ pub mod unseen;
 mod updates;
 /// This device's own Update: the press, the line the desktop app acts on, and
 /// the progress it reports back (ADR-0027).
-mod updating;
+pub mod updating;
 mod viewer;
 mod waiting;
 /// Following the disk: the watcher a Code pane's attachment runs over the
@@ -2697,7 +2697,16 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // own interfaces (ADR-0024, *advertise as told*). And knowing where its
     // own Annex Forward landed, which is the port it tells an Annex of its own
     // to advertise at.
+    //
+    // And what this start was installed as, which this device's row is
+    // offered an Update or a by-hand line for and which every member is told
+    // beside the release (ADR-0027) — read off the executable serving and said
+    // in the log, where a row that reads wrong is checked.
+    let installed = install::of_this_process(started_by);
+    tracing::info!(install = ?installed, "Verkstead read what it was installed as");
+
     let reading = device::reading::Reading::of_this_machine(tailscale.clone())
+        .installed_as(Some(installed))
         .told_by(settings.clone())
         .asking_its_keeper(peer::dialling::Peers::of(device.clone(), members.clone()));
     let reading = match &annex_forward {
@@ -2747,9 +2756,6 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // read: the Devices section's presses go through it, and so does the one thing
     // in a cluster that nobody presses at all — the announcement of a certificate
     // this start made again, below.
-    let installed = install::of_this_process(started_by);
-    tracing::info!(install = ?installed, "Verkstead read what it was installed as");
-
     let devices = device::Devices::of(
         device.clone(),
         reading.clone(),
@@ -2794,11 +2800,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // And the pages to tell when the list moves with nobody pressing anything,
     // which is this start forgetting an Annex whose box has gone — see
     // [`device::Devices::forget_annex`].
-    .nudging(nudges.clone())
-    // And what this start was installed as, which this device's row is offered
-    // an Update or a by-hand line for (ADR-0027) — read off the executable
-    // serving and said in the log, where a row that reads wrong is checked.
-    .installed_as(installed);
+    .nudging(nudges.clone());
 
     let devices = match &annexed {
         Some(annexed) => devices.keeping_an_annex(annexed.clone()),

@@ -7,6 +7,7 @@
       ],
       "device": "0011223344556677889900aabbccddee",
       "fingerprint": "AA:BB:CC:DD:0011223344556677889900aabbccddee",
+      "install": null,
       "kept_by": null,
       "name": "laptop",
       "os": "Linux (WSL)",

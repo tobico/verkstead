@@ -253,6 +253,7 @@ impl FarEnd {
             addresses: vec!["100.64.0.2".to_owned()],
             kept_by: None,
             version: None,
+            install: None,
         };
 
         FarEnd::serving(
@@ -526,6 +527,7 @@ async fn a_member_the_probe_found_is_not_drawn() {
             fingerprint: format!("AA:BB:CC:DD:{OVER_THERE}"),
             kept_by: None,
             version: None,
+            install: None,
         },
     )
     .await

@@ -369,7 +369,8 @@ async fn read_again(member: Member, peers: Peers, nudges: Nudges) {
             let moved = identity.name != member.name
                 || identity.os != member.os
                 || identity.addresses != member.addresses
-                || identity.version != member.version;
+                || identity.version != member.version
+                || crate::install::kept(identity.install) != member.install;
 
             if moved {
                 nudges.announce(Nudge::Devices);

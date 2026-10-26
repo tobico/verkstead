@@ -203,6 +203,7 @@ impl Verkstead {
             addresses: vec![self.at()],
             kept_by: None,
             version: None,
+            install: None,
         }
     }
 
@@ -690,6 +691,7 @@ async fn a_member_that_is_not_there_is_unlinked_all_the_same() {
             fingerprint: "AA:BB:CC:DD:EE:FF".to_owned(),
             kept_by: None,
             version: None,
+            install: None,
         },
     )
     .await
@@ -773,6 +775,7 @@ async fn a_member_that_was_away_is_told_the_removal_when_it_answers() {
             fingerprint: b.device.fingerprint().to_owned(),
             kept_by: None,
             version: None,
+            install: None,
         },
     )
     .await
@@ -823,6 +826,7 @@ async fn a_member_that_was_away_is_told_the_removal_when_it_answers() {
             fingerprint: b.device.fingerprint().to_owned(),
             kept_by: None,
             version: None,
+            install: None,
         },
     )
     .await
@@ -877,5 +881,6 @@ fn member_at(listening: &Verkstead, device: &str) -> verkstead_store::Member {
         kept_by: None,
         direct: None,
         version: None,
+        install: None,
     }
 }

@@ -2547,7 +2547,21 @@ kept_by: string | null,
  * `None` is what a Verkstead from before this field answers by saying
  * nothing — which is itself the sign that it wants updating.
  */
-version: string | null, };
+version: string | null, 
+/**
+ * And what it was installed as, read off the binary answering the way
+ * the release is (ADR-0027, *A device updates itself*) — which says
+ * whether a member's row can update it from here or shows how to update
+ * it by hand — see [`InstallKind`].
+ *
+ * **A reading like the version**, so a member's row takes whatever the
+ * last answer said, `None` included.
+ *
+ * `None` is a Verkstead from before this field, which says nothing — and
+ * a newer one naming a kind this release has no word for, which is read
+ * the same way rather than refusing the whole answer.
+ */
+install: InstallKind | null, };
 
 /**
  * The **Devices** list, as the Remote access pane reads it off this machine.
@@ -2636,9 +2650,9 @@ this_running_drafts: number,
  * offered an Update or a line saying how to update it by hand — see
  * [`InstallKind`].
  *
- * **This device's alone**, beside `this` rather than inside it: the
- * identity is what a member reads off the peer listener too, and what a
- * member tells of its own install is a later stage's to decide.
+ * The same reading as `this.install`, said here as well so that this
+ * device's row never has to read a kind that is not there: this device
+ * always knows what it is.
  */
 this_install: InstallKind, 
 /**
