@@ -6,15 +6,20 @@
 //! nothing is handed over on a check or a download that came to nothing, and
 //! the wait a relaunch makes for the app it replaces.
 
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import {
   FEED,
+  missed,
   prepare,
   RELAUNCH,
+  remember,
   told,
   update,
   type Updater,
@@ -60,17 +65,24 @@ function faked(version: string | null, steps: number[], failing?: string) {
 /// when the app handed over.
 function around(updater: Updater) {
   const reported: number[] = [];
+  const failed: string[] = [];
   const done: string[] = [];
 
   return {
     reported,
+    failed,
     done,
     updating: {
       updater,
       report: async (percent: number) => {
         reported.push(percent);
       },
-      handOver: () => done.push("handed over"),
+      fail: async (why: string) => {
+        failed.push(why);
+      },
+      handOver: (version: string) => {
+        done.push(`handed over to ${version}`);
+      },
       say: () => {},
     },
   };
@@ -84,13 +96,16 @@ describe("an Update", () => {
     const { updater, asked } = faked("0.3.0", [12.5, 12.9, 50, 99.9]);
     const exchange = around(updater);
     const order: string[] = [];
-    exchange.updating.handOver = () => order.push(`handed over after ${asked.length}`);
+    exchange.updating.handOver = (version) => {
+      order.push(`handed over to ${version} after ${asked.length}`);
+    };
 
     const outcome = await update(exchange.updating);
 
     expect(outcome).toEqual({ kind: "handed-over", version: "0.3.0" });
     expect(asked).toEqual(["check", "download", "install true true"]);
-    expect(order).toEqual(["handed over after 2"]);
+    expect(order).toEqual(["handed over to 0.3.0 after 2"]);
+    expect(exchange.failed).toEqual([]);
   });
 
   /// The server is told a whole percent at a time, each once, from nought to
@@ -104,7 +119,8 @@ describe("an Update", () => {
     expect(exchange.reported).toEqual([0, 12, 50, 99, 100]);
   });
 
-  /// Nothing newer is nothing downloaded and nothing handed over.
+  /// Nothing newer is nothing downloaded and nothing handed over — and told
+  /// to the server, whose row would otherwise read *updating…* on.
   it("downloads nothing where there is nothing newer", async () => {
     const { updater, asked } = faked(null, []);
     const exchange = around(updater);
@@ -112,9 +128,11 @@ describe("an Update", () => {
     expect(await update(exchange.updating)).toEqual({ kind: "nothing-newer" });
     expect(asked).toEqual(["check"]);
     expect(exchange.done).toEqual([]);
+    expect(exchange.failed).toEqual(["There's no newer release to update to."]);
   });
 
-  /// A download that fails says why and hands nothing over.
+  /// A download that fails hands nothing over, and tells the server the
+  /// updater's own reason.
   it("hands nothing over when the download fails", async () => {
     const { updater, asked } = faked("0.3.0", [20], "sha512 checksum mismatch");
     const exchange = around(updater);
@@ -125,6 +143,16 @@ describe("an Update", () => {
     });
     expect(asked).toEqual(["check", "download"]);
     expect(exchange.done).toEqual([]);
+    expect(exchange.failed).toEqual(["sha512 checksum mismatch"]);
+  });
+
+  /// A server that can't be told of the failure is said, not thrown.
+  it("comes out failed when the failure can't be told", async () => {
+    const { updater } = faked("0.3.0", [], "net::ERR_CONNECTION_REFUSED");
+    const exchange = around(updater);
+    exchange.updating.fail = () => Promise.reject(new Error("refused"));
+
+    expect((await update(exchange.updating)).kind).toBe("failed");
   });
 
   /// A server that refuses a report costs the report, not the Update.
@@ -179,14 +207,62 @@ describe("a report", () => {
     const { port } = server.address() as AddressInfo;
 
     try {
-      await told(`http://127.0.0.1:${port}/progress`, "the-key", 42);
+      await told(`http://127.0.0.1:${port}/progress`, "the-key", { percent: 42 });
+      await told(`http://127.0.0.1:${port}/failed`, "the-key", { why: "sha512 mismatch" });
     } finally {
       server.close();
     }
 
     expect(heard).toEqual([
       { cookie: "workbench_key=the-key", body: '{"percent":42}', method: "POST" },
+      { cookie: "workbench_key=the-key", body: '{"why":"sha512 mismatch"}', method: "POST" },
     ]);
+  });
+});
+
+describe("the version handed over to", () => {
+  const scratch = () => join(mkdtempSync(join(tmpdir(), "handed-")), "updating.json");
+
+  /// A start on the version remembered is the Update landed, and forgets it.
+  it("is forgotten by a start on it", () => {
+    const file = scratch();
+    remember(file, "0.3.0", () => {});
+
+    expect(missed(file, "0.3.0")).toBeUndefined();
+    expect(existsSync(file)).toBe(false);
+  });
+
+  /// A start on another one is the Update that didn't land, said once.
+  it("is the trouble line for a start on another version", () => {
+    const file = scratch();
+    remember(file, "0.3.0", () => {});
+
+    expect(missed(file, "0.2.2")).toBe(
+      "Verkstead 0.3.0 was installed, but this device started on 0.2.2.",
+    );
+    expect(existsSync(file)).toBe(false);
+    expect(missed(file, "0.2.2")).toBeUndefined();
+  });
+
+  /// Nothing remembered, or nothing readable, is nothing to say.
+  it("says nothing where nothing readable was remembered", () => {
+    const file = scratch();
+    expect(missed(file, "0.2.2")).toBeUndefined();
+
+    writeFileSync(file, "not json");
+    expect(missed(file, "0.2.2")).toBeUndefined();
+    expect(existsSync(file)).toBe(false);
+  });
+
+  /// A file that can't be written is said, and the Update goes on.
+  it("is said rather than thrown where it can't be kept", () => {
+    const said: string[] = [];
+    const dir = mkdtempSync(join(tmpdir(), "handed-"));
+    rmSync(dir, { recursive: true });
+
+    remember(join(dir, "updating.json"), "0.3.0", (line) => said.push(line));
+
+    expect(said).toHaveLength(1);
   });
 });
 

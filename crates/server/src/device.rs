@@ -1196,6 +1196,7 @@ impl Devices {
             this_update_available: false,
             this_install: self.install,
             this_updating: self.updating.reading(),
+            this_update_trouble: self.updating.trouble(),
         })
     }
 

@@ -533,6 +533,75 @@ async fn an_install_that_cannot_update_itself_is_refused_by_name() {
     }
 }
 
+/// The desktop app's report that the Update failed.
+async fn report_failure(app: &Router, why: &str) -> StatusCode {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/ui/devices/this/update/failed")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::json!({ "why": why }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+/// A failed download leaves *updating…* for the row's trouble line, carrying
+/// the updater's reason, and the row is offered Update again; the next press
+/// takes the line away.
+#[tokio::test]
+async fn a_failed_update_is_the_rows_trouble_line() {
+    let github = github().await;
+    let (_dir, app) =
+        cluster_app_installed_as(&github.releasing("v0.3.0"), InstallKind::AppImage).await;
+
+    press_update(&app).await;
+    report_progress(&app, 60).await;
+    assert_eq!(
+        report_failure(&app, "sha512 checksum mismatch, expected abc, got def").await,
+        StatusCode::NO_CONTENT
+    );
+
+    let view = devices(&app).await;
+    assert_eq!(view.this_updating, None);
+    assert_eq!(
+        view.this_update_trouble.as_deref(),
+        Some("This device couldn't be updated: sha512 checksum mismatch, expected abc, got def.")
+    );
+
+    let (_, pressed) = press_update(&app).await;
+    let pressed: DevicesView = serde_json::from_value(pressed).unwrap();
+    assert_eq!(pressed.this_update_trouble, None);
+}
+
+/// A relaunch on another version than the one handed over to reports to a
+/// server with no Update going, which draws the line all the same.
+#[tokio::test]
+async fn a_relaunch_on_the_wrong_version_is_the_rows_trouble_line() {
+    let github = github().await;
+    let (_dir, app) =
+        cluster_app_installed_as(&github.releasing("v0.3.0"), InstallKind::AppImage).await;
+
+    report_failure(
+        &app,
+        "Verkstead 0.3.0 was installed, but this device started on 0.2.0.",
+    )
+    .await;
+
+    let view = devices(&app).await;
+    assert_eq!(view.this_updating, None);
+    assert_eq!(
+        view.this_update_trouble.as_deref(),
+        Some(
+            "This device couldn't be updated: Verkstead 0.3.0 was installed, but this device \
+             started on 0.2.0."
+        )
+    );
+}
+
 /// A report with no Update going is dropped rather than drawn.
 #[tokio::test]
 async fn progress_with_no_update_going_is_dropped() {

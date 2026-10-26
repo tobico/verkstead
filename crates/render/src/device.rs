@@ -238,6 +238,15 @@ pub struct DevicesView {
     /// included, so the first answer after the relaunch reads none.
     #[serde(default)]
     pub this_updating: Option<ThisUpdating>,
+
+    /// And why this device's last Update didn't take it onto the release, as
+    /// the desktop app reported it — a download or check that failed, or a
+    /// relaunch that came up on another version than the one handed over to.
+    /// Drawn under this device's own row, beside any line of the Annex's, until
+    /// the next press or the next start. There is no rollback (ADR-0027): the
+    /// line, and a higher release.
+    #[serde(default)]
+    pub this_update_trouble: Option<String>,
 }
 
 /// This device's Update, as far as the desktop app has said it has got

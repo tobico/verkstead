@@ -973,6 +973,7 @@ function List(props: {
             : undefined
         }
         unlinking={props.updating}
+        failed={props.of.this_update_trouble}
         trouble={props.of.annex_trouble}
         keeper={keeperOf(props.of, props.of.this)}
       />
@@ -1119,6 +1120,11 @@ function Row(props: {
   progress?: string | null;
   /// And what Update does, where this row is offered one.
   update?: () => void;
+  /// And why this device's last Update didn't take it onto the release, on
+  /// this device's own row — drawn under the addresses as the server said it.
+  /// No rollback (ADR-0027): the line stands until a press or a higher
+  /// release.
+  failed?: string | null;
   /// And why its box would not come up, on a Keeper's row for its own Annex
   /// that would not — drawn under the addresses, as the server said it. On
   /// the Keeper's own row where the Annex has no row yet to carry it.
@@ -1202,6 +1208,10 @@ function Row(props: {
 
         <Show when={props.install} keyed>
           {(install) => <ByHand install={install} />}
+        </Show>
+
+        <Show when={props.failed}>
+          {(failed) => <p class={styles.trouble}>{failed()}</p>}
         </Show>
 
         <Show when={props.trouble}>

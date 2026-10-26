@@ -768,6 +768,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/devices/this/update/progress",
             post(update_progressed),
         )
+        .route("/api/ui/devices/this/update/failed", post(update_failed))
         // And what this machine has installed beyond what the wizard checks,
         // which is the Components section: the Annex's row on a Windows Keeper,
         // and nothing at all anywhere else. Read off the machine like the one
@@ -7991,6 +7992,32 @@ async fn update_progressed(
             "the desktop app reported an Update's progress with no Update going, so it is dropped"
         );
     }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// Why the desktop app's Update didn't take this device onto the release, as
+/// it reports it.
+#[derive(Debug, serde::Deserialize)]
+struct Failed {
+    /// The updater's own reason, or the app's for a relaunch on the wrong
+    /// version.
+    why: String,
+}
+
+/// `POST /api/ui/devices/this/update/failed` — the desktop app's report that
+/// this device's Update failed: the row leaves *updating…* for its trouble
+/// line, carrying the reason, and the device stays on its version (ADR-0027:
+/// no rollback). Taken with no Update going too, which is a relaunch that came
+/// up on another version than the one it handed over to. Answered with
+/// nothing.
+async fn update_failed(State(state): State<AppState>, Json(failed): Json<Failed>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("This server holds no device identity to answer for.");
+    };
+
+    devices.updating().failed(&failed.why);
+    state.nudges.announce(Nudge::Devices);
 
     StatusCode::NO_CONTENT.into_response()
 }

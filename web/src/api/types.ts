@@ -2633,7 +2633,16 @@ this_install: InstallKind,
  * the new release — see [`ThisUpdating`]. `None` otherwise, a start
  * included, so the first answer after the relaunch reads none.
  */
-this_updating: ThisUpdating | null, };
+this_updating: ThisUpdating | null, 
+/**
+ * And why this device's last Update didn't take it onto the release, as
+ * the desktop app reported it — a download or check that failed, or a
+ * relaunch that came up on another version than the one handed over to.
+ * Drawn under this device's own row, beside any line of the Annex's, until
+ * the next press or the next start. There is no rollback (ADR-0027): the
+ * line, and a higher release.
+ */
+this_update_trouble: string | null, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the

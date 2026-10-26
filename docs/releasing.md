@@ -211,7 +211,11 @@ only a test sets — and presses Update through the API. It passes once the row
 has read *updating…* with the app's reports on it, the server has gone and come
 back with no Update going, the image on disk is the one the feed offered, and
 the relaunched app's log says 0.0.2 started, waited out the app it replaced,
-and met neither its lock nor its listener. Run it locally the same way: `pack
+and met neither its lock nor its listener. Before that, a failing run: an
+install remembering an Update to 0.0.9 starts with the trouble line saying it
+didn't land, then Update is pressed against the feed's `corrupt/`, an image
+with one byte changed, and the row has to leave *updating…* for a trouble line
+naming the sha512 mismatch while the server stays up on its image. Run it locally the same way: `pack
 <sidecar> <dir>`, then `run <dir>` with a `DISPLAY` and port 8422 free. What it
 cannot prove is the GitHub half — `app-update.yml` pointing at a Release — which
 the first update from one published Release to the next is.

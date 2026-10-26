@@ -38,5 +38,6 @@
   },
   "this_install": "Binary",
   "this_update_available": false,
+  "this_update_trouble": null,
   "this_updating": null
 }

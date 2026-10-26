@@ -22,6 +22,17 @@
 //! The app says its own pid in [`RELAUNCH`] before handing over, the new launch
 //! inherits it, and [`waitOut`] has the new one wait for that pid to be gone
 //! and the address to be free before it asks for either.
+//!
+//! **And an Update that failed is told to the server the same way**, which
+//! draws it as the row's trouble line (ADR-0027: no rollback — the line, and a
+//! higher release). A check or a download that failed is told by this app
+//! while its server is still up. An install that failed quietly — the
+//! platform's installer, after this app has gone — is told by the app that
+//! comes up instead: the version handed over to is [`remember`]ed beside the
+//! desktop settings, and the next start that comes up on another one says so
+//! — see [`missed`].
+
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 
 import { COOKIE } from "./notices.js";
 
@@ -60,9 +71,12 @@ export interface Updating {
   updater: Updater;
   /// Tell the server how much is down, as a whole percentage.
   report(percent: number): Promise<void>;
-  /// Make ready for the quit `quitAndInstall` starts: the sidecar going is
-  /// expected from here, and the new launch is to wait this one out.
-  handOver(): void;
+  /// Tell the server the Update failed, and why.
+  fail(why: string): Promise<void>;
+  /// Make ready for the quit `quitAndInstall` starts on `version`: the
+  /// sidecar going is expected from here, the new launch is to wait this one
+  /// out, and the version is remembered for it to be checked against.
+  handOver(version: string): void;
   /// Say a line in the app's log.
   say(line: string): void;
 }
@@ -108,7 +122,26 @@ export function prepare(
 /// Reports are made a whole percent at a time and never awaited in the
 /// download's way: a server slow to take one is not a reason to stall the
 /// bytes, and one that refused is said and carried on past.
+///
+/// **Anything short of the handover is told as a failure**, nothing newer
+/// included: the server marked itself updating at the press, and a row left
+/// reading *updating…* over an Update nobody is doing would read so until the
+/// next start.
 export async function update(updating: Updating): Promise<Outcome> {
+  const outcome = await attempt(updating);
+
+  if (outcome.kind !== "handed-over") {
+    const why = outcome.kind === "failed" ? outcome.why : "There's no newer release to update to.";
+    await updating.fail(why).catch((trouble: unknown) => {
+      updating.say(`the server could not be told the update failed — ${String(trouble)}`);
+    });
+  }
+
+  return outcome;
+}
+
+/// The Update itself, short of telling the server how it failed.
+async function attempt(updating: Updating): Promise<Outcome> {
   const { updater, say } = updating;
   let reported = -1;
 
@@ -141,7 +174,7 @@ export async function update(updating: Updating): Promise<Outcome> {
     report(100);
 
     say(`Verkstead ${version} is downloaded, so the app quits and starts it`);
-    updating.handOver();
+    updating.handOver(version);
     updater.quitAndInstall(true, true);
 
     return { kind: "handed-over", version };
@@ -152,12 +185,13 @@ export async function update(updating: Updating): Promise<Outcome> {
   }
 }
 
-/// Tell the server how much of the release is down, with the key read afresh
-/// — [`keyIn`](./key.js)'s answer, handed in as `secret`.
+/// Tell the server how the Update is going — how much of the release is down,
+/// or that it failed and why — with the key read afresh: [`keyIn`](./key.js)'s
+/// answer, handed in as `secret`.
 export async function told(
   url: string,
   secret: string | undefined,
-  percent: number,
+  said: { readonly percent: number } | { readonly why: string },
 ): Promise<void> {
   const answer = await fetch(url, {
     method: "POST",
@@ -165,13 +199,54 @@ export async function told(
       "content-type": "application/json",
       ...(secret === undefined ? {} : { cookie: `${COOKIE}=${secret}` }),
     },
-    body: JSON.stringify({ percent }),
+    body: JSON.stringify(said),
     signal: AbortSignal.timeout(5_000),
   });
 
   if (!answer.ok) {
     throw new Error(`the server answered ${answer.status}`);
   }
+}
+
+/// The file beside the desktop settings the version handed over to is kept in,
+/// from the handover until the next start has read it.
+export const HANDED_OVER = "updating.json";
+
+/// Remember that this app handed over to `version`, in `file` — written before
+/// `quitAndInstall`, so the launch it starts can tell whether it landed. A
+/// file that can't be written is said: the Update goes ahead, and only the
+/// check after it is lost.
+export function remember(file: string, version: string, say: (line: string) => void): void {
+  try {
+    writeFileSync(file, JSON.stringify({ version }));
+  } catch (trouble) {
+    say(`the version handed over to could not be kept in ${file} — ${String(trouble)}`);
+  }
+}
+
+/// What a start says about the Update the last run handed over to, read out of
+/// `file` and forgotten: why it didn't land, where this start is `running`
+/// another version than the one remembered, and `undefined` where it did
+/// land or nothing was handed over.
+export function missed(file: string, running: string): string | undefined {
+  let remembered: unknown;
+  try {
+    remembered = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return undefined;
+  } finally {
+    rmSync(file, { force: true });
+  }
+
+  const version =
+    typeof remembered === "object" && remembered !== null && "version" in remembered
+      ? remembered.version
+      : undefined;
+  if (typeof version !== "string" || version === running) {
+    return undefined;
+  }
+
+  return `Verkstead ${version} was installed, but this device started on ${running}.`;
 }
 
 /// How long a relaunch waits for the app it replaces before going on anyway,

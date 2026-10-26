@@ -69,7 +69,7 @@ import { buttoned, lights, overlaid, overlay, worn } from "./decorations.js";
 import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
 import { takeOver as takeOverAgent } from "./launchd.js";
-import { heard, keep, say } from "./log.js";
+import { heard, keep, type Kept, say } from "./log.js";
 import { grey, shortcuts } from "./menu.js";
 import { hold, type Notice, opens, showing } from "./notices.js";
 import { dataDir, logDir } from "./platform.js";
@@ -90,7 +90,18 @@ import { taken } from "./taken.js";
 import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
 import { APPDIR, stripped, unmounted } from "./unmounted.js";
-import { alive, ASKING, prepare, RELAUNCH, told, update, waitOut } from "./updating.js";
+import {
+  alive,
+  ASKING,
+  HANDED_OVER,
+  missed,
+  prepare,
+  RELAUNCH,
+  remember,
+  told,
+  update,
+  waitOut,
+} from "./updating.js";
 import { browse, forward, open, type Opened } from "./window.js";
 import { enabled, NOWHERE, type Pane, pathFor, type Where, where } from "./where.js";
 import {
@@ -101,6 +112,7 @@ import {
   NOTICES,
   ORIGIN,
   PORT,
+  UPDATE_FAILED,
   UPDATE_PROGRESS,
 } from "./workbench.js";
 
@@ -134,6 +146,25 @@ function foreign(address: string): void {
       `serves on.\n\n` +
       `That's likely a Verkstead the machine starts for itself, or one started ` +
       `in a terminal. Stop it, then start Verkstead again.`,
+  );
+}
+
+/// What the human is told when the server was started and never answered.
+///
+/// Every such start, not only the one after an Update: the app was opened
+/// from an icon more often than not, and a launch that exits with nothing on
+/// the screen is one somebody presses again and again. The log is named
+/// because what the server said on its way down is in it.
+function silent(kept: Kept, waited: number): void {
+  const seconds = Math.round(waited / 1_000);
+  const where =
+    "file" in kept
+      ? `What it said is in the log at:\n\n${kept.file}`
+      : "What it said went to the standard error of whatever started Verkstead.";
+
+  dialog.showErrorBox(
+    "Verkstead's server didn't start.",
+    `It didn't answer within ${seconds} seconds of being started.\n\n${where}`,
   );
 }
 
@@ -590,15 +621,18 @@ async function run(): Promise<void> {
 
     const { autoUpdater } = electronUpdater;
     prepare(autoUpdater, machine.env, say);
+    const secret = () => (data === undefined ? undefined : keyIn(data));
     void update({
       updater: autoUpdater,
-      report: (percent) =>
-        told(UPDATE_PROGRESS, data === undefined ? undefined : keyIn(data), percent),
+      report: (percent) => told(UPDATE_PROGRESS, secret(), { percent }),
+      fail: (why) => told(UPDATE_FAILED, secret(), { why }),
       // The sidecar going from here is the quit `quitAndInstall` starts rather
-      // than news, and the launch it starts is to wait this one out.
-      handOver: () => {
+      // than news, the launch it starts is to wait this one out, and the
+      // version is what that launch checks it came up on — see [`missed`].
+      handOver: (version) => {
         leaving = true;
         process.env[RELAUNCH] = String(process.pid);
+        remember(join(app.getPath("userData"), HANDED_OVER), version, say);
       },
       say,
     }).then((outcome) => {
@@ -722,9 +756,10 @@ async function run(): Promise<void> {
     if (!(trouble instanceof NeverCameUp)) {
       throw trouble;
     }
-    // Said rather than shown: there is no window to draw a dialog over yet, and
-    // the line is what a developer running `pnpm start` is reading anyway.
+    // Said and shown: there is no window yet, so the dialog stands on its
+    // own, and the line is what a developer running `pnpm start` is reading.
     say(`the server never came up — ${trouble.message}`);
+    silent(kept, trouble.waited);
     give(1);
     return;
   }
@@ -743,6 +778,20 @@ async function run(): Promise<void> {
   // than in `config.yaml` (ADR-0020).
   const userData = app.getPath("userData");
   const desk = join(userData, DESKTOP);
+
+  // And whether the Update the last run handed over to landed: a start on
+  // another version than the one remembered is an install that failed
+  // quietly, which this device's row is told as its trouble line — the server
+  // that saw the press has gone, and this one is the first to hear of it.
+  // Forgotten either way.
+  const unlanded = missed(join(userData, HANDED_OVER), app.getVersion());
+  if (unlanded !== undefined) {
+    say(`the last run handed over to an Update that didn't land — ${unlanded}`);
+    told(UPDATE_FAILED, data === undefined ? undefined : keyIn(data), { why: unlanded }).catch(
+      (trouble: unknown) =>
+        say(`the server could not be told the Update didn't land — ${String(trouble)}`),
+    );
+  }
 
   // What the icon is made of, made before there is a window for it to open:
   // **Show tray icon** can ask for it back at any moment the app is running, so

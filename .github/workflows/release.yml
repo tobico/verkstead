@@ -1061,7 +1061,9 @@ jobs:
       # it, and the relaunch read back — the row reading *updating…* with the
       # app's reports on it, the server going, a server coming back on the
       # higher image, and the relaunch neither handing over to the app it
-      # replaced nor meeting its listener. See `desktop/scripts/update-feed.mjs`.
+      # replaced nor meeting its listener. And before it, a failing run: a
+      # relaunch that didn't land and a corrupt image, each read back as the
+      # row's trouble line. See `desktop/scripts/update-feed.mjs`.
       #
       # Packed apart from the artifact, under the runner's temp, so the file
       # uploaded below is the one every step above ran. And started only once

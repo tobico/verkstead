@@ -1044,6 +1044,44 @@ describe("the devices section", () => {
     expect(screen.queryByText(/updating…/)).toBeNull();
   });
 
+  /// A download that failed leaves *updating…* for the row's trouble line,
+  /// as the server said it, on the version it was on, with Update offered
+  /// again — the next release, or the same one tried again.
+  it("reads the trouble line once an Update failed", async () => {
+    let now: "updating" | "failed" = "updating";
+    const going: DevicesView = {
+      ...LINKED,
+      this_update_available: true,
+      this_install: "AppImage",
+      this_updating: { percent: 60 },
+    };
+    const failed: DevicesView = {
+      ...going,
+      this_updating: null,
+      this_update_trouble:
+        "This device couldn't be updated: sha512 checksum mismatch, expected abc, got def.",
+    };
+
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      whenever("/api/ui/devices", () => json(now === "updating" ? going : failed)()),
+      theHeard(),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("updating… 60%")).toBeTruthy());
+
+    now = "failed";
+    const line = await screen.findByText(/couldn't be updated: sha512 checksum mismatch/, undefined, {
+      timeout: 3_000,
+    });
+    const row = screen.getByText("this device").closest("li")!;
+    expect(line.closest("li")).toBe(row);
+    expect(row.textContent).not.toContain("updating…");
+    expect(row.textContent).toContain("update available");
+    expect(screen.getByRole("button", { name: "Update" })).toBeTruthy();
+  });
+
   /// A refused press says why under the list.
   it("says why a press of Update was refused", async () => {
     const behind: DevicesView = {

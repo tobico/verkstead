@@ -19,6 +19,16 @@
 //! and the app's log says the higher version started, waited out the one it
 //! replaced, and neither handed over to it nor met a foreign listener.
 //!
+//! **And first, an Update that fails** (ADR-0027: no rollback — the trouble
+//! line, and a higher release). The lower one is started with a version
+//! remembered as handed over to that it isn't, which is the install that
+//! failed quietly: the row carries the trouble line from the start. Then it is
+//! pointed at the feed's `corrupt/`, which serves the same metadata over an
+//! image with one byte changed, and Update is pressed: the row leaves
+//! *updating…* for a trouble line naming the sha512 mismatch, the server never
+//! stops answering, and the image on disk is the one it started from. That
+//! app is stopped, and the good run starts afresh.
+//!
 //! **The version that moves is the app's.** Both packs carry the one sidecar
 //! this is handed, so the server answers the same release before and after;
 //! what says the relaunch is the new release is the app's own start line, and
@@ -47,6 +57,7 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  readSync,
   statSync,
   writeFileSync,
   writeSync,
@@ -158,9 +169,11 @@ process.stdout.write(`Working in ${work}\n`);
 // `latest-linux.yml` and the file it names. A single range is served, and the
 // several-at-once request a differential download makes is answered whole,
 // which electron-updater takes as its cue to download the whole file — at
-// [`RATE`], so the row's reports are there to be read.
+// [`RATE`], so the row's reports are there to be read. Under `corrupt/`, the
+// same metadata over an image with one byte changed, which no sha512 check
+// passes.
 const served = join(work, "feed");
-mkdirSync(served);
+mkdirSync(join(served, "corrupt"), { recursive: true });
 const metadata = join(served, "latest-linux.yml");
 copyFileSync(join(highOut, "latest-linux.yml"), metadata);
 copyFileSync(high, join(served, IMAGE));
@@ -176,6 +189,19 @@ if (zeroing) {
   process.stdout.write("The feed's image has its ABI bytes zeroed, and its metadata says so\n");
 }
 const offered = sha512(offering);
+
+copyFileSync(metadata, join(served, "corrupt", "latest-linux.yml"));
+const corrupt = join(served, "corrupt", IMAGE);
+copyFileSync(offering, corrupt);
+{
+  const file = openSync(corrupt, "r+");
+  const at = Math.floor(statSync(corrupt).size / 2);
+  const byte = Buffer.alloc(1);
+  readSync(file, byte, 0, 1, at);
+  byte[0] ^= 0xff;
+  writeSync(file, byte, 0, 1, at);
+  closeSync(file);
+}
 
 /// How fast the feed serves an image: a loopback download is otherwise done
 /// before the row has been read once.
@@ -199,7 +225,7 @@ const feed = createServer((request, response) => {
   asked.push(`${request.method} ${request.url}`);
   const name = decodeURIComponent(new URL(request.url, "http://feed").pathname).replace(/^\/+/, "");
   const path = join(served, name);
-  if (name.includes("/") || !existsSync(path) || !statSync(path).isFile()) {
+  if (name.replace(/^corrupt\//, "").includes("/") || !existsSync(path) || !statSync(path).isFile()) {
     response.statusCode = 404;
     response.end();
     return;
@@ -224,41 +250,62 @@ await new Promise((up) => feed.listen(0, "127.0.0.1", up));
 const FEED = `http://127.0.0.1:${feed.address().port}/`;
 process.stdout.write(`The feed is ${FEED}\n`);
 
-// The install: the lower image under its release name, which has
-// electron-updater overwrite it in place rather than write a second file.
-const installed = join(work, "app", IMAGE);
-mkdirSync(join(work, "app"));
-copyFileSync(low, installed);
-chmodSync(installed, 0o755);
-if (zeroing) {
-  zero(installed);
+/// The run going: its log, its install, and the app it started.
+let run;
+
+/// Start the lower image as a fresh install under `name`, reading `feed`:
+/// under its release name, which has electron-updater overwrite it in place
+/// rather than write a second file, with a Data Directory, a state, a config
+/// and a cache of its own. `remembered` is a version left as handed over to,
+/// for the start to find it didn't land.
+function launch(name, feedUrl, remembered) {
+  const home = join(work, name);
+  const installed = join(home, "app", IMAGE);
+  mkdirSync(join(home, "app"), { recursive: true });
+  copyFileSync(low, installed);
+  chmodSync(installed, 0o755);
+  if (zeroing) {
+    zero(installed);
+  }
+
+  const data = join(home, "data");
+  mkdirSync(data);
+  writeFileSync(join(data, "workbench.key"), `${KEY}\n`);
+
+  if (remembered !== undefined) {
+    // Electron's userData on Linux: the config home and the package's name.
+    const userData = join(home, "config", "verkstead-desktop");
+    mkdirSync(userData, { recursive: true });
+    writeFileSync(join(userData, "updating.json"), JSON.stringify({ version: remembered }));
+  }
+
+  const env = {
+    ...process.env,
+    VERKSTEAD_DATA_DIR: data,
+    VERKSTEAD_UPDATE_FEED: feedUrl,
+    XDG_STATE_HOME: join(home, "state"),
+    XDG_CONFIG_HOME: join(home, "config"),
+    XDG_CACHE_HOME: join(home, "cache"),
+    ...(zeroing ? { APPIMAGE_EXTRACT_AND_RUN: "1" } : {}),
+  };
+
+  const output = openSync(join(home, "app.out"), "w");
+  run = {
+    installed,
+    started: sha512(installed),
+    log: join(home, "state", "verkstead", "verkstead.log"),
+    app: spawn(installed, [], { env, stdio: ["ignore", output, output] }),
+  };
+  process.stdout.write(`Started the ${name} run\n`);
 }
 
-const data = join(work, "data");
-mkdirSync(data);
-writeFileSync(join(data, "workbench.key"), `${KEY}\n`);
-const log = join(work, "state", "verkstead", "verkstead.log");
-
-const env = {
-  ...process.env,
-  VERKSTEAD_DATA_DIR: data,
-  VERKSTEAD_UPDATE_FEED: FEED,
-  XDG_STATE_HOME: join(work, "state"),
-  XDG_CONFIG_HOME: join(work, "config"),
-  XDG_CACHE_HOME: join(work, "cache"),
-  ...(zeroing ? { APPIMAGE_EXTRACT_AND_RUN: "1" } : {}),
-};
-
-const output = openSync(join(work, "app.out"), "w");
-const app = spawn(installed, [], { env, stdio: ["ignore", output, output] });
-
-const said = () => (existsSync(log) ? readFileSync(log, "utf8") : "");
+const said = () => (run !== undefined && existsSync(run.log) ? readFileSync(run.log, "utf8") : "");
 
 /// Every pid the app said it started at, for the clean-up.
 const pids = () => [...said().matchAll(/is starting, at pid (\d+)/g)].map((m) => Number(m[1]));
 
-function fail(...why) {
-  process.stderr.write(`${why.join("\n")}\n\nThe app's log:\n${said()}\nThe feed was asked:\n${asked.join("\n")}\n`);
+/// Stop every app the run started, by the pid each start line said.
+function stopAll() {
   for (const pid of pids()) {
     try {
       process.kill(pid, "SIGTERM");
@@ -266,7 +313,12 @@ function fail(...why) {
       // Gone already.
     }
   }
-  app.kill("SIGTERM");
+}
+
+function fail(...why) {
+  process.stderr.write(`${why.join("\n")}\n\nThe app's log:\n${said()}\nThe feed was asked:\n${asked.join("\n")}\n`);
+  stopAll();
+  run?.app.kill("SIGTERM");
   process.exit(1);
 }
 
@@ -315,39 +367,108 @@ async function devices() {
   }
 }
 
+/// Press Update the way the row does.
+async function press() {
+  process.stdout.write("Pressing Update\n");
+  const pressed = await ask("/api/ui/devices/this/update", "POST");
+  if (!pressed.ok) {
+    fail(`The press was refused: ${pressed.status} ${await pressed.text()}`);
+  }
+  const reading = await pressed.json();
+  if (reading.this_updating == null) {
+    fail("The press was answered with no Update going.");
+  }
+  if (reading.this_update_trouble != null) {
+    fail(`The press left the trouble line standing: ${reading.this_update_trouble}`);
+  }
+}
+
+/// What the row reads, as one word: down, its Update going, its trouble line,
+/// or back with neither.
+function reads(now) {
+  if (now === undefined) return "down";
+  if (now.this_updating != null) return `updating ${now.this_updating.percent ?? ""}`.trim();
+  if (now.this_update_trouble != null) return `trouble: ${now.this_update_trouble}`;
+  return "back";
+}
+
+// The failing run. A start that remembers handing over to a version it isn't
+// on carries the trouble line from the start.
+const MISSED = "0.0.9";
+launch("failing", `${FEED}corrupt/`, MISSED);
+
+await until(`Verkstead ${LOW} to answer`, async () => (await devices()) !== undefined);
+
+const landing = `Verkstead ${MISSED} was installed, but this device started on ${LOW}.`;
+await until("the trouble line for an Update that didn't land", async () =>
+  (await devices())?.this_update_trouble?.includes(landing),
+);
+process.stdout.write(`The row reads ${reads(await devices())}\n`);
+
+await press();
+
+const failing = [];
+await until("the corrupt download to be the row's trouble line", async () => {
+  const state = reads(await devices());
+  if (failing.at(-1) !== state) {
+    failing.push(state);
+    process.stdout.write(`The row reads ${state}\n`);
+  }
+  if (state === "down") {
+    fail("The server stopped answering over a download that should have failed.");
+  }
+  return state.startsWith("trouble: ");
+});
+const line = failing.at(-1);
+if (!/sha512/i.test(line)) {
+  fail(`The trouble line doesn't give the updater's reason: ${line}`);
+}
+if (!failing.some((state) => state.startsWith("updating"))) {
+  fail(`The row never read updating: ${failing.join(", ")}`);
+}
+if (sha512(run.installed) !== run.started) {
+  fail(`${run.installed} is not the image it started from.`);
+}
+for (const unwanted of [`Verkstead ${HIGH} is downloaded`, `Verkstead ${HIGH} is starting`]) {
+  if (said().includes(unwanted)) {
+    fail(`The app went on past a download that should have failed: "${unwanted}".`);
+  }
+}
+process.stdout.write(`A corrupt image left the device on ${LOW}: ${failing.join(", ")}\n`);
+
+stopAll();
+await until("the failing run's app to stop", async () => (await devices()) === undefined);
+process.stdout.write(said());
+
+// The good run, from a fresh install.
+launch("updating", FEED);
+
 await until(`Verkstead ${LOW} to answer`, async () => (await devices()) !== undefined);
 
 const before = await devices();
 if (before.this_install !== "AppImage") {
   fail(`The server reads its install as ${before.this_install}, not AppImage.`);
 }
+if (before.this_update_trouble != null) {
+  fail(`A fresh install reads a trouble line: ${before.this_update_trouble}`);
+}
 if (!said().includes(`Verkstead ${LOW} is starting`)) {
   fail(`The app's log does not say Verkstead ${LOW} started.`);
 }
 
-process.stdout.write("Pressing Update\n");
-const pressed = await ask("/api/ui/devices/this/update", "POST");
-if (!pressed.ok) {
-  fail(`The press was refused: ${pressed.status} ${await pressed.text()}`);
-}
-if ((await pressed.json()).this_updating == null) {
-  fail("The press was answered with no Update going.");
-}
+await press();
 
 // Read through the restart: *updating…* with the app's reports on it, then
 // nothing answering, then a server with no Update going.
 const states = [];
 await until("the relaunched server to answer", async () => {
-  const now = await devices();
-  const state =
-    now === undefined
-      ? "down"
-      : now.this_updating == null
-        ? "back"
-        : `updating ${now.this_updating.percent ?? ""}`.trim();
+  const state = reads(await devices());
   if (states.at(-1) !== state) {
     states.push(state);
     process.stdout.write(`The row reads ${state}\n`);
+  }
+  if (state.startsWith("trouble: ")) {
+    fail(`The Update failed: ${state}`);
   }
   return state === "back" && states.includes("down");
 });
@@ -373,13 +494,17 @@ for (const wanted of [
 for (const unwanted of [
   "Verkstead is already running, so this launch hands over",
   "something is already listening on",
+  "didn't land",
 ]) {
   if (written.includes(unwanted)) {
-    fail(`The relaunch met the app it replaced: "${unwanted}".`);
+    fail(`The relaunch met the app it replaced, or missed its version: "${unwanted}".`);
   }
 }
-if (sha512(installed) !== offered) {
-  fail(`${installed} is not the image the feed offered.`);
+if (sha512(run.installed) !== offered) {
+  fail(`${run.installed} is not the image the feed offered.`);
+}
+if ((await devices())?.this_update_trouble != null) {
+  fail("The relaunch on the version handed over to reads a trouble line.");
 }
 
 process.stdout.write(
@@ -388,13 +513,7 @@ process.stdout.write(
 
 // And put away: the relaunched app, which nothing here started, by the pid
 // its own start line said.
-for (const pid of pids()) {
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch {
-    // The one it replaced, gone already.
-  }
-}
+stopAll();
 await until("the relaunched app to stop", async () => (await devices()) === undefined);
 feed.close();
 process.stdout.write(said());
