@@ -202,6 +202,20 @@ its `app.asar`, with
 Release is ever an update: electron-updater reads `releases/latest`, which a
 pre-release is never.
 
+**And the Linux leg updates an app with it, against a feed of its own.**
+[`desktop/scripts/update-feed.mjs`](../desktop/scripts/update-feed.mjs) packs
+the app twice more, at 0.0.1 and 0.0.2 around the same sidecar, serves the
+higher one's `latest-linux.yml` and AppImage from a `generic` feed on loopback,
+starts the lower one pointed at it with `VERKSTEAD_UPDATE_FEED` — an override
+only a test sets — and presses Update through the API. It passes once the row
+has read *updating…* with the app's reports on it, the server has gone and come
+back with no Update going, the image on disk is the one the feed offered, and
+the relaunched app's log says 0.0.2 started, waited out the app it replaced,
+and met neither its lock nor its listener. Run it locally the same way: `pack
+<sidecar> <dir>`, then `run <dir>` with a `DISPLAY` and port 8422 free. What it
+cannot prove is the GitHub half — `app-update.yml` pointing at a Release — which
+the first update from one published Release to the next is.
+
 ## What the legs are, and what holds them to their floors
 
 The CLI legs each run on a runner of their own architecture; the Linux desktop

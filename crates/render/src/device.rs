@@ -231,6 +231,24 @@ pub struct DevicesView {
     /// member tells of its own install is a later stage's to decide.
     #[serde(default)]
     pub this_install: InstallKind,
+
+    /// And this device's own Update, while one is going: from the press until
+    /// the server serving this answer stops, which is the app relaunching it on
+    /// the new release — see [`ThisUpdating`]. `None` otherwise, a start
+    /// included, so the first answer after the relaunch reads none.
+    #[serde(default)]
+    pub this_updating: Option<ThisUpdating>,
+}
+
+/// This device's Update, as far as the desktop app has said it has got
+/// (ADR-0027, *A device updates itself*): the row reads *updating…* from the
+/// press, with how much of the release is down once the app has said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ThisUpdating {
+    /// How much of the release electron-updater has downloaded, as a whole
+    /// percentage — `None` until the app's first report.
+    pub percent: Option<u8>,
 }
 
 /// What a Verkstead was installed as, read off its own executable at startup

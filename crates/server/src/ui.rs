@@ -759,6 +759,15 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // happens to live, and everything a cluster relays later stands under
         // this same segment.
         .route("/api/ui/devices", get(devices))
+        // And Update on this device's own row, which asks the desktop app to
+        // take it onto the latest release, and the app's reports of how far it
+        // has got — see [`crate::updating`]. Under the Workbench Key like the
+        // rest: the app reads the key out of the Data Directory to report.
+        .route("/api/ui/devices/this/update", post(update_this))
+        .route(
+            "/api/ui/devices/this/update/progress",
+            post(update_progressed),
+        )
         // And what this machine has installed beyond what the wizard checks,
         // which is the Components section: the Annex's row on a Windows Keeper,
         // and nothing at all anywhere else. Read off the machine like the one
@@ -7928,6 +7937,62 @@ async fn devices(State(state): State<AppState>) -> HttpResponse {
     };
 
     listed(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/this/update` — **Update** on this device's own row:
+/// the desktop app is asked to take it onto the latest stable release, and the
+/// row reads *updating…* from the answer on (ADR-0027, *A device updates
+/// itself*). Answered with the Devices section read again.
+///
+/// **Refused by name on an install that can't update itself** — nix, a
+/// checkout, or a server the desktop app didn't start — which is never asked
+/// to try. A press while one is going is taken, and reads the one there is.
+async fn update_this(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("This server holds no device identity to answer for.");
+    };
+
+    if let Some(why) = crate::updating::refusal(devices.install()) {
+        return refused(StatusCode::CONFLICT, ApiError::new(why));
+    }
+
+    if devices.updating().begin() {
+        state.nudges.announce(Nudge::Devices);
+    }
+
+    listed(&state, &devices).await
+}
+
+/// How far the desktop app's Update has got, as it reports it.
+#[derive(Debug, serde::Deserialize)]
+struct Progressed {
+    /// How much of the release is down, as a whole percentage.
+    percent: u8,
+}
+
+/// `POST /api/ui/devices/this/update/progress` — the desktop app's report of
+/// how much of the release electron-updater has downloaded, which the row
+/// draws beside *updating…*. Answered with nothing; a report with no Update
+/// going is dropped, and said.
+///
+/// No Nudge: the row polls while it reads *updating…*, and a download says
+/// this many times a second.
+async fn update_progressed(
+    State(state): State<AppState>,
+    Json(progressed): Json<Progressed>,
+) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("This server holds no device identity to answer for.");
+    };
+
+    if !devices.updating().progressed(progressed.percent) {
+        tracing::info!(
+            percent = progressed.percent,
+            "the desktop app reported an Update's progress with no Update going, so it is dropped"
+        );
+    }
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// `GET /api/ui/components` — what this machine has installed beyond what the

@@ -47,6 +47,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { app, BrowserWindow, dialog, ipcMain, Notification } from "electron";
+import electronUpdater from "electron-updater";
 
 import { artwork } from "./artwork.js";
 import { AUTOSCROLLING } from "./autoscroll.js";
@@ -89,9 +90,19 @@ import { taken } from "./taken.js";
 import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
 import { APPDIR, stripped, unmounted } from "./unmounted.js";
+import { alive, ASKING, prepare, RELAUNCH, told, update, waitOut } from "./updating.js";
 import { browse, forward, open, type Opened } from "./window.js";
 import { enabled, NOWHERE, type Pane, pathFor, type Where, where } from "./where.js";
-import { ADDRESS, HEALTH, HOST, LISTEN, NOTICES, ORIGIN, PORT } from "./workbench.js";
+import {
+  ADDRESS,
+  HEALTH,
+  HOST,
+  LISTEN,
+  NOTICES,
+  ORIGIN,
+  PORT,
+  UPDATE_PROGRESS,
+} from "./workbench.js";
 
 /// What the human is told when the CLI is not where the app looked.
 ///
@@ -408,6 +419,10 @@ async function run(): Promise<void> {
   // goes on running.
   const kept = keep(logDir(machine));
 
+  // And which release this is, and which process: the line an Update is read
+  // back by, before and after its relaunch.
+  say(`Verkstead ${app.getVersion()} is starting, at pid ${process.pid}`);
+
   // And the name Windows knows this application by, said before there is a
   // window to be named — which is what ties the window to the Start-menu entry
   // the installer wrote (ADR-0020). That entry carries `System.AppUserModel.ID =
@@ -448,6 +463,16 @@ async function run(): Promise<void> {
   // that asked exits having made nothing. It is also what the probe below
   // rests on — with this held, a listener on the address cannot be another
   // copy of this app.
+  // **A relaunch waits out the app it replaces** before it asks for the lock
+  // or the address, both of which that app still holds while it quits — see
+  // [`waitOut`]. Nothing to wait for on any other launch. The variable is
+  // this launch's to read and nobody's after it, the sidecar included.
+  const replaced = await waitOut(machine.env, { alive, taken: () => taken(HOST, PORT) });
+  if (replaced !== undefined) {
+    say(`this launch replaces an app that updated itself, and waited ${replaced} ms for it to go`);
+  }
+  delete machine.env[RELAUNCH];
+
   if (!app.requestSingleInstanceLock()) {
     say("Verkstead is already running, so this launch hands over to it");
     app.quit();
@@ -550,7 +575,40 @@ async function run(): Promise<void> {
     say(`what opens a file or a link on this machine is ${by.program}`);
   }
 
-  const sidecar = start(path, ADDRESS, heard, passed);
+  // **This device's Update is asked for on the sidecar's stdout** (ADR-0027),
+  // which is read here a line at a time already: the line is filed like any
+  // other, and the one the server says for a press of Update is acted on too
+  // — see [`update`]. Once per run: the server marks itself updating at the
+  // press and says the line once, and an app that has handed over is going.
+  let pressed = false;
+  const said = (line: string): void => {
+    heard(line);
+    if (line !== ASKING || pressed) {
+      return;
+    }
+    pressed = true;
+
+    const { autoUpdater } = electronUpdater;
+    prepare(autoUpdater, machine.env, say);
+    void update({
+      updater: autoUpdater,
+      report: (percent) =>
+        told(UPDATE_PROGRESS, data === undefined ? undefined : keyIn(data), percent),
+      // The sidecar going from here is the quit `quitAndInstall` starts rather
+      // than news, and the launch it starts is to wait this one out.
+      handOver: () => {
+        leaving = true;
+        process.env[RELAUNCH] = String(process.pid);
+      },
+      say,
+    }).then((outcome) => {
+      if (outcome.kind !== "handed-over") {
+        pressed = false;
+      }
+    });
+  };
+
+  const sidecar = start(path, ADDRESS, said, passed);
   child = sidecar;
   say(`the sidecar is ${path}, at pid ${sidecar.pid}`);
 

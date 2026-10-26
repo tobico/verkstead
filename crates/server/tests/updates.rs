@@ -20,7 +20,7 @@ use axum::{Json, response::IntoResponse};
 use clap::Parser;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use verkstead_render::{DevicesView, InstallKind, UpdateNotice};
+use verkstead_render::{DevicesView, InstallKind, ThisUpdating, UpdateNotice};
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::peer::Members;
@@ -442,6 +442,106 @@ async fn a_nix_install_behind_the_release_says_it_is_nixs() {
     );
     assert_eq!(view.this_install, InstallKind::Nix);
     assert!(!view.this_install.updates_itself());
+}
+
+/// A press on this device's own Update, answered with the section read again.
+async fn press_update(app: &Router) -> (StatusCode, serde_json::Value) {
+    let http = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/ui/devices/this/update")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = http.status();
+    let body = http.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&body).unwrap())
+}
+
+/// The desktop app's report of how much is down.
+async fn report_progress(app: &Router, percent: u8) -> StatusCode {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/ui/devices/this/update/progress")
+                .header("content-type", "application/json")
+                .body(Body::from(format!(r#"{{"percent":{percent}}}"#)))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+/// An AppImage's Update reads *updating…* from the press, with the app's
+/// reports of how much is down on it — and a second press reads the first.
+#[tokio::test]
+async fn an_appimage_update_reads_updating_from_the_press() {
+    let github = github().await;
+    let (_dir, app) =
+        cluster_app_installed_as(&github.releasing("v0.3.0"), InstallKind::AppImage).await;
+
+    assert_eq!(devices(&app).await.this_updating, None);
+
+    let (status, pressed) = press_update(&app).await;
+    assert_eq!(status, StatusCode::OK);
+    let pressed: DevicesView = serde_json::from_value(pressed).unwrap();
+    assert_eq!(pressed.this_updating, Some(ThisUpdating { percent: None }));
+
+    assert_eq!(report_progress(&app, 42).await, StatusCode::NO_CONTENT);
+    assert_eq!(
+        devices(&app).await.this_updating,
+        Some(ThisUpdating { percent: Some(42) })
+    );
+
+    let (status, again) = press_update(&app).await;
+    assert_eq!(status, StatusCode::OK);
+    let again: DevicesView = serde_json::from_value(again).unwrap();
+    assert_eq!(
+        again.this_updating,
+        Some(ThisUpdating { percent: Some(42) }),
+        "a second press reads the Update already going"
+    );
+}
+
+/// A server the desktop app didn't start, nix's and a checkout's are each
+/// refused by what they are, and nothing is marked updating.
+#[tokio::test]
+async fn an_install_that_cannot_update_itself_is_refused_by_name() {
+    let github = github().await;
+
+    for (install, named) in [
+        (InstallKind::Binary, "wasn't started by the desktop app"),
+        (InstallKind::Nix, "installed with nix"),
+        (InstallKind::Checkout, "built from a checkout"),
+    ] {
+        let (_dir, app) = cluster_app_installed_as(&github.releasing("v0.3.0"), install).await;
+
+        let (status, refusal) = press_update(&app).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{install:?}");
+        assert!(
+            refusal["error"].as_str().unwrap().contains(named),
+            "{install:?}: {refusal}"
+        );
+        assert_eq!(devices(&app).await.this_updating, None, "{install:?}");
+    }
+}
+
+/// A report with no Update going is dropped rather than drawn.
+#[tokio::test]
+async fn progress_with_no_update_going_is_dropped() {
+    let github = github().await;
+    let (_dir, app) =
+        cluster_app_installed_as(&github.releasing("v0.3.0"), InstallKind::AppImage).await;
+
+    assert_eq!(report_progress(&app, 10).await, StatusCode::NO_CONTENT);
+    assert_eq!(devices(&app).await.this_updating, None);
 }
 
 /// A member can be behind a device that is itself up to date, which is what

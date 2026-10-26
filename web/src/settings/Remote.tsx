@@ -205,6 +205,7 @@ import {
   pressServe,
   resetKey,
   unlinkDevice,
+  updateThisDevice,
 } from "../api/client";
 import type {
   DeviceIdentity,
@@ -766,6 +767,15 @@ function Devices(props: {
       queries.setQueryData(["devices"], reading),
   }));
 
+  // And Update on this device's own row, which answers with the section read
+  // again: the row reads *updating…* from that answer, and is then polled
+  // through the restart — see [`useDevices`].
+  const update = useMutation(() => ({
+    mutationFn: updateThisDevice,
+    onSuccess: (reading: DevicesView) =>
+      queries.setQueryData(["devices"], reading),
+  }));
+
   /// And what the press on the card that asked does, which is the unlink.
   const confirmed = () => {
     const device = asking();
@@ -780,6 +790,26 @@ function Devices(props: {
         <Match when={devices.isPending}>
           <Empty>Reading the devices…</Empty>
         </Match>
+        {/* A read failing while this device's own Update is going is the
+            server going away to be relaunched, which the row says rather than
+            the failure: *restarting…* until the new one answers. */}
+        <Match
+          when={
+            devices.isError && devices.data?.this_updating
+              ? devices.data
+              : null
+          }
+        >
+          {(here) => (
+            <List
+              of={here()}
+              restarting
+              unlink={setAsking}
+              unlinking={drop.isPending}
+              components={props.components}
+            />
+          )}
+        </Match>
         <Match when={devices.isError}>
           <ErrorLine class={styles.failure}>
             The devices couldn't be read. {devices.error?.message}
@@ -789,6 +819,8 @@ function Devices(props: {
           {(here) => (
             <List
               of={here()}
+              update={() => update.mutate()}
+              updating={update.isPending}
               unlink={setAsking}
               unlinking={drop.isPending}
               components={props.components}
@@ -796,6 +828,12 @@ function Devices(props: {
           )}
         </Match>
       </Choose>
+
+      <Show when={update.isError}>
+        <ErrorLine class={styles.failure}>
+          This device couldn't be updated. {update.error?.message}
+        </ErrorLine>
+      </Show>
 
       <Show when={drop.isError}>
         <ErrorLine class={styles.failure}>
@@ -902,6 +940,13 @@ function Confirm(props: {
 /// see [`keeperOf`].
 function List(props: {
   of: DevicesView;
+  /// Whether this device's server has stopped answering mid-Update, which its
+  /// row reads as *restarting…* — see [`Devices`].
+  restarting?: boolean;
+  /// What Update on this device's own row does, where it is drawn.
+  update?: () => void;
+  /// And whether that press is going through.
+  updating?: boolean;
   /// What a press on a member's row asks about, which is the whole of what a
   /// row does with one: the card above this list is what acts.
   unlink: (device: DeviceIdentity) => void;
@@ -921,6 +966,13 @@ function List(props: {
         differs={false}
         newer={props.of.this_update_available}
         install={props.of.this_install}
+        progress={progress(props.of, props.restarting ?? false)}
+        update={
+          offeredUpdate(props.of) && !props.restarting
+            ? props.update
+            : undefined
+        }
+        unlinking={props.updating}
         trouble={props.of.annex_trouble}
         keeper={keeperOf(props.of, props.of.this)}
       />
@@ -966,6 +1018,34 @@ function List(props: {
 /// the Keeper's on its own Annex.
 function unlinkable(list: DevicesView, of: DeviceIdentity): boolean {
   return of.kept_by === null && of.device !== list.this.kept_by;
+}
+
+/// The installs electron-updater can take onto a newer release — the
+/// server's `InstallKind::updates_itself`.
+const UPDATES_ITSELF: InstallKind[] = ["AppImage", "MacApp", "WindowsInstall"];
+
+/// Whether this device's own row is offered Update: an install that updates
+/// itself, behind the latest stable release, and no Update already going.
+function offeredUpdate(list: DevicesView): boolean {
+  return (
+    UPDATES_ITSELF.includes(list.this_install) &&
+    list.this_update_available &&
+    list.this_updating === null
+  );
+}
+
+/// The word this device's row reads while its Update goes (ADR-0027):
+/// *updating…* from the press, with how much is down once the app has said,
+/// and *restarting…* once its server has stopped answering — the viewer's
+/// word, the server that would say it being the one that has gone. `null`
+/// while no Update is going.
+function progress(list: DevicesView, restarting: boolean): string | null {
+  if (list.this_updating === null) return null;
+  if (restarting) return "restarting…";
+
+  const { percent } = list.this_updating;
+
+  return percent === null ? "updating…" : `updating… ${percent}%`;
 }
 
 /// Whether a member runs another release than this device, which draws its
@@ -1014,6 +1094,11 @@ function differs(list: DevicesView, of: DeviceIdentity): boolean {
 /// *unreachable* stands, set as that word is — the server's verdict, out of
 /// the Update Notice's own check, so a row is never tagged with the check off.
 ///
+/// **And this device's own row carries Update** where its install updates
+/// itself and a newer stable release exists (ADR-0027, *A device updates
+/// itself*): *updating…* then stands where *update available* did, and
+/// *restarting…* once the server has gone — see [`progress`].
+///
 /// **And this device's own Annex's row is pressed whole**, opening the
 /// Components pane where the box is kept. On any other device the same row has
 /// no press: Components is the Keeper's.
@@ -1028,6 +1113,12 @@ function Row(props: {
   /// And what it was installed as, on this device's own row: an install that
   /// can't update itself says how to update it by hand — see [`ByHand`].
   install?: InstallKind;
+  /// And the word for its Update while one is going, on this device's own
+  /// row — see [`progress`]. Drawn where *update available* stands, in place
+  /// of it.
+  progress?: string | null;
+  /// And what Update does, where this row is offered one.
+  update?: () => void;
   /// And why its box would not come up, on a Keeper's row for its own Annex
   /// that would not — drawn under the addresses, as the server said it. On
   /// the Keeper's own row where the Annex has no row yet to carry it.
@@ -1077,7 +1168,15 @@ function Row(props: {
             {" "}
             <span class={styles.away}>unreachable</span>
           </Show>
-          <Show when={props.newer}>
+          <Show when={props.progress}>
+            {(word) => (
+              <>
+                {" "}
+                <span class={styles.newer}>{word()}</span>
+              </>
+            )}
+          </Show>
+          <Show when={props.newer && !props.progress}>
             {" "}
             <span class={styles.newer}>update available</span>
           </Show>
@@ -1109,6 +1208,19 @@ function Row(props: {
           {(trouble) => <p class={styles.trouble}>{trouble()}</p>}
         </Show>
       </div>
+
+      <Show when={props.update} keyed>
+        {(press) => (
+          <button
+            type="button"
+            class={styles.update}
+            disabled={props.unlinking}
+            onClick={() => press()}
+          >
+            Update
+          </button>
+        )}
+      </Show>
 
       <Show when={props.unlink} keyed>
         {(ask) => (

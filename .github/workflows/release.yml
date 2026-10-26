@@ -1054,6 +1054,51 @@ jobs:
             exit 1
           fi
 
+      # **And the app updates itself, with the real electron-updater** (ADR-0027,
+      # *A device updates itself*): packed twice more, at 0.0.1 and 0.0.2, the
+      # higher one served from a local `generic` feed and the lower one started
+      # pointed at it, Update pressed through the API the way the row presses
+      # it, and the relaunch read back — the row reading *updating…* with the
+      # app's reports on it, the server going, a server coming back on the
+      # higher image, and the relaunch neither handing over to the app it
+      # replaced nor meeting its listener. See `desktop/scripts/update-feed.mjs`.
+      #
+      # Packed apart from the artifact, under the runner's temp, so the file
+      # uploaded below is the one every step above ran. And started only once
+      # the last step's server has let go of the address, which a `kill`
+      # without a `wait` does not promise.
+      - name: The app updates itself from a local feed
+        timeout-minutes: 15
+        working-directory: desktop
+        env:
+          VERKSTEAD_CLI: ${{ github.workspace }}/sidecar/verkstead-linux-x64
+          FEED: ${{ runner.temp }}/feed
+        run: |
+          node scripts/update-feed.mjs pack "$VERKSTEAD_CLI" "$FEED"
+
+          for _ in $(seq 100); do
+            if ! curl --silent --output /dev/null http://127.0.0.1:8422/; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          Xvfb :98 -screen 0 1024x768x24 &
+          screen=$!
+          export DISPLAY=:98
+          for _ in $(seq 50); do
+            if [ -e /tmp/.X11-unix/X98 ]; then
+              break
+            fi
+            sleep 0.2
+          done
+          eval "$(dbus-launch --sh-syntax)"
+
+          status=0
+          node scripts/update-feed.mjs run "$FEED" || status=$?
+          kill "$screen" "$DBUS_SESSION_BUS_PID" || true
+          exit "$status"
+
       # Under an artifact name that says which desktop this is rather than what
       # the file is called. `publish` fetches the CLI binaries by a
       # `verkstead-*` pattern and counts what arrives, so a desktop asset named

@@ -895,6 +895,10 @@ pub struct Devices {
     /// unless a start said otherwise, see [`Devices::installed_as`], which
     /// offers nothing.
     install: verkstead_render::InstallKind,
+
+    /// And this device's own Update while one is going — see
+    /// [`crate::updating`], every clone of this handle sharing it.
+    updating: crate::updating::Updating,
 }
 
 impl Devices {
@@ -928,6 +932,7 @@ impl Devices {
             nudges: crate::nudge::Nudges::new(),
             tellings: Tellings::default(),
             install: verkstead_render::InstallKind::Binary,
+            updating: crate::updating::Updating::default(),
         }
     }
 
@@ -1007,6 +1012,16 @@ impl Devices {
     /// says outright.
     pub fn installed_as(self, install: verkstead_render::InstallKind) -> Devices {
         Devices { install, ..self }
+    }
+
+    /// What this device was installed as — see [`Devices::installed_as`].
+    pub(crate) fn install(&self) -> verkstead_render::InstallKind {
+        self.install
+    }
+
+    /// This device's own Update — see [`crate::updating`].
+    pub(crate) fn updating(&self) -> &crate::updating::Updating {
+        &self.updating
     }
 
     /// The same, holding what it forwards on `forwarding_on` rather than on both
@@ -1180,6 +1195,7 @@ impl Devices {
             annex_trouble,
             this_update_available: false,
             this_install: self.install,
+            this_updating: self.updating.reading(),
         })
     }
 

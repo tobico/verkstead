@@ -949,6 +949,130 @@ describe("the devices section", () => {
     }
   });
 
+  /// An install that updates itself, behind the release, has Update on its
+  /// row; the press reads *updating…* in place of *update available*, and
+  /// takes the button away while it goes.
+  it("offers Update on a desktop install behind the release", async () => {
+    const behind: DevicesView = {
+      ...LINKED,
+      this_update_available: true,
+      this_install: "AppImage",
+    };
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(behind),
+      theHeard(),
+      whenever(
+        "/api/ui/devices/this/update",
+        json({ ...behind, this_updating: { percent: null } }),
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    const press = await screen.findByRole("button", { name: "Update" });
+    expect(press.closest("li")).toBe(screen.getByText("this device").closest("li"));
+
+    fireEvent.click(press);
+
+    await waitFor(() => expect(screen.getByText("updating…")).toBeTruthy());
+    const row = screen.getByText("this device").closest("li")!;
+    expect(row.textContent).not.toContain("update available");
+    expect(screen.queryByRole("button", { name: "Update" })).toBeNull();
+    expect(
+      fetching.mock.calls.some(
+        ([path, init]) =>
+          String(path) === "/api/ui/devices/this/update" && init?.method === "POST",
+      ),
+    ).toBe(true);
+  });
+
+  /// No Update on an install that is on the release, nor on a member's row.
+  it("offers no Update on a desktop install that is on the release", async () => {
+    mountPane(SERVING, {
+      ...LINKED,
+      this_update_available: false,
+      this_install: "AppImage",
+      members: LINKED.members.map((member) => ({ ...member, update_available: true })),
+    });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    expect(screen.queryByRole("button", { name: "Update" })).toBeNull();
+  });
+
+  /// While it goes the row reads how much is down, *restarting…* once the
+  /// server stops answering, and the new release once the relaunched one
+  /// answers — polled the whole way, with no Nudge to say so.
+  it("reads updating, restarting, then the new release", async () => {
+    let now: "updating" | "down" | "back" = "updating";
+    const going: DevicesView = {
+      ...LINKED,
+      this_update_available: true,
+      this_install: "AppImage",
+      this_updating: { percent: 42 },
+    };
+    const back: DevicesView = {
+      ...LINKED,
+      this: { ...LINKED.this, version: "0.3.0" },
+      this_install: "AppImage",
+    };
+
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      whenever("/api/ui/devices", () => {
+        if (now === "down") return Promise.reject(new TypeError("Failed to fetch"));
+        return json(now === "updating" ? going : back)();
+      }),
+      theHeard(),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("updating… 42%")).toBeTruthy());
+
+    now = "down";
+    await waitFor(() => expect(screen.getByText("restarting…")).toBeTruthy(), {
+      timeout: 3_000,
+    });
+    expect(screen.queryByText(/couldn't be read/)).toBeNull();
+
+    now = "back";
+    await waitFor(() => expect(screen.getByText("Verkstead 0.3.0")).toBeTruthy(), {
+      timeout: 3_000,
+    });
+    expect(screen.queryByText("restarting…")).toBeNull();
+    expect(screen.queryByText(/updating…/)).toBeNull();
+  });
+
+  /// A refused press says why under the list.
+  it("says why a press of Update was refused", async () => {
+    const behind: DevicesView = {
+      ...LINKED,
+      this_update_available: true,
+      this_install: "AppImage",
+    };
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(behind),
+      theHeard(),
+      whenever(
+        "/api/ui/devices/this/update",
+        json(
+          { error: "This device wasn't started by the desktop app, so it can't update itself." },
+          409,
+        ),
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/so it can't update itself\./)).toBeTruthy(),
+    );
+  });
+
   /// And only one of them is this machine, whichever else is on the list.
   it("marks this device and no other", async () => {
     mountPane(SERVING, LINKED);

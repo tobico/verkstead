@@ -77,7 +77,7 @@ pub use conversations::{
 };
 pub use device::{
     DeviceIdentity, DevicesView, DiscoveredDevice, FoundOn, InstallKind, LinkedDevice,
-    RenewedCertificate,
+    RenewedCertificate, ThisUpdating,
 };
 pub use files::{
     FileDeleted, FileDeleting, FileList, FileListsView, FileMade, FileMaking, FileMark,

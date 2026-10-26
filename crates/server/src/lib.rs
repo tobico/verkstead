@@ -380,6 +380,9 @@ pub mod units;
 /// desktop app's sidecar has no console for a child to inherit.
 pub mod unseen;
 mod updates;
+/// This device's own Update: the press, the line the desktop app acts on, and
+/// the progress it reports back (ADR-0027).
+mod updating;
 mod viewer;
 mod waiting;
 /// Following the disk: the watcher a Code pane's attachment runs over the

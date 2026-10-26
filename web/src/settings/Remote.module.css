@@ -400,6 +400,35 @@
   }
 }
 
+/* Update, on this device's own row where its install updates itself: drawn
+   as the Annex's Components row draws its own, an outline in the accent, at
+   the end of the row where Unlink stands on a member's. */
+.update {
+  flex: none;
+  margin-top: 0.1rem;
+  margin-inline-start: auto;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.update:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .update:not(:disabled):hover {
+    border-color: var(--accent);
+  }
+}
+
 /* The card an Unlink is answered with before anything happens, on the one modal
    in the UI — the same shape the Repos pane's confirm takes, and drawn here in
    this module because the words are this section's.

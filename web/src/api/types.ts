@@ -2626,7 +2626,14 @@ this_update_available: boolean,
  * identity is what a member reads off the peer listener too, and what a
  * member tells of its own install is a later stage's to decide.
  */
-this_install: InstallKind, };
+this_install: InstallKind, 
+/**
+ * And this device's own Update, while one is going: from the press until
+ * the server serving this answer stops, which is the app relaunching it on
+ * the new release — see [`ThisUpdating`]. `None` otherwise, a start
+ * included, so the first answer after the relaunch reads none.
+ */
+this_updating: ThisUpdating | null, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -7467,6 +7474,18 @@ in_front: InFront | null, };
  * Oldest first, which is the order they were opened in.
  */
 export type TerminalsView = { live: Array<TerminalView>, };
+
+/**
+ * This device's Update, as far as the desktop app has said it has got
+ * (ADR-0027, *A device updates itself*): the row reads *updating…* from the
+ * press, with how much of the release is down once the app has said.
+ */
+export type ThisUpdating = { 
+/**
+ * How much of the release electron-updater has downloaded, as a whole
+ * percentage — `None` until the app's first report.
+ */
+percent: number | null, };
 
 /**
  * One entry in a Timeline.

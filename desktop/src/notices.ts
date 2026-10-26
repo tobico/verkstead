@@ -35,7 +35,7 @@
 const EVENT = "notice";
 
 /// What the gate reads a login out of — the server's `key::COOKIE_NAME`.
-const COOKIE = "workbench_key";
+export const COOKIE = "workbench_key";
 
 /// One notice: what the phones are told, as the server says it.
 export interface Notice {
