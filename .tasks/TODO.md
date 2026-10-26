@@ -20,6 +20,6 @@ Roadmap stage: [05: Updating members](docs/roadmaps/cluster-updates/05-updating-
 
 - [x] 01: A member says what it is, and can be told — [details](01-a-member-says-what-it-is-and-can-be-told.md)
 - [x] 02: Update on a member's row — [details](02-update-on-a-members-row.md)
-- [ ] 03: The member coming back — [details](03-the-member-coming-back.md)
+- [x] 03: The member coming back — [details](03-the-member-coming-back.md)
 - [ ] 04: Update all — [details](04-update-all.md)
 - [ ] 05: The notification on trouble — [details](05-the-notification-on-trouble.md)

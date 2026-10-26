@@ -1338,6 +1338,44 @@ describe("the devices section", () => {
     });
   });
 
+  /// Gone quiet, the member's row reads *restarting…*, as the server that
+  /// pressed says, and then its new release with no state word, polled.
+  it("reads restarting on a member's row, then its new release", async () => {
+    const behind = aDesktopMember();
+    const laptop = behind.members[0]!;
+    let now: "restarting" | "back" = "restarting";
+    const restarting = withTheLaptop(behind, {
+      updating: { percent: 100 },
+      restarting: true,
+    });
+    const back = withTheLaptop(behind, {
+      identity: { ...laptop.identity, version: "0.3.0" },
+      update_available: false,
+      update_release: null,
+    });
+
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      whenever("/api/ui/devices", () => json(now === "restarting" ? restarting : back)()),
+      theHeard(),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    const word = await screen.findByText("restarting…");
+    const row = screen.getByText("laptop").closest("li")!;
+    expect(word.closest("li")).toBe(row);
+    expect(row.textContent).not.toContain("updating…");
+    expect(within(row).queryByRole("button", { name: "Update" })).toBeNull();
+
+    now = "back";
+    await waitFor(() => expect(screen.queryByText("restarting…")).toBeNull(), {
+      timeout: 3_000,
+    });
+    const drawn = screen.getByText("laptop").closest("li")!;
+    expect(drawn.textContent).toContain("0.3.0");
+    expect(drawn.textContent).not.toContain("updating…");
+  });
+
   /// And Cancel tells the member nothing.
   it("tells a member nothing on Cancel", async () => {
     const behind = aDesktopMember();

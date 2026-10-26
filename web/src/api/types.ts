@@ -3778,7 +3778,15 @@ running_drafts: number,
  * none going; a press that left a line rather than an Update says it in
  * `trouble`.
  */
-updating: ThisUpdating | null, };
+updating: ThisUpdating | null, 
+/**
+ * And whether, with its Update going, it has gone quiet: the Nudge stream
+ * this device holds to it ended, which is its desktop app quitting to
+ * install. The row reads *restarting…* until it is back — said by the
+ * device that pressed, whose server is still up, rather than by the
+ * viewer as this device's own row has it.
+ */
+restarting: boolean, };
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is

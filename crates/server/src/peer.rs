@@ -711,6 +711,7 @@ impl Members {
                 running: Vec::new(),
                 running_drafts: 0,
                 updating: None,
+                restarting: false,
                 identity: DeviceIdentity {
                     device: member.device,
                     fingerprint: member.fingerprint,

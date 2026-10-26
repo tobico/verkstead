@@ -9,6 +9,12 @@
 //! would act on, heard in process (`Asking::heard`), and the reports it would
 //! post to its own server's workbench.
 //!
+//! **A restart is the member's link going down and a new server of it coming
+//! up behind it**, on whatever release the test says, over the same store and
+//! the same certificate: the Nudge stream the pressing device holds ends, and
+//! is taken up again on a server that has never heard of the press — which is
+//! what a desktop app quitting to install and relaunching is to this device.
+//!
 //! **The sessions running on the member** are its own Conversations with
 //! `working` said of them on the way out — a layer over its listener, because
 //! a session running is a process, and this suite is about the card naming
@@ -16,6 +22,7 @@
 
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::Router;
@@ -23,9 +30,12 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
+use axum::routing::get;
 use http_body_util::BodyExt;
 use serde_json::json;
 use sqlx::SqlitePool;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
 use verkstead_render::{DevicesView, InstallKind, LinkedDevice, ThisUpdating};
@@ -39,8 +49,8 @@ use verkstead_server::platform::Platform;
 use verkstead_server::remote::Tailscale;
 use verkstead_server::updating::Asking;
 use verkstead_server::{
-    Routers, open_database, router_answering_devices_telling, routers_answering_devices_telling,
-    store,
+    Routers, open_database, router_answering_devices_telling,
+    router_answering_devices_telling_checking_updates, routers_answering_devices_telling, store,
 };
 use verkstead_store::{Linking, record_member};
 
@@ -57,18 +67,28 @@ const RUNNING_THERE: [&str; 2] = ["rate-limiting", "solid-viewer"];
 const PATIENCE: Duration = Duration::from_millis(300);
 
 /// How long a test waits for a row to come to read what it expects. Generous,
-/// because it is only ever paid when the assertion is about to fail.
-const WAITING: Duration = Duration::from_secs(10);
+/// because it is only ever paid when the assertion is about to fail — and a
+/// stream that ended is taken up again five seconds later at the soonest.
+const WAITING: Duration = Duration::from_secs(30);
+
+/// The latest stable release, as the pressing device's Update Notice learns
+/// it: what crow is told of and is to come back on.
+const RELEASE: &str = "0.3.0";
+
+/// And how long crow has to come back where a test isn't about the deadline:
+/// longer than any restart here takes.
+const COMING_BACK: Duration = Duration::from_secs(120);
 
 /// The line crow's desktop app acts on.
 const ASKED: &str = "verkstead-desktop: update this device";
 
-/// crow: its own workbench, which its desktop app reports to, and what that
-/// app has been asked.
+/// crow: its own workbench, which its desktop app reports to, what that app has
+/// been asked, and the link the pressing device reaches it over.
 struct Crow {
     device: Device,
-    address: SocketAddr,
+    link: Link,
     pool: SqlitePool,
+    install: InstallKind,
     workbench: Router,
     asking: Asking,
     _dir: tempfile::TempDir,
@@ -76,7 +96,7 @@ struct Crow {
 
 impl Crow {
     /// crow installed as `install`, with two sessions running on it, its Peer
-    /// Listener up.
+    /// Listener up behind a link.
     async fn installed_as(install: InstallKind) -> Crow {
         let dir = tempfile::tempdir().unwrap();
         let pool = open_database(&dir.path().join("verkstead.db"))
@@ -84,53 +104,9 @@ impl Crow {
             .unwrap();
 
         let device = Device::stated(dir.path(), CROW).unwrap();
-        let members = Members::recorded(pool.clone());
-        let nudges = Nudges::new();
+        let link = Link::opened().await;
 
-        let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &device)
-            .expect("the loopback on a port the machine picked is free");
-        let address = listener.address();
-
-        let reading = Reading::advertising(
-            no_tailscale(),
-            Platform::Linux,
-            None,
-            vec![format!("127.0.0.1:{}", address.port())],
-        )
-        .calling_itself("crow", "Linux")
-        .installed_as(Some(install));
-
-        let asking = Asking::heard();
-
-        let devices = Devices::of(
-            device.clone(),
-            reading.clone(),
-            members.clone(),
-            Joins::none(),
-        )
-        .asking_the_app(asking.clone());
-
-        let Routers {
-            workbench,
-            over_the_link,
-        } = routers_answering_devices_telling(
-            pool.clone(),
-            devices,
-            nudges.clone(),
-            Machine::here(),
-        );
-
-        let serving = peer::router(
-            device.clone(),
-            reading,
-            members,
-            Joins::none(),
-            nudges,
-            over_the_link,
-        )
-        .layer(middleware::from_fn(sessions_running));
-
-        tokio::spawn(listener.serving(serving));
+        let (workbench, asking) = serving(&device, &pool, &link, install, None);
 
         let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
             .await
@@ -146,12 +122,41 @@ impl Crow {
 
         Crow {
             device,
-            address,
+            link,
             pool,
+            install,
             workbench,
             asking,
             _dir: dir,
         }
+    }
+
+    /// crow's app quitting to install: its link goes down, every connection
+    /// over it with it, and nothing answers until it comes back.
+    fn goes_quiet(&self) {
+        self.link.down();
+    }
+
+    /// And crow started again on `version`, a server that has heard of no
+    /// press, its link up again in front of it.
+    fn comes_back_on(&mut self, version: &str) {
+        self.starts_on(version);
+        self.link.up();
+    }
+
+    /// The new server alone, not yet reachable — for what its app says to it
+    /// before anybody asks.
+    fn starts_on(&mut self, version: &str) {
+        let (workbench, asking) = serving(
+            &self.device,
+            &self.pool,
+            &self.link,
+            self.install,
+            Some(version),
+        );
+
+        self.workbench = workbench;
+        self.asking = asking;
     }
 
     /// crow's desktop app reporting how much of the release is down.
@@ -182,6 +187,162 @@ impl Crow {
 
         assert_eq!(answered.status(), StatusCode::NO_CONTENT);
     }
+}
+
+/// A crow server over `device` and `pool`, installed as `install` and saying
+/// `version` (this build's where `None`), its Peer Listener up and `link`
+/// pointed at it: its workbench, and what its app is asked.
+fn serving(
+    device: &Device,
+    pool: &SqlitePool,
+    link: &Link,
+    install: InstallKind,
+    version: Option<&str>,
+) -> (Router, Asking) {
+    let members = Members::recorded(pool.clone());
+    let nudges = Nudges::new();
+
+    let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), device)
+        .expect("the loopback on a port the machine picked is free");
+
+    // What crow says of where it is, which a take-up writes onto its row on
+    // the pressing device, is the link: a restart on another port behind it is
+    // still crow at the address it was linked at.
+    let reading = Reading::advertising(no_tailscale(), Platform::Linux, None, vec![link.at()])
+        .calling_itself("crow", "Linux")
+        .installed_as(Some(install));
+
+    if let Some(version) = version {
+        reading.now_running(Some(version));
+    }
+
+    let asking = Asking::heard();
+
+    let devices = Devices::of(
+        device.clone(),
+        reading.clone(),
+        members.clone(),
+        Joins::none(),
+    )
+    .asking_the_app(asking.clone());
+
+    let Routers {
+        workbench,
+        over_the_link,
+    } = routers_answering_devices_telling(pool.clone(), devices, nudges.clone(), Machine::here());
+
+    let serving = peer::router(
+        device.clone(),
+        reading,
+        members,
+        Joins::none(),
+        nudges,
+        over_the_link,
+    )
+    .layer(middleware::from_fn(sessions_running));
+
+    link.through_to(listener.address());
+    tokio::spawn(listener.serving(serving));
+
+    (workbench, asking)
+}
+
+/// A link to crow as something that can **go down**: a socket on the loopback
+/// carrying bytes to whichever server of crow is up and back, which lets go of
+/// every connection it holds and turns new ones away while it is down.
+///
+/// **Which is what a restart is from the far side of it** — the freshness
+/// suite's cut link, kept down for as long as a restart takes. The bytes are
+/// crow's own TLS, untouched, so the fingerprint the pressing device pins is
+/// still crow's.
+struct Link {
+    address: SocketAddr,
+    far: Arc<Mutex<Far>>,
+    cutting: broadcast::Sender<()>,
+}
+
+/// Where the link goes, and whether it is up.
+#[derive(Clone, Copy)]
+struct Far {
+    to: Option<SocketAddr>,
+    up: bool,
+}
+
+impl Link {
+    /// A link going nowhere yet, up.
+    async fn opened() -> Link {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let far = Arc::new(Mutex::new(Far { to: None, up: true }));
+        let (cutting, _) = broadcast::channel(1);
+
+        let going = far.clone();
+        let cut = cutting.clone();
+
+        tokio::spawn(async move {
+            while let Ok((mut near, _)) = listener.accept().await {
+                let Far {
+                    to: Some(to),
+                    up: true,
+                } = *going.lock().unwrap()
+                else {
+                    continue;
+                };
+
+                let mut cut = cut.subscribe();
+
+                tokio::spawn(async move {
+                    let Ok(mut across) = TcpStream::connect(to).await else {
+                        return;
+                    };
+
+                    tokio::select! {
+                        _ = tokio::io::copy_bidirectional(&mut near, &mut across) => {}
+                        _ = cut.recv() => {}
+                    }
+                });
+            }
+        });
+
+        Link {
+            address,
+            far,
+            cutting,
+        }
+    }
+
+    fn at(&self) -> String {
+        format!("127.0.0.1:{}", self.address.port())
+    }
+
+    /// Carry what arrives from here on to `to`.
+    fn through_to(&self, to: SocketAddr) {
+        self.far.lock().unwrap().to = Some(to);
+    }
+
+    fn down(&self) {
+        self.far.lock().unwrap().up = false;
+        let _ = self.cutting.send(());
+    }
+
+    fn up(&self) {
+        self.far.lock().unwrap().up = true;
+    }
+}
+
+/// A GitHub whose latest release is [`RELEASE`], on a loopback port: where the
+/// pressing device's Update Notice asks.
+async fn github() -> String {
+    let app = Router::new().route(
+        "/latest",
+        get(|| async { axum::Json(json!({ "tag_name": format!("v{RELEASE}") })) }),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    format!("http://{address}/latest")
 }
 
 /// Every Conversation crow answers its list with, said to have a session
@@ -219,11 +380,16 @@ struct Pressing {
 impl Pressing {
     /// The pressing device, linked to crow at the address crow listens on.
     async fn linked_to(crow: &Crow) -> Pressing {
-        Pressing::linked_at(crow, &format!("127.0.0.1:{}", crow.address.port())).await
+        Pressing::linked_at(crow, &crow.link.at(), COMING_BACK).await
+    }
+
+    /// The same, crow having `within` of a press to come back.
+    async fn linked_within(crow: &Crow, within: Duration) -> Pressing {
+        Pressing::linked_at(crow, &crow.link.at(), within).await
     }
 
     /// The same, its row saying crow is at `address`.
-    async fn linked_at(crow: &Crow, address: &str) -> Pressing {
+    async fn linked_at(crow: &Crow, address: &str, within: Duration) -> Pressing {
         let dir = tempfile::tempdir().unwrap();
         let pool = open_database(&dir.path().join("verkstead.db"))
             .await
@@ -279,11 +445,16 @@ impl Pressing {
             Members::recorded(pool.clone()),
             Joins::none(),
         )
-        .waiting(PATIENCE);
+        .waiting(PATIENCE)
+        .coming_back_within(within);
 
         let nudges = Nudges::new();
-        let workbench =
-            router_answering_devices_telling(pool.clone(), devices.clone(), nudges.clone());
+        let workbench = router_answering_devices_telling_checking_updates(
+            pool.clone(),
+            devices.clone(),
+            nudges.clone(),
+            &github().await,
+        );
 
         let holding = {
             let devices = devices.clone();
@@ -475,7 +646,7 @@ async fn a_member_unreachable_at_the_press_is_not_told() {
     let address = nowhere.local_addr().unwrap().to_string();
     drop(nowhere);
 
-    let pressing = Pressing::linked_at(&crow, &address).await;
+    let pressing = Pressing::linked_at(&crow, &address, COMING_BACK).await;
 
     let pressed = pressing.presses_update().await;
 
@@ -502,4 +673,145 @@ async fn a_member_refusing_by_name_is_its_rows_line() {
         Some("crow was installed with nix, so it's updated by hand.")
     );
     assert!(crow.asking.lines().is_empty());
+}
+
+/// crow, told and going, with the pressing device holding its stream and
+/// knowing of [`RELEASE`]: what every restart below starts from.
+async fn told_and_going(crow: &Crow, pressing: &Pressing) {
+    // Its sessions read means its stream is held, and the release learned is
+    // what it is told of.
+    crow_comes_to(&pressing.workbench, |row| {
+        row.running.len() == 2 && row.update_release.as_deref() == Some(RELEASE)
+    })
+    .await;
+
+    let pressed = pressing.presses_update().await;
+    assert_eq!(pressed.updating, Some(ThisUpdating { percent: None }));
+    assert_eq!(crow.asking.lines(), vec![ASKED.to_owned()]);
+
+    crow.reports_progress(100).await;
+
+    crow_comes_to(&pressing.workbench, |row| {
+        row.updating == Some(ThisUpdating { percent: Some(100) })
+    })
+    .await;
+}
+
+/// With crow's stream dropped after the press its row reads *restarting…*,
+/// and taken up again on the new release the row shows it, with no state word
+/// and no line.
+#[tokio::test]
+async fn a_member_back_on_the_new_release_is_drawn_on_it() {
+    let mut crow = Crow::installed_as(InstallKind::AppImage).await;
+    let pressing = Pressing::linked_to(&crow).await;
+
+    told_and_going(&crow, &pressing).await;
+
+    crow.goes_quiet();
+
+    let quiet = crow_comes_to(&pressing.workbench, |row| row.restarting).await;
+    assert!(
+        quiet.updating.is_some(),
+        "restarting is still its Update going"
+    );
+    assert_eq!(quiet.trouble, None);
+
+    // Read on a second workbench too: the pressing device's server says it.
+    assert!(crow_on(&pressing.second_workbench()).await.restarting);
+
+    crow.comes_back_on(RELEASE);
+
+    let back = crow_comes_to(&pressing.workbench, |row| row.updating.is_none()).await;
+    assert_eq!(back.identity.version.as_deref(), Some(RELEASE));
+    assert!(!back.restarting);
+    assert_eq!(back.trouble, None);
+
+    tokio::time::timeout(WAITING, pressing.devices.member_update_settled(CROW))
+        .await
+        .expect("the Update is over");
+}
+
+/// Taken up again on the release it ran, crow's row carries one line naming
+/// both releases.
+#[tokio::test]
+async fn a_member_back_on_the_release_it_ran_is_a_line_naming_both() {
+    let mut crow = Crow::installed_as(InstallKind::AppImage).await;
+    let pressing = Pressing::linked_to(&crow).await;
+
+    told_and_going(&crow, &pressing).await;
+
+    crow.goes_quiet();
+    crow_comes_to(&pressing.workbench, |row| row.restarting).await;
+
+    crow.comes_back_on(RUNNING);
+
+    let back = crow_comes_to(&pressing.workbench, |row| row.updating.is_none()).await;
+    assert!(!back.restarting);
+    assert_eq!(
+        back.trouble.as_deref(),
+        Some(
+            format!("crow couldn't be updated: it came back on {RUNNING}, not {RELEASE}.").as_str()
+        )
+    );
+}
+
+/// And where crow's own app said so on relaunching, that is the one line,
+/// rather than it and this device's beside it.
+#[tokio::test]
+async fn a_members_own_relaunch_line_is_the_one_line() {
+    let mut crow = Crow::installed_as(InstallKind::AppImage).await;
+    let pressing = Pressing::linked_to(&crow).await;
+
+    told_and_going(&crow, &pressing).await;
+
+    crow.goes_quiet();
+    crow_comes_to(&pressing.workbench, |row| row.restarting).await;
+
+    crow.starts_on(RUNNING);
+    crow.reports_failure(&format!(
+        "Verkstead {RELEASE} was installed, but this device started on {RUNNING}."
+    ))
+    .await;
+    crow.link.up();
+
+    let back = crow_comes_to(&pressing.workbench, |row| row.updating.is_none()).await;
+    assert_eq!(
+        back.trouble.as_deref(),
+        Some(
+            format!(
+                "crow couldn't be updated: Verkstead {RELEASE} was installed, but this device \
+                 started on {RUNNING}."
+            )
+            .as_str()
+        )
+    );
+}
+
+/// A member that never comes back gets a line at the deadline — and turning
+/// up on the new release after all takes it away.
+#[tokio::test]
+async fn a_member_that_never_comes_back_is_a_line_at_the_deadline() {
+    let mut crow = Crow::installed_as(InstallKind::AppImage).await;
+    let pressing = Pressing::linked_within(&crow, Duration::from_secs(3)).await;
+
+    told_and_going(&crow, &pressing).await;
+
+    crow.goes_quiet();
+
+    tokio::time::timeout(WAITING, pressing.devices.member_update_settled(CROW))
+        .await
+        .expect("the deadline ends the Update");
+
+    let late = crow_on(&pressing.workbench).await;
+    assert_eq!(late.updating, None);
+    assert!(!late.restarting);
+    assert_eq!(
+        late.trouble.as_deref(),
+        Some("crow didn't come back after its update.")
+    );
+
+    crow.comes_back_on(RELEASE);
+
+    let back = crow_comes_to(&pressing.workbench, |row| row.trouble.is_none()).await;
+    assert_eq!(back.identity.version.as_deref(), Some(RELEASE));
 }

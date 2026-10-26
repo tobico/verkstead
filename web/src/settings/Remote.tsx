@@ -1249,10 +1249,12 @@ function offeredMemberUpdate(member: LinkedDevice): boolean {
 }
 
 /// The word a member's row reads while an Update pressed here goes:
-/// *updating…*, with how much is down once its app has said. `null` while
-/// none is going.
+/// *updating…*, with how much is down once its app has said, and
+/// *restarting…* once it has gone quiet — which this device's server says,
+/// being still up. `null` while none is going.
 function memberProgress(member: LinkedDevice): string | null {
   if (member.updating === null) return null;
+  if (member.restarting) return "restarting…";
 
   const { percent } = member.updating;
 

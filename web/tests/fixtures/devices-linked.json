@@ -16,6 +16,7 @@
         "version": "0.2.0"
       },
       "reachable": true,
+      "restarting": false,
       "running": [],
       "running_drafts": 0,
       "trouble": null,
@@ -37,6 +38,7 @@
         "version": null
       },
       "reachable": false,
+      "restarting": false,
       "running": [],
       "running_drafts": 0,
       "trouble": null,

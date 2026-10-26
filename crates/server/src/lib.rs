@@ -1276,6 +1276,30 @@ pub fn router_answering_devices_telling(
     )
 }
 
+/// The same, asking about newer releases at `releases` as well — which is what
+/// tells a member pressed on its row of the release it is to come back on.
+pub fn router_answering_devices_telling_checking_updates(
+    pool: SqlitePool,
+    devices: device::Devices,
+    nudges: nudge::Nudges,
+    releases: &str,
+) -> Router {
+    routed_telling(
+        pool,
+        updates::watching(Some(releases)),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        Some(devices),
+        nudges,
+    )
+}
+
 /// And **both** of that device's routers over **one** state, which is what a
 /// running server serves: the workbench its own browser asks, and the slice of
 /// it a member reaches over the link (see [`Routers`]).

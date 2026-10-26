@@ -1133,6 +1133,24 @@ impl Devices {
         }
     }
 
+    /// The same, a member's Update pressed here having `within` of the press
+    /// to come back before its row says it didn't — see
+    /// [`crate::updating::members::COMING_BACK_WITHIN`], which is ten minutes.
+    ///
+    /// For a suite, which has no ten minutes to wait.
+    pub fn coming_back_within(self, within: std::time::Duration) -> Devices {
+        Devices {
+            members_updating: crate::updating::members::MemberUpdates::within(within),
+            ..self
+        }
+    }
+
+    /// Wait until no Update pressed here is going on `device`: it came back, or
+    /// it left its row a line — see [`crate::updating::members`].
+    pub async fn member_update_settled(&self, device: &str) {
+        self.members_updating.settled(device).await
+    }
+
     /// The same, holding the tellings its presses leave running in `tellings`
     /// — see [`Tellings`].
     ///
@@ -1211,9 +1229,11 @@ impl Devices {
         // And a member's Update pressed here: going, or the line its press
         // left, last of the row's lines — see [`crate::updating::members`].
         for member in &mut members {
-            let (updating, trouble) = self.members_updating.reading(&member.identity.device);
+            let (updating, restarting, trouble) =
+                self.members_updating.reading(&member.identity.device);
 
             member.updating = updating;
+            member.restarting = restarting;
 
             if let Some(trouble) = trouble {
                 member.trouble = Some(match member.trouble.take() {
@@ -2160,7 +2180,13 @@ impl Devices {
     /// [`Devices::announce_renewal`] is: the first thing it does is dial members
     /// that may be switched off.
     pub async fn stay_fresh(&self, nudges: crate::nudge::Nudges) {
-        crate::relaying::freshness::held(self.members.clone(), self.peers.clone(), nudges).await
+        crate::relaying::freshness::held(
+            self.members.clone(),
+            self.peers.clone(),
+            nudges,
+            self.members_updating.clone(),
+        )
+        .await
     }
 
     /// What an announcement of the renewal carries: this device as it answers

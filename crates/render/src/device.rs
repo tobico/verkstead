@@ -461,6 +461,14 @@ pub struct LinkedDevice {
     /// `trouble`.
     #[serde(default)]
     pub updating: Option<ThisUpdating>,
+
+    /// And whether, with its Update going, it has gone quiet: the Nudge stream
+    /// this device holds to it ended, which is its desktop app quitting to
+    /// install. The row reads *restarting…* until it is back — said by the
+    /// device that pressed, whose server is still up, rather than by the
+    /// viewer as this device's own row has it.
+    #[serde(default)]
+    pub restarting: bool,
 }
 
 /// One device nobody has typed an address for, as the **Discovered** list under
