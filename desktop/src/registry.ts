@@ -1,8 +1,8 @@
 //! Reading and deleting one value of the Windows registry, which is the one
 //! thing **Launch on Startup** needs and nothing this app has an API for.
 //!
-//! Electron has none, this app has no dependencies at all and is not the place to
-//! acquire a native one — so it is `reg.exe` run and its exit status read,
+//! Electron has none, this app's one dependency is electron-updater and it is not
+//! the place to acquire a native one — so it is `reg.exe` run and its exit status read,
 //! injected as [`Registry`] the way the login-item API is, which is what makes
 //! every arm an ordinary vitest on the Linux runner.
 //!

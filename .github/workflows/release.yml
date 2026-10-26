@@ -765,6 +765,25 @@ jobs:
             exit 1
           fi
 
+      # **What electron-updater will be handed, read back before anything is
+      # uploaded** (ADR-0027, *The release*). The packed app's `app-update.yml`
+      # is where it looks, and has to name this repository; the
+      # `latest-linux.yml` the pack wrote beside the image is what it reads
+      # there, and has to name the file by the name the Release holds it under,
+      # with that file's size and sha512 — the metadata is unsigned, so those
+      # two are the whole of what an update rests on. And electron-updater
+      # itself, read out of the archive in the mounted image: a dependency the
+      # pack left out is an app that runs, passes everything below and never
+      # updates. See `desktop/scripts/updates.mjs`.
+      #
+      # There is no `.blockmap` to upload beside this one: an AppImage carries
+      # its blockmap inside itself, at the end of the file.
+      - name: The app knows where its updates are, and the metadata names this file
+        working-directory: desktop
+        run: |
+          node scripts/updates.mjs packed "$MOUNTED/resources" "$GITHUB_REPOSITORY"
+          node scripts/updates.mjs metadata ../target/electron/out/latest-linux.yml "../$APPIMAGE"
+
       # The half of this download a *session* gets, and the invariant the
       # Sandbox stands on (ADR-0020): what a session spawned by this app runs is
       # the binary inside the mounted image, by path, saying `ask`. An AppImage
@@ -1047,11 +1066,16 @@ jobs:
       # and a Release asset has no mode to carry it either. The file was run
       # above, where it still had one, and whoever downloads it chmods it — as
       # they do a bare binary.
-      - name: Upload the AppImage
+      #
+      # The update metadata goes up beside it, from the same directory, so the
+      # upload keeps both bare names.
+      - name: Upload the AppImage and its update metadata
         uses: actions/upload-artifact@v7.0.1
         with:
           name: desktop-linux
-          path: ${{ env.APPIMAGE }}
+          path: |
+            ${{ env.APPIMAGE }}
+            target/electron/out/latest-linux.yml
           if-no-files-found: error
 
   # The macOS desktop artifact: the same Electron app the AppImage carries,
@@ -1104,6 +1128,12 @@ jobs:
       # with "Could not create output file".
       ARCHIVE: target/electron/out/Verkstead-universal.zip
       EXTRACTED: target/electron/unzipped
+      # And what an update reads beside the zip: the metadata naming it, and
+      # the blockmap of each file for a differential download.
+      UPDATES: |
+        target/electron/out/latest-mac.yml
+        target/electron/out/Verkstead-universal.zip.blockmap
+        target/electron/out/Verkstead-universal.dmg.blockmap
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -1248,6 +1278,19 @@ jobs:
           hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$PWD/$MOUNT"
           ls -l "$MOUNT"
           ls -l "$APP/Contents"
+
+      # What electron-updater will be handed, for the reason the AppImage leg
+      # gives: the mounted app's `app-update.yml` and electron-updater inside
+      # it, and the `latest-mac.yml` naming both files by the names the Release
+      # holds them under, with each one's size and sha512. The zip first,
+      # because it is the update — Squirrel.Mac installs a zip — and so the one
+      # the metadata's `path` names; the dmg is listed beside it as a file of
+      # the same version. See `desktop/scripts/updates.mjs`.
+      - name: The app knows where its updates are, and the metadata names these files
+        working-directory: desktop
+        run: |
+          node scripts/updates.mjs packed "$GITHUB_WORKSPACE/$APP/Contents/Resources" "$GITHUB_REPOSITORY"
+          node scripts/updates.mjs metadata ../target/electron/out/latest-mac.yml "../$ARCHIVE" "../$DMG"
 
       # The half of this download a *session* gets, and the invariant the
       # Sandbox stands on (ADR-0020): what a session spawned by this app runs is
@@ -1727,14 +1770,16 @@ jobs:
       # modes inside it, which the artifact's own zipping carries as bytes —
       # the step above unzipped exactly those bytes. Both files sit in one
       # directory, so the upload keeps their bare names and `publish` finds
-      # the two of them in `desktop-assets/`.
-      - name: Upload the dmg and the zip
+      # the two of them in `desktop-assets/` — and the update metadata and the
+      # two blockmaps beside them, out of the same directory.
+      - name: Upload the dmg, the zip and what an update reads beside them
         uses: actions/upload-artifact@v7.0.1
         with:
           name: desktop-macos
           path: |
             ${{ env.DMG }}
             ${{ env.ARCHIVE }}
+            ${{ env.UPDATES }}
           if-no-files-found: error
 
   # The Windows desktop artifact: the same Electron app the other two legs pack,
@@ -1819,6 +1864,15 @@ jobs:
         run: |
           pnpm run pack
           ls -l ../target/electron/out
+
+      # What electron-updater will be handed, for the reason the AppImage leg
+      # gives — the `latest.yml` naming the installer by the name the Release
+      # holds it under, with its size and sha512. Read off the file that is
+      # uploaded, before it is installed; the installed app's `app-update.yml`
+      # is read after the install below.
+      - name: The metadata names this installer
+        working-directory: desktop
+        run: node scripts/updates.mjs metadata ../target/electron/out/latest.yml "../$INSTALLER"
 
       # Installed rather than unpacked, which is what makes every assertion
       # below one about the file that is uploaded: this is that installer,
@@ -1922,6 +1976,15 @@ jobs:
           echo "Installed apps says: Verkstead $(printf '%s\n' "$registration" | sed -n 's/^says=//p')"
 
           echo "INSTALL=$install" >> "$GITHUB_ENV"
+
+      # And the installed app knows where its updates are, for the reason the
+      # AppImage leg reads its own: `app-update.yml` in the installed resources
+      # naming this repository, and electron-updater inside `app.asar` — asked
+      # of the install, which is what electron-updater runs from. The path
+      # goes to Node in Windows' own spelling.
+      - name: The installed app knows where its updates are
+        working-directory: desktop
+        run: node scripts/updates.mjs packed "$(cygpath -w "$INSTALL/resources")" "$GITHUB_REPOSITORY"
 
       # The way in, and the one thing about it a human would notice going
       # wrong. Three claims, each asked of what was installed rather than of
@@ -2585,11 +2648,17 @@ jobs:
       # installer the two could be told apart by name as well — but the rule is
       # the prefix rather than the extension, and a leg is not the place to
       # start making exceptions to it.
-      - name: Upload the installer
+      #
+      # The update metadata and the installer's blockmap go up beside it, from
+      # the same directory, so the upload keeps all three bare names.
+      - name: Upload the installer and what an update reads beside it
         uses: actions/upload-artifact@v7.0.1
         with:
           name: desktop-windows
-          path: ${{ env.INSTALLER }}
+          path: |
+            ${{ env.INSTALLER }}
+            target/electron/out/latest.yml
+            target/electron/out/Verkstead-x86_64.exe.blockmap
           if-no-files-found: error
 
   # The tag and the Release, once every leg has succeeded — the desktop ones as
@@ -2688,7 +2757,13 @@ jobs:
       # would be satisfied by a leg that uploaded `verkstead-desktop.AppImage`.
       # So this is the one place the desktop asset names are written down, and
       # there is one line per file a desktop leg uploads — two for the Mac's,
-      # the dmg a human downloads and the zip an update installs.
+      # the dmg a human downloads and the zip an update installs — and then
+      # what electron-updater reads beside them: each platform's `latest*.yml`,
+      # and the blockmap of every file that has one outside itself (an
+      # AppImage carries its own inside). Those are published with the rest,
+      # because the Release is where electron-updater reads them from
+      # (ADR-0027, *The release*), and each leg has already read its metadata
+      # back against the files it names.
       #
       # Read both ways round: every name here arrived, and nothing arrived that
       # is not named here. Without the second, a leg this job has never been
@@ -2700,6 +2775,12 @@ jobs:
             Verkstead-universal.dmg
             Verkstead-universal.zip
             Verkstead-x86_64.exe
+            latest-linux.yml
+            latest-mac.yml
+            latest.yml
+            Verkstead-universal.dmg.blockmap
+            Verkstead-universal.zip.blockmap
+            Verkstead-x86_64.exe.blockmap
         run: |
           expected=$(printf '%s\n' "$DESKTOP_ASSETS" | sed '/^[[:space:]]*$/d' | sort)
           found=$(ls -1 desktop-assets 2> /dev/null | sort)

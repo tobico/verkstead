@@ -38,6 +38,10 @@
 //! variable is set. Either way the log says which, and afterwards by whose
 //! name, out of the bundle that was packed (ADR-0027, *The release*).
 //!
+//! **And nothing is published.** The configuration names where an update is read
+//! from, which is what has electron-builder write the update metadata; the
+//! Release that metadata is uploaded to is the release workflow's to make.
+//!
 //! `pnpm run pack` rather than `pnpm pack`, which is pnpm's own command for
 //! something else entirely. Everything after `--` is handed to
 //! electron-builder, so a developer who wants one target of several can say so.
@@ -449,10 +453,17 @@ stage(binaries);
 // No platform flag: electron-builder packs for the machine it is running on,
 // which is what each of the three artifacts has always been built by — and what
 // keeps this one command rather than one per platform.
-const packing = spawn(process.execPath, [builder(), ...signing(), ...args], {
-  cwd: DESKTOP,
-  stdio: "inherit",
-});
+//
+// **And never a publish**, said on every pack rather than only a release
+// leg's: `electron-builder.yml` names a `github` provider so that the update
+// metadata is written, and electron-builder left to itself publishes to it
+// whenever it finds itself on CI at a tag. The Release is
+// `.github/workflows/release.yml`'s to make, metadata and all.
+const packing = spawn(
+  process.execPath,
+  [builder(), "--publish", "never", ...signing(), ...args],
+  { cwd: DESKTOP, stdio: "inherit" },
+);
 
 packing.on("exit", (code, signal) => {
   const status = signal !== null ? 1 : (code ?? 0);

@@ -23,7 +23,7 @@ Roadmap stage: [04: The app updates this device](docs/roadmaps/cluster-updates/0
 
 ## Tasks
 
-- [ ] 01: The release publishes update metadata — [details](01-the-release-publishes-update-metadata.md)
+- [x] 01: The release publishes update metadata — [details](01-the-release-publishes-update-metadata.md)
 - [ ] 02: What this install is — [details](02-what-this-install-is.md)
 - [ ] 03: Update, end to end, against a local feed — [details](03-update-end-to-end-against-a-local-feed.md)
 - [ ] 04: When it goes wrong — [details](04-when-it-goes-wrong.md)

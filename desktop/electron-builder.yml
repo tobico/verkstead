@@ -31,18 +31,45 @@ productName: Verkstead
 # had agreed to ship. There is no `electronVersion` here for the same reason —
 # said twice, the two drift.
 
-# **Nothing is published from here and nothing updates itself.** A Release is
-# assembled by `.github/workflows/release.yml`, which uploads the files its legs
-# built and their checksums beside them; electron-builder's own publishing would
-# be a second thing talking to GitHub about the same tag. Said as `null` rather
-# than left unsaid, because unsaid means *guess* — it reads the repository out of
-# `.git/config`, writes the update metadata an auto-updater we do not ship would
-# read, and fails the build outright where there is nothing to guess from.
-publish: null
+# **Where an update is read from, and nothing published from here.** A
+# `github` provider naming this repository, which is what has electron-builder
+# write `latest-linux.yml`, `latest-mac.yml` and `latest.yml` beside each
+# platform's artifacts — the file, its size and its sha512 — and an
+# `app-update.yml` into the packed app saying where electron-updater is to look
+# for them (ADR-0027, *The release*). Named outright rather than read out of
+# `.git/config`, which is what electron-builder guesses from when this is
+# unsaid, and fails the build outright where there is nothing to guess from.
+#
+# **Publishing itself stays the workflow's.** A Release is assembled by
+# `.github/workflows/release.yml`, which uploads the files its legs built, this
+# metadata and each artifact's `.blockmap` among them, and their checksums
+# beside them; electron-builder's own publishing would be a second thing
+# talking to GitHub about the same tag. So `scripts/pack.mjs` says
+# `--publish never` on every pack, a developer's as much as a release leg's —
+# electron-builder publishes on its own when it finds itself on CI at a tag.
+#
+# **Unsigned, by decision** (ADR-0027, amended at stage 04's start): the
+# electron-builder pinned here has no manifest signing — the Ed25519
+# `updateManifest` is 27's, and 27 is an alpha — so there is no key to write
+# and no `updateManifest: false` either. What an update rests on is the sha512
+# in the file, fetched over TLS from the Release, and on a Mac the Developer ID
+# Squirrel.Mac checks besides.
+#
+# **Stable releases only**, which is electron-updater's default and so nothing
+# written here: it reads `releases/latest`, which a pre-release never is — the
+# same Release the Update Notice counts as newest.
+publish:
+  provider: github
+  owner: tobico
+  repo: verkstead
 
-# Nothing to rebuild and nothing native: this app has no dependencies at all,
-# its devDependencies are not packed, and the pack is not the place to discover
-# that a package manager can be run from inside it.
+# Nothing to rebuild and nothing native: this app's one dependency is
+# electron-updater, which is plain JavaScript all the way down and runs no
+# install script, its devDependencies are not packed, and the pack is not the
+# place to discover that a package manager can be run from inside it. It is
+# packed into `app.asar` for all that — electron-builder adds a package's
+# production dependencies whatever `files` below says — and the Linux leg of
+# `.github/workflows/release.yml` reads the packed archive back to prove it.
 npmRebuild: false
 
 directories:
@@ -266,8 +293,8 @@ mac:
     # ticket is stapled inside the bundle, so it travels in both.
     #
     # electron-builder writes a `.blockmap` beside it, for the differential
-    # download an updater may make; nothing uploads that yet, and neither it nor
-    # the metadata is this configuration's while `publish` above is `null`.
+    # download an updater may make, and the `latest-mac.yml` naming it; the
+    # release workflow uploads both beside the zip.
     - target: zip
       arch:
         - universal

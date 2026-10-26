@@ -146,7 +146,9 @@ Each of these waits on the one above it.
    CLI binaries, and beside them one desktop app per desktop platform — the
    Linux one as `Verkstead-x86_64.AppImage`, the macOS one as
    `Verkstead-universal.dmg` with `Verkstead-universal.zip` beside it, the
-   Windows one as `Verkstead-x86_64.exe`.
+   Windows one as `Verkstead-x86_64.exe`. Each desktop leg uploads what
+   electron-updater reads beside its files too — see
+   [the update metadata](#the-update-metadata).
 5. **Publish.** The tag is made on the prepare commit, annotated, and pushed;
    then the Release is created under it with every leg's artifacts and
    generated notes, the note above them where the run was given one.
@@ -170,6 +172,35 @@ committing it first, and a red check would then have left that commit on
 straight to `main`** with no pull request — see
 [the git workflow](agents/git-workflow.md#exception-the-release-commits) for
 why both are exceptions and what makes them safe.
+
+## The update metadata
+
+**A Release is also where a packed app finds its next version**
+([ADR-0027](adr/0027-cluster-updates.md), *The release*).
+[`desktop/electron-builder.yml`](../desktop/electron-builder.yml) names a
+`github` provider for this repository, which is what has each pack write an
+`app-update.yml` into the app — where electron-updater is to look — and a
+`latest*.yml` beside the files it made: `latest-linux.yml` naming the
+AppImage, `latest-mac.yml` naming the zip and the dmg, and `latest.yml` naming
+the installer, each with the file's size and sha512. The Mac's two files and
+the installer have a `.blockmap` beside them as well, for a differential
+download; an AppImage carries its blockmap inside itself.
+
+**Nothing is published by electron-builder.** `pnpm run pack` says
+`--publish never` on every pack, and the metadata and the blockmaps go up with
+the rest of the Release through the one `gh release create` — the publish job
+names every one of them, both ways round, as it names the installers.
+
+**The metadata is unsigned**, by decision: the pinned electron-builder has no
+manifest signing, so what an update rests on is the sha512 in the file,
+fetched over TLS from the Release, and on a Mac the Developer ID besides. So
+each desktop leg reads its own metadata back against the files it is about to
+upload — the names the Release will hold them under, the sizes and the hashes
+— and reads the packed app's `app-update.yml` and the electron-updater inside
+its `app.asar`, with
+[`desktop/scripts/updates.mjs`](../desktop/scripts/updates.mjs). Only a stable
+Release is ever an update: electron-updater reads `releases/latest`, which a
+pre-release is never.
 
 ## What the legs are, and what holds them to their floors
 
