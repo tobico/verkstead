@@ -198,12 +198,13 @@ async fn listening(
             // Held and then ended, so the machine is there and answering:
             // whatever ended the stream is as likely to be over as not, and the
             // next one is taken up at the soonest. A member updating itself
-            // ending it is its app quitting to install.
+            // ending it is its app quitting to install, which is this device's
+            // own record of its press and so told to its own pages alone.
             Held::Ended => {
                 waiting = AGAIN;
 
                 if updates.went_quiet(&device) {
-                    nudges.announce(Nudge::Devices);
+                    nudges.announce_here(Nudge::Devices);
                 }
             }
 
@@ -387,7 +388,9 @@ async fn read(
 /// row this stream was taken up against is what the answer is held up to.
 ///
 /// **And it is what says a member updating itself is back**, on the release
-/// it came up on — see [`MemberUpdates::taken_up`].
+/// it came up on — see [`MemberUpdates::taken_up`]. Where that is all that
+/// moved, it is this device's own record of its press, told to its own pages
+/// alone: no member's rows moved.
 ///
 /// **And a read that fails is a line in the log and nothing else.** The stream
 /// is up whatever this comes to, and the row stays as the last reading left
@@ -403,8 +406,10 @@ async fn read_again(member: Member, peers: Peers, nudges: Nudges, updates: Membe
 
             let updated = updates.taken_up(&member.device, identity.version.as_deref());
 
-            if moved || updated {
+            if moved {
                 nudges.announce(Nudge::Devices);
+            } else if updated {
+                nudges.announce_here(Nudge::Devices);
             }
         }
 
