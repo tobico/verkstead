@@ -109,6 +109,16 @@ version once the app has relaunched on it. If the new version doesn't come
 up, the app says so in a dialog and the row says why. Nothing is rolled back.
 Press **Update** to try again, or wait for the next release.
 
+**A device linked to this one is updated from its own row too,** where it
+runs the desktop app. Press **Update** on crow's row and the same card asks
+*Update crow?*, naming the release and the sessions running on crow. crow
+then updates itself while its row reads *updating…*, then *restarting…*
+while it is down, and then shows its new version. **Update all** on the
+banner tells every device linked to this one that can update itself, and
+updates this device last, once each of the others is back or has said why
+it isn't. One that isn't answering is skipped, and its row says so. A
+device that couldn't be updated sends a notification naming it.
+
 **Everything else is updated by hand,** with the command its row names:
 
 - **Installed with nix**, by the NixOS module or the flake: update this
