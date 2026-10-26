@@ -401,7 +401,7 @@ fn tagged(view: &DevicesView) -> Vec<String> {
         .map(|member| member.identity.device.clone())
         .collect();
 
-    if view.this_update_available {
+    if view.this_update_available.is_some() {
         tagged.push("this".to_owned());
     }
 
@@ -436,9 +436,10 @@ async fn a_nix_install_behind_the_release_says_it_is_nixs() {
 
     let view = devices(&app).await;
 
-    assert!(
-        view.this_update_available,
-        "this device is behind the release"
+    assert_eq!(
+        view.this_update_available.as_deref(),
+        Some("0.3.0"),
+        "this device is behind the release, and the row names it"
     );
     assert_eq!(view.this_install, InstallKind::Nix);
     assert!(!view.this_install.updates_itself());

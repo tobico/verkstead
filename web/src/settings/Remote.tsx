@@ -784,6 +784,23 @@ function Devices(props: {
     if (device !== null) drop.mutate(device.device);
   };
 
+  // Whether the card asking about this device's own Update is up. Asked
+  // before anything happens, because the restart stops every session here.
+  const [askingUpdate, setAskingUpdate] = createSignal(false);
+
+  /// A press on Update, which asks first — with the section read again, so
+  /// the sessions the card names are the ones running as it is drawn.
+  const askUpdate = () => {
+    void queries.invalidateQueries({ queryKey: ["devices"] });
+    setAskingUpdate(true);
+  };
+
+  /// And the press on that card, which is the Update.
+  const updateConfirmed = () => {
+    setAskingUpdate(false);
+    update.mutate();
+  };
+
   return (
     <section class={styles.devices}>
       <Choose>
@@ -819,7 +836,7 @@ function Devices(props: {
           {(here) => (
             <List
               of={here()}
-              update={() => update.mutate()}
+              update={askUpdate}
               updating={update.isPending}
               unlink={setAsking}
               unlinking={drop.isPending}
@@ -851,35 +868,78 @@ function Devices(props: {
       {/* Asked before anything happens, the way Remove on a Repo is: one press
           in a list, on a phone, that cannot be taken back. */}
       <Confirm
-        asked={asking()}
+        open={asking() !== null}
+        question={`Unlink ${asking()?.name ?? ""}?`}
+        why="It leaves the cluster for every device and is told to forget the rest, so linking it again needs somebody to allow it."
+        verb="Unlink"
         keep={() => setAsking(null)}
-        unlink={confirmed}
+        act={confirmed}
+      />
+
+      {/* And this device's own Update, asked for the same reason: what it
+          stops is every session running here (ADR-0027). */}
+      <Confirm
+        open={askingUpdate() && devices.data !== undefined}
+        question={`Update ${devices.data?.this.name ?? ""}?`}
+        why={updateWhy(devices.data)}
+        verb="Update"
+        keep={() => setAskingUpdate(false)}
+        act={updateConfirmed}
       />
     </section>
   );
 }
 
-/// What an Unlink is answered with before anything has happened: which device
-/// it would take out of the cluster, what that means for the rest of it, and
-/// the two ways out.
+/// What this device's Update does, as its confirm card says it: the release
+/// it restarts on, and the sessions running here, which the restart stops and
+/// startup resumes (ADR-0027, *A confirm card names the sessions that will be
+/// stopped*). With none running, the release alone.
+function updateWhy(list: DevicesView | undefined): string {
+  const onto = `It restarts on Verkstead ${list?.this_update_available ?? "the latest release"}`;
+  const running = list?.this_running ?? [];
+
+  if (running.length === 0) return `${onto}.`;
+
+  const sessions = running.length === 1 ? "the session" : "the sessions";
+
+  return `${onto}, and ${sessions} on ${listed(running)} will be stopped and resumed.`;
+}
+
+/// `a`, `a and b`, `a, b and c`.
+function listed(names: string[]): string {
+  if (names.length < 2) return names.join("");
+
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/// What a press on the Devices list is answered with before anything has
+/// happened: the question naming the act and the device, one sentence of what
+/// it does, and the two ways out. Unlink asks it, and Update on this device's
+/// own row.
 ///
 /// The device is named on the card because the list it was pressed in is behind
 /// it — the shape the Repos pane's confirm takes, for its reason: a card reading
 /// *Unlink this device?* over a list of them would be asking about whichever row
 /// the human remembers pressing.
 ///
-/// And the sentence under the name is what makes this press different from
-/// every other undoing in the app: it is not this device's own half of a link
-/// being cut, it is the device leaving the cluster for everybody.
+/// And the sentence under the name is what makes each press different from
+/// every other in the app: an Unlink is not this device's own half of a link
+/// being cut, it is the device leaving the cluster for everybody; an Update
+/// stops every session running here.
 function Confirm(props: {
-  /// The device the press asked about, or `null` while nothing is being asked.
-  asked: DeviceIdentity | null;
+  /// Whether the card is up.
+  open: boolean;
+  /// The question, *Unlink crow?*.
+  question: string;
+  /// And the one sentence of what the press does.
+  why: string;
+  /// And the press's own verb.
+  verb: string;
   /// The way back, which is what Escape and a press on the backdrop come to as
-  /// well: every way out of this card but the one button leaves the cluster
-  /// alone.
+  /// well: every way out of this card but the one button leaves things alone.
   keep: () => void;
   /// And the press it asked about, made.
-  unlink: () => void;
+  act: () => void;
 }): JSX.Element {
   // The heading's own id, for the `aria-labelledby` that names the card by it.
   const id = createUniqueId();
@@ -887,17 +947,14 @@ function Confirm(props: {
   return (
     <Modal
       class={styles.confirming!}
-      open={props.asked !== null}
+      open={props.open}
       close={props.keep}
       labelledBy={id}
     >
       <p id={id} class={styles.confirmingTitle}>
-        Unlink {props.asked?.name}?
+        {props.question}
       </p>
-      <p class={styles.confirmingWhy}>
-        It leaves the cluster for every device and is told to forget the rest,
-        so linking it again needs somebody to allow it.
-      </p>
+      <p class={styles.confirmingWhy}>{props.why}</p>
       <div class={styles.confirmingOut}>
         {/* Both classes, as every confirm pair in the app carries them: the
             global one is the paint, and the module's is what the row stands the
@@ -909,8 +966,8 @@ function Confirm(props: {
         >
           Cancel
         </button>
-        <button type="button" onClick={() => props.unlink()}>
-          Unlink
+        <button type="button" onClick={() => props.act()}>
+          {props.verb}
         </button>
       </div>
     </Modal>
@@ -964,7 +1021,7 @@ function List(props: {
         of={props.of.this}
         here
         differs={false}
-        newer={props.of.this_update_available}
+        newer={props.of.this_update_available !== null}
         install={props.of.this_install}
         progress={progress(props.of, props.restarting ?? false)}
         update={
@@ -1030,7 +1087,7 @@ const UPDATES_ITSELF: InstallKind[] = ["AppImage", "MacApp", "WindowsInstall"];
 function offeredUpdate(list: DevicesView): boolean {
   return (
     UPDATES_ITSELF.includes(list.this_install) &&
-    list.this_update_available &&
+    list.this_update_available !== null &&
     list.this_updating === null
   );
 }

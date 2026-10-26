@@ -1027,6 +1027,35 @@ pub fn router_running_sessions(
     )
 }
 
+/// And the same answering for `devices` too, which is what a desktop install
+/// serves: the Devices section beside running sessions, for the suite asking
+/// what this device's Update's confirm card names — the sessions running here
+/// (ADR-0027, *A device updates itself*).
+pub fn router_running_sessions_answering_devices(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    agents: Agents,
+    gh: Gh,
+    devices: device::Devices,
+) -> Router {
+    // Taken off the agents for the reason [`router_running_sessions`] does.
+    let binds = agents.binds().clone();
+
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        binds,
+        data_dir,
+        sessions::Sessions::under(agents),
+        gh,
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        Some(devices),
+    )
+}
+
 /// A router keeping its files in `data_dir` and reaching GitHub through `gh`,
 /// running no session at all.
 ///

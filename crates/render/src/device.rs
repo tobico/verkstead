@@ -215,12 +215,20 @@ pub struct DevicesView {
     #[serde(default)]
     pub annex_trouble: Option<String>,
 
-    /// And whether a newer stable release exists than the one this device
-    /// runs, which tags its row *update available* — see
+    /// And the newer stable release than the one this device runs, where one
+    /// exists, *0.3.0*: what tags its row *update available* — see
     /// [`LinkedDevice::update_available`], which is the same verdict for a
-    /// member.
+    /// member — and the version its Update's confirm card names.
     #[serde(default)]
-    pub this_update_available: bool,
+    pub this_update_available: Option<String>,
+
+    /// And what each session running on this device is running on, as a
+    /// sentence names its Conversation — the branch, or *a draft* — which
+    /// its Update's confirm card names as the sessions to be stopped and
+    /// resumed (ADR-0027). Read at the moment the pane asks, as the sidebar's
+    /// marks are; empty with none running.
+    #[serde(default)]
+    pub this_running: Vec<String>,
 
     /// And what this device was installed as, which says whether its row is
     /// offered an Update or a line saying how to update it by hand — see

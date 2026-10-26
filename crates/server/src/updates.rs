@@ -89,13 +89,19 @@ impl Updates {
     /// the sign for the first, and a tag guessed from the second would be a
     /// guess.
     pub(crate) fn newer_than(&self, version: Option<&str>) -> bool {
-        let Some(latest) = self.latest() else {
-            return false;
-        };
+        self.newer(version).is_some()
+    }
+
+    /// The release newer than `version`, where there is one — what this
+    /// device's confirm card names as the version its Update goes onto. `None`
+    /// wherever [`Updates::newer_than`] is false.
+    pub(crate) fn newer(&self, version: Option<&str>) -> Option<String> {
+        let latest = self.latest()?;
 
         version
             .and_then(|version| semver::Version::parse(version).ok())
             .is_some_and(|version| latest > version)
+            .then(|| latest.to_string())
     }
 
     fn latest(&self) -> Option<semver::Version> {

@@ -37,7 +37,8 @@
     "version": "0.2.2"
   },
   "this_install": "Binary",
-  "this_update_available": false,
+  "this_running": [],
+  "this_update_available": null,
   "this_update_trouble": null,
   "this_updating": null
 }

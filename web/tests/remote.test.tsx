@@ -873,7 +873,7 @@ describe("the devices section", () => {
     const [laptop, wsl] = LINKED.members;
     mountPane(SERVING, {
       ...LINKED,
-      this_update_available: true,
+      this_update_available: "0.3.0",
       members: [
         { ...laptop!, update_available: true },
         { ...wsl!, update_available: false },
@@ -900,7 +900,7 @@ describe("the devices section", () => {
   it("says how to update a nix install by hand, with no press", async () => {
     mountPane(SERVING, {
       ...LINKED,
-      this_update_available: true,
+      this_update_available: "0.3.0",
       this_install: "Nix",
     });
 
@@ -950,12 +950,12 @@ describe("the devices section", () => {
   });
 
   /// An install that updates itself, behind the release, has Update on its
-  /// row; the press reads *updating…* in place of *update available*, and
-  /// takes the button away while it goes.
+  /// row; the press asks first, and Update on the card reads *updating…* in
+  /// place of *update available*, taking the button away while it goes.
   it("offers Update on a desktop install behind the release", async () => {
     const behind: DevicesView = {
       ...LINKED,
-      this_update_available: true,
+      this_update_available: "0.3.0",
       this_install: "AppImage",
     };
     const fetching = stubbing(
@@ -975,6 +975,11 @@ describe("the devices section", () => {
 
     fireEvent.click(press);
 
+    await waitFor(() => expect(screen.getByText("Update workbench?")).toBeTruthy());
+    expect(askedFor(fetching, "/api/ui/devices/this/update")).toBe(0);
+
+    fireEvent.click(updateOnTheCard());
+
     await waitFor(() => expect(screen.getByText("updating…")).toBeTruthy());
     const row = screen.getByText("this device").closest("li")!;
     expect(row.textContent).not.toContain("update available");
@@ -987,11 +992,82 @@ describe("the devices section", () => {
     ).toBe(true);
   });
 
+  /// The card asks about this device by name, with the release it goes onto
+  /// in its body — and with nothing running here, that alone.
+  it("asks Update with the release and nothing else when nothing runs", async () => {
+    mountPane(SERVING, {
+      ...LINKED,
+      this_update_available: "0.3.0",
+      this_install: "AppImage",
+      this_running: [],
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+
+    const asked = await screen.findByText("Update workbench?");
+    expect(asked.closest("dialog")!.textContent).toContain(
+      "It restarts on Verkstead 0.3.0.",
+    );
+    expect(asked.closest("dialog")!.textContent).not.toContain("session");
+  });
+
+  /// With sessions running here, the card names each and says they will be
+  /// stopped and resumed — and Update on it goes ahead regardless (ADR-0027).
+  it("names the running sessions on the card, and updates anyway", async () => {
+    const behind: DevicesView = {
+      ...LINKED,
+      this_update_available: "0.3.0",
+      this_install: "AppImage",
+      this_running: ["rate-limiting", "a draft"],
+    };
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(behind),
+      theHeard(),
+      whenever(
+        "/api/ui/devices/this/update",
+        json({ ...behind, this_updating: { percent: null } }),
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+
+    const asked = await screen.findByText("Update workbench?");
+    expect(asked.closest("dialog")!.textContent).toContain(
+      "It restarts on Verkstead 0.3.0, and the sessions on rate-limiting and a draft will be stopped and resumed.",
+    );
+
+    fireEvent.click(updateOnTheCard());
+
+    await waitFor(() => expect(screen.getByText("updating…")).toBeTruthy());
+    expect(askedFor(fetching, "/api/ui/devices/this/update")).toBe(1);
+  });
+
+  /// And Cancel leaves the device alone.
+  it("updates nothing on Cancel", async () => {
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice({ ...LINKED, this_update_available: "0.3.0", this_install: "AppImage" }),
+      theHeard(),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+    await screen.findByText("Update workbench?");
+
+    fireEvent.click(screen.getByText("Cancel"));
+
+    await waitFor(() => expect(screen.queryByText("Update workbench?")).toBeNull());
+    expect(askedFor(fetching, "/api/ui/devices/this/update")).toBe(0);
+  });
+
   /// No Update on an install that is on the release, nor on a member's row.
   it("offers no Update on a desktop install that is on the release", async () => {
     mountPane(SERVING, {
       ...LINKED,
-      this_update_available: false,
+      this_update_available: null,
       this_install: "AppImage",
       members: LINKED.members.map((member) => ({ ...member, update_available: true })),
     });
@@ -1008,7 +1084,7 @@ describe("the devices section", () => {
     let now: "updating" | "down" | "back" = "updating";
     const going: DevicesView = {
       ...LINKED,
-      this_update_available: true,
+      this_update_available: "0.3.0",
       this_install: "AppImage",
       this_updating: { percent: 42 },
     };
@@ -1051,7 +1127,7 @@ describe("the devices section", () => {
     let now: "updating" | "failed" = "updating";
     const going: DevicesView = {
       ...LINKED,
-      this_update_available: true,
+      this_update_available: "0.3.0",
       this_install: "AppImage",
       this_updating: { percent: 60 },
     };
@@ -1086,7 +1162,7 @@ describe("the devices section", () => {
   it("says why a press of Update was refused", async () => {
     const behind: DevicesView = {
       ...LINKED,
-      this_update_available: true,
+      this_update_available: "0.3.0",
       this_install: "AppImage",
     };
     stubbing(
@@ -1105,6 +1181,7 @@ describe("the devices section", () => {
     mounting(() => <RemotePane back={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+    fireEvent.click(await waitFor(updateOnTheCard));
 
     await waitFor(() =>
       expect(screen.getByText(/so it can't update itself\./)).toBeTruthy(),
@@ -2281,3 +2358,14 @@ function scanned(code: Element): string | null {
 /// One dark module of the path the page draws — see `Qr.tsx`, which writes each
 /// as a one-unit square at its own place on the grid.
 const MODULE = /M(\d+) (\d+)h1v1h-1z/g;
+
+/// Update on the card asking about this device's own, rather than on its row.
+function updateOnTheCard(): HTMLElement {
+  const press = screen
+    .getAllByRole("button", { name: "Update" })
+    .find((button) => button.closest("dialog"));
+
+  if (press === undefined) throw new Error("no card asking about Update is up");
+
+  return press;
+}
