@@ -52,7 +52,11 @@ profile, with no administrator asked for, an icon in the notification area and
 `verkstead` on your `PATH` for a terminal opened after the install. It is
 unsigned too, so SmartScreen stops it behind *Windows protected your PC*:
 click **More info**, then **Run anyway**. Once per download; right-clicking the
-msi, **Properties**, and ticking **Unblock** does the same beforehand.
+msi, **Properties**, and ticking **Unblock** does the same beforehand. It
+stays unsigned because every route open to its maintainer, an individual in
+Australia, was weighed and declined, and a signed build would start behind the
+same window until downloads earned it a reputation
+([ADR-0020](docs/adr/0020-electron-desktop.md#amended-the-windows-build-stays-unsigned)).
 
 **Taking it off Windows again** starts before the msi is uninstalled, because
 the msi knows nothing of the account sessions ran as or of what was granted to
