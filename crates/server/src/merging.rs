@@ -718,6 +718,48 @@ pub(crate) async fn ranks(state: &AppState) -> anyhow::Result<Vec<Ranked>> {
     Ok(rows)
 }
 
+/// The rank at the top of the merged list, which is what a start is ranked above
+/// — see `store::start_conversation`.
+///
+/// **A start ranks above every device's rows, not only this one's.** A device
+/// that read its own table alone would mint `a0` for its first Conversation
+/// while a member held `Zy`, `Zz` and `a0` before it, and the new row would land
+/// at the bottom of every sidebar in the cluster. The held lists are a Nudge
+/// behind, and not there at all for a member never reached, so a start in that
+/// moment ranks off this device's own rows as it always did.
+///
+/// `None` where the merge cannot be read, said in the log rather than refused: a
+/// Conversation not started because of the sidebar's order would be a far worse
+/// thing than one drawn a row too low. And `None` too where the top is a rank
+/// nothing can be minted above — a member's row that is not a well-formed key —
+/// because the store would refuse the start over it, and a member's bad row is
+/// not this device's to fail on.
+pub(crate) async fn top(state: &AppState) -> Option<String> {
+    let top = match ranks(state).await {
+        Ok(rows) => rows.into_iter().next().map(|row| row.rank)?,
+        Err(why) => {
+            tracing::error!(
+                error = ?why,
+                "the merged list could not be read, so a new Conversation is ranked above \
+                 this device's own rows alone",
+            );
+            return None;
+        }
+    };
+
+    match verkstead_store::ranks::between(None, Some(&top), &state.device) {
+        Ok(_) => Some(top),
+        Err(why) => {
+            tracing::error!(
+                error = ?why,
+                "the top of the merged list is not a rank a new Conversation can go above, so \
+                 it is ranked above this device's own rows alone",
+            );
+            None
+        }
+    }
+}
+
 /// Whether anything is archived anywhere in the cluster: `own`, or any member's
 /// answer to the same question.
 ///

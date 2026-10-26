@@ -79,7 +79,7 @@ pub struct Worked {
 pub async fn worked(pool: &SqlitePool, branch: &str) -> Worked {
     let repo = repo(pool).await;
 
-    let id = start_conversation(pool, repo, branch, THIS_DEVICE)
+    let id = start_conversation(pool, repo, branch, THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -237,7 +237,7 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
         .map(|repo| repo.id)
         .unwrap_or(2);
 
-    let id = start_conversation(pool, repo, branch, THIS_DEVICE)
+    let id = start_conversation(pool, repo, branch, THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo is registered");

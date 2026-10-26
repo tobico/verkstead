@@ -326,7 +326,7 @@ async fn there(a: &Verkstead, b: &Verkstead) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&b.pool, registered.id, BRANCH, A)
+    let conversation = store::start_conversation(&b.pool, registered.id, BRANCH, A, None)
         .await
         .unwrap()
         .expect("the Repo was just registered");

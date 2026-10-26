@@ -90,11 +90,11 @@ async fn two_conversations() -> (tempfile::TempDir, SqlitePool, Router, i64, i64
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let first = store::start_conversation(&pool, repo.id, "outbound-retries", THIS_DEVICE)
+    let first = store::start_conversation(&pool, repo.id, "outbound-retries", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
-    let second = store::start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE)
+    let second = store::start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

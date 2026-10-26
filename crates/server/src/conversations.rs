@@ -55,6 +55,7 @@ use crate::boundaries;
 use crate::github::Gh;
 
 use crate::handoffs::Handoffs;
+use crate::merging;
 use crate::repos::git;
 use crate::settings::{Author, Config, Signature, Unauthored};
 use crate::skills;
@@ -77,9 +78,17 @@ use crate::worktrees;
 /// The Pairings are prefilled the same way, off what the Repo was last
 /// grilled with — see [`prefill`].
 pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
+    let top = merging::top(state).await;
+
     Ok(
-        match store::start_unnamed_conversation(&state.pool, repo_id, &branch_name(), &state.device)
-            .await?
+        match store::start_unnamed_conversation(
+            &state.pool,
+            repo_id,
+            &branch_name(),
+            &state.device,
+            top.as_deref(),
+        )
+        .await?
         {
             Some(id) => {
                 prefill(state, id, repo_id).await;
@@ -117,9 +126,18 @@ pub(crate) async fn start_adopting(
     roadmap: &str,
     base: Option<&str>,
 ) -> Result<Started> {
+    let top = merging::top(state).await;
+
     Ok(
-        match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap, &state.device)
-            .await?
+        match store::start_adoption(
+            &state.pool,
+            repo_id,
+            &branch_name(),
+            roadmap,
+            &state.device,
+            top.as_deref(),
+        )
+        .await?
         {
             Some(id) => {
                 if let Some(base) = base {
@@ -2912,8 +2930,15 @@ async fn alongside(
     // The row first, because everything after it is written against the id — and
     // a Repo taken off the registry between the press and here is the one thing
     // that refuses it.
-    let started =
-        store::start_conversation(&state.pool, adopting.repo.id, &branch, &state.device).await;
+    let top = merging::top(state).await;
+    let started = store::start_conversation(
+        &state.pool,
+        adopting.repo.id,
+        &branch,
+        &state.device,
+        top.as_deref(),
+    )
+    .await;
 
     let id = match started {
         Ok(Some(id)) => id,

@@ -85,7 +85,7 @@ async fn asking_from(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    store::start_conversation(pool, repo.id, "api-core-and-cli", THIS_DEVICE)
+    store::start_conversation(pool, repo.id, "api-core-and-cli", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered")
@@ -121,10 +121,11 @@ async fn asking_alongside(
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(pool, registered.id, "rate-limiting", THIS_DEVICE)
-        .await
-        .unwrap()
-        .expect("the Repo was just registered");
+    let conversation =
+        store::start_conversation(pool, registered.id, "rate-limiting", THIS_DEVICE, None)
+            .await
+            .unwrap()
+            .expect("the Repo was just registered");
 
     let worktree = dir.join("worktrees/askance-rate-limiting");
     let base = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();

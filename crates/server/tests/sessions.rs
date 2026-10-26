@@ -14775,7 +14775,7 @@ const PRINTS_AND_STOPS: &str = r#"printf 'nothing to do\n'"#;
 
 /// One archived Conversation with a session's worth of bulk on it.
 async fn archived_printing(pool: &SqlitePool, repo: i64, branch: &str) -> Archived {
-    let id = verkstead_store::start_conversation(pool, repo, branch, THIS_DEVICE)
+    let id = verkstead_store::start_conversation(pool, repo, branch, THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -23276,6 +23276,7 @@ async fn stood_on_by_a_finished_conversation(bench: &Bench, holder: Holder<'_>) 
         bench.repo_id,
         holder.branch,
         THIS_DEVICE,
+        None,
     )
     .await
     .unwrap()
@@ -24537,7 +24538,7 @@ async fn a_stage_of_the_roadmap(fixture: &Grilling, repo_id: i64, label: &str) -
     let pool = open_database(&fixture.database).await.unwrap();
     let branch = format!("roadmaps/rate-limiting/{label}-by-hand");
 
-    let id = verkstead_store::start_conversation(&pool, repo_id, &branch, THIS_DEVICE)
+    let id = verkstead_store::start_conversation(&pool, repo_id, &branch, THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the branch is free");

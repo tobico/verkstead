@@ -37,7 +37,7 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
 /// A Conversation on `branch`, walked as far as grilling — which is one of the
 /// two states a pull request can be recorded against.
 async fn grilling(pool: &SqlitePool, repo: i64, branch: &str) -> i64 {
-    let id = start_conversation(pool, repo, branch, THIS_DEVICE)
+    let id = start_conversation(pool, repo, branch, THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo is registered");

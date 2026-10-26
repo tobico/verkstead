@@ -79,8 +79,8 @@ const SMALLEST: &str = "A00000000000000000000000000";
 /// `above` is the rank of the row above in the sidebar and `below` the rank of
 /// the row below, so `None` above means *above everything* and `None` below
 /// means *below everything*; both absent is the only row there is. One call for
-/// all three uses: a Conversation is ranked above the top at the moment it is
-/// started, the rewrite ranks a database's rows one below the last, and a drag
+/// all three uses: a Conversation is ranked above the top of the merged list at
+/// the moment it is started — every device's rows, not only this one's — the rewrite ranks a database's rows one below the last, and a drag
 /// will rank the moved row between the two it landed between.
 ///
 /// The suffix is taken off each neighbour before the key is computed and
@@ -92,9 +92,10 @@ const SMALLEST: &str = "A00000000000000000000000000";
 /// neighbour pair with nothing between them at all.
 ///
 /// **That last is two rows at one key, and it is a gap the suffix cannot
-/// close.** Two devices ranking above their own top mint the same key — a fresh
-/// device's first rows rather than a coincidence — and suffixed those two rows
-/// sort apart, which is what a merged order needs of them. What no rank can do
+/// close.** Two devices ranking above the top of the merged list each holds
+/// mint the same key wherever what they hold is behind — a member's list a
+/// Nudge late, or not yet landed — and suffixed those two rows sort apart,
+/// which is what a merged order needs of them. What no rank can do
 /// is sit between them: every rank at that key reads `key-<device>`, so landing
 /// between `a0-A` and `a0-B` would take a device id sorting between those two,
 /// and the row that moved carries its own. There is nothing to hand back, so

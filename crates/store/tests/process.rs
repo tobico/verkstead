@@ -47,7 +47,7 @@ async fn repo(pool: &SqlitePool) -> i64 {
 async fn drafting(pool: &SqlitePool) -> i64 {
     let repo = repo(pool).await;
 
-    let id = start_conversation(pool, repo, "rate-limiting", THIS_DEVICE)
+    let id = start_conversation(pool, repo, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -62,7 +62,7 @@ async fn drafting(pool: &SqlitePool) -> i64 {
 async fn holding_a_pull_request(pool: &SqlitePool) -> i64 {
     let repo = repo(pool).await;
 
-    let id = start_conversation(pool, repo, "rate-limiting", THIS_DEVICE)
+    let id = start_conversation(pool, repo, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered");

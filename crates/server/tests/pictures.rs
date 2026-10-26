@@ -66,7 +66,7 @@ async fn grilling(pool: &SqlitePool, dir: &Path) -> (i64, PathBuf, Vec<PathBuf>)
         .expect("nothing is registered at that path yet");
 
     let conversation =
-        store::start_conversation(pool, registered.id, "svg-diff-previews", THIS_DEVICE)
+        store::start_conversation(pool, registered.id, "svg-diff-previews", THIS_DEVICE, None)
             .await
             .unwrap()
             .expect("the Repo was just registered");

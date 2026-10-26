@@ -167,7 +167,7 @@ async fn the_rank_and_the_birth_key_arrive_as_they_were_rather_than_being_invent
 
     // One of this device's own first, so the arriving row is not the only thing
     // in the list and its rank is not the only rank there is.
-    start_conversation(&pool, repo, "something-else", THIS_DEVICE)
+    start_conversation(&pool, repo, "something-else", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -418,7 +418,7 @@ async fn a_conversation_coming_home_lands_on_the_row_it_left() {
 
     // Drafted here and handed on: the row this device kept, the directory it cut
     // for the work, and the mark saying the record is on the other machine.
-    let ours = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
+    let ours = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -530,7 +530,7 @@ async fn a_conversation_coming_home_to_a_repo_that_has_gone_is_refused() {
     let repo = repo(&pool).await;
     let profile = profile(&pool, "work").await;
 
-    let ours = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
+    let ours = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -570,7 +570,7 @@ async fn a_key_of_another_devices_finds_nothing_here() {
     let (_dir, pool) = fresh_pool().await;
     let repo = repo(&pool).await;
 
-    let ours = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
+    let ours = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo is registered");

@@ -69,7 +69,7 @@ async fn repo(pool: &SqlitePool) -> i64 {
 
 /// A Conversation on that Repo, started by this device.
 async fn start(pool: &SqlitePool, repo: i64, branch: &str) -> i64 {
-    start_conversation(pool, repo, branch, THIS_DEVICE)
+    start_conversation(pool, repo, branch, THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered")
@@ -208,11 +208,11 @@ async fn two_devices_ranking_above_nothing_sort_apart() {
     let here = repo(&mine).await;
     let there = repo(&theirs).await;
 
-    start_conversation(&mine, here, "first", THIS_DEVICE)
+    start_conversation(&mine, here, "first", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
-    start_conversation(&theirs, there, "first", ANOTHER_DEVICE)
+    start_conversation(&theirs, there, "first", ANOTHER_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

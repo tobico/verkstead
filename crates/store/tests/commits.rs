@@ -36,7 +36,7 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
 async fn conversation(pool: &SqlitePool) -> (i64, i64) {
     let repo = registered(pool, "verkstead").await;
 
-    let id = start_conversation(pool, repo, "rate-limiting", THIS_DEVICE)
+    let id = start_conversation(pool, repo, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -282,7 +282,7 @@ async fn one_commit_can_be_on_two_conversations() {
     let (one, own) = conversation(&pool).await;
 
     let other = registered(&pool, "other").await;
-    let two = start_conversation(&pool, other, "stacked", THIS_DEVICE)
+    let two = start_conversation(&pool, other, "stacked", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

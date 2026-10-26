@@ -36,7 +36,7 @@ async fn conversation(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    start_conversation(pool, repo.id, "deferred-asks", THIS_DEVICE)
+    start_conversation(pool, repo.id, "deferred-asks", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered")
@@ -302,7 +302,7 @@ async fn only_this_conversations_deferred_answers_are_folded_into_its_prompts() 
     let mine = conversation(&pool).await;
 
     let repo = verkstead_store::registered_repos(&pool).await.unwrap()[0].id;
-    let yours = start_conversation(&pool, repo, "somebody-elses-work", THIS_DEVICE)
+    let yours = start_conversation(&pool, repo, "somebody-elses-work", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

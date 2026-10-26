@@ -344,11 +344,14 @@ cards in the one spot, and there is no bucket to size and no rebalance pass to
 run. Jira-style lexorank was rejected for that pass, and a dense integer per row
 for what it cost: the whole table rewritten on every drag, which is a sentence
 that cannot be sent to two devices that each own part of the list.
-**The device is suffixed because a device computes its keys off its own list
-alone.** Two devices each ranking a new Conversation above their own top produce
-the *same* key — on a fresh device that is its first few rows rather than a rare
-coincidence — and two rows sorting equal would leave a merged order ambiguous and
-a drag between them inexpressible, fractional indexing having no key strictly
+**A start ranks above the whole Merged List**, every member's rows as well as
+its own, as the device the start reaches holds that list — so a Conversation
+started anywhere is first on every sidebar, however few rows its own device
+has. **The device is suffixed because that held list can be behind.** It is a
+Nudge behind each member, and not there at all for a member not yet reached, so
+two devices starting a Conversation in that moment rank above the same top and
+produce the *same* key — and two rows sorting equal would leave a merged order
+ambiguous and a drag between them inexpressible, fractional indexing having no key strictly
 between two equal ones. Suffixed, they are distinct by construction and no merge
 needs a tiebreaker of its own. The separator sorts below every character of the
 alphabet, which is what makes ordering the whole strings ordering by key and then
@@ -356,8 +359,9 @@ by device — and what keeps a key minted between two neighbours between them on
 the suffixes are on. What it does not buy is room *between* two rows at one key:
 those two sort apart, but every rank at that key names a device and the row being
 moved carries its own, so nothing sorts between them and minting is refused.
-Only a merged list reaches it, and it is the first rows of two devices rather than
-a rare case — see *the gap is opened first* below.
+Only a merged list reaches it — two devices' starts minted off a held list that
+was behind, and every pair of first rows from before a start ranked above the
+merged list — see *the gap is opened first* below.
 **A drag writes one row.** The viewer says which Conversation moved and which row
 it now sits under — nothing at all being the top of the list, and each of the two
 named by **Device Id** and id, a bare id naming a row on no particular machine —
@@ -376,8 +380,9 @@ boundary, the neighbour being a row the far end may never have heard of — and 
 hub tells itself the same way for its own rows, so there is one way a rank is
 written.
 **And into the one gap there is not, the gap is opened first.** Two devices each
-ranking above their own top mint the same key, so their first rows are two rows at
-one key, sitting at the top of the list where cards are dropped most. A card
+ranking above a top held before the other's list landed mint the same key, so
+their rows are two rows at one key, sitting at the top of the list where cards
+are dropped most. A card
 dropped between them lands where it was dropped all the same: the hub re-ranks the
 *lower* of the pair through its own device — a key between the pair's shared one
 and whatever is under that row — and then mints the dropped row into the gap that

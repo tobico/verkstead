@@ -37,7 +37,7 @@ async fn conversation(pool: &SqlitePool) -> i64 {
         .expect("nothing was registered at that path yet")
         .id;
 
-    start_conversation(pool, repo, "rate-limiting", THIS_DEVICE)
+    start_conversation(pool, repo, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered")
@@ -257,7 +257,7 @@ async fn a_login_finds_the_runs_waiting_on_its_profile() {
     let mut ids = Vec::new();
     for branch in ["first", "second", "by-hand", "elsewhere", "driven"] {
         ids.push(
-            start_conversation(&pool, repo, branch, THIS_DEVICE)
+            start_conversation(&pool, repo, branch, THIS_DEVICE, None)
                 .await
                 .unwrap()
                 .unwrap(),
@@ -312,7 +312,7 @@ async fn every_kind_of_stop_reads_back_as_itself() {
         (Decision::Deliberate, "deliberate", "stopped-long-ago"),
         (Decision::Circumstance, "circumstance", "left-mid-run"),
     ] {
-        let id = start_conversation(&pool, repo, branch, THIS_DEVICE)
+        let id = start_conversation(&pool, repo, branch, THIS_DEVICE, None)
             .await
             .unwrap()
             .expect("the Repo was just registered");
@@ -543,7 +543,7 @@ async fn the_humans_own_stop_is_not_waiting_on_them_in_the_sidebar() {
         (Decision::Circumstance, "left-mid-run"),
         (Decision::Verkstead, "brake-pulled"),
     ] {
-        let id = start_conversation(&pool, repo, branch, THIS_DEVICE)
+        let id = start_conversation(&pool, repo, branch, THIS_DEVICE, None)
             .await
             .unwrap()
             .expect("the Repo was just registered");

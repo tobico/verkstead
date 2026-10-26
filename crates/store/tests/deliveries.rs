@@ -44,7 +44,7 @@ async fn conversation(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    start_conversation(pool, repo.id, "dropped-wait-recovery", THIS_DEVICE)
+    start_conversation(pool, repo.id, "dropped-wait-recovery", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered")

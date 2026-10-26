@@ -202,7 +202,7 @@ async fn the_record_lands_on_the_far_end_reading_as_it_read_here() {
 async fn a_slice_taken_while_commits_land_carries_the_event_of_every_commit_in_it() {
     let (_dir, pool) = fresh_pool().await;
     let repo = owning::repo(&pool).await;
-    let id = start_conversation(&pool, repo, "rate-limiting", BORN_ON)
+    let id = start_conversation(&pool, repo, "rate-limiting", BORN_ON, None)
         .await
         .unwrap()
         .unwrap();
@@ -440,7 +440,7 @@ async fn a_stage_queued_to_join_lands_queued_behind_what_waits_there() {
     // Another stage already waiting on the far end, queued before the record
     // lands again — which is what a return over a busy device is.
     let theirs = repos(&moved.there.pool).await;
-    let waiting = start_conversation(&moved.there.pool, theirs[0], "waiting", BORN_ON)
+    let waiting = start_conversation(&moved.there.pool, theirs[0], "waiting", BORN_ON, None)
         .await
         .unwrap()
         .expect("the Repo is registered");

@@ -52,7 +52,7 @@ async fn session_that_printed(pool: &SqlitePool, printed: &str) -> (i64, i64) {
     .unwrap()
     .unwrap();
 
-    let conversation = store::start_conversation(pool, repo.id, "screen", THIS_DEVICE)
+    let conversation = store::start_conversation(pool, repo.id, "screen", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();
@@ -193,7 +193,7 @@ async fn an_event_on_another_conversation_names_no_screen() {
 
     let (_, event) = session_that_printed(&pool, "printed\r\n").await;
 
-    let elsewhere = store::start_conversation(&pool, 1, "somewhere-else", THIS_DEVICE)
+    let elsewhere = store::start_conversation(&pool, 1, "somewhere-else", THIS_DEVICE, None)
         .await
         .unwrap()
         .unwrap();

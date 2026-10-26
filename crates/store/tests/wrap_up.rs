@@ -45,7 +45,7 @@ async fn wrapping(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(pool, repo.id, "rate-limiting", THIS_DEVICE)
+    let id = start_conversation(pool, repo.id, "rate-limiting", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered");

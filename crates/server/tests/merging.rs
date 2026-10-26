@@ -241,14 +241,33 @@ impl Verkstead {
     /// A Conversation started on it, and the Nudge its own handler sends about
     /// one — which is what its Nudge stream carries to whoever holds one.
     async fn starts(&self, repo: i64, branch: &str) -> i64 {
-        let conversation = store::start_conversation(&self.pool, repo, branch, self.device.id())
-            .await
-            .unwrap()
-            .expect("the Repo is registered");
+        let conversation =
+            store::start_conversation(&self.pool, repo, branch, self.device.id(), None)
+                .await
+                .unwrap()
+                .expect("the Repo is registered");
 
         self.nudges.announce(Nudge::Conversations);
 
         conversation
+    }
+
+    /// A press of **New conversation** in its own browser: the start the server
+    /// itself makes, ranked by the server off the merged list it holds — where
+    /// [`starts`] writes straight to the store and ranks off this device alone.
+    ///
+    /// The start itself announces nothing — the viewer's own writes on the draft
+    /// that follow are what do — so the Nudge is sent here, as [`starts`] sends
+    /// it.
+    async fn presses_new_conversation(&self, repo: i64) {
+        press(
+            &self.workbench,
+            SIDEBAR,
+            Some(&format!(r#"{{"repo_id":{repo}}}"#)),
+        )
+        .await;
+
+        self.nudges.announce(Nudge::Conversations);
     }
 
     /// One of its Conversations closed and put away on it, and the same Nudge
@@ -330,7 +349,7 @@ impl Verkstead {
     /// stages after this one. What is being asked here is what the merged list
     /// makes of the rows it leaves behind.
     async fn takes_a_copy(&self, repo: i64, branch: &str, born: &store::Birth, rank: &str) -> i64 {
-        let copy = store::start_conversation(&self.pool, repo, branch, self.device.id())
+        let copy = store::start_conversation(&self.pool, repo, branch, self.device.id(), None)
             .await
             .unwrap()
             .expect("the Repo is registered");
@@ -860,6 +879,100 @@ async fn a_conversation_started_on_a_member_arrives_on_the_merged_list() {
     );
     assert!(theirs.reachable);
     assert_eq!(merged[1].device, None);
+}
+
+/// A Conversation started on a device with fewer rows than another is first on
+/// every sidebar in the cluster, and so is the next one started on the other —
+/// the two leapfrog rather than one of them holding the top.
+///
+/// Each device used to rank a start above its own rows alone, so B's first
+/// Conversation was `a0` under A's `Zy`, `Zz` and `a0`, at the bottom of both
+/// sidebars for as long as B had fewer rows than A.
+#[tokio::test]
+async fn a_conversation_started_anywhere_is_first_on_every_sidebar() {
+    let (a, b) = linked_up().await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    let here = a.holding_a_repo().await;
+    let there = b.holding_a_repo().await;
+
+    for branch in ["the-first", "the-second", "the-third"] {
+        a.starts(here, branch).await;
+    }
+
+    // B has to hold A's list before its start can rank above it, as it does
+    // within a Nudge of A's last start.
+    b.sidebar_saying(|rows| rows.len() == 3).await;
+
+    b.presses_new_conversation(there).await;
+
+    let on_a = a.sidebar_saying(|rows| rows.len() == 4).await;
+    assert_eq!(
+        whose(&on_a),
+        [Some(B), None, None, None],
+        "B's start is first on A's sidebar: {on_a:#?}",
+    );
+
+    let on_b = b.sidebar_saying(|rows| rows.len() == 4).await;
+    assert_eq!(
+        whose(&on_b),
+        [None, Some(A), Some(A), Some(A)],
+        "and first on B's own: {on_b:#?}",
+    );
+
+    // And back the other way: A's next start goes above B's, which A holds.
+    a.presses_new_conversation(here).await;
+
+    let on_a = a.sidebar_saying(|rows| rows.len() == 5).await;
+    assert_eq!(
+        whose(&on_a),
+        [None, Some(B), None, None, None],
+        "A's next start is first on A's sidebar: {on_a:#?}",
+    );
+    assert_eq!(
+        branches(&on_a)[2..],
+        ["the-third", "the-second", "the-first"],
+        "with A's earlier rows where they were",
+    );
+
+    let on_b = b.sidebar_saying(|rows| rows.len() == 5).await;
+    assert_eq!(
+        whose(&on_b),
+        [Some(A), None, Some(A), Some(A), Some(A)],
+        "and on B's: {on_b:#?}",
+    );
+}
+
+/// A member's row whose rank is not a well-formed key does not stop a start
+/// here: the start ranks above this device's own rows instead, as it would with
+/// no member list held at all.
+#[tokio::test]
+async fn a_members_bad_rank_does_not_stop_a_start() {
+    let (a, b) = linked_up().await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    let here = a.holding_a_repo().await;
+    let there = b.holding_a_repo().await;
+
+    let broken = a.starts(here, "the-broken").await;
+    store::rank_conversation(&a.pool, broken, "!!-not-a-key")
+        .await
+        .unwrap();
+    a.nudges.announce(Nudge::Conversations);
+
+    // B holds the broken rank at the top of its merged list before it starts.
+    b.sidebar_saying(|rows| rows.len() == 1).await;
+
+    b.presses_new_conversation(there).await;
+
+    let on_b = b.sidebar_saying(|rows| rows.len() == 2).await;
+    assert_eq!(
+        whose(&on_b),
+        [Some(A), None],
+        "B's start went in, under the row it could not rank above: {on_b:#?}",
+    );
 }
 
 /// A member whose mark is the hub's own — a WSL seen from a Linux, one macOS

@@ -226,10 +226,9 @@ spot, and there is no bucket to rebalance — over Jira-style lexorank with its
 rebalance pass.
 
 **Every rank carries the device that issued it**, as a suffix after the key
-itself, because a device computes its keys knowing only its own list: two
-devices each ranking a new Conversation above their own top produce the *same*
-key, and on a fresh device that is the first few rows rather than a rare
-coincidence. Two rows that sorted equal would leave the merged order ambiguous
+itself, because a device computes its keys off what it holds of the list: two
+devices each ranking a new Conversation above the top they hold produce the
+*same* key wherever what they hold is behind — see the amendment below. Two rows that sorted equal would leave the merged order ambiguous
 — it would read differently on different hubs, which is the one thing ranks are
 here to prevent — and fractional indexing has no key strictly between two equal
 ones, so a drag between them could not be expressed at all. Suffixed, the keys
@@ -243,8 +242,9 @@ sort apart, which is what the merge needs of them, but every rank at that key
 reads `key-<device>`: a rank between `a0-A` and `a0-B` would take a device id
 sorting between those two, and the row being moved carries its own. There is no
 such rank, and stage 05 refuses rather than inventing one. It cannot arise on
-one device, whose own keys are distinct — on a merged list it is the first rows
-of two devices, sitting at the top of the list where cards are dropped most.
+one device, whose own keys are distinct — on a merged list it is two devices'
+starts minted off a held list that was behind, sitting at the top of the list
+where cards are dropped most.
 
 **A card dropped between them lands there all the same, the hub opening the gap
 first.** It re-ranks the *lower* of the pair through that row's own device — a
@@ -269,6 +269,24 @@ rather than a round trip per row.
 A migration ranks every existing row in its present order,
 unplaced ones on top newest first, and the *unplaced float to the top* rule
 goes: a new Conversation is simply ranked above everything.
+
+*Amended 2026-10-25.* "Above everything" was above everything **on the
+starting device**: each device read its own table's top and nothing else, so a
+member with fewer rows than another minted `a0` for its first Conversation
+under the `Zy` and `Zz` the busier device already held, and the new row landed
+at the bottom of every sidebar in the cluster. A start now ranks above the top
+of the merged list the device it reaches holds — its own rows and every member
+list held of it, which is what a cross-device drag already mints against — and
+still reads its own table's top inside the start's transaction, taking the
+lower of the two, so two starts a moment apart on one device do not tie. The
+suffix stays as it is: the held lists are a Nudge behind and are not there at
+all for a member not yet reached, which is the moment two devices can still
+mint one key. A member's archived rows are not on the held list while the
+switch is off, so a start can land under a hidden row nobody sees until the
+switch is flipped. Rows that landed low before this stay where they are — the
+store cannot tell them from rows dragged there — and a drag moves them. Having
+the viewer send the top it drew was rejected: it would teach the viewer what a
+rank is, and a start with no page behind it would send nothing.
 
 Once anything is linked, a row's second line says only what differs from the
 device the browser opened, because what is the same as the machine you are

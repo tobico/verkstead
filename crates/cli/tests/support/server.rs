@@ -71,11 +71,16 @@ impl Server {
                         .unwrap()
                         .expect("nothing is registered at that path yet");
 
-                let conversation =
-                    store::start_conversation(&pool, repo.id, "api-core-and-cli", THIS_DEVICE)
-                        .await
-                        .unwrap()
-                        .expect("the Repo was just registered");
+                let conversation = store::start_conversation(
+                    &pool,
+                    repo.id,
+                    "api-core-and-cli",
+                    THIS_DEVICE,
+                    None,
+                )
+                .await
+                .unwrap()
+                .expect("the Repo was just registered");
                 assert_eq!(conversation, ASKING_FROM);
             }
 

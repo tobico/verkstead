@@ -307,7 +307,7 @@ async fn machine(conversations: usize) -> Machine {
     for nth in 0..conversations {
         let branch = format!("installing-{nth}");
 
-        let id = store::start_conversation(&pool, repo_row.id, &branch, THIS_DEVICE)
+        let id = store::start_conversation(&pool, repo_row.id, &branch, THIS_DEVICE, None)
             .await
             .unwrap()
             .expect("the Conversation starts");

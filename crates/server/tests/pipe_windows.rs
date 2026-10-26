@@ -134,7 +134,7 @@ async fn a_conversation(pool: &SqlitePool) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(pool, repo.id, "named-pipe", THIS_DEVICE)
+    let conversation = store::start_conversation(pool, repo.id, "named-pipe", THIS_DEVICE, None)
         .await
         .unwrap()
         .expect("the Repo was just registered");

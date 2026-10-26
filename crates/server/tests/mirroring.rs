@@ -439,7 +439,7 @@ impl Verkstead {
                 .expect("nothing is registered at that path yet")
                 .id;
 
-        store::start_conversation(&self.pool, repo, "amber-kestrel", self.device.id())
+        store::start_conversation(&self.pool, repo, "amber-kestrel", self.device.id(), None)
             .await
             .unwrap()
             .expect("the Repo is registered")
