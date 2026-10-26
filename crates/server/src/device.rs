@@ -1195,6 +1195,7 @@ impl Devices {
             annex_trouble,
             this_update_available: None,
             this_running: Vec::new(),
+            this_running_drafts: 0,
             this_install: self.install,
             this_updating: self.updating.reading(),
             this_update_trouble: self.updating.trouble(),

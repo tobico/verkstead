@@ -1011,14 +1011,15 @@ describe("the devices section", () => {
     expect(asked.closest("dialog")!.textContent).not.toContain("session");
   });
 
-  /// With sessions running here, the card names each and says they will be
-  /// stopped and resumed — and Update on it goes ahead regardless (ADR-0027).
+  /// With sessions running here, the card names each branch, counts the
+  /// drafts, and says they will be stopped and resumed — and Update on it goes ahead regardless (ADR-0027).
   it("names the running sessions on the card, and updates anyway", async () => {
     const behind: DevicesView = {
       ...LINKED,
       this_update_available: "0.3.0",
       this_install: "AppImage",
-      this_running: ["rate-limiting", "a draft"],
+      this_running: ["rate-limiting"],
+      this_running_drafts: 2,
     };
     const fetching = stubbing(
       whenever("/api/ui/remote", json(SERVING)),
@@ -1036,7 +1037,7 @@ describe("the devices section", () => {
 
     const asked = await screen.findByText("Update workbench?");
     expect(asked.closest("dialog")!.textContent).toContain(
-      "It restarts on Verkstead 0.3.0, and the sessions on rate-limiting and a draft will be stopped and resumed.",
+      "It restarts on Verkstead 0.3.0, and the sessions on rate-limiting and 2 drafts will be stopped and resumed.",
     );
 
     fireEvent.click(updateOnTheCard());

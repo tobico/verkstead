@@ -919,16 +919,23 @@ export function useThisUpdate(devices: ReturnType<typeof useDevices>) {
 /// What this device's Update does, as its confirm card says it: the release
 /// it restarts on, and the sessions running here, which the restart stops and
 /// startup resumes (ADR-0027, *A confirm card names the sessions that will be
-/// stopped*). With none running, the release alone.
+/// stopped*). Each branch by name and the drafts counted, *rate-limiting and
+/// 2 drafts*. With none running, the release alone.
 function updateWhy(list: DevicesView | undefined): string {
   const onto = `It restarts on Verkstead ${list?.this_update_available ?? "the latest release"}`;
-  const running = list?.this_running ?? [];
+  const branches = list?.this_running ?? [];
+  const drafts = list?.this_running_drafts ?? 0;
+  const count = branches.length + drafts;
 
-  if (running.length === 0) return `${onto}.`;
+  if (count === 0) return `${onto}.`;
 
-  const sessions = running.length === 1 ? "the session" : "the sessions";
+  const named = [
+    ...branches,
+    ...(drafts === 0 ? [] : [drafts === 1 ? "a draft" : `${drafts} drafts`]),
+  ];
+  const sessions = count === 1 ? "the session" : "the sessions";
 
-  return `${onto}, and ${sessions} on ${listed(running)} will be stopped and resumed.`;
+  return `${onto}, and ${sessions} on ${listed(named)} will be stopped and resumed.`;
 }
 
 /// `a`, `a and b`, `a, b and c`.

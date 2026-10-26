@@ -222,13 +222,19 @@ pub struct DevicesView {
     #[serde(default)]
     pub this_update_available: Option<String>,
 
-    /// And what each session running on this device is running on, as a
-    /// sentence names its Conversation — the branch, or *a draft* — which
-    /// its Update's confirm card names as the sessions to be stopped and
-    /// resumed (ADR-0027). Read at the moment the pane asks, as the sidebar's
-    /// marks are; empty with none running.
+    /// And the branch each session running on this device is running on,
+    /// where its Conversation is called by its branch — which its Update's
+    /// confirm card names as the sessions to be stopped and resumed
+    /// (ADR-0027). Read at the moment the pane asks, as the sidebar's marks
+    /// are; empty with none running.
     #[serde(default)]
     pub this_running: Vec<String>,
+
+    /// And how many more are running on a Draft, whose branch is nobody's
+    /// name for it yet — counted rather than named, so that the card reads
+    /// *2 drafts* rather than *a draft and a draft*.
+    #[serde(default)]
+    pub this_running_drafts: u32,
 
     /// And what this device was installed as, which says whether its row is
     /// offered an Update or a line saying how to update it by hand — see

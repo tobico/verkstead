@@ -8457,7 +8457,7 @@ async fn listed(state: &AppState, devices: &crate::device::Devices) -> HttpRespo
     };
 
     view.this_update_available = state.updates.newer(view.this.version.as_deref());
-    view.this_running = running_here(state).await;
+    (view.this_running, view.this_running_drafts) = running_here(state).await;
     for member in &mut view.members {
         member.update_available = state.updates.newer_than(member.identity.version.as_deref());
     }
@@ -8465,38 +8465,42 @@ async fn listed(state: &AppState, devices: &crate::device::Devices) -> HttpRespo
     Json(view).into_response()
 }
 
-/// What every session running on this device is running on, named the way
-/// the Annex's refusal names one in a sentence: the branch, or *a draft* —
-/// see [`crate::merging::settled`]. In the sidebar's order. A store that can't be
-/// read names none, which the card then reads as nothing running: the restart
-/// still resumes whatever was.
-async fn running_here(state: &AppState) -> Vec<String> {
+/// What every session running on this device is running on: the branch of
+/// each whose Conversation is called by it, in the sidebar's order, and how
+/// many more are on a Draft — see [`crate::merging::settled`]. A store that
+/// can't be read names none, which the card then reads as nothing running: the
+/// restart still resumes whatever was.
+async fn running_here(state: &AppState) -> (Vec<String>, u32) {
     let working = state.sessions.working();
 
     if working.is_empty() {
-        return Vec::new();
+        return (Vec::new(), 0);
     }
 
     let conversations = match store::conversations(&state.pool, true).await {
         Ok(conversations) => conversations,
         Err(error) => {
             tracing::error!(error = ?error, "reading which Conversations run sessions failed");
-            return Vec::new();
+            return (Vec::new(), 0);
         }
     };
 
-    conversations
+    let mut named = Vec::new();
+    let mut drafts = 0;
+
+    for conversation in conversations
         .into_iter()
         .filter(|conversation| working.contains(&conversation.id))
-        .map(|conversation| {
-            let state = row_state(conversation.id, conversation.state);
+    {
+        let state = row_state(conversation.id, conversation.state);
 
-            match crate::merging::settled(conversation.branch_named, state, conversation.naming) {
-                true => conversation.branch,
-                false => "a draft".to_owned(),
-            }
-        })
-        .collect()
+        match crate::merging::settled(conversation.branch_named, state, conversation.naming) {
+            true => named.push(conversation.branch),
+            false => drafts += 1,
+        }
+    }
+
+    (named, drafts)
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

@@ -6888,18 +6888,18 @@ async fn a_restarted_server_grills_the_work_again_rather_than_raising_anything()
     );
 }
 
-/// This device's Update over two running sessions names both, goes ahead, and
+/// This device's Update over two running sessions counts both, goes ahead, and
 /// both are taken up again by the server it relaunches on (ADR-0027, *A
 /// confirm card names the sessions that will be stopped*).
 ///
-/// The card's names are the Devices section's, read while both run; the press
+/// The card's count is the Devices section's, read while both run; the press
 /// is taken rather than refused, the Annex's refusal being the one not chosen;
 /// and the relaunch is a second server over the same database, which is all an
 /// Update's restart is to the server — the app stops the old sidecar and starts
 /// the new one, and startup re-drives each driven Conversation, as after any
 /// restart.
 #[tokio::test]
-async fn an_update_over_two_running_sessions_names_both_and_both_are_resumed() {
+async fn an_update_over_two_running_sessions_counts_both_and_both_are_resumed() {
     let fixture = grilling_as_a_desktop_install(
         r#"
         printf 'the grilling is running\n'
@@ -6917,10 +6917,10 @@ async fn an_update_over_two_running_sessions_names_both_and_both_are_resumed() {
     let view: DevicesView = get(&fixture.app, "/api/ui/devices").await;
 
     assert_eq!(
-        view.this_running,
-        vec!["a draft".to_owned(), "a draft".to_owned()],
-        "both sessions are named, the way the Annex's refusal names a \
-         Conversation whose branch nobody has named yet",
+        (view.this_running.as_slice(), view.this_running_drafts),
+        (&[] as &[String], 2),
+        "both sessions are counted as drafts, neither Conversation's branch \
+         having been named yet",
     );
 
     let pressed: DevicesView = post(

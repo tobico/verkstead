@@ -2618,13 +2618,19 @@ annex_trouble: string | null,
  */
 this_update_available: string | null, 
 /**
- * And what each session running on this device is running on, as a
- * sentence names its Conversation — the branch, or *a draft* — which
- * its Update's confirm card names as the sessions to be stopped and
- * resumed (ADR-0027). Read at the moment the pane asks, as the sidebar's
- * marks are; empty with none running.
+ * And the branch each session running on this device is running on,
+ * where its Conversation is called by its branch — which its Update's
+ * confirm card names as the sessions to be stopped and resumed
+ * (ADR-0027). Read at the moment the pane asks, as the sidebar's marks
+ * are; empty with none running.
  */
 this_running: Array<string>, 
+/**
+ * And how many more are running on a Draft, whose branch is nobody's
+ * name for it yet — counted rather than named, so that the card reads
+ * *2 drafts* rather than *a draft and a draft*.
+ */
+this_running_drafts: number, 
 /**
  * And what this device was installed as, which says whether its row is
  * offered an Update or a line saying how to update it by hand — see
