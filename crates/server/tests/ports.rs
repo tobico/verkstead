@@ -439,13 +439,41 @@ fn ports_path() -> String {
     format!("/api/ui/conversations/{THERE}/ports")
 }
 
-/// A port nothing on this machine is listening on, this moment.
+/// A port nothing on this machine is listening on, this moment — and one no
+/// other test in this file has been handed.
+///
+/// From below the range the kernel picks a connection's own port from, which
+/// starts at 32768: a port is let go here seconds before the server typed into
+/// a terminal takes it up, and every connection this file makes in those
+/// seconds is given a port out of that range. One that lands on it is a server
+/// dying of EADDRINUSE, printing nothing the test is waiting for.
 fn free_port() -> u16 {
-    TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    const BELOW_THE_KERNELS: std::ops::Range<u16> = 20_000..32_768;
+
+    // Started somewhere at random, so that two runs of the file side by side
+    // do not walk the same ports in step — which two started together from
+    // their neighbouring process ids would. A hasher's keys are random to
+    // each process.
+    static NEXT: std::sync::OnceLock<std::sync::atomic::AtomicU16> = std::sync::OnceLock::new();
+
+    let span = BELOW_THE_KERNELS.end - BELOW_THE_KERNELS.start;
+    let next = NEXT.get_or_init(|| {
+        use std::hash::{BuildHasher, Hasher};
+
+        let random = std::collections::hash_map::RandomState::new()
+            .build_hasher()
+            .finish();
+        std::sync::atomic::AtomicU16::new((random % u64::from(span)) as u16)
+    });
+
+    loop {
+        let offset = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % span;
+        let port = BELOW_THE_KERNELS.start + offset;
+
+        if TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_ok() {
+            return port;
+        }
+    }
 }
 
 /// What a server started in a terminal is typed as: node, listening on `port`
