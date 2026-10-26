@@ -116,6 +116,16 @@ documentation rather than remembered, each a thing the human agreed to:
   signing off and trusting TLS alone was offered and not taken. Whether the
   pinned electron-builder has this at all is to be verified when that stage
   starts.
+
+  **Verified at stage 04's start (2026-10-26), and it has not.** The pinned
+  electron-builder 26.15.3 and the latest stable 26.18.0 have no manifest
+  signing at all; the Ed25519 `updateManifest` exists only in
+  27.0.0-alpha, verified by electron-updater 7.0.0-alpha. Offered the alpha
+  pair, the human took the fallback instead (Set 1404): stay on 26 and
+  publish the metadata unsigned, each file carrying its sha512 and fetched
+  over TLS, with the Mac's Developer ID check still standing. On 26 there is
+  no `updateManifest: false` to write — it is simply not there. Signing
+  comes with a stable 27.
 - **The README gains the Updating section** the Update Notice has linked to
   since the public-release roadmap, and `docs/releasing.md` follows the
   workflow.
