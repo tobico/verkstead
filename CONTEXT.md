@@ -5950,8 +5950,9 @@ The banner the viewer shows when the server has learned that a newer release
 exists than the one it is running, linking to the update instructions — the
 README's *Updating* section. On a desktop install it carries this device's
 **Update** in place of the link, through the same confirm card as the device's
-Devices row, and **Update all**, which tells every reachable member to update
-itself and then this device last
-([ADR-0027](docs/adr/0027-cluster-updates.md)); the banner itself still only
-informs, and nothing is installed until a press.
+Devices row. And wherever a member's row offers **Update**, whatever this
+device was installed as, it carries **Update all**, which tells every member
+that can update itself to do so and then updates this device last, where this
+device can update itself ([ADR-0027](docs/adr/0027-cluster-updates.md)). The
+banner itself still only informs, and nothing is installed until a press.
 _Avoid_: upgrade prompt, new-version alert
