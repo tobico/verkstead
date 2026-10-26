@@ -8,11 +8,12 @@
 //! Rust the endpoint fills in — so a payload written here that the server would
 //! never send does not typecheck.
 
-import { screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ConversationEntry,
+  DevicesView,
   ProfileEntry,
   RepoEntry,
   SettingsView,
@@ -29,7 +30,8 @@ import page from "../src/settings/SettingsPage.module.css";
 import head from "../src/workbench/PaneHead.module.css";
 import styles from "../src/update/UpdateNotice.module.css";
 import { mount } from "./listing";
-import { json, serving, whenever } from "./serving";
+import { askedFor, json, serving, whenever } from "./serving";
+import devices from "./fixtures/devices.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
@@ -37,9 +39,17 @@ import settings from "./fixtures/settings.json" with { type: "json" };
 
 const REPOS = repos as RepoEntry[];
 
-/// Where the README says how to update. Stage 06 of the public-release roadmap
-/// writes that section; the anchor is the one agreed with it.
+/// Where the README says how to update: its *Updating* section.
 const UPDATING = "https://github.com/tobico/verkstead#updating";
+
+/// This device as a desktop install behind 0.4.0, which is what offers its
+/// own Update — on the banner as on its Devices row.
+const BEHIND: DevicesView = {
+  ...(devices as DevicesView),
+  this_install: "AppImage",
+  this_update_available: "0.4.0",
+  this_running: ["rate-limiting"],
+};
 
 /// What the server says about updating, whenever the page asks.
 const saying = (notice: UpdateNotice) =>
@@ -210,5 +220,70 @@ describe("the Update Notice", () => {
     // it refreshes daily.
     await vi.advanceTimersByTimeAsync(60_000);
     expect(asking()).toBe(1);
+  });
+
+  /// On a desktop install behind the release, the banner carries this
+  /// device's Update, and the press goes through the Devices row's own card.
+  it("carries this device's Update on a desktop install, asking first", async () => {
+    const fetching = serving(
+      ...beneath(),
+      saying({ Available: { version: "0.4.0" } }),
+      whenever("/api/ui/devices", json(BEHIND)),
+      whenever(
+        "/api/ui/devices/this/update",
+        json({ ...BEHIND, this_updating: { percent: null } }),
+        "POST",
+      ),
+    );
+    mount(SettingsPage);
+
+    await waitFor(() =>
+      expect(banner()?.querySelector("button")?.textContent).toBe("Update"),
+    );
+    // In place of the link: the press is how this one is updated.
+    expect(banner()!.querySelectorAll("a")).toHaveLength(0);
+
+    fireEvent.click(banner()!.querySelector("button")!);
+
+    const asked = await screen.findByText("Update workbench?");
+    const card = asked.closest("dialog")!;
+    expect(card.textContent).toContain(
+      "It restarts on Verkstead 0.4.0, and the session on rate-limiting will be stopped and resumed.",
+    );
+    expect(askedFor(fetching, "/api/ui/devices/this/update")).toBe(0);
+
+    fireEvent.click(
+      [...card.querySelectorAll("button")].find((b) => b.textContent === "Update")!,
+    );
+
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/devices/this/update")).toBe(1),
+    );
+    // And once it is going, the banner offers no second press.
+    await waitFor(() =>
+      expect(
+        [...banner()!.querySelectorAll("button")].filter(
+          (b) => !b.closest("dialog"),
+        ),
+      ).toHaveLength(0),
+    );
+  });
+
+  /// An install that can't update itself keeps the link to the README.
+  it("keeps the link where this device is updated by hand", async () => {
+    serving(
+      ...beneath(),
+      saying({ Available: { version: "0.4.0" } }),
+      whenever("/api/ui/devices", json({ ...BEHIND, this_install: "Nix" })),
+    );
+    mount(SettingsPage);
+
+    await waitFor(() => expect(banner()).not.toBeNull());
+    await waitFor(() =>
+      expect(
+        [...banner()!.querySelectorAll("a")].map((a) => a.getAttribute("href")),
+      ).toEqual([UPDATING]),
+    );
+    expect(banner()!.querySelector("button")).toBeNull();
   });
 });

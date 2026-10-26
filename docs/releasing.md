@@ -217,8 +217,16 @@ didn't land, then Update is pressed against the feed's `corrupt/`, an image
 with one byte changed, and the row has to leave *updating…* for a trouble line
 naming the sha512 mismatch while the server stays up on its image. Run it locally the same way: `pack
 <sidecar> <dir>`, then `run <dir>` with a `DISPLAY` and port 8422 free. What it
-cannot prove is the GitHub half — `app-update.yml` pointing at a Release — which
-the first update from one published Release to the next is.
+cannot prove is the GitHub half — `app-update.yml` pointing at a Release.
+
+**That half is first run at the release after the first one carrying
+electron-updater.** The first such Release can only be updated *from*: every
+install before it has no updater in it, so nothing takes it as an update. And
+a rehearsal cannot stand in for the next one, because a rehearsal's tag is a
+pre-release, which `releases/latest` never is and the updater never offers. So
+once the second such Release is out, an AppImage of the first, run on a Linux
+desktop and updated from its Devices row, is the check: the row reads
+*updating…* and then *restarting…*, and the app comes back on the new version.
 
 ## What the legs are, and what holds them to their floors
 

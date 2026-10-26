@@ -92,6 +92,32 @@ prompt, or `verkstead session-account create` in an elevated terminal does.
 A boundary that cannot be made refuses the session rather than running it
 without one.
 
+## Updating
+
+Settings shows a banner when a newer stable release is out, and each device's
+row on the **Remote Access** page says *update available*. How the
+release reaches a device depends on how that device was installed. Its row
+says which, and under its version it says what to run.
+
+**The desktop app updates itself.** That covers the AppImage, the Mac app and
+the Windows installer. Press **Update** on this device's row, or on the
+banner. A card asks *Update wolf?*. It names the release and the sessions
+running on this device, which are stopped and resumed. Press **Update** on
+the card and the app downloads the release while the row reads *updating…*.
+The row reads *restarting…* once the server stops, and then shows the new
+version once the app has relaunched on it. If the new version doesn't come
+up, the app says so in a dialog and the row says why. Nothing is rolled back.
+Press **Update** to try again, or wait for the next release.
+
+**Everything else is updated by hand,** with the command its row names:
+
+- **Installed with nix**, by the NixOS module or the flake: update this
+  device with `nix flake update` and `nixos-rebuild switch`.
+- **Built from a checkout**: update this device with `git pull` and
+  `cargo build`.
+- **Run from a downloaded binary**, a bare `verkstead serve`: update this
+  device by downloading the latest release's `verkstead`.
+
 ## Where things are written down
 
 **[Design](docs/design/verkstead.md)** — what Verkstead is and the decisions it

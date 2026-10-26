@@ -767,15 +767,6 @@ function Devices(props: {
       queries.setQueryData(["devices"], reading),
   }));
 
-  // And Update on this device's own row, which answers with the section read
-  // again: the row reads *updating…* from that answer, and is then polled
-  // through the restart — see [`useDevices`].
-  const update = useMutation(() => ({
-    mutationFn: updateThisDevice,
-    onSuccess: (reading: DevicesView) =>
-      queries.setQueryData(["devices"], reading),
-  }));
-
   /// And what the press on the card that asked does, which is the unlink.
   const confirmed = () => {
     const device = asking();
@@ -784,22 +775,8 @@ function Devices(props: {
     if (device !== null) drop.mutate(device.device);
   };
 
-  // Whether the card asking about this device's own Update is up. Asked
-  // before anything happens, because the restart stops every session here.
-  const [askingUpdate, setAskingUpdate] = createSignal(false);
-
-  /// A press on Update, which asks first — with the section read again, so
-  /// the sessions the card names are the ones running as it is drawn.
-  const askUpdate = () => {
-    void queries.invalidateQueries({ queryKey: ["devices"] });
-    setAskingUpdate(true);
-  };
-
-  /// And the press on that card, which is the Update.
-  const updateConfirmed = () => {
-    setAskingUpdate(false);
-    update.mutate();
-  };
+  // And this device's own Update, asked first — see [`useThisUpdate`].
+  const update = useThisUpdate(devices);
 
   return (
     <section class={styles.devices}>
@@ -836,8 +813,8 @@ function Devices(props: {
           {(here) => (
             <List
               of={here()}
-              update={askUpdate}
-              updating={update.isPending}
+              update={update.ask}
+              updating={update.press.isPending}
               unlink={setAsking}
               unlinking={drop.isPending}
               components={props.components}
@@ -846,9 +823,9 @@ function Devices(props: {
         </Match>
       </Choose>
 
-      <Show when={update.isError}>
+      <Show when={update.press.isError}>
         <ErrorLine class={styles.failure}>
-          This device couldn't be updated. {update.error?.message}
+          This device couldn't be updated. {update.press.error?.message}
         </ErrorLine>
       </Show>
 
@@ -878,16 +855,65 @@ function Devices(props: {
 
       {/* And this device's own Update, asked for the same reason: what it
           stops is every session running here (ADR-0027). */}
-      <Confirm
-        open={askingUpdate() && devices.data !== undefined}
-        question={`Update ${devices.data?.this.name ?? ""}?`}
-        why={updateWhy(devices.data)}
-        verb="Update"
-        keep={() => setAskingUpdate(false)}
-        act={updateConfirmed}
-      />
+      {update.card}
     </section>
   );
+}
+
+/// This device's own Update, as both places that offer it press it: its
+/// Devices row, and the Update Notice's banner (ADR-0027, *A device updates
+/// itself*). One press each, and the same card in front of either — the one
+/// asking *Update wolf?* with the release and the sessions running here.
+///
+/// The press answers with the Devices section read again, so the row reads
+/// *updating…* from that answer and is then polled through the restart — see
+/// [`useDevices`]. `card` is drawn wherever the press is offered; it is up
+/// only between a press and the answer to it.
+export function useThisUpdate(devices: ReturnType<typeof useDevices>) {
+  const queries = useQueryClient();
+
+  const press = useMutation(() => ({
+    mutationFn: updateThisDevice,
+    onSuccess: (reading: DevicesView) =>
+      queries.setQueryData(["devices"], reading),
+  }));
+
+  // Whether the card asking is up. Asked before anything happens, because the
+  // restart stops every session here.
+  const [asking, setAsking] = createSignal(false);
+
+  /// A press on Update, which asks first — with the section read again, so
+  /// the sessions the card names are the ones running as it is drawn.
+  const ask = () => {
+    void queries.invalidateQueries({ queryKey: ["devices"] });
+    setAsking(true);
+  };
+
+  /// And the press on the card, which is the Update.
+  const confirmed = () => {
+    setAsking(false);
+    press.mutate();
+  };
+
+  const card = (
+    <Confirm
+      open={asking() && devices.data !== undefined}
+      question={`Update ${devices.data?.this.name ?? ""}?`}
+      why={updateWhy(devices.data)}
+      verb="Update"
+      keep={() => setAsking(false)}
+      act={confirmed}
+    />
+  );
+
+  return {
+    press,
+    ask,
+    card,
+    /// Whether Update is offered at all: see [`offeredUpdate`].
+    offered: (): boolean =>
+      devices.data !== undefined && offeredUpdate(devices.data),
+  };
 }
 
 /// What this device's Update does, as its confirm card says it: the release

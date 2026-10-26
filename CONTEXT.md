@@ -5947,9 +5947,11 @@ _Avoid_: tick, refresh signal, ping, change event, notification
 
 **Update Notice**:
 The banner the viewer shows when the server has learned that a newer release
-exists than the one it is running, linking to the update instructions. On a
-desktop install it also carries **Update all**, which tells every reachable
-member to update itself and then this device last
+exists than the one it is running, linking to the update instructions — the
+README's *Updating* section. On a desktop install it carries this device's
+**Update** in place of the link, through the same confirm card as the device's
+Devices row, and **Update all**, which tells every reachable member to update
+itself and then this device last
 ([ADR-0027](docs/adr/0027-cluster-updates.md)); the banner itself still only
 informs, and nothing is installed until a press.
 _Avoid_: upgrade prompt, new-version alert

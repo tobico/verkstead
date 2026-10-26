@@ -28,4 +28,4 @@ Roadmap stage: [04: The app updates this device](docs/roadmaps/cluster-updates/0
 - [x] 03: Update, end to end, against a local feed — [details](03-update-end-to-end-against-a-local-feed.md)
 - [x] 04: When it goes wrong — [details](04-when-it-goes-wrong.md)
 - [x] 05: The confirm card — [details](05-the-confirm-card.md)
-- [ ] 06: The README's Updating section, and the Notice's button — [details](06-the-readmes-updating-section-and-the-notices-button.md)
+- [x] 06: The README's Updating section, and the Notice's button — [details](06-the-readmes-updating-section-and-the-notices-button.md)

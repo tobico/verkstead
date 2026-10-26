@@ -1,11 +1,14 @@
 //! The Update Notice: the banner above the Repo list, saying that a newer
 //! Verkstead has been released than the one serving the page.
 //!
-//! It informs and nothing else (CONTEXT.md). The link to the instructions is the
-//! whole of what it offers — nothing here installs anything, and nothing here
-//! changes the server. Nor can it be dismissed: it stands until the server is
-//! updated, at which point the server stops saying there is anything to update
-//! to and the banner goes with it.
+//! It informs, and on a desktop install it also carries this device's Update
+//! (CONTEXT.md, ADR-0027): the same press as the Devices row's, through the
+//! same card asking *Update wolf?* first, so nothing is installed until that
+//! card's Update. Everywhere else — the NixOS module, a checkout, a bare
+//! binary, or a desktop install with an Update already going — the link to
+//! the instructions is the whole of what it offers. Nor can it be dismissed: it
+//! stands until the server is updated, at which point the server stops saying
+//! there is anything to update to and the banner goes with it.
 //!
 //! Everything but a release waiting is drawn as nothing at all — a server that
 //! is current, one that could not find out, and the moment before either has
@@ -16,7 +19,10 @@ import type { JSX } from "solid-js";
 import { Show } from "solid-js";
 
 import { updateNotice } from "../api/client";
+import { useDevices } from "../devices";
 import { useReading } from "../freshness";
+import { ErrorLine } from "../notices";
+import { useThisUpdate } from "../settings/Remote";
 import styles from "./UpdateNotice.module.css";
 
 /// Where the human is told how to update: the README's own section, which is
@@ -57,17 +63,40 @@ export function UpdateNotice(): JSX.Element {
     return said && said !== "Current" ? said.Available.version : null;
   };
 
+  // This device's own Update, offered where its row offers it: an install
+  // that updates itself, behind the release, with no Update already going.
+  const update = useThisUpdate(useDevices());
+
   return (
     <Show when={version()}>
       {(version) => (
         <aside class={styles.notice}>
           <span>Verkstead {version()} has been released.</span>
-          {/* Out to the README rather than over the page: the human is in the
-              middle of settling what Verkstead may touch, and reading how to
-              update should not be leaving it. */}
-          <a href={UPDATING} target="_blank" rel="noreferrer">
-            How to update →
-          </a>
+          <Show
+            when={update.offered()}
+            fallback={
+              // Out to the README rather than over the page: the human is in
+              // the middle of settling what Verkstead may touch, and reading
+              // how to update should not be leaving it.
+              <a href={UPDATING} target="_blank" rel="noreferrer">
+                How to update →
+              </a>
+            }
+          >
+            <button
+              type="button"
+              disabled={update.press.isPending}
+              onClick={() => update.ask()}
+            >
+              Update
+            </button>
+          </Show>
+          <Show when={update.press.isError}>
+            <ErrorLine class={styles.failure}>
+              This device couldn't be updated. {update.press.error?.message}
+            </ErrorLine>
+          </Show>
+          {update.card}
         </aside>
       )}
     </Show>
