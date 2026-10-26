@@ -848,6 +848,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/devices/members/{device}/update",
             post(update_member),
         )
+        .route("/api/ui/devices/all/update", post(update_all))
         .route(
             "/api/ui/devices/members/{device}/unlink",
             post(unlink_device),
@@ -8319,6 +8320,24 @@ async fn update_member(State(state): State<AppState>, Path(device): Path<String>
                 "The devices this one is linked to couldn't be read: {why:#}."
             ));
         }
+    }
+
+    listed(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/all/update` — **Update all**, on the Update Notice's
+/// banner: every member that can be updated is told at once, and this device
+/// updates last, once each is back or has a line (ADR-0027). Run by this
+/// server to its end — see [`crate::updating::members::all`] — and answered at
+/// once with the Devices section read again, `updating_all` set. A press while
+/// one is going reads the one there is.
+async fn update_all(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("This server holds no device identity to answer for.");
+    };
+
+    if crate::updating::members::all(&state, &devices) {
+        state.nudges.announce_here(Nudge::Devices);
     }
 
     listed(&state, &devices).await

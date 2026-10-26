@@ -60,6 +60,9 @@ const A: &str = "aa00bb11cc22dd33ee44ff5566778899";
 /// And crow, the member it updates.
 const CROW: &str = "0011223344556677889900aabbccddee";
 
+/// And raven, a second member, for Update all.
+const RAVEN: &str = "ffeeddccbbaa99887766554433221100";
+
 /// The branches crow's two sessions are running on.
 const RUNNING_THERE: [&str; 2] = ["rate-limiting", "solid-viewer"];
 
@@ -85,6 +88,7 @@ const ASKED: &str = "verkstead-desktop: update this device";
 /// crow: its own workbench, which its desktop app reports to, what that app has
 /// been asked, and the link the pressing device reaches it over.
 struct Crow {
+    name: &'static str,
     device: Device,
     link: Link,
     pool: SqlitePool,
@@ -98,15 +102,20 @@ impl Crow {
     /// crow installed as `install`, with two sessions running on it, its Peer
     /// Listener up behind a link.
     async fn installed_as(install: InstallKind) -> Crow {
+        Crow::named("crow", CROW, install).await
+    }
+
+    /// The same member called `name`, its Device Id `id` — another of them.
+    async fn named(name: &'static str, id: &str, install: InstallKind) -> Crow {
         let dir = tempfile::tempdir().unwrap();
         let pool = open_database(&dir.path().join("verkstead.db"))
             .await
             .unwrap();
 
-        let device = Device::stated(dir.path(), CROW).unwrap();
+        let device = Device::stated(dir.path(), id).unwrap();
         let link = Link::opened().await;
 
-        let (workbench, asking) = serving(&device, &pool, &link, install, None);
+        let (workbench, asking) = serving(name, &device, &pool, &link, install, None);
 
         let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
             .await
@@ -114,13 +123,14 @@ impl Crow {
             .unwrap();
 
         for branch in RUNNING_THERE {
-            store::start_conversation(&pool, repo.id, branch, CROW)
+            store::start_conversation(&pool, repo.id, branch, id)
                 .await
                 .unwrap()
                 .unwrap();
         }
 
         Crow {
+            name,
             device,
             link,
             pool,
@@ -148,6 +158,7 @@ impl Crow {
     /// before anybody asks.
     fn starts_on(&mut self, version: &str) {
         let (workbench, asking) = serving(
+            self.name,
             &self.device,
             &self.pool,
             &self.link,
@@ -193,6 +204,7 @@ impl Crow {
 /// `version` (this build's where `None`), its Peer Listener up and `link`
 /// pointed at it: its workbench, and what its app is asked.
 fn serving(
+    name: &str,
     device: &Device,
     pool: &SqlitePool,
     link: &Link,
@@ -209,7 +221,7 @@ fn serving(
     // the pressing device, is the link: a restart on another port behind it is
     // still crow at the address it was linked at.
     let reading = Reading::advertising(no_tailscale(), Platform::Linux, None, vec![link.at()])
-        .calling_itself("crow", "Linux")
+        .calling_itself(name, "Linux")
         .installed_as(Some(install));
 
     if let Some(version) = version {
@@ -371,6 +383,8 @@ async fn sessions_running(asked: Request<Body>, onwards: Next) -> Response {
 struct Pressing {
     pool: SqlitePool,
     devices: Devices,
+    /// What its own desktop app is asked, which only Update all asks here.
+    asking: Asking,
     nudges: Nudges,
     workbench: Router,
     _holding: Holding,
@@ -390,6 +404,13 @@ impl Pressing {
 
     /// The same, its row saying crow is at `address`.
     async fn linked_at(crow: &Crow, address: &str, within: Duration) -> Pressing {
+        Pressing::linked(&[(crow, address)], within).await
+    }
+
+    /// The pressing device linked to each member at the address beside it,
+    /// each having `within` of a press to come back. Installed as an AppImage,
+    /// so that Update all updates it last.
+    async fn linked(members: &[(&Crow, &str)], within: Duration) -> Pressing {
         let dir = tempfile::tempdir().unwrap();
         let pool = open_database(&dir.path().join("verkstead.db"))
             .await
@@ -405,39 +426,47 @@ impl Pressing {
         )
         .calling_itself("wolf", "Linux");
 
-        // Both ways, a link being both ways: this device dials crow pinned on
-        // its fingerprint, and crow admits it on its own.
-        record_member(
-            &pool,
-            &Linking {
-                device: CROW.to_owned(),
-                name: "crow".to_owned(),
-                os: "Linux".to_owned(),
-                addresses: vec![address.to_owned()],
-                fingerprint: crow.device.fingerprint().to_owned(),
-                kept_by: None,
-                version: Some(RUNNING.to_owned()),
-                install: None,
-            },
-        )
-        .await
-        .unwrap();
+        for (crow, address) in members {
+            // Both ways, a link being both ways: this device dials crow pinned
+            // on its fingerprint, and crow admits it on its own. Recorded as
+            // crow says of itself, so a take-up doesn't read the row as moved.
+            record_member(
+                &pool,
+                &Linking {
+                    device: crow.device.id().to_owned(),
+                    name: crow.name.to_owned(),
+                    os: "Linux".to_owned(),
+                    addresses: vec![(*address).to_owned()],
+                    fingerprint: crow.device.fingerprint().to_owned(),
+                    kept_by: None,
+                    version: Some(RUNNING.to_owned()),
+                    install: serde_json::to_value(crow.install)
+                        .unwrap()
+                        .as_str()
+                        .map(str::to_owned),
+                },
+            )
+            .await
+            .unwrap();
 
-        record_member(
-            &crow.pool,
-            &Linking {
-                device: A.to_owned(),
-                name: "wolf".to_owned(),
-                os: "Linux".to_owned(),
-                addresses: vec!["127.0.0.1:1".to_owned()],
-                fingerprint: device.fingerprint().to_owned(),
-                kept_by: None,
-                version: Some(RUNNING.to_owned()),
-                install: None,
-            },
-        )
-        .await
-        .unwrap();
+            record_member(
+                &crow.pool,
+                &Linking {
+                    device: A.to_owned(),
+                    name: "wolf".to_owned(),
+                    os: "Linux".to_owned(),
+                    addresses: vec!["127.0.0.1:1".to_owned()],
+                    fingerprint: device.fingerprint().to_owned(),
+                    kept_by: None,
+                    version: Some(RUNNING.to_owned()),
+                    install: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        let asking = Asking::heard();
 
         let devices = Devices::of(
             device,
@@ -446,7 +475,9 @@ impl Pressing {
             Joins::none(),
         )
         .waiting(PATIENCE)
-        .coming_back_within(within);
+        .coming_back_within(within)
+        .installed_as(InstallKind::AppImage)
+        .asking_the_app(asking.clone());
 
         let nudges = Nudges::new();
         let workbench = router_answering_devices_telling_checking_updates(
@@ -467,6 +498,7 @@ impl Pressing {
         Pressing {
             pool,
             devices,
+            asking,
             nudges,
             workbench,
             _holding: holding,
@@ -510,6 +542,34 @@ impl Pressing {
 
         crow_in(&serde_json::from_slice(&bytes).unwrap())
     }
+
+    /// Update all on the Update Notice's banner, pressed: the Devices section
+    /// it answers with.
+    async fn presses_update_all(&self) -> DevicesView {
+        let answered = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ui/devices/all/update")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = answered.status();
+        let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&bytes)
+        );
+
+        serde_json::from_slice(&bytes).unwrap()
+    }
 }
 
 /// The streams the pressing device holds, let go of when the test drops it.
@@ -527,6 +587,11 @@ fn no_tailscale() -> Tailscale {
 
 /// crow's row, as a workbench reads it.
 async fn crow_on(workbench: &Router) -> LinkedDevice {
+    crow_in(&devices_on(workbench).await)
+}
+
+/// The Devices section, as a workbench reads it.
+async fn devices_on(workbench: &Router) -> DevicesView {
     let answered = workbench
         .clone()
         .oneshot(
@@ -541,7 +606,7 @@ async fn crow_on(workbench: &Router) -> LinkedDevice {
     assert_eq!(answered.status(), StatusCode::OK);
 
     let bytes = answered.into_body().collect().await.unwrap().to_bytes();
-    crow_in(&serde_json::from_slice(&bytes).unwrap())
+    serde_json::from_slice(&bytes).unwrap()
 }
 
 fn crow_in(view: &DevicesView) -> LinkedDevice {
@@ -549,6 +614,36 @@ fn crow_in(view: &DevicesView) -> LinkedDevice {
         .iter()
         .find(|member| member.identity.device == CROW)
         .expect("crow is drawn")
+        .clone()
+}
+
+/// The Devices section, once it reads as `wanted` says — or the test fails
+/// saying what it read last.
+async fn devices_come_to(workbench: &Router, wanted: impl Fn(&DevicesView) -> bool) -> DevicesView {
+    let deadline = tokio::time::Instant::now() + WAITING;
+
+    loop {
+        let view = devices_on(workbench).await;
+
+        if wanted(&view) {
+            return view;
+        }
+
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the devices never came to read as wanted: {view:?}"
+        );
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// `id`'s row in `view`.
+fn member_in(view: &DevicesView, id: &str) -> LinkedDevice {
+    view.members
+        .iter()
+        .find(|member| member.identity.device == id)
+        .expect("the member is drawn")
         .clone()
 }
 
@@ -814,4 +909,116 @@ async fn a_member_that_never_comes_back_is_a_line_at_the_deadline() {
 
     let back = crow_comes_to(&pressing.workbench, |row| row.trouble.is_none()).await;
     assert_eq!(back.identity.version.as_deref(), Some(RELEASE));
+}
+
+/// Update all with raven asleep: raven's row says it couldn't be reached, crow
+/// is told and goes through its restart, and this device is told to update
+/// only once crow is back on the new release.
+#[tokio::test]
+async fn update_all_updates_the_members_then_this_device_and_skips_a_sleeper() {
+    let mut crow = Crow::installed_as(InstallKind::AppImage).await;
+    let raven = Crow::named("raven", RAVEN, InstallKind::AppImage).await;
+
+    let nowhere = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let asleep = nowhere.local_addr().unwrap().to_string();
+    drop(nowhere);
+
+    let pressing = Pressing::linked(
+        &[(&crow, crow.link.at().as_str()), (&raven, asleep.as_str())],
+        COMING_BACK,
+    )
+    .await;
+
+    // crow's stream held, and the release learned.
+    crow_comes_to(&pressing.workbench, |row| {
+        row.running.len() == 2 && row.update_release.as_deref() == Some(RELEASE)
+    })
+    .await;
+
+    let pressed = pressing.presses_update_all().await;
+    assert!(pressed.updating_all);
+
+    let view = devices_come_to(&pressing.workbench, |view| {
+        member_in(view, RAVEN).trouble.is_some() && member_in(view, CROW).updating.is_some()
+    })
+    .await;
+    assert_eq!(
+        member_in(&view, RAVEN).trouble.as_deref(),
+        Some("raven couldn't be reached, so it wasn't updated.")
+    );
+    assert!(raven.asking.lines().is_empty());
+    assert_eq!(crow.asking.lines(), vec![ASKED.to_owned()]);
+
+    // A second press reads the one going: nobody is told twice.
+    assert!(pressing.presses_update_all().await.updating_all);
+    assert_eq!(crow.asking.lines().len(), 1);
+
+    crow.reports_progress(100).await;
+    crow.goes_quiet();
+    crow_comes_to(&pressing.workbench, |row| row.restarting).await;
+
+    assert!(
+        pressing.asking.lines().is_empty(),
+        "this device waits on crow"
+    );
+    assert_eq!(devices_on(&pressing.workbench).await.this_updating, None);
+
+    crow.comes_back_on(RELEASE);
+
+    let done = devices_come_to(&pressing.workbench, |view| !view.updating_all).await;
+    assert_eq!(pressing.asking.lines(), vec![ASKED.to_owned()]);
+    assert_eq!(done.this_updating, Some(ThisUpdating { percent: None }));
+
+    let crow = member_in(&done, CROW);
+    assert_eq!(crow.identity.version.as_deref(), Some(RELEASE));
+    assert_eq!(crow.trouble, None);
+}
+
+/// Update all passes over a member updated by hand and an Annex in silence,
+/// and updates this device.
+#[tokio::test]
+async fn update_all_passes_over_nix_members_and_annexes() {
+    let crow = Crow::installed_as(InstallKind::Nix).await;
+    let pressing = Pressing::linked_to(&crow).await;
+
+    // An Annex of crow's, which follows crow's release.
+    record_member(
+        &pressing.pool,
+        &Linking {
+            device: RAVEN.to_owned(),
+            name: "crow-annex".to_owned(),
+            os: "Linux".to_owned(),
+            addresses: vec!["127.0.0.1:1".to_owned()],
+            fingerprint: "00".repeat(32),
+            kept_by: Some(CROW.to_owned()),
+            version: Some(RUNNING.to_owned()),
+            install: Some("AppImage".to_owned()),
+        },
+    )
+    .await
+    .unwrap();
+
+    crow_comes_to(&pressing.workbench, |row| {
+        row.update_release.as_deref() == Some(RELEASE)
+    })
+    .await;
+
+    pressing.presses_update_all().await;
+
+    let done = devices_come_to(&pressing.workbench, |view| !view.updating_all).await;
+    assert_eq!(pressing.asking.lines(), vec![ASKED.to_owned()]);
+    assert!(crow.asking.lines().is_empty());
+
+    for member in &done.members {
+        assert_eq!(
+            member.updating, None,
+            "{} is passed over",
+            member.identity.name
+        );
+        assert_eq!(
+            member.trouble, None,
+            "{} is passed over",
+            member.identity.name
+        );
+    }
 }

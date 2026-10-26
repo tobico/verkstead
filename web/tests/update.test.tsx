@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ConversationEntry,
   DevicesView,
+  LinkedDevice,
   ProfileEntry,
   RepoEntry,
   SettingsView,
@@ -267,6 +268,78 @@ describe("the Update Notice", () => {
         ),
       ).toHaveLength(0),
     );
+  });
+
+  /// With a member whose row offers Update, the banner carries Update all
+  /// beside this device's own, through a card naming every device it updates,
+  /// this one last, and the sessions running on them.
+  it("carries Update all where a member can be updated, asking first", async () => {
+    const crow: LinkedDevice = {
+      identity: {
+        device: "0011223344556677889900aabbccddee",
+        name: "crow",
+        os: "Linux",
+        addresses: ["100.64.0.2"],
+        fingerprint: "AA:BB",
+        version: "0.3.0",
+        kept_by: null,
+        install: "AppImage",
+      },
+      reachable: true,
+      trouble: null,
+      update_available: true,
+      update_release: "0.4.0",
+      running: ["solid-viewer"],
+      running_drafts: 1,
+      updating: null,
+      restarting: false,
+    };
+    const withCrow: DevicesView = { ...BEHIND, members: [crow] };
+
+    const fetching = serving(
+      ...beneath(),
+      saying({ Available: { version: "0.4.0" } }),
+      whenever("/api/ui/devices", json(withCrow)),
+      whenever(
+        "/api/ui/devices/all/update",
+        json({ ...withCrow, updating_all: true }),
+        "POST",
+      ),
+    );
+    mount(SettingsPage);
+
+    const pressable = () =>
+      [...(banner()?.querySelectorAll("button") ?? [])]
+        .filter((b) => !b.closest("dialog"))
+        .map((b) => b.textContent);
+
+    await waitFor(() => expect(pressable()).toEqual(["Update", "Update all"]));
+
+    fireEvent.click(
+      [...banner()!.querySelectorAll("button")].find(
+        (b) => b.textContent === "Update all",
+      )!,
+    );
+
+    const asked = await screen.findByText("Update crow and workbench?");
+    const card = asked.closest("dialog")!;
+    expect(card.textContent).toContain(
+      "Each restarts on Verkstead 0.4.0, workbench last, and the sessions on solid-viewer, rate-limiting and a draft will be stopped and resumed.",
+    );
+    expect(askedFor(fetching, "/api/ui/devices/all/update")).toBe(0);
+
+    fireEvent.click(
+      [...card.querySelectorAll("button")].find(
+        (b) => b.textContent === "Update all",
+      )!,
+    );
+
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/devices/all/update")).toBe(1),
+    );
+    // And while it goes, neither press is offered again: this device goes
+    // last as part of it.
+    await waitFor(() => expect(pressable()).toEqual([]));
   });
 
   /// An install that can't update itself keeps the link to the README.

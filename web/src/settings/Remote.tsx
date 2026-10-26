@@ -205,6 +205,7 @@ import {
   pressServe,
   resetKey,
   unlinkDevice,
+  updateAll,
   updateMember,
   updateThisDevice,
 } from "../api/client";
@@ -979,18 +980,109 @@ export function useThisUpdate(devices: ReturnType<typeof useDevices>) {
   };
 }
 
+/// **Update all**, as the Update Notice's banner presses it: every member
+/// whose row offers Update, told at once, and this device last where its own
+/// row offers it (ADR-0027, *Members first, this device last*). The server
+/// runs it to its end, so the page that pressed can close.
+///
+/// Offered where it would update a member — with none, it would be this
+/// device's own Update, which the banner already carries — and not while one
+/// is going. The card names every device it updates, this one last, and the
+/// sessions running on all of them.
+export function useUpdateAll(devices: ReturnType<typeof useDevices>) {
+  const queries = useQueryClient();
+
+  const press = useMutation(() => ({
+    mutationFn: updateAll,
+    onSuccess: (reading: DevicesView) =>
+      queries.setQueryData(["devices"], reading),
+  }));
+
+  const [asking, setAsking] = createSignal(false);
+
+  // The members it tells, out of the latest reading.
+  const members = (): LinkedDevice[] =>
+    devices.data?.members.filter(offeredMemberUpdate) ?? [];
+
+  // And this device, where it goes last.
+  const last = (): DeviceIdentity | null =>
+    devices.data !== undefined && offeredUpdate(devices.data)
+      ? devices.data.this
+      : null;
+
+  const names = (): string[] => [
+    ...members().map((member) => member.identity.name),
+    ...(last() === null ? [] : [last()!.name]),
+  ];
+
+  const why = (): string => {
+    const told = members();
+    const here = last();
+    const release =
+      devices.data?.this_update_available ?? told[0]?.update_release ?? null;
+
+    const branches = [
+      ...told.flatMap((member) => member.running),
+      ...(here === null ? [] : (devices.data?.this_running ?? [])),
+    ];
+    const drafts =
+      told.reduce((count, member) => count + member.running_drafts, 0) +
+      (here === null ? 0 : (devices.data?.this_running_drafts ?? 0));
+
+    if (names().length < 2) return updateWhy(release, branches, drafts);
+
+    return updateWhy(release, branches, drafts, "Each", here?.name ?? null);
+  };
+
+  const ask = () => {
+    void queries.invalidateQueries({ queryKey: ["devices"] });
+    setAsking(true);
+  };
+
+  const confirmed = () => {
+    setAsking(false);
+    press.mutate();
+  };
+
+  const card = (
+    <Confirm
+      open={asking() && names().length > 0}
+      question={`Update ${listed(names())}?`}
+      why={why()}
+      verb="Update all"
+      keep={() => setAsking(false)}
+      act={confirmed}
+    />
+  );
+
+  return {
+    press,
+    ask,
+    card,
+    /// Whether one is going, pressed here or on any workbench of this device.
+    going: (): boolean => devices.data?.updating_all ?? false,
+    /// Whether Update all is offered: a member to update, and none going.
+    offered: (): boolean =>
+      members().length > 0 && !(devices.data?.updating_all ?? false),
+  };
+}
+
 /// What an Update does, as its confirm card says it: the release the device
 /// restarts on, and the sessions running there, which the restart stops and
 /// startup resumes (ADR-0027, *A confirm card names the sessions that will be
 /// stopped*). Each branch by name and the drafts counted, *rate-limiting and
 /// 2 drafts*. With none running, the release alone. The same words on this
-/// device's card and a member's.
+/// device's card and a member's, and Update all's — *Each restarts on
+/// Verkstead 0.3.0, wolf last, …*, naming the device that goes `last`.
 function updateWhy(
   release: string | null,
   branches: string[],
   drafts: number,
+  who = "It",
+  last: string | null = null,
 ): string {
-  const onto = `It restarts on Verkstead ${release ?? "the latest release"}`;
+  const after = last === null ? "" : `, ${last} last`;
+  const onto = `${who} restarts on Verkstead ${release ?? "the latest release"}${after}`;
   const count = branches.length + drafts;
 
   if (count === 0) return `${onto}.`;

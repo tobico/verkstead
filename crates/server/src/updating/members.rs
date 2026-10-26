@@ -38,8 +38,13 @@
 //! ran. And one that hasn't come back [`COMING_BACK_WITHIN`] the press says
 //! so, until it turns up on the new release after all. Nothing is remembered
 //! for later (ADR-0027): the human presses again.
+//!
+//! **Update all is every one of those presses at once, and then this
+//! device's own** — see [`all`]. Members first and this device last, because
+//! this device restarting ends the page's view of the rest (ADR-0027).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -83,6 +88,9 @@ pub(crate) struct MemberUpdates {
     /// How long a member has to come back: [`COMING_BACK_WITHIN`], shorter in
     /// a suite.
     within: Duration,
+
+    /// Whether an Update all is going — see [`all`].
+    all: Arc<AtomicBool>,
 }
 
 impl Default for MemberUpdates {
@@ -179,7 +187,14 @@ impl MemberUpdates {
             held: Arc::default(),
             moved: Arc::new(watch::Sender::new(0)),
             within,
+            all: Arc::default(),
         }
+    }
+
+    /// Whether an Update all pressed here is going, which the Devices view
+    /// says as `updating_all`.
+    pub(crate) fn all_going(&self) -> bool {
+        self.all.load(Ordering::SeqCst)
     }
 
     fn held(&self) -> MutexGuard<'_, HashMap<String, Held>> {
@@ -546,6 +561,107 @@ pub(crate) async fn tell(state: &AppState, devices: &Devices, device: &str) -> R
     state.nudges.announce_here(Nudge::Devices);
 
     Ok(())
+}
+
+/// **Update all**, on the Update Notice's banner: every member that can be
+/// updated is told at once, and this device updates last, once each of them
+/// is back on its new release or has left its row a line (ADR-0027, *Members
+/// first, this device last*). `false` where one is already going, which a
+/// second press reads rather than starts again.
+///
+/// **Run here rather than by the page**, held by this server to its end, so a
+/// phone closed halfway through stops nothing (Set 1416). Every member's row
+/// says its own part as a press on it would.
+///
+/// **Passed over in silence**, their rows already saying why: an Annex, which
+/// follows its Keeper; a member whose install is updated by hand, or that
+/// says no install at all, being older than the saying; and one already on
+/// the latest release. A member that isn't answering is told like the rest,
+/// which is what leaves its row saying it couldn't be reached and so wasn't
+/// updated. And where this device can't update itself — a nix hub — the
+/// members are the whole of it.
+pub(crate) fn all(state: &AppState, devices: &Devices) -> bool {
+    let updates = devices.members_updating();
+
+    if updates.all.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+
+    tracing::info!("Update all was pressed, so every member is told and this device goes last");
+
+    tokio::spawn({
+        let state = state.clone();
+        let devices = devices.clone();
+
+        async move {
+            everyone(&state, &devices).await;
+
+            devices
+                .members_updating()
+                .all
+                .store(false, Ordering::SeqCst);
+            state.nudges.announce_here(Nudge::Devices);
+        }
+    });
+
+    true
+}
+
+/// [`all`]'s run: the members, then this device.
+async fn everyone(state: &AppState, devices: &Devices) {
+    let listed = match devices.listing().await {
+        Ok(listed) => listed,
+        Err(why) => {
+            tracing::error!("Update all couldn't read the devices this one is linked to: {why:#}");
+            return;
+        }
+    };
+
+    let told: Vec<String> = listed
+        .members
+        .into_iter()
+        .map(|member| member.identity)
+        .filter(|member| member.kept_by.is_none())
+        .filter(|member| {
+            member
+                .install
+                .is_some_and(|install| install.updates_itself())
+        })
+        .filter(|member| state.updates.newer_than(member.version.as_deref()))
+        .map(|member| member.device)
+        .collect();
+
+    let mut telling = tokio::task::JoinSet::new();
+
+    for device in &told {
+        let state = state.clone();
+        let devices = devices.clone();
+        let device = device.clone();
+
+        telling.spawn(async move {
+            if let Err(why) = tell(&state, &devices, &device).await {
+                tracing::warn!(device, "Update all couldn't tell a member: {why:?}");
+            }
+        });
+    }
+
+    telling.join_all().await;
+
+    for device in &told {
+        devices.members_updating().settled(device).await;
+    }
+
+    if crate::updating::refusal(devices.install(), "This device").is_some()
+        || !state.updates.newer_than(devices.version().as_deref())
+    {
+        tracing::info!("Update all told every member, and this device isn't one it updates");
+        return;
+    }
+
+    if devices.updating().begin() {
+        tracing::info!("Update all heard from every member it told, so this device updates last");
+        state.nudges.announce(Nudge::Devices);
+    }
 }
 
 /// What a member answered, read as a `T`, or `None` where it can't be.

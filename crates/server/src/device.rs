@@ -1254,6 +1254,7 @@ impl Devices {
             this_install: self.install(),
             this_updating: self.updating.reading(),
             this_update_trouble: self.updating.trouble(),
+            updating_all: self.members_updating.all_going(),
         })
     }
 

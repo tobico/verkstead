@@ -6,7 +6,11 @@
 //! same card asking *Update wolf?* first, so nothing is installed until that
 //! card's Update. Everywhere else — the NixOS module, a checkout, a bare
 //! binary, or a desktop install with an Update already going — the link to
-//! the instructions is the whole of what it offers. Nor can it be dismissed: it
+//! the instructions is what it offers.
+//!
+//! And where a member's row offers Update, it carries **Update all** beside
+//! either: every such member told at once, and this device last, through a
+//! card naming them all — see [`useUpdateAll`]. Nor can it be dismissed: it
 //! stands until the server is updated, at which point the server stops saying
 //! there is anything to update to and the banner goes with it.
 //!
@@ -22,7 +26,7 @@ import { updateNotice } from "../api/client";
 import { useDevices } from "../devices";
 import { useReading } from "../freshness";
 import { ErrorLine } from "../notices";
-import { useThisUpdate } from "../settings/Remote";
+import { useThisUpdate, useUpdateAll } from "../settings/Remote";
 import styles from "./UpdateNotice.module.css";
 
 /// Where the human is told how to update: the README's own section, which is
@@ -65,7 +69,11 @@ export function UpdateNotice(): JSX.Element {
 
   // This device's own Update, offered where its row offers it: an install
   // that updates itself, behind the release, with no Update already going.
-  const update = useThisUpdate(useDevices());
+  const devices = useDevices();
+  const update = useThisUpdate(devices);
+
+  // And Update all, where it has a member to update.
+  const all = useUpdateAll(devices);
 
   return (
     <Show when={version()}>
@@ -73,7 +81,9 @@ export function UpdateNotice(): JSX.Element {
         <aside class={styles.notice}>
           <span>Verkstead {version()} has been released.</span>
           <Show
-            when={update.offered()}
+            // Not beside an Update all going, which updates this device last
+            // itself.
+            when={update.offered() && !all.going()}
             fallback={
               // Out to the README rather than over the page: the human is in
               // the middle of settling what Verkstead may touch, and reading
@@ -91,12 +101,27 @@ export function UpdateNotice(): JSX.Element {
               Update
             </button>
           </Show>
+          <Show when={all.offered()}>
+            <button
+              type="button"
+              disabled={all.press.isPending}
+              onClick={() => all.ask()}
+            >
+              Update all
+            </button>
+          </Show>
           <Show when={update.press.isError}>
             <ErrorLine class={styles.failure}>
               This device couldn't be updated. {update.press.error?.message}
             </ErrorLine>
           </Show>
+          <Show when={all.press.isError}>
+            <ErrorLine class={styles.failure}>
+              The devices couldn't be updated. {all.press.error?.message}
+            </ErrorLine>
+          </Show>
           {update.card}
+          {all.card}
         </aside>
       )}
     </Show>

@@ -287,6 +287,13 @@ pub struct DevicesView {
     /// line, and a higher release.
     #[serde(default)]
     pub this_update_trouble: Option<String>,
+
+    /// And whether an **Update all** pressed here is going: from the press
+    /// until this device's own Update begins, last, or the run ends without
+    /// one. Every member's row says its own part as it goes; this is what the
+    /// Update Notice's banner reads to offer the press again or not.
+    #[serde(default)]
+    pub updating_all: bool,
 }
 
 /// This device's Update, as far as the desktop app has said it has got

@@ -2670,7 +2670,14 @@ this_updating: ThisUpdating | null,
  * the next press or the next start. There is no rollback (ADR-0027): the
  * line, and a higher release.
  */
-this_update_trouble: string | null, };
+this_update_trouble: string | null, 
+/**
+ * And whether an **Update all** pressed here is going: from the press
+ * until this device's own Update begins, last, or the run ends without
+ * one. Every member's row says its own part as it goes; this is what the
+ * Update Notice's banner reads to offer the press again or not.
+ */
+updating_all: boolean, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the

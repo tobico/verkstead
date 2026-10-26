@@ -2028,6 +2028,14 @@ export function updateMember(device: string): Promise<DevicesView> {
   );
 }
 
+/// **Update all**, on the Update Notice's banner: every member that can be
+/// updated is told at once, and this device updates last, once each is back
+/// or has a line (ADR-0027). Run by the server to its end; answered at once
+/// with the section read again, `updating_all` set.
+export function updateAll(): Promise<DevicesView> {
+  return post<DevicesView>("/api/ui/devices/all/update");
+}
+
 /// What this machine has installed beyond what the wizard checks: the Annex's
 /// row on a Windows Keeper, and `annex: null` everywhere else — which is what
 /// says the settings page draws no Components card.
