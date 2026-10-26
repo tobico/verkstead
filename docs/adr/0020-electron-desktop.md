@@ -179,6 +179,13 @@ has to match exactly once or the pack stops rather than writing an installer
 with no `PATH` entry in it. What goes on the `PATH` and why is unchanged; the
 mechanism this paragraph named for it was one electron-builder has not got.
 
+Amended: **the Mac app is signed with a Developer ID and notarized**, by
+[ADR-0027](0027-cluster-updates.md), *The release*: Squirrel.Mac refuses an
+ad-hoc signed update, so a Release's dmg is now signed, notarized and stapled,
+under the hardened runtime, with a `zip` of the same app beside it. A pack
+given no certificate still signs ad-hoc, as every pack did before. The
+AppImage and the Windows installer stay unsigned.
+
 ## Considered Options
 
 - **Keeping `verkstead desktop` beside Electron**, or shrinking the crate to

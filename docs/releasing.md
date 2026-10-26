@@ -50,9 +50,9 @@ A Release's Mac app is signed with a Developer ID and notarized
 the app updates itself through, refuses an ad-hoc signed update. Both need
 things only the maintainer holds, kept as five **repository** secrets —
 repository rather than an environment's, so that a throwaway workflow on
-another branch can be handed the same certificate. **A run missing either
-certificate secret fails its Mac leg before it packs**, naming the one it has
-not got, and publishes nothing; a pack anywhere else — a checkout, a pull
+another branch can be handed the same certificate. **A run missing any of the five fails its
+Mac leg before it packs**, naming each one it has not got, and publishes
+nothing; a pack anywhere else — a checkout, a pull
 request, a fork — has no secrets and signs ad-hoc, saying so in its log.
 
 Made once, in this order.
@@ -77,11 +77,14 @@ Made once, in this order.
 
 3. **Export it as a `.p12`.** In Keychain Access under **My Certificates**,
    the row reading *Developer ID Application: <your name> (<team id>)* —
-   expanded, it has the private key under it, and a `.p12` without the key
-   cannot sign — **Export**, as *Personal Information Exchange (.p12)*, under a
+   expanded, it has the private key under it — **Export**, as *Personal Information Exchange (.p12)*, under a
    password of its own. That file and its password are the whole of the
    signing identity: keep the file somewhere other than this machine's
    Downloads, and the password in your password manager.
+
+   **Export the certificate's row, not the key's.** The `.p12` has to hold
+   the certificate *and* its private key: exported from the key alone it holds
+   no identity, and the pack fails saying it found none.
 
 4. **Make an App Store Connect API key**, which is what notarization
    authenticates with. At
@@ -111,8 +114,9 @@ Made once, in this order.
    | `APPLE_API_ISSUER` | The team's Issuer ID |
 
    The names are electron-builder's own: the two `CSC_` ones are what it reads
-   a certificate from, and the leg writes `APPLE_API_KEY` out to a file and
-   hands electron-builder that file's path under the same name.
+   a certificate from. The leg writes `CSC_LINK` and `APPLE_API_KEY` out to
+   files in the runner's temp and hands electron-builder each file's path under
+   the same name, so neither secret is ever handed over as itself.
 
 A Developer ID certificate lasts five years and the API key until it is
 revoked. Renewing either is steps 2–3 or step 4 again and the same `gh secret
@@ -141,10 +145,11 @@ Each of these waits on the one above it.
 4. **Eight legs**, each building its artifact and then running it: five bare
    CLI binaries, and beside them one desktop app per desktop platform — the
    Linux one as `Verkstead-x86_64.AppImage`, the macOS one as
-   `Verkstead-universal.dmg`, the Windows one as `Verkstead-x86_64.exe`.
+   `Verkstead-universal.dmg` with `Verkstead-universal.zip` beside it, the
+   Windows one as `Verkstead-x86_64.exe`.
 5. **Publish.** The tag is made on the prepare commit, annotated, and pushed;
-   then the Release is created under it with all eight artifacts and generated
-   notes, the note above them where the run was given one.
+   then the Release is created under it with every leg's artifacts and
+   generated notes, the note above them where the run was given one.
 6. **Manifest.** [`nix/release.json`](../nix/release.json) is written from the
    published assets and committed to `main`, so the flake fetches what was just
    published.
@@ -194,8 +199,15 @@ two headless binaries that matrix built and ran — then hands the pair to `pnpm
 run pack`, which `lipo`s them into the one universal sidecar the app carries
 before electron-builder builds the x64 app and the arm64 app that
 `@electron/universal` merges into `Verkstead-universal.dmg`
-([ADR-0020](adr/0020-electron-desktop.md)). Both halves of the sidecar a
-downloader gets are the very files the CLI legs published beside it, and the
+([ADR-0020](adr/0020-electron-desktop.md)). Before it packs, the leg checks that all five of [the Mac's signing
+secrets](#the-macs-signing-secrets) are there, and a release with any of them
+missing stops at that step. With them, the pack signs the app and the sidecar
+inside it with the Developer ID under the hardened runtime, has Apple's notary
+accept the app, and staples the ticket to it before either target is made — so
+`Verkstead-universal.dmg` and `Verkstead-universal.zip` hold the same stapled
+app, the dmg for a human to download and the zip for an update to install.
+Both halves of the sidecar a downloader gets are the very files the CLI legs
+published beside it, and the
 `lipo` is the pack's rather than the leg's, so a developer packing from a
 checkout packs the same way. A universal merge refuses an extra resource that
 differs between the two halves, which a sidecar joined before either app is
@@ -269,7 +281,7 @@ ships the exe alone, at which point the check and the removal retire together.
 Last, **the uninstaller takes it all away and leaves the Data Directory**: run
 the way Installed apps would run it, it removes the install directory, the
 Start-menu entry, the row and the `PATH` entry, and the Data Directory is still
-there afterwards. The dmg's leg adds four of its own, and every one of them is
+there afterwards. The dmg's leg adds five of its own, and every one of them is
 about something a run of the app cannot report.
 
 That the app comes back out of the image sealed, over the bundle and over the
@@ -278,7 +290,14 @@ executable was a shell script, whose signature lives in an extended attribute a
 copy can drop, and it is a real Mach-O again — but an Apple silicon Mac refuses
 to execute a Mach-O carrying no signature at all, so a seal the pack or the
 image broke is the "damaged" a Mac will not open rather than the "unidentified
-developer" it offers a way past. That the icon resolves: `CFBundleIconFile` read
+developer" it offers a way past — and that the seal is a Developer ID
+Application's under the hardened runtime, over both, since notarization and
+Squirrel.Mac refuse anything less. That Gatekeeper accepts the app as a Mac
+that has never seen it would, out of the mounted dmg and out of the zip
+unpacked with `ditto` the way Squirrel.Mac unpacks one: `codesign --verify
+--strict`, `xcrun stapler validate` for the ticket a Mac offline at first
+launch has only the staple of, and `spctl --assess`, Gatekeeper's own verdict.
+That the icon resolves: `CFBundleIconFile` read
 off the mounted plist and `iconutil` opened on the file it names, the Finder
 icon being what a downloader drags into Applications rather than anything the
 process draws. That the bundle is still a Dock app and still promises the macOS
@@ -367,14 +386,18 @@ newcomer actually follows.
 4. **The dmg, downloaded in a browser and opened** on a Mac. In a browser
    deliberately: the `com.apple.quarantine` flag Gatekeeper reads is set by
    whatever did the downloading, and `curl` sets nothing — an app fetched with
-   it opens with no refusal at all, and that refusal is the one part of this
-   install no workflow can rehearse.
+   it opens with no question at all, and what Gatekeeper makes of a
+   quarantined download is the one part of this install no workflow can
+   rehearse.
 
-   Drag Verkstead into Applications, double-click it, and walk the three steps
-   through System Settings → Privacy & Security that
-   [a downloader is told](../README.md#status). The workbench
-   comes up in a window of its own, with a tile in the Dock and an icon in the
-   menu bar beside it.
+   Drag Verkstead into Applications and double-click it. The app is signed
+   and notarized, so macOS asks once whether to open an app downloaded from
+   the Internet, naming Verkstead, and nothing more: click **Open**, and the
+   workbench comes up in a window of its own, with a tile in the Dock and an
+   icon in the menu bar beside it. **A refusal that sends you to System
+   Settings for *Open Anyway* is a failed release**, whatever the run said:
+   it means the download Gatekeeper saw is not the notarized app the leg
+   assessed.
 
    Then tick **Launch on startup** on the settings page's **Desktop** section,
    log out and back in: Verkstead comes back with the icon in the menu bar and

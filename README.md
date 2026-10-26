@@ -37,15 +37,10 @@ just the same. Make it executable and run it; sessions want the distribution's
 
 **`Verkstead-universal.dmg`**, on a Mac: one download for Apple silicon and
 Intel alike, the workbench in a window, a tile in the Dock and an icon in the
-menu bar. Drag **Verkstead** into Applications. The app is unsigned
-([ADR-0020](docs/adr/0020-electron-desktop.md)), so the first launch is refused:
-
-1. Open it once, and click **Done** on the refusal.
-2. In **System Settings → Privacy & Security**, under **Security**, click
-   **Open Anyway** beside the line about Verkstead, and authenticate.
-3. Click **Open Anyway** in the dialog that follows.
-
-That is once per copy of the app; a newer download asks again.
+menu bar. Drag **Verkstead** into Applications and open it. The app is signed
+and notarized by Apple ([ADR-0027](docs/adr/0027-cluster-updates.md)), so the
+first launch asks only whether to open an app downloaded from the Internet:
+click **Open**, and it does not ask again.
 
 **`Verkstead-x86_64.exe`**, on Windows: an installer that puts the same app
 into your own profile, at `%LOCALAPPDATA%\Programs\Verkstead`, with no

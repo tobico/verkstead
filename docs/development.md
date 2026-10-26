@@ -1120,7 +1120,9 @@ $ cd desktop && pnpm run pack \
 ```
 
 What comes out is `target/electron/out/Verkstead-universal.dmg`, holding
-`Verkstead.app` — one file for both Macs, electron-builder building each half
+`Verkstead.app`, and `Verkstead-universal.zip` beside it holding the same app
+— the dmg is what a human downloads and the zip what an update installs. One
+app for both Macs, electron-builder building each half
 and `@electron/universal` merging the two, which is why the sidecar has to be
 joined first: that merge refuses a resource that differs between the halves. The
 bundle's `CFBundleIdentifier` is `net.tobico.Verkstead` and its
@@ -1133,12 +1135,16 @@ makes this a regular Dock app where the Rust bundle was one the Dock never held
 — see the `mac:` section of
 [`desktop/electron-builder.yml`](../desktop/electron-builder.yml), which says
 which key that was and why it is read back off what was packed
-([ADR-0020](adr/0020-electron-desktop.md)). The bundle is ad-hoc signed rather
-than signed with a Developer ID, because Apple silicon will not execute a binary
-with no signature at all — that is not the signing that gets an app past
-Gatekeeper, and there is none of that — with the hardened runtime off beside it,
-which under an ad-hoc signature would enforce library validation and reject the
-pre-signed Electron framework for carrying another Team ID. It packs on a Mac
+([ADR-0020](adr/0020-electron-desktop.md)). From a checkout the bundle is
+ad-hoc signed, because Apple silicon will not execute a binary with no signature
+at all, with the hardened runtime off beside it, which under an ad-hoc signature
+would enforce library validation and reject the pre-signed Electron framework
+for carrying another Team ID. Given the Developer ID certificate and the App
+Store Connect key in the environment, the same pack signs with the certificate
+under the hardened runtime and has Apple notarize and staple the app, which is
+what a Release does ([ADR-0027](adr/0027-cluster-updates.md)); its log says
+which of the two it did, and [releasing](releasing.md#the-macs-signing-secrets)
+says what the variables hold. It packs on a Mac
 only: `lipo`, `codesign` and `hdiutil` are the operating system's own tools, and
 there is no cross build of it from here.
 
