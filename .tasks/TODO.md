@@ -19,5 +19,5 @@ Roadmap stage: [02: A signed Mac release](docs/roadmaps/cluster-updates/02-a-sig
 ## Tasks
 
 - [x] 01: Signing behind the secrets — [details](01-signing-behind-the-secrets.md)
-- [ ] 02: Notarization and the zip — [details](02-notarization-and-the-zip.md)
+- [x] 02: Notarization and the zip — [details](02-notarization-and-the-zip.md)
 - [ ] 03: The words — [details](03-the-words.md)

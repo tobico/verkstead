@@ -10,9 +10,11 @@
 # written by. electron-builder on its own would pack an app with no sidecar in
 # it.
 #
-# Unsigned, as the Rust artifacts were: there is no Developer ID and no
-# authenticode certificate. Why Windows stays that way, and what would reopen
-# it, is ADR-0020's *Amended: the Windows build stays unsigned*.
+# The Mac app is signed with a Developer ID and notarized when the pack is
+# handed the secrets for both, and ad-hoc when it is not — see the `mac:`
+# section. The AppImage and the msi are unsigned, as the Rust artifacts were:
+# there is no authenticode certificate. Why Windows stays that way, and what
+# would reopen it, is ADR-0020's *Amended: the Windows build stays unsigned*.
 
 appId: net.tobico.Verkstead
 productName: Verkstead
@@ -172,6 +174,13 @@ mac:
   # is read back off what was packed.
   icon: ../target/electron/staged/icon.icns
 
+  # **The zip's name**, written down for the dmg's reason: `release.yml`
+  # uploads it, `publish` names it, and the update metadata will point at it
+  # by this name. Said here because the zip target has no section of its own to
+  # say it in — electron-builder takes an archive's name from the platform's —
+  # and read by nothing else, since the dmg below names itself.
+  artifactName: Verkstead-universal.zip
+
   # `Development` above, in Apple's own vocabulary: `LSApplicationCategoryType`,
   # which is what a Mac groups the app under.
   category: public.app-category.developer-tools
@@ -200,6 +209,16 @@ mac:
   # identity and under the same runtime: @electron/osx-sign signs every Mach-O
   # it finds in the bundle, and the release leg reads both signatures back.
   hardenedRuntime: true
+
+  # **Notarized when the pack is given an App Store Connect key, and not when
+  # it is not.** Nothing to say here for the first: electron-builder hands the
+  # signed app to Apple's notary itself whenever `APPLE_API_KEY` (a path to
+  # the `.p8`), `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` are set, waits for
+  # the verdict, and staples the ticket to the app — after signing and before
+  # either target below is made from it, so the dmg and the zip both carry
+  # it. `scripts/pack.mjs` says `notarize: false` on the command line when
+  # they are not, which is a skip electron-builder logs as one rather than a
+  # warning, and an ad-hoc app could never be notarized anyway.
 
   # **The entitlements Electron wants under that runtime**, written down rather
   # than left to the template electron-builder falls back on, so that a bump of
@@ -236,6 +255,20 @@ mac:
       # construction — `scripts/pack.mjs` joins both CLI builds before either
       # app is built — so it is byte-identical in the two halves and there is
       # nothing for an `x64ArchFiles` pattern to excuse.
+      arch:
+        - universal
+
+    # **And the same app as a zip beside it**, which is what an update is
+    # (ADR-0027, *The release*): Squirrel.Mac installs a zip rather than an
+    # image, and the `latest-mac.yml` electron-updater reads is written off this
+    # file. The dmg stays what a human downloads. Universal for the dmg's
+    # reason, and made from the same signed, notarized and stapled app — the
+    # ticket is stapled inside the bundle, so it travels in both.
+    #
+    # electron-builder writes a `.blockmap` beside it, for the differential
+    # download an updater may make; nothing uploads that yet, and neither it nor
+    # the metadata is this configuration's while `publish` above is `null`.
+    - target: zip
       arch:
         - universal
 
