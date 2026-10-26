@@ -629,8 +629,15 @@ async function run(): Promise<void> {
       // The sidecar going from here is the quit `quitAndInstall` starts rather
       // than news, the launch it starts is to wait this one out, and the
       // version is what that launch checks it came up on — see [`missed`].
+      //
+      // **And the window's close is a quit's from here**, on every platform:
+      // on a Mac `quitAndInstall` is Squirrel's, which closes every window
+      // before `before-quit` fires, and a Mac's close is always a hide — so a
+      // close left to the policy would cancel the quit, and with it the
+      // install.
       handOver: (version) => {
         leaving = true;
+        quitting = true;
         process.env[RELAUNCH] = String(process.pid);
         remember(join(app.getPath("userData"), HANDED_OVER), version, say);
       },
