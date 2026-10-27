@@ -1,5 +1,6 @@
 //! What a device reads off the machine it is on when another one asks what it
-//! is: its name, its OS and its addresses (ADR-0020).
+//! is: its name, its OS and its addresses (ADR-0020) — and, off the binary
+//! answering rather than the machine, the release it runs (ADR-0027).
 //!
 //! The other half of an identity. [`super`] keeps what a device *is* — an id
 //! and a certificate, invented once and read off the disk at every start — and
@@ -41,7 +42,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
-use verkstead_render::DeviceIdentity;
+use verkstead_render::{DeviceIdentity, InstallKind};
 
 use crate::device::Device;
 use crate::peer::dialling::Peers;
@@ -143,7 +144,29 @@ pub struct Reading {
     /// [`Reading::forwarded`]. `None` on a reading of a device that forwards
     /// nothing.
     forwarding_at: Option<u16>,
+
+    /// And the release of Verkstead this device says it runs: [`RUNNING`] on a
+    /// running server, and stated by a suite that is putting two releases in
+    /// one cluster — see [`Reading::running`].
+    ///
+    /// Shared by every clone, so a suite can restart the member on another
+    /// release under a running server — see [`Reading::now_running`].
+    version: Arc<std::sync::RwLock<Option<String>>>,
+
+    /// And what this device was installed as — see [`Reading::installed_as`].
+    /// A bare binary unless said otherwise, which is what a device that
+    /// cannot say what it is reads as.
+    install: Option<InstallKind>,
+
+    /// And the name and OS word it answers with where a suite has said them,
+    /// in place of the hostname and the platform's word — see
+    /// [`Reading::calling_itself`]. `None` on a running server.
+    called: Option<(String, String)>,
 }
+
+/// The release this binary is, which is what a device says it runs: the
+/// workspace's own version, the same one the Update Notice compares against.
+pub const RUNNING: &str = env!("CARGO_PKG_VERSION");
 
 /// The tailnet addresses as they were last read, and when.
 #[derive(Debug, Clone)]
@@ -199,6 +222,9 @@ impl Reading {
             answered: Arc::default(),
             answer_held_for: HELD_FOR,
             forwarding_at: None,
+            version: Arc::new(std::sync::RwLock::new(Some(RUNNING.to_owned()))),
+            install: Some(InstallKind::Binary),
+            called: None,
         }
     }
 
@@ -225,6 +251,9 @@ impl Reading {
             answered: Arc::default(),
             answer_held_for: HELD_FOR,
             forwarding_at: None,
+            version: Arc::new(std::sync::RwLock::new(Some(RUNNING.to_owned()))),
+            install: Some(InstallKind::Binary),
+            called: None,
         }
     }
 
@@ -254,6 +283,9 @@ impl Reading {
             answered: Arc::default(),
             answer_held_for: HELD_FOR,
             forwarding_at: None,
+            version: Arc::new(std::sync::RwLock::new(Some(RUNNING.to_owned()))),
+            install: Some(InstallKind::Binary),
+            called: None,
         }
     }
 
@@ -309,6 +341,66 @@ impl Reading {
             forwarding_at: Some(port),
             ..self
         }
+    }
+
+    /// The same, saying it runs `version` rather than [`RUNNING`] — or saying
+    /// nothing at all, which is what a Verkstead from before the version was
+    /// said answers.
+    ///
+    /// For a suite putting a member a release behind in front of this one: a
+    /// binary is the one release it is, and the cluster being asked about is
+    /// two of them.
+    pub fn running(self, version: Option<&str>) -> Reading {
+        Reading {
+            version: Arc::new(std::sync::RwLock::new(version.map(str::to_owned))),
+            ..self
+        }
+    }
+
+    /// The same, saying it was installed as `install` — which a start reads
+    /// off its own executable (see [`crate::install::of_this_process`]) and a
+    /// suite says outright — or saying nothing at all, which is what a
+    /// Verkstead from before the install kind was said answers.
+    ///
+    /// On the reading rather than only on the Devices handle because it is
+    /// said to members, beside the release: their rows offer an Update or a
+    /// by-hand line off it (ADR-0027, *A device updates itself*).
+    pub fn installed_as(self, install: Option<InstallKind>) -> Reading {
+        Reading { install, ..self }
+    }
+
+    /// What this device says it was installed as — see
+    /// [`Reading::installed_as`].
+    pub(crate) fn install(&self) -> Option<InstallKind> {
+        self.install
+    }
+
+    /// The same, answering as `name` on `os` rather than this machine's
+    /// hostname and its platform's word.
+    ///
+    /// For a suite whose devices are all one machine: a member's row is what it
+    /// last said of itself, and a take-up reads that again — so a suite that
+    /// writes a member down as *the-laptop* has the member say so, rather than
+    /// writing down the one hostname every device in it shares and reading
+    /// right for the wrong reason.
+    pub fn calling_itself(self, name: &str, os: &str) -> Reading {
+        Reading {
+            called: Some((name.to_owned(), os.to_owned())),
+            ..self
+        }
+    }
+
+    /// Say `version` from now on, in place of the release this reading was
+    /// stated with — for every clone of it at once.
+    ///
+    /// For a suite restarting a member on another binary: what is being asked
+    /// is what this device's view of it makes of the new release, and a server
+    /// started again would be a second server rather than the same member.
+    pub fn now_running(&self, version: Option<&str>) {
+        *self
+            .version
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = version.map(str::to_owned);
     }
 
     /// Say `advertised` from now on, in place of the list this reading was
@@ -369,7 +461,18 @@ impl Reading {
             os: self.os(),
             addresses: self.addresses().await,
             kept_by: self.keeper().map(|keeper| keeper.device().to_owned()),
+            version: self.version(),
+            install: self.install,
         }
+    }
+
+    /// The release this device says it runs, read at the moment of asking —
+    /// see [`Reading::running`].
+    pub(crate) fn version(&self) -> Option<String> {
+        self.version
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     /// What this machine is called, which is its hostname.
@@ -381,13 +484,19 @@ impl Reading {
     /// cannot disagree, and so that a suite stating a WSL has stated it for
     /// both at once.
     pub(crate) fn name(&self) -> String {
-        platform::hostname()
+        match &self.called {
+            Some((name, _)) => name.clone(),
+            None => platform::hostname(),
+        }
     }
 
     /// And the word for the operating system it is running: the platform's own
     /// everywhere but under WSL.
     pub(crate) fn os(&self) -> String {
-        platform::os_word(self.platform, self.kernel.as_deref())
+        match &self.called {
+            Some((_, os)) => os.clone(),
+            None => platform::os_word(self.platform, self.kernel.as_deref()),
+        }
     }
 
     /// Every address this device can be reached on, in the order a peer should

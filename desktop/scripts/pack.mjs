@@ -30,6 +30,18 @@
 //! Plain JavaScript and outside `src/`, for the reason `start.mjs` is: it is
 //! what packs the app rather than part of it.
 //!
+//! **And on a Mac, which signature the app gets.** A Developer ID when
+//! electron-builder's own `CSC_LINK` and `CSC_KEY_PASSWORD` hand it one, and
+//! ad-hoc when they do not; and notarized when its `APPLE_API_KEY` trio hands
+//! it an App Store Connect key as well — which is said here rather than in
+//! `electron-builder.yml` because a configuration file cannot read whether a
+//! variable is set. Either way the log says which, and afterwards by whose
+//! name, out of the bundle that was packed (ADR-0027, *The release*).
+//!
+//! **And nothing is published.** The configuration names where an update is read
+//! from, which is what has electron-builder write the update metadata; the
+//! Release that metadata is uploaded to is the release workflow's to make.
+//!
 //! `pnpm run pack` rather than `pnpm pack`, which is pnpm's own command for
 //! something else entirely. Everything after `--` is handed to
 //! electron-builder, so a developer who wants one target of several can say so.
@@ -37,6 +49,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 /// This project, which is one directory up from this script.
@@ -253,6 +266,185 @@ function builder() {
   return createRequire(import.meta.url).resolve("electron-builder/cli.js");
 }
 
+/// Where electron-builder leaves the universal app before it images it, which is
+/// what the signature is read back off. `directories.output` and the arch, in
+/// electron-builder's own spelling.
+const PACKED_APP = join(ROOT, "target", "electron", "out", "mac-universal", "Verkstead.app");
+
+/// Whether this pack has a Developer ID to sign with: electron-builder's own
+/// variable for the certificate, which it imports for the length of the pack.
+/// The password beside it is the certificate's business, and a wrong or a
+/// missing one is electron-builder's refusal to read it rather than this
+/// script's guess.
+function developerId() {
+  return given("CSC_LINK");
+}
+
+/// The App Store Connect key electron-builder notarizes with, by its own three
+/// variables: `APPLE_API_KEY` the path to the `.p8`, and the key's id and its
+/// issuer's beside it.
+const NOTARY = ["APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER"];
+
+/// Whether a variable holds anything, which an empty repository secret does not.
+function given(variable) {
+  const value = process.env[variable];
+  return value !== undefined && value.trim() !== "";
+}
+
+/// The file a `CSC_LINK` path names, resolved as electron-builder resolves it:
+/// `~/` from the home directory, `file://` dropped, and anything relative from
+/// this project, which is where the pack runs it.
+function certificateFile(link) {
+  if (link.startsWith("~/")) {
+    return join(homedir(), link.slice(2));
+  }
+  return resolve(DESKTOP, link.startsWith("file://") ? link.slice("file://".length) : link);
+}
+
+/// What electron-builder is told on top of the configuration about signing and
+/// notarizing, and the lines saying so.
+///
+/// Nothing, given a certificate and a key: the configuration is the Developer
+/// ID one, and electron-builder notarizes and staples whenever the key is
+/// there. Given a certificate alone, a Developer ID app that is not notarized,
+/// said as `notarize: false` so that electron-builder logs the skip as one.
+/// Without a certificate, the ad-hoc signature every release before ADR-0027
+/// shipped, with the hardened runtime off beside it — see the `mac:` section of
+/// `electron-builder.yml` for why the two go together — and nothing to
+/// notarize, since Apple's notary takes a Developer ID's signature or nothing.
+///
+/// **Half a key is refused here** rather than handed on: electron-builder would
+/// refuse it too, but only after an hour's universal build, and without saying
+/// which of the three it was missing.
+function signing() {
+  if (!MAC) {
+    return [];
+  }
+
+  if (!developerId()) {
+    process.stdout.write(
+      "Signing ad-hoc, because CSC_LINK names no Developer ID certificate, " +
+        "and so not notarizing\n",
+    );
+    return [
+      "--config.mac.identity=-",
+      "--config.mac.hardenedRuntime=false",
+      "--config.mac.notarize=false",
+    ];
+  }
+
+  // **Never a certificate electron-builder would read as a file name.** It
+  // takes `CSC_LINK` as base64 only when the value is over 2048 characters
+  // or ends in `=`, and otherwise as a path — and a short `.p12`'s base64 is
+  // neither, so electron-builder `stat`s it and prints the certificate whole
+  // in its error. Refused here without the value: a file is what the release
+  // hands over, and a path naming none is a certificate or a mistake, either
+  // of which is better unprinted.
+  const link = process.env.CSC_LINK.trim();
+  const electronBuilderReadsAsBase64 =
+    /^data:.*;base64,/.test(link) || link.length > 2048 || link.endsWith("=");
+  if (
+    !link.startsWith("https://") &&
+    !electronBuilderReadsAsBase64 &&
+    !statSync(certificateFile(link), { throwIfNoEntry: false })?.isFile()
+  ) {
+    die(
+      "CSC_LINK names no file, and electron-builder would not read it as base64:",
+      "",
+      "write the .p12 to a file and name that, as the release leg does.",
+    );
+  }
+
+  process.stdout.write("Signing with the Developer ID certificate in CSC_LINK\n");
+
+  const missing = NOTARY.filter((variable) => !given(variable));
+  if (missing.length === NOTARY.length) {
+    process.stdout.write(`Not notarizing, because ${NOTARY.join(", ")} are not set\n`);
+    return ["--config.mac.notarize=false"];
+  }
+  if (missing.length > 0) {
+    die(
+      `${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not set, ` +
+        "so there is only part of an App Store Connect key to notarize with:",
+      "",
+      `notarizing takes all three of ${NOTARY.join(", ")}, and packing takes none of them.`,
+    );
+  }
+  if (!statSync(process.env.APPLE_API_KEY, { throwIfNoEntry: false })?.isFile()) {
+    die(
+      `APPLE_API_KEY is ${process.env.APPLE_API_KEY}, and there is no file there:`,
+      "",
+      "it is the path to the key's .p8 rather than the key itself.",
+    );
+  }
+
+  process.stdout.write(
+    `Notarizing with the App Store Connect key ${process.env.APPLE_API_KEY_ID}, ` +
+      "and stapling the ticket to the app\n",
+  );
+  return [];
+}
+
+/// Say whose signature the packed app carries, read off the bundle rather than
+/// off which branch was taken: `codesign -dv` prints an `Authority=` line per
+/// certificate in the chain for a real identity and `Signature=adhoc` for the
+/// other, and the runtime among its flags.
+///
+/// A pack told to build one architecture alone leaves no universal app, and
+/// that is a developer's choice rather than a failure, so it is said and left.
+function signed() {
+  if (!statSync(PACKED_APP, { throwIfNoEntry: false })?.isDirectory()) {
+    process.stdout.write(`There is no app at ${PACKED_APP}, so its signature goes unread\n`);
+    return;
+  }
+
+  const run = spawnSync("codesign", ["-dv", "--verbose=2", PACKED_APP], { encoding: "utf8" });
+  // codesign writes what it displays to standard error.
+  const said = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+
+  if (run.error !== undefined || run.status !== 0) {
+    die(`codesign could not read the signature on ${PACKED_APP}:`, "", said.trimEnd());
+  }
+
+  const authority = said.match(/^Authority=(.*)$/m)?.[1];
+
+  // **A certificate that signed nothing is a failed pack**, not an ad-hoc one:
+  // electron-builder, finding no identity in what it imported — a `.p12`
+  // exported without its private key does exactly this — logs a skip and
+  // carries on, and the app comes out signed ad-hoc by the framework's own
+  // signatures. A `.p12` holding the key without its certificate does the
+  // same — what exporting the key's row alone writes. Said here, where the
+  // developer asked for a Developer ID, rather than discovered by whatever
+  // reads the bundle next.
+  if (developerId() && authority === undefined) {
+    die(
+      "CSC_LINK was given a certificate, and the app came out signed ad-hoc:",
+      "",
+      "electron-builder found no Developer ID Application identity in it. An identity",
+      "is the certificate and its private key together, and a .p12 holding only one",
+      "of them has none — export the certificate's row under My Certificates, with",
+      "its key beneath it.",
+    );
+  }
+  const runtime = /flags=\S*runtime/.test(said) ? ", with the hardened runtime" : "";
+  process.stdout.write(
+    authority !== undefined
+      ? `The app is signed by ${authority}${runtime}\n`
+      : `The app is signed ad-hoc${runtime}\n`,
+  );
+
+  // And whether a notarization ticket is stapled inside it, which is the other
+  // half of what Gatekeeper reads off a download and the half `codesign` does
+  // not show. `stapler` exits non-zero for a bundle with none, which an ad-hoc
+  // or an unnotarized pack is meant to be.
+  const stapled = spawnSync("xcrun", ["stapler", "validate", PACKED_APP], { encoding: "utf8" });
+  process.stdout.write(
+    stapled.error === undefined && stapled.status === 0
+      ? "The app carries a stapled notarization ticket\n"
+      : "The app carries no notarization ticket\n",
+  );
+}
+
 const binaries = cli();
 
 process.stdout.write(`The sidecar is ${binaries.join(" and ")}\n`);
@@ -261,9 +453,22 @@ stage(binaries);
 // No platform flag: electron-builder packs for the machine it is running on,
 // which is what each of the three artifacts has always been built by — and what
 // keeps this one command rather than one per platform.
-const packing = spawn(process.execPath, [builder(), ...args], {
-  cwd: DESKTOP,
-  stdio: "inherit",
-});
+//
+// **And never a publish**, said on every pack rather than only a release
+// leg's: `electron-builder.yml` names a `github` provider so that the update
+// metadata is written, and electron-builder left to itself publishes to it
+// whenever it finds itself on CI at a tag. The Release is
+// `.github/workflows/release.yml`'s to make, metadata and all.
+const packing = spawn(
+  process.execPath,
+  [builder(), "--publish", "never", ...signing(), ...args],
+  { cwd: DESKTOP, stdio: "inherit" },
+);
 
-packing.on("exit", (code, signal) => process.exit(signal !== null ? 1 : (code ?? 0)));
+packing.on("exit", (code, signal) => {
+  const status = signal !== null ? 1 : (code ?? 0);
+  if (status === 0 && MAC) {
+    signed();
+  }
+  process.exit(status);
+});

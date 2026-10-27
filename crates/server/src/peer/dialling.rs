@@ -161,7 +161,7 @@ enum Knocked {
     /// The address answered, and this is what came of the answer: the question
     /// held over there, or this device's account of why it was not. Either way
     /// the device has spoken, and a walk down its other addresses is over.
-    Answered(Result<JoinHeld>),
+    Answered(Box<Result<JoinHeld>>),
 
     /// And nothing at that address at all, which is the one finding worth trying
     /// another address for: a machine that has moved, or a row drawn of a device
@@ -431,8 +431,12 @@ impl Peers {
             );
         }
 
-        self.members
-            .refreshed(&Linking {
+        // Written only over a row that is still there: a device unlinked while
+        // this read was on the link is not made a member again by its answer —
+        // see [`verkstead_store::refresh_member`].
+        let still_a_member = self
+            .members
+            .brought_up_to_date(&Linking {
                 device: member.device.clone(),
                 name: identity.name.clone(),
                 os: identity.os.clone(),
@@ -448,8 +452,23 @@ impl Peers {
                 // refresh never adds to a row, the store keeping whatever the
                 // row was first recorded with. See [`Linking::kept_by`].
                 kept_by: identity.kept_by.clone(),
+
+                // And the release it says it runs, which a recording always
+                // writes — see [`Linking::version`].
+                version: identity.version.clone(),
+
+                // And what it was installed as, written the same way.
+                install: crate::install::kept(identity.install),
             })
             .await?;
+
+        if !still_a_member {
+            tracing::info!(
+                device = %member.device,
+                "a device answered what it is after it was unlinked, so nothing is written down",
+            );
+            return Ok(identity);
+        }
 
         // And where this member was in the middle of a changeover and has
         // answered under the certificate it was changing *to*, that changeover is
@@ -851,7 +870,7 @@ impl Peers {
     /// and that is [`Peers::join_found`].
     pub async fn join(&self, address: &str, saying: &DeviceIdentity) -> Result<JoinHeld> {
         match self.knocked(address, saying).await {
-            Knocked::Answered(held) => held,
+            Knocked::Answered(held) => *held,
             Knocked::Nobody(why) => Err(why),
         }
     }
@@ -989,7 +1008,9 @@ impl Peers {
         for address in &found.addresses {
             match self.knocked(address, saying).await {
                 Knocked::Answered(held) => {
-                    return Reached::Answered(Box::new(held.map(|held| (address.clone(), held))));
+                    return Reached::Answered(Box::new(
+                        (*held).map(|held| (address.clone(), held)),
+                    ));
                 }
 
                 Knocked::Nobody(why) => {
@@ -1038,7 +1059,7 @@ impl Peers {
             // Not an address that answered nothing: a client this device cannot
             // build is this device's own failure, and trying the next address
             // would fail it again.
-            Err(why) => return Knocked::Answered(Err(why)),
+            Err(why) => return Knocked::Answered(Box::new(Err(why))),
         };
 
         let answered = match asking
@@ -1056,7 +1077,7 @@ impl Peers {
             }
         };
 
-        Knocked::Answered(self.taken(address, answered, &met).await)
+        Knocked::Answered(Box::new(self.taken(address, answered, &met).await))
     }
 
     /// And what an answer to a join post was worth: the question held over there,
@@ -1780,6 +1801,8 @@ mod tests {
             acknowledged: None,
             kept_by: None,
             direct: None,
+            version: None,
+            install: None,
         }
     }
 

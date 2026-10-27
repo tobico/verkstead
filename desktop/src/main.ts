@@ -47,6 +47,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { app, BrowserWindow, dialog, ipcMain, Notification } from "electron";
+import electronUpdater from "electron-updater";
 
 import { artwork } from "./artwork.js";
 import { AUTOSCROLLING } from "./autoscroll.js";
@@ -68,7 +69,7 @@ import { buttoned, lights, overlaid, overlay, worn } from "./decorations.js";
 import { healthy, NeverCameUp } from "./health.js";
 import { keyIn } from "./key.js";
 import { takeOver as takeOverAgent } from "./launchd.js";
-import { heard, keep, say } from "./log.js";
+import { heard, keep, type Kept, say } from "./log.js";
 import { grey, shortcuts } from "./menu.js";
 import { hold, type Notice, opens, showing } from "./notices.js";
 import { dataDir, logDir } from "./platform.js";
@@ -89,9 +90,31 @@ import { taken } from "./taken.js";
 import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
 import { APPDIR, stripped, unmounted } from "./unmounted.js";
+import {
+  alive,
+  ASKING,
+  HANDED_OVER,
+  missed,
+  prepare,
+  RELAUNCH,
+  remember,
+  told,
+  update,
+  waitOut,
+} from "./updating.js";
 import { browse, forward, open, type Opened } from "./window.js";
 import { enabled, NOWHERE, type Pane, pathFor, type Where, where } from "./where.js";
-import { ADDRESS, HEALTH, HOST, LISTEN, NOTICES, ORIGIN, PORT } from "./workbench.js";
+import {
+  ADDRESS,
+  HEALTH,
+  HOST,
+  LISTEN,
+  NOTICES,
+  ORIGIN,
+  PORT,
+  UPDATE_FAILED,
+  UPDATE_PROGRESS,
+} from "./workbench.js";
 
 /// What the human is told when the CLI is not where the app looked.
 ///
@@ -123,6 +146,25 @@ function foreign(address: string): void {
       `serves on.\n\n` +
       `That's likely a Verkstead the machine starts for itself, or one started ` +
       `in a terminal. Stop it, then start Verkstead again.`,
+  );
+}
+
+/// What the human is told when the server was started and never answered.
+///
+/// Every such start, not only the one after an Update: the app was opened
+/// from an icon more often than not, and a launch that exits with nothing on
+/// the screen is one somebody presses again and again. The log is named
+/// because what the server said on its way down is in it.
+function silent(kept: Kept, waited: number): void {
+  const seconds = Math.round(waited / 1_000);
+  const where =
+    "file" in kept
+      ? `What it said is in the log at:\n\n${kept.file}`
+      : "What it said went to the standard error of whatever started Verkstead.";
+
+  dialog.showErrorBox(
+    "Verkstead's server didn't start.",
+    `It didn't answer within ${seconds} seconds of being started.\n\n${where}`,
   );
 }
 
@@ -408,9 +450,13 @@ async function run(): Promise<void> {
   // goes on running.
   const kept = keep(logDir(machine));
 
+  // And which release this is, and which process: the line an Update is read
+  // back by, before and after its relaunch.
+  say(`Verkstead ${app.getVersion()} is starting, at pid ${process.pid}`);
+
   // And the name Windows knows this application by, said before there is a
   // window to be named — which is what ties the window to the Start-menu entry
-  // the msi wrote (ADR-0020). That entry carries `System.AppUserModel.ID =
+  // the installer wrote (ADR-0020). That entry carries `System.AppUserModel.ID =
   // net.tobico.Verkstead`, and a window whose own id is something else is a
   // second, unnamed button on the taskbar beside it. Measured on Windows 11
   // under Electron 43 against the packed app: with nothing said here the window
@@ -448,6 +494,16 @@ async function run(): Promise<void> {
   // that asked exits having made nothing. It is also what the probe below
   // rests on — with this held, a listener on the address cannot be another
   // copy of this app.
+  // **A relaunch waits out the app it replaces** before it asks for the lock
+  // or the address, both of which that app still holds while it quits — see
+  // [`waitOut`]. Nothing to wait for on any other launch. The variable is
+  // this launch's to read and nobody's after it, the sidecar included.
+  const replaced = await waitOut(machine.env, { alive, taken: () => taken(HOST, PORT) });
+  if (replaced !== undefined) {
+    say(`this launch replaces an app that updated itself, and waited ${replaced} ms for it to go`);
+  }
+  delete machine.env[RELAUNCH];
+
   if (!app.requestSingleInstanceLock()) {
     say("Verkstead is already running, so this launch hands over to it");
     app.quit();
@@ -550,7 +606,50 @@ async function run(): Promise<void> {
     say(`what opens a file or a link on this machine is ${by.program}`);
   }
 
-  const sidecar = start(path, ADDRESS, heard, passed);
+  // **This device's Update is asked for on the sidecar's stdout** (ADR-0027),
+  // which is read here a line at a time already: the line is filed like any
+  // other, and the one the server says for a press of Update is acted on too
+  // — see [`update`]. Once per run: the server marks itself updating at the
+  // press and says the line once, and an app that has handed over is going.
+  let pressed = false;
+  const said = (line: string): void => {
+    heard(line);
+    if (line !== ASKING || pressed) {
+      return;
+    }
+    pressed = true;
+
+    const { autoUpdater } = electronUpdater;
+    prepare(autoUpdater, machine.env, say);
+    const secret = () => (data === undefined ? undefined : keyIn(data));
+    void update({
+      updater: autoUpdater,
+      report: (percent) => told(UPDATE_PROGRESS, secret(), { percent }),
+      fail: (why) => told(UPDATE_FAILED, secret(), { why }),
+      // The sidecar going from here is the quit `quitAndInstall` starts rather
+      // than news, the launch it starts is to wait this one out, and the
+      // version is what that launch checks it came up on — see [`missed`].
+      //
+      // **And the window's close is a quit's from here**, on every platform:
+      // on a Mac `quitAndInstall` is Squirrel's, which closes every window
+      // before `before-quit` fires, and a Mac's close is always a hide — so a
+      // close left to the policy would cancel the quit, and with it the
+      // install.
+      handOver: (version) => {
+        leaving = true;
+        quitting = true;
+        process.env[RELAUNCH] = String(process.pid);
+        remember(join(app.getPath("userData"), HANDED_OVER), version, say);
+      },
+      say,
+    }).then((outcome) => {
+      if (outcome.kind !== "handed-over") {
+        pressed = false;
+      }
+    });
+  };
+
+  const sidecar = start(path, ADDRESS, said, passed);
   child = sidecar;
   say(`the sidecar is ${path}, at pid ${sidecar.pid}`);
 
@@ -664,9 +763,10 @@ async function run(): Promise<void> {
     if (!(trouble instanceof NeverCameUp)) {
       throw trouble;
     }
-    // Said rather than shown: there is no window to draw a dialog over yet, and
-    // the line is what a developer running `pnpm start` is reading anyway.
+    // Said and shown: there is no window yet, so the dialog stands on its
+    // own, and the line is what a developer running `pnpm start` is reading.
     say(`the server never came up — ${trouble.message}`);
+    silent(kept, trouble.waited);
     give(1);
     return;
   }
@@ -685,6 +785,20 @@ async function run(): Promise<void> {
   // than in `config.yaml` (ADR-0020).
   const userData = app.getPath("userData");
   const desk = join(userData, DESKTOP);
+
+  // And whether the Update the last run handed over to landed: a start on
+  // another version than the one remembered is an install that failed
+  // quietly, which this device's row is told as its trouble line — the server
+  // that saw the press has gone, and this one is the first to hear of it.
+  // Forgotten either way.
+  const unlanded = missed(join(userData, HANDED_OVER), app.getVersion());
+  if (unlanded !== undefined) {
+    say(`the last run handed over to an Update that didn't land — ${unlanded}`);
+    told(UPDATE_FAILED, data === undefined ? undefined : keyIn(data), { why: unlanded }).catch(
+      (trouble: unknown) =>
+        say(`the server could not be told the Update didn't land — ${String(trouble)}`),
+    );
+  }
 
   // What the icon is made of, made before there is a window for it to open:
   // **Show tray icon** can ask for it back at any moment the app is running, so

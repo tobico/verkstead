@@ -8,8 +8,8 @@
 #
 # What a release ships: one bare binary per platform the project ships, and
 # beside them the desktop app as the file each desktop is installed from — the
-# Linux one as an AppImage, the macOS one as a dmg, the Windows one as an msi
-# — each with the viewer inside it, published as a GitHub Release under the
+# Linux one as an AppImage, the macOS one as a dmg, the Windows one as an NSIS
+# installer — each with the viewer inside it, published as a GitHub Release under the
 # tag this run created. Every leg builds its artifact and then runs it — the
 # Windows one by installing it first — so a target that will not build, or
 # that builds something that will not run, fails the run rather than reaching a
@@ -38,12 +38,22 @@ name: Release
 # The version is typed without its `v`, the way `Cargo.toml` and the flake both
 # spell one, because that is the number a person has in mind. Everything that
 # wants the other spelling derives it — see `TAG` below.
+#
+# The note is the one thing a release says in words of its own. It is put above
+# the generated notes, and is for what somebody installing over the last
+# Release has to do by hand: `docs/releasing.md` says when one is needed. Left
+# empty, the notes are the generated ones alone.
 on:
   workflow_dispatch:
     inputs:
       version:
         description: The version to release, without a leading v (0.1.2, or 0.1.0-rc.1)
         required: true
+        type: string
+      note:
+        description: A line put above the generated notes, for what an upgrader has to do by hand (empty for none)
+        required: false
+        default: ''
         type: string
 
 # Read at the top, so that the jobs which compile the dependency tree and run
@@ -151,11 +161,11 @@ jobs:
 
       # The workspace version, which every crate here takes, edited in the one
       # place it is written. A hyphen is semver's own spelling of a
-      # pre-release, and a Cargo version has nowhere to put one that the
-      # Windows Installer version could also carry — three numbers and nothing
-      # after them — so `v0.1.0-rc.1` and `v0.1.0-rc.2` are both a manifest
-      # reading `0.1.0`. That is the same rule from both ends: the tag keeps
-      # the pre-release, the compiled binary does not.
+      # pre-release, and it stops at the tag: a pre-release rehearses the
+      # release of its number, so what it builds says that number, and
+      # `v0.1.0-rc.1` and `v0.1.0-rc.2` are both a manifest reading `0.1.0`.
+      # That is the same rule from both ends: the tag keeps the pre-release,
+      # the compiled binary and the installers do not.
       #
       # awk rather than sed because `version = ` appears in `[workspace.
       # package]` and could appear in any table below it; the section is
@@ -198,20 +208,16 @@ jobs:
           echo "Cargo.toml reads $got."
 
       # **And the same number into `desktop/package.json`**, which is where
-      # electron-builder reads the version the msi carries: `Verkstead-x86_64.msi`
-      # is packed from that file's `version`, and nothing else in the repository
-      # bumps it — `prepare` is the only thing in this workflow that writes a
-      # version anywhere, and the step above writes the workspace's. Left alone,
-      # every Release's msi would read `0.1.0.0`, **Installed apps** would say
-      # `0.1.0` for ever, and every upgrade would rest entirely on
-      # `AllowSameVersionUpgrades` — with a downgrade indistinguishable from an
-      # upgrade.
+      # electron-builder reads the version the installer carries:
+      # `Verkstead-x86_64.exe` is packed from that file's `version`, and nothing
+      # else in the repository bumps it — `prepare` is the only thing in this
+      # workflow that writes a version anywhere, and the step above writes the
+      # workspace's. Left alone, every Release's installer would say `0.1.0`,
+      # and so would **Installed apps**, for ever.
       #
       # The crate's number rather than the tag's, which is the same rule the step
-      # above takes and for the same reason: Windows Installer compares three
-      # numbers and ignores everything after them, so a pre-release has nowhere
-      # to go — and what **Installed apps** then says is what `verkstead
-      # --version` says.
+      # above takes and for the same reason: what **Installed apps** then says is
+      # what `verkstead --version` says.
       #
       # Through Node rather than `sed`, because this is JSON and the file is
       # written by hand: `JSON.stringify` at two spaces is byte for byte what is
@@ -759,6 +765,25 @@ jobs:
             exit 1
           fi
 
+      # **What electron-updater will be handed, read back before anything is
+      # uploaded** (ADR-0027, *The release*). The packed app's `app-update.yml`
+      # is where it looks, and has to name this repository; the
+      # `latest-linux.yml` the pack wrote beside the image is what it reads
+      # there, and has to name the file by the name the Release holds it under,
+      # with that file's size and sha512 — the metadata is unsigned, so those
+      # two are the whole of what an update rests on. And electron-updater
+      # itself, read out of the archive in the mounted image: a dependency the
+      # pack left out is an app that runs, passes everything below and never
+      # updates. See `desktop/scripts/updates.mjs`.
+      #
+      # There is no `.blockmap` to upload beside this one: an AppImage carries
+      # its blockmap inside itself, at the end of the file.
+      - name: The app knows where its updates are, and the metadata names this file
+        working-directory: desktop
+        run: |
+          node scripts/updates.mjs packed "$MOUNTED/resources" "$GITHUB_REPOSITORY"
+          node scripts/updates.mjs metadata ../target/electron/out/latest-linux.yml "../$APPIMAGE"
+
       # The half of this download a *session* gets, and the invariant the
       # Sandbox stands on (ADR-0020): what a session spawned by this app runs is
       # the binary inside the mounted image, by path, saying `ask`. An AppImage
@@ -1029,6 +1054,53 @@ jobs:
             exit 1
           fi
 
+      # **And the app updates itself, with the real electron-updater** (ADR-0027,
+      # *A device updates itself*): packed twice more, at 0.0.1 and 0.0.2, the
+      # higher one served from a local `generic` feed and the lower one started
+      # pointed at it, Update pressed through the API the way the row presses
+      # it, and the relaunch read back — the row reading *updating…* with the
+      # app's reports on it, the server going, a server coming back on the
+      # higher image, and the relaunch neither handing over to the app it
+      # replaced nor meeting its listener. And before it, a failing run: a
+      # relaunch that didn't land and a corrupt image, each read back as the
+      # row's trouble line. See `desktop/scripts/update-feed.mjs`.
+      #
+      # Packed apart from the artifact, under the runner's temp, so the file
+      # uploaded below is the one every step above ran. And started only once
+      # the last step's server has let go of the address, which a `kill`
+      # without a `wait` does not promise.
+      - name: The app updates itself from a local feed
+        timeout-minutes: 15
+        working-directory: desktop
+        env:
+          VERKSTEAD_CLI: ${{ github.workspace }}/sidecar/verkstead-linux-x64
+          FEED: ${{ runner.temp }}/feed
+        run: |
+          node scripts/update-feed.mjs pack "$VERKSTEAD_CLI" "$FEED"
+
+          for _ in $(seq 100); do
+            if ! curl --silent --output /dev/null http://127.0.0.1:8422/; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          Xvfb :98 -screen 0 1024x768x24 &
+          screen=$!
+          export DISPLAY=:98
+          for _ in $(seq 50); do
+            if [ -e /tmp/.X11-unix/X98 ]; then
+              break
+            fi
+            sleep 0.2
+          done
+          eval "$(dbus-launch --sh-syntax)"
+
+          status=0
+          node scripts/update-feed.mjs run "$FEED" || status=$?
+          kill "$screen" "$DBUS_SESSION_BUS_PID" || true
+          exit "$status"
+
       # Under an artifact name that says which desktop this is rather than what
       # the file is called. `publish` fetches the CLI binaries by a
       # `verkstead-*` pattern and counts what arrives, so a desktop asset named
@@ -1041,11 +1113,16 @@ jobs:
       # and a Release asset has no mode to carry it either. The file was run
       # above, where it still had one, and whoever downloads it chmods it — as
       # they do a bare binary.
-      - name: Upload the AppImage
+      #
+      # The update metadata goes up beside it, from the same directory, so the
+      # upload keeps both bare names.
+      - name: Upload the AppImage and its update metadata
         uses: actions/upload-artifact@v7.0.1
         with:
           name: desktop-linux
-          path: ${{ env.APPIMAGE }}
+          path: |
+            ${{ env.APPIMAGE }}
+            target/electron/out/latest-linux.yml
           if-no-files-found: error
 
   # The macOS desktop artifact: the same Electron app the AppImage carries,
@@ -1076,7 +1153,7 @@ jobs:
   # the operating system's own tools, and that image is the Apple silicon one —
   # the half more people download.
   desktop-macos:
-    name: Verkstead-universal.dmg
+    name: Verkstead-universal.dmg and .zip
     needs: [prepare, build]
     runs-on: macos-15
     env:
@@ -1087,6 +1164,23 @@ jobs:
       DMG: target/electron/out/Verkstead-universal.dmg
       MOUNT: target/electron/mounted
       APP: target/electron/mounted/Verkstead.app
+      # And the same app as the zip an update installs, which is asserted the
+      # way the dmg is — out of the file that is uploaded, unzipped beside the
+      # mount rather than read off what the pack left behind.
+      #
+      # **Not `ZIP`, nor `UNZIP`**: Info-ZIP's `zip` and `unzip` each read an
+      # environment variable of their own name as extra options, and
+      # electron-builder makes the zip with that `zip` — so a job holding
+      # `ZIP` hands the pack's own `zip` this path as an argument, and it fails
+      # with "Could not create output file".
+      ARCHIVE: target/electron/out/Verkstead-universal.zip
+      EXTRACTED: target/electron/unzipped
+      # And what an update reads beside the zip: the metadata naming it, and
+      # the blockmap of each file for a differential download.
+      UPDATES: |
+        target/electron/out/latest-mac.yml
+        target/electron/out/Verkstead-universal.zip.blockmap
+        target/electron/out/Verkstead-universal.dmg.blockmap
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -1133,12 +1227,84 @@ jobs:
       # these: `lipo` neither reads nor copies it, and the script states 0755
       # over the file it writes. But a half nothing can run is the first thing
       # anybody debugging this leg would try to run, and the bit costs a line.
+      # **A release never publishes an ad-hoc Mac app** (ADR-0027, *The
+      # release*): Squirrel.Mac refuses an ad-hoc signed update, so one shipped
+      # would be a version no Mac could update to or from. The pack itself
+      # signs ad-hoc when it is given no certificate, which is what a checkout,
+      # a pull request and the probe branch want — so it is this leg that
+      # refuses, before anything is packed, naming the secret it has not got.
+      # `docs/releasing.md` says how each is made.
+      #
+      # **Nor an unnotarized one**, for the same reason one step on: a
+      # Developer ID app Apple has not notarized is one Gatekeeper still puts
+      # *Open Anyway* in front of, and the pack skips notarizing when it has no
+      # key rather than failing. So the key's three are refused here beside the
+      # certificate's two, before an hour of packing finds out.
+      #
+      # Repository secrets rather than an environment's, so that a throwaway
+      # workflow on another branch can be handed the same certificate.
+      - name: The Developer ID certificate and the notary's key are in the secrets
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          missing=0
+          for secret in CSC_LINK CSC_KEY_PASSWORD; do
+            if [ -z "${!secret}" ]; then
+              echo "::error::The repository has no $secret secret," \
+                "so this Mac app would be signed ad-hoc and could never update."
+              missing=1
+            fi
+          done
+          for secret in APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            if [ -z "${!secret}" ]; then
+              echo "::error::The repository has no $secret secret," \
+                "so this Mac app would not be notarized and Gatekeeper would refuse it."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
       - name: Pack the app
         working-directory: desktop
         env:
           ARM64: ${{ github.workspace }}/sidecar/verkstead-macos-arm64
           X64: ${{ github.workspace }}/sidecar/verkstead-macos-x64
+          # electron-builder's own names: the `.p12` and its password, which
+          # the pack imports into a keychain of its own and throws away after.
+          # Its log says whose identity it signed with.
+          #
+          # **The certificate is handed over as a file, never as the base64
+          # itself.** electron-builder reads `CSC_LINK` as base64 only when it
+          # is over 2048 characters or ends in `=`, and as a *path* otherwise —
+          # and a Developer ID `.p12` can be short enough to be neither, at
+          # which point it `stat`s the certificate as a file name and prints
+          # it whole in the error, into a public log where GitHub's masking,
+          # which matches the secret exactly, does not hide it. So the secret
+          # arrives under a name of this step's, is decoded into the runner's
+          # temp beside the `.p8`, and `CSC_LINK` names that file.
+          CERTIFICATE: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # And the App Store Connect key electron-builder notarizes with, by
+          # its own names — except the `.p8` itself, which it takes as a path
+          # to a file rather than as the key. So the secret arrives under a
+          # name of this step's and is written to the runner's temp, which the
+          # runner empties after the job, and `APPLE_API_KEY` names that file.
+          NOTARY_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
+          CSC_LINK="$RUNNER_TEMP/certificate.p12"
+          printf '%s' "$CERTIFICATE" | base64 --decode > "$CSC_LINK"
+          export CSC_LINK
+
+          APPLE_API_KEY="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
+          printf '%s\n' "$NOTARY_KEY" > "$APPLE_API_KEY"
+          export APPLE_API_KEY
+
           chmod +x "$ARM64" "$X64"
           pnpm run pack "$ARM64" "$X64"
           ls -l ../target/electron/out
@@ -1159,6 +1325,19 @@ jobs:
           hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$PWD/$MOUNT"
           ls -l "$MOUNT"
           ls -l "$APP/Contents"
+
+      # What electron-updater will be handed, for the reason the AppImage leg
+      # gives: the mounted app's `app-update.yml` and electron-updater inside
+      # it, and the `latest-mac.yml` naming both files by the names the Release
+      # holds them under, with each one's size and sha512. The zip first,
+      # because it is the update — Squirrel.Mac installs a zip — and so the one
+      # the metadata's `path` names; the dmg is listed beside it as a file of
+      # the same version. See `desktop/scripts/updates.mjs`.
+      - name: The app knows where its updates are, and the metadata names these files
+        working-directory: desktop
+        run: |
+          node scripts/updates.mjs packed "$GITHUB_WORKSPACE/$APP/Contents/Resources" "$GITHUB_REPOSITORY"
+          node scripts/updates.mjs metadata ../target/electron/out/latest-mac.yml "../$ARCHIVE" "../$DMG"
 
       # The half of this download a *session* gets, and the invariant the
       # Sandbox stands on (ADR-0020): what a session spawned by this app runs is
@@ -1207,10 +1386,69 @@ jobs:
       # Over the bundle and over the sidecar inside it: the pack signs the app
       # and everything electron-builder knows to be in it, and the sidecar is an
       # extra resource that arrived from another job.
+      #
+      # **And that the seal is a Developer ID's, under the hardened runtime**,
+      # over both again: notarization refuses anything less, Squirrel.Mac
+      # refuses an ad-hoc update, and the sidecar is the binary every session
+      # is spawned from — a bundle signed properly around a sidecar signed
+      # ad-hoc is one Apple's notary sends back. `codesign -dv` prints an
+      # `Authority=` line per certificate in the chain, the leaf's first, and
+      # the runtime among its `flags=`; it prints them to standard error.
       - name: The signature survived the packing
         run: |
           codesign --verify --strict --verbose=2 "$APP"
           codesign --verify --strict "$APP/Contents/Resources/cli/verkstead"
+
+          for signed in "$APP" "$APP/Contents/Resources/cli/verkstead"; do
+            shown=$(codesign -dv --verbose=2 "$signed" 2>&1)
+            printf '%s\n' "$shown" | grep -E '^(Authority|Identifier|TeamIdentifier|CodeDirectory)'
+            if ! printf '%s\n' "$shown" | grep -q '^Authority=Developer ID Application: '; then
+              echo "::error::$signed is not signed by a Developer ID Application certificate."
+              exit 1
+            fi
+            if ! printf '%s\n' "$shown" | grep -Eq 'flags=[^ ]*runtime'; then
+              echo "::error::$signed is not signed with the hardened runtime."
+              exit 1
+            fi
+          done
+
+      # **And that Gatekeeper takes both files as a Mac that has never seen
+      # them would** — the dmg a human opens and the zip Squirrel.Mac will
+      # install — which is the whole of what notarizing was for: no *Open
+      # Anyway*, and no update refused.
+      #
+      # The zip is unzipped with `ditto`, which is how Squirrel.Mac itself
+      # unpacks one, rather than read off the app the pack zipped: a zip that
+      # lost a framework's symlinks, a mode or the stapled ticket is one whose
+      # app no longer verifies, and that must fail here rather than on a Mac
+      # that updated. Under `target/` beside the mount, for the reason the
+      # mount is there.
+      #
+      # Over each app: the seal again, strictly; the ticket, which `stapler`
+      # reads out of the bundle without asking Apple; and `spctl`, which is
+      # Gatekeeper's own assessment and says `source=Notarized Developer ID`
+      # of an app it accepts. A runner is online, so `spctl` could take the
+      # ticket from Apple instead of from the bundle — which is why `stapler`
+      # is asked as well: a Mac offline at first launch has only the staple.
+      - name: Gatekeeper accepts the app out of the dmg and out of the zip
+        run: |
+          rm -rf "$EXTRACTED"
+          mkdir -p "$EXTRACTED"
+          ditto -x -k "$ARCHIVE" "$EXTRACTED"
+          ls -l "$EXTRACTED"
+
+          for app in "$APP" "$EXTRACTED/Verkstead.app"; do
+            echo "Assessing $app"
+            codesign --verify --strict --verbose=2 "$app"
+            xcrun stapler validate "$app" || {
+              echo "::error::$app carries no stapled notarization ticket."
+              exit 1
+            }
+            spctl --assess --type execute --verbose=4 "$app" || {
+              echo "::error::Gatekeeper refuses $app."
+              exit 1
+            }
+          done
 
       # And that the icon a downloader drags into Applications resolves to a
       # file macOS can read. The Finder icon is the one thing about this bundle
@@ -1451,9 +1689,9 @@ jobs:
       # inside the bundle from a Conversation over this checkout.
       #
       # **What this leg is for beyond the other two is the signature.** The
-      # bundle is ad-hoc signed rather than by a Developer ID, and the
       # notification centre is the one part of macOS that may decline an app it
-      # cannot place; Electron says so with a `failed` event, which the app logs.
+      # cannot place, which an ad-hoc bundle was and a Developer ID one should
+      # not be; Electron says so with a `failed` event, which the app logs.
       # So the line saying it was shown, the absence of that refusal, and
       # `usernoted` presenting it are all read. Measured on macos-15: an ad-hoc
       # bundle installed in `/Applications` is presented, and the same bundle
@@ -1573,15 +1811,26 @@ jobs:
       # artifact is the image itself with the app, the `/Applications` symlink
       # and every mode either of them has still inside it. Which is the other
       # half of why a Mac download is an image rather than a folder.
-      - name: Upload the dmg
+      #
+      # The zip goes up beside it under the same artifact, and is safe from
+      # that for the dmg's reason: it is one file with the symlinks and the
+      # modes inside it, which the artifact's own zipping carries as bytes —
+      # the step above unzipped exactly those bytes. Both files sit in one
+      # directory, so the upload keeps their bare names and `publish` finds
+      # the two of them in `desktop-assets/` — and the update metadata and the
+      # two blockmaps beside them, out of the same directory.
+      - name: Upload the dmg, the zip and what an update reads beside them
         uses: actions/upload-artifact@v7.0.1
         with:
           name: desktop-macos
-          path: ${{ env.DMG }}
+          path: |
+            ${{ env.DMG }}
+            ${{ env.ARCHIVE }}
+            ${{ env.UPDATES }}
           if-no-files-found: error
 
   # The Windows desktop artifact: the same Electron app the other two legs pack,
-  # inside the msi a Windows download arrives as. A leg of its own rather than a
+  # inside the NSIS installer a Windows download arrives as. A leg of its own rather than a
   # row in the matrix above, for the reason `desktop-linux` gives about itself —
   # what it uploads is an installer rather than a bare binary, and nothing about
   # it is that matrix's shape.
@@ -1595,20 +1844,18 @@ jobs:
   # the viewer is embedded in the binary above at compile time, so fetching the
   # CLI fetches the viewer with it.
   #
-  # **And it compiles nothing**, which is most of what this leg used to be: no
-  # Rust toolchain, no cache keyed `msi`, no `touch` of the embed to defeat
-  # cargo's staleness, and no `web/dist` to fetch first. The hand-written WiX
-  # source and the script that ran the toolset over it are retired in the same
-  # change — the package is electron-builder's msi target now, which fetches its
-  # own candle and light (ADR-0020, and `desktop/electron-builder.yml`).
+  # **And it compiles nothing**: no Rust toolchain, no `touch` of the embed to
+  # defeat cargo's staleness, and no `web/dist` to fetch first. The package is
+  # electron-builder's `nsis` target, which fetches its own makensis
+  # (ADR-0027, and `desktop/electron-builder.yml`).
   #
-  # `windows-2025` all the same: those two are Windows programs, and the install
-  # and every assertion after it want a real Windows to happen on.
+  # `windows-2025` all the same: makensis is a Windows program, and the
+  # install and every assertion after it want a real Windows to happen on.
   #
   # x86_64 only, as the AppImage is (ADR-0012, kept by ADR-0020): Windows on
   # arm64 runs an x86_64 exe under the emulation it has for exactly this.
   desktop-windows:
-    name: Verkstead-x86_64.msi
+    name: Verkstead-x86_64.exe
     needs: [prepare, build]
     runs-on: windows-2025
     # Every `run` below is a shell script, as in the `build` job above: said
@@ -1620,16 +1867,16 @@ jobs:
       run:
         shell: bash
     env:
-      # Where `pnpm run pack` leaves it, said once: every step below installs
-      # this file, installs over it or uploads it. Under `target/`, which is
-      # where `desktop/electron-builder.yml` puts everything it makes.
-      MSI: target/electron/out/Verkstead-x86_64.msi
+      # Where `pnpm run pack` leaves it, said once: the steps below install
+      # this file and upload it. Under `target/`, which is where
+      # `desktop/electron-builder.yml` puts everything it makes.
+      INSTALLER: target/electron/out/Verkstead-x86_64.exe
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           # The bump commit, as every leg does — see the `viewer` job. It is the
           # commit whose `desktop/package.json` carries this release's version,
-          # which is the number the msi reads as its product version.
+          # which is the number the installer carries as its version.
           ref: ${{ needs.prepare.outputs.sha }}
 
       # The same pins the viewer's leg and `ci.yml` take — see the action. The
@@ -1665,43 +1912,41 @@ jobs:
           pnpm run pack
           ls -l ../target/electron/out
 
+      # What electron-updater will be handed, for the reason the AppImage leg
+      # gives — the `latest.yml` naming the installer by the name the Release
+      # holds it under, with its size and sha512. Read off the file that is
+      # uploaded, before it is installed; the installed app's `app-update.yml`
+      # is read after the install below.
+      - name: The metadata names this installer
+        working-directory: desktop
+        run: node scripts/updates.mjs metadata ../target/electron/out/latest.yml "../$INSTALLER"
+
       # Installed rather than unpacked, which is what makes every assertion
-      # below one about the file that is uploaded: this is that msi, handed to
-      # Windows the way a double-click hands it over — the whole product, no
-      # arguments of its own, and nothing asked of anybody.
+      # below one about the file that is uploaded: this is that installer,
+      # handed to Windows the way a double-click hands it over — the whole
+      # product, and nothing asked of anybody.
       #
-      # `/qn` is what stands in for the human, `/norestart` because nothing
-      # here has any business rebooting a runner, and the log is the only way
-      # back into a failed install: Windows Installer reports one number and
-      # writes everything else to the file it was pointed at.
-      #
-      # `/qn` is also what keeps `runAfterFinish` out of every install this leg
-      # makes: the custom action electron-builder's template writes is
-      # conditioned on the UI level, so the installer starts the app for a human
-      # who double-clicked the file and never for a quiet install here.
+      # `/S` is what stands in for the human, and it is also what keeps
+      # `runAfterFinish` out of every install this leg makes: electron-builder's
+      # template starts the app after a silent install only when it is also
+      # told `--force-run`, so the installer starts the app for a human who
+      # double-clicked the file and never for a quiet install here.
       #
       # Through `Start-Process -Wait` rather than started from this shell,
-      # because `msiexec` is a windows-subsystem program: run directly it can
-      # hand back a prompt before the install it started has finished, and
+      # because the installer is a windows-subsystem program: run directly it
+      # hands back a prompt before the install it started has finished, and
       # every step below would then be asking about a half-written directory.
-      - name: The msi installs
+      # NSIS writes no log of its own, so the exit code is the whole of what a
+      # failed install says.
+      - name: The installer installs
         run: |
-          msi=$(cygpath -w "$MSI")
-          log=$(cygpath -w msiexec.log)
+          installer=$(cygpath -w "$INSTALLER")
           code=0
           powershell -NoProfile -Command \
-            "exit (Start-Process msiexec -ArgumentList '/i',\"$msi\",'/qn','/norestart','/l*v',\"$log\" -Wait -PassThru).ExitCode" ||
+            "exit (Start-Process -FilePath \"$installer\" -ArgumentList '/S' -Wait -PassThru).ExitCode" ||
             code=$?
           if [ "$code" -ne 0 ]; then
-            echo "::error::Windows Installer refused the msi (exit $code)."
-            # Through `tr`, because Windows Installer writes its verbose log as
-            # UTF-16: every other byte is a NUL, and a log printed without
-            # taking them out arrives as a column of single characters.
-            if [ -f msiexec.log ]; then
-              tr -d '\000' < msiexec.log | tail -n 200
-            else
-              echo "It wrote no log either."
-            fi
+            echo "::error::The installer refused to install (exit $code)."
             exit 1
           fi
 
@@ -1710,35 +1955,32 @@ jobs:
       # unsigned program asking for the machine, and elevation buys a
       # downloader nothing they wanted.
       #
-      # **The Uninstall key is not where Windows writes that down.** Windows
-      # Installer may put the Installed apps entry under `HKLM` whichever
-      # context it installed in — the service that writes it is running as the
-      # machine either way — so a per-user product's entry can sit in `HKLM`
-      # beside every machine-wide one, and its absence from `HKCU` would say
-      # nothing at all about scope. What does say it is the registration
-      # underneath: a per-user install is listed in
-      # `HKCU\Software\Microsoft\Installer\Products`, a per-machine one in
-      # `HKLM\SOFTWARE\Classes\Installer\Products`, and a product is in one of
-      # the two and never both. So the claim is made there — present in the
-      # first, absent from the second — and the entry a human sees is asked for
-      # separately and only to exist, because somebody who installed this has to
-      # be able to find it again and remove it. Which hive that entry landed in
-      # is printed rather than asserted: it is a fact about this package that
-      # this leg is the first thing able to read.
+      # **An NSIS installer writes its registration where its scope says**:
+      # a per-user install writes its Installed apps entry under `HKCU`'s
+      # Uninstall key, a per-machine one under `HKLM`'s, and nothing else
+      # writes either for it. So the claim is made there — one entry in the
+      # first, none in the second — and the entry is also what somebody who
+      # installed this has to find again to remove it.
       #
       # Three things therefore say it landed the way the package asked: the
-      # files are in this user's profile, the product is registered to this
+      # files are in this user's profile, the install is registered to this
       # user rather than to the machine, and Installed apps can see it.
       #
-      # **And the two files are the launcher and the CLI under it**, rather than
-      # the two exes that used to sit side by side: `Verkstead.exe` at the root
-      # is what electron-builder names the launcher, and the sidecar is in a
-      # directory of its own inside the install (ADR-0020). Looked for with
-      # `find` rather than with `[ -f ]`, the way the dmg leg reads the names
-      # inside a bundle: NTFS does not read case, so a test that only opened the
-      # file would pass on a spelling Windows' own lookup treats as another name
-      # — and the two spellings one directory cannot hold are the whole reason
-      # the CLI has a directory at all.
+      # **The profile directory is `…\Programs\Verkstead`**, which is the one
+      # thing about where it landed that `desktop/build/installer.nsh` decides
+      # rather than electron-builder: left alone, a per-user install is named
+      # for the package, `verkstead-desktop`. It is the directory Launch on
+      # Startup's Run value names `Verkstead.exe` inside, so a wrong one here
+      # is a machine that stops starting the app at login.
+      #
+      # **And the two files are the launcher and the CLI under it**: `Verkstead.exe`
+      # at the root is what electron-builder names the launcher, and the
+      # sidecar is in a directory of its own inside the install (ADR-0020).
+      # Looked for with `find` rather than with `[ -f ]`, the way the dmg leg
+      # reads the names inside a bundle: NTFS does not read case, so a test that
+      # only opened the file would pass on a spelling Windows' own lookup treats
+      # as another name — and the two spellings one directory cannot hold are
+      # the whole reason the CLI has a directory at all.
       #
       # Where they landed is then written down for the steps after this one,
       # because one of them points `LOCALAPPDATA` at a directory of its own and
@@ -1750,71 +1992,46 @@ jobs:
             if [ -z "$(find "$(dirname "$file")" -maxdepth 1 \
               -name "$(basename "$file")" 2> /dev/null)" ]; then
               echo "::error::$file is not there, under that spelling or at all."
-              find "$install" -maxdepth 2 2> /dev/null ||
-                echo "There is no $install at all."
+              find "$(cygpath -u "$LOCALAPPDATA")/Programs" -maxdepth 2 2> /dev/null ||
+                echo "There is no Programs directory in this profile at all."
               exit 1
             fi
           done
           ls -l "$install" "$install/resources/cli"
 
-          # All three asked for in one pass and printed whole, so that a leg
-          # which fails below shows what Windows actually recorded rather than
-          # only which of the three assertions tripped over it.
+          # Both hives asked in one pass and printed whole, so that a leg which
+          # fails below shows what Windows actually recorded rather than only
+          # which assertion tripped over it.
           registration=$(powershell -NoProfile -Command "
-            \$user = @(Get-ChildItem 'HKCU:\Software\Microsoft\Installer\Products' -EA SilentlyContinue |
-              Where-Object { (Get-ItemProperty \$_.PSPath -EA SilentlyContinue).ProductName -eq 'Verkstead' })
-            \$machine = @(Get-ChildItem 'HKLM:\SOFTWARE\Classes\Installer\Products' -EA SilentlyContinue |
-              Where-Object { (Get-ItemProperty \$_.PSPath -EA SilentlyContinue).ProductName -eq 'Verkstead' })
-            \$arp = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue |
+            \$user = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue |
+              Where-Object DisplayName -eq 'Verkstead')
+            \$machine = @(Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue |
               Where-Object DisplayName -eq 'Verkstead')
             'user=' + \$user.Count
             'machine=' + \$machine.Count
-            'arp=' + ((\$arp | ForEach-Object { \$_.DisplayVersion + ' at ' + (\$_.PSPath -replace '^.*::','') }) -join '; ')
+            'says=' + ((\$user + \$machine | ForEach-Object { \$_.DisplayVersion + ' at ' + (\$_.PSPath -replace '^.*::','') + ', uninstalled by ' + \$_.QuietUninstallString }) -join '; ')
           " | tr -d '\r')
           echo "$registration"
 
           user=$(printf '%s\n' "$registration" | sed -n 's/^user=//p')
           machine=$(printf '%s\n' "$registration" | sed -n 's/^machine=//p')
-          entry=$(printf '%s\n' "$registration" | sed -n 's/^arp=//p')
 
           if [ "$user" != 1 ] || [ "$machine" != 0 ]; then
             echo "::error::Verkstead is registered $user time(s) to this user and $machine to the machine, and a per-user install is 1 and 0."
-            # What the installer decided and why, which is the one thing the
-            # registry cannot say. `ALLUSERS` is the property the context is
-            # chosen from and the log records every change to it; `Assignment`
-            # is the answer, and is 0 for per-user.
-            echo "What the install said about its scope:"
-            if [ -f msiexec.log ]; then
-              # Through `tr`, because Windows Installer writes its verbose log
-              # as UTF-16: every other byte is a NUL, and a `grep` for ASCII
-              # matches nothing in it at all.
-              #
-              # Held in a variable rather than printed straight out of the
-              # pipe: this step runs under `pipefail`, and both a `grep` that
-              # matched nothing and a `head` that closed the pipe on one that
-              # matched plenty fail the whole pipeline — so what was found has
-              # to be looked at rather than inferred from an exit code.
-              scope=$(tr -d '\000' < msiexec.log |
-                grep -aiE "ALLUSERS|MSIINSTALLPERUSER|Assignment=" |
-                head -n 40 || true)
-              if [ -n "$scope" ]; then
-                printf '%s\n' "$scope"
-              else
-                echo "The log says nothing about any of them."
-              fi
-            else
-              echo "There is no msiexec.log to read."
-            fi
             exit 1
           fi
-
-          if [ -z "$entry" ]; then
-            echo "::error::Verkstead registered per-user, and nothing in Installed apps can see it."
-            exit 1
-          fi
-          echo "Installed apps says: Verkstead $entry"
+          echo "Installed apps says: Verkstead $(printf '%s\n' "$registration" | sed -n 's/^says=//p')"
 
           echo "INSTALL=$install" >> "$GITHUB_ENV"
+
+      # And the installed app knows where its updates are, for the reason the
+      # AppImage leg reads its own: `app-update.yml` in the installed resources
+      # naming this repository, and electron-updater inside `app.asar` — asked
+      # of the install, which is what electron-updater runs from. The path
+      # goes to Node in Windows' own spelling.
+      - name: The installed app knows where its updates are
+        working-directory: desktop
+        run: node scripts/updates.mjs packed "$(cygpath -w "$INSTALL/resources")" "$GITHUB_REPOSITORY"
 
       # The way in, and the one thing about it a human would notice going
       # wrong. Three claims, each asked of what was installed rather than of
@@ -1822,11 +2039,12 @@ jobs:
       #
       # **There is an entry**, in this user's own Start menu — which is where a
       # per-user install writes one, and says once more what the step above
-      # established.
+      # established. It is the entry that carries `net.tobico.Verkstead` as its
+      # AppUserModelID, which the toast below depends on.
       #
       # **It opens the app**: the shortcut names `Verkstead.exe` at the install
-      # root, which is the launcher electron-builder writes and the file its msi
-      # target hangs the shortcut off. There is no verb for it to carry and no
+      # root, which is the launcher electron-builder writes and the file its
+      # installer hangs the shortcut off. There is no verb for it to carry and no
       # shim for it to name — the app is the one way into itself.
       #
       # **And it opens no console with it**, which the shim used to be the whole
@@ -1839,9 +2057,8 @@ jobs:
       # console one. What it asserts is that whatever the entry opens is a
       # windows-subsystem program, and an Electron launcher is one.
       #
-      # The target is read through `WScript.Shell`, which reads one off a
-      # non-advertised shortcut — electron-builder's template sets
-      # `DISABLEADVTSHORTCUTS`, so that is what this gets.
+      # The target is read through `WScript.Shell`, which reads one off an
+      # ordinary shortcut, and an NSIS installer writes no other kind.
       #
       # Paths are compared with the case taken out of them, because that is how
       # Windows compares them and nothing here settles whose spelling of the
@@ -1878,7 +2095,7 @@ jobs:
       # The half of the install that is not the app at all: a human at a
       # terminal. A session Verkstead spawns is handed the server's own image
       # by path, but somebody typing `verkstead ask` is handed whatever `PATH`
-      # says — so the msi puts a directory of the install on this user's own
+      # says — so the installer puts a directory of the install on this user's own
       # `PATH`, and this is that entry read back the way a terminal opened
       # afterwards would read it.
       #
@@ -1928,7 +2145,7 @@ jobs:
           # Which `verkstead` before what it prints: a `PATH` that found some
           # other one would answer this step's question with the wrong binary.
           # `tr -s` because a Windows directory property ends in a separator and
-          # a shell joining a name onto one leaves two — the entry this msi
+          # a shell joining a name onto one leaves two — the entry the installer
           # writes names a directory *inside* the install rather than the
           # property alone, so it does not, and one fewer thing depends on that.
           cli=$(lower "$INSTALL/resources/cli")
@@ -2079,7 +2296,7 @@ jobs:
       # **What this leg is for beyond the other two is the AppUserModelID.** A
       # Windows toast belongs to an application id, and Windows shows one only
       # for an id something on the machine has claimed — here the Start-menu
-      # entry the msi wrote, which carries the id `main.ts` sets. A toast under
+      # entry the installer wrote, which carries the id `main.ts` sets. A toast under
       # an id nothing claims is dropped, and Electron says so with a `failed`
       # event, which the app logs. So the line saying it was shown and the
       # absence of that refusal are both read.
@@ -2173,93 +2390,78 @@ jobs:
             exit 1
           fi
 
-      # **A package installed over another, which no leg has ever done.**
-      # Windows is the only platform where the question arises — an AppImage and
-      # a dmg are files a downloader replaces — and it is a
-      # promise to a downloader in as many words: a newer msi replaces the
-      # copy that is there rather than standing beside it.
+      # **An install over what is already there**, which is the one shape of
+      # install a real machine makes after its first. Two halves, each followed
+      # by three counts — one row in Installed apps, one entry on this user's
+      # `PATH` naming the install, one Start-menu entry across both menus —
+      # because those are the three ways two products would show to whoever
+      # installed them. Asked after each half rather than once at the end, so
+      # that a failure says which install left two.
       #
-      # **Two halves, and they test different things.** The first installs this
-      # msi over itself, which exercises the same-version upgrade rule
-      # deterministically: a Windows Installer version is three numbers
-      # compared, so a `v0.1.0-rc.2` package reads the same as the `v0.1.0-rc.1`
-      # one it replaces, and `AllowSameVersionUpgrades` in electron-builder's own
-      # template is what makes that a major upgrade rather than a second product
-      # (`docs/releasing.md`). The second fetches the last Release's msi and
-      # installs this one on top of it, which is the half that tests the
-      # carried-over UpgradeCode — the one identifier that says two packages are
-      # the same product, and the one thing a code derived afresh from the app
-      # id would get wrong (see `desktop/electron-builder.yml`).
+      # **The first half is this exe over itself**, with nothing uninstalled in
+      # between: a second download of a version already installed, and the
+      # shape electron-updater's update takes. It is the check that
+      # `desktop/build/installer.nsh` adds its `PATH` entry once rather than once
+      # more.
       #
-      # **The second half takes the installed copy away first.** The last
-      # Release's version is below this one's and both packages refuse a
-      # downgrade by name, so the order is uninstall, install the older package,
-      # then install this one over it — which is the order a machine that has
-      # been running the last release is in when somebody downloads this.
+      # **The second half is this exe over the last Release's msi**, which an
+      # NSIS installer cannot upgrade: the include script finds the msi by its
+      # UpgradeCode and uninstalls it before anything is extracted (Set 1393
+      # Q2). So the order is the one a machine that ran that release is in —
+      # this install taken away, the msi installed, then this exe over it — and
+      # afterwards the msi is gone from Windows Installer's own record of this
+      # user's products, as well as from the three counts.
       #
-      # **And where there is no Release to fetch, that half is skipped with a
-      # warning rather than failing**: a Release should not fail for the absence
-      # of an earlier one. The warning says the upgrade went unchecked in as
-      # many words, so a skip cannot be read off the log as a pass.
+      # **And the `PATH` entry is read as well as counted.** The msi's entry and
+      # this installer's name the same directory, so a count of one does not say
+      # whose survived. What is checked is that the one left is
+      # `resources\cli`, which is what a terminal needs.
       #
-      # What each install is followed by is three counts, which are the three
-      # ways two products would be visible to whoever installed them: one row in
-      # Installed apps, one entry in this user's `PATH` naming the install, and
-      # one Start-menu entry across both menus. Asked after each of the two
-      # halves rather than once at the end, so that a failure says which install
-      # left two.
+      # **Launch on Startup's Run value survives it.** That value is the app's,
+      # written through Electron's login-item API from the window, which nothing
+      # here can reach. So it is written the way that API writes it, before the
+      # install over the msi, and read back after it: still there, unchanged,
+      # and naming a `Verkstead.exe` that exists.
       #
-      # **And the `PATH` entry is read as well as counted**, which the other two
-      # are not. A count says two products are not both installed; it does not
-      # say *whose* entry survived, and here the two disagree about what they
-      # put on a `PATH`: the package this one replaces named the install root,
-      # which is exactly the spelling this stage moved away from — the root
-      # holds `Verkstead.exe` and Windows looks a name up without regard to
-      # case, so `verkstead guide` there answers with a window rather than with
-      # the Guide. An upgrade that removed the new entry and left the old one
-      # would be one entry, and it would be the wrong one. This half is the only
-      # place that transition is ever made, so the name is checked where it is
-      # made rather than only on the fresh install further up.
+      # **Where the last Release has no msi, that half is skipped with a
+      # warning** saying it went unchecked, so a skip cannot be read off the log
+      # as a pass. The Release before the first to ship this installer is the
+      # last to carry an msi, so from the second Release that ships it this
+      # half skips itself every run. It
+      # retires with the removal code in `desktop/build/installer.nsh`, which
+      # is there for machines still holding that msi.
       #
-      # Last of the assertions because of what it leaves behind: the second half
-      # has an older Verkstead installed for part of it, and every step above
-      # asks its question of the install this leg's own msi made.
-      - name: The msi upgrades over itself, and over the last Release's
+      # Before the uninstall step rather than after it, so that the install that
+      # step takes away is the one made over the msi.
+      - name: Installed over itself, and over the last Release's msi, it is still one
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # Every install below goes through here, because each wants the same
-          # log and the same account of a refusal — see the step that installed
-          # this package in the first place for why it is `Start-Process -Wait`
-          # and why the log needs its nulls taken out before anything reads it.
-          installer() {
-            slug=$1
-            verb=$2
-            package=$3
-            said=$4
-            log="$PWD/msiexec-$slug.log"
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+          # Every program below is a windows-subsystem one, so each is waited
+          # for through `Start-Process -Wait` — see the step that installed this
+          # in the first place.
+          run() {
+            said=$1
+            program=$2
+            arguments=$3
             code=0
             powershell -NoProfile -Command \
-              "exit (Start-Process msiexec -ArgumentList '$verb',\"$(cygpath -w "$package")\",'/qn','/norestart','/l*v',\"$(cygpath -w "$log")\" -Wait -PassThru).ExitCode" ||
+              "exit (Start-Process -FilePath \"$program\" -ArgumentList '$arguments' -Wait -PassThru).ExitCode" ||
               code=$?
             if [ "$code" -ne 0 ]; then
-              echo "::error::Windows Installer refused $said (exit $code)."
-              if [ -f "$log" ]; then
-                tr -d '\000' < "$log" | tail -n 200
-              else
-                echo "It wrote no log either."
-              fi
+              echo "::error::$said failed (exit $code)."
               exit 1
             fi
-            echo "Installer: $said — done."
+            echo "$said: done."
           }
 
           # The three counts and what they are counting, in one pass and printed
-          # whole: a leg that fails below then shows what the machine actually
-          # holds rather than only which count was wrong. The product is looked
-          # for by the name a human reads rather than by a product code, because
-          # what is being asked is what somebody opening Installed apps finds.
+          # whole, so that a count that is wrong shows what the machine holds.
+          # Looked for by the name a human reads, because what is being asked is
+          # what somebody opening Installed apps finds.
           counts() {
             powershell -NoProfile -Command "
               \$menus = @(
@@ -2280,22 +2482,18 @@ jobs:
             " | tr -d '\r'
           }
 
-          # One of each, whatever was installed over whatever — and the one
-          # `PATH` entry read as well as counted.
-          #
-          # The name comes off the report's own `PATH` line rather than a line
-          # of its own, that being the same string either way. A wording change
-          # up there leaves this finding nothing, which fails here rather than
-          # passing quietly.
-          #
-          # Compared with the case taken out of it and a trailing separator
-          # off the end, for the reasons the two steps above give: Windows
-          # compares paths without regard to case and nothing settles whose
-          # spelling of the profile directory each side got, and a Windows
-          # directory property ends in a separator where this entry, naming a
-          # directory inside one, does not.
-          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+          # The msi products Windows Installer holds for this user, by name: a
+          # per-user msi is recorded under this key and nowhere an NSIS install
+          # writes.
+          msis() {
+            powershell -NoProfile -Command "
+              @(Get-ItemProperty 'HKCU:\Software\Microsoft\Installer\Products\*' -EA SilentlyContinue |
+                Where-Object ProductName -eq 'Verkstead').Count" | tr -d '\r'
+          }
 
+          # One of each, and the one `PATH` entry naming `resources\cli`.
+          # Compared with the case and a trailing separator taken off, for the
+          # reasons the steps above give.
           one() {
             said=$1
             report=$(counts)
@@ -2305,8 +2503,7 @@ jobs:
               "menu=Start-menu entries"; do
               got=$(printf '%s\n' "$report" | sed -n "s/^${pair%%=*}=//p")
               if [ "$got" != 1 ]; then
-                echo "::error::After $said there are $got ${pair#*=} for Verkstead, and an upgrade leaves one."
-                printf '%s\n' "$report"
+                echo "::error::After $said there are $got ${pair#*=} for Verkstead, and an install over another leaves one."
                 exit 1
               fi
             done
@@ -2314,49 +2511,183 @@ jobs:
             entry=$(printf '%s\n' "$report" | sed -n 's/^says=PATH: //p')
             got=$(lower "$(cygpath -u "$entry" 2> /dev/null)")
             if [ "${got%/}" != "$(lower "$INSTALL/resources/cli")" ]; then
-              echo "::error::After $said the one PATH entry is '$entry', and it is not $INSTALL/resources/cli — a verkstead found there is the app rather than the CLI."
-              printf '%s\n' "$report"
+              echo "::error::After $said the one PATH entry is '$entry', and it is not $INSTALL/resources/cli."
               exit 1
             fi
-
             echo "One row in Installed apps, one Start-menu entry, and the one PATH entry is $entry."
           }
 
-          # The first half. Nothing is uninstalled in between, which is exactly
-          # what a second download of a version already installed is.
-          installer over-itself /i "$PWD/$MSI" \
-            "this msi over the copy already installed"
+          installer=$(cygpath -w "$INSTALLER")
+
+          # The first half.
+          run "Installing this exe over itself" "$installer" /S
           one "installing it over itself"
 
-          # The second half, and the tag it is against. Asked of `gh` — it is on
-          # the runner already and takes the workflow's own token — and the
-          # Release read before the asset, so that a Release carrying no msi is
-          # told apart from no Release at all. It is the previous one either way:
-          # the tag for the release being built is `publish`'s to make, after
-          # every leg has passed.
+          # The second half, and the tag it is against: the last Release, since
+          # the tag for this one is `publish`'s to make. The Release is read
+          # before the asset, so that one with no msi is told apart from none.
           tag=$(gh release view --json tagName --jq .tagName 2> release.err) || tag=
           if [ -z "$tag" ]; then
-            echo "::warning::There is no Release to fetch an msi from, so the upgrade over the package before this one went unchecked."
+            echo "::warning::There is no Release to fetch an msi from, so the install over the msi went unchecked."
             cat release.err
             exit 0
           fi
-          echo "The last Release is $tag."
-
           if [ -z "$(gh release view "$tag" --json assets \
             --jq '.assets[].name | select(. == "Verkstead-x86_64.msi")')" ]; then
-            echo "::warning::The last Release, $tag, carries no Verkstead-x86_64.msi, so the upgrade over the package before this one went unchecked."
+            echo "::warning::The last Release, $tag, carries no Verkstead-x86_64.msi, so the install over the msi went unchecked."
             exit 0
           fi
-
           gh release download "$tag" --pattern Verkstead-x86_64.msi --dir previous
           ls -l previous
 
-          installer uninstall /x "$PWD/$MSI" \
-            "the uninstall that makes room for $tag's package"
-          installer previous /i "$PWD/previous/Verkstead-x86_64.msi" \
-            "$tag's msi, the package a machine is upgrading from"
-          installer over-previous /i "$PWD/$MSI" "this msi over $tag's"
+          # This install taken away, the way Installed apps would take it.
+          quiet=$(powershell -NoProfile -Command "
+            (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue |
+              Where-Object DisplayName -eq 'Verkstead').QuietUninstallString" | tr -d '\r')
+          program=${quiet#\"}
+          program=${program%%\"*}
+          run "Uninstalling it to make room for $tag's msi" "$program" "${quiet#\""$program"\"}"
+          for _ in $(seq 60); do
+            [ ! -e "$INSTALL" ] && break
+            sleep 1
+          done
+
+          log=$(cygpath -w "$PWD/msiexec.log")
+          code=0
+          powershell -NoProfile -Command \
+            "exit (Start-Process msiexec -ArgumentList '/i',\"$(cygpath -w "$PWD/previous/Verkstead-x86_64.msi")\",'/qn','/norestart','/l*v',\"$log\" -Wait -PassThru).ExitCode" ||
+            code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error::Windows Installer refused $tag's msi (exit $code)."
+            tr -d '\000' < msiexec.log | tail -n 200
+            exit 1
+          fi
+          if [ "$(msis)" != 1 ]; then
+            echo "::error::$tag's msi installed, and Windows Installer does not hold it for this user."
+            exit 1
+          fi
+          echo "Windows Installer holds $tag's msi for this user."
+
+          # Launch on Startup, registered the way Electron's login-item API
+          # registers it: a value named `Verkstead`, holding the launcher in
+          # quotes and `--hidden` — see `desktop/src/startup.ts`.
+          start="\"$(cygpath -w "$INSTALL/Verkstead.exe")\" --hidden"
+          START="$start" powershell -NoProfile -Command \
+            "Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Verkstead -Value \$env:START"
+
+          run "Installing this exe over $tag's msi" "$installer" /S
           one "installing it over $tag's msi"
+
+          if [ "$(msis)" != 0 ]; then
+            echo "::error::After installing over $tag's msi, Windows Installer still holds the msi for this user."
+            exit 1
+          fi
+          echo "Windows Installer holds no Verkstead msi any more."
+
+          kept=$(powershell -NoProfile -Command \
+            "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -EA SilentlyContinue).Verkstead" |
+            tr -d '\r')
+          echo "Launch on Startup's Run value says: $kept"
+          if [ "$kept" != "$start" ]; then
+            echo "::error::After installing over $tag's msi, the Run value is '$kept', and it was '$start'."
+            exit 1
+          fi
+          if [ ! -f "$INSTALL/Verkstead.exe" ]; then
+            echo "::error::The Run value names $INSTALL/Verkstead.exe, and there is nothing there."
+            exit 1
+          fi
+          echo "The Run value is as it was, and names the launcher this install put there."
+
+      # **And the uninstall takes back everything the install put down**, which
+      # is a promise to whoever installed this as much as the install is: the
+      # files, the Start-menu entry, the row in Installed apps and — the one
+      # `desktop/build/installer.nsh` is answerable for — the entry on this
+      # user's `PATH`. A `PATH` entry left behind names a directory that is no
+      # longer there, in every terminal this user opens, until somebody finds it
+      # by hand.
+      #
+      # **And it leaves the Data Directory alone**: `%APPDATA%\Verkstead`, which
+      # electron-builder's uninstaller would delete as the app's data if it were
+      # told to (`deleteAppDataOnUninstall`, which is off). A file is put there
+      # first and looked for afterwards, because the steps above pointed the app
+      # somewhere else and this profile's own is otherwise empty.
+      #
+      # The uninstaller is the one Installed apps would run, read out of the
+      # registration as `QuietUninstallString` — the same command with its own
+      # `/S`. Waited for by what it removes rather than by the process: an NSIS
+      # uninstaller copies itself out of the directory it is about to delete and
+      # runs the copy, so the process this shell started can be gone while the
+      # uninstall is still going.
+      - name: The uninstaller takes it all away, and leaves the Data Directory
+        run: |
+          lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+          data="$(cygpath -u "$APPDATA")/Verkstead"
+          mkdir -p "$data"
+          printf '%s\n' "an uninstall leaves this" > "$data/uninstall-leaves-this"
+
+          quiet=$(powershell -NoProfile -Command "
+            (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue |
+              Where-Object DisplayName -eq 'Verkstead').QuietUninstallString" | tr -d '\r')
+          echo "Installed apps uninstalls with: $quiet"
+          if [ -z "$quiet" ]; then
+            echo "::error::The registration names no quiet uninstaller."
+            exit 1
+          fi
+          # `"C:\…\Uninstall Verkstead.exe" /currentuser /S` — the program in
+          # its quotes, and what follows it.
+          program=${quiet#\"}
+          program=${program%%\"*}
+          arguments=${quiet#\""$program"\"}
+          code=0
+          powershell -NoProfile -Command \
+            "exit (Start-Process -FilePath \"$program\" -ArgumentList '$arguments' -Wait -PassThru).ExitCode" ||
+            code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error::The uninstaller refused to uninstall (exit $code)."
+            exit 1
+          fi
+
+          lnk="$(cygpath -u "$APPDATA")/Microsoft/Windows/Start Menu/Programs/Verkstead.lnk"
+          for _ in $(seq 60); do
+            [ ! -e "$INSTALL" ] && [ ! -e "$lnk" ] && break
+            sleep 1
+          done
+
+          report=$(powershell -NoProfile -Command "
+            \$arp = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue |
+              Where-Object DisplayName -eq 'Verkstead')
+            'arp=' + \$arp.Count
+            'path=' + [Environment]::GetEnvironmentVariable('Path','User')
+          " | tr -d '\r')
+          printf '%s\n' "$report"
+
+          failed=
+          if [ -e "$INSTALL" ]; then
+            echo "::error::The uninstall left $INSTALL behind."
+            find "$INSTALL" -maxdepth 2
+            failed=1
+          fi
+          if [ -e "$lnk" ]; then
+            echo "::error::The uninstall left the Start-menu entry at $lnk."
+            failed=1
+          fi
+          if [ "$(printf '%s\n' "$report" | sed -n 's/^arp=//p')" != 0 ]; then
+            echo "::error::The uninstall left Verkstead in Installed apps."
+            failed=1
+          fi
+          case "$(lower "$(printf '%s\n' "$report" | sed -n 's/^path=//p')")" in
+            *'\programs\verkstead'*)
+              echo "::error::The uninstall left an entry naming the install on this user's PATH."
+              failed=1
+              ;;
+          esac
+          if [ ! -f "$data/uninstall-leaves-this" ]; then
+            echo "::error::The uninstall deleted the Data Directory, $data."
+            failed=1
+          fi
+          [ -z "$failed" ] || exit 1
+          echo "The install, its Start-menu entry, its row and its PATH entry are gone, and the Data Directory is where it was."
 
       # Under the `desktop-` artifact prefix, for the reason both other desktop
       # uploads give: that prefix is what keeps a desktop asset out of the count
@@ -2364,11 +2695,17 @@ jobs:
       # installer the two could be told apart by name as well — but the rule is
       # the prefix rather than the extension, and a leg is not the place to
       # start making exceptions to it.
-      - name: Upload the msi
+      #
+      # The update metadata and the installer's blockmap go up beside it, from
+      # the same directory, so the upload keeps all three bare names.
+      - name: Upload the installer and what an update reads beside it
         uses: actions/upload-artifact@v7.0.1
         with:
           name: desktop-windows
-          path: ${{ env.MSI }}
+          path: |
+            ${{ env.INSTALLER }}
+            target/electron/out/latest.yml
+            target/electron/out/Verkstead-x86_64.exe.blockmap
           if-no-files-found: error
 
   # The tag and the Release, once every leg has succeeded — the desktop ones as
@@ -2466,7 +2803,14 @@ jobs:
       # what an install line and the documentation spell out — and any count
       # would be satisfied by a leg that uploaded `verkstead-desktop.AppImage`.
       # So this is the one place the desktop asset names are written down, and
-      # there is one line per desktop leg.
+      # there is one line per file a desktop leg uploads — two for the Mac's,
+      # the dmg a human downloads and the zip an update installs — and then
+      # what electron-updater reads beside them: each platform's `latest*.yml`,
+      # and the blockmap of every file that has one outside itself (an
+      # AppImage carries its own inside). Those are published with the rest,
+      # because the Release is where electron-updater reads them from
+      # (ADR-0027, *The release*), and each leg has already read its metadata
+      # back against the files it names.
       #
       # Read both ways round: every name here arrived, and nothing arrived that
       # is not named here. Without the second, a leg this job has never been
@@ -2476,7 +2820,14 @@ jobs:
           DESKTOP_ASSETS: |
             Verkstead-x86_64.AppImage
             Verkstead-universal.dmg
-            Verkstead-x86_64.msi
+            Verkstead-universal.zip
+            Verkstead-x86_64.exe
+            latest-linux.yml
+            latest-mac.yml
+            latest.yml
+            Verkstead-universal.dmg.blockmap
+            Verkstead-universal.zip.blockmap
+            Verkstead-x86_64.exe.blockmap
         run: |
           expected=$(printf '%s\n' "$DESKTOP_ASSETS" | sed '/^[[:space:]]*$/d' | sort)
           found=$(ls -1 desktop-assets 2> /dev/null | sort)
@@ -2536,17 +2887,26 @@ jobs:
       #
       # Notes are generated rather than written. There is nobody to write them
       # at the moment a release is coined, and a release with an empty body is
-      # worse than one listing what landed since the last tag.
+      # worse than one listing what landed since the last tag. The `note`
+      # input, where there is one, is `--notes`, which `gh` puts above the
+      # generated notes. It is read through the environment like the version,
+      # and left off entirely when it is empty, so a release without one is
+      # published exactly as before.
       - name: Publish the Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          NOTE: ${{ inputs.note }}
         run: |
           case "$TAG" in
             *-*) prerelease=(--prerelease) ;;
             *) prerelease=() ;;
           esac
-          gh release create "$TAG" --generate-notes "${prerelease[@]}" \
+          note=()
+          if [ -n "$NOTE" ]; then
+            note=(--notes "$NOTE")
+          fi
+          gh release create "$TAG" --generate-notes "${note[@]}" "${prerelease[@]}" \
             binaries/verkstead-* desktop-assets/*
 
       # What GitHub says it now has, in the log of the run that put it there —

@@ -3,8 +3,8 @@
 //!
 //! **Why a verb rather than the installer** (ADR-0014, *Amended: the Sandbox is
 //! an account*). The account and its password are made together and the
-//! password has to land in the Data Directory — which the msi does not know and
-//! may not have made yet — so what creates one is Verkstead's own binary, run
+//! password has to land in the Data Directory — which the installer does not
+//! know and may not have made yet — so what creates one is Verkstead's own binary, run
 //! once from an elevated terminal, rather than a custom action in a package.
 //! Everything after that is unprivileged: the server only ever reads the
 //! account.

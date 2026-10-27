@@ -130,6 +130,10 @@ const LONGEST_OS: usize = 64;
 const LONGEST_ADDRESS: usize = 255;
 const MOST_ADDRESSES: usize = 16;
 
+/// And the release it says it runs, which is *0.2.2* — the one bound here a
+/// Discovered row has no word for, there being no version in a TXT record.
+const LONGEST_VERSION: usize = 64;
+
 /// The device being asked, as the two routes above answer out of it: what to
 /// say about itself, and where to keep the question.
 #[derive(Debug, Clone)]
@@ -321,6 +325,11 @@ impl Joins {
                     os: held.os,
                     addresses: held.addresses,
                     kept_by: None,
+                    version: held.version,
+
+                    // Not held with a join: a member says it at its first
+                    // take-up, the way it says everything that moves.
+                    install: None,
                 },
             })
             .collect())
@@ -517,6 +526,7 @@ pub(crate) async fn join(
         fingerprint: presented,
         asked_at,
         expires_at: expires_at.clone(),
+        version: saying.version,
     };
 
     match holding.joins.hold(&held, now).await {
@@ -627,6 +637,8 @@ async fn kept(holding: &Holding, saying: DeviceIdentity, presented: String) -> R
         // two were matched before this was called.
         fingerprint: presented,
         kept_by: saying.kept_by,
+        version: saying.version,
+        install: crate::install::kept(saying.install),
     };
 
     // And where this device reaches its Keeper directly, as the Keeper wrote
@@ -822,6 +834,14 @@ fn asked(holding: &Holding, request: String) {
 ///
 /// `None` is a join this device will keep, which is every join a Verkstead makes.
 pub(crate) fn too_much(saying: &DeviceIdentity) -> Option<&'static str> {
+    if saying
+        .version
+        .as_ref()
+        .is_some_and(|version| version.chars().count() > LONGEST_VERSION)
+    {
+        return Some("that is longer than any release of Verkstead");
+    }
+
     too_much_said(&saying.device, &saying.name, &saying.os, &saying.addresses)
 }
 
@@ -949,12 +969,14 @@ mod tests {
                     "192.168.1.24".to_owned(),
                 ],
                 kept_by: None,
+                version: Some("0.2.2".to_owned()),
+                install: None,
             }),
             None,
         );
     }
 
-    /// And each of the five is refused on its own, saying which it was.
+    /// And each of the six is refused on its own, saying which it was.
     #[test]
     fn a_join_that_says_too_much_is_refused_by_the_thing_it_said_too_much_of() {
         let fine = DeviceIdentity {
@@ -964,6 +986,8 @@ mod tests {
             os: "Linux".to_owned(),
             addresses: vec!["192.168.1.24".to_owned()],
             kept_by: None,
+            version: Some("0.2.2".to_owned()),
+            install: None,
         };
 
         let said = |saying: DeviceIdentity| too_much(&saying).unwrap_or_default().to_owned();
@@ -1003,9 +1027,17 @@ mod tests {
         assert!(
             said(DeviceIdentity {
                 addresses: vec!["a".repeat(LONGEST_ADDRESS + 1)],
-                ..fine
+                ..fine.clone()
             })
             .contains("any address")
+        );
+
+        assert!(
+            said(DeviceIdentity {
+                version: Some("a".repeat(LONGEST_VERSION + 1)),
+                ..fine
+            })
+            .contains("release")
         );
     }
 

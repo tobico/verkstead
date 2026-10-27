@@ -7,9 +7,11 @@
       ],
       "device": "0011223344556677889900aabbccddee",
       "fingerprint": "AA:BB:CC:DD:0011223344556677889900aabbccddee",
+      "install": null,
       "kept_by": null,
       "name": "laptop",
-      "os": "Linux (WSL)"
+      "os": "Linux (WSL)",
+      "version": null
     },
     "request": "5566778899aabbcc"
   }

@@ -428,6 +428,8 @@ impl Verkstead {
                 addresses,
                 fingerprint: other.fingerprint().to_owned(),
                 kept_by: None,
+                version: None,
+                install: None,
             },
         )
         .await
@@ -514,6 +516,8 @@ fn member_at(listening: &Verkstead, device: &str) -> verkstead_store::Member {
         acknowledged: None,
         kept_by: None,
         direct: None,
+        version: None,
+        install: None,
     }
 }
 
@@ -640,6 +644,8 @@ async fn a_member_that_is_switched_off_costs_the_notification_and_nothing_else()
             addresses: vec![nowhere().await],
             fingerprint: "sha256:nothing-is-listening-there".to_owned(),
             kept_by: None,
+            version: None,
+            install: None,
         },
     )
     .await

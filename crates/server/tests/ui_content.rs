@@ -3928,6 +3928,8 @@ const A_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 const A_FINGERPRINT: &str = "3A:7B:1F:04:C8:92:6D:5E:AA:11:B0:47:9C:3D:2E:88:F5:60:71:1C:D4:09:B6:3F:82:5A:0E:97:44:CB:2D:16";
 #[cfg(unix)]
 const A_MACHINE_NAME: &str = "workbench";
+#[cfg(unix)]
+const A_RELEASE: &str = "0.2.2";
 
 /// A router answering for a device on a stated machine, and the directory
 /// holding that device's files alive.
@@ -4012,18 +4014,23 @@ async fn a_linked_devices_app() -> (tempfile::TempDir, Router) {
     )
     .await;
 
-    for (device, name, os, addresses) in [
+    // A release behind this device on the one, and none at all on the other:
+    // a Verkstead from before the release was said, which is the row the
+    // viewer draws with no version line.
+    for (device, name, os, addresses, version) in [
         (
             A_MEMBER,
             "laptop",
             "macOS",
             vec!["laptop.tailnet-name.ts.net", "100.64.0.2"],
+            Some("0.2.0"),
         ),
         (
             ANOTHER_MEMBER,
             "workbench",
             "Linux (WSL)",
             vec!["172.29.0.14"],
+            None,
         ),
     ] {
         verkstead_store::record_member(
@@ -4035,6 +4042,8 @@ async fn a_linked_devices_app() -> (tempfile::TempDir, Router) {
                 addresses: addresses.into_iter().map(str::to_owned).collect(),
                 fingerprint: format!("AA:BB:CC:DD:{device}"),
                 kept_by: None,
+                version: version.map(str::to_owned),
+                install: None,
             },
         )
         .await
@@ -4100,6 +4109,8 @@ async fn an_annexed_devices_app(
                 addresses: vec!["192.168.1.31".to_owned()],
                 fingerprint: format!("AA:BB:CC:DD:{device}"),
                 kept_by: kept_by.map(str::to_owned),
+                version: None,
+                install: None,
             },
         )
         .await
@@ -4318,6 +4329,8 @@ async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
             addresses: vec!["100.64.0.2".to_owned()],
             fingerprint: format!("AA:BB:CC:DD:{A_MEMBER}"),
             kept_by: None,
+            version: None,
+            install: None,
         },
     )
     .await
@@ -4461,6 +4474,7 @@ async fn an_asked_devices_app() -> (tempfile::TempDir, Router) {
             fingerprint: format!("AA:BB:CC:DD:{A_MEMBER}"),
             asked_at: "2026-09-25T10:00:00Z".to_owned(),
             expires_at: "2099-01-01T00:00:00Z".to_owned(),
+            version: None,
         },
     )
     .await
@@ -4533,8 +4547,8 @@ async fn a_discovering_devices_app() -> (tempfile::TempDir, Router) {
     (dir, app)
 }
 
-/// One Devices reading with the two things in it that are this run's own
-/// written back out as a machine anybody would recognise.
+/// One Devices reading with the three things in it that are this run's or this
+/// build's own written back out as a machine anybody would recognise.
 ///
 /// The fingerprint is the SHA-256 of a certificate made fresh in a temporary
 /// directory, so it is different every run; the name is the hostname of the box
@@ -4547,6 +4561,10 @@ fn a_stated_machine(json: &str) -> String {
 
     payload["this"]["fingerprint"] = A_FINGERPRINT.into();
     payload["this"]["name"] = A_MACHINE_NAME.into();
+
+    // And the release, which is this build's own and so moves at every bump:
+    // a fixture rewritten by a version number is a diff nobody meant.
+    payload["this"]["version"] = A_RELEASE.into();
 
     serde_json::to_string(&payload).unwrap()
 }

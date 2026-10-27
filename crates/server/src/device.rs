@@ -869,6 +869,10 @@ pub struct Devices {
     /// Annex's row to be drawn with. See [`Devices::annex_troubled`].
     annex_trouble: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 
+    /// And each member's background reads that did not land, which its row
+    /// carries as a line of its own — see [`crate::relaying::FailedReads`].
+    failed_reads: crate::relaying::FailedReads,
+
     /// And the Annex it keeps, booted at its start and terminated at its stop,
     /// where it is a Keeper with a way of having one — held here so that the
     /// install run that makes the box boots and links it through the same
@@ -885,6 +889,14 @@ pub struct Devices {
     /// And the tellings an Allow or a Deny left running after it answered —
     /// see [`Devices::allow`] and [`Tellings`].
     tellings: Tellings,
+
+    /// And this device's own Update while one is going — see
+    /// [`crate::updating`], every clone of this handle sharing it.
+    updating: crate::updating::Updating,
+
+    /// And the Updates pressed here on members' rows — see
+    /// [`crate::updating::members`], every clone sharing them.
+    members_updating: crate::updating::members::MemberUpdates,
 }
 
 impl Devices {
@@ -913,9 +925,12 @@ impl Devices {
             annex_forward: crate::peer::annex_forward::Pointing::at_nothing(),
             peer_port: crate::peer::PEER_PORT,
             annex_trouble: std::sync::Arc::default(),
+            failed_reads: crate::relaying::FailedReads::default(),
             annexed: None,
             nudges: crate::nudge::Nudges::new(),
             tellings: Tellings::default(),
+            updating: crate::updating::Updating::default(),
+            members_updating: crate::updating::members::MemberUpdates::default(),
         }
     }
 
@@ -937,6 +952,13 @@ impl Devices {
     /// *The opened device relays*).
     pub(crate) fn name(&self) -> String {
         self.reading.name()
+    }
+
+    /// And the release it runs — see [`reading::Reading::version`]. What a
+    /// member's is compared against where a call to it fails, for the sentence
+    /// [`crate::updates::gap`] writes.
+    pub(crate) fn version(&self) -> Option<String> {
+        self.reading.version()
     }
 
     /// And the word for its operating system — see [`reading::Reading::os`].
@@ -981,6 +1003,45 @@ impl Devices {
     /// membership has no business making them.
     pub fn probing(self, probe: Probe) -> Devices {
         Devices { probe, ..self }
+    }
+
+    /// The same, read as installed as `install` — which a start reads off its
+    /// own executable (see [`crate::install::of_this_process`]) and a suite
+    /// says outright. Said on its reading, so that what its own row offers
+    /// and what it tells its members are one reading — see
+    /// [`reading::Reading::installed_as`].
+    pub fn installed_as(self, install: verkstead_render::InstallKind) -> Devices {
+        Devices {
+            reading: self.reading.installed_as(Some(install)),
+            ..self
+        }
+    }
+
+    /// What this device was installed as, which its row is offered an Update
+    /// or a by-hand line for — see [`Devices::installed_as`]. A bare binary
+    /// where nothing said otherwise, which offers nothing.
+    pub(crate) fn install(&self) -> verkstead_render::InstallKind {
+        self.reading.install().unwrap_or_default()
+    }
+
+    /// The same, telling the desktop app through `asking` rather than on
+    /// stdout — see [`crate::updating::Asking`].
+    pub fn asking_the_app(self, asking: crate::updating::Asking) -> Devices {
+        Devices {
+            updating: crate::updating::Updating::asking(asking),
+            ..self
+        }
+    }
+
+    /// This device's own Update — see [`crate::updating`].
+    pub(crate) fn updating(&self) -> &crate::updating::Updating {
+        &self.updating
+    }
+
+    /// And the Updates pressed here on its members' rows — see
+    /// [`crate::updating::members`].
+    pub(crate) fn members_updating(&self) -> &crate::updating::members::MemberUpdates {
+        &self.members_updating
     }
 
     /// The same, holding what it forwards on `forwarding_on` rather than on both
@@ -1072,6 +1133,24 @@ impl Devices {
         }
     }
 
+    /// The same, a member's Update pressed here having `within` of the press
+    /// to come back before its row says it didn't — see
+    /// [`crate::updating::members::COMING_BACK_WITHIN`], which is ten minutes.
+    ///
+    /// For a suite, which has no ten minutes to wait.
+    pub fn coming_back_within(self, within: std::time::Duration) -> Devices {
+        Devices {
+            members_updating: crate::updating::members::MemberUpdates::within(within),
+            ..self
+        }
+    }
+
+    /// Wait until no Update pressed here is going on `device`: it came back, or
+    /// it left its row a line — see [`crate::updating::members`].
+    pub async fn member_update_settled(&self, device: &str) {
+        self.members_updating.settled(device).await
+    }
+
     /// The same, holding the tellings its presses leave running in `tellings`
     /// — see [`Tellings`].
     ///
@@ -1098,6 +1177,11 @@ impl Devices {
     /// not come up at this start — see [`Devices::annex_troubled`]. Where there
     /// is no row to carry it, an Annex that has never been linked, it is said
     /// beside this device's own instead.
+    ///
+    /// **And a member's row carries the background reads of it that did not
+    /// land** — see [`crate::relaying::FailedReads`] — after the Annex's line
+    /// where it has both, and followed by the gap between its release and this
+    /// device's where there is one: [`crate::updates::gap`].
     pub(crate) async fn listing(&self) -> Result<DevicesView> {
         let mut members = self.members.listed().await?;
 
@@ -1118,11 +1202,59 @@ impl Devices {
             }
         }
 
+        let this = self.reading.identity(&self.device).await;
+
+        for member in &mut members {
+            let identity = &member.identity;
+
+            let Some(failed) = self.failed_reads.line(&identity.device, &identity.name) else {
+                continue;
+            };
+
+            let gap = crate::updates::gap(
+                &identity.name,
+                identity.version.as_deref(),
+                this.version.as_deref(),
+            );
+
+            member.trouble = Some(
+                [member.trouble.take(), Some(failed), gap]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+        }
+
+        // And a member's Update pressed here: going, or the line its press
+        // left, last of the row's lines — see [`crate::updating::members`].
+        for member in &mut members {
+            let (updating, restarting, trouble) =
+                self.members_updating.reading(&member.identity.device);
+
+            member.updating = updating;
+            member.restarting = restarting;
+
+            if let Some(trouble) = trouble {
+                member.trouble = Some(match member.trouble.take() {
+                    Some(before) => format!("{before} {trouble}"),
+                    None => trouble,
+                });
+            }
+        }
+
         Ok(DevicesView {
-            this: self.reading.identity(&self.device).await,
+            this,
             members,
             pending: self.joins.pending(OffsetDateTime::now_utc()).await?,
             annex_trouble,
+            this_update_available: None,
+            this_running: Vec::new(),
+            this_running_drafts: 0,
+            this_install: self.install(),
+            this_updating: self.updating.reading(),
+            this_update_trouble: self.updating.trouble(),
+            updating_all: self.members_updating.all_going(),
         })
     }
 
@@ -1133,6 +1265,12 @@ impl Devices {
             .annex_trouble
             .lock()
             .expect("the Annex's trouble is never poisoned") = why;
+    }
+
+    /// The background reads of each member that did not land, which every
+    /// reader of a member records against — see [`crate::relaying::FailedReads`].
+    pub(crate) fn failed_reads(&self) -> &crate::relaying::FailedReads {
+        &self.failed_reads
     }
 
     /// And what was last said, which the Annex's row on the Devices list is
@@ -1686,6 +1824,12 @@ impl Devices {
                 // on: a member *is* a fingerprint.
                 fingerprint: held.fingerprint.clone(),
                 kept_by: None,
+
+                // And the release it said it runs when it asked. What it was
+                // installed as is not held with a join, so it is said at the
+                // first take-up of its stream.
+                version: held.version.clone(),
+                install: None,
             })
             .await?;
 
@@ -1762,6 +1906,8 @@ impl Devices {
                 os: held.os.clone(),
                 addresses: held.addresses.clone(),
                 kept_by: None,
+                version: held.version.clone(),
+                install: None,
             },
         )
         .await;
@@ -2035,7 +2181,13 @@ impl Devices {
     /// [`Devices::announce_renewal`] is: the first thing it does is dial members
     /// that may be switched off.
     pub async fn stay_fresh(&self, nudges: crate::nudge::Nudges) {
-        crate::relaying::freshness::held(self.members.clone(), self.peers.clone(), nudges).await
+        crate::relaying::freshness::held(
+            self.members.clone(),
+            self.peers.clone(),
+            nudges,
+            self.members_updating.clone(),
+        )
+        .await
     }
 
     /// What an announcement of the renewal carries: this device as it answers
@@ -2606,6 +2758,8 @@ pub(crate) fn presenting(member: &verkstead_store::Member) -> DeviceIdentity {
         os: member.os.clone(),
         addresses: member.addresses.clone(),
         kept_by: member.kept_by.clone(),
+        version: member.version.clone(),
+        install: crate::install::said(member.install.as_deref()),
     }
 }
 

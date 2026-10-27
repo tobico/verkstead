@@ -14,7 +14,8 @@ use verkstead_store::{
     Linking, Renewal, Telling, announcement_made, announcements_owed, announcements_owed_to,
     changeover_over, forget_every_member, forget_every_member_but, forget_member, member_count,
     member_holding, member_reached_at, member_unreachable, members, members_yet_to_acknowledge,
-    open_database, owe_announcement, record_member, record_renewal, renewal_acknowledged,
+    open_database, owe_announcement, record_member, record_renewal, refresh_member,
+    renewal_acknowledged,
 };
 
 /// The two devices these tests link to, named by the ids a cluster names them
@@ -65,6 +66,8 @@ fn advertising(device: &str, name: &str, fingerprint: &str) -> Linking {
         ],
         fingerprint: fingerprint.to_owned(),
         kept_by: None,
+        version: Some("0.2.2".to_owned()),
+        install: None,
     }
 }
 
@@ -80,6 +83,8 @@ fn renewing(device: &str, name: &str, presenting: &str, incoming: &str) -> Renew
         addresses: advertising.addresses,
         presenting: presenting.to_owned(),
         incoming: incoming.to_owned(),
+        version: advertising.version,
+        install: None,
     }
 }
 
@@ -283,6 +288,106 @@ async fn the_annex_mark_is_taken_once_and_kept() {
     );
 }
 
+/// The release a member says it runs is a reading, written by every recording
+/// — a member moved back to a Verkstead from before the version was said says
+/// none, and that is what its row then holds.
+#[tokio::test]
+async fn the_version_is_whatever_the_last_recording_said() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let version = |pool: SqlitePool| async move {
+        members(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|member| member.device == B)
+            .unwrap()
+            .version
+    };
+
+    record_member(&pool, &advertising(B, "winvm", B_FINGERPRINT))
+        .await
+        .unwrap();
+    assert_eq!(version(pool.clone()).await.as_deref(), Some("0.2.2"));
+
+    record_member(
+        &pool,
+        &Linking {
+            version: Some("0.2.0".to_owned()),
+            ..advertising(B, "winvm", B_FINGERPRINT)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(version(pool.clone()).await.as_deref(), Some("0.2.0"));
+
+    record_member(
+        &pool,
+        &Linking {
+            version: None,
+            ..advertising(B, "winvm", B_FINGERPRINT)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        version(pool.clone()).await,
+        None,
+        "a recording that says none is not one that leaves the last alone",
+    );
+
+    record_renewal(
+        &pool,
+        &Renewal {
+            version: Some("0.2.3".to_owned()),
+            ..renewing(B, "winvm", B_FINGERPRINT, RENEWED)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        version(pool.clone()).await.as_deref(),
+        Some("0.2.3"),
+        "and a renewal is a recording like any other",
+    );
+}
+
+/// A database made before members said their release opens, gains the column,
+/// and reads every row it already held as having said none.
+#[tokio::test]
+async fn a_database_from_before_the_version_gains_the_column() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("verkstead.db");
+    let pool = open_database(&path).await.unwrap();
+
+    record_member(&pool, &advertising(B, "winvm", B_FINGERPRINT))
+        .await
+        .unwrap();
+
+    // The column off, which is the whole of what says this database is one
+    // from before.
+    sqlx::query("ALTER TABLE members DROP COLUMN version")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let pool = open_database(&path).await.unwrap();
+    let listed = members(&pool).await.unwrap();
+
+    assert_eq!(listed.len(), 1, "the row it held is still there");
+    assert_eq!(listed[0].version, None, "and it said no release");
+
+    record_member(&pool, &advertising(B, "winvm", B_FINGERPRINT))
+        .await
+        .unwrap();
+    assert_eq!(
+        members(&pool).await.unwrap()[0].version.as_deref(),
+        Some("0.2.2"),
+        "and the column it gained is written by the next recording",
+    );
+}
+
 /// Where a member is reached directly is this device's own record: written on
 /// its own, and kept through every recording of what the member says after
 /// (ADR-0024, *The Keeper and its Annex reach each other directly*).
@@ -427,6 +532,36 @@ async fn a_forgotten_member_is_gone() {
     // And a device that is not a member is already not a member: unlinking one
     // twice is not a thing to fail.
     forget_member(&pool, B).await.unwrap();
+}
+
+/// A member brought up to date is rewritten as a recording would rewrite it,
+/// and a device that is no member is not made one: the read of a device
+/// unlinked while it was on the link lands on nothing.
+#[tokio::test]
+async fn a_refresh_writes_a_member_and_never_makes_one() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+
+    let mut renamed = advertising(B, "bench", B_FINGERPRINT);
+    renamed.addresses = vec!["192.168.1.40".to_owned()];
+    renamed.version = Some("0.3.0".to_owned());
+
+    assert!(refresh_member(&pool, &renamed).await.unwrap());
+
+    let listed = members(&pool).await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "bench");
+    assert_eq!(listed[0].addresses, vec!["192.168.1.40".to_owned()]);
+    assert_eq!(listed[0].version.as_deref(), Some("0.3.0"));
+
+    forget_member(&pool, B).await.unwrap();
+
+    assert!(!refresh_member(&pool, &renamed).await.unwrap());
+    assert!(members(&pool).await.unwrap().is_empty());
+    assert!(!member_holding(&pool, B_FINGERPRINT).await.unwrap());
 }
 
 // ---------------------------------------------------------------------------

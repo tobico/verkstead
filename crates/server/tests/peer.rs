@@ -1062,6 +1062,8 @@ async fn recorded(pool: &SqlitePool, device: &Device) {
             addresses: vec!["192.168.1.31".to_owned()],
             fingerprint: device.fingerprint().to_owned(),
             kept_by: None,
+            version: None,
+            install: None,
         },
     )
     .await

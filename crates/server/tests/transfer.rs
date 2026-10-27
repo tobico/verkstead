@@ -53,7 +53,7 @@ use verkstead_render::{
 use verkstead_schema::Direction;
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
-use verkstead_server::device::reading::Reading;
+use verkstead_server::device::reading::{RUNNING, Reading};
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::nudge::Nudges;
@@ -228,6 +228,15 @@ impl Verkstead {
             vec![format!("127.0.0.1:{}", address.port())],
         );
 
+        // B says of itself what every row for it here says, so that a member
+        // reading its identity again on taking up its stream finds that row as
+        // it stands — see [`B_MACHINE`].
+        let reading = if id == B {
+            reading.calling_itself(B_MACHINE, B_OS)
+        } else {
+            reading
+        };
+
         let cluster = Devices::of(
             device.clone(),
             reading.clone(),
@@ -315,6 +324,8 @@ impl Verkstead {
                 addresses,
                 fingerprint: other.fingerprint().to_owned(),
                 kept_by: None,
+                version: Some(RUNNING.to_owned()),
+                install: Some("Binary".to_owned()),
             },
         )
         .await

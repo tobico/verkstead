@@ -82,6 +82,7 @@ fn held(request: &str, expires_at: &str) -> HeldJoin {
         fingerprint: A_FINGERPRINT.to_owned(),
         asked_at: "2026-09-25T10:00:00Z".to_owned(),
         expires_at: expires_at.to_owned(),
+        version: None,
     }
 }
 

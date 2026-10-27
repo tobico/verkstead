@@ -5,8 +5,9 @@
 //! **The browser stays same-origin and knows nothing about this.** It asks the
 //! device it opened, over the origin it already has and the cookie it already
 //! holds, and what it gets back is what the far end said — method, path, query,
-//! body and status carried through, and the answer handed over untouched. The
-//! other half of the hop is [`crate::peer::workbench`], which is where a
+//! body and status carried through, and the answer handed over untouched but
+//! for one sentence: a refusal from a member a release apart names the gap
+//! (ADR-0027, *Seeing versions*; see [`handed_back_apart`]). The other half of the hop is [`crate::peer::workbench`], which is where a
 //! member's call lands.
 //!
 //! **A prefix of its own** — `/api/ui/members/{device}/…` — rather than a
@@ -73,6 +74,7 @@
 pub(crate) mod bridging;
 pub(crate) mod freshness;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
@@ -89,6 +91,7 @@ use verkstead_schema::ApiError;
 
 use crate::AppState;
 use crate::device::{Devices, Unrelayed};
+use crate::nudge::Nudges;
 use crate::ui::{refused, unavailable};
 
 /// The prefix a relayed call stands under, with the Device Id as the segment
@@ -213,7 +216,7 @@ async fn relay(State(state): State<AppState>, request: Request) -> Response {
 
                 bridging::bridged(taking, answered)
             }
-            None => handed_back(answered),
+            None => handed_back_apart(&devices, &device, answered).await,
         },
 
         Err(Unrelayed::ThisDevice) => refused(
@@ -288,6 +291,84 @@ fn handed_back(answered: reqwest::Response) -> Response {
         .collect();
 
     (status, headers, Body::from_stream(answered.bytes_stream())).into_response()
+}
+
+/// The most of a member's refusal this device reads to add the gap to it: a
+/// refusal is a sentence, and one longer than this is handed back as it came.
+const MOST_A_REFUSAL_IS: u64 = 64 * 1024;
+
+/// The same, except that **a refusal from a member a release apart names the
+/// gap** — *winvm is on 0.2.0 and this device is on 0.2.2. Update winvm.* —
+/// after what it said, the way every trouble line a member's call leaves does
+/// (ADR-0027, *Seeing versions*). See [`crate::updates::gap`].
+///
+/// **The one answer this hop opens.** Everything else is carried through as it
+/// came, and so is a refusal wherever the two devices run one release, or it is
+/// not the JSON refusal a Verkstead answers with, or it is longer than
+/// [`MOST_A_REFUSAL_IS`]. And only its `error` sentence moves: every other field
+/// in it, and its status, are the member's own, so a page reading a `413` by
+/// name still reads it.
+async fn handed_back_apart(
+    devices: &Devices,
+    device: &str,
+    answered: reqwest::Response,
+) -> Response {
+    let status = answered.status();
+
+    let refusing = status.is_client_error() || status.is_server_error();
+    let in_json = answered
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|kind| kind.to_str().ok())
+        .is_some_and(|kind| kind.starts_with("application/json"));
+    let short = answered
+        .content_length()
+        .is_some_and(|length| length <= MOST_A_REFUSAL_IS);
+
+    if !(refusing && in_json && short) {
+        return handed_back(answered);
+    }
+
+    let Some(gap) = gap_to(Some(devices), device).await else {
+        return handed_back(answered);
+    };
+
+    let mut headers: HeaderMap<HeaderValue> = answered
+        .headers()
+        .iter()
+        .filter(|(name, _)| !NOT_HANDED_BACK.contains(&name.as_str()))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
+
+    let said = match bounded(answered, MOST_A_REFUSAL_IS as usize).await {
+        Ok(said) => said,
+        Err(why) => {
+            let refusal = unreadable(Some(devices), device, format!("{why:#}")).await;
+            return refused(refusal.status, ApiError::new(refusal.saying));
+        }
+    };
+
+    // Read as a value rather than as an [`ApiError`], so that whatever else the
+    // member's refusal carries goes back with it.
+    let mut refusal: serde_json::Value = match serde_json::from_slice(&said) {
+        Ok(refusal) => refusal,
+        Err(_) => return (status, headers, Body::from(said)).into_response(),
+    };
+
+    let Some(error) = refusal.get_mut("error") else {
+        return (status, headers, Body::from(said)).into_response();
+    };
+
+    let Some(sentence) = error.as_str() else {
+        return (status, headers, Body::from(said)).into_response();
+    };
+
+    *error = serde_json::Value::String(format!("{sentence} {gap}"));
+
+    // The body is a different length now, and is framed again here.
+    headers.remove(CONTENT_LENGTH);
+
+    (status, headers, Body::from(refusal.to_string())).into_response()
 }
 
 /// A call on its way to a member: what [`crate::peer::dialling::Peers::relay`]
@@ -447,6 +528,20 @@ pub(crate) async fn read_of(
     about: &str,
     most: usize,
 ) -> Option<Vec<u8>> {
+    answer_of(devices, device, onwards, about, most).await.ok()
+}
+
+/// The same read, saying which way it did not land: [`Unread`].
+///
+/// What the background reads that draw their failure on the member's row are
+/// made with — see [`FailedReads`]. The others want only the body.
+pub(crate) async fn answer_of(
+    devices: &crate::device::Devices,
+    device: &str,
+    onwards: String,
+    about: &str,
+    most: usize,
+) -> Result<Vec<u8>, Unread> {
     let answered = match devices.relay(device, asking(onwards)).await {
         Ok(answered) => answered,
         Err(why) => {
@@ -455,7 +550,7 @@ pub(crate) async fn read_of(
                 "a member's {about} could not be read, so what it last said stands: {}",
                 unrelayed(&why),
             );
-            return None;
+            return Err(Unread::Unanswered);
         }
     };
 
@@ -465,19 +560,136 @@ pub(crate) async fn read_of(
             status = %answered.status(),
             "a member refused the read of its {about}, so what it last said stands",
         );
-        return None;
+        return Err(Unread::Answered);
     }
 
     match bounded(answered, most).await {
-        Ok(body) => Some(body),
+        Ok(body) => Ok(body),
         Err(why) => {
             tracing::warn!(
                 device,
                 "a member's {about} could not be read to the end: {why:#}"
             );
-            None
+            Err(Unread::Answered)
         }
     }
+}
+
+/// Which way a read of a member did not land.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unread {
+    /// No member answered: it is not there, or the link is down. Its row says
+    /// so already, reading *unreachable*, so this is no line of its own.
+    Unanswered,
+
+    /// It answered, and what it answered was a refusal, or more than this
+    /// device will hold, or something this device could not make out — which
+    /// is what two devices a release apart look like (ADR-0027, *Seeing
+    /// versions*), and what [`FailedReads`] puts on the row.
+    Answered,
+}
+
+/// What this device reads of each member of its own accord, as the row names
+/// it when a read fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Read {
+    Profiles,
+    Authors,
+    Conversations,
+}
+
+impl Read {
+    fn words(self) -> &'static str {
+        match self {
+            Read::Profiles => "Agent Profiles",
+            Read::Authors => "Authors",
+            Read::Conversations => "Conversations",
+        }
+    }
+}
+
+/// **The last failed background read of each member**, kind by kind, which is
+/// the line its Devices row carries until the next read of that kind lands.
+///
+/// Without it a member that answers this device in a way it cannot read — the
+/// winvm incident, a release apart — fails into the log and onto neither
+/// screen. In memory and nothing written down: it is about this run, and a
+/// start reads every member again.
+///
+/// Shared by every clone, the way the Annex's trouble beside it is.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FailedReads(Arc<Mutex<BTreeMap<String, BTreeSet<Read>>>>);
+
+impl FailedReads {
+    /// `device`'s read of `read` did not land, for `why`. Only a member that
+    /// answered leaves a line — see [`Unread`] — and the pages are told where
+    /// it is a new one.
+    pub(crate) fn failed(&self, nudges: &Nudges, device: &str, read: Read, why: Unread) {
+        if why == Unread::Unanswered {
+            return;
+        }
+
+        let new = self
+            .0
+            .lock()
+            .expect("the failed reads are never poisoned")
+            .entry(device.to_owned())
+            .or_default()
+            .insert(read);
+
+        if new {
+            told(nudges);
+        }
+    }
+
+    /// And it did land, which takes its line away.
+    pub(crate) fn held(&self, nudges: &Nudges, device: &str, read: Read) {
+        let gone = {
+            let mut failed = self.0.lock().expect("the failed reads are never poisoned");
+
+            let gone = failed
+                .get_mut(device)
+                .is_some_and(|reads| reads.remove(&read));
+
+            if failed.get(device).is_some_and(BTreeSet::is_empty) {
+                failed.remove(device);
+            }
+
+            gone
+        };
+
+        if gone {
+            told(nudges);
+        }
+    }
+
+    /// The sentence `device`'s row carries, under the `name` it is drawn with:
+    /// *winvm's Agent Profiles couldn't be read.* `None` where every read of it
+    /// landed.
+    pub(crate) fn line(&self, device: &str, name: &str) -> Option<String> {
+        let failed = self.0.lock().expect("the failed reads are never poisoned");
+        let words: Vec<&str> = failed
+            .get(device)?
+            .iter()
+            .map(|read| read.words())
+            .collect();
+
+        let listed = match words.as_slice() {
+            [] => return None,
+            [one] => (*one).to_owned(),
+            [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        };
+
+        Some(format!("{name}'s {listed} couldn't be read."))
+    }
+}
+
+/// The Devices section told its rows moved — to this device's own pages alone,
+/// this being nobody else's news, and marked so that the mirrors, which read
+/// every member again on a Devices Nudge, leave it be: what moved is a line, not
+/// the membership. See [`Nudges::announce_here`].
+fn told(nudges: &Nudges) {
+    nudges.announce_here(verkstead_schema::Nudge::Devices);
 }
 
 /// The call one of those is made with: a `GET` of `onwards` asking for JSON, on
@@ -507,7 +719,7 @@ pub(crate) fn asking(onwards: String) -> Call {
 /// Read chunk by chunk rather than in one call, so the bound is applied as the
 /// bytes arrive: a body read whole and then measured is a body this device has
 /// already held.
-async fn bounded(answered: reqwest::Response, most: usize) -> anyhow::Result<Vec<u8>> {
+pub(crate) async fn bounded(answered: reqwest::Response, most: usize) -> anyhow::Result<Vec<u8>> {
     use tokio_stream::StreamExt;
 
     let mut body = answered.bytes_stream();
@@ -659,10 +871,14 @@ pub(crate) async fn put_to(
     match devices.relay(device, call).await {
         Ok(answered) if answered.status().is_success() => Ok(answered),
 
-        Ok(answered) => Err(Refusal::theirs(format!(
-            "{named} refused it: {}.",
-            answered.status(),
-        ))),
+        Ok(answered) => Err(Refusal::theirs(
+            apart(
+                Some(devices),
+                device,
+                format!("{named} refused it: {}.", answered.status()),
+            )
+            .await,
+        )),
 
         Err(Unrelayed::Unreachable(_)) => {
             Err(Refusal::theirs(format!("{named} couldn't be reached.")))
@@ -721,10 +937,46 @@ pub(crate) async fn word_from<T: serde::de::DeserializeOwned>(
 /// the one path that would need it twice, and a membership read on the way to a
 /// sentence nobody usually sees is cheaper than a second one on every press.
 async fn unreadable(devices: Option<&Devices>, device: &str, why: String) -> Refusal {
-    Refusal::theirs(format!(
+    let said = format!(
         "{} answered in a way this device can't read: {why}.",
         called(devices, device).await,
-    ))
+    );
+
+    Refusal::theirs(apart(devices, device, said).await)
+}
+
+/// What a member that answered and refused is told as: `said`, and after it the
+/// gap between its release and this device's where the two differ — *winvm
+/// refused it: 404 Not Found. winvm is on 0.2.0 and this device is on 0.2.2.
+/// Update winvm.* See [`crate::updates::gap`].
+///
+/// **Only for a member that answered.** One that could not be reached, or is no
+/// longer a member, is not refusing anything a release could explain, so those
+/// sentences go out as they are. And the gap is said rather than acted on: the
+/// press was the far end's to refuse, and nothing here refuses on a skew.
+///
+/// The row is read again here rather than carried down from [`called`], this
+/// being a sentence only a refusal is ever written for.
+async fn apart(devices: Option<&Devices>, device: &str, said: String) -> String {
+    match gap_to(devices, device).await {
+        Some(gap) => format!("{said} {gap}"),
+        None => said,
+    }
+}
+
+/// The gap between `device`'s release and this device's, as
+/// [`crate::updates::gap`] says it: `None` where they agree, and where there is
+/// no row to read the member's off.
+async fn gap_to(devices: Option<&Devices>, device: &str) -> Option<String> {
+    let devices = devices?;
+    let members = devices.membership().rows().await.ok()?;
+    let member = members.into_iter().find(|member| member.device == device)?;
+
+    crate::updates::gap(
+        &member.name,
+        member.version.as_deref(),
+        devices.version().as_deref(),
+    )
 }
 
 /// What a device is called, for the sentence a [`Refusal`] carries.
@@ -844,5 +1096,28 @@ mod tests {
             sends_bytes(&chunked),
             "and so does a body of no known length"
         );
+    }
+
+    /// Each read that did not land is named once, the lot in one sentence, and
+    /// a member that never answered leaves no line: its row reads unreachable.
+    #[test]
+    fn the_failed_reads_are_one_sentence_until_they_land() {
+        let nudges = Nudges::new();
+        let failed = FailedReads::default();
+
+        failed.failed(&nudges, "a", Read::Conversations, Unread::Answered);
+        failed.failed(&nudges, "a", Read::Profiles, Unread::Answered);
+        failed.failed(&nudges, "a", Read::Authors, Unread::Unanswered);
+
+        assert_eq!(
+            failed.line("a", "winvm").as_deref(),
+            Some("winvm's Agent Profiles and Conversations couldn't be read."),
+        );
+        assert_eq!(failed.line("b", "wolf"), None);
+
+        failed.held(&nudges, "a", Read::Profiles);
+        failed.held(&nudges, "a", Read::Conversations);
+
+        assert_eq!(failed.line("a", "winvm"), None);
     }
 }

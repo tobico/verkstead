@@ -70,22 +70,30 @@ use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, AnswerAttached, Attached, BaseRecorded, BriefSaved, Capture,
     CommitEvent, CommitPane, CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView,
-    ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
-    GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, Process, ProcessPicked,
-    ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, ServerAttached, SetReading,
-    SetView, Shown, Size, StageListReached, StageState, Started, SteerOpened, Submitted,
-    TargetRecorded, TaskListEvent, TaskListReached, TerminalClosed, TerminalOpened, TerminalView,
-    TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
+    ConversationClosed, ConversationSteered, ConversationStopped, ConversationView, DevicesView,
+    GrillingStarted, InstallKind, Lifecycle, NoticeEvent, PickedView, PinnedEvent, Process,
+    ProcessPicked, ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, ServerAttached,
+    SetReading, SetView, Shown, Size, StageListReached, StageState, Started, SteerOpened,
+    Submitted, TargetRecorded, TaskListEvent, TaskListReached, TerminalClosed, TerminalOpened,
+    TerminalView, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
+use verkstead_server::device::Devices;
+use verkstead_server::device::reading::Reading;
 use verkstead_server::handoffs::Handoffs;
+use verkstead_server::peer::Members;
+use verkstead_server::peer::joining::Joins;
 use verkstead_server::platform::Platform;
+use verkstead_server::remote::Tailscale;
 use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
-use verkstead_server::{Agents, Gh, Pace, open_database, router_running_sessions};
+use verkstead_server::{
+    Agents, Gh, Pace, open_database, router_running_sessions,
+    router_running_sessions_answering_devices,
+};
 use verkstead_store::{Decision, StageOf, stage_roadmap};
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -2962,6 +2970,50 @@ async fn grilling_however_started_serving(
     serving: &[(&str, &str)],
 ) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace, signature).await;
+
+    grilling_on(
+        bench, companions, attaching, pickers, origin, seeded, serving,
+    )
+    .await
+}
+
+/// And the same on a desktop install's server — one answering for this device
+/// as well as running sessions, installed as an AppImage so that its own
+/// Update is offered (ADR-0027, *A device updates itself*).
+async fn grilling_as_a_desktop_install(stub: &str) -> Grilling {
+    let bench = bench_serving(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        None,
+        Serving::ADesktopInstall,
+    )
+    .await;
+
+    grilling_on(
+        bench,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::UnderEveryPairing,
+        Origin::None,
+        Seeded::Nothing,
+        &[],
+    )
+    .await
+}
+
+/// Start the fixture's Conversation on `bench` the way
+/// [`grilling_however_started_serving`] says, and press *start grilling*.
+async fn grilling_on(
+    bench: Bench,
+    companions: &[(&str, CompanionMode)],
+    attaching: &[(&str, &str)],
+    pickers: Pickers,
+    origin: Origin,
+    seeded: Seeded,
+    serving: &[(&str, &str)],
+) -> Grilling {
     let app = &bench.app;
 
     // Before the Conversation is started, so that every worktree cut from this
@@ -3474,6 +3526,28 @@ async fn bench_at_pace(
     pace: Pace,
     signature: Option<&str>,
 ) -> Bench {
+    bench_serving(spill, stub, gh, pace, signature, Serving::Sessions).await
+}
+
+/// What a bench's server is besides a workbench running sessions.
+enum Serving {
+    /// Nothing: no device identity, which is every bench but one.
+    Sessions,
+
+    /// A desktop install's, answering for this device too — see
+    /// [`grilling_as_a_desktop_install`].
+    ADesktopInstall,
+}
+
+/// The same, serving what `serving` says.
+async fn bench_serving(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    pace: Pace,
+    signature: Option<&str>,
+    serving: Serving,
+) -> Bench {
     // Before anything is built, so that a bench queued behind the suite's
     // ceiling costs nothing while it waits — see [`ROOM`].
     let room = ROOM
@@ -3518,7 +3592,38 @@ async fn bench_at_pace(
         None => agents,
     };
 
-    let app = router_running_sessions(pool, state.path().to_owned(), agents, gh_stub(gh));
+    let app = match serving {
+        Serving::Sessions => {
+            router_running_sessions(pool, state.path().to_owned(), agents, gh_stub(gh))
+        }
+        Serving::ADesktopInstall => {
+            let devices = Devices::of(
+                verkstead_server::device::Device::stated(
+                    state.path(),
+                    "0123456789abcdef0123456789abcdef",
+                )
+                .unwrap(),
+                Reading::stated(
+                    Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422),
+                    Platform::HERE,
+                    None,
+                    Vec::new(),
+                )
+                .running(Some("0.2.2")),
+                Members::recorded(pool.clone()),
+                Joins::recorded(pool.clone()),
+            )
+            .installed_as(InstallKind::AppImage);
+
+            router_running_sessions_answering_devices(
+                pool,
+                state.path().to_owned(),
+                agents,
+                gh_stub(gh),
+                devices,
+            )
+        }
+    };
 
     let repo = repository(elsewhere.path().join("verkstead"));
     let registered: Registered =
@@ -6781,6 +6886,98 @@ async fn a_restarted_server_grills_the_work_again_rather_than_raising_anything()
         "which is where a fresh grilling leaves it: an interview that has to be \
          had again is still the interview",
     );
+}
+
+/// This device's Update over two running sessions counts both, goes ahead, and
+/// both are taken up again by the server it relaunches on (ADR-0027, *A
+/// confirm card names the sessions that will be stopped*).
+///
+/// The card's count is the Devices section's, read while both run; the press
+/// is taken rather than refused, the Annex's refusal being the one not chosen;
+/// and the relaunch is a second server over the same database, which is all an
+/// Update's restart is to the server — the app stops the old sidecar and starts
+/// the new one, and startup re-drives each driven Conversation, as after any
+/// restart.
+#[tokio::test]
+async fn an_update_over_two_running_sessions_counts_both_and_both_are_resumed() {
+    let fixture = grilling_as_a_desktop_install(
+        r#"
+        printf 'the grilling is running\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let beside = composed_beside(&fixture, Process::Investigate).await;
+    grilled(&fixture, beside).await;
+
+    until_working(&fixture, fixture.id).await;
+    until_working(&fixture, beside).await;
+
+    let view: DevicesView = get(&fixture.app, "/api/ui/devices").await;
+
+    assert_eq!(
+        (view.this_running.as_slice(), view.this_running_drafts),
+        (&[] as &[String], 2),
+        "both sessions are counted as drafts, neither Conversation's branch \
+         having been named yet",
+    );
+
+    let pressed: DevicesView = post(
+        &fixture.app,
+        "/api/ui/devices/this/update",
+        &serde_json::json!({}),
+    )
+    .await;
+
+    assert!(
+        pressed.this_updating.is_some(),
+        "Update goes ahead with sessions running: {pressed:?}",
+    );
+
+    let before: Vec<usize> = {
+        let mut counted = Vec::new();
+
+        for id in [fixture.id, beside] {
+            let view: ConversationView =
+                get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
+            counted.push(outputs(&view).len());
+        }
+
+        counted
+    };
+
+    let _relaunched = fixture
+        .restarted(r#"printf 'prompt was: %s\n' "$2"; sleep 300"#, PULL_REQUEST)
+        .await;
+
+    for (id, before) in [fixture.id, beside].into_iter().zip(before) {
+        let taken_up = until_on(&fixture, id, |view| {
+            let sessions = outputs(view);
+            (sessions.len() > before).then(|| sessions[before].id)
+        })
+        .await;
+
+        let printed = until_on(&fixture, id, |view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id == taken_up && output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+        let capture: Capture = get(
+            &fixture.app,
+            &format!("/api/ui/conversations/{id}/capture/{printed}"),
+        )
+        .await;
+
+        assert!(
+            capture.text.contains("/verkstead/skills/"),
+            "Conversation {id} is resumed by the relaunched server: {:?}",
+            capture.text,
+        );
+    }
 }
 
 /// A sandbox that will not start says why where somebody is looking.

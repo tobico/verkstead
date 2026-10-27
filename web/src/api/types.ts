@@ -2534,7 +2534,34 @@ addresses: Array<string>,
  * `None` is every device but an Annex, and what a Verkstead from before
  * the Annex existed answers by saying nothing.
  */
-kept_by: string | null, };
+kept_by: string | null, 
+/**
+ * And the release of Verkstead it is running, *0.2.2*: read off the
+ * binary answering rather than the machine, and drawn under the name on
+ * its Devices row (ADR-0027, *Seeing versions*).
+ *
+ * **A reading like the name, the OS and the addresses**, so a member's
+ * row takes whatever the last answer said, `None` included: a device
+ * moved back to an older Verkstead really does say none.
+ *
+ * `None` is what a Verkstead from before this field answers by saying
+ * nothing — which is itself the sign that it wants updating.
+ */
+version: string | null, 
+/**
+ * And what it was installed as, read off the binary answering the way
+ * the release is (ADR-0027, *A device updates itself*) — which says
+ * whether a member's row can update it from here or shows how to update
+ * it by hand — see [`InstallKind`].
+ *
+ * **A reading like the version**, so a member's row takes whatever the
+ * last answer said, `None` included.
+ *
+ * `None` is a Verkstead from before this field, which says nothing — and
+ * a newer one naming a kind this release has no word for, which is read
+ * the same way rather than refusing the whole answer.
+ */
+install: InstallKind | null, };
 
 /**
  * The **Devices** list, as the Remote access pane reads it off this machine.
@@ -2596,7 +2623,61 @@ pending: Array<PendingJoin>,
  * Annex has a row, the line is on it instead — see
  * [`LinkedDevice::trouble`] — and this is `None`.
  */
-annex_trouble: string | null, };
+annex_trouble: string | null, 
+/**
+ * And the newer stable release than the one this device runs, where one
+ * exists, *0.3.0*: what tags its row *update available* — see
+ * [`LinkedDevice::update_available`], which is the same verdict for a
+ * member — and the version its Update's confirm card names.
+ */
+this_update_available: string | null, 
+/**
+ * And the branch each session running on this device is running on,
+ * where its Conversation is called by its branch — which its Update's
+ * confirm card names as the sessions to be stopped and resumed
+ * (ADR-0027). Read at the moment the pane asks, as the sidebar's marks
+ * are; empty with none running.
+ */
+this_running: Array<string>, 
+/**
+ * And how many more are running on a Draft, whose branch is nobody's
+ * name for it yet — counted rather than named, so that the card reads
+ * *2 drafts* rather than *a draft and a draft*.
+ */
+this_running_drafts: number, 
+/**
+ * And what this device was installed as, which says whether its row is
+ * offered an Update or a line saying how to update it by hand — see
+ * [`InstallKind`].
+ *
+ * The same reading as `this.install`, said here as well so that this
+ * device's row never has to read a kind that is not there: this device
+ * always knows what it is.
+ */
+this_install: InstallKind, 
+/**
+ * And this device's own Update, while one is going: from the press until
+ * the server serving this answer stops, which is the app relaunching it on
+ * the new release — see [`ThisUpdating`]. `None` otherwise, a start
+ * included, so the first answer after the relaunch reads none.
+ */
+this_updating: ThisUpdating | null, 
+/**
+ * And why this device's last Update didn't take it onto the release, as
+ * the desktop app reported it — a download or check that failed, or a
+ * relaunch that came up on another version than the one handed over to.
+ * Drawn under this device's own row, beside any line of the Annex's, until
+ * the next press or the next start. There is no rollback (ADR-0027): the
+ * line, and a higher release.
+ */
+this_update_trouble: string | null, 
+/**
+ * And whether an **Update all** pressed here is going: from the press
+ * until this device's own Update begins, last, or the run ends without
+ * one. Every member's row says its own part as it goes; this is what the
+ * Update Notice's banner reads to offer the press again or not.
+ */
+updating_all: boolean, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -3374,6 +3455,17 @@ export type IgnoredCommentsEdit = "Keep" | { "Set": { rules: Array<IgnoreRule>, 
 export type InFront = "Run" | "Shell" | "Other" | "Unknown";
 
 /**
+ * What a Verkstead was installed as, read off its own executable at startup
+ * (ADR-0027, *A device updates itself*).
+ *
+ * **Three of them update themselves and three are updated by hand.** The
+ * desktop app's three artifacts are what electron-updater can replace; what
+ * nix, a checkout or a downloaded binary put there is the human's to replace
+ * the way they put it there, and nothing is ever attempted on one.
+ */
+export type InstallKind = "AppImage" | "MacApp" | "WindowsInstall" | "Nix" | "Checkout" | "Binary";
+
+/**
  * The press that starts one: the rows that were ticked.
  *
  * Every one of them is a row the reading said was absent. A row that is
@@ -3636,10 +3728,72 @@ reachable: boolean,
  * Drawn under the row, which reads *unreachable* beside it until the
  * Annex answers (ADR-0024).
  *
- * The Keeper's own finding, like the flag above, and only a Keeper has
- * one: `None` on every other row, and on an Annex that came up.
+ * **And the background reads of this member that did not land** —
+ * its Agent Profiles, its Authors, its Conversations — after the Annex's
+ * line where there is both, and then the gap between its release and this
+ * device's where they differ: *winvm's Agent Profiles couldn't be read.
+ * winvm is on 0.2.0 and this device is on 0.2.2. Update winvm.* Held until
+ * the next read of that kind lands.
+ *
+ * **And, last, why the last Update pressed on it here didn't go**: its
+ * own refusal by name, its updater's failure in its own words, or that it
+ * was unreachable at the press and so wasn't updated — standing until the
+ * next press (ADR-0027, *A device updates itself*).
+ *
+ * This device's own findings, like the flag above: `None` on a row with
+ * none of them.
  */
-trouble: string | null, };
+trouble: string | null, 
+/**
+ * And whether the version it last said is older than the latest stable
+ * release, which tags the row *update available* (ADR-0027, *Seeing
+ * versions*).
+ *
+ * **This device's finding, out of the Update Notice's own daily check**,
+ * so it is false while that check is off or unanswered, and on a row that
+ * says no version. Worked out by the server, so the viewer does no version
+ * arithmetic.
+ */
+update_available: boolean, 
+/**
+ * And that newer release, *0.3.0*, which its Update's confirm card names
+ * — `None` wherever `update_available` is false.
+ */
+update_release: string | null, 
+/**
+ * And the branch each session running on it is running on, where its
+ * Conversation is called by its branch — which its Update's confirm card
+ * names as the sessions to be stopped and resumed (ADR-0027), as
+ * [`DevicesView::this_running`] does for this device.
+ *
+ * **Read off the list this device already holds of that member**, the
+ * sidebar's, rather than asked for: what it says is as fresh as the last
+ * Nudge of that member's that moved its sidebar. Empty for a member never
+ * heard from.
+ */
+running: Array<string>, 
+/**
+ * And how many more are running there on a Draft, counted rather than
+ * named — see [`DevicesView::this_running_drafts`].
+ */
+running_drafts: number, 
+/**
+ * And its Update, where one pressed on this device is going: from the
+ * press, with how much of the release is down once that member's desktop
+ * app has said (ADR-0027, *A device updates itself*). Held by the device
+ * that pressed, so every workbench of it draws the same row. `None` with
+ * none going; a press that left a line rather than an Update says it in
+ * `trouble`.
+ */
+updating: ThisUpdating | null, 
+/**
+ * And whether, with its Update going, it has gone quiet: the Nudge stream
+ * this device holds to it ended, which is its desktop app quitting to
+ * install. The row reads *restarting…* until it is back — said by the
+ * device that pressed, whose server is still up, rather than by the
+ * viewer as this device's own row has it.
+ */
+restarting: boolean, };
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -7408,6 +7562,18 @@ in_front: InFront | null, };
  * Oldest first, which is the order they were opened in.
  */
 export type TerminalsView = { live: Array<TerminalView>, };
+
+/**
+ * This device's Update, as far as the desktop app has said it has got
+ * (ADR-0027, *A device updates itself*): the row reads *updating…* from the
+ * press, with how much of the release is down once the app has said.
+ */
+export type ThisUpdating = { 
+/**
+ * How much of the release electron-updater has downloaded, as a whole
+ * percentage — `None` until the app's first report.
+ */
+percent: number | null, };
 
 /**
  * One entry in a Timeline.

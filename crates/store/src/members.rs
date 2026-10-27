@@ -181,6 +181,16 @@ pub struct Member {
     /// every member but an Annex.
     pub kept_by: Option<String>,
 
+    /// And the release of Verkstead it said it runs at its last recording,
+    /// *0.2.2* — see [`Linking::version`]. `None` is a member that said none,
+    /// which is a Verkstead from before the version was said.
+    pub version: Option<String>,
+
+    /// And what it said it was installed as at its last recording, in the
+    /// word the wire spells it with — *AppImage*, *Nix* — see
+    /// [`Linking::install`]. `None` is a member that said none.
+    pub install: Option<String>,
+
     /// And an address this device reaches the member at that the member never
     /// advertised: dialled before any of the [`Member::addresses`], and never
     /// written by what the far end says (ADR-0024, *The Keeper and its Annex
@@ -273,6 +283,17 @@ pub struct Linking {
     /// roster or an announcement, all of which carry it, so it is marked from
     /// its first row on; a device linked as an ordinary member stays one.
     pub kept_by: Option<String>,
+
+    /// And the release of Verkstead it says it runs, **written by every
+    /// recording, `None` included** — unlike the mark above. It is a reading
+    /// of the binary answering, and a member moved back to a Verkstead from
+    /// before the version was said really does say none.
+    pub version: Option<String>,
+
+    /// And what it says it was installed as, in the word the wire spells it
+    /// with, **written by every recording, `None` included** — a reading of
+    /// the binary answering, like the version.
+    pub install: Option<String>,
 }
 
 /// And a member that has made its certificate again, saying so: the same five
@@ -300,6 +321,14 @@ pub struct Renewal {
     /// And the one it is changing over to, which is what the row is keyed on
     /// from now on: a member *is* a fingerprint, and this is the one it will be.
     pub incoming: String,
+
+    /// And the release it says it runs, written as a recording writes it — see
+    /// [`Linking::version`].
+    pub version: Option<String>,
+
+    /// And what it says it was installed as, written the same way — see
+    /// [`Linking::install`].
+    pub install: Option<String>,
 }
 
 /// The members table, and the addresses hanging off it.
@@ -315,7 +344,9 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              renewing_from TEXT,
              acknowledged  TEXT,
              kept_by       TEXT,
-             direct        TEXT
+             direct        TEXT,
+             version       TEXT,
+             install       TEXT
          ) STRICT",
     )
     .execute(pool)
@@ -356,8 +387,18 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // And the mark an Annex's row wears, by the same rule again: arriving null,
     // there being no Annex before the column. See [`Member::kept_by`]. And the
     // direct address a Keeper and its Annex hold each other at, null for the
-    // same reason — see [`Member::direct`].
-    for column in ["renewing_from", "acknowledged", "kept_by", "direct"] {
+    // same reason — see [`Member::direct`]. And the release each member said
+    // it runs, null for the reason the mark is: nothing said one before the
+    // column — see [`Member::version`]. And what each said it was installed
+    // as, null for the same reason — see [`Member::install`].
+    for column in [
+        "renewing_from",
+        "acknowledged",
+        "kept_by",
+        "direct",
+        "version",
+        "install",
+    ] {
         let there: Option<(String,)> =
             sqlx::query_as("SELECT name FROM pragma_table_info('members') WHERE name = ?")
                 .bind(column)
@@ -475,32 +516,96 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// again by the same fact that moves the moment.
 ///
 /// **Except the mark**, which a new row takes and an existing one keeps,
-/// whatever this recording says — see [`Linking::kept_by`].
+/// whatever this recording says — see [`Linking::kept_by`]. The version and
+/// the install are written like the name, whatever they say — see
+/// [`Linking::version`].
 pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
     let mut tx = writing(pool, "recording a member").await?;
 
     sqlx::query(
-        "INSERT INTO members (device, name, os, fingerprint, last_seen, reachable, kept_by)
-         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 1, ?)
+        "INSERT INTO members
+           (device, name, os, fingerprint, last_seen, reachable, kept_by, version, install)
+         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 1, ?, ?, ?)
          ON CONFLICT (device) DO UPDATE
            SET name        = excluded.name,
                os          = excluded.os,
                fingerprint = excluded.fingerprint,
                last_seen   = excluded.last_seen,
-               reachable   = 1",
+               reachable   = 1,
+               version     = excluded.version,
+               install     = excluded.install",
     )
     .bind(&linking.device)
     .bind(&linking.name)
     .bind(&linking.os)
     .bind(&linking.fingerprint)
     .bind(&linking.kept_by)
+    .bind(&linking.version)
+    .bind(&linking.install)
     .execute(&mut *tx)
     .await
     .with_context(|| format!("recording device {} as a member", linking.device))?;
 
+    advertised(&mut tx, linking).await?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("recording device {} as a member", linking.device))
+}
+
+/// The same for a device that is **already a member**, and nothing at all for
+/// one that is not: `false`, and no row written, where there is none to bring
+/// up to date.
+///
+/// **What a read of a member's identity writes**, rather than
+/// [`record_member`]. That read goes over the link and back, and a device
+/// unlinked while it was on the way has no row for the answer to land in. Put
+/// back by an upsert, it would be a member again that nobody linked, and
+/// everything pruned for its going would be held of it again. Whether the row is
+/// there is asked by the write itself, so no unlink can fall between the two.
+pub async fn refresh_member(pool: &SqlitePool, linking: &Linking) -> Result<bool> {
+    let mut tx = writing(pool, "bringing a member up to date").await?;
+
+    let updated = sqlx::query(
+        "UPDATE members
+         SET name        = ?,
+             os          = ?,
+             fingerprint = ?,
+             last_seen   = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+             reachable   = 1,
+             version     = ?,
+             install     = ?
+         WHERE device = ?",
+    )
+    .bind(&linking.name)
+    .bind(&linking.os)
+    .bind(&linking.fingerprint)
+    .bind(&linking.version)
+    .bind(&linking.install)
+    .bind(&linking.device)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("bringing member {} up to date", linking.device))?;
+
+    if updated.rows_affected() == 0 {
+        return Ok(false);
+    }
+
+    advertised(&mut tx, linking).await?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("bringing member {} up to date", linking.device))?;
+
+    Ok(true)
+}
+
+/// The addresses `linking` advertised, written in place of the ones its row
+/// held, in the transaction the row is written in — see [`record_member`].
+async fn advertised(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, linking: &Linking) -> Result<()> {
     sqlx::query("DELETE FROM member_addresses WHERE device = ?")
         .bind(&linking.device)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .with_context(|| {
             format!(
@@ -514,7 +619,7 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
             .bind(&linking.device)
             .bind(position as i64)
             .bind(address)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .with_context(|| {
                 format!(
@@ -524,18 +629,17 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
             })?;
     }
 
-    tx.commit()
-        .await
-        .with_context(|| format!("recording device {} as a member", linking.device))
+    Ok(())
 }
 
 /// One member row as the query hands it back, in the order the `SELECT` names the
 /// columns: the device, its name, its OS, the fingerprint it is keyed on, when it
 /// was last heard from, whether the last dial got through, what it is changing over
-/// from, what it has acknowledged of this device, whose Annex it is, and where this
-/// device reaches it directly.
+/// from, what it has acknowledged of this device, whose Annex it is, where this
+/// device reaches it directly, the release it said it runs, and what it said it
+/// was installed as.
 ///
-/// Named because ten columns written out at the call site is a type nobody reads
+/// Named because twelve columns written out at the call site is a type nobody reads
 /// — and the nullable ones at the end are exactly the ones it would be easiest
 /// to read in the wrong order.
 type Row = (
@@ -545,6 +649,8 @@ type Row = (
     String,
     String,
     bool,
+    Option<String>,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -564,7 +670,7 @@ pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
 
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT device, name, os, fingerprint, last_seen, reachable, renewing_from, acknowledged,
-                kept_by, direct
+                kept_by, direct, version, install
          FROM members
          ORDER BY name, device",
     )
@@ -602,6 +708,8 @@ pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
                 acknowledged,
                 kept_by,
                 direct,
+                version,
+                install,
             )| Member {
                 addresses: addresses.remove(&device).unwrap_or_default(),
                 device,
@@ -614,6 +722,8 @@ pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
                 acknowledged,
                 kept_by,
                 direct,
+                version,
+                install,
             },
         )
         .collect())
@@ -809,6 +919,8 @@ pub async fn record_renewal(pool: &SqlitePool, renewal: &Renewal) -> Result<bool
                 os            = ?,
                 fingerprint   = ?,
                 renewing_from = ?,
+                version       = ?,
+                install       = ?,
                 last_seen     = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
                 reachable     = 1
           WHERE device = ?",
@@ -817,6 +929,8 @@ pub async fn record_renewal(pool: &SqlitePool, renewal: &Renewal) -> Result<bool
     .bind(&renewal.os)
     .bind(&renewal.incoming)
     .bind(&renewal.presenting)
+    .bind(&renewal.version)
+    .bind(&renewal.install)
     .bind(&renewal.device)
     .execute(&mut *tx)
     .await

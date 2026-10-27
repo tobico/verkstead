@@ -2010,6 +2010,32 @@ export function loadDevices(): Promise<DevicesView> {
   return get<DevicesView>("/api/ui/devices");
 }
 
+/// **Update** on this device's own row: the desktop app is asked to take it
+/// onto the latest stable release, and the row reads *updating…* from the
+/// answer on (ADR-0027). Refused by name where the install can't update
+/// itself — nix, a checkout, or a server the app didn't start.
+export function updateThisDevice(): Promise<DevicesView> {
+  return post<DevicesView>("/api/ui/devices/this/update");
+}
+
+/// **Update** on a member's row: the member is told to update itself, and its
+/// row reads *updating…* from the answer on — or the line saying why not, its
+/// own refusal or that it couldn't be reached (ADR-0027). Answered with the
+/// section read again whatever the member made of it.
+export function updateMember(device: string): Promise<DevicesView> {
+  return post<DevicesView>(
+    `/api/ui/devices/members/${encodeURIComponent(device)}/update`,
+  );
+}
+
+/// **Update all**, on the Update Notice's banner: every member that can be
+/// updated is told at once, and this device updates last, once each is back
+/// or has a line (ADR-0027). Run by the server to its end; answered at once
+/// with the section read again, `updating_all` set.
+export function updateAll(): Promise<DevicesView> {
+  return post<DevicesView>("/api/ui/devices/all/update");
+}
+
 /// What this machine has installed beyond what the wizard checks: the Annex's
 /// row on a Windows Keeper, and `annex: null` everywhere else — which is what
 /// says the settings page draws no Components card.

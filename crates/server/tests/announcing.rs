@@ -212,8 +212,15 @@ impl Verkstead {
 
     /// How it dials, for the questions that are about a call rather than about
     /// a press.
+    ///
+    /// **With a running server's deadlines rather than [`PATIENCE`]**, because
+    /// every call made through this one is meant to be answered — let in or
+    /// refused at the gate, but answered. Three hundred milliseconds for the
+    /// whole of an answer, a handshake and a write, is a dial a loaded runner
+    /// fails to finish, and that reads exactly as a member answering at none of
+    /// its addresses.
     fn peers(&self) -> Peers {
-        Peers::of(self.device.clone(), self.members.clone()).waiting(PATIENCE)
+        Peers::of(self.device.clone(), self.members.clone())
     }
 
     /// What it says about itself, which is what an announcement carries.
@@ -225,6 +232,8 @@ impl Verkstead {
             os: "Linux".to_owned(),
             addresses: vec![self.at()],
             kept_by: None,
+            version: None,
+            install: None,
         }
     }
 
@@ -635,6 +644,8 @@ async fn a_member_that_answers_nothing_is_dimmed_and_owed_the_telling() {
             addresses: vec!["127.0.0.1:1".to_owned()],
             fingerprint: "AA:BB:CC:DD:EE:FF".to_owned(),
             kept_by: None,
+            version: None,
+            install: None,
         },
     )
     .await
@@ -847,6 +858,8 @@ async fn linking_again_keeps_the_keepers_own_rows_over_the_annexes() {
             addresses: vec!["127.0.0.1:1".to_owned()],
             fingerprint: "00:11:22".to_owned(),
             kept_by: None,
+            version: None,
+            install: None,
         },
     )
     .await
@@ -884,6 +897,8 @@ async fn an_annex_announced_after_it_was_owed_carries_its_mark() {
         addresses: vec![address],
         fingerprint: c.device.fingerprint().to_owned(),
         kept_by: None,
+        version: None,
+        install: None,
     };
 
     verkstead_store::record_member(&a.pool, &away("127.0.0.1:1".to_owned()))
@@ -1032,5 +1047,7 @@ fn member_at(listening: &Verkstead, device: &str) -> verkstead_store::Member {
         acknowledged: None,
         kept_by: None,
         direct: None,
+        version: None,
+        install: None,
     }
 }

@@ -123,7 +123,7 @@ export const HIDDEN = "--hidden";
 /// **Said rather than left to Electron, because the name it would choose is the
 /// one name this must not be.** `setLoginItemSettings` names the value after the
 /// application's AppUserModelId where it is told nothing else, and `main.ts` sets
-/// that to [`APP_ID`] so that the window groups with the Start-menu entry the msi
+/// that to [`APP_ID`] so that the window groups with the Start-menu entry the installer
 /// writes. [`APP_ID`] is also the tray app's own value name, which is the one
 /// [`runkey.ts`](./runkey.js) reads and deletes — so under one name the launch
 /// after a take-over would read this app's own registration as the tray app's,

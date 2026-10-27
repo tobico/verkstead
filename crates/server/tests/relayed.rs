@@ -136,6 +136,8 @@ impl Linked {
                 addresses: vec!["192.168.1.31".to_owned()],
                 fingerprint: member.fingerprint().to_owned(),
                 kept_by: None,
+                version: None,
+                install: None,
             },
         )
         .await

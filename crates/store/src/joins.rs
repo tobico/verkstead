@@ -131,6 +131,11 @@ pub struct HeldJoin {
     /// moment above, worked out when the request was made rather than counted
     /// from whenever this process last came up.
     pub expires_at: String,
+
+    /// And the release of Verkstead it said it runs, which is what its member
+    /// row is written with at an Allow. `None` is an asker that said none — a
+    /// Verkstead from before the version was said.
+    pub version: Option<String>,
 }
 
 /// The two tables, and the addresses hanging off the held one.
@@ -181,12 +186,29 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              os          TEXT NOT NULL,
              fingerprint TEXT NOT NULL,
              asked_at    TEXT NOT NULL,
-             expires_at  TEXT NOT NULL
+             expires_at  TEXT NOT NULL,
+             version     TEXT
          ) STRICT",
     )
     .execute(pool)
     .await
     .context("creating the table of joins this device is holding")?;
+
+    // And the release the asker said it runs, by the rule `refused` follows
+    // above. Arriving null, which is what every asker before it said.
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('joins_held') WHERE name = ?")
+            .bind("version")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the column that says what release an asker runs")?;
+
+    if there.is_none() {
+        sqlx::query("ALTER TABLE joins_held ADD COLUMN version TEXT")
+            .execute(pool)
+            .await
+            .context("adding the column that says what release an asker runs")?;
+    }
 
     // The addresses the asker advertised, a row apiece with the position they
     // came in — the shape `member_addresses` is, and for its reason: the dial
@@ -338,8 +360,8 @@ pub async fn hold_join(pool: &SqlitePool, held: &HeldJoin) -> Result<()> {
 
     sqlx::query(
         "INSERT INTO joins_held
-             (request, device, name, os, fingerprint, asked_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+             (request, device, name, os, fingerprint, asked_at, expires_at, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&held.request)
     .bind(&held.device)
@@ -348,6 +370,7 @@ pub async fn hold_join(pool: &SqlitePool, held: &HeldJoin) -> Result<()> {
     .bind(&held.fingerprint)
     .bind(&held.asked_at)
     .bind(&held.expires_at)
+    .bind(&held.version)
     .execute(&mut *tx)
     .await
     .with_context(|| format!("holding the join device {} asked", held.device))?;
@@ -380,8 +403,8 @@ pub async fn hold_join(pool: &SqlitePool, held: &HeldJoin) -> Result<()> {
 pub async fn held_join(pool: &SqlitePool, request: &str) -> Result<Option<HeldJoin>> {
     let mut tx = super::reading(pool, "reading a held join").await?;
 
-    let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
-        "SELECT device, name, os, fingerprint, asked_at, expires_at
+    let row: Option<HeldRow> = sqlx::query_as(
+        "SELECT device, name, os, fingerprint, asked_at, expires_at, version
          FROM joins_held
          WHERE request = ?",
     )
@@ -390,7 +413,7 @@ pub async fn held_join(pool: &SqlitePool, request: &str) -> Result<Option<HeldJo
     .await
     .with_context(|| format!("reading the join held under {request}"))?;
 
-    let Some((device, name, os, fingerprint, asked_at, expires_at)) = row else {
+    let Some((device, name, os, fingerprint, asked_at, expires_at, version)) = row else {
         return Ok(None);
     };
 
@@ -412,8 +435,34 @@ pub async fn held_join(pool: &SqlitePool, request: &str) -> Result<Option<HeldJo
         fingerprint,
         asked_at,
         expires_at,
+        version,
     }))
 }
+
+/// One held join as [`held_join`] reads it: the device, its name, its OS, the
+/// fingerprint, when it was asked, when it runs out, and the release it said.
+type HeldRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+);
+
+/// And one as [`held_joins`] lists it: the request it is held under, then the
+/// same seven.
+type HeldListed = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+);
 
 /// Every join this device is holding, oldest first — which is the order they
 /// arrived in, and the order the modal raises them in.
@@ -428,8 +477,8 @@ pub async fn held_join(pool: &SqlitePool, request: &str) -> Result<Option<HeldJo
 pub async fn held_joins(pool: &SqlitePool) -> Result<Vec<HeldJoin>> {
     let mut tx = super::reading(pool, "listing the held joins").await?;
 
-    let rows: Vec<(String, String, String, String, String, String, String)> = sqlx::query_as(
-        "SELECT request, device, name, os, fingerprint, asked_at, expires_at
+    let rows: Vec<HeldListed> = sqlx::query_as(
+        "SELECT request, device, name, os, fingerprint, asked_at, expires_at, version
          FROM joins_held
          ORDER BY asked_at, request",
     )
@@ -453,7 +502,7 @@ pub async fn held_joins(pool: &SqlitePool) -> Result<Vec<HeldJoin>> {
     Ok(rows
         .into_iter()
         .map(
-            |(request, device, name, os, fingerprint, asked_at, expires_at)| HeldJoin {
+            |(request, device, name, os, fingerprint, asked_at, expires_at, version)| HeldJoin {
                 addresses: addresses.remove(&request).unwrap_or_default(),
                 request,
                 device,
@@ -462,6 +511,7 @@ pub async fn held_joins(pool: &SqlitePool) -> Result<Vec<HeldJoin>> {
                 fingerprint,
                 asked_at,
                 expires_at,
+                version,
             },
         )
         .collect())

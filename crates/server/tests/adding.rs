@@ -523,6 +523,7 @@ async fn a_press_the_far_end_refused_keeps_its_row() {
                 fingerprint: format!("AA:BB:{held:02X}"),
                 asked_at: "2026-09-25T10:00:00Z".to_owned(),
                 expires_at: "2099-01-01T00:00:00Z".to_owned(),
+                version: None,
             },
         )
         .await

@@ -205,11 +205,15 @@ import {
   pressServe,
   resetKey,
   unlinkDevice,
+  updateAll,
+  updateMember,
+  updateThisDevice,
 } from "../api/client";
 import type {
   DeviceIdentity,
   DevicesView,
   DiscoveredDevice,
+  InstallKind,
   LinkedDevice,
   PendingJoin,
   RemoteView,
@@ -773,11 +777,69 @@ function Devices(props: {
     if (device !== null) drop.mutate(device.device);
   };
 
+  // And this device's own Update, asked first — see [`useThisUpdate`].
+  const update = useThisUpdate(devices);
+
+  // The member a press on Update asked about, while the card asking is up —
+  // or `null` while none is. Its id rather than its row, so the card names
+  // the sessions running there as the section read again says them.
+  const [updatingAsked, setUpdatingAsked] = createSignal<string | null>(null);
+
+  // The member the card is about, out of the latest reading.
+  const asked = (): LinkedDevice | undefined =>
+    devices.data?.members.find(
+      (member) => member.identity.device === updatingAsked(),
+    );
+
+  // And the press itself, answered with the section read again: *updating…*
+  // from that answer, or the line saying why not on the member's row.
+  const tell = useMutation(() => ({
+    mutationFn: (device: string) => updateMember(device),
+    onSuccess: (reading: DevicesView) =>
+      queries.setQueryData(["devices"], reading),
+  }));
+
+  /// A press on a member's Update, which asks first — with the section read
+  /// again, so the sessions the card names are the ones running as it is
+  /// drawn.
+  const askUpdate = (member: LinkedDevice) => {
+    void queries.invalidateQueries({ queryKey: ["devices"] });
+    setUpdatingAsked(member.identity.device);
+  };
+
+  /// And the press on the card, which tells the member.
+  const updateConfirmed = () => {
+    const device = updatingAsked();
+    setUpdatingAsked(null);
+
+    if (device !== null) tell.mutate(device);
+  };
+
   return (
     <section class={styles.devices}>
       <Choose>
         <Match when={devices.isPending}>
           <Empty>Reading the devices…</Empty>
+        </Match>
+        {/* A read failing while this device's own Update is going is the
+            server going away to be relaunched, which the row says rather than
+            the failure: *restarting…* until the new one answers. */}
+        <Match
+          when={
+            devices.isError && devices.data?.this_updating
+              ? devices.data
+              : null
+          }
+        >
+          {(here) => (
+            <List
+              of={here()}
+              restarting
+              unlink={setAsking}
+              unlinking={drop.isPending}
+              components={props.components}
+            />
+          )}
         </Match>
         <Match when={devices.isError}>
           <ErrorLine class={styles.failure}>
@@ -788,6 +850,10 @@ function Devices(props: {
           {(here) => (
             <List
               of={here()}
+              update={update.ask}
+              updating={update.press.isPending}
+              updateMember={askUpdate}
+              telling={tell.isPending}
               unlink={setAsking}
               unlinking={drop.isPending}
               components={props.components}
@@ -796,9 +862,21 @@ function Devices(props: {
         </Match>
       </Choose>
 
+      <Show when={update.press.isError}>
+        <ErrorLine class={styles.failure}>
+          This device couldn't be updated. {update.press.error?.message}
+        </ErrorLine>
+      </Show>
+
       <Show when={drop.isError}>
         <ErrorLine class={styles.failure}>
           The device couldn't be unlinked. {drop.error?.message}
+        </ErrorLine>
+      </Show>
+
+      <Show when={tell.isError}>
+        <ErrorLine class={styles.failure}>
+          The device couldn't be updated. {tell.error?.message}
         </ErrorLine>
       </Show>
 
@@ -812,35 +890,247 @@ function Devices(props: {
       {/* Asked before anything happens, the way Remove on a Repo is: one press
           in a list, on a phone, that cannot be taken back. */}
       <Confirm
-        asked={asking()}
+        open={asking() !== null}
+        question={`Unlink ${asking()?.name ?? ""}?`}
+        why="It leaves the cluster for every device and is told to forget the rest, so linking it again needs somebody to allow it."
+        verb="Unlink"
         keep={() => setAsking(null)}
-        unlink={confirmed}
+        act={confirmed}
+      />
+
+      {/* And this device's own Update, asked for the same reason: what it
+          stops is every session running here (ADR-0027). */}
+      {update.card}
+
+      {/* And a member's, asked for that reason too: what it stops is every
+          session running there. */}
+      <Confirm
+        open={asked() !== undefined}
+        question={`Update ${asked()?.identity.name ?? ""}?`}
+        why={updateWhy(
+          asked()?.update_release ?? null,
+          asked()?.running ?? [],
+          asked()?.running_drafts ?? 0,
+        )}
+        verb="Update"
+        keep={() => setUpdatingAsked(null)}
+        act={updateConfirmed}
       />
     </section>
   );
 }
 
-/// What an Unlink is answered with before anything has happened: which device
-/// it would take out of the cluster, what that means for the rest of it, and
-/// the two ways out.
+/// This device's own Update, as both places that offer it press it: its
+/// Devices row, and the Update Notice's banner (ADR-0027, *A device updates
+/// itself*). One press each, and the same card in front of either — the one
+/// asking *Update wolf?* with the release and the sessions running here.
+///
+/// The press answers with the Devices section read again, so the row reads
+/// *updating…* from that answer and is then polled through the restart — see
+/// [`useDevices`]. `card` is drawn wherever the press is offered; it is up
+/// only between a press and the answer to it.
+export function useThisUpdate(devices: ReturnType<typeof useDevices>) {
+  const queries = useQueryClient();
+
+  const press = useMutation(() => ({
+    mutationFn: updateThisDevice,
+    onSuccess: (reading: DevicesView) =>
+      queries.setQueryData(["devices"], reading),
+  }));
+
+  // Whether the card asking is up. Asked before anything happens, because the
+  // restart stops every session here.
+  const [asking, setAsking] = createSignal(false);
+
+  /// A press on Update, which asks first — with the section read again, so
+  /// the sessions the card names are the ones running as it is drawn.
+  const ask = () => {
+    void queries.invalidateQueries({ queryKey: ["devices"] });
+    setAsking(true);
+  };
+
+  /// And the press on the card, which is the Update.
+  const confirmed = () => {
+    setAsking(false);
+    press.mutate();
+  };
+
+  const card = (
+    <Confirm
+      open={asking() && devices.data !== undefined}
+      question={`Update ${devices.data?.this.name ?? ""}?`}
+      why={updateWhy(
+        devices.data?.this_update_available ?? null,
+        devices.data?.this_running ?? [],
+        devices.data?.this_running_drafts ?? 0,
+      )}
+      verb="Update"
+      keep={() => setAsking(false)}
+      act={confirmed}
+    />
+  );
+
+  return {
+    press,
+    ask,
+    card,
+    /// Whether Update is offered at all: see [`offeredUpdate`].
+    offered: (): boolean =>
+      devices.data !== undefined && offeredUpdate(devices.data),
+  };
+}
+
+/// **Update all**, as the Update Notice's banner presses it: every member
+/// whose row offers Update, told at once, and this device last where its own
+/// row offers it (ADR-0027, *Members first, this device last*). The server
+/// runs it to its end, so the page that pressed can close.
+///
+/// Offered where it would update a member — with none, it would be this
+/// device's own Update, which the banner already carries — and not while one
+/// is going. The card names every device it updates, this one last, and the
+/// sessions running on all of them.
+export function useUpdateAll(devices: ReturnType<typeof useDevices>) {
+  const queries = useQueryClient();
+
+  const press = useMutation(() => ({
+    mutationFn: updateAll,
+    onSuccess: (reading: DevicesView) =>
+      queries.setQueryData(["devices"], reading),
+  }));
+
+  const [asking, setAsking] = createSignal(false);
+
+  // The members it tells, out of the latest reading.
+  const members = (): LinkedDevice[] =>
+    devices.data?.members.filter(offeredMemberUpdate) ?? [];
+
+  // And this device, where it goes last.
+  const last = (): DeviceIdentity | null =>
+    devices.data !== undefined && offeredUpdate(devices.data)
+      ? devices.data.this
+      : null;
+
+  const names = (): string[] => [
+    ...members().map((member) => member.identity.name),
+    ...(last() === null ? [] : [last()!.name]),
+  ];
+
+  const why = (): string => {
+    const told = members();
+    const here = last();
+    const release =
+      devices.data?.this_update_available ?? told[0]?.update_release ?? null;
+
+    const branches = [
+      ...told.flatMap((member) => member.running),
+      ...(here === null ? [] : (devices.data?.this_running ?? [])),
+    ];
+    const drafts =
+      told.reduce((count, member) => count + member.running_drafts, 0) +
+      (here === null ? 0 : (devices.data?.this_running_drafts ?? 0));
+
+    if (names().length < 2) return updateWhy(release, branches, drafts);
+
+    return updateWhy(release, branches, drafts, "Each", here?.name ?? null);
+  };
+
+  const ask = () => {
+    void queries.invalidateQueries({ queryKey: ["devices"] });
+    setAsking(true);
+  };
+
+  const confirmed = () => {
+    setAsking(false);
+    press.mutate();
+  };
+
+  const card = (
+    <Confirm
+      open={asking() && names().length > 0}
+      question={`Update ${listed(names())}?`}
+      why={why()}
+      verb="Update all"
+      keep={() => setAsking(false)}
+      act={confirmed}
+    />
+  );
+
+  return {
+    press,
+    ask,
+    card,
+    /// Whether one is going, pressed here or on any workbench of this device.
+    going: (): boolean => devices.data?.updating_all ?? false,
+    /// Whether Update all is offered: a member to update, and none going.
+    offered: (): boolean =>
+      members().length > 0 && !(devices.data?.updating_all ?? false),
+  };
+}
+
+/// What an Update does, as its confirm card says it: the release the device
+/// restarts on, and the sessions running there, which the restart stops and
+/// startup resumes (ADR-0027, *A confirm card names the sessions that will be
+/// stopped*). Each branch by name and the drafts counted, *rate-limiting and
+/// 2 drafts*. With none running, the release alone. The same words on this
+/// device's card and a member's, and Update all's — *Each restarts on
+/// Verkstead 0.3.0, wolf last, …*, naming the device that goes `last`.
+function updateWhy(
+  release: string | null,
+  branches: string[],
+  drafts: number,
+  who = "It",
+  last: string | null = null,
+): string {
+  const after = last === null ? "" : `, ${last} last`;
+  const onto = `${who} restarts on Verkstead ${release ?? "the latest release"}${after}`;
+  const count = branches.length + drafts;
+
+  if (count === 0) return `${onto}.`;
+
+  const named = [
+    ...branches,
+    ...(drafts === 0 ? [] : [drafts === 1 ? "a draft" : `${drafts} drafts`]),
+  ];
+  const sessions = count === 1 ? "the session" : "the sessions";
+
+  return `${onto}, and ${sessions} on ${listed(named)} will be stopped and resumed.`;
+}
+
+/// `a`, `a and b`, `a, b and c`.
+function listed(names: string[]): string {
+  if (names.length < 2) return names.join("");
+
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/// What a press on the Devices list is answered with before anything has
+/// happened: the question naming the act and the device, one sentence of what
+/// it does, and the two ways out. Unlink asks it, and Update on this device's
+/// own row.
 ///
 /// The device is named on the card because the list it was pressed in is behind
 /// it — the shape the Repos pane's confirm takes, for its reason: a card reading
 /// *Unlink this device?* over a list of them would be asking about whichever row
 /// the human remembers pressing.
 ///
-/// And the sentence under the name is what makes this press different from
-/// every other undoing in the app: it is not this device's own half of a link
-/// being cut, it is the device leaving the cluster for everybody.
+/// And the sentence under the name is what makes each press different from
+/// every other in the app: an Unlink is not this device's own half of a link
+/// being cut, it is the device leaving the cluster for everybody; an Update
+/// stops every session running here.
 function Confirm(props: {
-  /// The device the press asked about, or `null` while nothing is being asked.
-  asked: DeviceIdentity | null;
+  /// Whether the card is up.
+  open: boolean;
+  /// The question, *Unlink crow?*.
+  question: string;
+  /// And the one sentence of what the press does.
+  why: string;
+  /// And the press's own verb.
+  verb: string;
   /// The way back, which is what Escape and a press on the backdrop come to as
-  /// well: every way out of this card but the one button leaves the cluster
-  /// alone.
+  /// well: every way out of this card but the one button leaves things alone.
   keep: () => void;
   /// And the press it asked about, made.
-  unlink: () => void;
+  act: () => void;
 }): JSX.Element {
   // The heading's own id, for the `aria-labelledby` that names the card by it.
   const id = createUniqueId();
@@ -848,17 +1138,14 @@ function Confirm(props: {
   return (
     <Modal
       class={styles.confirming!}
-      open={props.asked !== null}
+      open={props.open}
       close={props.keep}
       labelledBy={id}
     >
       <p id={id} class={styles.confirmingTitle}>
-        Unlink {props.asked?.name}?
+        {props.question}
       </p>
-      <p class={styles.confirmingWhy}>
-        It leaves the cluster for every device and is told to forget the rest,
-        so linking it again needs somebody to allow it.
-      </p>
+      <p class={styles.confirmingWhy}>{props.why}</p>
       <div class={styles.confirmingOut}>
         {/* Both classes, as every confirm pair in the app carries them: the
             global one is the paint, and the module's is what the row stands the
@@ -870,8 +1157,8 @@ function Confirm(props: {
         >
           Cancel
         </button>
-        <button type="button" onClick={() => props.unlink()}>
-          Unlink
+        <button type="button" onClick={() => props.act()}>
+          {props.verb}
         </button>
       </div>
     </Modal>
@@ -901,6 +1188,19 @@ function Confirm(props: {
 /// see [`keeperOf`].
 function List(props: {
   of: DevicesView;
+  /// Whether this device's server has stopped answering mid-Update, which its
+  /// row reads as *restarting…* — see [`Devices`].
+  restarting?: boolean;
+  /// What Update on this device's own row does, where it is drawn.
+  update?: () => void;
+  /// And whether that press is going through.
+  updating?: boolean;
+  /// What Update on a member's row asks about, where a row offers one —
+  /// see [`offeredMemberUpdate`].
+  updateMember?: (member: LinkedDevice) => void;
+  /// And whether a member's is going through, which greys the presses on
+  /// the members' rows while it is.
+  telling?: boolean;
   /// What a press on a member's row asks about, which is the whole of what a
   /// row does with one: the card above this list is what acts.
   unlink: (device: DeviceIdentity) => void;
@@ -917,6 +1217,17 @@ function List(props: {
       <Row
         of={props.of.this}
         here
+        differs={false}
+        newer={props.of.this_update_available !== null}
+        install={props.of.this_install}
+        progress={progress(props.of, props.restarting ?? false)}
+        update={
+          offeredUpdate(props.of) && !props.restarting
+            ? props.update
+            : undefined
+        }
+        unlinking={props.updating}
+        failed={props.of.this_update_trouble}
         trouble={props.of.annex_trouble}
         keeper={keeperOf(props.of, props.of.this)}
       />
@@ -926,6 +1237,21 @@ function List(props: {
           <Row
             of={member.identity}
             unreachable={!member.reachable}
+            differs={differs(props.of, member.identity)}
+            newer={member.update_available}
+            install={
+              member.identity.kept_by === null
+                ? (member.identity.install ?? undefined)
+                : undefined
+            }
+            who={member.identity.name}
+            note={memberNote(props.of, member)}
+            progress={memberProgress(member)}
+            update={
+              props.updateMember && offeredMemberUpdate(member)
+                ? () => props.updateMember?.(member)
+                : undefined
+            }
             trouble={member.trouble}
             keeper={keeperOf(props.of, member.identity)}
             open={
@@ -938,7 +1264,7 @@ function List(props: {
                 ? () => props.unlink(member.identity)
                 : undefined
             }
-            unlinking={props.unlinking}
+            unlinking={props.unlinking || props.telling}
           />
         )}
       </For>
@@ -956,15 +1282,106 @@ function List(props: {
   );
 }
 
+/// The line a member's row says about updating it where it can't say how by
+/// hand: an Annex follows its Keeper, which re-pins it to its own release at
+/// every start, and a member from before the install kind was said can't be
+/// updated from here — said only once a newer release exists for it.
+function memberNote(list: DevicesView, member: LinkedDevice): string | null {
+  const name = member.identity.name;
+  const keeper = keeperOf(list, member.identity);
+
+  if (keeper !== null) {
+    return keeper
+      ? `Kept on ${keeper}'s release, so it's updated when ${keeper} is.`
+      : "Kept on its keeper's release, so it's updated with it.";
+  }
+
+  if ((member.identity.install ?? null) === null && member.update_available) {
+    return `${name} is on a release that can't be updated from here. Update it on ${name}.`;
+  }
+
+  return null;
+}
+
 /// Whether a member's row is offered an Unlink: not an Annex's, and not
 /// the Keeper's on its own Annex.
 function unlinkable(list: DevicesView, of: DeviceIdentity): boolean {
   return of.kept_by === null && of.device !== list.this.kept_by;
 }
 
-/// One row: the OS mark, the name, and every address a peer could reach that
-/// device on — with *this device* beside the name on the one that is this
-/// machine.
+/// The installs electron-updater can take onto a newer release — the
+/// server's `InstallKind::updates_itself`.
+const UPDATES_ITSELF: InstallKind[] = ["AppImage", "MacApp", "WindowsInstall"];
+
+/// Whether this device's own row is offered Update: an install that updates
+/// itself, behind the latest stable release, and no Update already going.
+function offeredUpdate(list: DevicesView): boolean {
+  return (
+    UPDATES_ITSELF.includes(list.this_install) &&
+    list.this_update_available !== null &&
+    list.this_updating === null
+  );
+}
+
+/// Whether a member's row is offered Update, as this device's own is (see
+/// [`offeredUpdate`]): an install that updates itself, behind the latest
+/// stable release, answering, and no Update already going. Never an Annex's,
+/// which follows its Keeper.
+function offeredMemberUpdate(member: LinkedDevice): boolean {
+  const install = member.identity.install ?? null;
+
+  return (
+    member.identity.kept_by === null &&
+    install !== null &&
+    UPDATES_ITSELF.includes(install) &&
+    member.update_available &&
+    member.reachable &&
+    member.updating === null
+  );
+}
+
+/// The word a member's row reads while an Update pressed here goes:
+/// *updating…*, with how much is down once its app has said, and
+/// *restarting…* once it has gone quiet — which this device's server says,
+/// being still up. `null` while none is going.
+function memberProgress(member: LinkedDevice): string | null {
+  if (member.updating === null) return null;
+  if (member.restarting) return "restarting…";
+
+  const { percent } = member.updating;
+
+  return percent === null ? "updating…" : `updating… ${percent}%`;
+}
+
+/// The word this device's row reads while its Update goes (ADR-0027):
+/// *updating…* from the press, with how much is down once the app has said,
+/// and *restarting…* once its server has stopped answering — the viewer's
+/// word, the server that would say it being the one that has gone. `null`
+/// while no Update is going.
+function progress(list: DevicesView, restarting: boolean): string | null {
+  if (list.this_updating === null) return null;
+  if (restarting) return "restarting…";
+
+  const { percent } = list.this_updating;
+
+  return percent === null ? "updating…" : `updating… ${percent}%`;
+}
+
+/// Whether a member runs another release than this device, which draws its
+/// version line in a colour of its own. A member that says none has no line to
+/// colour, and one this device cannot read its own release off has nothing to
+/// differ from.
+function differs(list: DevicesView, of: DeviceIdentity): boolean {
+  return (
+    of.version !== null &&
+    list.this.version !== null &&
+    of.version !== list.this.version
+  );
+}
+
+/// One row: the OS mark, the name, the release it runs, and every address a
+/// peer could reach that device on — with *this device* beside the name on the
+/// one that is this machine.
 ///
 /// One component for both because they are one thing drawn: what the pane shows
 /// of a device is the same three facts whether it is this one or another, and
@@ -989,6 +1406,23 @@ function unlinkable(list: DevicesView, of: DeviceIdentity): boolean {
 /// most of what an Unlink is for, and a press that greyed itself out on the one
 /// row somebody needs it on would be the feature refusing its own case.
 ///
+/// **The release is drawn in a colour of its own where it differs from this
+/// device's**, with no word beside it: the number is what says it, and the
+/// colour is what makes the eye find it (ADR-0027, *Seeing versions*). And a
+/// row behind the latest stable release reads *update available* where
+/// *unreachable* stands, set as that word is — the server's verdict, out of
+/// the Update Notice's own check, so a row is never tagged with the check off.
+///
+/// **And every row says how to update it by hand** where its install can't
+/// update itself, a member's naming the member — and an Annex's says it
+/// follows its Keeper instead, and a member too old to say its install says it
+/// can't be updated from here once a newer release exists: see [`memberNote`].
+///
+/// **And this device's own row carries Update** where its install updates
+/// itself and a newer stable release exists (ADR-0027, *A device updates
+/// itself*): *updating…* then stands where *update available* did, and
+/// *restarting…* once the server has gone — see [`progress`].
+///
 /// **And this device's own Annex's row is pressed whole**, opening the
 /// Components pane where the box is kept. On any other device the same row has
 /// no press: Components is the Keeper's.
@@ -996,6 +1430,30 @@ function Row(props: {
   of: DeviceIdentity;
   here?: boolean;
   unreachable?: boolean;
+  /// Whether its release differs from this device's — see [`differs`].
+  differs?: boolean;
+  /// And whether a newer stable release exists than the one it runs.
+  newer?: boolean;
+  /// And what it was installed as: an install that can't update itself says
+  /// how to update it by hand — see [`ByHand`].
+  install?: InstallKind;
+  /// And what that line calls the device: *this device* on its own row, and
+  /// a member's name on the member's.
+  who?: string;
+  /// And a member's line about updating it where there is no by-hand line to
+  /// draw — see [`memberNote`].
+  note?: string | null;
+  /// And the word for its Update while one is going, on this device's own
+  /// row — see [`progress`]. Drawn where *update available* stands, in place
+  /// of it.
+  progress?: string | null;
+  /// And what Update does, where this row is offered one.
+  update?: () => void;
+  /// And why this device's last Update didn't take it onto the release, on
+  /// this device's own row — drawn under the addresses as the server said it.
+  /// No rollback (ADR-0027): the line stands until a press or a higher
+  /// release.
+  failed?: string | null;
   /// And why its box would not come up, on a Keeper's row for its own Annex
   /// that would not — drawn under the addresses, as the server said it. On
   /// the Keeper's own row where the Annex has no row yet to carry it.
@@ -1045,16 +1503,69 @@ function Row(props: {
             {" "}
             <span class={styles.away}>unreachable</span>
           </Show>
+          <Show when={props.progress}>
+            {(word) => (
+              <>
+                {" "}
+                <span class={styles.newer}>{word()}</span>
+              </>
+            )}
+          </Show>
+          <Show when={props.newer && !props.progress}>
+            {" "}
+            <span class={styles.newer}>update available</span>
+          </Show>
         </p>
+
+        {/* The release it runs, as the Annex's Components row draws its own.
+            None from a Verkstead from before the release was said, rather
+            than a guess. */}
+        <Show when={props.of.version}>
+          {(version) => (
+            <p
+              class={styles.version}
+              classList={{ [styles.differs!]: props.differs }}
+            >
+              Verkstead {version()}
+            </p>
+          )}
+        </Show>
 
         <Show when={props.of.addresses.length > 0}>
           <p class={styles.addresses}>{props.of.addresses.join(", ")}</p>
+        </Show>
+
+        <Show when={props.install} keyed>
+          {(install) => (
+            <ByHand install={install} who={props.who ?? "this device"} />
+          )}
+        </Show>
+
+        <Show when={props.note}>
+          {(note) => <p class={styles.byHand}>{note()}</p>}
+        </Show>
+
+        <Show when={props.failed}>
+          {(failed) => <p class={styles.trouble}>{failed()}</p>}
         </Show>
 
         <Show when={props.trouble}>
           {(trouble) => <p class={styles.trouble}>{trouble()}</p>}
         </Show>
       </div>
+
+      <Show when={props.update} keyed>
+        {(press) => (
+          <button
+            type="button"
+            class={styles.update}
+            disabled={props.unlinking}
+            onClick={() => press()}
+          >
+            Update
+          </button>
+        )}
+      </Show>
 
       <Show when={props.unlink} keyed>
         {(ask) => (
@@ -1069,6 +1580,39 @@ function Row(props: {
         )}
       </Show>
     </li>
+  );
+}
+
+/// How to update an install that can't update itself, under its addresses —
+/// and nothing for the three that can (ADR-0027, *A device updates itself*).
+/// The same line on a member's row as on this device's, naming the member.
+///
+/// **Drawn whether or not *update available* is**, because it says what this
+/// install is as much as what to do: the row of an up-to-date NixOS host is
+/// where somebody finds out how the next release will reach it. Nothing is
+/// ever attempted on these, so there is no press beside the line.
+function ByHand(props: { install: InstallKind; who: string }): JSX.Element {
+  return (
+    <Choose>
+      <Match when={props.install === "Nix"}>
+        <p class={styles.byHand}>
+          Installed with nix. Update {props.who} with <code>nix flake update</code>{" "}
+          and <code>nixos-rebuild switch</code>.
+        </p>
+      </Match>
+      <Match when={props.install === "Checkout"}>
+        <p class={styles.byHand}>
+          Built from a checkout. Update {props.who} with <code>git pull</code>{" "}
+          and <code>cargo build</code>.
+        </p>
+      </Match>
+      <Match when={props.install === "Binary"}>
+        <p class={styles.byHand}>
+          Run from a downloaded binary. Update {props.who} by downloading the
+          latest release's <code>verkstead</code>.
+        </p>
+      </Match>
+    </Choose>
   );
 }
 

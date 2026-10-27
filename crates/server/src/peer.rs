@@ -89,6 +89,7 @@ pub mod renewing;
 pub mod repos;
 pub mod transfers;
 pub mod unlinking;
+pub mod updating;
 pub mod workbench;
 
 use std::net::SocketAddr;
@@ -705,6 +706,12 @@ impl Members {
             .map(|member| LinkedDevice {
                 reachable: member.reachable,
                 trouble: None,
+                update_available: false,
+                update_release: None,
+                running: Vec::new(),
+                running_drafts: 0,
+                updating: None,
+                restarting: false,
                 identity: DeviceIdentity {
                     device: member.device,
                     fingerprint: member.fingerprint,
@@ -712,6 +719,8 @@ impl Members {
                     os: member.os,
                     addresses: member.addresses,
                     kept_by: member.kept_by,
+                    version: member.version,
+                    install: crate::install::said(member.install.as_deref()),
                 },
             })
             .collect())
@@ -780,6 +789,24 @@ impl Members {
                 .with_context(|| format!("recording what device {} says it is", linking.device)),
 
             Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// The same for a device that is already a member, and nothing for one
+    /// that is not: `false` where no row was there to bring up to date, which
+    /// is a device unlinked while it was being read — see
+    /// [`verkstead_store::refresh_member`]. A stated membership writes nothing
+    /// and says it did.
+    pub(crate) async fn brought_up_to_date(
+        &self,
+        linking: &verkstead_store::Linking,
+    ) -> Result<bool> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::refresh_member(pool, linking)
+                .await
+                .with_context(|| format!("recording what device {} says it is", linking.device)),
+
+            Recorded::Stated(_) => Ok(true),
         }
     }
 

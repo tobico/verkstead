@@ -64,6 +64,7 @@ use crate::device::Unlinkable;
 use crate::onboarding::Refusal;
 use crate::peer::workbench::OverTheLink;
 use crate::settings::{AtOnce, Cleanup, CleanupStep, Config, RuleTrouble};
+use crate::updating::members::Untold;
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -759,6 +760,16 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // happens to live, and everything a cluster relays later stands under
         // this same segment.
         .route("/api/ui/devices", get(devices))
+        // And Update on this device's own row, which asks the desktop app to
+        // take it onto the latest release, and the app's reports of how far it
+        // has got — see [`crate::updating`]. Under the Workbench Key like the
+        // rest: the app reads the key out of the Data Directory to report.
+        .route("/api/ui/devices/this/update", post(update_this))
+        .route(
+            "/api/ui/devices/this/update/progress",
+            post(update_progressed),
+        )
+        .route("/api/ui/devices/this/update/failed", post(update_failed))
         // And what this machine has installed beyond what the wizard checks,
         // which is the Components section: the Annex's row on a Windows Keeper,
         // and nothing at all anywhere else. Read off the machine like the one
@@ -833,6 +844,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // that one is — the thing, and what is being done to it — rather than
         // as a `DELETE` on the row, because that is how every press in this
         // API is spelled and a second spelling would be a second convention.
+        .route(
+            "/api/ui/devices/members/{device}/update",
+            post(update_member),
+        )
+        .route("/api/ui/devices/all/update", post(update_all))
         .route(
             "/api/ui/devices/members/{device}/unlink",
             post(unlink_device),
@@ -7927,7 +7943,101 @@ async fn devices(State(state): State<AppState>) -> HttpResponse {
         return unavailable("This server holds no device identity to answer for.");
     };
 
-    listed(&devices).await
+    listed(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/this/update` — **Update** on this device's own row:
+/// the desktop app is asked to take it onto the latest stable release, and the
+/// row reads *updating…* from the answer on (ADR-0027, *A device updates
+/// itself*). Answered with the Devices section read again.
+///
+/// **Refused by name on an install that can't update itself** — nix, a
+/// checkout, or a server the desktop app didn't start — which is never asked
+/// to try. A press while one is going is taken, and reads the one there is.
+async fn update_this(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("This server holds no device identity to answer for.");
+    };
+
+    if let Some(why) = crate::updating::refusal(devices.install(), "This device") {
+        return refused(StatusCode::CONFLICT, ApiError::new(why));
+    }
+
+    if devices.updating().begin() {
+        state.nudges.announce(Nudge::Devices);
+    }
+
+    listed(&state, &devices).await
+}
+
+/// How far the desktop app's Update has got, as it reports it.
+#[derive(Debug, serde::Deserialize)]
+struct Progressed {
+    /// How much of the release is down, as a whole percentage.
+    percent: u8,
+}
+
+/// `POST /api/ui/devices/this/update/progress` — the desktop app's report of
+/// how much of the release electron-updater has downloaded, which the row
+/// draws beside *updating…*. Answered with nothing; a report with no Update
+/// going is dropped, and said.
+///
+/// No Nudge: the row polls while it reads *updating…*, and a download says
+/// this many times a second.
+async fn update_progressed(
+    State(state): State<AppState>,
+    Json(progressed): Json<Progressed>,
+) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("This server holds no device identity to answer for.");
+    };
+
+    if !devices.updating().progressed(progressed.percent) {
+        tracing::info!(
+            percent = progressed.percent,
+            "the desktop app reported an Update's progress with no Update going, so it is dropped"
+        );
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// Why the desktop app's Update didn't take this device onto the release, as
+/// it reports it.
+#[derive(Debug, serde::Deserialize)]
+struct Failed {
+    /// The updater's own reason, or the app's for a relaunch on the wrong
+    /// version.
+    why: String,
+}
+
+/// `POST /api/ui/devices/this/update/failed` — the desktop app's report that
+/// this device's Update failed: the row leaves *updating…* for its trouble
+/// line, carrying the reason, and the device stays on its version (ADR-0027:
+/// no rollback). Taken with no Update going too, which is a relaunch that came
+/// up on another version than the one it handed over to. Raises one
+/// notification naming this device. Answered with nothing.
+async fn update_failed(State(state): State<AppState>, Json(failed): Json<Failed>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("This server holds no device identity to answer for.");
+    };
+
+    // And the human's devices told, once, in the row's own line with this
+    // device named as its members name it (Set 1416).
+    if devices.updating().failed(&failed.why)
+        && let Some(line) = devices.updating().trouble_naming(&devices.name())
+    {
+        crate::push::mentioned(
+            &state.pool,
+            crate::push::Word::NotUpdated {
+                name: devices.name(),
+                line,
+            },
+        );
+    }
+    state.nudges.announce(Nudge::Devices);
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// `GET /api/ui/components` — what this machine has installed beyond what the
@@ -8184,6 +8294,67 @@ async fn cancel_join(State(state): State<AppState>, Path(request): Path<String>)
     moved(&state, &devices).await
 }
 
+/// `POST /api/ui/devices/members/{device}/update` — **Update** on a member's
+/// row: the member is told to update itself, and its row reads *updating…*
+/// from the answer on, or the line saying why not — refused by name, or
+/// unreachable and so not updated (ADR-0027, *A device updates itself*). See
+/// [`crate::updating::members`]. Answered with the Devices section read again,
+/// whatever the member made of it.
+///
+/// **Refused on an Annex**, which follows its Keeper's release, and on a
+/// device that is no member — neither is told anything.
+async fn update_member(State(state): State<AppState>, Path(device): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("This server holds no device identity to answer for.");
+    };
+
+    match crate::updating::members::tell(&state, &devices, &device).await {
+        Ok(()) => {}
+
+        Err(Untold::NoSuchMember) => {
+            return refused(
+                StatusCode::NOT_FOUND,
+                ApiError::new("That device isn't linked to this one."),
+            );
+        }
+
+        Err(Untold::Annex { name }) => {
+            return refused(
+                StatusCode::CONFLICT,
+                ApiError::new(format!(
+                    "{name} is an annex, so it's updated with its keeper."
+                )),
+            );
+        }
+
+        Err(Untold::Unreadable(why)) => {
+            return unavailable(&format!(
+                "The devices this one is linked to couldn't be read: {why:#}."
+            ));
+        }
+    }
+
+    listed(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/all/update` — **Update all**, on the Update Notice's
+/// banner: every member that can be updated is told at once, and this device
+/// updates last, once each is back or has a line (ADR-0027). Run by this
+/// server to its end — see [`crate::updating::members::all`] — and answered at
+/// once with the Devices section read again, `updating_all` set. A press while
+/// one is going reads the one there is.
+async fn update_all(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("This server holds no device identity to answer for.");
+    };
+
+    if crate::updating::members::all(&state, &devices) {
+        state.nudges.announce_here(Nudge::Devices);
+    }
+
+    listed(&state, &devices).await
+}
+
 /// `POST /api/ui/devices/members/{device}/unlink` — **Unlink**: take a device
 /// out of this cluster, for everybody (ADR-0020, *A cluster is a membership*).
 ///
@@ -8345,13 +8516,17 @@ async fn are_asking(devices: &crate::device::Devices) -> HttpResponse {
 async fn moved(state: &AppState, devices: &crate::device::Devices) -> HttpResponse {
     state.nudges.announce(Nudge::Devices);
 
-    listed(devices).await
+    listed(state, devices).await
 }
 
 /// The Devices section as the pane reads it, which is what all of the above
 /// answer with: one reading, made at the moment it is asked for.
-async fn listed(devices: &crate::device::Devices) -> HttpResponse {
-    let view: DevicesView = match devices.listing().await {
+///
+/// **Each row tagged against the Update Notice's latest release** here, where
+/// the check's verdict is to hand: a row behind it reads *update available*,
+/// and with the check off or unanswered none does.
+async fn listed(state: &AppState, devices: &crate::device::Devices) -> HttpResponse {
+    let mut view: DevicesView = match devices.listing().await {
         Ok(view) => view,
         Err(why) => {
             return unavailable(&format!(
@@ -8360,7 +8535,53 @@ async fn listed(devices: &crate::device::Devices) -> HttpResponse {
         }
     };
 
+    view.this_update_available = state.updates.newer(view.this.version.as_deref());
+    (view.this_running, view.this_running_drafts) = running_here(state).await;
+    for member in &mut view.members {
+        member.update_available = state.updates.newer_than(member.identity.version.as_deref());
+        member.update_release = state.updates.newer(member.identity.version.as_deref());
+        (member.running, member.running_drafts) = state.merged.running_on(&member.identity.device);
+    }
+
     Json(view).into_response()
+}
+
+/// What every session running on this device is running on: the branch of
+/// each whose Conversation is called by it, in the sidebar's order, and how
+/// many more are on a Draft — see [`crate::merging::settled`]. A store that
+/// can't be read names none, which the card then reads as nothing running: the
+/// restart still resumes whatever was.
+async fn running_here(state: &AppState) -> (Vec<String>, u32) {
+    let working = state.sessions.working();
+
+    if working.is_empty() {
+        return (Vec::new(), 0);
+    }
+
+    let conversations = match store::conversations(&state.pool, true).await {
+        Ok(conversations) => conversations,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading which Conversations run sessions failed");
+            return (Vec::new(), 0);
+        }
+    };
+
+    let mut named = Vec::new();
+    let mut drafts = 0;
+
+    for conversation in conversations
+        .into_iter()
+        .filter(|conversation| working.contains(&conversation.id))
+    {
+        let state = row_state(conversation.id, conversation.state);
+
+        match crate::merging::settled(conversation.branch_named, state, conversation.naming) {
+            true => named.push(conversation.branch),
+            false => drafts += 1,
+        }
+    }
+
+    (named, drafts)
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

@@ -76,6 +76,12 @@
      apart by shape too — see `.mark` in `workbench/Tree.module.css`. */
   --modified: #a34b12;
 
+  /* A release that is not this device's, on a Devices row. A hue nothing else
+     here means anything by — not the Diff's red or green, nor the ember the app
+     means *in flight* by — because it says only *not the same*, which is
+     neither good nor bad. 7.2:1 as text on the card. */
+  --differs: #5b4a9e;
+
   --tok-comment: #8d857a;
   --tok-string: #4a7a4f;
   --tok-constant: #8a5a2b;
@@ -125,6 +131,9 @@
     /* The dark scheme's ember, which is the accent unaltered here: 5.6:1 on the
        tree's own `--code-wash`, where the light one would be unreadable. */
     --modified: #f08a3c;
+
+    /* The same violet lifted: 7.5:1 on the dark card. */
+    --differs: #b3a6e3;
 
     --tok-comment: #8b8378;
     --tok-string: #9dc493;

@@ -37,31 +37,32 @@ just the same. Make it executable and run it; sessions want the distribution's
 
 **`Verkstead-universal.dmg`**, on a Mac: one download for Apple silicon and
 Intel alike, the workbench in a window, a tile in the Dock and an icon in the
-menu bar. Drag **Verkstead** into Applications. The app is unsigned
-([ADR-0020](docs/adr/0020-electron-desktop.md)), so the first launch is refused:
+menu bar. Drag **Verkstead** into Applications and open it. The app is signed
+and notarized by Apple ([ADR-0027](docs/adr/0027-cluster-updates.md)), so the
+first launch asks only whether to open an app downloaded from the Internet:
+click **Open**, and it does not ask again.
 
-1. Open it once, and click **Done** on the refusal.
-2. In **System Settings → Privacy & Security**, under **Security**, click
-   **Open Anyway** beside the line about Verkstead, and authenticate.
-3. Click **Open Anyway** in the dialog that follows.
-
-That is once per copy of the app; a newer download asks again.
-
-**`Verkstead-x86_64.msi`**, on Windows: the same app installed into your own
-profile, with no administrator asked for, an icon in the notification area and
-`verkstead` on your `PATH` for a terminal opened after the install. It is
-unsigned too, so SmartScreen stops it behind *Windows protected your PC*:
-click **More info**, then **Run anyway**. Once per download; right-clicking the
-msi, **Properties**, and ticking **Unblock** does the same beforehand. It
-stays unsigned because every route open to its maintainer, an individual in
-Australia, was weighed and declined, and a signed build would start behind the
-same window until downloads earned it a reputation
+**`Verkstead-x86_64.exe`**, on Windows: an installer that puts the same app
+into your own profile, at `%LOCALAPPDATA%\Programs\Verkstead`, with no
+administrator asked for, an icon in the notification area and `verkstead` on
+your `PATH` for a terminal opened after the install. It is unsigned, so
+SmartScreen stops it behind *Windows protected your PC*: click **More info**,
+then **Run anyway**. Once per download; right-clicking the exe, **Properties**,
+and ticking **Unblock** does the same beforehand. It stays unsigned because
+every route open to its maintainer, an individual in Australia, was weighed and
+declined, and a signed build would start behind the same window until downloads
+earned it a reputation
 ([ADR-0020](docs/adr/0020-electron-desktop.md#amended-the-windows-build-stays-unsigned)).
 
-**Taking it off Windows again** starts before the msi is uninstalled, because
-the msi knows nothing of the account sessions ran as or of what was granted to
-it. Quit Verkstead, then run `verkstead session-account remove` in an elevated
-terminal. It reads every record Verkstead kept under its Data Directory of the
+**A machine that has the earlier Windows Installer package of Verkstead**
+installs this exe over it once, by hand. The installer finds the old install
+and removes it before putting its own in the same place, and the Data
+Directory, the settings and Launch on startup are left as they were.
+
+**Taking it off Windows again** starts before Verkstead is uninstalled, because
+the uninstaller knows nothing of the account sessions ran as or of what was
+granted to it. Quit Verkstead, then run `verkstead session-account remove` in
+an elevated terminal. It reads every record Verkstead kept under its Data Directory of the
 access-control entries it wrote on your directories, takes each one off with a
 line saying which, and then deletes the account, the `C:\Users` directory
 Windows made for it the first time a session ran, and its password out of the
@@ -73,7 +74,8 @@ deletes the account regardless, still naming the paths. Run again on a machine
 whose account is already gone, it takes off whatever entries the records still
 name. A Conversation's own grants, on its Worktree and the Repo's git
 directory, stand for as long as the Conversation is open, Verkstead running or
-not, and come off when it closes or when the account is removed.
+not, and come off when it closes or when the account is removed. Then
+uninstall Verkstead from **Installed apps**.
 
 **Sessions run on all three, and on all three behind a boundary.** One
 description of what a session may reach — its Worktree, the Repo's git
@@ -89,6 +91,42 @@ Verkstead asks for, and the setup wizard takes it behind a User Account Control
 prompt, or `verkstead session-account create` in an elevated terminal does.
 A boundary that cannot be made refuses the session rather than running it
 without one.
+
+## Updating
+
+Settings shows a banner when a newer stable release is out, and each device's
+row on the **Remote Access** page says *update available*. How the
+release reaches a device depends on how that device was installed. Its row
+says which, and under its version it says what to run.
+
+**The desktop app updates itself.** That covers the AppImage, the Mac app and
+the Windows installer. Press **Update** on this device's row, or on the
+banner. A card asks *Update wolf?*. It names the release and the sessions
+running on this device, which are stopped and resumed. Press **Update** on
+the card and the app downloads the release while the row reads *updating…*.
+The row reads *restarting…* once the server stops, and then shows the new
+version once the app has relaunched on it. If the new version doesn't come
+up, the app says so in a dialog and the row says why. Nothing is rolled back.
+Press **Update** to try again, or wait for the next release.
+
+**A device linked to this one is updated from its own row too,** where it
+runs the desktop app. Press **Update** on crow's row and the same card asks
+*Update crow?*, naming the release and the sessions running on crow. crow
+then updates itself while its row reads *updating…*, then *restarting…*
+while it is down, and then shows its new version. **Update all** on the
+banner tells every device linked to this one that can update itself, and
+updates this device last, once each of the others is back or has said why
+it isn't. One that isn't answering is skipped, and its row says so. A
+device that couldn't be updated sends a notification naming it.
+
+**Everything else is updated by hand,** with the command its row names:
+
+- **Installed with nix**, by the NixOS module or the flake: update this
+  device with `nix flake update` and `nixos-rebuild switch`.
+- **Built from a checkout**: update this device with `git pull` and
+  `cargo build`.
+- **Run from a downloaded binary**, a bare `verkstead serve`: update this
+  device by downloading the latest release's `verkstead`.
 
 ## Where things are written down
 
@@ -108,7 +146,8 @@ every string on a screen, and the reasons behind them.
 and the loop for working on Verkstead itself.
 
 **[Releasing](docs/releasing.md)** — the one workflow that turns a version
-number into the published binaries, the AppImage, the dmg and the msi.
+number into the published binaries, the AppImage, the dmg and the Windows
+installer.
 
 ## Licence
 

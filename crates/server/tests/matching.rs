@@ -154,6 +154,8 @@ impl Verkstead {
                 addresses,
                 fingerprint: other.fingerprint().to_owned(),
                 kept_by: None,
+                version: None,
+                install: None,
             },
         )
         .await

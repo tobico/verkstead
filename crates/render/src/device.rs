@@ -109,6 +109,45 @@ pub struct DeviceIdentity {
     /// the Annex existed answers by saying nothing.
     #[serde(default)]
     pub kept_by: Option<String>,
+
+    /// And the release of Verkstead it is running, *0.2.2*: read off the
+    /// binary answering rather than the machine, and drawn under the name on
+    /// its Devices row (ADR-0027, *Seeing versions*).
+    ///
+    /// **A reading like the name, the OS and the addresses**, so a member's
+    /// row takes whatever the last answer said, `None` included: a device
+    /// moved back to an older Verkstead really does say none.
+    ///
+    /// `None` is what a Verkstead from before this field answers by saying
+    /// nothing — which is itself the sign that it wants updating.
+    #[serde(default)]
+    pub version: Option<String>,
+
+    /// And what it was installed as, read off the binary answering the way
+    /// the release is (ADR-0027, *A device updates itself*) — which says
+    /// whether a member's row can update it from here or shows how to update
+    /// it by hand — see [`InstallKind`].
+    ///
+    /// **A reading like the version**, so a member's row takes whatever the
+    /// last answer said, `None` included.
+    ///
+    /// `None` is a Verkstead from before this field, which says nothing — and
+    /// a newer one naming a kind this release has no word for, which is read
+    /// the same way rather than refusing the whole answer.
+    #[serde(default, deserialize_with = "an_install_known_here")]
+    pub install: Option<InstallKind>,
+}
+
+/// An install kind as a device said it, or `None` where it said one this
+/// release has no word for: a newer Verkstead's answer still reads, with
+/// nothing known about how it was installed.
+fn an_install_known_here<'de, D>(said: D) -> Result<Option<InstallKind>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let said: Option<serde_json::Value> = Option::deserialize(said)?;
+
+    Ok(said.and_then(|said| serde_json::from_value(said).ok()))
 }
 
 /// What a device tells each of its members when it has made its certificate
@@ -201,6 +240,148 @@ pub struct DevicesView {
     /// [`LinkedDevice::trouble`] — and this is `None`.
     #[serde(default)]
     pub annex_trouble: Option<String>,
+
+    /// And the newer stable release than the one this device runs, where one
+    /// exists, *0.3.0*: what tags its row *update available* — see
+    /// [`LinkedDevice::update_available`], which is the same verdict for a
+    /// member — and the version its Update's confirm card names.
+    #[serde(default)]
+    pub this_update_available: Option<String>,
+
+    /// And the branch each session running on this device is running on,
+    /// where its Conversation is called by its branch — which its Update's
+    /// confirm card names as the sessions to be stopped and resumed
+    /// (ADR-0027). Read at the moment the pane asks, as the sidebar's marks
+    /// are; empty with none running.
+    #[serde(default)]
+    pub this_running: Vec<String>,
+
+    /// And how many more are running on a Draft, whose branch is nobody's
+    /// name for it yet — counted rather than named, so that the card reads
+    /// *2 drafts* rather than *a draft and a draft*.
+    #[serde(default)]
+    pub this_running_drafts: u32,
+
+    /// And what this device was installed as, which says whether its row is
+    /// offered an Update or a line saying how to update it by hand — see
+    /// [`InstallKind`].
+    ///
+    /// The same reading as `this.install`, said here as well so that this
+    /// device's row never has to read a kind that is not there: this device
+    /// always knows what it is.
+    #[serde(default)]
+    pub this_install: InstallKind,
+
+    /// And this device's own Update, while one is going: from the press until
+    /// the server serving this answer stops, which is the app relaunching it on
+    /// the new release — see [`ThisUpdating`]. `None` otherwise, a start
+    /// included, so the first answer after the relaunch reads none.
+    #[serde(default)]
+    pub this_updating: Option<ThisUpdating>,
+
+    /// And why this device's last Update didn't take it onto the release, as
+    /// the desktop app reported it — a download or check that failed, or a
+    /// relaunch that came up on another version than the one handed over to.
+    /// Drawn under this device's own row, beside any line of the Annex's, until
+    /// the next press or the next start. There is no rollback (ADR-0027): the
+    /// line, and a higher release.
+    #[serde(default)]
+    pub this_update_trouble: Option<String>,
+
+    /// And whether an **Update all** pressed here is going: from the press
+    /// until this device's own Update begins, last, or the run ends without
+    /// one. Every member's row says its own part as it goes; this is what the
+    /// Update Notice's banner reads to offer the press again or not.
+    #[serde(default)]
+    pub updating_all: bool,
+}
+
+/// This device's Update, as far as the desktop app has said it has got
+/// (ADR-0027, *A device updates itself*): the row reads *updating…* from the
+/// press, with how much of the release is down once the app has said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ThisUpdating {
+    /// How much of the release electron-updater has downloaded, as a whole
+    /// percentage — `None` until the app's first report.
+    pub percent: Option<u8>,
+}
+
+/// What a device tells a member when its row's Update is pressed there: update
+/// yourself (ADR-0027, *A device updates itself*).
+///
+/// **Not a viewer type**, like [`RenewedCertificate`]: one Verkstead telling
+/// another, over the peer listener. The member's own desktop app fetches its
+/// own latest stable release, as this device's does for itself, so nothing
+/// here is a release to install — the version rides along for the log and to
+/// be compared against what the member comes back on.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct UpdateTold {
+    /// The release the pressing device expects the member to come back on,
+    /// *0.3.0* — `None` where it knew of none.
+    #[serde(default)]
+    pub release: Option<String>,
+}
+
+/// And a member's own Update as it stands, which is what it answers being told
+/// and what it answers being asked again: the same two readings its own
+/// Devices list draws its own row with, `this_updating` and
+/// `this_update_trouble`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MemberUpdate {
+    /// The Update going there, from the press until that server stops — see
+    /// [`ThisUpdating`].
+    #[serde(default)]
+    pub updating: Option<ThisUpdating>,
+
+    /// And why its last Update didn't take it onto the release, in its own
+    /// words, until its next press or its next start.
+    #[serde(default)]
+    pub trouble: Option<String>,
+}
+
+/// What a Verkstead was installed as, read off its own executable at startup
+/// (ADR-0027, *A device updates itself*).
+///
+/// **Three of them update themselves and three are updated by hand.** The
+/// desktop app's three artifacts are what electron-updater can replace; what
+/// nix, a checkout or a downloaded binary put there is the human's to replace
+/// the way they put it there, and nothing is ever attempted on one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum InstallKind {
+    /// The desktop app out of `Verkstead-x86_64.AppImage`: its sidecar, run
+    /// from inside the image's mount.
+    AppImage,
+
+    /// The desktop app out of the dmg: its sidecar, run from inside the
+    /// bundle's `Contents/Resources/cli`.
+    MacApp,
+
+    /// The desktop app out of `Verkstead-x86_64.exe`: its sidecar, run from
+    /// the per-user directory the installer puts it in.
+    WindowsInstall,
+
+    /// Anything run out of the nix store, which on a host is the NixOS module.
+    Nix,
+
+    /// A build under a checkout's `target/`, which is what `pnpm start` and
+    /// `cargo run` both run.
+    Checkout,
+
+    /// Anything else, which is a downloaded `verkstead` started with `serve`.
+    #[default]
+    Binary,
+}
+
+impl InstallKind {
+    /// Whether electron-updater can take this install onto a newer release.
+    pub fn updates_itself(self) -> bool {
+        matches!(
+            self,
+            InstallKind::AppImage | InstallKind::MacApp | InstallKind::WindowsInstall
+        )
+    }
 }
 
 /// One device linked to this one: what it says it is, and whether the last dial
@@ -229,10 +410,72 @@ pub struct LinkedDevice {
     /// Drawn under the row, which reads *unreachable* beside it until the
     /// Annex answers (ADR-0024).
     ///
-    /// The Keeper's own finding, like the flag above, and only a Keeper has
-    /// one: `None` on every other row, and on an Annex that came up.
+    /// **And the background reads of this member that did not land** —
+    /// its Agent Profiles, its Authors, its Conversations — after the Annex's
+    /// line where there is both, and then the gap between its release and this
+    /// device's where they differ: *winvm's Agent Profiles couldn't be read.
+    /// winvm is on 0.2.0 and this device is on 0.2.2. Update winvm.* Held until
+    /// the next read of that kind lands.
+    ///
+    /// **And, last, why the last Update pressed on it here didn't go**: its
+    /// own refusal by name, its updater's failure in its own words, or that it
+    /// was unreachable at the press and so wasn't updated — standing until the
+    /// next press (ADR-0027, *A device updates itself*).
+    ///
+    /// This device's own findings, like the flag above: `None` on a row with
+    /// none of them.
     #[serde(default)]
     pub trouble: Option<String>,
+
+    /// And whether the version it last said is older than the latest stable
+    /// release, which tags the row *update available* (ADR-0027, *Seeing
+    /// versions*).
+    ///
+    /// **This device's finding, out of the Update Notice's own daily check**,
+    /// so it is false while that check is off or unanswered, and on a row that
+    /// says no version. Worked out by the server, so the viewer does no version
+    /// arithmetic.
+    #[serde(default)]
+    pub update_available: bool,
+
+    /// And that newer release, *0.3.0*, which its Update's confirm card names
+    /// — `None` wherever `update_available` is false.
+    #[serde(default)]
+    pub update_release: Option<String>,
+
+    /// And the branch each session running on it is running on, where its
+    /// Conversation is called by its branch — which its Update's confirm card
+    /// names as the sessions to be stopped and resumed (ADR-0027), as
+    /// [`DevicesView::this_running`] does for this device.
+    ///
+    /// **Read off the list this device already holds of that member**, the
+    /// sidebar's, rather than asked for: what it says is as fresh as the last
+    /// Nudge of that member's that moved its sidebar. Empty for a member never
+    /// heard from.
+    #[serde(default)]
+    pub running: Vec<String>,
+
+    /// And how many more are running there on a Draft, counted rather than
+    /// named — see [`DevicesView::this_running_drafts`].
+    #[serde(default)]
+    pub running_drafts: u32,
+
+    /// And its Update, where one pressed on this device is going: from the
+    /// press, with how much of the release is down once that member's desktop
+    /// app has said (ADR-0027, *A device updates itself*). Held by the device
+    /// that pressed, so every workbench of it draws the same row. `None` with
+    /// none going; a press that left a line rather than an Update says it in
+    /// `trouble`.
+    #[serde(default)]
+    pub updating: Option<ThisUpdating>,
+
+    /// And whether, with its Update going, it has gone quiet: the Nudge stream
+    /// this device holds to it ended, which is its desktop app quitting to
+    /// install. The row reads *restarting…* until it is back — said by the
+    /// device that pressed, whose server is still up, rather than by the
+    /// viewer as this device's own row has it.
+    #[serde(default)]
+    pub restarting: bool,
 }
 
 /// One device nobody has typed an address for, as the **Discovered** list under
@@ -316,4 +559,63 @@ pub enum FoundOn {
     /// that is not a Verkstead answers nothing this can read, and is no row at
     /// all.
     Tailscale,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A Verkstead from before the version answers without the field at all,
+    /// and that reads as having said none rather than as an answer refused.
+    #[test]
+    fn an_identity_without_a_version_says_none() {
+        let older: DeviceIdentity = serde_json::from_str(
+            r#"{"device":"aa","fingerprint":"3F:0A","name":"winvm","os":"Windows","addresses":[]}"#,
+        )
+        .expect("an older Verkstead's answer still reads");
+
+        assert_eq!(older.version, None);
+        assert_eq!(older.kept_by, None);
+    }
+
+    /// And one that says it is read back as it was said.
+    #[test]
+    fn an_identity_with_a_version_says_it() {
+        let newer: DeviceIdentity = serde_json::from_str(
+            r#"{"device":"aa","fingerprint":"3F:0A","name":"wolf","os":"Linux","addresses":[],"version":"0.2.2"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(newer.version.as_deref(), Some("0.2.2"));
+    }
+
+    /// A Verkstead from before the install kind says none, and one that names
+    /// it is read back as it said.
+    #[test]
+    fn an_identity_says_its_install_where_it_has_one() {
+        let older: DeviceIdentity = serde_json::from_str(
+            r#"{"device":"aa","fingerprint":"3F:0A","name":"crow","os":"Linux","addresses":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(older.install, None);
+
+        let newer: DeviceIdentity = serde_json::from_str(
+            r#"{"device":"aa","fingerprint":"3F:0A","name":"crow","os":"Linux","addresses":[],"install":"AppImage"}"#,
+        )
+        .unwrap();
+        assert_eq!(newer.install, Some(InstallKind::AppImage));
+    }
+
+    /// And a kind this release has no word for reads as none, rather than
+    /// refusing the whole answer of a newer Verkstead.
+    #[test]
+    fn an_install_from_a_newer_verkstead_reads_as_none() {
+        let newer: DeviceIdentity = serde_json::from_str(
+            r#"{"device":"aa","fingerprint":"3F:0A","name":"crow","os":"Linux","addresses":[],"install":"Flatpak","version":"9.0.0"}"#,
+        )
+        .expect("a newer Verkstead's answer still reads");
+
+        assert_eq!(newer.install, None);
+        assert_eq!(newer.version.as_deref(), Some("9.0.0"));
+    }
 }

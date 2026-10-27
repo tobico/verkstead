@@ -46,11 +46,13 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 use verkstead_schema::Nudge;
+use verkstead_store::Member;
 
 use crate::nudge::Nudges;
 use crate::peer::Members;
 use crate::peer::dialling::Peers;
 use crate::relaying::{Call, Streamed};
+use crate::updating::members::MemberUpdates;
 
 /// What a member serves its news on, which is the same path this device serves
 /// its own browser's stream at: the namespace is one router mounted twice, so
@@ -115,8 +117,16 @@ const MOST_A_FRAME_IS: usize = 64 * 1024;
 /// what is left here is bookkeeping: a row with no task gets one, and a task
 /// whose row is gone is dropped. A task that has finished on its own is a member
 /// whose row it could not read, and it is started again on the next pass.
-pub(crate) async fn held(members: Members, peers: Peers, nudges: Nudges) {
-    let mut holding: HashMap<String, JoinHandle<()>> = HashMap::new();
+///
+/// **The tasks are this loop's own**, ended with it rather than outliving it:
+/// a task let go of here takes its stream down, and the reading of the member
+/// beside that stream with it — see [`Holder`].
+///
+/// **And `updates` is told when a stream ends and when one is taken up**, which
+/// is what a member updating itself going quiet and coming back is — see
+/// [`crate::updating::members`].
+pub(crate) async fn held(members: Members, peers: Peers, nudges: Nudges, updates: MemberUpdates) {
+    let mut holding: HashMap<String, Holder> = HashMap::new();
 
     loop {
         match members.rows().await {
@@ -124,7 +134,7 @@ pub(crate) async fn held(members: Members, peers: Peers, nudges: Nudges) {
                 for member in &rows {
                     let already = holding
                         .get(&member.device)
-                        .is_some_and(|holder| !holder.is_finished());
+                        .is_some_and(|holder| !holder.0.is_finished());
 
                     if already {
                         continue;
@@ -132,12 +142,13 @@ pub(crate) async fn held(members: Members, peers: Peers, nudges: Nudges) {
 
                     holding.insert(
                         member.device.clone(),
-                        tokio::spawn(listening(
+                        Holder(tokio::spawn(listening(
                             member.device.clone(),
                             members.clone(),
                             peers.clone(),
                             nudges.clone(),
-                        )),
+                            updates.clone(),
+                        ))),
                     );
                 }
 
@@ -145,15 +156,7 @@ pub(crate) async fn held(members: Members, peers: Peers, nudges: Nudges) {
                 // not a member of this cluster, so news of it is news about
                 // nothing: the stream goes, and the pages keep whatever they
                 // last read of it until they are drawn again.
-                holding.retain(|device, holder| {
-                    let still = rows.iter().any(|member| &member.device == device);
-
-                    if !still {
-                        holder.abort();
-                    }
-
-                    still
-                });
+                holding.retain(|device, _| rows.iter().any(|member| &member.device == device));
             }
 
             // Which leaves the streams that are up alone: they are held against
@@ -181,15 +184,29 @@ pub(crate) async fn held(members: Members, peers: Peers, nudges: Nudges) {
 /// [`AT_MOST`], and goes back to [`AGAIN`] the moment a stream is held at all: a
 /// member that is there costs the short wait and a member that is switched off
 /// costs the long one. See the two constants, which is where the reasoning is.
-async fn listening(device: String, members: Members, peers: Peers, nudges: Nudges) {
+async fn listening(
+    device: String,
+    members: Members,
+    peers: Peers,
+    nudges: Nudges,
+    updates: MemberUpdates,
+) {
     let mut waiting = AGAIN;
 
     loop {
-        match read(&device, &members, &peers, &nudges).await {
+        match read(&device, &members, &peers, &nudges, &updates).await {
             // Held and then ended, so the machine is there and answering:
             // whatever ended the stream is as likely to be over as not, and the
-            // next one is taken up at the soonest.
-            Held::Ended => waiting = AGAIN,
+            // next one is taken up at the soonest. A member updating itself
+            // ending it is its app quitting to install, which is this device's
+            // own record of its press and so told to its own pages alone.
+            Held::Ended => {
+                waiting = AGAIN;
+
+                if updates.went_quiet(&device) {
+                    nudges.announce_here(Nudge::Devices);
+                }
+            }
 
             // Nothing answered at all, so the wait it was dialled after is the
             // one that doubles below.
@@ -225,7 +242,13 @@ enum Held {
 /// that started the task: a member moves between the LAN and the tailnet, and
 /// re-issues the certificate a dial is pinned on, and a stream taken up against
 /// what that row said an hour ago would be one that could never come back.
-async fn read(device: &str, members: &Members, peers: &Peers, nudges: &Nudges) -> Held {
+async fn read(
+    device: &str,
+    members: &Members,
+    peers: &Peers,
+    nudges: &Nudges,
+    updates: &MemberUpdates,
+) -> Held {
     let member = match members.rows().await {
         Ok(rows) => rows.into_iter().find(|member| member.device == device),
 
@@ -286,6 +309,20 @@ async fn read(device: &str, members: &Members, peers: &Peers, nudges: &Nudges) -
     // page last read anything, and a Nudge that reached nobody costs nothing.
     nudges.announce_of(&member.device, Nudge::Everything);
 
+    // And what the member is, read again beside the stream rather than in front
+    // of it: a take-up is the one moment a restart of either end is sure to
+    // pass through, so a member back on another release is drawn on it here.
+    //
+    // Held for as long as this read is, so that a stream let go of because the
+    // device was unlinked takes the read with it: a reading that landed after
+    // the unlink would write the row back.
+    let _reading_again = Beside(tokio::spawn(read_again(
+        member.clone(),
+        peers.clone(),
+        nudges.clone(),
+        updates.clone(),
+    )));
+
     tracing::info!(
         device,
         "this device is holding the member's Nudge stream, and announcing what comes down it \
@@ -333,6 +370,77 @@ async fn read(device: &str, members: &Members, peers: &Peers, nudges: &Nudges) -
     );
 
     Held::Ended
+}
+
+/// Read `member`'s identity again, now that its stream has been taken up, and
+/// tell this device's pages where the row it is drawn from has moved
+/// (ADR-0027, *Seeing versions*).
+///
+/// **Fresh by construction rather than polled.** A release changes only across
+/// a restart, and a restart of either end ends the stream and has it taken up
+/// again — so a take-up is where the version a member runs can have changed,
+/// and nowhere else. Nothing reads an ordinary member on a timer, and this adds
+/// none.
+///
+/// **[`Nudge::Devices`] only where the row moved.** That Nudge has mirroring and
+/// the Author mirroring read every member again, so one said on every take-up
+/// would be a sweep of the whole cluster each time any stream came back; the
+/// row this stream was taken up against is what the answer is held up to.
+///
+/// **And it is what says a member updating itself is back**, on the release
+/// it came up on — see [`MemberUpdates::taken_up`]. Where that is all that
+/// moved, it is this device's own record of its press, told to its own pages
+/// alone: no member's rows moved.
+///
+/// **And a read that fails is a line in the log and nothing else.** The stream
+/// is up whatever this comes to, and the row stays as the last reading left
+/// it.
+async fn read_again(member: Member, peers: Peers, nudges: Nudges, updates: MemberUpdates) {
+    match peers.identity(&member).await {
+        Ok(identity) => {
+            let moved = identity.name != member.name
+                || identity.os != member.os
+                || identity.addresses != member.addresses
+                || identity.version != member.version
+                || crate::install::kept(identity.install) != member.install;
+
+            let updated = updates.taken_up(&member.device, identity.version.as_deref());
+
+            if moved {
+                nudges.announce(Nudge::Devices);
+            } else if updated {
+                nudges.announce_here(Nudge::Devices);
+            }
+        }
+
+        Err(why) => tracing::warn!(
+            device = %member.device,
+            "a member's Nudge stream was taken up and its identity could not be read again, \
+             so its row stays as it was: {why:#}",
+        ),
+    }
+}
+
+/// One member's [`listening`], ended when [`held`] lets go of it — and when
+/// `held` itself ends, which a server never does but a caller that drops it
+/// does: a task left running past that would go on taking the stream up, and
+/// reading the member's identity again beside it, writing down addresses for
+/// it after whoever dropped `held` had stopped expecting anything to.
+struct Holder(JoinHandle<()>);
+
+impl Drop for Holder {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// A task running beside a stream, ended when the stream's reading is.
+struct Beside(JoinHandle<()>);
+
+impl Drop for Beside {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// The call the stream is taken up with: the member's own `/api/ui/nudges`, read

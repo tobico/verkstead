@@ -20,8 +20,8 @@
 #
 # **And `electron-winstaller`'s is denied with it.** That package arrives under
 # electron-builder and is the Squirrel.Windows target's; its install script
-# fetches Squirrel's own binaries. Windows gets an msi through the WiX target
-# instead (ADR-0020), so nothing here will ever build a Squirrel installer —
+# fetches Squirrel's own binaries. Windows gets an installer through the NSIS
+# target instead (ADR-0027), so nothing here will ever build a Squirrel one —
 # and what the script would do meanwhile is download a Windows toolchain onto
 # every machine that installs this project, Linux runners included.
 allowBuilds:

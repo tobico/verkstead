@@ -169,7 +169,8 @@ above. Both are deliberate.
   to remember: a fresh install offered to update itself to the version it
   already was. The third file is the same rule for the Windows installer, which
   electron-builder versions from that `package.json` and nothing else bumps —
-  left alone, every Release's msi would read `0.1.0` in **Installed apps**.
+  left alone, every Release's installer would read `0.1.0` in **Installed
+  apps**.
 - **`chore: release manifest for <tag>`**, after the Release, touching
   `nix/release.json` and nothing else. That manifest is the entire interface
   to the binary flake: a version, plus a url and an SRI hash per nix system,

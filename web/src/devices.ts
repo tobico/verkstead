@@ -18,12 +18,18 @@ import {
 } from "@fortawesome/free-brands-svg-icons";
 import { faDesktop } from "@fortawesome/free-solid-svg-icons";
 import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
+import { useQueryClient } from "@tanstack/solid-query";
 
-import { loadDevices } from "./api/client";
+import { loadDevices, retrying } from "./api/client";
 import type { DeviceIdentity, DevicesView } from "./api/types";
 import { useReading } from "./freshness";
 import type { Device } from "./reaching";
 import { repoParent } from "./remembered";
+
+/// How often the reading is asked again while an Update is going — this
+/// device's, or a member's pressed here: often enough that *restarting…* gives
+/// way to the new version within a second or so of the new server answering.
+const UPDATING = 1_000;
 
 /// Which mark stands beside a device's name, off the word for its operating
 /// system.
@@ -85,10 +91,34 @@ export function sameMark(one: string, other: string): boolean {
 /// `on` is for the one page that must not ask at all: a share fetches
 /// nothing, and the header it draws is a record's rather than a machine's.
 export function useDevices(on?: () => boolean) {
+  const queries = useQueryClient();
+
+  /// Whether the reading last read says this device's own Update is going.
+  const updating = (): boolean =>
+    queries.getQueryData<DevicesView>(["devices"])?.this_updating != null;
+
+  /// And whether it says a member's is, pressed here: its progress reaches
+  /// this server with no Nudge either.
+  const memberUpdating = (): boolean =>
+    queries
+      .getQueryData<DevicesView>(["devices"])
+      ?.members.some((member) => member.updating != null) ?? false;
+
   return useReading(() => ({
     queryKey: ["devices"],
     queryFn: loadDevices,
     enabled: on === undefined || on(),
+    // And polled while this device's own Update is going, the way the Annex's
+    // row is while it reads *updating*: the app's progress reports carry no
+    // Nudge, and the server that would send one is about to go. Kept polling
+    // through the failed reads of the restart, so the page finds the new
+    // server the moment it answers.
+    refetchInterval: () => (updating() || memberUpdating() ? UPDATING : false),
+    // And a failed read is not retried meanwhile: a server that has stopped
+    // answering is the restart, and the row says so at the first failure
+    // rather than after the ordinary backoff.
+    retry: (attempts: number, error: Error) =>
+      !updating() && retrying(attempts, error),
     freshness: { reconcile: "device" },
   }));
 }

@@ -149,7 +149,7 @@ pub use members::{
     announcements_owed_to, changeover_over, forget_every_member, forget_every_member_but,
     forget_member, member_answering, member_count, member_holding, member_reached_at,
     member_unreachable, members, members_yet_to_acknowledge, owe_announcement, record_member,
-    record_renewal, renewal_acknowledged,
+    record_renewal, refresh_member, renewal_acknowledged,
 };
 pub use memos::{
     Memo, Retirement, Retiring, StandingMemo, leave_memo, memo_of, restore_memo, retire_memo,

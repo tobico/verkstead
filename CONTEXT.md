@@ -1804,13 +1804,29 @@ than failing — and a device on neither a tailnet nor a network still answers,
 having an id and a fingerprint, which is what somebody typing an address by
 hand is looking at. The address typed at link time is only the first one ever
 known: this list is what keeps a device that moved reachable.
+**And the release it runs**, *0.2.2* — the one part read off the binary
+answering rather than off the machine, and the version the Update Notice
+compares against ([ADR-0027](docs/adr/0027-cluster-updates.md), *Seeing
+versions*). A member's row takes whatever its last answer said, none included:
+a Verkstead from before the release was said answers none, and its row draws no
+version, which is itself the sign that it wants updating.
 _Avoid_: device info, device metadata, machine details, the device's profile
 
 **Devices**:
 The list of every **Device** this workbench is one of, and the third section of
-the **Remote Access** pane. One row each: the OS icon, the name, and the
-addresses under them — with *this device* on this machine's own row, where
-another's carries an Unlink.
+the **Remote Access** pane. One row each: the OS icon, the name, the
+release it runs — in a colour of its own where that differs from this
+device's, and with a tag where a newer release exists — and the addresses
+under them — with *this device* on this
+machine's own row, where another's carries an Unlink; and **Update** on any
+row whose install can update itself
+([ADR-0027](docs/adr/0027-cluster-updates.md)).
+**What this device was installed as is read off its own executable at
+startup** — the AppImage's mount, a Mac bundle, the Windows install directory,
+the nix store, a checkout's `target/`, or anything else — and the desktop app's
+three artifacts are the kinds that update themselves. On this device's own row the
+other three draw a line saying how to update it by hand instead, with nothing
+to press: nothing is ever attempted on them.
 **A section of that pane rather than a settings section of its own**, because
 linking is how this machine is reached as much as the serve and the key are.
 There is no word of its own in the settings' openings, no card and no route: the
@@ -5931,6 +5947,12 @@ _Avoid_: tick, refresh signal, ping, change event, notification
 
 **Update Notice**:
 The banner the viewer shows when the server has learned that a newer release
-exists than the one it is running, linking to the update instructions. Informs
-only — nothing is installed on the human's behalf.
+exists than the one it is running, linking to the update instructions — the
+README's *Updating* section. On a desktop install it carries this device's
+**Update** in place of the link, through the same confirm card as the device's
+Devices row. And wherever a member's row offers **Update**, whatever this
+device was installed as, it carries **Update all**, which tells every member
+that can update itself to do so and then updates this device last, where this
+device can update itself ([ADR-0027](docs/adr/0027-cluster-updates.md)). The
+banner itself still only informs, and nothing is installed until a press.
 _Avoid_: upgrade prompt, new-version alert

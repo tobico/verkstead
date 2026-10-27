@@ -42,7 +42,7 @@ use tokio::task::JoinHandle;
 use tower::ServiceExt;
 use verkstead_render::{ConversationEntry, ShowingArchived};
 use verkstead_schema::Nudge;
-use verkstead_server::device::reading::Reading;
+use verkstead_server::device::reading::{RUNNING, Reading};
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::onboarding::Machine;
@@ -68,9 +68,9 @@ const LATER: &str = "ff11223344556677889900aabbccddee";
 /// row, which is what a merged row of B's says.
 ///
 /// Stated rather than read off a machine, because they are the membership row's
-/// — a member's name and OS are what it last said about itself at an exchange,
-/// and nothing in a cluster asks a device for them again. And deliberately not
-/// this box's own words: every device in this suite is one machine, so a row
+/// — a member's name and OS are what it last said about itself, at an exchange
+/// or when its stream was taken up — and B says them of itself to match: see
+/// [`Verkstead::member`]. And deliberately not this box's own words: every device in this suite is one machine, so a row
 /// that took the hub's hostname for a member's would read right for the wrong
 /// reason.
 const B_MACHINE: &str = "the-laptop";
@@ -124,6 +124,9 @@ struct Verkstead {
     /// Where the other device dials it, on a port the machine picked.
     address: SocketAddr,
 
+    /// What it says of itself, kept so a test can move it behind a [`Link`].
+    reading: Reading,
+
     /// Held for the length of the test: the identity and the database live in
     /// it.
     _dir: tempfile::TempDir,
@@ -134,6 +137,17 @@ impl Verkstead {
     /// Listener up — both routers over the one state, the peer half behind the
     /// Member Gate.
     async fn answering(id: &str) -> Verkstead {
+        Verkstead::serving(id, None).await
+    }
+
+    /// The same, saying it is [`B_MACHINE`] on `os` — which is what A's row for
+    /// it says, so that the read of B's identity on every take-up of its stream
+    /// finds the row as it stands.
+    async fn member(id: &str, os: &str) -> Verkstead {
+        Verkstead::serving(id, Some(os)).await
+    }
+
+    async fn serving(id: &str, called: Option<&str>) -> Verkstead {
         let dir = tempfile::tempdir().unwrap();
         let pool = open_database(&dir.path().join("verkstead.db"))
             .await
@@ -153,6 +167,11 @@ impl Verkstead {
             None,
             vec![format!("127.0.0.1:{}", address.port())],
         );
+
+        let reading = match called {
+            Some(os) => reading.calling_itself(B_MACHINE, os),
+            None => reading,
+        };
 
         let cluster = Devices::of(
             device.clone(),
@@ -174,7 +193,7 @@ impl Verkstead {
 
         tokio::spawn(listener.serving(peer::router(
             device.clone(),
-            reading,
+            reading.clone(),
             members,
             Joins::none(),
             nudges.clone(),
@@ -188,6 +207,7 @@ impl Verkstead {
             cluster,
             workbench,
             address,
+            reading,
             _dir: dir,
         }
     }
@@ -211,6 +231,13 @@ impl Verkstead {
         format!("127.0.0.1:{}", self.address.port())
     }
 
+    /// Advertise `link` from now on, as a machine reached through it would: a
+    /// take-up reads the addresses a member advertises, and one still saying
+    /// its own would have the row dialled round the link.
+    fn behind(&self, link: &Link) {
+        self.reading.moving_to(vec![link.at()]);
+    }
+
     /// Write `other` down as one of this device's members, at `addresses`, under
     /// the name and OS word it is to be shown as.
     async fn linked_to(&self, other: &Device, name: &str, os: &str, addresses: Vec<String>) {
@@ -223,6 +250,8 @@ impl Verkstead {
                 addresses,
                 fingerprint: other.fingerprint().to_owned(),
                 kept_by: None,
+                version: Some(RUNNING.to_owned()),
+                install: Some("Binary".to_owned()),
             },
         )
         .await
@@ -536,7 +565,7 @@ async fn linked(reaching: impl Fn(&Verkstead) -> String) -> (Verkstead, Verkstea
 /// gap-opening write over the link.
 async fn pair(member: &str, reaching: impl Fn(&Verkstead) -> String) -> (Verkstead, Verkstead) {
     let a = Verkstead::answering(A).await;
-    let b = Verkstead::answering(member).await;
+    let b = Verkstead::member(member, B_OS).await;
 
     a.linked_to(&b.device, B_MACHINE, B_OS, vec![reaching(&b)])
         .await;
@@ -987,7 +1016,7 @@ async fn a_member_on_the_hubs_own_mark_carries_no_os() {
     };
 
     let a = Verkstead::answering(A).await;
-    let b = Verkstead::answering(B).await;
+    let b = Verkstead::member(B, &same).await;
 
     a.linked_to(&b.device, B_MACHINE, &same, vec![b.at()]).await;
     b.linked_to(&a.device, &this_machine().0, &os, vec![a.at()])
@@ -1140,8 +1169,9 @@ async fn one_number_on_two_devices_is_two_rows() {
 /// they carry the flag that says the device is not there.
 #[tokio::test]
 async fn a_member_that_stops_answering_keeps_its_rows_dimmed() {
-    let b = Verkstead::answering(B).await;
+    let b = Verkstead::member(B, B_OS).await;
     let link = Link::to(b.address).await;
+    b.behind(&link);
 
     let a = Verkstead::answering(A).await;
     a.linked_to(&b.device, B_MACHINE, B_OS, vec![link.at()])
@@ -1634,8 +1664,9 @@ async fn a_row_dropped_between_two_rows_at_one_key_lands_there() {
 /// told which device it was, and nothing at all is written.
 #[tokio::test]
 async fn a_gap_that_needs_a_member_that_is_not_there_is_refused_by_name() {
-    let b = Verkstead::answering(LATER).await;
+    let b = Verkstead::member(LATER, B_OS).await;
     let link = Link::to(b.address).await;
+    b.behind(&link);
 
     let a = Verkstead::answering(A).await;
     a.linked_to(&b.device, B_MACHINE, B_OS, vec![link.at()])

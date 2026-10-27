@@ -258,6 +258,8 @@ impl Verkstead {
             os: "Linux".to_owned(),
             addresses: vec![self.at()],
             kept_by: None,
+            version: None,
+            install: None,
         }
     }
 }
@@ -462,6 +464,8 @@ async fn the_handover_carries_every_member_the_device_holds() {
             ],
             fingerprint: "AA:BB:CC:DD:EE:FF".to_owned(),
             kept_by: None,
+            version: None,
+            install: None,
         },
     )
     .await
@@ -653,6 +657,7 @@ async fn a_dial_back_stops_at_a_certificate_the_request_does_not_hold() {
                 fingerprint: somebody_else.device.fingerprint().to_owned(),
                 asked_at: LONG_AGO.to_owned(),
                 expires_at: LONG_HENCE.to_owned(),
+                version: None,
             },
             &JoinSettled::Joined {
                 introducer: asked.identity().await,
@@ -911,6 +916,7 @@ async fn a_dial_back_that_reaches_nobody_still_lets_the_device_in() {
             fingerprint: asking.device.fingerprint().to_owned(),
             asked_at: LONG_AGO.to_owned(),
             expires_at: LONG_HENCE.to_owned(),
+            version: None,
         },
     )
     .await
@@ -954,6 +960,7 @@ fn toward(asking: &Verkstead, request: &str) -> HeldJoin {
         fingerprint: asking.device.fingerprint().to_owned(),
         asked_at: LONG_AGO.to_owned(),
         expires_at: LONG_HENCE.to_owned(),
+        version: None,
     }
 }
 

@@ -76,7 +76,8 @@ pub use conversations::{
     unreadable_set_event,
 };
 pub use device::{
-    DeviceIdentity, DevicesView, DiscoveredDevice, FoundOn, LinkedDevice, RenewedCertificate,
+    DeviceIdentity, DevicesView, DiscoveredDevice, FoundOn, InstallKind, LinkedDevice,
+    MemberUpdate, RenewedCertificate, ThisUpdating, UpdateTold,
 };
 pub use files::{
     FileDeleted, FileDeleting, FileList, FileListsView, FileMade, FileMaking, FileMark,

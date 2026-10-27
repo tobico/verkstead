@@ -1,7 +1,7 @@
 # What a packed Verkstead is, on every platform it is packed for.
 #
 # One configuration for the three artifacts a Release ships (ADR-0020) — an
-# x86_64 AppImage, a universal dmg and an msi — with all three of them filled
+# x86_64 AppImage, a universal dmg and an NSIS installer — with all three of them filled
 # in. Everything above the `linux:`, `mac:` and `win:` sections is every
 # platform's.
 #
@@ -10,9 +10,11 @@
 # written by. electron-builder on its own would pack an app with no sidecar in
 # it.
 #
-# Unsigned, as the Rust artifacts were: there is no Developer ID and no
-# authenticode certificate. Why Windows stays that way, and what would reopen
-# it, is ADR-0020's *Amended: the Windows build stays unsigned*.
+# The Mac app is signed with a Developer ID and notarized when the pack is
+# handed the secrets for both, and ad-hoc when it is not — see the `mac:`
+# section. The AppImage and the exe are unsigned, as the Rust artifacts were:
+# there is no authenticode certificate. Why Windows stays that way, and what
+# would reopen it, is ADR-0020's *Amended: the Windows build stays unsigned*.
 
 appId: net.tobico.Verkstead
 productName: Verkstead
@@ -29,18 +31,45 @@ productName: Verkstead
 # had agreed to ship. There is no `electronVersion` here for the same reason —
 # said twice, the two drift.
 
-# **Nothing is published from here and nothing updates itself.** A Release is
-# assembled by `.github/workflows/release.yml`, which uploads the files its legs
-# built and their checksums beside them; electron-builder's own publishing would
-# be a second thing talking to GitHub about the same tag. Said as `null` rather
-# than left unsaid, because unsaid means *guess* — it reads the repository out of
-# `.git/config`, writes the update metadata an auto-updater we do not ship would
-# read, and fails the build outright where there is nothing to guess from.
-publish: null
+# **Where an update is read from, and nothing published from here.** A
+# `github` provider naming this repository, which is what has electron-builder
+# write `latest-linux.yml`, `latest-mac.yml` and `latest.yml` beside each
+# platform's artifacts — the file, its size and its sha512 — and an
+# `app-update.yml` into the packed app saying where electron-updater is to look
+# for them (ADR-0027, *The release*). Named outright rather than read out of
+# `.git/config`, which is what electron-builder guesses from when this is
+# unsaid, and fails the build outright where there is nothing to guess from.
+#
+# **Publishing itself stays the workflow's.** A Release is assembled by
+# `.github/workflows/release.yml`, which uploads the files its legs built, this
+# metadata and each artifact's `.blockmap` among them, and their checksums
+# beside them; electron-builder's own publishing would be a second thing
+# talking to GitHub about the same tag. So `scripts/pack.mjs` says
+# `--publish never` on every pack, a developer's as much as a release leg's —
+# electron-builder publishes on its own when it finds itself on CI at a tag.
+#
+# **Unsigned, by decision** (ADR-0027, amended at stage 04's start): the
+# electron-builder pinned here has no manifest signing — the Ed25519
+# `updateManifest` is 27's, and 27 is an alpha — so there is no key to write
+# and no `updateManifest: false` either. What an update rests on is the sha512
+# in the file, fetched over TLS from the Release, and on a Mac the Developer ID
+# Squirrel.Mac checks besides.
+#
+# **Stable releases only**, which is electron-updater's default and so nothing
+# written here: it reads `releases/latest`, which a pre-release never is — the
+# same Release the Update Notice counts as newest.
+publish:
+  provider: github
+  owner: tobico
+  repo: verkstead
 
-# Nothing to rebuild and nothing native: this app has no dependencies at all,
-# its devDependencies are not packed, and the pack is not the place to discover
-# that a package manager can be run from inside it.
+# Nothing to rebuild and nothing native: this app's one dependency is
+# electron-updater, which is plain JavaScript all the way down and runs no
+# install script, its devDependencies are not packed, and the pack is not the
+# place to discover that a package manager can be run from inside it. It is
+# packed into `app.asar` for all that — electron-builder adds a package's
+# production dependencies whatever `files` below says — and the Linux leg of
+# `.github/workflows/release.yml` reads the packed archive back to prove it.
 npmRebuild: false
 
 directories:
@@ -172,27 +201,62 @@ mac:
   # is read back off what was packed.
   icon: ../target/electron/staged/icon.icns
 
+  # **The zip's name**, written down for the dmg's reason: `release.yml`
+  # uploads it, `publish` names it, and the update metadata will point at it
+  # by this name. Said here because the zip target has no section of its own to
+  # say it in — electron-builder takes an archive's name from the platform's —
+  # and read by nothing else, since the dmg below names itself.
+  artifactName: Verkstead-universal.zip
+
   # `Development` above, in Apple's own vocabulary: `LSApplicationCategoryType`,
   # which is what a Mac groups the app under.
   category: public.app-category.developer-tools
 
-  # **Ad-hoc signed, which is not the signing this roadmap decided against.**
-  # `null` here would skip code signing outright, and Apple silicon refuses to
-  # execute a Mach-O carrying no signature at all — so the app would not start on
-  # half the Macs it is built for. `-` is `codesign --sign -` through
-  # @electron/osx-sign, which is exactly what the Rust bundle this replaced did
-  # by hand. It buys nothing from Gatekeeper: there is no Developer ID, the
-  # download is unsigned in the sense `README.md` means, and the three
-  # steps it describes stay (ADR-0020).
-  identity: "-"
+  # **Signed with a Developer ID when the pack is given one, and ad-hoc when it
+  # is not** (ADR-0027, *The release*): Squirrel.Mac, which electron-updater
+  # drives, refuses an ad-hoc signed update, and notarization wants a
+  # Developer ID and the hardened runtime both. So no `identity` is written
+  # here: electron-builder takes the certificate from `CSC_LINK` and
+  # `CSC_KEY_PASSWORD`, imports it into a keychain of its own for the length of
+  # the pack, and signs with the Developer ID Application identity it finds
+  # there.
+  #
+  # **And the ad-hoc half is `scripts/pack.mjs`'s**, because it is the absence
+  # of those two variables that decides it and a configuration file cannot read
+  # one. Given no `CSC_LINK`, the script says `identity: "-"` and
+  # `hardenedRuntime: false` on electron-builder's command line, which is
+  # exactly the bundle every release before this one shipped — a developer's
+  # checkout, a pull request and a fork all pack it. Never unsigned: an Apple
+  # silicon Mac refuses to execute a Mach-O carrying no signature at all, which
+  # `identity: null` would be. And never ad-hoc *with* the runtime: library
+  # validation would weigh frameworks with no Team ID against an app with none,
+  # and that is the bundle electron-builder's own schema warns may not launch.
+  #
+  # The sidecar in `Contents/Resources/cli` is signed with the rest, by the same
+  # identity and under the same runtime: @electron/osx-sign signs every Mach-O
+  # it finds in the bundle, and the release leg reads both signatures back.
+  hardenedRuntime: true
 
-  # **And the hardened runtime goes off beside it.** It defaults on, and
-  # electron-builder's own schema warns what that means under an ad-hoc
-  # signature: library validation, which rejects the pre-signed Electron
-  # framework for carrying a different Team ID — an app that packs and then will
-  # not launch. Nothing here is notarized, which is the only thing the hardened
-  # runtime is required for.
-  hardenedRuntime: false
+  # **Notarized when the pack is given an App Store Connect key, and not when
+  # it is not.** Nothing to say here for the first: electron-builder hands the
+  # signed app to Apple's notary itself whenever `APPLE_API_KEY` (a path to
+  # the `.p8`), `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` are set, waits for
+  # the verdict, and staples the ticket to the app — after signing and before
+  # either target below is made from it, so the dmg and the zip both carry
+  # it. `scripts/pack.mjs` says `notarize: false` on the command line when
+  # they are not, which is a skip electron-builder logs as one rather than a
+  # warning, and an ad-hoc app could never be notarized anyway.
+
+  # **The entitlements Electron wants under that runtime**, written down rather
+  # than left to the template electron-builder falls back on, so that a bump of
+  # it cannot change what the app is allowed without a diff here. They are that
+  # template's three as of electron-builder 26.15: V8's JIT, the unsigned
+  # executable memory it maps besides, and library validation off — the last
+  # being what lets the Electron framework, signed before it reached this
+  # bundle, load into it. The same file for the app and for everything inside
+  # it, which is what the template is used as too.
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
 
   # **No `LSUIElement`, said as a line about what is not here.** That key is what
   # made the Rust bundle a menu-bar app with no Dock tile, and ADR-0020 retires
@@ -221,92 +285,87 @@ mac:
       arch:
         - universal
 
+    # **And the same app as a zip beside it**, which is what an update is
+    # (ADR-0027, *The release*): Squirrel.Mac installs a zip rather than an
+    # image, and the `latest-mac.yml` electron-updater reads is written off this
+    # file. The dmg stays what a human downloads. Universal for the dmg's
+    # reason, and made from the same signed, notarized and stapled app — the
+    # ticket is stapled inside the bundle, so it travels in both.
+    #
+    # electron-builder writes a `.blockmap` beside it, for the differential
+    # download an updater may make, and the `latest-mac.yml` naming it; the
+    # release workflow uploads both beside the zip.
+    - target: zip
+      arch:
+        - universal
+
 dmg:
   # Written down rather than defaulted, for the reason the AppImage's is:
   # `release.yml` uploads this name, `README.md` spells it, and
   # electron-builder's own pattern would put the version in the middle of both.
   artifactName: Verkstead-universal.dmg
 
-# **The generated WiX project, patched.** This is the one hook in this
-# configuration, and it is here because the msi target has the one gap: on this
-# version it reads its `template.xml` out of `app-builder-lib`, hands candle a
-# single `project.wxs` and light a single `project.wixobj`, and there is nothing
-# a WiX source of our own could be linked into. `msiProjectCreated` names a file
-# that runs after that project is written and before candle compiles it, which is
-# where the `PATH` entry comes from and where the install directory's name is
-# forced — see `scripts/msi.mjs`, which says what it changes and why each is not
-# a configuration key instead.
-#
-# A top-level key rather than one under `msi:` below, because that is where
-# electron-builder reads it: it is a build hook like `afterPack`, and the msi is
-# only the artifact it happens to fire for.
-msiProjectCreated: ./scripts/msi.mjs
-
 win:
   # **The committed `.ico`, staged rather than pointed at**, the way the `.icns`
   # and the launcher icons are — `tools/generate-packaging.sh` writes it from the
   # same artwork, and `scripts/pack.mjs` is what puts it where this reads it.
   #
-  # Wanted three times over: electron-builder edits it into `Verkstead.exe` as
-  # the launcher's own resource, the msi names it as `ARPPRODUCTICON` so that
-  # **Installed apps** draws the row with it, and the Start-menu shortcut is
-  # advertised against it.
+  # Wanted twice over: electron-builder edits it into `Verkstead.exe` as the
+  # launcher's own resource, and the installer's **Installed apps** row and
+  # Start-menu entry are drawn from that launcher.
   icon: ../target/electron/staged/icon.ico
 
   # No `executableName` here, unlike the Linux section: what a Windows launcher
-  # is called is the product name already — `Verkstead.exe` — and the msi target
-  # recognises the launcher among the packed files by exactly that name, which is
-  # what carries the Start-menu shortcut. A name said here would have to agree
-  # with it.
+  # is called is the product name already — `Verkstead.exe` — and that is the
+  # file the Start-menu entry and Launch on Startup's Run value both name.
 
   target:
-    - target: msi
+    - target: nsis
       # x86_64 only, as the AppImage is (ADR-0012, kept by ADR-0020): Windows on
       # arm64 runs an x86_64 exe under the emulation it has for exactly this.
       arch:
         - x64
 
-msi:
+# **An NSIS installer, because that is what electron-updater updates**
+# (ADR-0027): its Windows update runs the new installer over the old install,
+# and an install made any other way is not one it can run over.
+nsis:
   # Written down rather than defaulted, for the reason the AppImage's and the
   # dmg's are: `release.yml` checks this name, `README.md` spells it, and
   # electron-builder's own pattern would put the version in the middle of both.
-  artifactName: Verkstead-x86_64.msi
+  artifactName: Verkstead-x86_64.exe
 
-  # **The UpgradeCode carried over from the Rust msi**, out of the
-  # `tools/verkstead.wxs` this stage retires. It is the one identifier that says
-  # two packages are the same product, and electron-builder derives its own from
-  # the app id unless it is told — derived afresh, this package would install
-  # *beside* a machine's Rust msi rather than over it: two install directories,
-  # two `PATH` entries, two Start-menu entries and two rows in **Installed
-  # apps**, against what a downloader is promised in as many words.
-  #
-  # Never changed again, for the same reason it is not regenerated here.
-  upgradeCode: "{A4727089-F5B9-40A6-A196-1856E8D6827A}"
+  # **The three things no key here says** — the install directory, which would
+  # otherwise be named for the package, the CLI's directory on this user's
+  # `PATH`, and the removal of the msi earlier Releases installed. See the
+  # script, which says what it does and why each is not a key.
+  include: build/installer.nsh
 
   # **The Start-menu entry is what this download promises, and nothing else.**
   # electron-builder creates a desktop shortcut as well unless told not to;
   # `createStartMenuShortcut` is left unsaid because it already defaults on.
+  # The entry carries `appId` as its AppUserModelID, which is the id a toast is
+  # shown under and the one `src/main.ts` sets.
   createDesktopShortcut: false
 
-  # And three things left unsaid on purpose, because the defaults are the
-  # decisions (ADR-0020):
+  # **The row in Installed apps says `Verkstead`**, rather than
+  # electron-builder's `Verkstead 0.2.2`: the version has a column of its
+  # own there, and the release leg finds the row by this name.
+  uninstallDisplayName: "${productName}"
+
+  # And four things left unsaid on purpose, because the defaults are the
+  # decisions (ADR-0020, kept by ADR-0027):
   #
-  # - `perMachine` is off, so the package installs into the profile —
-  #   `ALLUSERS=2` with `MSIINSTALLPERUSER=1`, which is what redirects the
-  #   package's `ProgramFiles64Folder` to `%LOCALAPPDATA%\Programs`. The app is
-  #   unsigned (ADR-0020, *Amended: the Windows build stays unsigned*), and an
-  #   installer asking for administrator would be an unsigned program asking
-  #   for the machine.
-  # - `oneClick` is on, so there is no wizard: a progress window, and the
-  #   install. The assisted installer would bring WiX's own UI with it and a
-  #   per-machine choice in front of the decision above.
-  # - `runAfterFinish` is on, which the Rust msi did not do: the installer starts
-  #   the app when it finishes. The custom action is conditioned on the UI level,
-  #   so this is a human double-clicking the file and never a `msiexec /qn` in
-  #   CI.
-  #
-  # `AllowSameVersionUpgrades="yes"` and light's `-sw1076` are in
-  # electron-builder's own template already, so the same-version upgrade rule
-  # `docs/releasing.md` needs — a `v0.1.0-rc.2` msi replacing the `v0.1.0-rc.1`
-  # one, both of them reading as `0.1.0` to Windows Installer — needs nothing
-  # added here.
+  # - `perMachine` is off, so the installer installs into the profile and asks
+  #   for no administrator. The app is unsigned (ADR-0020, *Amended: the
+  #   Windows build stays unsigned*), and an installer asking for administrator
+  #   would be an unsigned program asking for the machine.
+  # - `oneClick` is on, so there is no wizard: a progress banner, and the
+  #   install.
+  # - `runAfterFinish` is on: the installer starts the app when it finishes.
+  #   Never for a silent install — `/S`, which is how the release
+  #   leg installs it — unless that install also says `--force-run`.
+  # - `deleteAppDataOnUninstall` is off, and has to stay off: what it deletes
+  #   is `%APPDATA%\Verkstead`, which is the Data Directory — every Repo,
+  #   Conversation and setting — and an uninstall is not a request to lose
+  #   those.

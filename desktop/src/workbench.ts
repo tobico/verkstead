@@ -51,3 +51,14 @@ export const HEALTH = `${ORIGIN}/api/v1/health`;
 /// to show as the platform's own notifications — see [`hold`](./notices.js).
 /// Behind the gate, so it is held with the key.
 export const NOTICES = `${ORIGIN}/api/ui/push/notices`;
+
+/// Where the app reports how much of this device's Update is down, which this
+/// device's Devices row draws — see [`update`](./updating.js). Behind the gate,
+/// so it is posted with the key.
+export const UPDATE_PROGRESS = `${ORIGIN}/api/ui/devices/this/update/progress`;
+
+/// And where it reports that the Update failed, and why — a check or download
+/// that failed, or a relaunch on another version than the one handed over to.
+/// This device's row draws it as its trouble line. Behind the gate, so it is
+/// posted with the key.
+export const UPDATE_FAILED = `${ORIGIN}/api/ui/devices/this/update/failed`;

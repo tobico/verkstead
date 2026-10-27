@@ -287,9 +287,48 @@
   opacity: 0.55;
 }
 
+/* And *update available*, on a row behind the latest stable release: where
+   *unreachable* stands and set as it is, because it is the same kind of thing
+   said — a fact about the row, not an error. */
+.newer {
+  margin-inline-start: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* The release it runs, *Verkstead 0.2.2*: an exact string, read the way an
+   address is and drawn the way the Annex's Components row draws its own. */
+.version {
+  margin: 0.25rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* How to update an install that can't update itself, under the addresses:
+   prose set as quietly as the version line above it, with the commands in it
+   in the monospace the addresses are. */
+.byHand {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.byHand code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* And in a colour of its own where it is not this device's release, with no
+   word beside it: the number says what is different, and the colour is what
+   finds it on a list of them. */
+.differs {
+  color: var(--differs);
+}
+
 /* And every address a peer could reach it on, set the way the tailnet name
    above is: exact strings, to be read character by character and typed into
    another machine. */
+
 .addresses {
   margin: 0.25rem 0 0;
   font-family: ui-monospace, SFMono-Regular, monospace;
@@ -358,6 +397,35 @@
 @media (hover: hover) {
   .unlink:not(:disabled):hover {
     border-color: var(--removed);
+  }
+}
+
+/* Update, on this device's own row where its install updates itself: drawn
+   as the Annex's Components row draws its own, an outline in the accent, at
+   the end of the row where Unlink stands on a member's. */
+.update {
+  flex: none;
+  margin-top: 0.1rem;
+  margin-inline-start: auto;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.update:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .update:not(:disabled):hover {
+    border-color: var(--accent);
   }
 }
 

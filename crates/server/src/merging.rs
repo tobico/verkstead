@@ -93,13 +93,14 @@
 //! switch while a member has something behind it — see [`anything_archived`].
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use verkstead_render::{ConversationEntry, RowDevice, ShowingArchived};
 use verkstead_schema::Nudge;
 use verkstead_store::Member;
 
-use crate::relaying::read_of;
+use crate::relaying::{Read, Unread, answer_of};
 use crate::{AppState, platform, store};
 
 /// The path a member's own sidebar list is read at, which is the path this
@@ -143,8 +144,22 @@ pub(crate) const MOST_A_LIST_IS: usize = 4 * 1024 * 1024;
 /// the sidebar reads the lot of them. A plain mutex rather than a read-write
 /// one, because the reading writes too — it is where a departed member's rows
 /// are dropped, see [`MemberLists::held_of`].
+///
+/// **And every read is numbered as it is asked**, because two reads of one
+/// member can be in flight at once and land in either order: the refresher's,
+/// set going by a Nudge, and the one [`afresh`] makes when the switch moves.
+/// The one asked first was asked with the position the switch was in before,
+/// and landing second it would put back the very list the switch has just
+/// changed — with nothing left to read it again. So what is kept is the answer
+/// to the latest question, whichever order the answers arrive in; see
+/// [`MemberLists::keep`].
 #[derive(Debug, Clone, Default)]
-pub(crate) struct MemberLists(Arc<Mutex<HashMap<String, Held>>>);
+pub(crate) struct MemberLists {
+    lists: Arc<Mutex<HashMap<String, Held>>>,
+
+    /// The number the next read is asked under.
+    asked: Arc<AtomicU64>,
+}
 
 /// What is held of one member: the rows it last answered, and whether it said it
 /// had anything archived.
@@ -163,6 +178,10 @@ struct Held {
     /// Which is not a thing the rows above can say: the list is filtered, so an
     /// empty one is the same empty list either way.
     any_archived: bool,
+
+    /// The number the read that answered this was asked under — see
+    /// [`MemberLists::asking`].
+    asked: u64,
 }
 
 impl MemberLists {
@@ -172,13 +191,32 @@ impl MemberLists {
         MemberLists::default()
     }
 
-    /// Hold what `device` just answered, replacing whatever it last said.
+    /// The number a read about to be asked goes under, taken before it reads
+    /// the switch's position: a read numbered later than another one read the
+    /// switch later too.
+    fn asking(&self) -> u64 {
+        self.asked.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Hold what `device` just answered, replacing whatever it last said —
+    /// unless what is held already answered a later question, and then this
+    /// answer is dropped and `false` says so.
     ///
     /// Wholesale rather than merged, because a list is the answer to one
     /// question: a Conversation closed and swept on that machine is a row that
     /// has to go, and a merge would keep it for ever.
-    fn keep(&self, device: &str, held: Held) {
-        self.held().insert(device.to_owned(), held);
+    fn keep(&self, device: &str, held: Held) -> bool {
+        let mut lists = self.held();
+
+        if lists
+            .get(device)
+            .is_some_and(|kept| kept.asked > held.asked)
+        {
+            return false;
+        }
+
+        lists.insert(device.to_owned(), held);
+        true
     }
 
     /// Put a rank this device has just written to `device` onto the row it was
@@ -226,6 +264,31 @@ impl MemberLists {
         })
     }
 
+    /// What every session running on `device` is running on, as its own list
+    /// last said: the branch of each whose Conversation is called by it, in
+    /// that list's order, and how many more are on a Draft — the reading its
+    /// Update's confirm card names, as [`crate::ui`]'s `running_here` is this
+    /// device's. Nothing where this device holds no list of it.
+    pub(crate) fn running_on(&self, device: &str) -> (Vec<String>, u32) {
+        let held = self.held();
+        let mut named = Vec::new();
+        let mut drafts = 0;
+
+        for row in held
+            .get(device)
+            .into_iter()
+            .flat_map(|held| &held.rows)
+            .filter(|row| row.working)
+        {
+            match settled(row.branch_named, row.state, row.naming) {
+                true => named.push(row.branch.clone()),
+                false => drafts += 1,
+            }
+        }
+
+        (named, drafts)
+    }
+
     /// What is held of each of `members`, and nothing of anybody else.
     ///
     /// **The membership is what prunes this.** A device that has been unlinked
@@ -268,7 +331,7 @@ impl MemberLists {
     /// them takes it, does a little arithmetic over a handful of rows, and gives
     /// it back.
     fn held(&self) -> MutexGuard<'_, HashMap<String, Held>> {
-        self.0.lock().expect("nothing panics holding this")
+        self.lists.lock().expect("nothing panics holding this")
     }
 }
 
@@ -431,10 +494,19 @@ async fn read_every_member(state: &AppState) {
 /// foot of this function. A read that could not be made announces nothing: what
 /// this device holds has not changed, so there is nothing for a page to read
 /// again.
+///
+/// **Nor does one that was overtaken.** An answer that lands after a later read
+/// of the same member has already landed is the older account of it, asked with
+/// what may be the switch's old position, and it is dropped — see
+/// [`MemberLists`].
 async fn read_member(state: &AppState, device: &str) {
     let Some(devices) = state.devices.as_ref() else {
         return;
     };
+
+    // Numbered before the switch is read, so that of two reads in flight the
+    // later-numbered one asked with the later position — see [`MemberLists`].
+    let asked = state.merged.asking();
 
     // Where the human put the switch on *this* device, which is what the member
     // is asked with. Read per member rather than once for the round, because a
@@ -458,7 +530,17 @@ async fn read_member(state: &AppState, device: &str) {
     // [`crate::ui::conversations`]. The dial itself is the one every read this
     // device makes of its own accord goes through, carrying no header of a
     // browser's and no body at all — see [`crate::relaying::read_of`].
-    let Some(said) = read_of(
+    //
+    // And one that did not land is drawn on the member's row as well as logged,
+    // the list and its archives as one read of its Conversations — see
+    // [`crate::relaying::FailedReads`].
+    let failed = |why| {
+        devices
+            .failed_reads()
+            .failed(&state.nudges, device, Read::Conversations, why)
+    };
+
+    let said = match answer_of(
         devices,
         device,
         format!("{LIST}?archived={showing}"),
@@ -466,8 +548,9 @@ async fn read_member(state: &AppState, device: &str) {
         MOST_A_LIST_IS,
     )
     .await
-    else {
-        return;
+    {
+        Ok(said) => said,
+        Err(why) => return failed(why),
     };
 
     let rows = match serde_json::from_slice::<Vec<ConversationEntry>>(&said) {
@@ -483,11 +566,11 @@ async fn read_member(state: &AppState, device: &str) {
                 "a member answered a list of Conversations this device cannot read, so what it \
                  last said stands: {why}",
             );
-            return;
+            return failed(Unread::Answered);
         }
     };
 
-    let Some(said) = read_of(
+    let said = match answer_of(
         devices,
         device,
         ARCHIVES.to_owned(),
@@ -495,8 +578,9 @@ async fn read_member(state: &AppState, device: &str) {
         MOST_A_LIST_IS,
     )
     .await
-    else {
-        return;
+    {
+        Ok(said) => said,
+        Err(why) => return failed(why),
     };
 
     let any_archived = match serde_json::from_slice::<ShowingArchived>(&said) {
@@ -510,11 +594,30 @@ async fn read_member(state: &AppState, device: &str) {
                 "a member answered its archives in a way this device cannot read, so what it last \
                  said stands: {why}",
             );
-            return;
+            return failed(Unread::Answered);
         }
     };
 
-    state.merged.keep(device, Held { rows, any_archived });
+    // The member answered, whichever question this was the answer to, so a
+    // failed read of its Conversations no longer stands.
+    devices
+        .failed_reads()
+        .held(&state.nudges, device, Read::Conversations);
+
+    // An answer to an older question than the one already held changes nothing
+    // a page could read, so there is nothing to announce.
+    let kept = state.merged.keep(
+        device,
+        Held {
+            rows,
+            any_archived,
+            asked,
+        },
+    );
+
+    if !kept {
+        return;
+    }
 
     // And the pages are told, this being the moment there is something new for
     // them to read. The Nudge that set this read going was the member's own,

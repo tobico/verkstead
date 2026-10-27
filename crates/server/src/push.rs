@@ -499,6 +499,12 @@ pub(crate) enum Word {
     /// asking for ten minutes — see [`crate::peer::joining`]. Named for the
     /// device, which is the whole of what the human is deciding about.
     ADeviceIsAsking { name: String },
+
+    /// A device's Update ended in its row's trouble line rather than on the
+    /// new release — see [`crate::updating`] and [`crate::updating::members`].
+    /// `line` is that line, a sentence led by the device's `name`, and the row
+    /// is where success is said instead (ADR-0027).
+    NotUpdated { name: String, line: String },
 }
 
 impl Word {
@@ -518,6 +524,15 @@ impl Word {
             Word::ADeviceIsAsking { name } => {
                 format!("{} is asking to link with this device.", fitting(name))
             }
+
+            // The row's own line, so the lock screen and the row say one thing.
+            // The name in it is a member's word for itself, cut as a join's is,
+            // and what follows may be its updater's own words, cut as a
+            // member's sentence is.
+            Word::NotUpdated { name, line } => match line.strip_prefix(name.as_str()) {
+                Some(rest) => format!("{}{}", fitting(name), cut_to(rest, A_SENTENCE)),
+                None => fitting_sentence(line),
+            },
         }
     }
 
@@ -529,7 +544,7 @@ impl Word {
     /// place to land rather than the thing being opened.
     fn path(&self) -> &'static str {
         match self {
-            Word::ADeviceIsAsking { .. } => "/settings/remote",
+            Word::ADeviceIsAsking { .. } | Word::NotUpdated { .. } => "/settings/remote",
         }
     }
 
@@ -537,6 +552,7 @@ impl Word {
     fn about(&self) -> &'static str {
         match self {
             Word::ADeviceIsAsking { .. } => "the device asking to link",
+            Word::NotUpdated { .. } => "the device that couldn't be updated",
         }
     }
 }
@@ -976,7 +992,7 @@ fn signed(private_key: &str, claims: &[u8]) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{JWT_HEADER, News, Word, audience, relayed, signed};
+    use super::{A_NAME, A_SENTENCE, JWT_HEADER, News, Word, audience, relayed, signed};
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use p256::ecdsa::signature::Verifier;
@@ -1022,9 +1038,15 @@ mod tests {
     /// And everything that is not about a piece of work, which is the other way
     /// in — see [`Word`].
     fn about_the_machine() -> Vec<Word> {
-        vec![Word::ADeviceIsAsking {
-            name: "laptop".to_owned(),
-        }]
+        vec![
+            Word::ADeviceIsAsking {
+                name: "laptop".to_owned(),
+            },
+            Word::NotUpdated {
+                name: "crow".to_owned(),
+                line: "crow couldn't be updated: it came back on 0.2.2, not 0.3.0.".to_owned(),
+            },
+        ]
     }
 
     /// Every title a lock screen can show, from both ways in.
@@ -1136,6 +1158,43 @@ mod tests {
             }
             .title(),
             "laptop is asking to link with this device.",
+        );
+    }
+
+    /// A device that couldn't be updated is told in its row's own line, and
+    /// lands on the pane the row is on.
+    #[test]
+    fn a_device_not_updated_reads_as_its_rows_line() {
+        let word = Word::NotUpdated {
+            name: "crow".to_owned(),
+            line: "crow couldn't be updated: it came back on 0.2.2, not 0.3.0.".to_owned(),
+        };
+
+        assert_eq!(
+            word.title(),
+            "crow couldn't be updated: it came back on 0.2.2, not 0.3.0."
+        );
+        assert_eq!(word.path(), "/settings/remote");
+    }
+
+    /// And a long name, and a long reason from a member's updater, are each cut
+    /// rather than allowed to be the whole of a lock screen.
+    #[test]
+    fn a_device_not_updated_is_cut_to_fit() {
+        let name = "c".repeat(400);
+        let title = Word::NotUpdated {
+            line: format!("{name} couldn't be updated: {}.", "x".repeat(400)),
+            name,
+        }
+        .title();
+
+        assert!(
+            title.starts_with(&format!("{}… couldn't be updated: ", "c".repeat(A_NAME))),
+            "{title:?}"
+        );
+        assert!(
+            title.chars().count() <= A_NAME + 1 + A_SENTENCE + 1,
+            "{title:?}"
         );
     }
 

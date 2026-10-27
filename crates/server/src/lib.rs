@@ -136,6 +136,9 @@ mod grillings;
 /// session runs on — every sandbox binds one — so standing a router up that runs
 /// sessions means saying where they live.
 pub mod handoffs;
+/// What this Verkstead was installed as, which says whether its row on
+/// **Devices** can be offered an Update (ADR-0027).
+mod install;
 mod investigations;
 mod joins;
 /// The Workbench Key: the secret the human's browser holds and a session cannot
@@ -377,6 +380,9 @@ pub mod units;
 /// desktop app's sidecar has no console for a child to inherit.
 pub mod unseen;
 mod updates;
+/// This device's own Update: the press, the line the desktop app acts on, and
+/// the progress it reports back (ADR-0027).
+pub mod updating;
 mod viewer;
 mod waiting;
 /// Following the disk: the watcher a Code pane's attachment runs over the
@@ -1021,6 +1027,35 @@ pub fn router_running_sessions(
     )
 }
 
+/// And the same answering for `devices` too, which is what a desktop install
+/// serves: the Devices section beside running sessions, for the suite asking
+/// what this device's Update's confirm card names — the sessions running here
+/// (ADR-0027, *A device updates itself*).
+pub fn router_running_sessions_answering_devices(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    agents: Agents,
+    gh: Gh,
+    devices: device::Devices,
+) -> Router {
+    // Taken off the agents for the reason [`router_running_sessions`] does.
+    let binds = agents.binds().clone();
+
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        binds,
+        data_dir,
+        sessions::Sessions::under(agents),
+        gh,
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        Some(devices),
+    )
+}
+
 /// A router keeping its files in `data_dir` and reaching GitHub through `gh`,
 /// running no session at all.
 ///
@@ -1189,6 +1224,30 @@ pub fn router_answering_devices(pool: SqlitePool, devices: device::Devices) -> R
     router_answering_devices_telling(pool, devices, nudge::Nudges::new())
 }
 
+/// The same, asking about newer releases at `releases` the way
+/// [`router_checking_updates`] does — which is what tags a Devices row
+/// *update available*.
+pub fn router_answering_devices_checking_updates(
+    pool: SqlitePool,
+    devices: device::Devices,
+    releases: &str,
+) -> Router {
+    routed_telling(
+        pool,
+        updates::watching(Some(releases)),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        Some(devices),
+        nudge::Nudges::new(),
+    )
+}
+
 /// The same, over a Nudge stream the caller made.
 ///
 /// For the suite that stands a whole Verkstead up: a join arrives on the peer
@@ -1204,6 +1263,30 @@ pub fn router_answering_devices_telling(
     routed_telling(
         pool,
         updates::Updates::nothing_learned(),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        Some(devices),
+        nudges,
+    )
+}
+
+/// The same, asking about newer releases at `releases` as well — which is what
+/// tells a member pressed on its row of the release it is to come back on.
+pub fn router_answering_devices_telling_checking_updates(
+    pool: SqlitePool,
+    devices: device::Devices,
+    nudges: nudge::Nudges,
+    releases: &str,
+) -> Router {
+    routed_telling(
+        pool,
+        updates::watching(Some(releases)),
         nothing_bound(),
         nowhere(),
         sessions::Sessions::none(),
@@ -2638,7 +2721,16 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // own interfaces (ADR-0024, *advertise as told*). And knowing where its
     // own Annex Forward landed, which is the port it tells an Annex of its own
     // to advertise at.
+    //
+    // And what this start was installed as, which this device's row is
+    // offered an Update or a by-hand line for and which every member is told
+    // beside the release (ADR-0027) — read off the executable serving and said
+    // in the log, where a row that reads wrong is checked.
+    let installed = install::of_this_process(started_by);
+    tracing::info!(install = ?installed, "Verkstead read what it was installed as");
+
     let reading = device::reading::Reading::of_this_machine(tailscale.clone())
+        .installed_as(Some(installed))
         .told_by(settings.clone())
         .asking_its_keeper(peer::dialling::Peers::of(device.clone(), members.clone()));
     let reading = match &annex_forward {

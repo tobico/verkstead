@@ -36,9 +36,9 @@ use sqlx::SqlitePool;
 use tokio_stream::Stream;
 use tower::ServiceExt;
 use verkstead_render::{Attached, ConversationView, Submitted};
-use verkstead_schema::{Answer, QuestionSet, Response};
+use verkstead_schema::{Answer, ApiError, QuestionSet, Response};
 use verkstead_server::attachments::MAX_BYTES;
-use verkstead_server::device::reading::Reading;
+use verkstead_server::device::reading::{RUNNING, Reading};
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
 use verkstead_server::peer::joining::Joins;
@@ -175,6 +175,11 @@ impl Verkstead {
 
     /// Write `other` down as one of this device's members, at `addresses`.
     async fn linked_to(&self, other: &Device, addresses: Vec<String>) {
+        self.linked_running(other, addresses, None).await;
+    }
+
+    /// The same, as running `version`.
+    async fn linked_running(&self, other: &Device, addresses: Vec<String>, version: Option<&str>) {
         record_member(
             &self.pool,
             &Linking {
@@ -184,6 +189,8 @@ impl Verkstead {
                 addresses,
                 fingerprint: other.fingerprint().to_owned(),
                 kept_by: None,
+                version: version.map(str::to_owned),
+                install: None,
             },
         )
         .await
@@ -397,6 +404,58 @@ async fn a_read_and_a_press_under_a_members_id_are_that_members_own() {
         status,
         StatusCode::NOT_FOUND,
         "A has no Conversation of its own, which is what makes the read above a relay",
+    );
+}
+
+/// A refusal through the hop from a member a release apart names the gap after
+/// what the member said, and one from a member on this device's release is the
+/// member's own, byte for byte (ADR-0027, *Seeing versions*).
+#[tokio::test]
+async fn a_refusal_from_a_member_a_release_apart_names_the_gap() {
+    let (a, b) = linked().await;
+
+    let missing = "/api/ui/conversations/999";
+
+    let (status, bs_own) = get(
+        &router_keeping(b.pool.clone(), b.dir.path().to_owned()),
+        missing,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "B refusing its own: {bs_own}"
+    );
+
+    a.linked_running(&b.device, vec![b.at()], Some(RUNNING))
+        .await;
+
+    let (status, same) = get(&a.workbench(), &through(B, missing)).await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        same, bs_own,
+        "a member on this device's release refuses in its own words alone",
+    );
+
+    a.linked_running(&b.device, vec![b.at()], Some("0.0.1"))
+        .await;
+
+    let (status, apart) = get(&a.workbench(), &through(B, missing)).await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND, "the status is still B's own");
+
+    let own: ApiError = serde_json::from_str(&bs_own).unwrap();
+    let apart: ApiError = serde_json::from_str(&apart)
+        .unwrap_or_else(|why| panic!("the refusal is still a refusal: {apart}: {why}"));
+
+    assert_eq!(
+        apart.error,
+        format!(
+            "{} somewhere-else is on 0.0.1 and this device is on {RUNNING}. Update \
+             somewhere-else.",
+            own.error,
+        ),
     );
 }
 

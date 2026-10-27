@@ -41,7 +41,7 @@ import {
 } from "../src/startup.js";
 
 /// The app as an upgraded Windows machine runs it: a packed Verkstead installed
-/// where the msi puts one.
+/// where the installer puts one.
 const packed = (over: Partial<Registering> = {}): Registering => ({
   packaged: true,
   platform: "win32",

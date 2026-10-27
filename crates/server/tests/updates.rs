@@ -20,8 +20,21 @@ use axum::{Json, response::IntoResponse};
 use clap::Parser;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use verkstead_render::UpdateNotice;
-use verkstead_server::{Config, open_database, router_checking_updates};
+use verkstead_render::{DevicesView, InstallKind, MemberUpdate, ThisUpdating, UpdateNotice};
+use verkstead_server::device::reading::Reading;
+use verkstead_server::device::{Device, Devices};
+use verkstead_server::nudge::Nudges;
+use verkstead_server::onboarding::Machine;
+use verkstead_server::peer::joining::Joins;
+use verkstead_server::peer::{self, Members};
+use verkstead_server::platform::Platform;
+use verkstead_server::remote::Tailscale;
+use verkstead_server::updating::Asking;
+use verkstead_server::{
+    Config, Routers, open_database, router_answering_devices_checking_updates,
+    router_checking_updates, routers_answering_devices_telling,
+};
+use verkstead_store::{Linking, record_member};
 
 /// The release this test binary was built as, which is the version the server
 /// under test is comparing tags against.
@@ -296,4 +309,474 @@ async fn a_server_told_not_to_check_asks_nobody() {
         UpdateNotice::Current,
         "and the endpoint still answers, saying there is nothing to update to",
     );
+}
+
+/// The id this device is stated as, and the ones its members are.
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+const BEHIND: &str = "0011223344556677889900aabbccddee";
+const ON_THE_RELEASE: &str = "ffeeddccbbaa00998877665544332211";
+const SAYING_NONE: &str = "99887766554433221100aabbccddeeff";
+
+/// A device on 0.2.2 linked to one member a release behind it, one on the
+/// latest release, and one from before a member said its version — asking
+/// about newer releases at `releases`.
+async fn cluster_app(releases: &str) -> (tempfile::TempDir, Router) {
+    cluster_app_installed_as(releases, InstallKind::Binary).await
+}
+
+/// The same cluster, this device installed as `install`.
+async fn cluster_app_installed_as(
+    releases: &str,
+    install: InstallKind,
+) -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    for (device, version) in [
+        (BEHIND, Some("0.2.0")),
+        (ON_THE_RELEASE, Some("0.3.0")),
+        (SAYING_NONE, None),
+    ] {
+        record_member(
+            &pool,
+            &Linking {
+                device: device.to_owned(),
+                name: device[..4].to_owned(),
+                os: "Linux".to_owned(),
+                addresses: Vec::new(),
+                fingerprint: format!("AA:BB:{device}"),
+                kept_by: None,
+                version: version.map(str::to_owned),
+                install: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    let reading = Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422),
+        Platform::HERE,
+        None,
+        Vec::new(),
+    )
+    .running(Some("0.2.2"));
+
+    let devices = Devices::of(
+        Device::stated(dir.path(), THIS_DEVICE).unwrap(),
+        reading,
+        Members::recorded(pool.clone()),
+        Joins::recorded(pool.clone()),
+    )
+    .installed_as(install);
+
+    (
+        dir,
+        router_answering_devices_checking_updates(pool, devices, releases),
+    )
+}
+
+/// The Devices section as the pane reads it.
+async fn devices(app: &Router) -> DevicesView {
+    let http = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/ui/devices")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(http.status(), StatusCode::OK);
+
+    let body = http.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&body).unwrap()
+}
+
+/// Which rows read *update available*, this device's as `this`.
+fn tagged(view: &DevicesView) -> Vec<String> {
+    let mut tagged: Vec<String> = view
+        .members
+        .iter()
+        .filter(|member| member.update_available)
+        .map(|member| member.identity.device.clone())
+        .collect();
+
+    if view.this_update_available.is_some() {
+        tagged.push("this".to_owned());
+    }
+
+    tagged.sort();
+    tagged
+}
+
+#[tokio::test]
+async fn every_row_behind_the_latest_release_is_tagged() {
+    let github = github().await;
+    let (_dir, app) = cluster_app(&github.releasing("v0.3.0")).await;
+
+    github.is_asked().await;
+    settle().await;
+
+    assert_eq!(
+        tagged(&devices(&app).await),
+        vec![BEHIND.to_owned(), "this".to_owned()],
+        "a row on the release, or saying none, is not tagged",
+    );
+}
+
+/// A NixOS module install behind the release is tagged like any other row, and
+/// says it is nix's, which is what draws the by-hand line and no Update.
+#[tokio::test]
+async fn a_nix_install_behind_the_release_says_it_is_nixs() {
+    let github = github().await;
+    let (_dir, app) = cluster_app_installed_as(&github.releasing("v0.3.0"), InstallKind::Nix).await;
+
+    github.is_asked().await;
+    settle().await;
+
+    let view = devices(&app).await;
+
+    assert_eq!(
+        view.this_update_available.as_deref(),
+        Some("0.3.0"),
+        "this device is behind the release, and the row names it"
+    );
+    assert_eq!(view.this_install, InstallKind::Nix);
+    assert!(!view.this_install.updates_itself());
+}
+
+/// A press on this device's own Update, answered with the section read again.
+async fn press_update(app: &Router) -> (StatusCode, serde_json::Value) {
+    let http = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/ui/devices/this/update")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = http.status();
+    let body = http.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&body).unwrap())
+}
+
+/// The desktop app's report of how much is down.
+async fn report_progress(app: &Router, percent: u8) -> StatusCode {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/ui/devices/this/update/progress")
+                .header("content-type", "application/json")
+                .body(Body::from(format!(r#"{{"percent":{percent}}}"#)))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+/// An AppImage's Update reads *updating…* from the press, with the app's
+/// reports of how much is down on it — and a second press reads the first.
+#[tokio::test]
+async fn an_appimage_update_reads_updating_from_the_press() {
+    let github = github().await;
+    let (_dir, app) =
+        cluster_app_installed_as(&github.releasing("v0.3.0"), InstallKind::AppImage).await;
+
+    assert_eq!(devices(&app).await.this_updating, None);
+
+    let (status, pressed) = press_update(&app).await;
+    assert_eq!(status, StatusCode::OK);
+    let pressed: DevicesView = serde_json::from_value(pressed).unwrap();
+    assert_eq!(pressed.this_updating, Some(ThisUpdating { percent: None }));
+
+    assert_eq!(report_progress(&app, 42).await, StatusCode::NO_CONTENT);
+    assert_eq!(
+        devices(&app).await.this_updating,
+        Some(ThisUpdating { percent: Some(42) })
+    );
+
+    let (status, again) = press_update(&app).await;
+    assert_eq!(status, StatusCode::OK);
+    let again: DevicesView = serde_json::from_value(again).unwrap();
+    assert_eq!(
+        again.this_updating,
+        Some(ThisUpdating { percent: Some(42) }),
+        "a second press reads the Update already going"
+    );
+}
+
+/// A server the desktop app didn't start, nix's and a checkout's are each
+/// refused by what they are, and nothing is marked updating.
+#[tokio::test]
+async fn an_install_that_cannot_update_itself_is_refused_by_name() {
+    let github = github().await;
+
+    for (install, named) in [
+        (InstallKind::Binary, "wasn't started by the desktop app"),
+        (InstallKind::Nix, "installed with nix"),
+        (InstallKind::Checkout, "built from a checkout"),
+    ] {
+        let (_dir, app) = cluster_app_installed_as(&github.releasing("v0.3.0"), install).await;
+
+        let (status, refusal) = press_update(&app).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{install:?}");
+        assert!(
+            refusal["error"].as_str().unwrap().contains(named),
+            "{install:?}: {refusal}"
+        );
+        assert_eq!(devices(&app).await.this_updating, None, "{install:?}");
+    }
+}
+
+/// The desktop app's report that the Update failed.
+async fn report_failure(app: &Router, why: &str) -> StatusCode {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/ui/devices/this/update/failed")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::json!({ "why": why }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+/// A failed download leaves *updating…* for the row's trouble line, carrying
+/// the updater's reason, and the row is offered Update again; the next press
+/// takes the line away.
+#[tokio::test]
+async fn a_failed_update_is_the_rows_trouble_line() {
+    let github = github().await;
+    let (_dir, app) =
+        cluster_app_installed_as(&github.releasing("v0.3.0"), InstallKind::AppImage).await;
+
+    press_update(&app).await;
+    report_progress(&app, 60).await;
+    assert_eq!(
+        report_failure(&app, "sha512 checksum mismatch, expected abc, got def").await,
+        StatusCode::NO_CONTENT
+    );
+
+    let view = devices(&app).await;
+    assert_eq!(view.this_updating, None);
+    assert_eq!(
+        view.this_update_trouble.as_deref(),
+        Some("This device couldn't be updated: sha512 checksum mismatch, expected abc, got def.")
+    );
+
+    let (_, pressed) = press_update(&app).await;
+    let pressed: DevicesView = serde_json::from_value(pressed).unwrap();
+    assert_eq!(pressed.this_update_trouble, None);
+}
+
+/// A relaunch on another version than the one handed over to reports to a
+/// server with no Update going, which draws the line all the same.
+#[tokio::test]
+async fn a_relaunch_on_the_wrong_version_is_the_rows_trouble_line() {
+    let github = github().await;
+    let (_dir, app) =
+        cluster_app_installed_as(&github.releasing("v0.3.0"), InstallKind::AppImage).await;
+
+    report_failure(
+        &app,
+        "Verkstead 0.3.0 was installed, but this device started on 0.2.0.",
+    )
+    .await;
+
+    let view = devices(&app).await;
+    assert_eq!(view.this_updating, None);
+    assert_eq!(
+        view.this_update_trouble.as_deref(),
+        Some(
+            "This device couldn't be updated: Verkstead 0.3.0 was installed, but this device \
+             started on 0.2.0."
+        )
+    );
+}
+
+/// A report with no Update going is dropped rather than drawn.
+#[tokio::test]
+async fn progress_with_no_update_going_is_dropped() {
+    let github = github().await;
+    let (_dir, app) =
+        cluster_app_installed_as(&github.releasing("v0.3.0"), InstallKind::AppImage).await;
+
+    assert_eq!(report_progress(&app, 10).await, StatusCode::NO_CONTENT);
+    assert_eq!(devices(&app).await.this_updating, None);
+}
+
+/// A member can be behind a device that is itself up to date, which is what
+/// keeping the release rather than the verdict is for.
+#[tokio::test]
+async fn a_member_behind_an_up_to_date_device_is_tagged() {
+    let github = github().await;
+    let (_dir, app) = cluster_app(&github.releasing("v0.2.2")).await;
+
+    github.is_asked().await;
+    settle().await;
+
+    assert_eq!(tagged(&devices(&app).await), vec![BEHIND.to_owned()]);
+}
+
+#[tokio::test]
+async fn with_no_answer_no_row_is_tagged() {
+    let unreachable = nowhere().await;
+    let (_dir, app) = cluster_app(&unreachable).await;
+
+    settle().await;
+
+    assert!(tagged(&devices(&app).await).is_empty());
+}
+
+/// A member called crow, installed as `install`, as the device pressing its
+/// row reaches it: the router it serves over the link, and what its desktop
+/// app hears.
+async fn member_installed_as(install: InstallKind) -> (tempfile::TempDir, Router, Asking) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let reading = Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422),
+        Platform::HERE,
+        None,
+        Vec::new(),
+    )
+    .calling_itself("crow", "Linux")
+    .running(Some("0.2.2"));
+
+    let asking = Asking::heard();
+
+    let devices = Devices::of(
+        Device::stated(dir.path(), BEHIND).unwrap(),
+        reading,
+        Members::recorded(pool.clone()),
+        Joins::recorded(pool.clone()),
+    )
+    .installed_as(install)
+    .asking_the_app(asking.clone());
+
+    let Routers { over_the_link, .. } =
+        routers_answering_devices_telling(pool, devices, Nudges::new(), Machine::here());
+
+    (dir, over_the_link, asking)
+}
+
+/// Tell a member to update itself, the way a press on its row does.
+async fn tell_to_update(member: &Router) -> (StatusCode, String) {
+    let http = member
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(peer::updating::UPDATE)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"release":"0.3.0"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = http.status();
+    let body = http.into_body().collect().await.unwrap().to_bytes();
+    (status, String::from_utf8(body.to_vec()).unwrap())
+}
+
+/// Ask a member how its Update stands.
+async fn member_update(member: &Router) -> MemberUpdate {
+    let http = member
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(peer::updating::UPDATE)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(http.status(), StatusCode::OK);
+
+    let body = http.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&body).unwrap()
+}
+
+/// A desktop member told to update itself says the line its app acts on, once
+/// however often it is told, and reads *updating…* when asked.
+#[tokio::test]
+async fn a_desktop_member_told_to_update_asks_its_app() {
+    let (_dir, member, asking) = member_installed_as(InstallKind::AppImage).await;
+
+    assert_eq!(member_update(&member).await, MemberUpdate::default());
+
+    let (status, answered) = tell_to_update(&member).await;
+    assert_eq!(status, StatusCode::OK, "{answered}");
+    let answered: MemberUpdate = serde_json::from_str(&answered).unwrap();
+    assert_eq!(answered.updating, Some(ThisUpdating { percent: None }));
+
+    assert_eq!(
+        asking.lines(),
+        vec!["verkstead-desktop: update this device".to_owned()]
+    );
+
+    let (status, _) = tell_to_update(&member).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(asking.lines().len(), 1, "a second telling reads the first");
+
+    assert_eq!(
+        member_update(&member).await,
+        MemberUpdate {
+            updating: Some(ThisUpdating { percent: None }),
+            trouble: None,
+        }
+    );
+}
+
+/// A member whose install can't update itself refuses by name, and its app
+/// is asked nothing.
+#[tokio::test]
+async fn a_member_that_cannot_update_itself_refuses_by_name() {
+    for (install, said) in [
+        (
+            InstallKind::Nix,
+            "crow was installed with nix, so it's updated by hand.\n",
+        ),
+        (
+            InstallKind::Checkout,
+            "crow was built from a checkout, so it's updated by hand.\n",
+        ),
+        (
+            InstallKind::Binary,
+            "crow wasn't started by the desktop app, so it can't update itself.\n",
+        ),
+    ] {
+        let (_dir, member, asking) = member_installed_as(install).await;
+
+        assert_eq!(
+            tell_to_update(&member).await,
+            (StatusCode::CONFLICT, said.to_owned()),
+            "{install:?}"
+        );
+        assert!(asking.lines().is_empty(), "{install:?}");
+        assert_eq!(
+            member_update(&member).await,
+            MemberUpdate::default(),
+            "{install:?}"
+        );
+    }
 }

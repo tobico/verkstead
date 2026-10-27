@@ -38,7 +38,7 @@
 //! `crates/server/tests/remote.rs` and `crates/server/tests/devices.rs`, whose
 //! subject those shapes are.
 
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import jsQR from "jsqr";
 import type { JSX } from "solid-js";
@@ -54,12 +54,14 @@ import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
 import type {
   DevicesView,
   DiscoveredDevice,
+  LinkedDevice,
   Nudge,
   RemoteView,
   ServePress,
 } from "../src/api/types";
 import { listenForNudges } from "../src/nudge";
 import { RemoteCard, RemotePane } from "../src/settings/Remote";
+import remote from "../src/settings/Remote.module.css";
 import devices from "./fixtures/devices.json" with { type: "json" };
 import devicesBesideAnAnnex from "./fixtures/devices-beside-an-annex.json" with { type: "json" };
 import devicesDiscovered from "./fixtures/devices-discovered.json" with { type: "json" };
@@ -806,6 +808,665 @@ describe("the devices section", () => {
       screen.getAllByText("workbench").length,
       "this device and the WSL linked to it both answer to that hostname",
     ).toBe(2);
+  });
+
+  /// Every row says the release its device runs, under the name — this
+  /// device's own, a member a release behind its own, and a member from before
+  /// the release was said nothing at all.
+  it("draws the release each device runs under its name", async () => {
+    mountPane(SERVING, LINKED);
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const here = screen.getByText("this device").closest("li")!;
+    expect(here.textContent).toContain("Verkstead 0.2.2");
+
+    const behind = screen.getByText("laptop").closest("li")!;
+    expect(behind.textContent).toContain("Verkstead 0.2.0");
+
+    const older = screen.getByText("172.29.0.14").closest("li")!;
+    expect(
+      older.textContent,
+      "a member that said no release has no version line, rather than a guess",
+    ).not.toContain("Verkstead");
+  });
+
+  /// A member on another release than this device draws its number in a colour
+  /// of its own and says nothing beside it; one on the same release is drawn
+  /// plainly.
+  it("colours a release that differs from this device's, with no word", async () => {
+    const laptop = LINKED.members[0]!;
+    mountPane(SERVING, {
+      ...LINKED,
+      members: [
+        ...LINKED.members,
+        {
+          ...laptop,
+          identity: {
+            ...laptop.identity,
+            device: "77665544332211009988aabbccddeeff",
+            name: "desk",
+            version: "0.2.2",
+          },
+        },
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByText("desk")).toBeTruthy());
+
+    const line = (text: string) => screen.getByText(text).closest("p")!;
+
+    expect(line("Verkstead 0.2.0").classList).toContain(remote.differs);
+    expect(line("Verkstead 0.2.0").textContent).toBe("Verkstead 0.2.0");
+    expect(line("Verkstead 0.2.0").closest("li")!.textContent).not.toContain(
+      "update available",
+    );
+
+    for (const same of screen.getAllByText("Verkstead 0.2.2")) {
+      expect(same.closest("p")!.classList).not.toContain(remote.differs);
+    }
+  });
+
+  /// And a row the server finds behind the latest stable release reads
+  /// *update available* where *unreachable* stands — this device's own
+  /// included — and a row it does not, does not.
+  it("tags every row behind the latest release", async () => {
+    const [laptop, wsl] = LINKED.members;
+    mountPane(SERVING, {
+      ...LINKED,
+      this_update_available: "0.3.0",
+      members: [
+        { ...laptop!, update_available: true },
+        { ...wsl!, update_available: false },
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const tagged = screen
+      .getAllByText("update available")
+      .map((tag) => tag.closest("li")!);
+
+    expect(tagged).toHaveLength(2);
+    expect(tagged).toContain(screen.getByText("this device").closest("li"));
+    expect(tagged).toContain(screen.getByText("laptop").closest("li"));
+    expect(screen.getAllByText("update available")[0]!.classList).toContain(
+      remote.newer,
+    );
+  });
+
+  /// And this device's row says how to update it by hand where its install
+  /// can't update itself, with nothing to press: a NixOS host behind the
+  /// release reads the nix line beside *update available*.
+  it("says how to update a nix install by hand, with no press", async () => {
+    mountPane(SERVING, {
+      ...LINKED,
+      this_update_available: "0.3.0",
+      this_install: "Nix",
+    });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const row = screen.getByText("this device").closest("li")!;
+
+    expect(row.textContent).toContain("update available");
+    expect(row.textContent).toContain(
+      "Installed with nix. Update this device with nix flake update and nixos-rebuild switch.",
+    );
+    expect(row.querySelector("button")).toBeNull();
+  });
+
+  /// A dev checkout and a bare binary each say their own line.
+  it("says how to update a checkout and a bare binary", async () => {
+    mountPane(SERVING, { ...LINKED, this_install: "Checkout" });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    expect(screen.getByText("this device").closest("li")!.textContent).toContain(
+      "Built from a checkout. Update this device with git pull and cargo build.",
+    );
+
+    cleanup();
+    mountPane(SERVING, { ...LINKED, this_install: "Binary" });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    expect(screen.getByText("this device").closest("li")!.textContent).toContain(
+      "Run from a downloaded binary.",
+    );
+  });
+
+  /// And an install that updates itself has no by-hand line, and no member's
+  /// row has one either where the member said nothing of its install.
+  it("says nothing by hand for an install that updates itself", async () => {
+    for (const install of ["AppImage", "MacApp", "WindowsInstall"] as const) {
+      mountPane(SERVING, { ...LINKED, this_install: install });
+
+      await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+      expect(screen.queryByText(/Update this device/)).toBeNull();
+
+      cleanup();
+    }
+  });
+
+  /// A member's row says how to update it by hand where its install can't
+  /// update itself, naming the member, with no Update beside it — whether or
+  /// not a newer release exists.
+  it("says how to update a nix member by hand, naming it", async () => {
+    const [laptop, wsl] = LINKED.members;
+    mountPane(SERVING, {
+      ...LINKED,
+      members: [
+        { ...laptop!, identity: { ...laptop!.identity, install: "Nix" } },
+        {
+          ...wsl!,
+          identity: { ...wsl!.identity, install: "Checkout" },
+          update_available: true,
+        },
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const nix = screen.getByText("laptop").closest("li")!;
+    expect(nix.textContent).toContain(
+      "Installed with nix. Update laptop with nix flake update and nixos-rebuild switch.",
+    );
+    expect(within(nix).queryByRole("button", { name: "Update" })).toBeNull();
+
+    const checkout = screen.getByText("172.29.0.14").closest("li")!;
+    expect(checkout.textContent).toContain(
+      "Built from a checkout. Update workbench with git pull and cargo build.",
+    );
+    expect(within(checkout).queryByRole("button", { name: "Update" })).toBeNull();
+  });
+
+  /// A member from before the install kind was said can't be updated from
+  /// here, and says so once a newer release exists for it — and nothing
+  /// while it is on the release.
+  it("says an older member can't be updated from here", async () => {
+    const [laptop, wsl] = LINKED.members;
+    mountPane(SERVING, {
+      ...LINKED,
+      members: [{ ...laptop!, update_available: true }, wsl!],
+    });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const older = screen.getByText("laptop").closest("li")!;
+    expect(older.textContent).toContain(
+      "laptop is on a release that can't be updated from here. Update it on laptop.",
+    );
+    expect(within(older).queryByRole("button", { name: "Update" })).toBeNull();
+
+    expect(
+      screen.getByText("172.29.0.14").closest("li")!.textContent,
+      "a member on the release says nothing about updating",
+    ).not.toContain("can't be updated");
+  });
+
+  /// An Annex's row says it follows its Keeper rather than how to update it,
+  /// even where it says it was installed with nix and is behind the release.
+  it("says an Annex follows its Keeper", async () => {
+    const [laptop, annex] = KEEPING.members;
+    mountPane(SERVING, {
+      ...KEEPING,
+      members: [
+        laptop!,
+        {
+          ...annex!,
+          identity: { ...annex!.identity, install: "Nix" },
+          update_available: true,
+        },
+      ],
+    });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    const row = screen
+      .getByText("Kept on this device's release, so it's updated when this device is.")
+      .closest("li")!;
+
+    expect(row.textContent).not.toContain("Installed with nix");
+    expect(row.textContent).not.toContain("can't be updated from here");
+    expect(within(row).queryByRole("button", { name: "Update" })).toBeNull();
+
+    cleanup();
+    mountPane(SERVING, BESIDE_AN_ANNEX);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Kept on laptop's release, so it's updated when laptop is."),
+      ).toBeTruthy(),
+    );
+  });
+
+  /// An install that updates itself, behind the release, has Update on its
+  /// row; the press asks first, and Update on the card reads *updating…* in
+  /// place of *update available*, taking the button away while it goes.
+  it("offers Update on a desktop install behind the release", async () => {
+    const behind: DevicesView = {
+      ...LINKED,
+      this_update_available: "0.3.0",
+      this_install: "AppImage",
+    };
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(behind),
+      theHeard(),
+      whenever(
+        "/api/ui/devices/this/update",
+        json({ ...behind, this_updating: { percent: null } }),
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    const press = await screen.findByRole("button", { name: "Update" });
+    expect(press.closest("li")).toBe(screen.getByText("this device").closest("li"));
+
+    fireEvent.click(press);
+
+    await waitFor(() => expect(screen.getByText("Update workbench?")).toBeTruthy());
+    expect(askedFor(fetching, "/api/ui/devices/this/update")).toBe(0);
+
+    fireEvent.click(updateOnTheCard());
+
+    await waitFor(() => expect(screen.getByText("updating…")).toBeTruthy());
+    const row = screen.getByText("this device").closest("li")!;
+    expect(row.textContent).not.toContain("update available");
+    expect(screen.queryByRole("button", { name: "Update" })).toBeNull();
+    expect(
+      fetching.mock.calls.some(
+        ([path, init]) =>
+          String(path) === "/api/ui/devices/this/update" && init?.method === "POST",
+      ),
+    ).toBe(true);
+  });
+
+  /// The card asks about this device by name, with the release it goes onto
+  /// in its body — and with nothing running here, that alone.
+  it("asks Update with the release and nothing else when nothing runs", async () => {
+    mountPane(SERVING, {
+      ...LINKED,
+      this_update_available: "0.3.0",
+      this_install: "AppImage",
+      this_running: [],
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+
+    const asked = await screen.findByText("Update workbench?");
+    expect(asked.closest("dialog")!.textContent).toContain(
+      "It restarts on Verkstead 0.3.0.",
+    );
+    expect(asked.closest("dialog")!.textContent).not.toContain("session");
+  });
+
+  /// With sessions running here, the card names each branch, counts the
+  /// drafts, and says they will be stopped and resumed — and Update on it goes ahead regardless (ADR-0027).
+  it("names the running sessions on the card, and updates anyway", async () => {
+    const behind: DevicesView = {
+      ...LINKED,
+      this_update_available: "0.3.0",
+      this_install: "AppImage",
+      this_running: ["rate-limiting"],
+      this_running_drafts: 2,
+    };
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(behind),
+      theHeard(),
+      whenever(
+        "/api/ui/devices/this/update",
+        json({ ...behind, this_updating: { percent: null } }),
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+
+    const asked = await screen.findByText("Update workbench?");
+    expect(asked.closest("dialog")!.textContent).toContain(
+      "It restarts on Verkstead 0.3.0, and the sessions on rate-limiting and 2 drafts will be stopped and resumed.",
+    );
+
+    fireEvent.click(updateOnTheCard());
+
+    await waitFor(() => expect(screen.getByText("updating…")).toBeTruthy());
+    expect(askedFor(fetching, "/api/ui/devices/this/update")).toBe(1);
+  });
+
+  /// And Cancel leaves the device alone.
+  it("updates nothing on Cancel", async () => {
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice({ ...LINKED, this_update_available: "0.3.0", this_install: "AppImage" }),
+      theHeard(),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+    await screen.findByText("Update workbench?");
+
+    fireEvent.click(screen.getByText("Cancel"));
+
+    await waitFor(() => expect(screen.queryByText("Update workbench?")).toBeNull());
+    expect(askedFor(fetching, "/api/ui/devices/this/update")).toBe(0);
+  });
+
+  /// No Update on an install that is on the release, nor on a member's row.
+  it("offers no Update on a desktop install that is on the release", async () => {
+    mountPane(SERVING, {
+      ...LINKED,
+      this_update_available: null,
+      this_install: "AppImage",
+      members: LINKED.members.map((member) => ({ ...member, update_available: true })),
+    });
+
+    await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+    expect(screen.queryByRole("button", { name: "Update" })).toBeNull();
+  });
+
+  /// While it goes the row reads how much is down, *restarting…* once the
+  /// server stops answering, and the new release once the relaunched one
+  /// answers — polled the whole way, with no Nudge to say so.
+  it("reads updating, restarting, then the new release", async () => {
+    let now: "updating" | "down" | "back" = "updating";
+    const going: DevicesView = {
+      ...LINKED,
+      this_update_available: "0.3.0",
+      this_install: "AppImage",
+      this_updating: { percent: 42 },
+    };
+    const back: DevicesView = {
+      ...LINKED,
+      this: { ...LINKED.this, version: "0.3.0" },
+      this_install: "AppImage",
+    };
+
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      whenever("/api/ui/devices", () => {
+        if (now === "down") return Promise.reject(new TypeError("Failed to fetch"));
+        return json(now === "updating" ? going : back)();
+      }),
+      theHeard(),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("updating… 42%")).toBeTruthy());
+
+    now = "down";
+    await waitFor(() => expect(screen.getByText("restarting…")).toBeTruthy(), {
+      timeout: 3_000,
+    });
+    expect(screen.queryByText(/couldn't be read/)).toBeNull();
+
+    now = "back";
+    await waitFor(() => expect(screen.getByText("Verkstead 0.3.0")).toBeTruthy(), {
+      timeout: 3_000,
+    });
+    expect(screen.queryByText("restarting…")).toBeNull();
+    expect(screen.queryByText(/updating…/)).toBeNull();
+  });
+
+  /// A download that failed leaves *updating…* for the row's trouble line,
+  /// as the server said it, on the version it was on, with Update offered
+  /// again — the next release, or the same one tried again.
+  it("reads the trouble line once an Update failed", async () => {
+    let now: "updating" | "failed" = "updating";
+    const going: DevicesView = {
+      ...LINKED,
+      this_update_available: "0.3.0",
+      this_install: "AppImage",
+      this_updating: { percent: 60 },
+    };
+    const failed: DevicesView = {
+      ...going,
+      this_updating: null,
+      this_update_trouble:
+        "This device couldn't be updated: sha512 checksum mismatch, expected abc, got def.",
+    };
+
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      whenever("/api/ui/devices", () => json(now === "updating" ? going : failed)()),
+      theHeard(),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText("updating… 60%")).toBeTruthy());
+
+    now = "failed";
+    const line = await screen.findByText(/couldn't be updated: sha512 checksum mismatch/, undefined, {
+      timeout: 3_000,
+    });
+    const row = screen.getByText("this device").closest("li")!;
+    expect(line.closest("li")).toBe(row);
+    expect(row.textContent).not.toContain("updating…");
+    expect(row.textContent).toContain("update available");
+    expect(screen.getByRole("button", { name: "Update" })).toBeTruthy();
+  });
+
+  /// A desktop member behind the release, answering, as its row is offered
+  /// Update with two sessions running there.
+  function aDesktopMember(): DevicesView {
+    const [laptop, wsl] = LINKED.members;
+
+    return {
+      ...LINKED,
+      members: [
+        {
+          ...laptop!,
+          identity: { ...laptop!.identity, install: "AppImage" },
+          update_available: true,
+          update_release: "0.3.0",
+          running: ["rate-limiting", "solid-viewer"],
+        },
+        wsl!,
+      ],
+    };
+  }
+
+  /// With `laptop`'s row changed by `change`.
+  function withTheLaptop(
+    list: DevicesView,
+    change: Partial<LinkedDevice>,
+  ): DevicesView {
+    return {
+      ...list,
+      members: list.members.map((member) =>
+        member.identity.name === "laptop" ? { ...member, ...change } : member,
+      ),
+    };
+  }
+
+  /// A desktop member behind the release has Update on its own row; the
+  /// press asks *Update laptop?* naming the release and both sessions
+  /// running there, and Update on the card tells it — the row then reads
+  /// *updating…*, and the percent once the member reports it, polled.
+  it("offers Update on a desktop member's row, asking by its name", async () => {
+    const behind = aDesktopMember();
+    let now: "asked" | "told" | "downloading" = "asked";
+    const told = withTheLaptop(behind, { updating: { percent: null } });
+    const downloading = withTheLaptop(behind, { updating: { percent: 40 } });
+    const device = behind.members[0]!.identity.device;
+
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      whenever("/api/ui/devices", () =>
+        json(now === "asked" ? behind : now === "told" ? told : downloading)(),
+      ),
+      theHeard(),
+      whenever(
+        `/api/ui/devices/members/${device}/update`,
+        () => {
+          now = "told";
+          return json(told)();
+        },
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    const press = await screen.findByRole("button", { name: "Update" });
+    expect(press.closest("li")).toBe(screen.getByText("laptop").closest("li"));
+
+    fireEvent.click(press);
+
+    const asked = await screen.findByText("Update laptop?");
+    expect(asked.closest("dialog")!.textContent).toContain(
+      "It restarts on Verkstead 0.3.0, and the sessions on rate-limiting and solid-viewer will be stopped and resumed.",
+    );
+    expect(askedFor(fetching, `/api/ui/devices/members/${device}/update`)).toBe(0);
+
+    fireEvent.click(updateOnTheCard());
+
+    await waitFor(() => expect(screen.getByText("updating…")).toBeTruthy());
+    const row = screen.getByText("laptop").closest("li")!;
+    expect(row.textContent).not.toContain("update available");
+    expect(within(row).queryByRole("button", { name: "Update" })).toBeNull();
+    expect(askedFor(fetching, `/api/ui/devices/members/${device}/update`)).toBe(1);
+
+    now = "downloading";
+    await waitFor(() => expect(screen.getByText("updating… 40%")).toBeTruthy(), {
+      timeout: 3_000,
+    });
+  });
+
+  /// Gone quiet, the member's row reads *restarting…*, as the server that
+  /// pressed says, and then its new release with no state word, polled.
+  it("reads restarting on a member's row, then its new release", async () => {
+    const behind = aDesktopMember();
+    const laptop = behind.members[0]!;
+    let now: "restarting" | "back" = "restarting";
+    const restarting = withTheLaptop(behind, {
+      updating: { percent: 100 },
+      restarting: true,
+    });
+    const back = withTheLaptop(behind, {
+      identity: { ...laptop.identity, version: "0.3.0" },
+      update_available: false,
+      update_release: null,
+    });
+
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      whenever("/api/ui/devices", () => json(now === "restarting" ? restarting : back)()),
+      theHeard(),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    const word = await screen.findByText("restarting…");
+    const row = screen.getByText("laptop").closest("li")!;
+    expect(word.closest("li")).toBe(row);
+    expect(row.textContent).not.toContain("updating…");
+    expect(within(row).queryByRole("button", { name: "Update" })).toBeNull();
+
+    now = "back";
+    await waitFor(() => expect(screen.queryByText("restarting…")).toBeNull(), {
+      timeout: 3_000,
+    });
+    const drawn = screen.getByText("laptop").closest("li")!;
+    expect(drawn.textContent).toContain("0.3.0");
+    expect(drawn.textContent).not.toContain("updating…");
+  });
+
+  /// And Cancel tells the member nothing.
+  it("tells a member nothing on Cancel", async () => {
+    const behind = aDesktopMember();
+    const device = behind.members[0]!.identity.device;
+    const fetching = stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(behind),
+      theHeard(),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+    await screen.findByText("Update laptop?");
+
+    fireEvent.click(screen.getByText("Cancel"));
+
+    await waitFor(() => expect(screen.queryByText("Update laptop?")).toBeNull());
+    expect(askedFor(fetching, `/api/ui/devices/members/${device}/update`)).toBe(0);
+  });
+
+  /// No Update on a member that is unreachable, on the release, or already
+  /// updating.
+  it("offers no Update on a member that can't be told now", async () => {
+    for (const change of [
+      { reachable: false },
+      { update_available: false, update_release: null },
+      { updating: { percent: 10 } },
+    ] satisfies Partial<LinkedDevice>[]) {
+      mountPane(SERVING, withTheLaptop(aDesktopMember(), change));
+
+      await waitFor(() => expect(screen.getByText("laptop")).toBeTruthy());
+
+      expect(
+        within(screen.getByText("laptop").closest("li")!).queryByRole("button", {
+          name: "Update",
+        }),
+        JSON.stringify(change),
+      ).toBeNull();
+
+      cleanup();
+    }
+  });
+
+  /// The line a member's Update left — its failure in its own words, or that
+  /// it was unreachable at the press — is drawn on its row, with Update
+  /// offered again.
+  it("draws the line a member's Update left on its row", async () => {
+    for (const line of [
+      "laptop couldn't be updated: sha512 checksum mismatch, expected abc, got def.",
+      "laptop couldn't be reached, so it wasn't updated.",
+    ]) {
+      mountPane(SERVING, withTheLaptop(aDesktopMember(), { trouble: line }));
+
+      const drawn = await screen.findByText(line);
+      const row = screen.getByText("laptop").closest("li")!;
+      expect(drawn.closest("li")).toBe(row);
+      expect(row.textContent).not.toContain("updating…");
+      expect(within(row).getByRole("button", { name: "Update" })).toBeTruthy();
+
+      cleanup();
+    }
+  });
+
+  /// A refused press says why under the list.
+  it("says why a press of Update was refused", async () => {
+    const behind: DevicesView = {
+      ...LINKED,
+      this_update_available: "0.3.0",
+      this_install: "AppImage",
+    };
+    stubbing(
+      whenever("/api/ui/remote", json(SERVING)),
+      theDevice(behind),
+      theHeard(),
+      whenever(
+        "/api/ui/devices/this/update",
+        json(
+          { error: "This device wasn't started by the desktop app, so it can't update itself." },
+          409,
+        ),
+        "POST",
+      ),
+    );
+    mounting(() => <RemotePane back={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+    fireEvent.click(await waitFor(updateOnTheCard));
+
+    await waitFor(() =>
+      expect(screen.getByText(/so it can't update itself\./)).toBeTruthy(),
+    );
   });
 
   /// And only one of them is this machine, whichever else is on the list.
@@ -1978,3 +2639,14 @@ function scanned(code: Element): string | null {
 /// One dark module of the path the page draws — see `Qr.tsx`, which writes each
 /// as a one-unit square at its own place on the grid.
 const MODULE = /M(\d+) (\d+)h1v1h-1z/g;
+
+/// Update on the card asking about this device's own, rather than on its row.
+function updateOnTheCard(): HTMLElement {
+  const press = screen
+    .getAllByRole("button", { name: "Update" })
+    .find((button) => button.closest("dialog"));
+
+  if (press === undefined) throw new Error("no card asking about Update is up");
+
+  return press;
+}

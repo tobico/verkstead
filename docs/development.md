@@ -1120,7 +1120,9 @@ $ cd desktop && pnpm run pack \
 ```
 
 What comes out is `target/electron/out/Verkstead-universal.dmg`, holding
-`Verkstead.app` — one file for both Macs, electron-builder building each half
+`Verkstead.app`, and `Verkstead-universal.zip` beside it holding the same app
+— the dmg is what a human downloads and the zip what an update installs. One
+app for both Macs, electron-builder building each half
 and `@electron/universal` merging the two, which is why the sidecar has to be
 joined first: that merge refuses a resource that differs between the halves. The
 bundle's `CFBundleIdentifier` is `net.tobico.Verkstead` and its
@@ -1133,43 +1135,55 @@ makes this a regular Dock app where the Rust bundle was one the Dock never held
 — see the `mac:` section of
 [`desktop/electron-builder.yml`](../desktop/electron-builder.yml), which says
 which key that was and why it is read back off what was packed
-([ADR-0020](adr/0020-electron-desktop.md)). The bundle is ad-hoc signed rather
-than signed with a Developer ID, because Apple silicon will not execute a binary
-with no signature at all — that is not the signing that gets an app past
-Gatekeeper, and there is none of that — with the hardened runtime off beside it,
-which under an ad-hoc signature would enforce library validation and reject the
-pre-signed Electron framework for carrying another Team ID. It packs on a Mac
+([ADR-0020](adr/0020-electron-desktop.md)). From a checkout the bundle is
+ad-hoc signed, because Apple silicon will not execute a binary with no signature
+at all, with the hardened runtime off beside it, which under an ad-hoc signature
+would enforce library validation and reject the pre-signed Electron framework
+for carrying another Team ID. Given the Developer ID certificate and the App
+Store Connect key in the environment, the same pack signs with the certificate
+under the hardened runtime and has Apple notarize and staple the app, which is
+what a Release does ([ADR-0027](adr/0027-cluster-updates.md)); its log says
+which of the two it did, and [releasing](releasing.md#the-macs-signing-secrets)
+says what the variables hold. It packs on a Mac
 only: `lipo`, `codesign` and `hdiutil` are the operating system's own tools, and
 there is no cross build of it from here.
 
-The msi is the same pack on Windows, and the one artifact of the three that is
-an installer rather than a file to keep wherever you like: an app whose two
-ways in are a Start-menu entry and a directory on the user's `PATH` has to be
-put somewhere before either of them exists.
+The NSIS installer is the same pack on Windows, and the one artifact of the
+three that is an installer rather than a file to keep wherever you like: an app
+whose two ways in are a Start-menu entry and a directory on the user's `PATH`
+has to be put somewhere before either of them exists.
 
 ```console
 $ cargo build --release -p verkstead-cli
 $ cd desktop && pnpm run pack ../target/release/verkstead.exe
 ```
 
-What comes out is `target/electron/out/Verkstead-x86_64.msi`, and what it
-installs goes into the profile: `%LOCALAPPDATA%\Programs\Verkstead`, with the
-launcher `Verkstead.exe` at its root and the sidecar under `resources\cli`; an
-entry in the user's own Start menu; and `resources\cli` on the user's own
-`PATH`, so that `verkstead ask` works in a terminal opened afterwards. The
-CLI's own directory rather than the install root, because the root is where
-the launcher stands and Windows resolves a `PATH` lookup without regard to
-case ([ADR-0020](adr/0020-electron-desktop.md)). Per-user because the package
-is unsigned, and asking for administrator would be an unsigned program asking
-for the machine. That `PATH` entry and the install directory's name are the two
-things electron-builder's msi target cannot be told, so
-[`desktop/scripts/msi.mjs`](../desktop/scripts/msi.mjs) patches them into the
-generated WiX project through the target's `msiProjectCreated` hook — string
-surgery on a generated file, so every patch has to match exactly once or the
-pack stops rather than writing an installer with no `PATH` entry in it. It
-packs on Windows only: the WiX toolset that compiles the package is a set of
-Windows programs, fetched by electron-builder rather than carried by the dev
-shell, and MSVC builds what goes inside.
+What comes out is `target/electron/out/Verkstead-x86_64.exe`, electron-builder's
+`nsis` target ([ADR-0027](adr/0027-cluster-updates.md)), and what it installs
+goes into the profile with no wizard and no administrator asked for:
+`%LOCALAPPDATA%\Programs\Verkstead`, with the launcher `Verkstead.exe` at its
+root and the sidecar under `resources\cli`; an entry in the user's own Start
+menu; a row under `HKCU` in **Installed apps**; and `resources\cli` on the
+user's own `PATH`, so that `verkstead ask` works in a terminal opened
+afterwards. The CLI's own directory rather than the install root, because the
+root is where the launcher stands and Windows resolves a `PATH` lookup without
+regard to case ([ADR-0020](adr/0020-electron-desktop.md)). Per-user because the
+installer is unsigned, and asking for administrator would be an unsigned
+program asking for the machine. The install directory's name and that `PATH`
+entry are the two things the target cannot be told, so
+[`desktop/build/installer.nsh`](../desktop/build/installer.nsh), the include
+script the configuration names, says them in NSIS: it gives a first install its
+directory before the template reads one, adds the entry on install without
+ever adding it twice, and takes it off again on uninstall. It also takes away
+the Windows Installer package of Verkstead that earlier Releases shipped, where
+a machine still has one, before anything is extracted. The uninstaller is the
+row's own, and leaves the Data Directory alone.
+
+It packs on Windows: electron-builder fetches its own NSIS rather than the dev
+shell carrying one, and MSVC builds what goes inside. The installer is proven
+on the release's Windows leg, which installs it, asks the install its
+questions, installs it again over itself and over the last Release's package,
+and uninstalls it — see [Releasing](releasing.md).
 
 ### An Annex from a development build
 
@@ -1461,9 +1475,9 @@ for electron-builder to copy into the Mac bundle and name in its `Info.plist`,
 and `net.tobico.Verkstead.ico`, staged beside it for the platform
 that wants one picture three times over: electron-builder edits it into
 `Verkstead.exe` as the launcher's own resource, nothing installed beside an exe
-being what Alt-Tab and the taskbar draw it with; the msi names it as
-`ARPPRODUCTICON`, so the row in **Installed apps** is drawn with it; and the
-Start-menu shortcut is advertised against it. It is written by
+being what Alt-Tab and the taskbar draw it with, and the installer names that
+resource as the row's `DisplayIcon`, so the row in **Installed apps** is drawn
+with it, and as the Start-menu shortcut's icon. It is written by
 [`tools/generate-packaging.sh`](../tools/generate-packaging.sh) from the same
 hammer, and committed for the same reason the viewer's icons are. That script
 rewrites the whole directory from nothing on every run — so a size that stops

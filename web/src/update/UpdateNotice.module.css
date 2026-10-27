@@ -32,6 +32,13 @@
   white-space: nowrap;
 }
 
+/* An Update that couldn't be pressed says why on a line of its own, under the
+   sentence and the press. */
+.failure {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 /* Under the pointer, the underline this line took off it. Said here rather than
    left to the rule every link in the app takes from `styles/base.css`, because
    the rule above is what took the underline away and the two carry the same
