@@ -2,6 +2,7 @@
   "mode": false,
   "platform": "Linux",
   "distro": "Ubuntu",
+  "machine": "ada-box",
   "dependencies": [
     {
       "dependency": "Sandbox",

@@ -1,9 +1,10 @@
 /* The accounts step — see `Accounts.tsx`.
 
-   A column inside the step's card, like the step before it: the line that says
-   what a Profile is, the accounts that were found, the press onwards, and the
-   form for an account that is kept somewhere else. Nothing is a grid — a row is
-   a tick, a name and a couple of paths, and it is read down on a phone. */
+   A column on the paper, as the `02-*` boards draw it: the line that says what
+   a Profile is, the accounts that were found as cards under a label in tracked
+   capitals, or the card that says none were, and the dashed card that opens
+   into the form for an account kept somewhere else. The press is in the frame's
+   foot. */
 
 .step {
   display: flex;
@@ -16,60 +17,110 @@
   line-height: 1.5;
 }
 
-.rows {
+/* The found accounts, under their label: "Found in ~" in the frame's tracked
+   capitals, with the count beside it in a quiet gloss. The label is typed in
+   sentence case and only set in capitals here. */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+
+.label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.gloss {
+  font-size: 0.8rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* One account. Separated by a rule rather than by cards inside a card, the way
-   the dependency rows are: the step is already one surface. */
-.row {
-  padding: 0.75rem 0;
-  border-top: 1px solid var(--edge);
+/* One account: the mark, the name and the paths, and the box on the right. A
+   ticked one takes the ember's edge, as a ticked tile does on step 1. */
+.card {
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.75rem;
 }
 
-.row:last-child {
-  border-bottom: 1px solid var(--edge);
+.card.chosen {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
-/* An account whose harness is not on the machine is drawn quiet: it is a row to
-   read rather than a row to tick, and the note under it says why. */
-.row[data-harness="no"] {
+/* An account whose harness is not on the machine is drawn quiet: a card to
+   read rather than one to tick, on the paper rather than the card. */
+.card[data-harness="no"] {
+  background: transparent;
   color: var(--ink-soft);
 }
 
-/* The tick, the mark and the name on one line — the whole of it a label, so
-   that the name is what the tick is read out as. */
-.head {
+.inner {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  cursor: pointer;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 0.9rem 1rem;
+}
 
-  /* The cursor already said the row was a press; this is the other half of it,
-     so a press that slid leaves no sliver of the name highlighted — see
-     `rowPress` in `src/rows.ts`. */
+/* The whole card is the press — see `rowPress` in `src/rows.ts`. */
+label.inner {
+  cursor: pointer;
   user-select: none;
 }
 
-.row[data-harness="no"] .head {
-  cursor: not-allowed;
+.text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
 }
 
 .name {
   display: flex;
-  gap: 0.4rem;
-  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
   font-weight: 600;
 }
 
-/* The harness's own mark, sized to the word beside it the way every other
-   reading of a backend sizes one. */
+/* The harness's own mark, at the size step 1's tiles draw it. */
 .harness {
   flex: none;
-  width: 0.9em;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* What a missing harness is, in a word after the name. */
+.pill {
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--code-wash);
+  white-space: nowrap;
 }
 
 /* Where the account is kept, for whoever is checking what is about to be saved.
@@ -78,29 +129,90 @@
 .kept {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  margin: 0.4rem 0 0;
+  gap: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.quiet {
+  margin: 0;
   font-size: 0.85rem;
+  line-height: 1.5;
   color: var(--ink-soft);
 }
 
-.kept code {
-  font-family: ui-monospace, SFMono-Regular, monospace;
+/* The box, in the ember, at the boards' 18px. */
+.box {
+  flex: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0.1rem 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
-/* A home with nothing in it: the line that says so, and one command per harness
-   that could make an account here. */
+/* The way back to step 1, as a word in the ember on the card's right. */
+.reopen {
+  flex: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* A home with nothing in it: the card saying so, the Watching dot on its
+   right, and one command per harness that could make an account here. */
 .nothing {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.75rem;
+}
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.title {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* Watching, after a dot in the green the rail's reading line wears. */
+.watching {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.watching::before {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--added);
 }
 
 .logins {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  margin: 0;
+  margin: 0.5rem 0 0;
   padding: 0;
   list-style: none;
 }
@@ -109,28 +221,105 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  justify-content: space-between;
   align-items: center;
 }
 
-.login pre {
-  margin: 0;
-  padding: 0.35rem 0.6rem;
+/* The line to run, after a prompt, and the press that copies it — the by-hand
+   screen's command block, smaller. */
+.command {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  max-width: 100%;
+  padding: 0.35rem 0.5rem 0.35rem 0.65rem;
+  background: var(--code-wash);
+  border-radius: 0.45rem;
+}
+
+.prompt {
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 0.85rem;
-  background: var(--paper);
+  color: var(--ink-soft);
+}
+
+.command pre {
+  margin: 0;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+}
+
+.copy {
+  flex: none;
+  padding: 0.15rem 0.45rem;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  background: none;
   border: 1px solid var(--edge);
-  border-radius: 0.4rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
 }
 
-.onwards {
-  margin-top: 0.3rem;
+/* The way to the form while it is shut: a dashed card with a plus, its title
+   in the ember and the line under it quiet. */
+.naming {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.9rem 1rem;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  background: none;
+  border: 1px dashed var(--edge);
+  border-radius: 0.75rem;
+  cursor: pointer;
 }
 
-/* The press onwards, drawn as the step before it draws its own. Refused until
-   there is a Profile to run under, and refused the way every other disabled
-   control here is. */
+.naming .title {
+  color: var(--accent);
+}
+
+.plus {
+  flex: none;
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+/* And the card it opens into, holding the form. */
+.named {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.75rem;
+}
+
+.named > .quiet {
+  margin-bottom: 0.9rem;
+}
+
+/* The form's own Save, drawn as an outline here: the filled press on this
+   paper is the one in the foot. */
+.named button[type="submit"] {
+  color: var(--ink);
+  background: var(--card);
+  border-color: var(--edge);
+  font-weight: 400;
+}
+
+/* The press, drawn as step 1 draws its own. */
 .next {
-  padding: 0.5rem 1.1rem;
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 1.1rem;
   font: inherit;
   font-weight: 600;
   color: var(--paper);
@@ -142,51 +331,18 @@
 
 .next:disabled {
   cursor: not-allowed;
-  opacity: 0.65;
+  opacity: 0.45;
 }
 
-.failure {
-  margin-top: 0.5rem;
+.arrow {
+  font-size: 0.85em;
 }
 
-/* The form under the rows, set apart by a rule and a heading: it is the way in
-   for an account nothing found, rather than another row of the list. Behind a
-   link until it is asked for — see `naming` in `Accounts.tsx` — so the rule is
-   what says the section is there while it is only one line long. */
-.byHand {
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--edge);
+/* Why the press is held, in one line beside it. */
+.held {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
 }
-
-.byHand h3 {
-  margin: 0 0 0.4rem;
-  font-size: 1rem;
-}
-
-/* The heading while the section is shut, which is a link: it reveals what is
-   under it rather than going anywhere, so it is a button, and it is drawn as
-   the app draws every other link — see `a` in `styles/base.css`, which is the
-   look this borrows rather than a look of its own.
-
-   The focus ring is left where it is, this being a control the keyboard reaches
-   and the one thing on the step it reaches nothing else through. */
-.byHand .naming {
-  padding: 0;
-  font: inherit;
-  color: var(--accent);
-  text-align: start;
-  text-decoration: underline;
-  background: none;
-  border: 0;
-  cursor: pointer;
-}
-
-/* And the heading that replaces it takes nothing off: it wears the ring the
-   browser puts round it, being where the focus lands when the press that opened
-   the section takes its own control away. A hand that pressed with the pointer
-   never matches `:focus-visible` and sees none of it; the hand that pressed with
-   Enter is the one being told where it now is, which is the whole reason the
-   focus is moved there at all — see `named` in `Accounts.tsx`. */
 
 @media (hover: hover) {
   .next:not(:disabled):hover {
@@ -194,8 +350,16 @@
     border-color: var(--accent-deep);
   }
 
-  /* Deepened, the way every other link in the app is. */
-  .byHand .naming:hover {
+  .reopen:hover,
+  .naming:hover .title {
     color: var(--accent-deep);
+  }
+
+  .naming:hover {
+    border-color: var(--accent);
+  }
+
+  .named button[type="submit"]:not(:disabled):hover {
+    border-color: var(--accent);
   }
 }

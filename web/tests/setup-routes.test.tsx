@@ -29,8 +29,9 @@ import fresh from "./fixtures/onboarding-fresh.json" with { type: "json" };
 /// is the mode on.
 const FRESH = fresh as OnboardingView;
 
-/// The wizard's own heading, which is what says the page reached was it.
-const WIZARD = "Set Up Verkstead";
+/// The label under the wizard's brand, which is what says the page reached was
+/// it: the brand alone is the word the workbench heads itself with too.
+const WIZARD = "Setup";
 
 /// And what the app answers a path nothing has.
 const MISSED = "There's no page at this address.";

@@ -68,6 +68,13 @@ export function after(step: Step): Step | null {
   return STEPS[STEPS.indexOf(step) + 1] ?? null;
 }
 
+/// And the step before this one, or `null` at the start — which is where the
+/// frame's Back goes, and always a met step: one is only ever open once the
+/// ones before it are.
+export function before(step: Step): Step | null {
+  return STEPS[STEPS.indexOf(step) - 1] ?? null;
+}
+
 /// Where this device's open step is kept. Namespaced like everything else this
 /// app leaves in a browser.
 export const SETUP_STEP = "verkstead.setup-step";
@@ -129,4 +136,31 @@ export function openScreen(): Screen {
 /// Remember which screen is open, so that a reload opens it again.
 export function keepScreen(screen: Screen): void {
   write(SETUP_SCREEN, screen);
+}
+
+/// How this device's by-hand screen was reached: by a run that left a ticked row
+/// missing, or by *Install by hand instead* with no run at all.
+///
+/// Kept beside the screen because the two are different screens over one
+/// component: the first lists the rows the run failed and reads *Skip* while
+/// one of them is missing, and the second lists every row still missing and
+/// reads Next. The reading cannot tell them apart — a device that pressed
+/// *Install by hand instead* after an earlier run failed has failed rows on
+/// the wire all the same — so a reload asks this.
+export const SETUP_BY_HAND = "verkstead.setup-by-hand";
+
+/// One of the two.
+export type Reached = "run" | "choice";
+
+/// How the by-hand screen this device was left on was reached — by a run
+/// where it has never been said, which is what a device left there before this
+/// was kept had always been.
+export function reached(): Reached {
+  return read(SETUP_BY_HAND) === "choice" ? "choice" : "run";
+}
+
+/// Remember how the by-hand screen was reached, so that a reload opens the
+/// same one.
+export function keepReached(how: Reached): void {
+  write(SETUP_BY_HAND, how);
 }

@@ -6,7 +6,8 @@
 //!
 //! A tick where it is met and an empty ring where it is not: the shapes a pull
 //! request's checks are drawn with, for the same reason — the ring is what a
-//! tick is cut into once something has happened.
+//! tick is cut into once something has happened. And between the two, the ring
+//! in the ember with a dot in it, for the row an install run is on.
 
 import { faCheck } from "@fortawesome/free-solid-svg-icons";
 import { Match, Switch, type JSX } from "solid-js";
@@ -19,7 +20,9 @@ export type Standing =
   /// It is there, or it is done.
   | "met"
   /// It is not, and somebody is going to do something about it.
-  | "waiting";
+  | "waiting"
+  /// It is not yet, and an install run is doing something about it now.
+  | "going";
 
 /// One of the two, as a mark.
 export function Mark(props: { standing: Standing }): JSX.Element {
@@ -31,6 +34,9 @@ export function Mark(props: { standing: Standing }): JSX.Element {
     >
       <Match when={props.standing === "met"}>
         <Icon of={faCheck} label="Done" class={styles.done} />
+      </Match>
+      <Match when={props.standing === "going"}>
+        <span class={styles.going} aria-label="Installing" role="img" />
       </Match>
     </Switch>
   );

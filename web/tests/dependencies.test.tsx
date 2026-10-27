@@ -205,6 +205,7 @@ const WINDOWS: OnboardingView = {
 function mount(machine: OnboardingView) {
   const onwards = vi.fn();
   const poll = vi.fn();
+  const name = vi.fn();
   const [reading, setReading] = createSignal(machine);
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -223,11 +224,17 @@ function mount(machine: OnboardingView) {
   return {
     ...render(() => (
       <QueryClientProvider client={client}>
-        <Dependencies reading={reading()} onwards={onwards} poll={poll} />
+        <Dependencies
+          reading={reading()}
+          onwards={onwards}
+          poll={poll}
+          name={name}
+        />
       </QueryClientProvider>
     )),
     onwards,
     poll,
+    name,
     /// The machine read again, which is what the frame hands down every few
     /// seconds.
     read: setReading,
@@ -264,16 +271,38 @@ function box(
   );
 }
 
-/// Every tab, in the order they were drawn.
+/// Every machine the commands can be for, in the order the select lists them.
 function tabs(container: ParentNode): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>("[data-distro]")];
 }
 
-/// And which one is showing.
+/// And which one is chosen.
 function showing(container: ParentNode): string | undefined {
-  return container.querySelector<HTMLElement>(
-    '[data-distro][aria-pressed="true"]',
-  )?.dataset.distro;
+  return container.querySelector("select")?.value;
+}
+
+/// Choose the machine the commands are for.
+function choose(container: ParentNode, distro: Distro): void {
+  const select = container.querySelector("select")!;
+
+  select.value = distro;
+  fireEvent.change(select);
+}
+
+/// What the run said about one row on the by-hand screen, once its Failed pill
+/// is opened — which it is not, to begin with.
+function said(container: ParentNode, dependency: Dependency): string | null {
+  const failed = press(row(container, dependency), "Failed");
+
+  expect(failed.getAttribute("aria-expanded")).toBe("false");
+  expect(row(container, dependency).querySelector("[data-failed]")).toBeNull();
+
+  fireEvent.click(failed);
+
+  return (
+    row(container, dependency).querySelector("[data-failed]")?.textContent ??
+    null
+  );
 }
 
 /// A press, by the words on it.
@@ -286,9 +315,19 @@ function press(container: ParentNode, words: string): HTMLButtonElement {
   )!;
 }
 
-/// The press onwards, which reads the same on every screen of the wizard.
+/// The press onwards: *Next*, on the checkbox screen *Install N* for the rows
+/// it would install, and on the by-hand screen *Skip* where it leaves a row a
+/// run failed behind.
 function onwards(container: ParentNode): HTMLButtonElement {
-  return press(container, "Next");
+  return [...container.querySelectorAll("button")].find((button) =>
+    /^(Next|Skip|Install \d+)$/.test(button.textContent ?? ""),
+  )!;
+}
+
+/// The checkbox screen's way past the run, to the commands for everything
+/// missing.
+function byHand(container: ParentNode): void {
+  fireEvent.click(press(container, "Install by hand instead"));
 }
 
 afterEach(() => {
@@ -360,7 +399,95 @@ describe("the checkbox screen", () => {
 
     expect(sandbox.dataset.state).toBe("Absent");
     expect(box(container, "Sandbox")!.checked).toBe(true);
-    expect(sandbox.textContent).toContain("there is no local account");
+  });
+
+  /// Three groups, each under its own label: the two rows nothing runs
+  /// without, the four harnesses as tiles, and the rest.
+  it("draws the rows in three groups, the harnesses as tiles", () => {
+    const { container } = mount(FRESH);
+    const group = (label: string) =>
+      container.querySelector<HTMLElement>(`[data-group="${label}"]`)!;
+
+    expect(drawn(group("Required"))).toEqual(["Sandbox", "Git"]);
+    expect(drawn(group("An agent"))).toEqual([
+      "Claude",
+      "Codex",
+      "Grok",
+      "OpenCode",
+    ]);
+    expect(drawn(group("Optional"))).toEqual(["Gh"]);
+
+    expect(group("Required").querySelector("h3")!.textContent).toBe(
+      "RequiredEvery session needs both.",
+    );
+    expect(group("An agent").querySelector("h3")!.textContent).toBe(
+      "An agentAt least one",
+    );
+
+    // Each tile names the command a session launches.
+    expect(row(container, "OpenCode").querySelector("code")!.textContent).toBe(
+      "opencode",
+    );
+  });
+
+  /// A word for what the box and the tick say, and nothing else: which file a
+  /// row found is the hint screen's to say.
+  it("pills a row Installed or Missing, with no path under it", () => {
+    const { container } = mount(PART_WAY);
+    const git = row(container, "Git");
+
+    expect(git.textContent).toContain("Installed");
+    expect(git.textContent).not.toContain("Missing");
+    expect(row(container, "Gh").textContent).toContain("Missing");
+
+    expect(container.querySelector("[data-where]")).toBeNull();
+    expect(container.textContent).not.toContain("/machine/bin");
+  });
+
+  /// The press says what it will do.
+  it("names the press for the rows it would install, and Next for none", () => {
+    const { container } = mount(FRESH);
+
+    fireEvent.click(box(container, "Claude")!);
+    expect(onwards(container).textContent).toBe("Install 3");
+
+    fireEvent.click(box(container, "Sandbox")!);
+    expect(onwards(container).textContent).toBe("Install 2");
+
+    const { container: there } = mount(PART_WAY);
+    expect(onwards(there).textContent).toBe("Next");
+  });
+
+  /// And why it is held, as one line beside it rather than a paragraph.
+  it("says why the press is held beside it, and not once it is not", () => {
+    const { container } = mount(FRESH);
+    const said = () =>
+      container.textContent!.includes(
+        "A sandbox, git, and one agent are needed.",
+      );
+
+    expect(said()).toBe(true);
+
+    fireEvent.click(box(container, "Claude")!);
+    expect(said()).toBe(false);
+  });
+
+  /// Somebody installing by hand wants the commands for everything missing,
+  /// ticked or not — and nothing is started on the machine.
+  it("opens the hint screen over every missing row without starting a run", () => {
+    const fetching = serving(json(FRESH));
+    const { container } = mount(PART_WAY);
+
+    byHand(container);
+
+    expect(drawn(container)).toEqual(["Codex", "Grok", "OpenCode", "Gh"]);
+    expect(tabs(container).length).toBeGreaterThan(0);
+    expect(container.querySelector("progress")).toBeNull();
+    expect(fetching).not.toHaveBeenCalled();
+
+    // And Back is the ticks again.
+    fireEvent.click(press(container, "Back"));
+    expect(box(container, "Codex")).not.toBeNull();
   });
 
   /// Everything this screen used to carry about installing something by hand is
@@ -369,14 +496,15 @@ describe("the checkbox screen", () => {
     const { container } = mount(FRESH);
 
     expect(tabs(container)).toHaveLength(0);
-    expect(container.textContent).not.toContain("reads that PATH once");
+    expect(container.textContent).not.toContain("Read once");
     expect(container.textContent).not.toContain("/machine/bin");
     expect(container.textContent).not.toContain("apt install");
   });
 
   /// A `bwrap` that is installed and will not make a namespace says why in its
-  /// own words, and the line naming the sysctl to set is the one worth reading.
-  it("puts the failed run's own words under the sandbox row", () => {
+  /// own words, and the line naming the sysctl to set is the one worth reading
+  /// — on the hint screen, where a row has the room for it.
+  it("puts the failed run's own words under the sandbox row by hand", () => {
     const { container } = mount(
       stating(FRESH, "Sandbox", {
         state: "Absent",
@@ -385,8 +513,27 @@ describe("the checkbox screen", () => {
       }),
     );
 
+    expect(row(container, "Sandbox").querySelector("pre")).toBeNull();
+
+    byHand(container);
+
     expect(row(container, "Sandbox").querySelector("pre")!.textContent).toBe(
       REFUSAL,
+    );
+  });
+
+  /// And the Windows sandbox row's own reason, the same way.
+  it("says why the Windows sandbox row is missing by hand", () => {
+    const { container } = mount(WINDOWS);
+
+    expect(row(container, "Sandbox").textContent).not.toContain(
+      "there is no local account",
+    );
+
+    byHand(container);
+
+    expect(row(container, "Sandbox").textContent).toContain(
+      "there is no local account",
     );
   });
 });
@@ -463,15 +610,83 @@ describe("the install screen", () => {
   /// A run that is going is the screen to be on whatever this device was left
   /// on: somebody pressed Next here a moment ago, or on the phone beside it.
   it("draws the bar, the count and the status line the server wrote", () => {
-    const { container } = mount(INSTALLING);
+    const { container, name } = mount(INSTALLING);
     const bar = container.querySelector("progress")!;
 
+    expect(name).toHaveBeenLastCalledWith("Installing");
     expect(bar.value).toBe(0);
     expect(bar.max).toBe(3);
-    expect(container.textContent).toContain("0/3");
+    expect(container.querySelector("[data-count]")!.textContent).toBe(
+      "0 of 3 installed",
+    );
     expect(container.querySelector("[data-status]")!.textContent).toBe(
       "Waiting for the password dialog on ada-box…",
     );
+  });
+
+  /// The one moment of a run with something for the human to do, and it is
+  /// somewhere else: the status goes in the callout, with where to answer it.
+  it("puts the status in the callout while it asks, and on a line otherwise", () => {
+    const { container, read } = mount(INSTALLING);
+    const callout = () => container.querySelector("[data-asking]");
+
+    expect(callout()!.textContent).toContain(
+      "Waiting for the password dialog on ada-box…",
+    );
+    expect(callout()!.textContent).toContain(
+      "Answer it on the machine Verkstead runs on, not here.",
+    );
+
+    read(
+      running(INSTALLING, {
+        ...OVER,
+        phase: "Installing",
+        status: "Installing bubblewrap, git",
+        done: 0,
+      }),
+    );
+
+    expect(callout()).toBeNull();
+    expect(container.querySelector("[data-status]")!.textContent).toBe(
+      "Installing bubblewrap, git",
+    );
+  });
+
+  /// The ticked rows, and the word on the one the run is on. A row waiting its
+  /// turn says nothing: the bar says how far the run has got.
+  it("lists the ticked rows, Installing on the ones the run is on", () => {
+    const { container, read } = mount(INSTALLING);
+
+    expect(drawn(container)).toEqual(["Sandbox", "Git", "Codex"]);
+    expect(row(container, "Sandbox").textContent).toContain("Installing");
+
+    // The sandbox in, git under way, and Codex waiting its turn.
+    read(
+      running(made(landed(INSTALLING, "Sandbox"), "Codex", { install: "Idle" }), {
+        ...OVER,
+        phase: "Installing",
+        done: 1,
+      }),
+    );
+
+    expect(drawn(container)).toEqual(["Sandbox", "Git", "Codex"]);
+    expect(row(container, "Sandbox").textContent).not.toContain("Installing");
+    expect(
+      row(container, "Sandbox").querySelector('[aria-label="Done"]'),
+    ).not.toBeNull();
+    expect(row(container, "Git").textContent).toContain("Installing");
+    expect(row(container, "Codex").textContent).not.toContain("Installing");
+  });
+
+  /// Nothing onwards to press while a run goes: the screen moves on by itself.
+  it("has Cancel as its only press", () => {
+    const { container } = mount(INSTALLING);
+
+    expect(
+      [...container.querySelectorAll("button")].map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(["Cancel"]);
   });
 
   it("fills the bar as the run gets through it", () => {
@@ -480,7 +695,9 @@ describe("the install screen", () => {
     read(running(INSTALLING, { ...OVER, phase: "Installing", done: 2 }));
 
     expect(container.querySelector("progress")!.value).toBe(2);
-    expect(container.textContent).toContain("2/3");
+    expect(container.querySelector("[data-count]")!.textContent).toBe(
+      "2 of 3 installed",
+    );
   });
 
   it("posts the cancel, and reads cancelling until the unit under way is over", async () => {
@@ -531,12 +748,12 @@ describe("the install screen", () => {
 
     expect(pressed).not.toHaveBeenCalled();
     expect(drawn(container)).toEqual(["Codex"]);
-    expect(row(container, "Codex").querySelector("[data-failed]")!.textContent).toBe(
-      UNPACKAGED,
-    );
+    expect(said(container, "Codex")).toBe(UNPACKAGED);
     expect(container.querySelector("[data-detected]")!.textContent).toBe(
-      "0/1 detected",
+      "0 of 1 found",
     );
+    // The sandbox and git landed and no agent did, so a session still could
+    // not start.
     expect(onwards(container).disabled).toBe(true);
   });
 });
@@ -567,18 +784,19 @@ describe("the hint screen", () => {
     const { container } = hinting(FAILED);
 
     expect(drawn(container)).toEqual(["Sandbox", "Git", "Claude"]);
-    expect(
-      row(container, "Sandbox").querySelector("[data-failed]")!.textContent,
-    ).toBe("Error: (-128) User canceled.");
-    expect(
-      row(container, "Claude").querySelector("[data-failed]")!.textContent,
-    ).toBe("The installer could not reach the network.");
+    expect(said(container, "Sandbox")).toBe("Error: (-128) User canceled.");
+    expect(said(container, "Claude")).toBe(
+      "The installer could not reach the network.",
+    );
     expect(container.querySelector("[data-detected]")!.textContent).toBe(
-      "0/3 detected",
+      "0 of 3 found",
+    );
+    expect(container.querySelector("[data-missing]")!.textContent).toBe(
+      "3 still missing",
     );
   });
 
-  it("opens the tab this machine says it is, and draws all nine", () => {
+  it("chooses the machine this one says it is, and lists all nine", () => {
     const { container } = hinting(ONE_FAILED);
 
     expect(showing(container)).toBe("Ubuntu");
@@ -596,14 +814,14 @@ describe("the hint screen", () => {
   /// the human reading it is the one the detection went wrong about — so the
   /// other Mac has to be the tab next door rather than the one past every
   /// Linux.
-  it("draws the two Macs beside each other", () => {
+  it("lists the two Macs beside each other", () => {
     const { container } = hinting(ONE_FAILED);
     const drawn = tabs(container).map((tab) => tab.dataset.distro);
 
     expect(drawn.indexOf("MacOsIntel")).toBe(drawn.indexOf("MacOs") + 1);
   });
 
-  it("draws a tab for every machine the server can say it is", () => {
+  it("lists every machine the server can say it is", () => {
     expect([...DISTROS].sort()).toEqual(Object.keys(GUIDES).sort());
   });
 
@@ -650,9 +868,7 @@ describe("the hint screen", () => {
   it("says which Mac a tab is on the one that is not Homebrew's", () => {
     const { container } = hinting(ONE_FAILED);
 
-    fireEvent.click(
-      tabs(container).find((tab) => tab.dataset.distro === "MacOs")!,
-    );
+    choose(container, "MacOs");
 
     expect(container.textContent).not.toContain(
       "Homebrew no longer supports Intel Macs",
@@ -664,15 +880,19 @@ describe("the hint screen", () => {
   /// The detection is a guess off `/etc/os-release` — a derivative names its
   /// parent, and a machine nobody has heard of names nothing — so the other
   /// seven are a press away for the human who can see the machine.
-  it("shows another machine's commands when its tab is pressed", () => {
-    const { container } = hinting(ONE_FAILED);
+  it("shows another machine's commands when it is chosen, and keeps it chosen", () => {
+    const { container, read } = hinting(ONE_FAILED);
 
-    fireEvent.click(
-      tabs(container).find((tab) => tab.dataset.distro === "Windows")!,
-    );
+    choose(container, "Windows");
 
     expect(showing(container)).toBe("Windows");
     expect(row(container, "Codex").textContent).toContain("npm install -g");
+
+    // And the machine read again, as it is every ten seconds, is not a reason
+    // to put the human back on the one detected.
+    read({ ...ONE_FAILED });
+
+    expect(showing(container)).toBe("Windows");
   });
 
   /// Most of the Mac tab's commands are a `brew install`, so a Mac that
@@ -685,9 +905,7 @@ describe("the hint screen", () => {
 
     expect(container.querySelector("[data-before]")).toBeNull();
 
-    fireEvent.click(
-      tabs(container).find((tab) => tab.dataset.distro === "MacOs")!,
-    );
+    choose(container, "MacOs");
 
     const before = container.querySelector("[data-before]")!;
 
@@ -698,56 +916,213 @@ describe("the hint screen", () => {
     expect(before.textContent).not.toContain("Every command below");
   });
 
+  /// The leading install is the one to run, so the other way to get the same
+  /// program stands behind a link naming where it comes from.
+  it("keeps the alternative behind a link naming where it is from", () => {
+    const { container } = hinting(FAILED);
+    const claude = () => row(container, "Claude");
+
+    expect(claude().textContent).toContain(
+      "curl -fsSL https://claude.ai/install.sh | bash",
+    );
+    expect(claude().querySelector("[data-alternative]")).toBeNull();
+    expect(claude().textContent).not.toContain("sudo npm install -g");
+
+    fireEvent.click(press(claude(), "Or from npm"));
+
+    expect(claude().querySelector("[data-alternative]")!.textContent).toContain(
+      "sudo npm install -g @anthropic-ai/claude-code",
+    );
+
+    // And every command, the alternative's among them, is a line to copy.
+    expect(
+      [...claude().querySelectorAll("button")].filter(
+        (button) => button.textContent === "Copy",
+      ),
+    ).toHaveLength(2);
+  });
+
   /// A PATH read at startup is a PATH that does not have the directory this
   /// morning's install landed in, and the list itself is the server's own
   /// rather than a sentence about one: both are facts about this machine, so
-  /// they are drawn once, above the rows, whichever tab is showing.
-  it("lists the PATH a session is given, and says it was read once", () => {
+  /// they are drawn once, in a box under the rows, whichever machine the
+  /// commands are for.
+  it("lists the PATH a session is given under the rows, and says it was read once", () => {
     const { container } = hinting(ONE_FAILED);
+    const box = () => container.querySelector("[data-path]")!;
     const said = () =>
       [...container.querySelectorAll("p")].filter((line) =>
-        line.textContent!.includes("reads that PATH once"),
+        line.textContent!.includes("Read once, when Verkstead starts."),
       );
     const path = () =>
-      [...container.querySelectorAll("ol li code")].map(
+      [...box().querySelectorAll("ol li code")].map(
         (entry) => entry.textContent,
       );
 
+    expect(box().textContent).toContain("PATH");
     expect(said()).toHaveLength(1);
+    expect(box().contains(said()[0]!)).toBe(true);
     expect(said()[0]!.textContent).toContain("started again");
     expect(path()).toEqual(ONE_FAILED.path);
 
-    // The tab is which machine the commands are for, which neither of those is
-    // about: pressing another one leaves them where they were.
+    // Under the list of rows rather than above it.
+    const rows = row(container, "Codex").parentElement!;
+    expect(
+      rows.compareDocumentPosition(box()) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // The select is which machine the commands are for, which neither of those
+    // is about: choosing another leaves them where they were.
     for (const distro of DISTROS) {
-      fireEvent.click(
-        tabs(container).find((tab) => tab.dataset.distro === distro)!,
-      );
+      choose(container, distro);
 
       expect(said()).toHaveLength(1);
       expect(path()).toEqual(ONE_FAILED.path);
     }
   });
 
-  /// The counter is the whole of what Next is waiting for, and it moves under
-  /// somebody who is watching it: the page reads the machine again while they
-  /// are in the other window installing.
-  it("counts what has been detected, and releases Next when they all are", () => {
-    const { container, read, onwards: pressed } = hinting(ONE_FAILED);
+  /// The count moves under somebody who is watching it: the page reads the
+  /// machine again while they are in the other window installing.
+  it("counts what has been found, and releases Next once the objective is met", () => {
+    const { container, read, onwards: pressed, name } = hinting(ONE_FAILED);
 
+    expect(name).toHaveBeenLastCalledWith("Install the Rest by Hand");
     expect(container.querySelector("[data-detected]")!.textContent).toBe(
-      "0/1 detected",
+      "0 of 1 found",
     );
     expect(onwards(container).disabled).toBe(true);
 
     read(landed(ONE_FAILED, "Codex"));
 
     expect(container.querySelector("[data-detected]")!.textContent).toBe(
-      "1/1 detected",
+      "1 of 1 found",
+    );
+    expect(container.querySelector("[data-missing]")!.textContent).toBe(
+      "0 still missing",
     );
 
     fireEvent.click(onwards(container));
     expect(pressed).toHaveBeenCalledTimes(1);
+  });
+
+  /// One rule however the screen was reached: a sandbox, git and one agent.
+  /// Waiting for every listed row would be waiting for `gh` and every harness
+  /// once the screen was reached by hand.
+  it("releases the press by the objective, not by every row it lists", () => {
+    const { container, read } = mount(FRESH);
+
+    byHand(container);
+
+    expect(drawn(container)).toEqual([
+      "Sandbox",
+      "Git",
+      "Claude",
+      "Codex",
+      "Grok",
+      "OpenCode",
+      "Gh",
+    ]);
+    expect(onwards(container).disabled).toBe(true);
+
+    read(landed(landed(FRESH, "Sandbox"), "Git"));
+    expect(onwards(container).disabled).toBe(true);
+
+    read(landed(landed(landed(FRESH, "Sandbox"), "Git"), "Grok"));
+    expect(onwards(container).disabled).toBe(false);
+    expect(container.querySelector("[data-detected]")!.textContent).toBe(
+      "3 of 7 found",
+    );
+  });
+
+  /// After a run, a press that leaves a row it failed behind is a skip, and
+  /// says so; once nothing it failed is missing it is Next again.
+  it("reads Skip after a run while a row it failed is still missing", () => {
+    const { container, read, onwards: pressed } = hinting(
+      running(
+        refused(
+          refused(landed(landed(INSTALLING, "Sandbox"), "Git"), "Codex", UNPACKAGED),
+          "Claude",
+          "The installer could not reach the network.",
+        ),
+        OVER,
+      ),
+    );
+
+    expect(drawn(container)).toEqual(["Claude", "Codex"]);
+    expect(onwards(container).textContent).toBe("Skip");
+    expect(onwards(container).disabled).toBe(true);
+
+    // Claude lands, which meets the objective with Codex still missing.
+    read(
+      running(
+        refused(
+          landed(landed(landed(INSTALLING, "Sandbox"), "Git"), "Claude"),
+          "Codex",
+          UNPACKAGED,
+        ),
+        OVER,
+      ),
+    );
+
+    expect(onwards(container).textContent).toBe("Skip");
+    expect(onwards(container).disabled).toBe(false);
+
+    // And Codex too: nothing the run failed is left behind.
+    read(
+      running(
+        landed(
+          landed(landed(landed(INSTALLING, "Sandbox"), "Git"), "Claude"),
+          "Codex",
+        ),
+        OVER,
+      ),
+    );
+
+    expect(onwards(container).textContent).toBe("Next");
+
+    fireEvent.click(onwards(container));
+    expect(pressed).toHaveBeenCalledTimes(1);
+  });
+
+  /// From the link there was no run, so nothing is being skipped.
+  it("reads Next by hand, whatever is still missing", () => {
+    const { container } = mount(PART_WAY);
+
+    byHand(container);
+
+    expect(drawn(container)).toEqual(["Codex", "Grok", "OpenCode", "Gh"]);
+    expect(onwards(container).textContent).toBe("Next");
+    expect(onwards(container).disabled).toBe(false);
+  });
+
+  /// Somebody copying commands into a terminal who reloads is put back where
+  /// they were, over every row still missing — not on the ticks, there having
+  /// been no run to fail one.
+  it("lands a reload back on the screen opened by hand", () => {
+    const first = mount(PART_WAY);
+    byHand(first.container);
+    first.unmount();
+
+    const { container } = mount(PART_WAY);
+
+    expect(drawn(container)).toEqual(["Codex", "Grok", "OpenCode", "Gh"]);
+    expect(onwards(container).textContent).toBe("Next");
+  });
+
+  /// And a device whose earlier run failed a row, which then chose to install
+  /// by hand, reloads onto the by-hand list rather than onto the run's: every
+  /// row missing, and nothing being skipped.
+  it("lands a reload on the by-hand list, not the run's, after a run failed", () => {
+    const first = mount(ONE_FAILED);
+    byHand(first.container);
+    const listed = drawn(first.container);
+    first.unmount();
+
+    const { container } = mount(ONE_FAILED);
+
+    expect(drawn(container)).toEqual(listed);
+    expect(listed.length).toBeGreaterThan(1);
+    expect(onwards(container).textContent).toBe("Next");
   });
 
   /// A row lands where it was rather than leaving the list: the count is what
@@ -810,12 +1185,35 @@ describe("how often the step asks for the machine", () => {
   });
 });
 
+/// Drawn on the hint screen, reached by hand: a row that is there has a path
+/// to say once it has landed under somebody watching, and a row that is not
+/// has where its name was seen.
 describe("where each program was found", () => {
+  /// The hint screen over every row a bare machine is missing, and then the
+  /// machine read again once some of them have landed.
+  function landing(machine: OnboardingView) {
+    const mounted = mount(FRESH);
+
+    byHand(mounted.container);
+    mounted.read(machine);
+
+    return mounted;
+  }
+
+  /// And over a machine as it is.
+  function hinted(machine: OnboardingView) {
+    const mounted = mount(machine);
+
+    byHand(mounted.container);
+
+    return mounted;
+  }
+
   /// Which `claude` a session got is the whole of what this feature is about: a
   /// distribution's, too old to connect, and the human's own under
   /// `~/.local/bin` are the same tick and two different programs.
   it("draws the resolved path under a row that is there", () => {
-    const { container } = mount(PART_WAY);
+    const { container } = landing(PART_WAY);
     const git = row(container, "Git").querySelector("[data-where]")!;
 
     expect(git.querySelector("[data-at]")!.textContent).toBe("/machine/bin/git");
@@ -826,7 +1224,7 @@ describe("where each program was found", () => {
   /// installer leaves: the name a session resolved, and the version it really
   /// runs.
   it("draws the link's target after it where the two differ", () => {
-    const { container } = mount(PART_WAY);
+    const { container } = landing(PART_WAY);
     const claude = row(container, "Claude").querySelector("[data-where]")!;
 
     expect(claude.querySelector("[data-at]")!.textContent).toBe(
@@ -840,7 +1238,7 @@ describe("where each program was found", () => {
   /// A row that named no file has nothing to draw: the sandbox on a Mac is
   /// Apple's own rather than a program anybody went looking for.
   it("draws nothing under a row that named no file", () => {
-    const { container } = mount(A_MAC);
+    const { container } = landing(A_MAC);
 
     expect(row(container, "Sandbox").querySelector("[data-where]")).toBeNull();
   });
@@ -849,7 +1247,7 @@ describe("where each program was found", () => {
   /// has it, and what is wanted is the directory on the `PATH` Verkstead is
   /// started with rather than another install.
   it("says where a name was seen when a session cannot reach it", () => {
-    const { container } = mount(
+    const { container } = hinted(
       stating(
         PART_WAY,
         "Codex",
@@ -867,7 +1265,7 @@ describe("where each program was found", () => {
   /// A link into an install nothing binds, and one with nothing at the end of
   /// it: two different things to do about, so two different sentences.
   it("says where a link leads, and when it leads nowhere", () => {
-    const { container } = mount(
+    const { container } = hinted(
       stating(
         stating(
           PART_WAY,
@@ -903,7 +1301,7 @@ describe("where each program was found", () => {
   /// that a session is not launched as, so the row says which of the two it is
   /// and goes on drawing the install under it.
   it("says when the name is the desktop app rather than the CLI", () => {
-    const { container } = mount(
+    const { container } = hinted(
       stating(
         WINDOWS,
         "Claude",
@@ -942,7 +1340,7 @@ describe("where each program was found", () => {
   /// And a name on no `PATH` at all was seen nowhere: nothing is said under it
   /// but what to install.
   it("says nothing under a name that was seen nowhere", () => {
-    const { container } = mount(PART_WAY);
+    const { container } = hinted(PART_WAY);
     const grok = row(container, "Grok");
 
     expect(grok.dataset.state).toBe("Absent");
@@ -1314,7 +1712,9 @@ describe("the step over the page's own interval", () => {
     await waitFor(() =>
       expect(container.querySelector("progress")).not.toBeNull(),
     );
-    expect(container.textContent).toContain("0/3");
+    expect(container.querySelector("[data-count]")!.textContent).toBe(
+      "0 of 3 installed",
+    );
     expect(container.querySelector("[data-status]")!.textContent).toBe(
       "Waiting for the password dialog on ada-box…",
     );

@@ -62,7 +62,6 @@ import {
   tap,
 } from "./fields";
 import { art, marked } from "./marking";
-import { offered as offeredRows, pick, rows, showing } from "./pickers";
 import { askedFor, json, serving, whenever } from "./serving";
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import shared from "./fixtures/profiles-shared.json" with { type: "json" };
@@ -168,20 +167,59 @@ function memorySwitch(): HTMLInputElement {
 }
 
 /// Every model the form has a tick for, in the order they are drawn.
+///
+/// Each as its name and the id it stands for — the chip's title, which an id
+/// the list does not know has none of.
 function offered(): string[] {
-  return picks().map((tick) => tick.closest("li")!.textContent!);
+  return picks().map((tick) => {
+    const chip = tick.closest("label")!;
+    return `${chip.textContent}${chip.title}`;
+  });
 }
 
-/// And every one that is ticked, as the ids they would be saved as: the label
-/// reads the pretty name, so the id beside it is what the row is read back by —
-/// and for a model the list does not know, the two are the same string.
+/// And every one that is ticked, as the ids they would be saved as: the chip
+/// reads the pretty name, so the id in its title is what it is read back by —
+/// and for a model the list does not know, the name is the id already.
 function ticked(): string[] {
   return picks()
     .filter((tick) => (tick as HTMLInputElement).checked)
     .map((tick) => {
-      const row = tick.closest("li")!;
-      return row.querySelector("code")?.textContent ?? row.textContent!;
+      const chip = tick.closest("label")!;
+      return chip.title || chip.textContent!;
     });
+}
+
+/// The agent picker: a segmented control, a radio per backend under one
+/// legend.
+function agents(): HTMLElement {
+  return screen.getByRole("group", { name: "Agent" });
+}
+
+/// Its segments, in the order they are drawn.
+function segments(): HTMLLabelElement[] {
+  return [...agents().querySelectorAll("label")];
+}
+
+/// What each segment reads as.
+function segmentNames(): string[] {
+  return segments().map((segment) => segment.textContent ?? "");
+}
+
+/// The segment that is chosen, where one is.
+function chosenSegment(): HTMLLabelElement | undefined {
+  return segments().find(
+    (segment) => segment.querySelector<HTMLInputElement>("input")!.checked,
+  );
+}
+
+/// What the picker is showing: the chosen segment's words.
+function showingAgent(): string {
+  return chosenSegment()?.textContent ?? "";
+}
+
+/// Pick the segment that reads as `reading`.
+function pickAgent(reading: string): void {
+  fireEvent.click(screen.getByRole("radio", { name: reading }));
 }
 
 /// One profile's card, by the name on it.
@@ -1177,10 +1215,9 @@ describe("the pane a card opens", () => {
       ),
     ).toEqual([
       "profile-name",
-      "profile-model",
-      "profile-agent_type",
       "profile-claude_dir",
       "profile-config_file",
+      "profile-model",
     ]);
   });
 
@@ -1197,16 +1234,11 @@ describe("the pane a card opens", () => {
       [...container.querySelectorAll("form label[for]")].map((label) =>
         label.getAttribute("for"),
       ),
-    ).toEqual([
-      "profile-name",
-      "profile-model",
-      "profile-agent_type",
-      "profile-home",
-    ]);
+    ).toEqual(["profile-name", "profile-home", "profile-model"]);
     expect(
       (screen.getByLabelText(/Home directory/) as HTMLInputElement).value,
     ).toBe(home(CODEX.account).home);
-    expect(showing("Agent")).toBe("Codex");
+    expect(showingAgent()).toBe("Codex");
   });
 
   /// The paths shown are the resolved ones the server recorded rather than
@@ -1225,7 +1257,7 @@ describe("the pane a card opens", () => {
         (press) => press.textContent,
       ),
     ).toEqual(["Remove"]);
-    expect(showing("Agent")).toBe(AGENT_NAME[FABLE.account.agent_type]);
+    expect(showingAgent()).toBe(AGENT_NAME[FABLE.account.agent_type]);
   });
 
   /// Every backend that can launch, by its own name, and no other.
@@ -1241,9 +1273,9 @@ describe("the pane a card opens", () => {
     theProfiles();
     mountPane(FABLE.id);
 
-    await waitFor(() => screen.getByLabelText("Agent"));
+    await waitFor(() => agents());
 
-    expect(rows("Agent")).toEqual([
+    expect(segmentNames()).toEqual([
       "Claude Code",
       "Codex",
       "Grok Build",
@@ -1258,9 +1290,9 @@ describe("the pane a card opens", () => {
     theProfiles();
     mountPane(FABLE.id);
 
-    await waitFor(() => screen.getByLabelText("Agent"));
+    await waitFor(() => agents());
 
-    expect(offeredRows("Agent").map(marked)).toEqual([
+    expect(segments().map(marked)).toEqual([
       art(claudeMarkFile),
       art(codexMarkFile),
       art(grokMarkFile),
@@ -1268,17 +1300,15 @@ describe("the pane a card opens", () => {
     ]);
   });
 
-  /// And the closed control draws the chosen row the way the list drew it, mark
-  /// and all: a control showing one thing and offering the same thing drawn
-  /// differently is a control the eye has to check.
-  it("draws the chosen backend's mark on the closed control", async () => {
+  /// And the chosen segment is the profile's own backend, mark and all.
+  it("chooses the profile's own backend, mark and all", async () => {
     serving(whenever("/api/ui/profiles", json([CODEX])));
     mountPane(CODEX.id);
 
-    const control = await waitFor(() => screen.getByLabelText("Agent"));
+    await waitFor(() => agents());
 
-    expect(marked(control)).toBe(art(codexMarkFile));
-    expect(showing("Agent")).toBe("Codex");
+    expect(marked(chosenSegment()!)).toBe(art(codexMarkFile));
+    expect(showingAgent()).toBe("Codex");
   });
 
   /// Picking another type is asking for that type's account, so the fields under
@@ -1290,7 +1320,7 @@ describe("the pane a card opens", () => {
 
     await waitFor(() => screen.getByLabelText(/Claude directory/));
 
-    pick("Agent", "Codex");
+    pickAgent("Codex");
 
     await waitFor(() => screen.getByLabelText(/Home directory/));
     expect(screen.queryByLabelText(/Claude directory/)).toBeNull();
@@ -1462,7 +1492,7 @@ describe("the pane the plus opens", () => {
     expect(memorySwitch().checked).toBe(true);
 
     for (const agent of ["Codex", "Grok", "OpenCode", "Claude"] as const) {
-      pick("Agent", AGENT_NAME[agent]);
+      pickAgent(AGENT_NAME[agent]);
 
       await waitFor(() => expect(memorySwitch().checked).toBe(true));
     }
@@ -1519,7 +1549,7 @@ describe("the pane the plus opens", () => {
       });
       fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
-      pick("Agent", AGENT_NAME[profile.account.agent_type]);
+      pickAgent(AGENT_NAME[profile.account.agent_type]);
       fireEvent.input(
         await waitFor(() => screen.getByLabelText(/Home directory/)),
         { target: { value: home(profile.account).home } },
@@ -1765,7 +1795,7 @@ describe("the models a profile lists", () => {
     mountPane(FABLE.id);
 
     await waitFor(() => screen.getByLabelText("Fable 5"));
-    pick("Agent", "Grok Build");
+    pickAgent("Grok Build");
 
     await waitFor(() => screen.getByLabelText("Grok 4.6"));
     expect(screen.queryByLabelText("Opus 5")).toBeNull();
@@ -1785,7 +1815,7 @@ describe("the models a profile lists", () => {
     mountPane(FABLE.id);
 
     await waitFor(() => screen.getByLabelText("Fable 5"));
-    pick("Agent", "Grok Build");
+    pickAgent("Grok Build");
     await waitFor(() => screen.getByLabelText("Grok 4.6"));
 
     expect(
@@ -2124,7 +2154,7 @@ describe("browsing for the account's paths", () => {
     theBrowse();
     mountPane("new");
 
-    pick("Agent", AGENT_NAME.Codex);
+    pickAgent(AGENT_NAME.Codex);
     await waitFor(() => screen.getByLabelText(/Home directory/));
 
     const HOME = "Home directory";

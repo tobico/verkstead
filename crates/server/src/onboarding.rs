@@ -336,7 +336,8 @@ pub struct Machine {
 
     /// And what this box calls itself, which is the one thing here that is
     /// neither a probe nor a setting: it is what the install run's status line
-    /// names while a password dialog is up — see [`install`].
+    /// names while a password dialog is up — see [`install`] — and what the
+    /// wizard's rail says it is reading, as [`OnboardingView::machine`].
     ///
     /// Stated like everything else rather than read where it is wanted, and for
     /// the same reason: a status line that had this box's own hostname in it
@@ -1171,6 +1172,7 @@ impl Onboarding {
             mode: self.mode(steps, kept).await,
             platform: shown(self.machine.platform),
             distro: self.machine.distro(),
+            machine: self.machine.hostname().to_owned(),
             dependencies,
             path: probed.path,
             accounts: probed.accounts,

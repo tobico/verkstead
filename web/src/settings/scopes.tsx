@@ -6,8 +6,9 @@
 //! saved — the account it authenticates as, and a scope it turns out not to
 //! have. That is a different thing: it is about one token, it only appears
 //! after a save, and it names what to do about it. This is the list to tick
-//! against on GitHub's own form, and it stands whether or not anything has been
-//! saved.
+//! against on GitHub's own form. The settings page draws it whether or not
+//! anything has been saved; the wizard draws GitHub's answer in its place once
+//! there is one, as its boards do.
 //!
 //! **Why Verkstead says it at all.** The push that needs these scopes is made
 //! inside the sandbox by a session, so a refusal for a missing one comes back
@@ -25,7 +26,10 @@ import type { JSX } from "solid-js";
 
 import styles from "./scopes.module.css";
 
-/// What a token needs, as a block to draw under a *GitHub token* heading.
+/// What a token needs, as a block to draw under a *GitHub token* heading: a
+/// boxed title with why it is there under it, a *Classic* line of the scopes as
+/// chips — `gist` said apart, as the one only a share needs — and a
+/// *Fine-grained* line naming the permissions.
 ///
 /// A `class` of the parent's rides along the way the notices take one: the two
 /// places this stands in space their blocks differently, and that is theirs to
@@ -33,19 +37,31 @@ import styles from "./scopes.module.css";
 export function TokenScopes(props: { class?: string }): JSX.Element {
   return (
     <div class={[styles.scopes, props.class].filter(Boolean).join(" ")}>
+      <p class={styles.title}>Tick these on GitHub before pasting</p>
       <p class={styles.why}>
-        Tick these on GitHub's form before pasting a token here. A token
-        missing one fails inside a session, where the refusal names no scope.
+        A token missing one fails inside a session, where the error names no
+        scope.
       </p>
       <ul>
         <li>
-          A <b>classic</b> token wants <code>repo</code> and{" "}
-          <code>workflow</code>, and <code>gist</code> as well to publish a
-          share.
+          <span class={styles.flavour}>Classic</span>
+          <span class={styles.chips}>
+            <code>repo</code>
+            <code>workflow</code>
+            {/* Not wanted by every token: only a share is published with it,
+                so it is said apart from the two a session cannot push
+                without. */}
+            <span class={styles.only}>
+              <code>gist</code> to publish a share
+            </span>
+          </span>
         </li>
         <li>
-          A <b>fine-grained</b> token wants Contents, Pull requests, Issues,
-          and Workflows set to write, and Actions to read.
+          <span class={styles.flavour}>Fine-grained</span>
+          <span class={styles.wanted}>
+            Contents, Pull requests, Issues, Workflows to write; Actions to
+            read
+          </span>
         </li>
       </ul>
     </div>

@@ -444,7 +444,14 @@ describe("the form", () => {
     const [classic, fine] = wanted(container);
     expect(classic).toContain("repo");
     expect(classic).toContain("workflow");
-    expect(classic).toContain("gist");
+    // And `gist` said apart, as the one only a share needs.
+    expect(classic).toContain("gist to publish a share");
+
+    // Why the block is there: a scope missed is refused in a session's own
+    // words, which name none.
+    expect(container.querySelector(`.${scopes.scopes}`)!.textContent).toContain(
+      "where the error names no scope",
+    );
 
     expect(fine).toContain("Contents");
     expect(fine).toContain("Pull requests");

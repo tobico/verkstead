@@ -20,6 +20,19 @@ const SHEETS = import.meta.glob("../src/**/*.css", {
   eager: true,
 }) as Record<string, string>;
 
+/// The sheets that do, and why: the setup wizard's small labels — *Setup*
+/// under the brand, *Step 1 of 3* over the title, and the first step's group
+/// labels, *Required*, *An agent* and *Optional* — are set in tracked
+/// capitals in the approved *B · Rail* design (`docs/design/setup-wizard/`),
+/// and the backlog that builds it asks for them. Labels rather than badges, at
+/// 11.5px: the words are still typed in sentence case, and only these sheets
+/// may set them in capitals.
+const LABELLED = [
+  "../src/setup/SetupPage.module.css",
+  "../src/setup/Dependencies.module.css",
+  "../src/setup/Accounts.module.css",
+];
+
 describe("the viewer's type", () => {
   /// The glob is the whole of what this test is worth, so a glob that found
   /// nothing would pass while asserting nothing at all.
@@ -28,8 +41,10 @@ describe("the viewer's type", () => {
   });
 
   it("asks for capitals nowhere", () => {
-    const shouting = Object.entries(SHEETS).filter(([, source]) =>
-      /text-transform:\s*(uppercase|capitalize)/.test(source),
+    const shouting = Object.entries(SHEETS).filter(
+      ([path, source]) =>
+        !LABELLED.includes(path) &&
+        /text-transform:\s*(uppercase|capitalize)/.test(source),
     );
 
     expect(shouting.map(([path]) => path)).toEqual([]);

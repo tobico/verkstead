@@ -21,3 +21,14 @@
   border: 2px solid var(--edge);
   border-radius: 50%;
 }
+
+/* And a thing being done now: the ring in the ember, with a dot in it. */
+.going {
+  flex: none;
+  box-sizing: border-box;
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent) 0 35%, transparent 40%);
+}

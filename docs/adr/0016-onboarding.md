@@ -167,7 +167,8 @@ screen, drawing only the ticked rows still absent with the failure under each,
 the OS tabs, the PATH list and the restart note, its Next held with a counter
 beside it until every ticked row is detected, and Back to the checkboxes. The
 page polls every two seconds while a run is going. The install endpoint answers
-only while onboarding mode is on, and every button in the wizard reads Next.
+only while onboarding mode is on, and every button in the wizard read Next —
+until *The rail* below, which also changed how the hint screen is reached.
 
 ## Macs
 
@@ -249,6 +250,52 @@ stub that is the same dialog, so where the resolved `git` is Apple's and the
 tools are missing it offers nothing and the human types the two fields. Both Mac
 tabs' git rows lead with `xcode-select --install`, Apple silicon keeping
 `brew install git` as the alternative.
+
+## The rail
+
+*Amended 2026-10-25.* The wizard was redrawn to the *B · Rail* design, whose
+boards and notes are under `docs/design/setup-wizard/`. The objective, the
+met-only reopening and the absence of a skip past the objective all stand;
+what changed is how the page says them.
+
+**The page is a rail beside a paper.** From the app's 60rem breakpoint the three
+steps stand in a rail down the left, each a press only once it is met and not
+open — an unmet step is text, because pressing it would be the skip this
+decision refused — with a met step's summary under it and, at the rail's foot,
+a line naming the machine being read and how often. Below 60rem the rail folds
+into a header of the brand, a strip of the three steps and a **Steps** press
+that opens the same list in a sheet. **The onboarding reading carries the
+machine's name** for that line, the hostname the install run's status line
+already says: a phone walking the wizard is not standing at the box, and the
+name is how it knows which box it is reading.
+
+**Every button names what it does.** Where every press read Next, the
+dependency step's reads *Install N* for the N rows ticked, the accounts step's
+*Keep N profiles* for the N accounts ticked, and the author step's *Finish
+setup*; each reads Next only where there is nothing to install or keep and the
+step is already met. A press that is held says why in a short line beside it,
+in place of the note that stood under it.
+
+**The hint screen is reached from the checkboxes.** It was reached only after
+a run, over the ticked rows that run left absent. *Install by hand instead* on
+the checkbox screen now opens it over every missing row, for somebody who
+would rather type the commands, and a run still ends on it where a ticked row
+failed. Either way **its Next is released on the step's objective** — a
+sandbox, `git` and one harness present — rather than on every row it lists,
+so an optional row nobody wanted never holds it. After a run, while a row the
+run failed is still missing, it reads **Skip**: the objective is met and the
+press leaves that row behind, which is not the skip the objective refused. The
+OS tabs became one select, opening on the detected distro as the tab did, and
+a failure's words sit behind a *Failed* pill on its row rather than open under
+it.
+
+**The token stops the wizard only for a refusal or a missing scope.** A token
+GitHub verified used to hold the last step for one more press, so the login
+could be read before going on. *Finish setup* now saves and finishes in one
+press where GitHub's answer is clean, and stays on the step only where GitHub
+refused the token or it lacks a scope Verkstead uses, saying which in a
+callout; pressing it again goes on without putting that right, the token being
+outside the objective.
 
 ## The zero state
 

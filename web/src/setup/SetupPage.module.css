@@ -1,62 +1,214 @@
 /* The wizard — see `SetupPage.tsx`.
 
-   Read down as one column at the measure `styles/base.css` sets for prose: it
-   is the one page in the app that is a sequence rather than a workbench, and
-   somebody is walking it once. No panes and no sidebar, because there is
-   nothing yet for either of them to hold. */
+   A rail beside a paper from 60rem, the width the workbench breaks at
+   (`BESIDE` in `widths.ts`): the rail holds the brand, the three steps and
+   what the page is reading, and the paper holds the open step with its foot
+   pinned to the bottom. The page takes the whole window there rather than the
+   column every other page is read at — see `.shell:has([data-wizard])` in
+   `App.module.css`, where the shell gives it up.
+
+   Narrower than that, the rail folds into a header over the paper — the
+   brand, a Steps button and a strip of three dots, as the phone boards draw
+   it — and the foot sticks to the bottom of the window with its press the
+   whole width of it. The rules are the phone's first and the rail's after,
+   under the one query at the bottom. */
+
+/* The sizes are the boards' — `docs/design/setup-wizard/` — written in rem
+   against the body's 16px: a title of 26px, a secondary line of 13.5px, and
+   labels of 11.5px set in capitals. */
 
 .setup {
-  padding: 1.5rem 0 3rem;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--band, 0px));
 }
 
-.setup h1 {
-  margin: 0 0 0.5rem;
-  font-size: 1.4rem;
+/* The rail is drawn on the hunk colour, which is exactly the shade the boards
+   draw it in, light and dark: a warm step down from the paper that says this is
+   the frame's rather than the step's. No token of its own, there being nothing
+   it would ever be set to that `--hunk` is not. */
+.rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.875rem 1rem;
+  background: var(--hunk);
 }
 
-/* The line under the title, in the quiet every other page says how things
-   stand in. */
-.standing {
-  margin: 0 0 1.5rem;
+/* What only the rail itself holds, which a phone's header has no room for:
+   the label and the list are behind Steps there. */
+.rail .label,
+.listed {
+  display: none;
+}
+
+/* Steps, on the header's right: the quiet button's card and edge, with the
+   app's chevron saying it opens something. */
+.listing {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.35rem 0.7rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.caret {
+  font-size: 0.65em;
   color: var(--ink-soft);
-  line-height: 1.5;
 }
 
-.steps {
+/* The strip under the brand: the three steps as numbered dots joined by a
+   rule, the open one filled with the ember, and its name beside them. */
+.strip {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 1.4rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.dots {
+  display: flex;
+  align-items: center;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* One step: a card of the same paper the settings' sections are drawn on, with
-   the ones that are not open sitting quieter than the one that is. */
-.step {
-  margin-bottom: 0.75rem;
-  padding: 1rem 1.1rem;
-  border: 1px solid var(--edge);
-  border-radius: 0.75rem;
+.pip {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 1.5px solid var(--edge);
+  border-radius: 50%;
   background: var(--card);
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--ink-soft);
 }
 
-.open {
+/* The rule between two dots, drawn in the gap in front of the second with
+   half a rem clear of either. */
+.pip + .pip {
+  position: relative;
+  margin-left: calc(0.875rem + 2 * 0.5rem);
+}
+
+.pip + .pip::before {
+  content: "";
+  position: absolute;
+  top: calc(50% - 0.75px);
+  right: calc(100% + 0.5rem);
+  width: 0.875rem;
+  height: 1.5px;
+  background: var(--edge);
+}
+
+.here {
   border-color: var(--accent);
+  background: var(--accent);
+  color: var(--paper);
+  font-weight: 600;
 }
 
-.head {
+.where {
+  overflow: hidden;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The page's one `h1`: the mark and the word, as the workbench's sidebar heads
+   itself — see `Wordmark.module.css` — at the size of the rail it heads. */
+.brand {
   display: flex;
   gap: 0.6rem;
   align-items: center;
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 1rem;
+}
+
+.brand img {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+/* What the brand is doing here, in the labels' capitals. Written as *Setup*
+   and set in capitals here, so a screen reader reads a word rather than
+   spelling one. */
+.label {
+  margin: 2rem 0 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One step. The open one sits on a card; the rest sit on the rail. */
+.step {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+}
+
+.open {
+  border-color: var(--edge);
+  background: var(--card);
+}
+
+.head {
+  flex: 1;
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink-soft);
+}
+
+.open .head,
+.step[data-met="yes"] .head {
+  color: var(--ink);
+}
+
+.open .head {
+  font-weight: 600;
+}
+
+/* The mark and the name on one line, the mark held to the name's first line
+   where the name wraps. The heading itself when it is not a press, and the
+   button inside it when it is. */
+.head,
+.reopen {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
 }
 
 /* A met step's heading is the press that opens it again, and it is a heading
    first: no button chrome, the line it was already on, and the pointer to say
    it can be pressed. */
 .reopen {
-  display: flex;
-  gap: 0.6rem;
-  align-items: center;
+  width: 100%;
   padding: 0;
   border: 0;
   background: none;
@@ -66,16 +218,337 @@
   cursor: pointer;
 }
 
+/* An unmet step's mark is its number in a ring, and the open one's ring is
+   filled with the ember. The number is the stylesheet's, so the heading reads
+   as the step's name alone. */
+.number,
+.ticked {
+  flex: none;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.number {
+  border: 1px solid var(--edge);
+  background: var(--card);
+}
+
+.number::before {
+  content: attr(data-number);
+}
+
+.open .number {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--paper);
+  font-weight: 600;
+}
+
+/* And a met one's is the tick, on a wash of the green it is drawn in. */
+.ticked {
+  background: color-mix(in srgb, var(--added) 12%, transparent);
+  font-size: 0.75rem;
+}
+
+.name {
+  padding-top: 0.1rem;
+}
+
+/* The heading, and on the sheet the Open on the end of it. */
+.row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+/* Open, in the ember and no box: a word on the end of a row rather than a
+   second button beside the heading. */
+.reach {
+  flex: none;
+  padding: 0.1rem 0;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* What meeting the step came to, under its name and in line with it. */
+.summary {
+  margin: 0.15rem 0 0 2.25rem;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: var(--ink-soft);
+}
+
+/* What the page is reading, and how often, at the foot of the rail. */
+.reading {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 1.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.dot {
+  flex: none;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--added);
+}
+
+/* Quiet where nothing is being read again: the open step stands met. */
+.reading[data-reading="no"] .dot {
+  background: var(--ink-soft);
+}
+
+.paper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 0;
+}
+
+/* Which step this is of the three, in the ember and the labels' capitals. */
+.eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.title {
+  margin: 0.4rem 0 0.75rem;
+  font-size: 1.625rem;
+  line-height: 1.25;
+}
+
+/* The step's own standing line — the first paragraph each step draws — in the
+   quiet the boards set it in. */
+.body > * > p:first-child {
+  color: var(--ink-soft);
+}
+
+/* The foot, stuck to the bottom of the window so a step longer than it keeps
+   its press in reach, on the paper's own colour so what scrolls passes under
+   it. On a phone the press is the foot's whole width with Back under it, and
+   the foot runs out to the paper's edges with a rule over it. */
+.foot {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.75rem;
+  align-items: stretch;
+  margin: auto -1rem 0;
+  padding: 1rem;
+  border-top: 1px solid var(--edge);
+  background: var(--paper);
+}
+
+/* The step's end of it: the whole width here, and the right from 60rem. */
+.press {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+/* What a step hands the foot arrives in a box of the frame's making — see
+   `Foot.tsx` — laid out as the end it is in. And a step drawn with no frame
+   draws its press in a box of the same shape, where it stands. */
+.pressing {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: stretch;
+  text-align: center;
+}
+
+.unframed {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.unframed {
+  margin-top: 0.3rem;
+}
+
+/* Back, drawn as the quiet half of the foot: the paper's card with an edge,
+   where the press beside it is the ember. */
+.back {
+  padding: 0.5rem 1.1rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+/* Back on a phone, under the press rather than beside it. */
+.foot > .back {
+  align-self: center;
+}
+
+/* The phone's Steps sheet — the app's one `Modal`, see `Modal.module.css` —
+   hung from the top of the window rather than rising from the bottom, because
+   what it opens out of is the header up there. The whole width, and square
+   along the top edge it hangs from. Written against the dialog element to
+   outweigh the shared rule that would centre it. */
+dialog.sheet {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 auto;
+}
+
+dialog.sheet > div {
+  padding: 1rem 0.75rem;
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0 0 0.8rem 0.8rem;
+}
+
+.sheetHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.25rem;
+}
+
+.close {
+  padding: 0.35rem 0.7rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.sheet .label {
+  margin: 1.25rem 0.25rem 0.6rem;
+}
+
+/* The open step on the sheet sits on the paper rather than a card, the sheet
+   already being the card. */
+.sheet .open {
+  border-color: transparent;
+  background: var(--paper);
+}
+
+.sheet .reading {
+  margin: 1rem 0.75rem 0;
+}
+
 /* Behind the query, like every other hover state in the viewer: a rule a phone
    can reach is one it paints on whatever was last tapped and leaves there. */
 @media (hover: hover) {
   .reopen:hover {
     color: var(--accent);
   }
+
+  .back:hover,
+  .listing:hover,
+  .close:hover {
+    border-color: var(--ink-soft);
+  }
 }
 
-/* What the open step is about, under its heading. Empty until that step's
-   own component lands — two of the three still arrive with their own tasks. */
-.body:not(:empty) {
-  margin-top: 0.9rem;
+@media (min-width: 60rem) {
+  .setup {
+    display: grid;
+    grid-template-columns: 290px minmax(0, 1fr);
+    gap: 0;
+    min-height: calc(100vh - var(--band, 0px));
+  }
+
+  /* The rail the whole height of the window, and staying there while a long
+     step scrolls beside it. */
+  .rail {
+    position: sticky;
+    top: var(--band, 0px);
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    align-items: stretch;
+    box-sizing: border-box;
+    height: calc(100vh - var(--band, 0px));
+    padding: 1.25rem;
+  }
+
+  /* The rail's own list in place of the header's way to it. */
+  .listing,
+  .strip {
+    display: none;
+  }
+
+  .rail .label {
+    display: block;
+  }
+
+  .listed {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* And the reading at its very foot. */
+  .listed .reading {
+    margin-top: auto;
+  }
+
+  /* The step at the boards' 42rem, three and a half from the rail. */
+  .paper {
+    max-width: calc(42rem + 7rem);
+    margin: 0;
+    padding: 3.5rem 3.5rem 0;
+  }
+
+  /* The foot as a row along the paper's bottom: Back on the left, the step's
+     press on the right whether or not there is a Back. */
+  .foot {
+    flex-direction: row;
+    align-items: center;
+    margin: auto 0 0;
+    padding: 1.5rem 0;
+    border-top: 0;
+  }
+
+  /* The step's end takes what Back leaves, its press on the right, so a
+     quiet alternative a step puts first can stand at the far left. */
+  .press {
+    flex: 1;
+    flex-direction: row;
+    justify-content: flex-end;
+    align-items: center;
+  }
+
+  .pressing {
+    flex: 1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    text-align: start;
+  }
 }

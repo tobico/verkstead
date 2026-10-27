@@ -220,11 +220,9 @@
    wants.
 
    The agent type used to be in this rule, drawn as the rest of the form's rows
-   because it was another of them. It is the app's own listbox now — a row per
-   backend under its own brand mark — which carries the field treatment itself,
-   in `picking.module.css`, and takes only the room under it from here. Its words
-   are not in the fields' monospace either: what is being read is "Claude Code"
-   beside a mark rather than a path. */
+   because it was another of them. It is a segmented bar of radios now — see
+   `.agents` below — and its words are not in the fields' monospace: what is
+   being read is "Claude Code" beside a mark rather than a path. */
 .form input[type="text"] {
   display: block;
   width: 100%;
@@ -255,10 +253,73 @@
   margin-bottom: 0.85rem;
 }
 
-/* The room under the type picker, which is the whole of what the form has to say
-   about it: the same gap every field above it leaves. */
-.form .agentType {
-  margin-bottom: 0.85rem;
+/* The agent picker: the four backends as one segmented bar, each segment a
+   radio's label with the mark and the name, and the chosen one raised on the
+   card. The radio itself is kept for the keyboard and the screen reader and
+   drawn as nothing; its focus is drawn on the segment instead. A fieldset with
+   none of a fieldset's box, as the models' is below. */
+.form .agents {
+  margin: 0 0 0.85rem;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.form .agents legend {
+  padding: 0;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.segments {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.2rem;
+  background: var(--code-wash);
+  border: 1px solid var(--edge);
+  border-radius: 0.5rem;
+}
+
+.form .segment {
+  position: relative;
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin: 0;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  border: 1px solid transparent;
+  border-radius: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.segment input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.segment:has(input:checked) {
+  color: var(--ink);
+  font-weight: 500;
+  background: var(--card);
+  border-color: var(--edge);
+}
+
+.segment:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.segmentMark {
+  flex: none;
+  width: 0.95em;
 }
 
 /* The models: a tick per model this build knows, and the field under them for an
@@ -287,35 +348,52 @@
   margin: 0 0 0.85rem;
   padding: 0;
   display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-/* Wrapping, because a row can say more than a narrow pane holds on one line: a
-   tick, a name, the note under `elsewhere` below and the id are four things, and
-   the words are the part worth reading whole. */
-.picks li {
-  display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-
-/* A tick and the name beside it, which is a control rather than a field's label
-   — so it takes none of the treatment the labels above the fields do. */
-.form .picks label {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
   gap: 0.4rem;
-  margin: 0;
+}
 
-  /* And a row to press: the whole of it, taking no selection — see `rowPress` in
-     `src/rows.ts` for what a press that slid used to do instead. */
+/* One model, as a chip: its name, and a tick before it in the ember while it is
+   picked. The checkbox inside is kept for the keyboard and the screen reader
+   and drawn as nothing, its focus drawn on the chip. A whole chip to press,
+   taking no selection — see `rowPress` in `src/rows.ts` for what a press that
+   slid used to do instead. */
+.form .chip {
+  position: relative;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: baseline;
+  margin: 0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
   cursor: pointer;
   user-select: none;
-  font-size: inherit;
-  color: inherit;
+}
+
+.chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chip:has(input:checked) {
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  border-color: var(--accent);
+}
+
+.chip:has(input:checked)::before {
+  content: "✓";
+  font-size: 0.8em;
+  color: var(--accent);
+}
+
+.chip:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* A ticked model that is another backend's, which is what a profile carries
@@ -326,14 +404,6 @@
 .picks .elsewhere {
   font-size: 0.85rem;
   color: var(--stopped);
-}
-
-/* The id the name stands for, quiet beside it: what the session is launched
-   with, for whoever is checking. */
-.picks code {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
 }
 
 /* The id typed in where the list has not learned it yet: the field and the press
