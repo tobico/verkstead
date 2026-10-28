@@ -33,7 +33,7 @@ chose too.
 ## Stages
 
 - [x] 01: Records are the cluster's — Authors first — [brief](01-records-are-the-clusters.md) — no dependencies
-- [ ] 02: Profiles by uuid, bound per device — [brief](02-profiles-by-uuid-bound-per-device.md) — after 01
+- [ ] 02: Profiles by uuid, bound per device — [brief](02-profiles-by-uuid-bound-per-device.md) — after 01 *(in progress: `roadmaps/cluster-owned-records/02-profiles-by-uuid-bound-per-device`)*
 - [ ] 03: The replicated login — [brief](03-the-replicated-login.md) — after 02
 - [ ] 04: Memory unioned in and fanned out — [brief](04-memory-unioned-in-and-fanned-out.md) — after 02
 - [ ] 05: Instructions and MCP servers — [brief](05-instructions-and-mcp-servers.md) — after 01

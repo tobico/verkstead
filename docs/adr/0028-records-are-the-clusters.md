@@ -84,10 +84,14 @@ turned down.
   Conversation refusing it by name as a repoint does today.
 
 - **The uniqueness rules are enforced at the press** — one unnamed Profile per
-  harness, no two named alike, no two live MCP servers of one name — against
-  the whole table this device holds, and a pair that arrives by replication is
-  kept and drawn, two alike, until one is renamed or removed. Dropping the
-  rules was turned down.
+  harness, no two of one harness named alike, no two live MCP servers of one
+  name — against the whole table this device holds, and a pair that arrives by
+  replication is kept and drawn, two alike, until one is renamed or removed.
+  Dropping the rules was turned down. The name rule is **per harness** since
+  stage 02's planning (Set 1476): naming a device's unnamed Profiles after it
+  gives its unnamed Claude and its unnamed Codex the one name, and the
+  harness's mark already tells the two apart — suffixing the second with its
+  harness, or leaving the clash standing, were turned down.
 
 - **Every reference to a Profile becomes the uuid**: the three pairing columns
   on a Conversation, the Repo's pairing memory, pending Steers, the models and
