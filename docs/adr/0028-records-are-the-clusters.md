@@ -50,6 +50,15 @@ turned down.
   edits of different fields both survive at a timestamp per column, were both
   turned down for the simpler rule.
 
+- **A write is stamped past what it was made on top of.** The stamps are wall
+  clocks on different machines, and a VM or a laptop that slept can run
+  behind; stamped with its own clock alone, an edit made there shortly after
+  an edit elsewhere would be older, and the first pull would quietly revert
+  it on the very device it was made on. So a write is stamped with the later
+  of this device's now and one past the stamp it already holds for that
+  record: a local edit always beats what it was made on top of, and skew
+  only decides between edits neither of which had seen the other.
+
 - **Every device serves its whole table** — rows and tombstones, whoever wrote
   them — on a route of the Peer Listener behind the Member Gate, and the others
   **pull and merge** at start, on the existing *moved* Nudge, when a member's

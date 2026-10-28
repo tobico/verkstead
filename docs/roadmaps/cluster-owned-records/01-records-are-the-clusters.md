@@ -22,6 +22,9 @@ full.
   device. Newest write wins per record, the device id breaking a tie; a
   removal is final, a tombstone never overwritten by a later edit. Per-field
   timestamps and resurrection by a later edit were turned down.
+- **A write is stamped past what it was made on top of**: the later of this
+  device's now and one past the stamp it holds for the record, so a device
+  whose clock runs behind never has its own edit reverted by the next pull.
 - **Every device serves its whole table** on a Peer Listener route behind the
   Member Gate — rows and tombstones, whoever wrote them, so a record whose
   writer is off still reaches a newcomer through whoever holds it. The others
@@ -58,13 +61,15 @@ full.
 
 1. **The facility.** A store module declaring the record shape generically —
    uuid, `updated_at`, `deleted_at`, the writing device — with the merge rule
-   as one function, the peer route serving a kind's whole table, and the
+   and the stamping rule each one function, the peer route serving a kind's whole table, and the
    puller on the mirroring schedule: start, the kind's *moved* Nudge, a
    member's stream taken up again, membership moved.
    - Two Verksteads: a row written on A is on B after the Nudge; B taken down
      and brought back catches up on the start pull.
    - An edit stamped older than what B holds is dropped; one stamped later
      than a tombstone is dropped too.
+   - An edit on B, whose clock is behind A's, of a record A last wrote is
+     stamped past A's write, and A takes it on the next pull.
    - A record made on A reaches C through B after A is unlinked.
 
 2. **Authors on it.** A serve-time rewrite moves `authors:` into the table once
