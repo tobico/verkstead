@@ -78,30 +78,14 @@ pub(crate) async fn register(
 ///
 /// **A uuid named is that Author or a refusal**, whatever else is configured:
 /// a form that named one the one list no longer holds was drawn over a list
-/// that has since changed. A member's mirror is an Author like this device's
-/// own here — see [`Config::one_list`]. **None named is the one Author** where
-/// this device has exactly one — there is nobody else it could be (ADR-0025)
-/// — and a refusal where there are several, there being no saying which.
-///
-/// **And where it has none of its own, the one mirror**, where the one list
-/// holds exactly one: an **Annex** is given no Author by its Keeper and sees
-/// the Keeper's as mirrors, and with one there is still nobody else it could
-/// be (ADR-0024). Nobody where the one list is empty or holds several.
+/// that has since changed. An Author made on another device is one like any
+/// other (ADR-0028). **None named is the one Author** where there is exactly
+/// one — there is nobody else it could be (ADR-0025) — nobody where there is
+/// none, and a refusal where there are several, there being no saying which.
 fn picked<'a>(config: &'a Config, asked: Option<&str>) -> Result<Option<&'a Author>, Unpicked> {
     match (asked, config.authors()) {
-        (Some(id), _) => config
-            .one_list()
-            .find(|author| author.id() == id)
-            .map(Some)
-            .ok_or(Unpicked::NoSuchAuthor),
-        (None, []) => {
-            let mut mirrors = config.one_list();
-
-            Ok(match (mirrors.next(), mirrors.next()) {
-                (Some(only), None) => Some(only),
-                _ => None,
-            })
-        }
+        (Some(id), _) => config.author(id).map(Some).ok_or(Unpicked::NoSuchAuthor),
+        (None, []) => Ok(None),
         (None, [only]) => Ok(Some(only)),
         (None, _) => Err(Unpicked::AuthorUnpicked),
     }
@@ -324,14 +308,12 @@ pub(crate) async fn create(
             // And not at all where that Author has no token: `gh` would fall
             // back to the host's own login and make the repository in an
             // account nobody picked. Made here only, and said why — the shape a
-            // GitHub that would not finish already has. A mirror whose token's
+            // GitHub that would not finish already has. An Author whose token's
             // copy has not arrived says that instead.
-            let awaited = picked
-                .and_then(|author| config.mirror(author.id()))
-                .filter(|mirror| mirror.awaited());
+            let awaited = picked.and_then(|author| config.token_awaited(author.id()));
 
-            if let Some(mirror) = awaited {
-                Some(crate::github::awaited(mirror.device()))
+            if let Some(device) = awaited {
+                Some(crate::github::awaited(device))
             } else if gh.tokened() {
                 tokio::task::spawn_blocking(move || {
                     crate::github::create_repository(&gh, &dir, &called)
@@ -550,7 +532,7 @@ fn is_a_name(name: &str) -> bool {
 /// the clonable row carried — settled by [`picked`] the way a registration's
 /// is: a uuid this device's one list holds, or the one Author where none was
 /// said. The Repo is recorded as it, and git fetches as its token, read at the
-/// moment of the call — see [`cloning`]. A mirror whose token's copy has not
+/// moment of the call — see [`cloning`]. An Author whose token's copy has not
 /// arrived refuses by name rather than leave the fetch to the host's login.
 ///
 /// **And a clone that failed leaves nothing behind**: no registration, and no
@@ -575,12 +557,8 @@ pub(crate) async fn clone(
         Err(refusal) => return Ok(refusal.into()),
     };
 
-    let awaited = picked
-        .and_then(|author| config.mirror(author.id()))
-        .filter(|mirror| mirror.awaited());
-
-    if let Some(mirror) = awaited {
-        return Ok(Cloned::Refused(crate::github::awaited(mirror.device())));
+    if let Some(device) = picked.and_then(|author| config.token_awaited(author.id())) {
+        return Ok(Cloned::Refused(crate::github::awaited(device)));
     }
 
     let credential = gh.as_author(picked.map(Author::id)).credential();
@@ -910,7 +888,7 @@ pub(crate) async fn repoint(
     id: i64,
     author: &str,
 ) -> Result<Repointed> {
-    if !config.one_list().any(|listed| listed.id() == author) {
+    if config.author(author).is_none() {
         return Ok(Repointed::NoSuchAuthor);
     }
 

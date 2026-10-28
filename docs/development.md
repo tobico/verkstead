@@ -667,6 +667,13 @@ into the database under the uuids they carried, so every Repo still resolves
 its Author, and takes the key out of the file. An `authors:` key written back
 in by hand afterwards is ignored, and the log says so.
 
+In a cluster every device holds every Author: each serves its whole table of
+them on `GET /api/peer/v1/records/authors` behind the Member Gate, and pulls
+and merges each member's at the start, on a member's Authors Nudge, when a
+member's Nudge stream is taken up again and when the membership moves. The
+Author mirrors an earlier release wrote down become records of the same uuid
+stamped older than anything, which the real record replaces on the first pull.
+
 `sandbox_binds` at the foot is the other place the Sandbox Configuration binds
 are said. A bind is one absolute path, every session gets every one of them, and
 what the server goes by is the union of this file and the installation's own

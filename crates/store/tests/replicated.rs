@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use verkstead_store::open_database;
 use verkstead_store::replicated::{
-    Kind, Written, live_records, records, remove, rewrite, take_up, taken_up, write,
+    Kind, Record, Written, live_records, merge, records, remove, rewrite, take_up, taken_up, write,
 };
 
 /// A kind of no consequence, standing in for Authors.
@@ -217,4 +217,185 @@ async fn a_kind_is_taken_up_once_with_the_uuids_it_already_carried() {
         .await
         .unwrap();
     assert_eq!(records::<Notes>(&pool).await.unwrap(), held);
+}
+
+fn arriving(
+    uuid: &str,
+    updated_at: i64,
+    deleted_at: Option<i64>,
+    by: &str,
+    text: &str,
+) -> Record<Note> {
+    Record {
+        uuid: uuid.to_owned(),
+        updated_at,
+        deleted_at,
+        written_by: by.to_owned(),
+        fields: note(text),
+    }
+}
+
+/// A member's table merged here: a record never held is written down as it
+/// arrives, removed or not, and the same table merged twice moves nothing.
+#[tokio::test]
+async fn a_members_records_are_merged_and_a_second_merge_moves_nothing() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let served = [
+        arriving("one", 10, None, "b", "first"),
+        arriving("two", 12, Some(12), "b", "gone"),
+    ];
+
+    assert!(merge::<Notes>(&pool, &served).await.unwrap());
+    assert!(!merge::<Notes>(&pool, &served).await.unwrap());
+
+    assert_eq!(records::<Notes>(&pool).await.unwrap(), served);
+    let live: Vec<_> = live_records::<Notes>(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|record| record.uuid)
+        .collect();
+    assert_eq!(live, ["one"]);
+}
+
+/// Merged by the rule: a newer edit replaces what is held, an older one is
+/// dropped, and an edit arriving after a removal stays removed.
+#[tokio::test]
+async fn a_merge_keeps_the_newest_and_a_removal_final() {
+    let (_dir, pool) = fresh_pool().await;
+
+    merge::<Notes>(
+        &pool,
+        &[
+            arriving("one", 10, None, "a", "first"),
+            arriving("two", 10, Some(10), "a", "removed"),
+        ],
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        !merge::<Notes>(&pool, &[arriving("one", 9, None, "b", "older")])
+            .await
+            .unwrap()
+    );
+    assert!(
+        merge::<Notes>(&pool, &[arriving("one", 11, None, "b", "newer")])
+            .await
+            .unwrap()
+    );
+    assert!(
+        !merge::<Notes>(&pool, &[arriving("two", 20, None, "b", "edited after")])
+            .await
+            .unwrap()
+    );
+
+    let held = records::<Notes>(&pool).await.unwrap();
+    assert_eq!(held[0], arriving("one", 11, None, "b", "newer"));
+    assert_eq!(held[1], arriving("two", 10, Some(10), "a", "removed"));
+}
+
+/// An Author mirror an older Verkstead wrote down is a record of the same uuid
+/// stamped older than anything, and the `author_mirrors` table is gone.
+#[tokio::test]
+async fn the_author_mirrors_are_records_stamped_oldest() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("verkstead.db");
+
+    let pool = open_database(&path).await.unwrap();
+    sqlx::query(
+        "CREATE TABLE author_mirrors (
+             id           TEXT PRIMARY KEY,
+             home_device  TEXT NOT NULL,
+             display_name TEXT NOT NULL,
+             name         TEXT NOT NULL,
+             email        TEXT NOT NULL,
+             holds_token  INTEGER NOT NULL
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO author_mirrors VALUES
+             ('work', 'device-a', '', 'Ada', 'ada@work.example', 1),
+             ('home', 'device-a', 'Home', 'Ada L.', '', 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let pool = open_database(&path).await.unwrap();
+
+    let held: Vec<(String, i64, Option<i64>, String, serde_json::Value)> = sqlx::query_as(
+        "SELECT uuid, updated_at, deleted_at, written_by, body FROM replicated
+         WHERE kind = 'authors' ORDER BY uuid",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(
+        |(uuid, at, deleted, by, body): (String, i64, Option<i64>, String, String)| {
+            (uuid, at, deleted, by, serde_json::from_str(&body).unwrap())
+        },
+    )
+    .collect();
+
+    assert_eq!(
+        held,
+        [
+            (
+                "home".to_owned(),
+                0,
+                None,
+                "device-a".to_owned(),
+                serde_json::json!({
+                    "display_name": "Home",
+                    "name": "Ada L.",
+                    "email": null,
+                    "holds_token": false,
+                }),
+            ),
+            (
+                "work".to_owned(),
+                0,
+                None,
+                "device-a".to_owned(),
+                serde_json::json!({
+                    "display_name": null,
+                    "name": "Ada",
+                    "email": "ada@work.example",
+                    "holds_token": true,
+                }),
+            ),
+        ]
+    );
+
+    let mirrors: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE name = 'author_mirrors'")
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+    assert_eq!(mirrors, None);
+}
+
+/// And a kind taken up over a record stamped oldest replaces it, which is this
+/// device's own Author over a mirror of it.
+#[tokio::test]
+async fn a_take_up_replaces_a_record_stamped_oldest() {
+    let (_dir, pool) = fresh_pool().await;
+
+    merge::<Notes>(&pool, &[arriving("one", 0, None, "b", "mirrored")])
+        .await
+        .unwrap();
+    take_up::<Notes>(&pool, "a", &[("one".to_owned(), note("own"))])
+        .await
+        .unwrap();
+
+    let held = records::<Notes>(&pool).await.unwrap();
+    assert_eq!(held[0].fields, note("own"));
+    assert_eq!(held[0].written_by, "a");
 }

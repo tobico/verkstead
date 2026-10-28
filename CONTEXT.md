@@ -112,27 +112,26 @@ whose Author is gone from the one list refuses a start by name and halts with a
 **Notice** where nobody pressed; and a **Companion Repo** of another Author is
 refused on the composer, read-only or read-write alike, a sandbox having one
 environment.
-**Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a record every device holds under the uuid, with an `updated_at` and a deletion stamp, the newest write winning and a removal final — no home device, nothing relayed, and the record in the database rather than `config.yaml`, the token staying in `secrets.yaml`. Removing one then checks this device's Repos and every reachable member's and offers *Repoint them all to…*. The `cluster-owned-records` roadmap lands it; until its stage does, the mirror below is how an Author crosses the cluster.
-**One list across a cluster**, the way the Profiles are one. An Author is at home
-on the device whose files hold it; every other device keeps a mirror row in
-its database, keyed by the uuid — the display name, the git name, the email,
-whether a token is held, and the home device — read off each member's own list
-over the **Relay** as the Profiles are, and never a mirror of a mirror, and a
-copy of the token in its own `secrets.yaml` under the uuid, so a home that is
-quiet does not stop a Repo here — fetched on a member's own call over the Peer
-Listener, which hands over only that device's own Authors' tokens, written as
-the mirrors refresh, and taken away when the mirror goes, when its device is
-unlinked or when its home stops holding one. A home not answering leaves the
-copy as it stands, and a session carries its own Repo's Author's copy and none
-of the others this device holds.
-A Repo is pointed at a mirror the way it is at one of this device's own, and
-everything that reads a Repo's Author reads the mirror's name and email and the
-copy; a mirror whose home holds no token is a tokenless Author here too.
-A new Author is at home where it was made; a mirror is edited from wherever it
-is drawn and the press relayed home, token verification included; removal checks
-the home device's Repos alone, a member's Repo left pointing at a mirror that
-has gone refusing its start under the rule above. A mirror whose copy has not
-arrived refuses a **Start** by name, naming the home device, and halts a
+**One list across a cluster**, every device holding every Author as a
+**Replicated record** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md))
+under the uuid — no home device, nothing relayed, no device mark, and the
+record in the database rather than `config.yaml`. Every device serves its whole
+table of Authors behind the Member Gate, removed ones included, and pulls each
+member's: at the start, on a member's Authors Nudge, when a member's Nudge
+stream is taken up again and when the membership moves — so a device that was
+off catches up when it comes back, an edit made after a removal stays removed,
+and an Author whose writer is off or unlinked still reaches a newcomer through
+whoever holds it. A member too old to serve them has its Devices row say so,
+naming both releases, and its Authors are absent until it updates. The token
+stays in `secrets.yaml` under the uuid, copied from whoever holds one, and a
+session carries its own Repo's Author's token and none of the others this
+device holds.
+A Repo is pointed at an Author made on another device the way it is at one made
+here, and everything that reads a Repo's Author reads its name and email and
+the token this device holds. Removal checks this device's Repos, a member's
+Repo left pointing at an Author removed refusing its start under the rule
+above. An Author last written on a device holding its token, whose copy has not
+arrived refuses a **Start** by name, naming that device, and halts a
 pipeline step with a Notice, and nothing Verkstead does on its Repo falls back
 to the host's own login meanwhile; a **Transfer** whose far Repo points at another
 Author is refused by the **Preflight**, naming both; and **Create repo** on a
@@ -2239,8 +2238,8 @@ machine — the Instructions, the MCP servers and their header values, the
 at-once limit, Cleanup, the ignored comments, the conflict resolution and
 sharing on Done — is copied in from its Keeper at every boot. **Its Authors
 are not copied**: it holds none of its own, and the Keeper's reach it as
-mirrors over the one list, token copies and all, the way they reach any
-member — so with one, a Repo there is that one's.
+records, the way they reach any member — so with one, a Repo there is that
+one's.
 **And it never enters Onboarding Mode**: a kept Annex is told so in its
 config and skips the verdict, its objective being met by the mirrors its
 Keeper's Profiles arrive as.

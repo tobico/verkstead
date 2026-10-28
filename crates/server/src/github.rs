@@ -283,8 +283,8 @@ impl Gh {
             return AsWhom::Host;
         };
 
-        if let Some(mirror) = config.mirror(author.id()).filter(|mirror| mirror.awaited()) {
-            return AsWhom::Awaited(mirror.device().to_owned());
+        if let Some(device) = config.token_awaited(author.id()) {
+            return AsWhom::Awaited(device.to_owned());
         }
 
         match config.token_of(author, &settings.secrets()) {
@@ -2692,29 +2692,22 @@ printf '%s' '{"number":41,"title":"Rate limiting","url":"https://github.com/tobi
         (dir, settings)
     }
 
-    /// A Repo pointed at a member's Author is asked about as that Author: with
-    /// the copy of its token where its home holds one and the copy is here,
-    /// never as the host while the copy is awaited — the `gh` is not run at
-    /// all, and a git is handed no helper of the host's — and as the host where
-    /// its home holds no token, the way a tokenless Author of this device's own
-    /// is.
+    /// A Repo pointed at an Author whose token is held on another device is
+    /// asked about as that Author: with the copy of its token once the copy is
+    /// here, and never as the host while it is awaited — the `gh` is not run
+    /// at all, and a git is handed no helper of the host's.
     #[test]
-    fn a_mirrored_authors_repo_is_asked_about_with_its_copy_and_never_the_hosts_login() {
-        use crate::settings::{Author, Mirrored};
+    fn an_authors_repo_is_asked_about_with_its_copy_and_never_the_hosts_login() {
+        use crate::settings::{Author, Recorded};
 
         let (repo, gh) = stub_saying_its_token();
         let (_data_dir, settings) = configured(None);
         let gh = gh.authenticated_by(settings.clone());
 
-        let mirror = |id: &str, holds_token| {
-            Mirrored::of(
-                Author::of(id.to_owned(), None, Some("Ada".to_owned()), None),
-                "the-workstation".to_owned(),
-                holds_token,
-            )
-        };
-
-        settings.holding_mirrors(vec![mirror("tokened", true), mirror("tokenless", false)]);
+        settings.holding_authors(vec![Recorded::with_token_at(
+            Author::of("tokened".to_owned(), None, Some("Ada".to_owned()), None),
+            "the-workstation".to_owned(),
+        )]);
 
         let tokened = gh.as_author(Some("tokened"));
 
@@ -2731,7 +2724,7 @@ printf '%s' '{"number":41,"title":"Rate limiting","url":"https://github.com/tobi
 
         std::fs::write(
             settings.secrets_path(),
-            "author_tokens:\n  tokened: ghp_thecopy\n  tokenless: ghp_astaleone\n",
+            "author_tokens:\n  tokened: ghp_thecopy\n",
         )
         .unwrap();
 
@@ -2740,18 +2733,6 @@ printf '%s' '{"number":41,"title":"Rate limiting","url":"https://github.com/tobi
                 .unwrap()
                 .title,
             "ghp_thecopy",
-        );
-        // The host's own, which is whatever this process was started with.
-        assert_ne!(
-            pull_request(
-                &gh.as_author(Some("tokenless")),
-                repo.path(),
-                "rate-limiting"
-            )
-            .unwrap()
-            .title,
-            "ghp_astaleone",
-            "a home holding no token is a tokenless Author, whatever copy lingers",
         );
     }
 

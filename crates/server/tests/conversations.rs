@@ -31,7 +31,7 @@ use verkstead_render::{
     StageState, Standing, Started, SteerCancelled, SteerCompanionRefusal, SteerOpened,
     SteerPairingView, SteerSaved, TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
 };
-use verkstead_server::settings::{Author, Mirrored, Settings};
+use verkstead_server::settings::{Author, Recorded, Settings};
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
 /// A router, plus the directory holding its database and its data directory
@@ -3597,20 +3597,41 @@ async fn starting_on_a_repo_with_no_author_picked_among_two_is_refused_naming_it
     );
 }
 
-/// Hold `away` as this device's mirror of a member's Author — the one list
-/// the refresher hands the settings — at home on `the-workstation`, its home
-/// holding a token for it or not.
+/// Hold `away` beside this device's Authors as an Author made on another —
+/// what the puller hands the settings once it has merged a member's records —
+/// last written on `the-workstation`, which holds a token for it or not.
 fn mirroring(dir: &tempfile::TempDir, holds_token: bool) {
-    Settings::in_data_dir(dir.path()).holding_mirrors(vec![Mirrored::of(
-        Author::of(
-            "away".to_owned(),
-            Some("Away".to_owned()),
-            Some("Ada Lovelace".to_owned()),
-            Some("ada@away.example".to_owned()),
-        ),
-        "the-workstation".to_owned(),
-        holds_token,
-    )]);
+    let away = Author::of(
+        "away".to_owned(),
+        Some("Away".to_owned()),
+        Some("Ada Lovelace".to_owned()),
+        Some("ada@away.example".to_owned()),
+    );
+
+    holding_beside(
+        dir,
+        Some(match holds_token {
+            true => Recorded::with_token_at(away, "the-workstation".to_owned()),
+            false => Recorded::of(away),
+        }),
+    );
+}
+
+/// Hold this device's Authors as they read now, and `beside` after them.
+fn holding_beside(dir: &tempfile::TempDir, beside: Option<Recorded>) {
+    let settings = Settings::in_data_dir(dir.path());
+
+    let mut held: Vec<Recorded> = settings
+        .config()
+        .authors()
+        .iter()
+        .filter(|author| author.id() != "away")
+        .cloned()
+        .map(Recorded::of)
+        .collect();
+    held.extend(beside);
+
+    settings.holding_authors(held);
 }
 
 /// Point the Repo `repo_id` at `author` from its row on the Repos pane.
@@ -3730,7 +3751,7 @@ async fn a_repo_pointed_at_a_mirror_that_has_gone_refuses_as_one_gone() {
     mirroring(&dir, false);
     repoint(&app, repo_id, "away").await;
 
-    Settings::in_data_dir(dir.path()).holding_mirrors(Vec::new());
+    holding_beside(&dir, None);
 
     let id = ready(&app, elsewhere.path(), repo_id).await;
 
@@ -11074,10 +11095,9 @@ async fn a_take_up_is_refused_over_the_repos_author_as_a_start_is() {
         std::fs::write(dir.path().join(CONFIG), config).unwrap();
 
         if let TakenUp::RepoAuthorTokenAwaited { .. } = refusal {
-            Settings::in_data_dir(dir.path()).holding_mirrors(vec![Mirrored::of(
+            Settings::in_data_dir(dir.path()).holding_authors(vec![Recorded::with_token_at(
                 Author::of("work".to_owned(), None, Some("Ada".to_owned()), None),
                 "the-workstation".to_owned(),
-                true,
             )]);
         }
 

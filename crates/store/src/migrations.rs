@@ -110,7 +110,62 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     stages_that_never_said_which_one_they_were(pool).await?;
     memos_left_before_there_were_titles(pool).await?;
     previews_suggested_before_there_were_descriptions(pool).await?;
-    profiles_whose_name_was_unique_everywhere(pool).await
+    profiles_whose_name_was_unique_everywhere(pool).await?;
+    author_mirrors_that_are_records_now(pool).await
+}
+
+/// Write every **Author mirror** this device held down as a record of the
+/// same uuid, stamped older than anything, and take the `author_mirrors` table
+/// away (ADR-0028).
+///
+/// **Stamped older than anything** — at the epoch, by the device it was at
+/// home on — so that the real record wins the first pull of any member that
+/// holds it, and until then the Author is on the one list under the uuid a
+/// Repo here records. A uuid already held as a record is left as it is: that
+/// record was written by somebody. The fields are what a mirror held, a name
+/// left empty being none.
+///
+/// Safe to run twice: what says whether there is anything to do is the table
+/// being there, and after the first run it is not.
+async fn author_mirrors_that_are_records_now(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+            .bind("author_mirrors")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the Author mirrors")?;
+
+    if there.is_none() {
+        return Ok(());
+    }
+
+    let mut tx = super::writing(pool, "writing the Author mirrors down as records").await?;
+
+    sqlx::query(
+        "INSERT INTO replicated (kind, uuid, updated_at, deleted_at, written_by, body)
+         SELECT 'authors', id, 0, NULL, home_device,
+                json_object(
+                    'display_name', NULLIF(display_name, ''),
+                    'name', NULLIF(name, ''),
+                    'email', NULLIF(email, ''),
+                    'holds_token', json(CASE WHEN holds_token THEN 'true' ELSE 'false' END)
+                )
+         FROM author_mirrors
+         ORDER BY home_device, id
+         ON CONFLICT (kind, uuid) DO NOTHING",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("writing the Author mirrors down as records")?;
+
+    sqlx::query("DROP TABLE author_mirrors")
+        .execute(&mut *tx)
+        .await
+        .context("taking the Author mirrors away")?;
+
+    tx.commit()
+        .await
+        .context("writing the Author mirrors down as records")
 }
 
 /// Give every Memo left before a session named its Memo the column that holds

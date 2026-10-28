@@ -2192,17 +2192,17 @@ mod tests {
         );
     }
 
-    /// A halt over a Repo pointed at a member's Author whose token's copy has
-    /// not arrived names the device it is at home on, and sends the human
-    /// there rather than to settings.
+    /// A halt over a Repo pointed at an Author whose token's copy has not
+    /// arrived names the device it is held on, and sends the human there
+    /// rather than to settings.
     #[test]
-    fn a_halt_over_a_mirror_awaiting_its_token_names_its_home() {
-        use crate::settings::{Mirrored, Settings};
+    fn a_halt_over_an_author_awaiting_its_token_names_its_device() {
+        use crate::settings::{Recorded, Settings};
 
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
-        settings.holding_mirrors(vec![Mirrored::of(
+        settings.holding_authors(vec![Recorded::with_token_at(
             Author::of(
                 "away".to_owned(),
                 None,
@@ -2210,7 +2210,6 @@ mod tests {
                 Some("ada@away.example".to_owned()),
             ),
             "the-workstation".to_owned(),
-            true,
         )]);
 
         assert_eq!(

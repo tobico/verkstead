@@ -208,8 +208,8 @@ pub(crate) const ORDINARY_MODE: u32 = 0o644;
 pub struct Settings {
     dir: PathBuf,
 
-    /// What this device holds in memory beside the files: the Authors' records
-    /// and the members' mirrors — see [`Held`].
+    /// What this device holds in memory beside the files: the Authors'
+    /// records — see [`Held`].
     held: Arc<Held>,
 }
 
@@ -220,19 +220,15 @@ struct Held {
     /// [`Settings::holding_authors`]. `None` until they first are, which is a
     /// start before the Authors were taken up into the database, and the one
     /// moment `config.yaml`'s `authors:` is still read.
-    authors: RwLock<Option<Vec<Author>>>,
+    authors: RwLock<Option<Vec<Recorded>>>,
 
     /// Whether the log has been told that `config.yaml` holds an `authors:`
     /// key nothing reads any more — once per run, rather than at every read.
     ignoring_said: AtomicBool,
-
-    /// The members' Authors this device holds mirrors of, as the refresher
-    /// last wrote them down — see [`Settings::holding_mirrors`].
-    mirrors: RwLock<Vec<Mirrored>>,
 }
 
 /// Every Data Directory's held lists, so that every handle on one directory
-/// reads the same — see [`Settings::holding_mirrors`].
+/// reads the same — see [`Settings::holding_authors`].
 static HELD: LazyLock<Mutex<HashMap<PathBuf, Arc<Held>>>> = LazyLock::new(Mutex::default);
 
 impl Settings {
@@ -255,15 +251,22 @@ impl Settings {
     /// database's table, in the order they were first written down, for
     /// [`Settings::config`] to lay over whatever `config.yaml` says.
     ///
-    /// **Held in memory rather than read off the store**, for the mirrors'
-    /// reason below: an Author is resolved on blocking threads, out of these
-    /// files alone. What writes the table is what hands the records on here,
-    /// after every write — see [`crate::replicating::authors`].
+    /// **Held in memory rather than read off the store**, because the store is
+    /// the one thing here that cannot be read where an Author is resolved: a
+    /// `gh` call and a sandbox are composed on blocking threads, from these
+    /// files alone. What writes the table — a write here, or a member's records
+    /// merged — is what hands the records on here, after every write — see
+    /// [`crate::replicating::authors`].
+    ///
+    /// **One per Data Directory rather than one per handle**: the workbench,
+    /// the sandbox's agents and the server's own `gh` each hold a handle made
+    /// of the same directory, and an Author written through one is an Author
+    /// to all three.
     ///
     /// **And from then on `config.yaml` is not read for Authors**: the table is
     /// the whole of them, and an `authors:` key written into the file by hand
     /// is ignored, the log saying so once.
-    pub fn holding_authors(&self, authors: Vec<Author>) {
+    pub fn holding_authors(&self, authors: Vec<Recorded>) {
         *self
             .held
             .authors
@@ -290,29 +293,6 @@ impl Settings {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_some()
-    }
-
-    /// Hold `mirrors` as every member's Authors this device knows of, for
-    /// [`Settings::config`] to resolve a Repo's Author out of beside the file's
-    /// own.
-    ///
-    /// **Held in memory rather than read off the store**, because the store is
-    /// the one thing here that cannot be read where an Author is resolved: a
-    /// `gh` call and a sandbox are composed on blocking threads, from these
-    /// files alone. The rows themselves are the store's (ADR-0025, a mirror is
-    /// found rather than told), and the refresher that writes them is what hands
-    /// them on here — see [`crate::mirroring::authors`].
-    ///
-    /// **One per Data Directory rather than one per handle**: the workbench, the
-    /// sandbox's agents and the server's own `gh` each hold a handle made of the
-    /// same directory, and a mirror written down through one is an Author to all
-    /// three.
-    pub fn holding_mirrors(&self, mirrors: Vec<Mirrored>) {
-        *self
-            .held
-            .mirrors
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = mirrors;
     }
 
     /// Where `secrets.yaml` is, which is what writes it and what says so on a
@@ -347,10 +327,11 @@ impl Settings {
     /// moment: the pair is what a session's git is configured out of, so they
     /// are decided together.
     ///
-    /// **With the mirrors beside the file's own Authors**, which is the one list
-    /// a Repo's Author is resolved out of — see [`Config::author_of`]. Each says
-    /// whether its token's copy is in `secrets.yaml` yet, so the other file is
-    /// read too where a mirror's home holds a token.
+    /// **With the table's Authors in place of the file's**, once they are held,
+    /// which is the one list a Repo's Author is resolved out of — see
+    /// [`Config::author_of`]. Where one was last written on a device that holds
+    /// its token, the other file is read too, for whether the copy is here
+    /// yet — see [`Config::token_awaited`].
     pub fn config(&self) -> Config {
         let path = self.config_path();
 
@@ -372,36 +353,43 @@ impl Settings {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
 
-        if let Some(authors) = authors {
-            if !config.authors.is_empty() && !self.held.ignoring_said.swap(true, Ordering::Relaxed)
-            {
-                tracing::warn!(
-                    path = %path.display(),
-                    "config.yaml holds an `authors:` key, which is ignored: the Authors are \
-                     kept in the database now, and are added, edited and removed on the \
-                     settings page",
-                );
-            }
+        let Some(authors) = authors else {
+            return config;
+        };
 
-            config.authors = authors;
+        if !config.authors.is_empty() && !self.held.ignoring_said.swap(true, Ordering::Relaxed) {
+            tracing::warn!(
+                path = %path.display(),
+                "config.yaml holds an `authors:` key, which is ignored: the Authors are \
+                 kept in the database now, and are added, edited and removed on the \
+                 settings page",
+            );
         }
 
-        let mut mirrors = self
-            .held
-            .mirrors
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let secrets = authors
+            .iter()
+            .any(|recorded| recorded.token_at.is_some())
+            .then(|| self.secrets());
 
-        if mirrors.iter().any(|mirror| mirror.holds_token) {
-            let secrets = self.secrets();
+        config.awaited = authors
+            .iter()
+            .filter_map(|recorded| {
+                let device = recorded.token_at.as_ref()?;
+                let secrets = secrets.as_ref()?;
 
-            for mirror in &mut mirrors {
-                mirror.copied = secrets.author_token(mirror.author.id()).is_some();
-            }
-        }
+                secrets
+                    .author_token(recorded.author.id())
+                    .is_none()
+                    .then(|| (recorded.author.id().to_owned(), device.clone()))
+            })
+            .collect();
 
-        Config { mirrors, ..config }
+        config.authors = authors
+            .into_iter()
+            .map(|recorded| recorded.author)
+            .collect();
+
+        config
     }
 
     /// When `secrets.yaml` was last written, or `None` where there is no file to
@@ -580,18 +568,6 @@ impl Settings {
         }
 
         self.save_secrets(&secrets.with_author_token(id, token))
-    }
-
-    /// What `secrets.yaml` holds, nothing written counting as empty — or `None`
-    /// where it will not parse.
-    ///
-    /// **For a write nobody pressed**, which [`Settings::secrets`] would turn a
-    /// file with a typo in it into an empty one for: a background writer that
-    /// wrote that back would take every other secret in the file with it. See
-    /// [`crate::mirroring::authors`], whose copies of the members' tokens are
-    /// written this way.
-    pub(crate) fn secrets_as_written(&self) -> Option<Secrets> {
-        Self::parsed(&self.secrets_path(), Secrets::read)
     }
 
     /// What the settings file at `path` says read by `read`, nothing written
@@ -1095,12 +1071,12 @@ pub struct Config {
     )]
     authors: Vec<Author>,
 
-    /// And every member's Authors this device holds a mirror of, which are
-    /// Authors a Repo here can be pointed at like the file's own — never read
-    /// from this file nor written to it, but laid beside it by
-    /// [`Settings::config`].
+    /// The Authors whose token is awaited here, by uuid, each with the name of
+    /// the device that last wrote it and holds the token — never read from
+    /// this file nor written to it, but laid beside it by
+    /// [`Settings::config`]. See [`Config::token_awaited`].
     #[serde(skip)]
-    mirrors: Vec<Mirrored>,
+    awaited: BTreeMap<String, String>,
 
     /// And how the shared Rust build cache is set: whether sessions get one at
     /// all, and how big its compiled half may grow — see [`crate::build_cache`].
@@ -1343,7 +1319,7 @@ impl Config {
             // With the blanks taken out of each and the ones with no uuid
             // dropped — see [`authors_kept`].
             authors: authors_kept(config.authors),
-            mirrors: Vec::new(),
+            awaited: BTreeMap::new(),
             rust_build_cache: RustBuildCache {
                 enabled: config.rust_build_cache.enabled,
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
@@ -1400,7 +1376,7 @@ impl Config {
             // [`Config::keeping_what_the_page_never_drew`], the way an
             // installer's descriptor keys are.
             authors: author.into_iter().collect(),
-            mirrors: Vec::new(),
+            awaited: BTreeMap::new(),
             // And nothing for the key the map replaced: the two keys the page
             // draws of Rust are in `languages` below now, so writing this one
             // as well would leave a second opinion about them in the file. A
@@ -1476,31 +1452,19 @@ impl Config {
         self.authors.iter().find(|author| author.id == id)
     }
 
-    /// The mirror of a member's Author whose uuid is `id`, or `None` where
-    /// there is none — or where this file holds that uuid itself, whatever it
-    /// says about it being what it is here.
-    pub(crate) fn mirror(&self, id: &str) -> Option<&Mirrored> {
-        if self.author(id).is_some() {
-            return None;
-        }
-
-        self.mirrors.iter().find(|mirror| mirror.author.id == id)
-    }
-
-    /// Every Author a Repo here can be pointed at: this file's own, and then
-    /// every member's this device holds a mirror of — the one list.
-    pub(crate) fn one_list(&self) -> impl Iterator<Item = &Author> {
-        self.authors.iter().chain(
-            self.mirrors
-                .iter()
-                .filter(|mirror| self.author(mirror.author.id()).is_none())
-                .map(|mirror| &mirror.author),
-        )
+    /// The name of the device the token of the Author whose uuid is `id` is
+    /// awaited from, where it is: the device that last wrote its record holds
+    /// a token for it, that device is not this one, and the copy has not
+    /// reached this device's `secrets.yaml`. Working as that Author without
+    /// it was turned down, and so was the host's own login in its place
+    /// (ADR-0025).
+    pub(crate) fn token_awaited(&self, id: &str) -> Option<&str> {
+        self.awaited.get(id).map(String::as_str)
     }
 
     /// The Author a Repo recorded as `recorded` is committed and pushed as:
-    /// the one with that uuid in the one list — this file's own or a member's
-    /// mirror — or, where the Repo records none, the one Author configured,
+    /// the one with that uuid — made on this device or any other, which is the
+    /// one list — or, where the Repo records none, the one Author there is,
     /// where there is exactly one.
     ///
     /// The fallback is the promise that one Author changes nothing: a Repo
@@ -1510,15 +1474,9 @@ impl Config {
     /// [`crate::repos::entry`]. A uuid no longer in the list is nobody either,
     /// rather than whoever happens to be first: the wrong name on a commit is
     /// the mistake an Author per Repo exists to stop.
-    ///
-    /// **The fallback counts this file's Authors alone**, so that linking a
-    /// device whose Authors arrive as mirrors never leaves a Repo recording
-    /// none with nobody to commit as: a mirror is picked by name or not at all.
     pub fn author_of(&self, recorded: Option<&str>) -> Option<&Author> {
         match (recorded, self.authors.as_slice()) {
-            (Some(id), _) => self
-                .author(id)
-                .or_else(|| self.mirror(id).map(|mirror| &mirror.author)),
+            (Some(id), _) => self.author(id),
             (None, [only]) => Some(only),
             (None, _) => None,
         }
@@ -1526,52 +1484,41 @@ impl Config {
 
     /// Why a Repo recorded as `recorded` has no Author to work as, where the
     /// reason is the Repo's record rather than an Author's fields: a uuid no
-    /// Author in the one list holds any more, none recorded among several, or
-    /// a mirror whose token's copy has not arrived. `None` where
+    /// Author holds any more, none recorded among several, or an Author whose
+    /// token is awaited here — see [`Config::token_awaited`]. `None` where
     /// [`Config::author_of`] finds one to work as, and where no Author is
-    /// configured or mirrored at all: there is nobody to pick instead, and what
-    /// every door already says — that no git author is set — is the whole of it.
+    /// configured at all: there is nobody to pick instead, and what every door
+    /// already says — that no git author is set — is the whole of it.
     ///
-    /// Asked at every door that commits as the Repo's Author, so that a hand
-    /// edit of this file, or a mirror gone with its home, is named for what it
-    /// is rather than read as nobody having set an author (ADR-0025). Falling
-    /// back to the first Author was turned down there, and so was working as a
-    /// mirror without its token while the copy is awaited.
+    /// Asked at every door that commits as the Repo's Author, so that an
+    /// Author removed is named for what it is rather than read as nobody
+    /// having set an author (ADR-0025). Falling back to the first Author was
+    /// turned down there.
     pub fn author_missing(&self, recorded: Option<&str>) -> Option<Unauthored> {
-        let nobody = self.authors.is_empty() && self.mirrors.is_empty();
-
         match recorded {
-            Some(_) if nobody => None,
-            Some(id) if self.author(id).is_some() => None,
-            Some(id) => match self.mirror(id) {
-                None => Some(Unauthored::Gone),
-                Some(mirror) if mirror.awaited() => Some(Unauthored::TokenAwaited {
-                    device: mirror.device.clone(),
+            Some(_) if self.authors.is_empty() => None,
+            Some(id) if self.author(id).is_none() => Some(Unauthored::Gone),
+            Some(id) => self
+                .token_awaited(id)
+                .map(|device| Unauthored::TokenAwaited {
+                    device: device.to_owned(),
                 }),
-                Some(_) => None,
-            },
             None if self.authors.len() > 1 => Some(Unauthored::Unpicked),
             None => None,
         }
     }
 
-    /// The token `author` works as, out of `secrets`: its own where this file
-    /// holds it, and the copy under its uuid where it is a mirror whose home
-    /// holds one. A mirror whose home holds none has none, whatever a copy left
-    /// behind says.
+    /// The token `author` works as, out of `secrets`: whatever this device's
+    /// file holds under its uuid.
     pub(crate) fn token_of<'s>(&self, author: &Author, secrets: &'s Secrets) -> Option<&'s str> {
-        match self.mirror(author.id()) {
-            Some(mirror) if !mirror.holds_token => None,
-            _ => secrets.author_token(author.id()),
-        }
+        secrets.author_token(author.id())
     }
 
     /// The config a **Keeper** writes for its **Annex** before the Annex first
     /// starts: whose it is, and nothing else, so every other section reads as
     /// nobody having said. **No Author of its own**: the Annex is a linked
-    /// Member, so the Keeper's Authors reach it as mirrors over the one list,
-    /// token copies and all (ADR-0025), and a copy at home here too would be one
-    /// Author at home on two devices.
+    /// Member, so the Keeper's Authors reach it as records like any member's
+    /// (ADR-0028).
     pub fn of_an_annex(kept_by: KeptBy) -> Config {
         Config {
             kept_by: Some(kept_by),
@@ -2177,55 +2124,46 @@ impl GitAuthor {
 /// Repo's own record — see [`Config::author_missing`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unauthored {
-    /// It records a uuid no Author in the one list holds: one removed from
-    /// `config.yaml` by hand, or a mirror gone with its home.
+    /// It records a uuid no Author holds: one removed.
     Gone,
 
     /// It records none, and there is more than one Author it could be.
     Unpicked,
 
-    /// It records a mirror whose home holds a token, and the copy of it has
-    /// not reached this device: working as that Author without it was turned
-    /// down, and so was the host's own login in its place (ADR-0025). `device`
-    /// is the home's name, which is where it has to come from.
+    /// It records an Author whose token is held on another device, and the
+    /// copy of it has not reached this one: working as that Author without it
+    /// was turned down, and so was the host's own login in its place
+    /// (ADR-0025). `device` is the name of the device that last wrote the
+    /// Author, which is where it has to come from.
     TokenAwaited { device: String },
 }
 
-/// A member's Author as this device holds it: the Author as its home answers
-/// it, the name of the device it is at home on, and whether that device holds
-/// a token for it — the mirror row, as [`Settings::holding_mirrors`] is handed
-/// it (ADR-0025).
+/// An Author as this device holds its record, for [`Settings::holding_authors`]
+/// (ADR-0028): the Author, and — where the record was last written on another
+/// device that holds a token for it — that device's name, which is where the
+/// token's copy is awaited from until this device's `secrets.yaml` holds one.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Mirrored {
+pub struct Recorded {
     author: Author,
-    device: String,
-    holds_token: bool,
-
-    /// Whether the token's copy is in this device's `secrets.yaml`, which
-    /// [`Settings::config`] reads as it lays the mirrors down.
-    copied: bool,
+    token_at: Option<String>,
 }
 
-impl Mirrored {
-    /// The mirror of `author`, at home on the device called `device`.
-    pub fn of(author: Author, device: String, holds_token: bool) -> Mirrored {
-        Mirrored {
+impl Recorded {
+    /// An Author no other device's token is awaited for.
+    pub fn of(author: Author) -> Recorded {
+        Recorded {
             author,
-            device,
-            holds_token,
-            copied: false,
+            token_at: None,
         }
     }
 
-    /// The name of the device it is at home on.
-    pub(crate) fn device(&self) -> &str {
-        &self.device
-    }
-
-    /// Whether its home holds a token whose copy has not arrived here, which
-    /// is a mirror nothing may work as yet.
-    pub(crate) fn awaited(&self) -> bool {
-        self.holds_token && !self.copied
+    /// And one last written on the device called `device`, which holds a token
+    /// for it.
+    pub fn with_token_at(author: Author, device: String) -> Recorded {
+        Recorded {
+            author,
+            token_at: Some(device),
+        }
     }
 }
 
@@ -3055,7 +2993,7 @@ mod tests {
 
     use super::{
         AtOnce, AttachedServer, Author, Cleanup, CleanupStep, Config, ConflictResolution,
-        GitAuthor, HeaderValue, IgnoreRule, KeptBy, Languages, McpServer, Mirrored, RuleTrouble,
+        GitAuthor, HeaderValue, IgnoreRule, KeptBy, Languages, McpServer, Recorded, RuleTrouble,
         Secrets, ServerTrouble, Settings, Signature, Unauthored, trouble_among, yaml,
     };
 
@@ -3450,58 +3388,36 @@ mod tests {
         );
     }
 
-    /// A member's Author resolves out of the one list like this file's own: by
-    /// its uuid, as its name and email, and to the copy of its token where its
-    /// home holds one — and where the copy has not arrived it is named as
-    /// awaited rather than worked as. The one-Author fallback counts this
-    /// file's Authors alone, and a uuid this file holds is its own whatever a
-    /// mirror says.
+    /// An Author last written on another device that holds its token resolves
+    /// like any other, by its uuid, as its name and email — and where the
+    /// token's copy has not arrived here it is named as awaited, saying from
+    /// which device, rather than worked as.
     #[test]
-    fn a_mirror_resolves_out_of_the_one_list() {
+    fn an_author_whose_token_is_elsewhere_is_awaited_until_the_copy_arrives() {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
-        std::fs::write(
-            settings.config_path(),
-            "authors:\n  - id: work\n    name: Tobias Cohen\n",
-        )
-        .unwrap();
+        let author =
+            |id: &str, name: &str| Author::of(id.to_owned(), None, Some(name.to_owned()), None);
 
-        let mirror = |id: &str, name: &str, holds_token| {
-            Mirrored::of(
-                Author::of(id.to_owned(), None, Some(name.to_owned()), None),
-                "the-workstation".to_owned(),
-                holds_token,
-            )
-        };
-
-        settings.holding_mirrors(vec![
-            mirror("tokened", "Ada", true),
-            mirror("tokenless", "Grace", false),
-            mirror("work", "Someone Else", false),
+        settings.holding_authors(vec![
+            Recorded::of(author("work", "Tobias Cohen")),
+            Recorded::with_token_at(author("tokened", "Ada"), "the-workstation".to_owned()),
+            Recorded::of(author("tokenless", "Grace")),
         ]);
 
         let config = settings.config();
 
         assert_eq!(
-            config.one_list().map(Author::id).collect::<Vec<_>>(),
+            config.authors().iter().map(Author::id).collect::<Vec<_>>(),
             ["work", "tokened", "tokenless"],
         );
         assert_eq!(
             config.author_of(Some("tokenless")).and_then(Author::name),
             Some("Grace"),
         );
-        assert_eq!(
-            config.author_of(Some("work")).and_then(Author::name),
-            Some("Tobias Cohen"),
-            "this file's own, not the mirror of its uuid",
-        );
-        assert_eq!(
-            config.author_of(None).map(Author::id),
-            Some("work"),
-            "the one Author of this file's own, the mirrors not counted",
-        );
-        assert_eq!(config.author_missing(None), None);
+        assert_eq!(config.author_of(None), None, "three to pick from");
+        assert_eq!(config.author_missing(None), Some(Unauthored::Unpicked));
         assert_eq!(config.author_missing(Some("tokenless")), None);
         assert_eq!(
             config.author_missing(Some("tokened")),
@@ -3513,7 +3429,7 @@ mod tests {
 
         std::fs::write(
             settings.secrets_path(),
-            "author_tokens:\n  tokened: ghp_thecopy\n  tokenless: ghp_astaleone\n",
+            "author_tokens:\n  tokened: ghp_thecopy\n",
         )
         .unwrap();
 
@@ -3529,18 +3445,13 @@ mod tests {
             config.token_of(config.author_of(Some("tokened")).unwrap(), &secrets),
             Some("ghp_thecopy"),
         );
-        assert_eq!(
-            config.token_of(config.author_of(Some("tokenless")).unwrap(), &secrets),
-            None,
-            "its home holds none, whatever copy lingers",
-        );
 
-        settings.holding_mirrors(Vec::new());
+        settings.holding_authors(vec![Recorded::of(author("work", "Tobias Cohen"))]);
 
         assert_eq!(
-            settings.config().author_missing(Some("tokenless")),
+            settings.config().author_missing(Some("tokened")),
             Some(Unauthored::Gone),
-            "a mirror gone with its home",
+            "an Author removed",
         );
     }
 
@@ -3558,12 +3469,12 @@ mod tests {
         )
         .unwrap();
 
-        settings.holding_authors(vec![Author::of(
+        settings.holding_authors(vec![Recorded::of(Author::of(
             "work".into(),
             None,
             Some("Tobias Cohen".into()),
             None,
-        )]);
+        ))]);
 
         let config = settings.config();
         let ids: Vec<_> = config.authors().iter().map(Author::id).collect();

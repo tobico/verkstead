@@ -116,8 +116,9 @@ pub(crate) struct OverTheLink;
 /// viewer's: the news a member tells its members when it has something worth a
 /// phone — see [`super::news`] — this device's Repos with their origins, see
 /// [`super::repos`], and the files of one of its accounts a session away from
-/// home is given, see [`super::account`], the token a mirror of one of its
-/// Authors is copied from, see [`super::authors`], and the Update a member's
+/// home is given, see [`super::account`], the token of one of its Authors, see
+/// [`super::authors`], its whole table of each kind of Replicated record, see
+/// [`crate::replicating`], and the Update a member's
 /// press tells it to make, see [`super::updating`].
 ///
 /// Built here because each answers out of this same state: what the news is shown
@@ -135,6 +136,7 @@ pub(crate) fn served(state: AppState) -> Router {
         .merge(super::transfers::route())
         .merge(super::account::route())
         .merge(super::authors::route())
+        .merge(crate::replicating::route())
         .merge(super::memory::route())
         .merge(super::updating::route())
         .with_state(state)

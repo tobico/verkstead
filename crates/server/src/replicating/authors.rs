@@ -11,16 +11,27 @@
 //! file carried are the records', so nothing a Repo records changes; the key
 //! goes out of the file, and after that the file is not read for Authors.
 //!
-//! **Held in memory for the settings to resolve out of**, the way the mirrors
-//! are laid down: an Author is resolved on blocking threads from the files
-//! alone, so every write here hands the live records on to
+//! **Held in memory for the settings to resolve out of**: an Author is
+//! resolved on blocking threads from the files alone, so every write here, and
+//! every merge of a member's records, hands the live records on to
 //! [`Settings::holding_authors`] once it is written.
+//!
+//! **Replicated across the cluster** on the facility's route and puller — see
+//! [`super`]. Nothing of the token crosses there: the record says whether the
+//! device that wrote it holds one, and the token is copied on a call of its
+//! own.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::settings::{Author, Settings};
+use verkstead_render::AuthorEntry;
+use verkstead_schema::Nudge;
+
+use super::Replicating;
+use crate::AppState;
+use crate::relaying::Read;
+use crate::settings::{Author, Recorded, Settings};
 use crate::store::replicated::{self, Kind, Written};
 
 /// The Authors, as a kind of record.
@@ -29,6 +40,43 @@ pub struct Authors;
 impl Kind for Authors {
     const NAME: &'static str = "authors";
     type Fields = Fields;
+}
+
+impl Replicating for Authors {
+    const MOVED: Nudge = Nudge::Authors;
+    const READ: Read = Read::Authors;
+
+    /// The merged records held for the settings — taken up first, where a
+    /// server stood up without a serve has not — and the pages told.
+    async fn merged(state: &AppState) -> Result<()> {
+        taken_up(&state.pool, &state.settings, &state.device).await?;
+        held(&state.pool, &state.settings, &state.device).await?;
+
+        state.nudges.announce_here(Nudge::Authors);
+
+        Ok(())
+    }
+}
+
+/// The one list as the Git section and the pickers draw it: every live Author,
+/// in the order they were first written down here, and nothing of the token
+/// but whether this device's `secrets.yaml` holds one.
+pub(crate) fn listed(settings: &Settings) -> Vec<AuthorEntry> {
+    let secrets = settings.secrets();
+
+    settings
+        .config()
+        .authors()
+        .iter()
+        .map(|author| AuthorEntry {
+            id: author.id().to_owned(),
+            display_name: author.display_name().unwrap_or_default().to_owned(),
+            name: author.name().unwrap_or_default().to_owned(),
+            email: author.email().unwrap_or_default().to_owned(),
+            holds_token: secrets.author_token(author.id()).is_some(),
+            device: None,
+        })
+        .collect()
 }
 
 /// What an Author's record holds besides the record's own stamps.
@@ -127,16 +175,37 @@ pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> R
         }
     }
 
-    held(pool, settings).await
+    held(pool, settings, device).await
 }
 
 /// Hand the table's live Authors on to the settings, which is what every
-/// list, picker and launch resolves an Author out of.
-pub async fn held(pool: &SqlitePool, settings: &Settings) -> Result<()> {
-    let authors = replicated::live_records::<Authors>(pool)
-        .await?
+/// list, picker and launch resolves an Author out of — each last written on
+/// another device that holds its token with that device's name, which is
+/// where the token's copy is awaited from. `device` is this one's id.
+pub async fn held(pool: &SqlitePool, settings: &Settings, device: &str) -> Result<()> {
+    let records = replicated::live_records::<Authors>(pool).await?;
+
+    let elsewhere = records
+        .iter()
+        .any(|record| record.fields.holds_token && record.written_by != device);
+    let names = match elsewhere {
+        true => crate::profiles::members_by_device(pool).await?,
+        false => Default::default(),
+    };
+
+    let authors = records
         .into_iter()
-        .map(|record| record.fields.author(&record.uuid))
+        .map(|record| {
+            let author = record.fields.author(&record.uuid);
+
+            match record.fields.holds_token && record.written_by != device {
+                true => Recorded::with_token_at(
+                    author,
+                    crate::profiles::whose(&names, &record.written_by).name,
+                ),
+                false => Recorded::of(author),
+            }
+        })
         .collect();
 
     settings.holding_authors(authors);
@@ -195,7 +264,7 @@ async fn writing(
         replicated::rewrite::<Authors>(pool, device, author.id(), &fields).await?
     };
 
-    held(pool, settings).await?;
+    held(pool, settings, device).await?;
 
     Ok(outcome)
 }
@@ -220,7 +289,7 @@ pub async fn removed(
         return Ok(false);
     }
 
-    held(pool, settings).await?;
+    held(pool, settings, device).await?;
 
     let settings = settings.clone();
     let id = id.to_owned();
@@ -451,12 +520,6 @@ mod tests {
         );
 
         assert_eq!(ids(&settings), ["work"]);
-        assert!(
-            settings
-                .config()
-                .one_list()
-                .all(|author| author.id() != "home")
-        );
         assert_eq!(settings.secrets().author_token("home"), None);
         assert_eq!(settings.secrets().author_token("work"), Some("ghp_work"));
 

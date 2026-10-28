@@ -1796,10 +1796,10 @@ fn standing(
     // this device's memory, and the two are refreshed by different news.
     mirroring::refreshing(&state);
 
-    // And the mirror rows of every member's Authors, on the Profiles' schedule
-    // and beside them, so every device draws one list of Authors (ADR-0025) —
-    // see [`mirroring::authors`].
-    mirroring::authors::refreshing(&state);
+    // And every member's Replicated records pulled and merged into this
+    // device's, on the Profiles' schedule and beside them, so every device
+    // holds the cluster's Authors (ADR-0028) — see [`replicating`].
+    replicating::pulling(&state);
 
     // And what this device forwards, on the same channel again: a member's
     // `ports` Nudge is that Conversation's ports read over the link and held on

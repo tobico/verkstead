@@ -18,7 +18,7 @@ Roadmap stage: [01: Records are the cluster's — Authors first](docs/roadmaps/c
 ## Tasks
 
 - [x] 01: Authors are records, here — [details](01-authors-are-records-here.md)
-- [ ] 02: Replicated across the cluster — [details](02-replicated-across-the-cluster.md)
+- [x] 02: Replicated across the cluster — [details](02-replicated-across-the-cluster.md)
 - [ ] 03: Tokens from whoever holds one — [details](03-tokens-from-whoever-holds-one.md)
 - [ ] 04: The Git section without homes — [details](04-the-git-section-without-homes.md)
 - [ ] 05: Removal across devices and Repoint them all — [details](05-removal-across-devices-and-repoint-them-all.md)

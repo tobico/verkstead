@@ -50,7 +50,10 @@ use verkstead_server::peer::joining::Joins;
 use verkstead_server::peer::{self, Members};
 use verkstead_server::platform::{self, Environment, Platform};
 use verkstead_server::remote::Tailscale;
-use verkstead_server::{Routers, open_database, routers_keeping_answering_devices_telling, store};
+use verkstead_server::settings::Settings;
+use verkstead_server::{
+    Routers, open_database, replicating, routers_keeping_answering_devices_telling, store,
+};
 use verkstead_store::{Linking, record_member};
 
 /// The device the work is on, and where every assertion is made: the preflight
@@ -213,16 +216,24 @@ impl Verkstead {
             .expect("the Repo that was just registered")
     }
 
-    /// Write `yaml` as this device's `config.yaml`, which is where its own
-    /// Authors are.
-    fn configured(&self, yaml: &str) {
+    /// Write `yaml` as this device's `config.yaml` and take the Authors in it
+    /// up into the database, as a serve over that file does.
+    async fn configured(&self, yaml: &str) {
         std::fs::write(self.dir.path().join("config.yaml"), yaml).unwrap();
+
+        replicating::authors::taken_up(
+            &self.pool,
+            &Settings::in_data_dir(self.dir.path()),
+            self.device.id(),
+        )
+        .await
+        .unwrap();
     }
 
-    /// Read every member's Authors again and wait until each of `ids` is
-    /// drawn here as a mirror — the refresher's own round, as a membership
-    /// moving starts one.
-    async fn mirrors(&self, ids: &[&str]) {
+    /// Pull every member's Authors again and wait until each of `ids` is on
+    /// the one list here — the puller's own round, as a membership moving
+    /// starts one.
+    async fn holds_authors(&self, ids: &[&str]) {
         self.nudges.announce(Nudge::Devices);
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -230,16 +241,13 @@ impl Verkstead {
         loop {
             let rows: Vec<AuthorEntry> = reading(&self.workbench, "/api/ui/authors").await;
 
-            if ids
-                .iter()
-                .all(|id| rows.iter().any(|row| row.id == *id && row.device.is_some()))
-            {
+            if ids.iter().all(|id| rows.iter().any(|row| row.id == *id)) {
                 return;
             }
 
             assert!(
                 std::time::Instant::now() < deadline,
-                "the mirrors of {ids:?} never arrived: {rows:?}",
+                "the Authors {ids:?} never arrived: {rows:?}",
             );
 
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -663,18 +671,18 @@ async fn a_device_that_is_not_answering_is_unreachable_and_nothing_else() {
     );
 }
 
-/// Two Authors at home on A, which B holds as mirrors: the one list, as two
+/// Two Authors made on A, which B holds as records too: the one list, as two
 /// devices of a cluster each draw it.
 const TWO_AUTHORS: &str = "authors:\n  - id: work\n    display_name: Work\n    name: Ada Lovelace\n    email: ada@work.example\n  - id: home\n    display_name: Home\n    name: Ada Lovelace\n    email: ada@home.example\n";
 
 /// A far Repo under another Author than this one's is named with both, and a
-/// repoint over there clears it — the same Author being the same uuid, a mirror
-/// there and the local one here alike.
+/// repoint over there clears it — the same Author being the same uuid on both
+/// devices.
 #[tokio::test]
 async fn a_repo_under_another_author_over_there_is_named_with_both() {
     let (a, b) = linked_up().await;
-    a.configured(TWO_AUTHORS);
-    b.mirrors(&["work", "home"]).await;
+    a.configured(TWO_AUTHORS).await;
+    b.holds_authors(&["work", "home"]).await;
 
     let origin = "https://github.com/you/widgets.git";
 
@@ -702,7 +710,7 @@ async fn a_repo_under_another_author_over_there_is_named_with_both() {
     assert_eq!(
         a.preflight(conversation, B).await.lacks,
         Vec::new(),
-        "the mirror of Work over there is Work",
+        "Work over there is Work",
     );
 }
 
@@ -712,7 +720,7 @@ async fn a_repo_under_another_author_over_there_is_named_with_both() {
 #[tokio::test]
 async fn a_repo_with_no_match_is_offered_as_its_author() {
     let (a, _b) = linked_up().await;
-    a.configured(TWO_AUTHORS);
+    a.configured(TWO_AUTHORS).await;
 
     let here = a
         .repo("widgets", Some("https://github.com/you/widgets.git"))
@@ -741,8 +749,8 @@ async fn a_repo_with_no_match_is_offered_as_its_author() {
 #[tokio::test]
 async fn a_companion_under_another_author_over_there_is_named_with_both() {
     let (a, b) = linked_up().await;
-    a.configured(TWO_AUTHORS);
-    b.mirrors(&["work", "home"]).await;
+    a.configured(TWO_AUTHORS).await;
+    b.holds_authors(&["work", "home"]).await;
 
     let origin = "https://github.com/you/widgets.git";
     let beside = "https://github.com/you/askance.git";
@@ -780,8 +788,8 @@ async fn a_companion_under_another_author_over_there_is_named_with_both() {
 #[tokio::test]
 async fn a_repo_with_no_author_picked_over_there_is_named() {
     let (a, b) = linked_up().await;
-    a.configured(TWO_AUTHORS);
-    b.configured(TWO_AUTHORS);
+    a.configured(TWO_AUTHORS).await;
+    b.configured(TWO_AUTHORS).await;
 
     let origin = "https://github.com/you/widgets.git";
 

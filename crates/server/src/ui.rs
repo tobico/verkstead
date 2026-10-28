@@ -670,15 +670,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // And taking one Author away, which is a press on the Git section's
         // switcher rather than a key of a save: refused by name while a Repo
         // points at it, the way a Repo's removal is refused under live work.
-        // And the cluster's one list of Authors: this device's own and a mirror
-        // of every member's, marked with its home — what the Git switcher draws,
-        // and what a member reads this device's own off across the link (see
-        // [`crate::mirroring::authors`]). Nothing of a token but whether one is
-        // held, because a member reads it too.
+        // And the cluster's one list of Authors, every device's alike — what
+        // the Git switcher draws (see [`crate::replicating::authors`]).
+        // Nothing of a token but whether this device holds one.
         .route("/api/ui/authors", get(authors))
-        // And one Author edited alone, which is what the Git section sends for
-        // a member's: put to the device it is at home on, as that device's own
-        // edit — see [`crate::mirroring::authors::edited`].
+        // And one Author edited alone, which is what the Git section sends.
         .route("/api/ui/authors/{id}", post(edit_author))
         .route("/api/ui/authors/{id}/remove", post(remove_author))
         // Emptying one language's stores, which is an act rather than a value
@@ -1337,10 +1333,13 @@ async fn remove_repo(State(state): State<AppState>, Path(id): Path<String>) -> H
     }
 }
 
-/// `GET /api/ui/authors` — the one list of Authors: this device's own, then a
-/// mirror of every member's with the device it is at home on.
+/// `GET /api/ui/authors` — the one list of Authors, made on this device or any
+/// other.
 async fn authors(State(state): State<AppState>) -> HttpResponse {
-    match crate::mirroring::authors::listed(&state).await {
+    let settings = state.settings.clone();
+
+    match tokio::task::spawn_blocking(move || crate::replicating::authors::listed(&settings)).await
+    {
         Ok(listed) => Json(listed).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading the Authors failed");
@@ -1352,40 +1351,13 @@ async fn authors(State(state): State<AppState>) -> HttpResponse {
 /// `POST /api/ui/authors/{id}` — rewrite one Author's fields, and set or clear
 /// its token, and nothing else of either file.
 ///
-/// **Reached for a mirror, and relayed home when it is one** (ADR-0025): the
-/// edit is put to the device the Author is at home on, and what comes back is
-/// that device's own word — the token verified there, with its own `gh` — or a
-/// refusal naming the machine that did not take it. See
-/// [`crate::mirroring::authors::edited`]. Arriving at home, it is the half
-/// below: the Author's own entry written over and the token by the settings
-/// save's rules, then tried against GitHub after the writing for its reason.
+/// The Author's record written over and the token by the settings save's
+/// rules, then tried against GitHub after the writing for its reason.
 async fn edit_author(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(edit): Json<AuthorEdit>,
 ) -> HttpResponse {
-    match crate::mirroring::authors::edited(&state, &id, &edit).await {
-        Ok(crate::mirroring::Pressed::Here) => {}
-
-        Ok(crate::mirroring::Pressed::Away(outcome)) => {
-            return Json(outcome).into_response();
-        }
-
-        Ok(crate::mirroring::Pressed::Refused(why)) => {
-            tracing::warn!("an Author was not saved at home: {}", why.saying);
-            return refused(why.status, ApiError::new(why.saying));
-        }
-
-        Err(error) => {
-            tracing::error!(
-                error = ?error,
-                author = id,
-                "reading which device an Author is at home on failed",
-            );
-            return unavailable("The author couldn't be saved.");
-        }
-    }
-
     let settings = state.settings.clone();
     let gh = state.github.clone();
 
@@ -1473,35 +1445,12 @@ async fn edit_author(
 /// Every refusal is a named outcome in the body, the Repo removal's way: the
 /// Repos pointing at it are what the switcher puts in words.
 ///
-/// **Relayed home for a mirror**, checking that device's Repos alone, and
-/// refused naming the machine where it did not take it — see
-/// [`crate::mirroring::authors::removed`].
+/// A removal is a deletion stamp on the Author's record, which every member
+/// merges on the pull this sets going.
 async fn remove_author(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
-    match crate::mirroring::authors::removed(&state, &id).await {
-        Ok(crate::mirroring::Pressed::Here) => {}
-
-        Ok(crate::mirroring::Pressed::Away(outcome)) => {
-            return Json(outcome).into_response();
-        }
-
-        Ok(crate::mirroring::Pressed::Refused(why)) => {
-            tracing::warn!("an Author was not removed at home: {}", why.saying);
-            return refused(why.status, ApiError::new(why.saying));
-        }
-
-        Err(error) => {
-            tracing::error!(
-                error = ?error,
-                author = id,
-                "reading which device an Author is at home on failed",
-            );
-            return unavailable("The author couldn't be removed.");
-        }
-    }
-
     match crate::repos::remove_author(&state.pool, &state.settings, &state.device, &id).await {
         Ok(outcome) => {
-            // Every member's mirror of it goes on the read this sets going.
+            // Every member pulls the deletion stamp on the Nudge.
             if outcome == verkstead_render::AuthorRemoved::Removed {
                 state.nudges.announce(Nudge::Authors);
             }
@@ -6726,7 +6675,7 @@ async fn save_settings(
 
     // This device's Authors as they stood, for telling the cluster afterwards
     // whether the save moved them — see below.
-    let authors_before = crate::mirroring::authors::own(&state.settings);
+    let authors_before = crate::replicating::authors::listed(&state.settings);
 
     // And whether it set or cleared a token, which the rows above cannot show:
     // a rotation leaves an Author holding one, and every member's copy of it is
@@ -7085,10 +7034,11 @@ async fn save_settings(
             // was spoken to, and changes nothing about what was saved.
             saved.tried = crate::mcp::tried(&trying).await;
 
-            // And every member told where the save moved this device's Authors,
-            // which is what has each read them again and redraw its mirrors.
+            // And every member told where the save moved the Authors, which is
+            // what has each pull the records again.
             // Only then: a save about the build cache is no news to anybody.
-            if token_moved || crate::mirroring::authors::own(&state.settings) != authors_before {
+            if token_moved || crate::replicating::authors::listed(&state.settings) != authors_before
+            {
                 state.nudges.announce(Nudge::Authors);
             }
 

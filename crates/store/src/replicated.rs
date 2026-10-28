@@ -34,8 +34,8 @@
 //! as: a rewrite keeps a record's place.
 
 use anyhow::{Context, Result};
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 /// The tables the records live in: the records of every kind, and which kinds
@@ -87,8 +87,10 @@ pub trait Kind {
     type Fields: Serialize + DeserializeOwned + PartialEq + Clone;
 }
 
-/// One record of a kind, as this device holds it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One record of a kind, as this device holds it — and as it crosses to a
+/// member, which is the same record: every device serves its whole table of a
+/// kind, removed records included, and merges what its members serve.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Record<F> {
     pub uuid: String,
     pub updated_at: i64,
@@ -357,6 +359,79 @@ pub async fn remove<K: Kind>(pool: &SqlitePool, device: &str, uuid: &str) -> Res
     Ok(true)
 }
 
+/// Merge what a member served of kind `K` into what this device holds, by
+/// [`arriving_wins`] record by record, in one transaction — and say whether
+/// anything here moved.
+///
+/// **Idempotent**: the same records merged twice move nothing the second time,
+/// so a pull made on a Nudge that was not needed costs a read and nothing
+/// else. A record this device has never held is written down whatever it
+/// carries, a removed one included: the deletion stamp is what tells an edit
+/// that arrives later to stay removed.
+pub async fn merge<K: Kind>(pool: &SqlitePool, arriving: &[Record<K::Fields>]) -> Result<bool> {
+    let mut tx = super::writing(pool, "merging records").await?;
+    let mut moved = false;
+
+    for record in arriving {
+        let held: Option<(i64, Option<i64>, String)> = sqlx::query_as(
+            "SELECT updated_at, deleted_at, written_by FROM replicated
+             WHERE kind = ? AND uuid = ?",
+        )
+        .bind(K::NAME)
+        .bind(&record.uuid)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the {} record {}", K::NAME, record.uuid))?;
+
+        let wins = held
+            .as_ref()
+            .is_none_or(|(updated_at, deleted_at, written_by)| {
+                arriving_wins(
+                    Stamp {
+                        updated_at: *updated_at,
+                        deleted_at: *deleted_at,
+                        written_by,
+                    },
+                    record.stamp(),
+                )
+            });
+
+        if !wins {
+            continue;
+        }
+
+        let body = serde_json::to_string(&record.fields)
+            .with_context(|| format!("writing down the {} record {}", K::NAME, record.uuid))?;
+
+        sqlx::query(
+            "INSERT INTO replicated (kind, uuid, updated_at, deleted_at, written_by, body)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT (kind, uuid) DO UPDATE SET
+                 updated_at = excluded.updated_at,
+                 deleted_at = excluded.deleted_at,
+                 written_by = excluded.written_by,
+                 body = excluded.body",
+        )
+        .bind(K::NAME)
+        .bind(&record.uuid)
+        .bind(record.updated_at)
+        .bind(record.deleted_at)
+        .bind(&record.written_by)
+        .bind(body)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("merging the {} record {}", K::NAME, record.uuid))?;
+
+        moved = true;
+    }
+
+    tx.commit()
+        .await
+        .with_context(|| format!("merging the {} records", K::NAME))?;
+
+    Ok(moved)
+}
+
 /// Whether kind `K` has been taken up already — see [`take_up`].
 pub async fn taken_up<K: Kind>(pool: &SqlitePool) -> Result<bool> {
     let row: Option<(String,)> =
@@ -376,7 +451,9 @@ pub async fn taken_up<K: Kind>(pool: &SqlitePool) -> Result<bool> {
 /// **Once.** What is said here is what says the old place is never read for
 /// the kind again: a record written into it afterwards by hand is somebody
 /// editing a file nothing reads, which the caller is to say. A uuid already
-/// held is left as it is.
+/// held is left as it is, unless what is held is a live record stamped older
+/// than anything, at the epoch — an Author mirror written down as a record,
+/// see [`super::migrations`] — which any real write is to replace.
 pub async fn take_up<K: Kind>(
     pool: &SqlitePool,
     device: &str,
@@ -392,7 +469,11 @@ pub async fn take_up<K: Kind>(
         sqlx::query(
             "INSERT INTO replicated (kind, uuid, updated_at, deleted_at, written_by, body)
              VALUES (?, ?, ?, NULL, ?, ?)
-             ON CONFLICT (kind, uuid) DO NOTHING",
+             ON CONFLICT (kind, uuid) DO UPDATE SET
+                 updated_at = excluded.updated_at,
+                 written_by = excluded.written_by,
+                 body = excluded.body
+             WHERE replicated.deleted_at IS NULL AND replicated.updated_at = 0",
         )
         .bind(K::NAME)
         .bind(uuid)

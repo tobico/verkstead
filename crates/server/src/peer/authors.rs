@@ -5,8 +5,9 @@
 //! every Author at home here, and a Repo there pointed at one commits and
 //! pushes from a copy of its token — held there rather than fetched at the
 //! moment of need, so that a quiet home does not stop a Repo over there. This
-//! is what the copy is written from, and [`crate::mirroring::authors`] is the
-//! end that asks and writes it down as its mirrors refresh.
+//! is what the copy is written from. Nothing asks it while the Authors are
+//! replicated records with no home: the copy is fetched from whoever holds a
+//! token in the stage's next task (ADR-0028).
 //!
 //! **A member's own call rather than the viewer's**, beside
 //! [`super::account`], whose shape it is: what it hands over is a credential,
