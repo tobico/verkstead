@@ -168,10 +168,10 @@ pub use pending_steers::{
 pub use permitted::{forbid_device, permit_device, permitted_devices};
 pub use previews::{Preview, retire_preview, standing_previews, suggest_preview};
 pub use profiles::{
-    Account, AgentType, Channel, Clash, Deleting, Minted, Mirror, Pairing, Picked, Profile,
-    ProfileFacts, Saving, bridge_mirror, create_profile, delete_profile, forget_mirrors_except,
-    forget_mirrors_of_departed, load_profile, profiles, profiles_as_saved, record_mirror,
-    update_profile,
+    Account, AgentType, Binding, Bindings, Channel, Clash, Deleting, Minted, Mirror, Pairing,
+    Picked, Profile, ProfileFacts, ProfileRecord, Profiles, Saving, binding_uuid, bridge_mirror,
+    create_profile, delete_profile, forget_mirrors_except, forget_mirrors_of_departed,
+    load_profile, profiles, profiles_as_saved, record_mirror, update_profile,
 };
 pub use pull_requests::{
     Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup,

@@ -3733,10 +3733,13 @@ the whole of what most accounts are — the one Claude Code login on this machin
 running Fable 5 — and a box that had to be filled in before a save would be a
 word invented to get past it. So the name is optional, and what a name is *for*
 is telling two accounts of one harness apart: **at most one unnamed Profile per
-harness**, and **no two named alike**. Both are rules the store holds rather
-than looks taken in front of a write, and which of the two refused a save is
-read off what was being saved — a Profile with a name can only have hit the
-second, and one without a name only the first.
+harness**, and **no two of one harness named alike** — a Claude and a Codex
+Profile may share a name, the harness's mark telling them apart. Both are
+checked **at the press, against every live Profile** whichever device wrote
+it, and which of the two refused a save is read off what was being saved — a
+Profile with a name can only have hit the second, and one without a name only
+the first. A pair that arrives alike by replication was pressed on two devices
+apart, and is kept and drawn two alike.
 **An unnamed one reads as nothing wherever the harness and the model say
 enough**, which is most of the places a Profile is read: the pairing rows of a
 harness with one account, the second line of the Agent run card, the Brief's
@@ -3748,7 +3751,7 @@ Profile anything falls back to: there is no default Profile, exactly as there is
 no default model. And a session run under one writes no name into its record, so
 a finished run draws as the harness and the model alone — which is how a record
 from before Verkstead wrote the name down already drew.
-**Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a record every device holds under a uuid that every reference to a Profile becomes, with an `updated_at` and a deletion stamp; the account paths become a **binding** of one device, a row per device so the card carries a line apiece, and a device with no binding runs from a copy built from the replicated login. In a cluster, an unnamed Profile is named after its device at the switch, and as its device first links. The `cluster-owned-records` roadmap lands it; until its stage does, the mirror below is how a Profile crosses the cluster.
+**A Profile is a Replicated record** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): its name, its harness, its models and its memory switch, under the uuid every reference to it names, with an `updated_at` and a deletion stamp — so **a removal is a deletion stamp**, kept, and nulls every Pairing that named the uuid on its way. **The account's paths are a binding**, a record of their own per Profile per device, keyed `<uuid>/<device>` and written only by the device it names: this device's binding is what a session here is run as, and a record this device holds no binding of is not one it can run yet. At the switch every device's own Profiles became records under the uuids they already carried, and each device's paths its binding. **Becoming the cluster's**: the records and the bindings replicating, the card carrying a line per device, and a device with no binding running from a copy built from the replicated login; in a cluster, an unnamed Profile is named after its device at the switch, and as its device first links. The `cluster-owned-records` roadmap lands it; until its stage does, the mirror below is how a Profile crosses the cluster.
 **A cluster's Profiles are one list on every device of it.** A device linked to
 another keeps a **mirror** per Profile that other device holds: a row of its own
 `profiles` table carrying what a row is drawn and picked by — the name, the
@@ -3768,8 +3771,8 @@ provisional uuid to the home's in everything that named it, the account mirror
 under the Data Directory included — so every Pairing survives the switch,
 whichever device updates first. A home a release behind cannot be read, which
 is a line on its Devices row naming both releases, and its mirrors stay
-provisional, Pairings and all, until it updates. What a row costs is that the two uniqueness rules above become
-*this device's own rows'*: two machines may each hold a `work`, and each the one
+provisional, Pairings and all, until it updates. A mirror is in neither
+uniqueness rule above: two machines may each hold a `work`, and each the one
 unnamed Claude account, which is what nearly every installation holds.
 **Which machine an account sits on is a fact on the row**, drawn with the mark
 its operating system wears wherever a device is drawn — on the settings card and

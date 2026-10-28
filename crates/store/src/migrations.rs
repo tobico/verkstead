@@ -118,7 +118,147 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     previews_suggested_before_there_were_descriptions(pool).await?;
     profiles_whose_name_was_unique_everywhere(pool).await?;
     author_mirrors_that_are_records_now(pool).await?;
-    profiles_that_were_numbered_here(pool).await
+    profiles_that_were_numbered_here(pool).await?;
+    profiles_that_are_records_now(pool).await
+}
+
+/// Make every Agent Profile of this device's own a **Replicated record**, its
+/// account's paths **this device's binding** of it (ADR-0028), and take the
+/// foreign keys off everything that names one.
+///
+/// **The foreign keys go** because a record is nobody's to cascade from: the
+/// three Pairing columns of a Conversation, a half-written steer's and the
+/// Repo's memory of its last Pairing named `profiles(id)`, and a Profile that
+/// is a record is no row there. The columns keep their uuids — the same ones,
+/// since a record is taken up under the uuid its row carried — so every
+/// Pairing draws the Profile it drew. A column is put beside itself, filled and
+/// put in its place, as the uuid rewrite above did; `repo_pairings`, whose
+/// column cannot be null, is rebuilt beside itself.
+///
+/// **The take-up** is `profiles::take_up`, once — what says it has been is
+/// the facility's own `replicated_taken_up`. The mirrors stay rows of
+/// `profiles`.
+///
+/// Foreign keys off on the one connection, for the reason the rebuilds above
+/// say. Safe to run twice: what says whether there is anything to do is a
+/// foreign key still naming `profiles` and the kind not yet taken up.
+async fn profiles_that_are_records_now(pool: &SqlitePool) -> Result<()> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("making the Profiles records")?;
+
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
+        .await
+        .context("holding the foreign keys off while the Profiles become records")?;
+
+    let made = profiles_made_records(&mut conn).await;
+
+    let restored = sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *conn)
+        .await
+        .context("putting the foreign keys back on");
+
+    made?;
+    restored?;
+
+    Ok(())
+}
+
+/// That rewrite, in one transaction on the connection whose foreign keys are
+/// off.
+async fn profiles_made_records(conn: &mut sqlx::SqliteConnection) -> Result<()> {
+    use sqlx::Connection;
+
+    let mut tx = conn
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .context("making the Profiles records")?;
+
+    for (table, column) in [
+        ("conversations", "grilling_profile_id"),
+        ("conversations", "implementation_profile_id"),
+        ("conversations", "review_profile_id"),
+        ("pending_steers", "profile_id"),
+    ] {
+        let referenced: Option<(i64,)> = sqlx::query_as(&format!(
+            "SELECT 1 FROM pragma_foreign_key_list('{table}')
+             WHERE \"table\" = 'profiles' AND \"from\" = ?"
+        ))
+        .bind(column)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("looking at whether {table}.{column} names profiles(id)"))?;
+
+        if referenced.is_none() {
+            continue;
+        }
+
+        for statement in [
+            format!("ALTER TABLE {table} ADD COLUMN {column}_unkeyed TEXT"),
+            format!("UPDATE {table} SET {column}_unkeyed = {column}"),
+            format!("ALTER TABLE {table} DROP COLUMN {column}"),
+            format!("ALTER TABLE {table} RENAME COLUMN {column}_unkeyed TO {column}"),
+        ] {
+            sqlx::query(&statement)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("taking the foreign key off {table}.{column}"))?;
+        }
+    }
+
+    let referenced: Option<(i64,)> = sqlx::query_as(
+        "SELECT 1 FROM pragma_foreign_key_list('repo_pairings') WHERE \"table\" = 'profiles'",
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .context("looking at whether repo_pairings names profiles(id)")?;
+
+    if referenced.is_some() {
+        for statement in [
+            "CREATE TABLE repo_pairings_unkeyed (
+                 repo_id    INTEGER NOT NULL REFERENCES repos(id),
+                 role       TEXT NOT NULL,
+                 profile_id TEXT NOT NULL,
+                 model      TEXT NOT NULL,
+                 PRIMARY KEY (repo_id, role)
+             ) STRICT",
+            "INSERT INTO repo_pairings_unkeyed (repo_id, role, profile_id, model)
+             SELECT repo_id, role, profile_id, model FROM repo_pairings",
+            "DROP TABLE repo_pairings",
+            "ALTER TABLE repo_pairings_unkeyed RENAME TO repo_pairings",
+        ] {
+            sqlx::query(statement)
+                .execute(&mut *tx)
+                .await
+                .context("taking the foreign key off repo_pairings")?;
+        }
+    }
+
+    let taken_up: Option<(String,)> =
+        sqlx::query_as("SELECT kind FROM replicated_taken_up WHERE kind = 'profiles'")
+            .fetch_optional(&mut *tx)
+            .await
+            .context("reading whether the Profiles have been taken up")?;
+
+    if taken_up.is_none() {
+        super::profiles::take_up(&mut tx).await?;
+    }
+
+    let dangling: (i64,) = sqlx::query_as("SELECT count(*) FROM pragma_foreign_key_check")
+        .fetch_one(&mut *tx)
+        .await
+        .context("checking that nothing was left naming a row that is not there")?;
+
+    if dangling.0 != 0 {
+        bail!(
+            "making the Profiles records left {} rows naming a row that is not there",
+            dangling.0
+        );
+    }
+
+    tx.commit().await.context("making the Profiles records")
 }
 
 /// Name every Agent Profile by a **uuid** rather than by its local integer id,
@@ -414,26 +554,24 @@ async fn renumber_profiles(conn: &mut sqlx::SqliteConnection) -> Result<()> {
     tx.commit().await.context("naming every Profile by a uuid")
 }
 
-/// Say which device this one's own renumbered Profiles were minted on: the
-/// device half of [`super::Profile::minted`], which nothing in [`apply`] can
-/// know.
+/// Say which device this one is, to the Profiles: the device half of
+/// [`super::Profile::minted`], and the device every record and binding taken
+/// up or written before the serve said so was written by — which nothing in
+/// [`apply`] can know. See `profiles::this_device_is`.
 ///
 /// **The same shape as [`stamp_the_births`], and for its reason**: the device
 /// identity is read out of the very pool an open runs on, so the serve calls
 /// this once the identity is issued and before any route is answered.
 ///
-/// One statement, and safe to run twice: a row already stamped is left alone.
+/// Safe to run twice: what is said already is left alone.
 pub async fn stamp_the_profiles(pool: &SqlitePool, device: &str) -> Result<()> {
-    sqlx::query(
-        "UPDATE profiles SET minted_on = ?
-         WHERE minted_id IS NOT NULL AND minted_on IS NULL AND home_device IS NULL",
-    )
-    .bind(device)
-    .execute(pool)
-    .await
-    .context("saying which device the Profiles numbered before their uuids were minted on")?;
+    let mut tx = super::writing(pool, "saying which device the Profiles are on").await?;
 
-    Ok(())
+    super::profiles::this_device_is(&mut tx, device).await?;
+
+    tx.commit()
+        .await
+        .context("saying which device the Profiles are on")
 }
 
 /// Every Profile the switch to uuids renumbered whose integer still has

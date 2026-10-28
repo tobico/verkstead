@@ -2406,10 +2406,12 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         .await
         .context("stamping the Conversations of a database written before there were birth keys")?;
 
-    // And the device this one's own Profiles were minted on, where they were
-    // numbered before they had uuids — see [`store::stamp_the_profiles`]. Here
-    // for the reason the two above are, and before the routes because the
-    // Profile list a member reads carries it.
+    // And which device this is, to the Profiles: the device every record and
+    // binding taken up at the open was written by, and the one this device's
+    // own were minted on where they were numbered before they had uuids — see
+    // [`store::stamp_the_profiles`]. Here for the reason the two above are,
+    // and before the routes because a Profile here is read through this
+    // device's binding of it, and the list a member reads carries the minting.
     store::stamp_the_profiles(&pool, device.id())
         .await
         .context("stamping the Profiles of a database written before they had uuids")?;

@@ -60,7 +60,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS repo_pairings (
              repo_id    INTEGER NOT NULL REFERENCES repos(id),
              role       TEXT NOT NULL,
-             profile_id TEXT NOT NULL REFERENCES profiles(id),
+             profile_id TEXT NOT NULL,
              model      TEXT NOT NULL,
              PRIMARY KEY (repo_id, role)
          ) STRICT",

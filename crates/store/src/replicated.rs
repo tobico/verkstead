@@ -166,7 +166,7 @@ pub fn stamped(now: i64, held: Option<i64>) -> i64 {
 }
 
 /// This device's clock, in the unit the stamps are written in.
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     let nanos = time::OffsetDateTime::now_utc().unix_timestamp_nanos();
 
     i64::try_from(nanos / 1_000_000).unwrap_or(i64::MAX)
@@ -193,6 +193,21 @@ fn record<F: DeserializeOwned>(
 /// Every record of kind `K` this device holds, the removed ones included, in
 /// the order each was first written down here.
 pub async fn records<K: Kind>(pool: &SqlitePool) -> Result<Vec<Record<K::Fields>>> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .with_context(|| format!("reading the {} records", K::NAME))?;
+
+    records_on::<K>(&mut connection).await
+}
+
+/// And the same off a connection already held, which is how a read or a write
+/// that has to see one moment of the table — a Profile's uniqueness checked
+/// against the whole of it, then written — reads it inside its own
+/// transaction.
+pub(crate) async fn records_on<K: Kind>(
+    connection: &mut sqlx::SqliteConnection,
+) -> Result<Vec<Record<K::Fields>>> {
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT uuid, updated_at, deleted_at, written_by, body
          FROM replicated
@@ -200,11 +215,30 @@ pub async fn records<K: Kind>(pool: &SqlitePool) -> Result<Vec<Record<K::Fields>
          ORDER BY rowid",
     )
     .bind(K::NAME)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| format!("reading the {} records", K::NAME))?;
 
     rows.into_iter().map(|row| record(K::NAME, row)).collect()
+}
+
+/// One record of kind `K`, removed or not, off a connection already held.
+pub(crate) async fn record_on<K: Kind>(
+    connection: &mut sqlx::SqliteConnection,
+    uuid: &str,
+) -> Result<Option<Record<K::Fields>>> {
+    let row: Option<Row> = sqlx::query_as(
+        "SELECT uuid, updated_at, deleted_at, written_by, body
+         FROM replicated
+         WHERE kind = ? AND uuid = ?",
+    )
+    .bind(K::NAME)
+    .bind(uuid)
+    .fetch_optional(&mut *connection)
+    .await
+    .with_context(|| format!("reading the {} record {uuid}", K::NAME))?;
+
+    row.map(|row| record(K::NAME, row)).transpose()
 }
 
 /// And the ones of them that have not been removed, which is every list and
@@ -267,20 +301,25 @@ async fn writing<K: Kind>(
 ) -> Result<Written> {
     let mut tx = super::writing(pool, "writing a record").await?;
 
-    let held: Option<Row> = sqlx::query_as(
-        "SELECT uuid, updated_at, deleted_at, written_by, body
-         FROM replicated
-         WHERE kind = ? AND uuid = ?",
-    )
-    .bind(K::NAME)
-    .bind(uuid)
-    .fetch_optional(&mut *tx)
-    .await
-    .with_context(|| format!("reading the {} record {uuid}", K::NAME))?;
+    let written = written_on::<K>(&mut tx, device, uuid, fields, making).await?;
 
-    let held = held
-        .map(|row| record::<K::Fields>(K::NAME, row))
-        .transpose()?;
+    tx.commit()
+        .await
+        .with_context(|| format!("writing the {} record {uuid}", K::NAME))?;
+
+    Ok(written)
+}
+
+/// [`write`] or [`rewrite`], inside a transaction somebody else opened — so
+/// that what decides whether to write, and the write, are one moment.
+pub(crate) async fn written_on<K: Kind>(
+    connection: &mut sqlx::SqliteConnection,
+    device: &str,
+    uuid: &str,
+    fields: &K::Fields,
+    making: bool,
+) -> Result<Written> {
+    let held = record_on::<K>(&mut *connection, uuid).await?;
 
     match &held {
         None if !making => return Ok(Written::Absent),
@@ -305,13 +344,9 @@ async fn writing<K: Kind>(
     .bind(stamped(now(), held.map(|held| held.updated_at)))
     .bind(device)
     .bind(body)
-    .execute(&mut *tx)
+    .execute(&mut *connection)
     .await
     .with_context(|| format!("writing the {} record {uuid}", K::NAME))?;
-
-    tx.commit()
-        .await
-        .with_context(|| format!("writing the {} record {uuid}", K::NAME))?;
 
     Ok(Written::Written)
 }
@@ -325,11 +360,26 @@ async fn writing<K: Kind>(
 pub async fn remove<K: Kind>(pool: &SqlitePool, device: &str, uuid: &str) -> Result<bool> {
     let mut tx = super::writing(pool, "removing a record").await?;
 
+    let removed = removed_on::<K>(&mut tx, device, uuid).await?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("removing the {} record {uuid}", K::NAME))?;
+
+    Ok(removed)
+}
+
+/// [`remove`], inside a transaction somebody else opened.
+pub(crate) async fn removed_on<K: Kind>(
+    connection: &mut sqlx::SqliteConnection,
+    device: &str,
+    uuid: &str,
+) -> Result<bool> {
     let held: Option<(i64, Option<i64>)> =
         sqlx::query_as("SELECT updated_at, deleted_at FROM replicated WHERE kind = ? AND uuid = ?")
             .bind(K::NAME)
             .bind(uuid)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut *connection)
             .await
             .with_context(|| format!("reading the {} record {uuid}", K::NAME))?;
 
@@ -348,13 +398,9 @@ pub async fn remove<K: Kind>(pool: &SqlitePool, device: &str, uuid: &str) -> Res
     .bind(device)
     .bind(K::NAME)
     .bind(uuid)
-    .execute(&mut *tx)
+    .execute(&mut *connection)
     .await
     .with_context(|| format!("removing the {} record {uuid}", K::NAME))?;
-
-    tx.commit()
-        .await
-        .with_context(|| format!("removing the {} record {uuid}", K::NAME))?;
 
     Ok(true)
 }

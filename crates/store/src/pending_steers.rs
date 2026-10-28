@@ -187,7 +187,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              instruction     TEXT,
              follow_up       TEXT,
              investigation   TEXT,
-             profile_id      TEXT REFERENCES profiles(id),
+             profile_id      TEXT,
              model           TEXT,
              interrupt       INTEGER NOT NULL DEFAULT 0
          ) STRICT",

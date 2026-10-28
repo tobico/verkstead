@@ -9,13 +9,15 @@
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
+use verkstead_store::replicated::records;
 use verkstead_store::{
-    Account, AgentType, Chosen, Clash, Deleting, Event, Lifecycle, Mirror, Pairing, PendingForm,
-    PendingPairing, Picked, Profile, ProfileFacts, Saving, bridge_mirror, create_profile,
-    delete_profile, forget_mirrors_except, load_conversation, load_profile, open_database,
-    open_pending_steer, profiles, record_mirror, register_repo, save_pending_steer,
-    set_grilling_pairing, set_implementation_pairing, set_review_pairing, skip_review,
-    start_capture, start_conversation, start_grilling, timeline, update_profile,
+    Account, AgentType, Bindings, Chosen, Clash, Deleting, Event, Lifecycle, Mirror, Pairing,
+    PendingForm, PendingPairing, Picked, Profile, ProfileFacts, Profiles, Saving, binding_uuid,
+    bridge_mirror, create_profile, delete_profile, forget_mirrors_except, load_conversation,
+    load_profile, open_database, open_pending_steer, profiles, record_mirror, register_repo,
+    save_pending_steer, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
+    skip_review, stamp_the_profiles, start_capture, start_conversation, start_grilling, timeline,
+    update_profile,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -142,79 +144,71 @@ async fn a_saved_profile_holds_its_account_and_its_models() {
 }
 
 /// A Profile of a type this binary does not have is a database written by a
-/// newer Verkstead. Refused by the word that is in the column, rather than read
+/// newer Verkstead. Refused by the word that is in the record, rather than read
 /// past as though it were a Claude row with a pair it has not got.
 #[tokio::test]
 async fn a_profile_naming_an_agent_type_this_binary_has_not_got_is_refused_by_name() {
     let (_dir, pool) = fresh_pool().await;
 
-    sqlx::query(
-        "INSERT INTO profiles (id, name, claude_dir, config_file, model, agent_type)
-         VALUES ('0b0e4c1a-5d2f-4e7b-9a3c-6f1d2e3b4a5c', ?, ?, ?, ?, ?)",
+    written_by_hand(
+        &pool,
+        r#"{"name":"work","harness":"gemini","models":["gemini-code"],"memory":true}"#,
+        r#"{"home":"/watched/accounts/work/.gemini"}"#,
     )
-    .bind("work")
-    .bind("")
-    .bind("")
-    .bind("grok-code")
-    .bind("grok")
-    .execute(&pool)
-    .await
-    .unwrap();
+    .await;
 
     let refused = profiles(&pool).await.unwrap_err().to_string();
     assert!(
-        refused.contains("grok"),
+        refused.contains("gemini"),
         "the refusal should name the word it did not know, and said {refused:?}"
     );
+}
+
+/// A record and this device's binding of it written straight into the table,
+/// standing in for a database somebody edited by hand.
+async fn written_by_hand(pool: &SqlitePool, record: &str, binding: &str) {
+    let id = "0b0e4c1a-5d2f-4e7b-9a3c-6f1d2e3b4a5c";
+
+    for (kind, uuid, body) in [
+        ("profiles", id.to_owned(), record),
+        ("profile_bindings", format!("{id}/"), binding),
+    ] {
+        sqlx::query(
+            "INSERT INTO replicated (kind, uuid, updated_at, deleted_at, written_by, body)
+             VALUES (?, ?, 1, NULL, '', ?)",
+        )
+        .bind(kind)
+        .bind(uuid)
+        .bind(body)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
 }
 
 /// And a Profile of a type whose whole account is one home, with no home
 /// recorded, is refused the same way.
 ///
 /// Nothing above the store can write one: a home is put down with the Profile
-/// and taken away with it. So what this catches is a row somebody edited by
+/// and taken away with it. So what this catches is a record somebody edited by
 /// hand — and reading it past as a home of the empty string would be a bind
 /// landing on `/`.
 #[tokio::test]
 async fn a_profile_whose_account_is_a_home_it_has_not_got_is_refused() {
     let (_dir, pool) = fresh_pool().await;
 
-    sqlx::query(
-        "INSERT INTO profiles (id, name, claude_dir, config_file, model, agent_type)
-         VALUES ('0b0e4c1a-5d2f-4e7b-9a3c-6f1d2e3b4a5c', ?, ?, ?, ?, ?)",
+    written_by_hand(
+        &pool,
+        r#"{"name":"work","harness":"codex","models":["gpt-5-codex"],"memory":true}"#,
+        r#"{"claude_dir":"/watched/.claude","config_file":"/watched/.claude.json"}"#,
     )
-    .bind("work")
-    .bind("")
-    .bind("")
-    .bind("gpt-5-codex")
-    .bind("codex")
-    .execute(&pool)
-    .await
-    .unwrap();
+    .await;
 
     let refused = profiles(&pool).await.unwrap_err().to_string();
     assert!(
         refused.contains("home"),
         "the refusal should say what is missing, and said {refused:?}"
     );
-}
-
-/// The table the account of every type after Claude lives in: one home per
-/// Profile, keyed by its id.
-#[tokio::test]
-async fn a_profiles_single_home_directory_has_a_table_of_its_own() {
-    let (_dir, pool) = fresh_pool().await;
-    let profile = saved(&pool, "work").await;
-
-    keep_home(&pool, &profile.id, "/watched/accounts/work").await;
-
-    let home: (String,) = sqlx::query_as("SELECT home FROM profile_homes WHERE profile_id = ?")
-        .bind(profile.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-
-    assert_eq!(home.0, "/watched/accounts/work");
 }
 
 /// A Profile whose account is one home round-trips whole: saved with it, listed
@@ -365,71 +359,17 @@ async fn a_claude_profile_writes_no_home_at_all() {
     assert_eq!(homes(&pool).await, 0);
 }
 
-/// And removing a Profile takes the home with it.
-///
-/// `profile_homes` references `profiles(id)` and foreign keys are enforced, so
-/// a home left behind is not an orphan row but a Profile that cannot be removed
-/// at all — which is the stage that first writes one finding removal broken
-/// rather than finding it arranged.
-#[tokio::test]
-async fn removing_a_profile_takes_the_home_it_kept_its_account_under_with_it() {
-    let (_dir, pool) = fresh_pool().await;
-    let profile = saved(&pool, "work").await;
-
-    keep_home(&pool, &profile.id, "/watched/accounts/work").await;
-
-    assert_eq!(
-        delete_profile(&pool, &profile.id).await.unwrap(),
-        Deleting::Deleted
-    );
-    assert_eq!(
-        homes(&pool).await,
-        0,
-        "the home goes with the Profile that kept its account under it"
-    );
-}
-
-/// And rewriting one replaces it, as it replaces the model list: the account is
-/// the type's shape, so the home a Profile had is the old type's if the type has
-/// changed.
-#[tokio::test]
-async fn rewriting_a_profile_replaces_the_home_its_account_was_under() {
-    let (_dir, pool) = fresh_pool().await;
-    let profile = saved(&pool, "work").await;
-
-    keep_home(&pool, &profile.id, "/watched/accounts/work").await;
-
-    assert_eq!(
-        update_profile(&pool, &profile.id, &facts("work"))
-            .await
-            .unwrap(),
-        Saving::Saved
-    );
-    assert_eq!(
-        homes(&pool).await,
-        0,
-        "a rewrite writes the account whole rather than reconciling it"
-    );
-}
-
-/// A home written straight into the table, standing in for the backend that
-/// will keep its whole account under one: there is no type with a home yet, so
-/// nothing above the store can put a row here.
-async fn keep_home(pool: &SqlitePool, id: &str, home: &str) {
-    sqlx::query("INSERT INTO profile_homes (profile_id, home) VALUES (?, ?)")
-        .bind(id)
-        .bind(home)
-        .execute(pool)
-        .await
-        .expect("the table is there to be written to");
-}
-
-/// And how many the table is holding.
+/// How many homes this device's live bindings hold: one for every Profile
+/// whose account is one.
 async fn homes(pool: &SqlitePool) -> i64 {
-    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM profile_homes")
-        .fetch_one(pool)
-        .await
-        .unwrap();
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM replicated
+         WHERE kind = 'profile_bindings' AND deleted_at IS NULL
+           AND json_extract(body, '$.home') IS NOT NULL",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
 
     count
 }
@@ -483,7 +423,7 @@ async fn rewriting_a_profile_replaces_its_list_rather_than_adding_to_it() {
 /// Claude account it always was, with nothing for the human to re-enter.
 #[tokio::test]
 async fn a_profile_written_before_the_list_reads_its_old_model_as_its_only_one() {
-    let (_dir, pool) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
 
     sqlx::query(
         "INSERT INTO profiles (id, name, claude_dir, config_file, model, agent_type)
@@ -497,6 +437,19 @@ async fn a_profile_written_before_the_list_reads_its_old_model_as_its_only_one()
     .execute(&pool)
     .await
     .unwrap();
+
+    // Kept where Profiles were kept before they were records, and taken up as
+    // the database is next opened.
+    sqlx::query("DELETE FROM replicated_taken_up WHERE kind = 'profiles'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
 
     let listed = profiles(&pool).await.unwrap();
     assert_eq!(listed[0].models, ["claude-opus-5"]);
@@ -620,6 +573,44 @@ async fn a_name_another_profile_already_has_is_refused() {
         Err(Clash::NameTaken)
     );
     assert_eq!(profiles(&pool).await.unwrap().len(), 1);
+}
+
+/// Both rules are per harness: a Codex Profile named like a Claude one is a
+/// row of its own harness, told apart by the harness's mark in a picker — and
+/// a rename onto a name only another harness holds goes through too.
+#[tokio::test]
+async fn a_name_another_harnesss_profile_has_is_saved() {
+    let (_dir, pool) = fresh_pool().await;
+    saved(&pool, "work").await;
+
+    let theirs = create_profile(&pool, &facts_for("work", codex("work")))
+        .await
+        .unwrap()
+        .expect("a Codex Profile is in no Claude Profile's way");
+
+    assert_eq!(profiles(&pool).await.unwrap().len(), 2);
+
+    assert_eq!(
+        create_profile(&pool, &facts_for("work", codex("second")))
+            .await
+            .unwrap(),
+        Err(Clash::NameTaken),
+        "and two of one harness named alike are still refused",
+    );
+
+    let elsewhere = create_profile(&pool, &facts_for("elsewhere", codex("elsewhere")))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        update_profile(&pool, &elsewhere.id, &facts_for("work", grok("elsewhere")))
+            .await
+            .unwrap(),
+        Saving::Saved,
+        "a Grok Profile may be called what a Claude and a Codex one are",
+    );
+    assert_ne!(theirs.id, elsewhere.id);
 }
 
 #[tokio::test]
@@ -784,11 +775,121 @@ async fn a_profile_nobody_is_running_under_is_removed() {
         Deleting::Deleted
     );
     assert!(profiles(&pool).await.unwrap().is_empty());
+    assert_eq!(load_profile(&pool, &profile.id).await.unwrap(), None);
+
+    // A deletion stamp on the record and on this device's binding, both kept:
+    // the stamp is what every other device is to learn from it.
+    let removed = records::<Profiles>(&pool).await.unwrap();
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0].uuid, profile.id);
+    assert!(
+        removed[0].removed(),
+        "the record carries its deletion stamp"
+    );
+    assert_eq!(removed[0].fields.name.as_deref(), Some("work"));
+
+    let bindings = records::<Bindings>(&pool).await.unwrap();
+    assert_eq!(bindings.len(), 1);
+    assert!(bindings[0].removed(), "and the binding goes with it");
 
     assert_eq!(
         delete_profile(&pool, &profile.id).await.unwrap(),
         Deleting::NoSuchProfile
     );
+    assert_eq!(
+        update_profile(&pool, &profile.id, &facts("work"))
+            .await
+            .unwrap(),
+        Saving::NoSuchProfile,
+        "a removal is final",
+    );
+
+    saved(&pool, "work").await;
+}
+
+/// A Profile is a record and this device's binding of it: the account's paths
+/// are the binding's, kept under `<uuid>/<device>` once the serve has said
+/// which device this is — and moved with it when the id it goes by changes.
+#[tokio::test]
+async fn a_profile_is_a_record_and_this_devices_binding() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let before = saved(&pool, "before").await;
+
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    let after = saved(&pool, "after").await;
+
+    let written = records::<Profiles>(&pool).await.unwrap();
+    assert_eq!(
+        written
+            .iter()
+            .map(|record| (record.uuid.as_str(), record.written_by.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (before.id.as_str(), THIS_DEVICE),
+            (after.id.as_str(), THIS_DEVICE)
+        ],
+        "a record written before the serve said which device this is is said to be its",
+    );
+    assert_eq!(written[1].fields.harness, "claude");
+    assert_eq!(written[1].fields.models, ["claude-opus-5"]);
+
+    let bindings = records::<Bindings>(&pool).await.unwrap();
+    assert_eq!(
+        bindings
+            .iter()
+            .map(|binding| binding.uuid.clone())
+            .collect::<Vec<_>>(),
+        [
+            binding_uuid(&before.id, THIS_DEVICE),
+            binding_uuid(&after.id, THIS_DEVICE)
+        ],
+    );
+    assert_eq!(
+        bindings[1].fields.claude_dir.as_deref(),
+        Some("/watched/accounts/after/.claude")
+    );
+
+    stamp_the_profiles(&pool, "ff00ee11dd22cc33bb44aa5566778899")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        records::<Bindings>(&pool).await.unwrap()[0].uuid,
+        binding_uuid(&before.id, "ff00ee11dd22cc33bb44aa5566778899"),
+        "a binding is where this machine keeps the account, whatever id it goes by",
+    );
+    assert_eq!(
+        load_profile(&pool, &before.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .account,
+        claude("before"),
+    );
+}
+
+/// A record this device holds no binding of is no Profile it can run, and is
+/// not listed here.
+#[tokio::test]
+async fn a_record_bound_on_another_device_alone_is_not_listed() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    let profile = saved(&pool, "work").await;
+
+    sqlx::query("UPDATE replicated SET uuid = ? WHERE kind = 'profile_bindings'")
+        .bind(binding_uuid(
+            &profile.id,
+            "ff00ee11dd22cc33bb44aa5566778899",
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert!(profiles(&pool).await.unwrap().is_empty());
+    assert_eq!(load_profile(&pool, &profile.id).await.unwrap(), None);
 }
 
 /// Taken away rather than refused, and the Conversation that had chosen it is
@@ -1210,8 +1311,8 @@ async fn a_removal_leaves_no_row_anywhere_that_names_the_profile() {
     }
 }
 
-/// Every table-and-column pair the schema says points at `profiles`, asked of
-/// SQLite rather than written down here.
+/// Every table-and-column pair the schema has naming a Profile, asked of
+/// SQLite rather than written down here: every column called for one.
 async fn names_a_profile(pool: &SqlitePool) -> Vec<(String, String)> {
     let tables: Vec<(String,)> = sqlx::query_as(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
@@ -1223,18 +1324,20 @@ async fn names_a_profile(pool: &SqlitePool) -> Vec<(String, String)> {
     let mut naming = Vec::new();
 
     for (table,) in tables {
-        let keys: Vec<(String, String)> = sqlx::query_as(&format!(
-            "SELECT \"table\", \"from\" FROM pragma_foreign_key_list('{table}')"
+        // A mirror's own two tables, which a record has no row in, and the
+        // recorded steers, which keep the uuid of what was picked for good.
+        if ["profile_models", "profile_homes", "steers"].contains(&table.as_str()) {
+            continue;
+        }
+
+        let columns: Vec<(String,)> = sqlx::query_as(&format!(
+            "SELECT name FROM pragma_table_info('{table}') WHERE name LIKE '%profile_id'"
         ))
         .fetch_all(pool)
         .await
         .unwrap();
 
-        for (points_at, column) in keys {
-            if points_at == "profiles" {
-                naming.push((table.clone(), column));
-            }
-        }
+        naming.extend(columns.into_iter().map(|(column,)| (table.clone(), column)));
     }
 
     naming.sort();

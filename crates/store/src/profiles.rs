@@ -12,14 +12,13 @@
 //! There is no default and no preferred entry — the list only says what is
 //! available, and every pick made from it is explicit.
 //!
-//! They live in a table of their own, `profile_models`, hung off `profiles` the
-//! way the directions are hung off the conversations: there was no migration
-//! machinery here when the list arrived, so it came as a new table rather than as
-//! a column added to an old one. There is machinery now — see
-//! [`super::migrations`] — and it is how [`Profile::memory`] became a column
-//! instead. The old `model` column stays where it is, and a Profile written
-//! before the list existed is read as the one entry that column holds — which is
-//! what carries every saved Profile over with nothing for the human to re-enter.
+//! **A Profile is a Replicated record** (ADR-0028) — see [`Profiles`]: its
+//! name, its harness, its models and its memory switch, under a uuid that is
+//! the same on every device and that everything naming a Profile names — a
+//! Pairing, a Repo's memory of what it was last grilled with, a steer and
+//! every Conversation. **Its account is a binding**, one per device — see
+//! [`Bindings`]: this device's is what a session here is run as, and what
+//! [`Profile::account`] reads.
 //!
 //! An account's paths are stored resolved, as a Repo's is and for the same
 //! reason: whoever saved the Profile had `..` and every symlink taken out of
@@ -29,33 +28,28 @@
 //!
 //! A Profile's name is optional. A name is what tells two accounts of one
 //! harness apart, and a harness with one account has nothing to tell apart — so
-//! the column is nullable and uniqueness is two rules rather than one: at most
-//! one unnamed Profile per harness, and no two named alike. Both are indexes,
-//! so both refuse a write rather than being looked up in front of one.
+//! uniqueness is two rules rather than one, both per harness: at most one
+//! unnamed Profile of a harness, and no two of one harness named alike. Both are
+//! checked at the press against every live record — see [`clash`].
 //!
-//! **A row may be a member's rather than this device's own**, and that is the
-//! whole of what a **mirror** is: the same columns, marked with the device the
-//! Profile is at home on (ADR-0020, *Shared Profiles*), and held under the uuid
-//! that device knows it by. **A Profile is named by its uuid everywhere**
-//! (ADR-0028): a pairing, a Repo's memory of what it was last grilled with, a
-//! steer and every Conversation hold one, and one Profile is one uuid on every
-//! device that holds it. What it costs is that the two uniqueness rules become
-//! this device's own rows', which is what the partial indexes in
-//! [`apply_schema`] are; what writes one is [`record_mirror`], and the account
-//! paths on it are the home machine's and belong to no filesystem here.
-//!
-//! The agent type is a column, and it is what says which shape a row's account
-//! is written in — the launch line's flags and the asking channel are keyed on
-//! it. A second backend slots in beside `claude` rather than having to be
-//! migrated in underneath it: it adds an arm to [`Account`] and keeps its home
-//! in `profile_homes`, which is a table hung off `profiles` for the reason
-//! `profile_models` is one.
+//! **A mirror is a member's Profile held as a row of `profiles`**, which is
+//! what is left of where Profiles were kept before they were records: the
+//! columns a Profile was kept in, marked with the device it is at home on
+//! (ADR-0020, *Shared Profiles*), and held under the uuid that device knows it
+//! by. What writes one is [`record_mirror`], and the account paths on it are the
+//! home machine's and belong to no filesystem here. Its models hang off it in
+//! `profile_models` and its home, for a harness that keeps one, in
+//! `profile_homes`; a row written before the list existed reads as the one
+//! model its old `model` column holds.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+
+use super::replicated::{self, Kind};
 
 /// Which coding agent a Profile runs.
 ///
@@ -243,8 +237,8 @@ pub struct Profile {
 
     /// Where this Profile is at home, where that is not this device.
     ///
-    /// `None` is one of this device's own, which is every Profile there was
-    /// before a cluster could share them. `Some` is a **mirror**: a row written
+    /// `None` is a record, read through this device's binding of it — see
+    /// [`Profiles`]. `Some` is a **mirror**: a row written
     /// down from what a member said, carrying what that member's row is drawn
     /// and picked by and nothing of this device's own. See [`Mirror`].
     pub mirror: Option<Mirror>,
@@ -466,20 +460,181 @@ pub enum Deleting {
     NoSuchProfile,
 }
 
-/// The tables the Profiles live in.
+/// The Agent Profiles, as a kind of **Replicated record** (ADR-0028): the
+/// Profile as the cluster holds it, the same uuid on every device.
 ///
-/// **Both uniqueness rules are about this device's own rows**, which is what
-/// lets a mirror sit in this table at all: a member's Profile is written down
-/// here as an ordinary row marked with the device it is at home on, and two
-/// machines each keeping an account called `work` — or each keeping the one
-/// unnamed Claude account, which is what nearly every installation holds — are
-/// two rows this table has to take. So each rule is a partial index over the
-/// rows with no home device on them, and the mirrors are held apart by a rule of
-/// their own: one row per Profile per device it came from.
+/// Declared here rather than by the server, as the Authors are, because what a
+/// Profile is is the store's to say — a Pairing, a steer and a Conversation's
+/// three roles are read into Profiles inside the store's own transactions.
+pub struct Profiles;
+
+impl Kind for Profiles {
+    const NAME: &'static str = "profiles";
+    type Fields = ProfileRecord;
+}
+
+/// What a Profile's record holds: everything about it but where its account
+/// is, which is each device's own — see [`Binding`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRecord {
+    /// What the human calls it, where they have called it anything — see
+    /// [`Profile::name`].
+    pub name: Option<String>,
+
+    /// The harness it runs, in [`AgentType::word`]'s spelling: the shape every
+    /// device's binding of it is in.
+    pub harness: String,
+
+    /// The models it can run a session on, in the order they were written.
+    pub models: Vec<String>,
+
+    /// Whether a session under it shares the account's memory store.
+    pub memory: bool,
+
+    /// The **Device Id** it was minted on, for one numbered before Profiles
+    /// had uuids — see [`Profile::minted`]. Arrives empty at the switch, which
+    /// is made before this device knows its own id, and is said at the serve
+    /// — see [`super::stamp_the_profiles`].
+    #[serde(default)]
+    pub minted_on: Option<String>,
+
+    /// And the integer id it had there.
+    #[serde(default)]
+    pub minted_id: Option<i64>,
+}
+
+impl ProfileRecord {
+    /// The record a save of `facts` writes, keeping where `held` was minted.
+    fn of(facts: &ProfileFacts, held: Option<&ProfileRecord>) -> Self {
+        Self {
+            name: facts.name.clone(),
+            harness: facts.account.agent_type().word().to_owned(),
+            models: facts.models.clone(),
+            memory: facts.memory,
+            minted_on: held.and_then(|held| held.minted_on.clone()),
+            minted_id: held.and_then(|held| held.minted_id),
+        }
+    }
+}
+
+/// The **bindings**: where a device keeps the account of a Profile, one per
+/// Profile per device, as a kind of record of its own.
 ///
-/// Which is why `name` is not `UNIQUE` on the column any more. A column
-/// constraint cannot be made partial, and SQLite cannot drop one in place — so
-/// the table is made over for it, in [`super::migrations`].
+/// **Keyed `<profile uuid>/<device id>`** — see [`binding_uuid`] — because the
+/// facility keys a record by its kind and uuid alone, and a binding is one of
+/// a pair. Only the device it names ever writes it, so two devices never write
+/// one binding and the merge rule has nothing to decide between them.
+pub struct Bindings;
+
+impl Kind for Bindings {
+    const NAME: &'static str = "profile_bindings";
+    type Fields = Binding;
+}
+
+/// One device's binding of a Profile: the account's paths there, resolved, in
+/// the shape its harness keeps one — Claude's pair, or the one home every
+/// harness after it keeps. See [`Account`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Binding {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_dir: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_file: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<String>,
+}
+
+impl Binding {
+    /// The binding `account` is written down as.
+    fn of(account: &Account) -> Result<Self> {
+        Ok(match account {
+            Account::Claude {
+                claude_dir,
+                config_file,
+            } => Self {
+                claude_dir: Some(text(claude_dir)?.to_owned()),
+                config_file: Some(text(config_file)?.to_owned()),
+                home: None,
+            },
+            Account::Codex { home } | Account::Grok { home } | Account::OpenCode { home } => Self {
+                claude_dir: None,
+                config_file: None,
+                home: Some(text(home)?.to_owned()),
+            },
+        })
+    }
+
+    /// And the account it is, for a Profile of `harness` — refused where it is
+    /// not of that harness's shape, which is a record somebody edited by hand:
+    /// an account of nowhere is a bind that would land on `/`.
+    fn account(&self, harness: AgentType, id: &str) -> Result<Account> {
+        let missing = |what| {
+            anyhow!(
+                "Profile {id} runs {} and has no {what} bound here to run it under",
+                harness.word()
+            )
+        };
+
+        let home = || {
+            self.home
+                .as_deref()
+                .map(PathBuf::from)
+                .ok_or_else(|| missing("home"))
+        };
+
+        Ok(match harness {
+            AgentType::Claude => match (&self.claude_dir, &self.config_file) {
+                (Some(claude_dir), Some(config_file)) => Account::Claude {
+                    claude_dir: PathBuf::from(claude_dir),
+                    config_file: PathBuf::from(config_file),
+                },
+                _ => return Err(missing("pair")),
+            },
+            AgentType::Codex => Account::Codex { home: home()? },
+            AgentType::Grok => Account::Grok { home: home()? },
+            AgentType::OpenCode => Account::OpenCode { home: home()? },
+        })
+    }
+}
+
+/// The uuid `device`'s binding of the Profile `profile` is kept under.
+pub fn binding_uuid(profile: &str, device: &str) -> String {
+    format!("{profile}/{device}")
+}
+
+/// The Device Id of this device, as the serve last said it — see
+/// [`super::stamp_the_profiles`] — or the empty string where it has not said
+/// one yet.
+///
+/// **The empty string is a device too**: a record or a binding written before
+/// the serve has said which device this is — the switch itself, made as the
+/// database is opened, and a database a suite fills before serving it — is
+/// written by it, and the serve says the real id over every one of them.
+pub(crate) async fn here(connection: &mut sqlx::SqliteConnection) -> Result<String> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT device FROM this_device")
+        .fetch_optional(&mut *connection)
+        .await
+        .context("reading which device this is")?;
+
+    Ok(row.map(|(device,)| device).unwrap_or_default())
+}
+
+/// The tables the Profiles live in, beside the records.
+///
+/// **A Profile is a record** — see [`Profiles`] and [`Bindings`] — and
+/// `profiles` is what is left of where they were kept before: the **mirrors**
+/// of members' Profiles, each an ordinary row marked with the device it is at
+/// home on, and — on a database not yet opened by this release — this
+/// device's own rows, which the switch takes up into records as it is opened
+/// (see [`super::migrations`]). The two partial indexes over rows with no home
+/// device are the uniqueness rules as they were kept before, over rows the
+/// switch leaves none of; the rules are checked at the press now, against the
+/// whole table of records — see [`clash`].
+///
+/// And `this_device`, which says which Device Id this database is the
+/// device of — see [`here`].
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS profiles (
@@ -503,6 +658,17 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 
     mirror_columns(pool).await?;
     home_login_column(pool).await?;
+
+    // Which device this is, said by the serve — see [`here`]. One row at most.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS this_device (
+             one    INTEGER PRIMARY KEY CHECK (one = 1),
+             device TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the this_device table")?;
 
     // The rule the column's own `UNIQUE` carried: no two Profiles of this
     // device's own called the same thing. Over the local rows alone now — what a
@@ -670,49 +836,45 @@ async fn added(pool: &SqlitePool, column: &str, kind: &str) -> Result<()> {
 /// Record a Profile, which is expected to have been checked already: that its
 /// pair exists and is of its harness's shape is decided above the store.
 ///
-/// The [`Clash`] is which of the two uniqueness rules turned it away, and it is
-/// read off what was being saved rather than out of the index: a row with a name
-/// can only have hit the unique name, and a row without one can only have hit
-/// the partial index over the harnesses, which is the only index a null name is
-/// in. So the index is still what refuses — nothing is looked up in front of the
-/// write — and the sentence to say about it needs no second query.
+/// **A record and this device's binding**, written in one transaction: the
+/// name, the harness, the models and the memory switch are the record, which
+/// is the cluster's; the account's paths are this device's binding of it.
 ///
-/// Those two are the whole of what an insert here can conflict on. The id is a
-/// uuid minted in the statement itself — see [`MINTED_UUID`] — so the primary
-/// key is not one, and the mirrors' index is over rows this never writes.
+/// The [`Clash`] is which of the two uniqueness rules turned it away, checked
+/// at the press against **every live record of the table** — see [`clash`] —
+/// rather than by an index: a record that arrived from a member is in the
+/// table beside this device's own, and a pair that arrived alike is kept.
+///
+/// The uuid is minted in a statement — see [`MINTED_UUID`] — the store having
+/// no generator of its own.
 pub async fn create_profile(
     pool: &SqlitePool,
     facts: &ProfileFacts,
 ) -> Result<Result<Profile, Clash>> {
     let mut tx = super::writing(pool, "saving a Profile").await?;
 
-    let (claude_dir, config_file) = pair(&facts.account)?;
+    if let Some(clash) = clash(&mut tx, facts, None).await? {
+        return Ok(Err(clash));
+    }
 
-    let row: Option<(String,)> = sqlx::query_as(&format!(
-        "INSERT INTO profiles (id, name, claude_dir, config_file, model, agent_type, memory)
-         VALUES ({MINTED_UUID}, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT DO NOTHING
-         RETURNING id",
-    ))
-    .bind(&facts.name)
-    .bind(claude_dir)
-    .bind(config_file)
-    .bind(legacy_model(facts))
-    .bind(facts.account.agent_type().word())
-    .bind(facts.memory)
-    .fetch_optional(&mut *tx)
-    .await
-    .with_context(|| format!("saving the Profile {:?}", facts.name))?;
+    let (id,): (String,) = sqlx::query_as(&format!("SELECT {MINTED_UUID}"))
+        .fetch_one(&mut *tx)
+        .await
+        .context("minting a uuid for a new Profile")?;
 
-    let Some((id,)) = row else {
-        return Ok(Err(match facts.name {
-            Some(_) => Clash::NameTaken,
-            None => Clash::DefaultTaken,
-        }));
-    };
+    let here = here(&mut tx).await?;
 
-    write_models(&mut tx, &id, &facts.models).await?;
-    write_home(&mut tx, &id, &facts.account).await?;
+    replicated::written_on::<Profiles>(&mut tx, &here, &id, &ProfileRecord::of(facts, None), true)
+        .await?;
+
+    replicated::written_on::<Bindings>(
+        &mut tx,
+        &here,
+        &binding_uuid(&id, &here),
+        &Binding::of(&facts.account)?,
+        true,
+    )
+    .await?;
 
     tx.commit()
         .await
@@ -725,12 +887,42 @@ pub async fn create_profile(
         models: facts.models.clone(),
         memory: facts.memory,
 
-        // A Profile saved here is this device's own. What writes a mirror is
-        // [`record_mirror`], which is the other way a row arrives in this table.
+        // A Profile saved here is a record. What writes a mirror is
+        // [`record_mirror`], which is the other way a Profile arrives.
         mirror: None,
 
         // And made since the uuids, so it was never numbered anything else.
         minted: None,
+    }))
+}
+
+/// Which of the two uniqueness rules `facts` would break, against every live
+/// record of the table but `except`'s — or none.
+///
+/// **Per harness, both of them** (ADR-0028): at most one unnamed Profile of a
+/// harness, and no two of one harness named alike. A Claude and a Codex
+/// Profile may share a name, the harness's mark telling them apart in a
+/// picker. Every live record is asked, whichever device wrote it, because a
+/// picker draws them all as one list; a removed one is in nobody's way.
+///
+/// A mirror is in neither rule: it is a member's Profile, drawn with the
+/// device it is at home on.
+async fn clash(
+    connection: &mut sqlx::SqliteConnection,
+    facts: &ProfileFacts,
+    except: Option<&str>,
+) -> Result<Option<Clash>> {
+    let harness = facts.account.agent_type().word();
+
+    let taken = replicated::records_on::<Profiles>(connection)
+        .await?
+        .into_iter()
+        .filter(|record| !record.removed() && Some(record.uuid.as_str()) != except)
+        .any(|record| record.fields.harness == harness && record.fields.name == facts.name);
+
+    Ok(taken.then_some(match facts.name {
+        Some(_) => Clash::NameTaken,
+        None => Clash::DefaultTaken,
     }))
 }
 
@@ -751,85 +943,49 @@ pub(crate) const MINTED_UUID: &str = "(lower(hex(randomblob(4))) || '-' || \
 
 /// Rewrite a Profile, whole: everything about one is the human's to change, and
 /// nothing about it is an artifact that could have been built from it yet.
+///
+/// The record and this device's binding, each written only where it moved —
+/// see [`replicated::Written::Unchanged`]. Where it was minted is kept: it is
+/// a fact about the Profile, not about the form.
+///
+/// A mirror is not rewritten here: an edit of one is put to its home.
 pub async fn update_profile(pool: &SqlitePool, id: &str, facts: &ProfileFacts) -> Result<Saving> {
     let mut tx = super::writing(pool, "rewriting a Profile").await?;
 
-    // What it is being made may be another Profile's already — its name, or the
-    // one unnamed row its harness is allowed. Asked as its own statement rather
-    // than caught off the update, because an update that changed nothing and an
-    // update that hit an index are two different sentences and `rows_affected`
-    // cannot tell them apart.
-    //
-    // One query per rule, because only one of them is ever asked: a rewrite with
-    // a name is in the unique name and nowhere else, and one without is in the
-    // partial index over the harnesses and nowhere else.
-    //
-    // This device's own rows either way, which is what the two indexes are over:
-    // a mirror called `work` is a member's account and says nothing about what
-    // this device may call one of its own.
-    let clash: Option<(String,)> = match &facts.name {
-        Some(name) => sqlx::query_as(
-            "SELECT id FROM profiles WHERE name = ? AND home_device IS NULL AND id <> ?",
-        )
-        .bind(name)
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .with_context(|| format!("looking for another Profile called {name:?}"))?,
-
-        None => sqlx::query_as(
-            "SELECT id FROM profiles
-             WHERE name IS NULL AND agent_type = ? AND home_device IS NULL AND id <> ?",
-        )
-        .bind(facts.account.agent_type().word())
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .context("looking for another Profile of that harness that nobody named")?,
+    let Some(held) = replicated::record_on::<Profiles>(&mut tx, id).await? else {
+        return Ok(Saving::NoSuchProfile);
     };
 
-    if clash.is_some() {
-        return Ok(match facts.name {
-            Some(_) => Saving::NameTaken,
-            None => Saving::DefaultTaken,
-        });
-    }
-
-    let (claude_dir, config_file) = pair(&facts.account)?;
-
-    let changed = sqlx::query(
-        "UPDATE profiles
-         SET name = ?, claude_dir = ?, config_file = ?, model = ?, agent_type = ?,
-             memory = ?
-         WHERE id = ?",
-    )
-    .bind(&facts.name)
-    .bind(claude_dir)
-    .bind(config_file)
-    .bind(legacy_model(facts))
-    .bind(facts.account.agent_type().word())
-    .bind(facts.memory)
-    .bind(id)
-    .execute(&mut *tx)
-    .await
-    .with_context(|| format!("rewriting Profile {id}"))?
-    .rows_affected();
-
-    if changed == 0 {
+    if held.removed() {
         return Ok(Saving::NoSuchProfile);
     }
 
-    // The list is replaced rather than reconciled: it is a handful of lines the
-    // human retyped, and which of them happen to be the same lines as before is
-    // not a fact anything holds on to.
-    forget_models(&mut tx, id).await?;
-    write_models(&mut tx, id, &facts.models).await?;
+    if let Some(clash) = clash(&mut tx, facts, Some(id)).await? {
+        return Ok(match clash {
+            Clash::NameTaken => Saving::NameTaken,
+            Clash::DefaultTaken => Saving::DefaultTaken,
+        });
+    }
 
-    // And the account with them: what a Profile's account is, is its type's
-    // shape, so a rewrite that changed the type would otherwise leave the old
-    // type's home sitting behind it.
-    forget_home(&mut tx, id).await?;
-    write_home(&mut tx, id, &facts.account).await?;
+    let here = here(&mut tx).await?;
+
+    replicated::written_on::<Profiles>(
+        &mut tx,
+        &here,
+        id,
+        &ProfileRecord::of(facts, Some(&held.fields)),
+        false,
+    )
+    .await?;
+
+    replicated::written_on::<Bindings>(
+        &mut tx,
+        &here,
+        &binding_uuid(id, &here),
+        &Binding::of(&facts.account)?,
+        true,
+    )
+    .await?;
 
     tx.commit()
         .await
@@ -840,6 +996,9 @@ pub async fn update_profile(pool: &SqlitePool, id: &str, facts: &ProfileFacts) -
 
 /// Remove a Profile, taking it out of everything that named it.
 ///
+/// **A deletion stamp** on the record and on this device's binding of it,
+/// both kept: the stamp is what every other device is to learn from it.
+///
 /// **Always possible.** A Conversation that had chosen it used to stand in the
 /// way; now its choice is nulled out and the removal goes through. What that
 /// costs is a session that starts nothing the next time that Conversation is
@@ -848,7 +1007,8 @@ pub async fn update_profile(pool: &SqlitePool, id: &str, facts: &ProfileFacts) -
 /// refusal that leaves them unable to finish with it at all.
 ///
 /// It costs a session already running nothing: one that has launched holds the
-/// account it launched under, and nothing re-reads this row to keep it going.
+/// account it launched under, and nothing re-reads this record to keep it
+/// going.
 ///
 /// Both halves of every Pairing that named it go, not the Profile half alone: a
 /// Pairing is an account and a model chosen together, and a role left holding
@@ -861,29 +1021,26 @@ pub async fn update_profile(pool: &SqlitePool, id: &str, facts: &ProfileFacts) -
 ///
 /// What is deliberately left alone is the record of what has already run:
 /// [`super::session_pairings`] keeps the Profile's *name* rather than its id, so
-/// every session ever launched under it goes on saying so.
+/// every session ever launched under it goes on saying so, and a recorded
+/// steer keeps the uuid.
 pub async fn delete_profile(pool: &SqlitePool, id: &str) -> Result<Deleting> {
     let mut tx = super::writing(pool, "removing a Profile").await?;
 
-    forget_pairings(&mut tx, id).await?;
-    forget_models(&mut tx, id).await?;
-    forget_home(&mut tx, id).await?;
+    let here = here(&mut tx).await?;
 
-    let removed = sqlx::query("DELETE FROM profiles WHERE id = ?")
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("removing Profile {id}"))?
-        .rows_affected();
+    if !replicated::removed_on::<Profiles>(&mut tx, &here, id).await? {
+        return Ok(Deleting::NoSuchProfile);
+    }
+
+    replicated::removed_on::<Bindings>(&mut tx, &here, &binding_uuid(id, &here)).await?;
+
+    forget_pairings(&mut tx, id).await?;
 
     tx.commit()
         .await
         .with_context(|| format!("removing Profile {id}"))?;
 
-    Ok(match removed {
-        0 => Deleting::NoSuchProfile,
-        _ => Deleting::Deleted,
-    })
+    Ok(Deleting::Deleted)
 }
 
 /// Write down what a member said about one of its Profiles: the **mirror** row
@@ -902,12 +1059,12 @@ pub async fn delete_profile(pool: &SqlitePool, id: &str) -> Result<Deleting> {
 /// Profile *is*, and what a session away from home is actually given is another
 /// stage's.
 ///
-/// No [`Clash`] can come back. The two uniqueness rules are over this device's
-/// own rows, and a mirror is in neither — see [`apply_schema`] — so a member's
+/// No [`Clash`] can come back. The two uniqueness rules are the records', and
+/// a mirror is in neither — see [`clash`] — so a member's
 /// `work` lands beside this device's `work`, and a member's unnamed Claude
 /// account beside this device's.
 ///
-/// **A uuid this device holds as one of its own is not written over.** It is
+/// **A uuid this device holds as a record is not written over.** It is
 /// a member saying back what it holds of this device, which is no Profile of
 /// its: refused rather than taken, because a row of this device's own turned
 /// into a mirror of itself would be an account nobody here could launch.
@@ -920,6 +1077,16 @@ pub async fn record_mirror(
     let mut tx = super::writing(pool, "writing down a member's Profile").await?;
 
     let (claude_dir, config_file) = pair(&facts.account)?;
+
+    if replicated::record_on::<Profiles>(&mut tx, id)
+        .await?
+        .is_some()
+    {
+        bail!(
+            "{} said it holds Profile {id}, which is a record on this device",
+            at.device
+        )
+    }
 
     let there: Option<(Option<String>,)> =
         sqlx::query_as("SELECT home_device FROM profiles WHERE id = ?")
@@ -1097,6 +1264,13 @@ pub async fn bridge_mirror(
         return Ok(None);
     };
 
+    if replicated::record_on::<Profiles>(&mut tx, uuid)
+        .await?
+        .is_some()
+    {
+        bail!("{home} said its Profile {was} is {uuid}, which is a record on this device")
+    }
+
     let there: Option<(Option<String>,)> =
         sqlx::query_as("SELECT home_device FROM profiles WHERE id = ?")
             .bind(uuid)
@@ -1259,35 +1433,70 @@ fn placeholders(many: usize) -> String {
     }
 }
 
-/// Every Profile, by name.
+/// Every Profile, by name: the records this device holds a binding of, and
+/// the mirrors.
 ///
 /// Alphabetical like the Repos, and for the same reason: a Profile is not news,
 /// it is something to pick out of a short list, and the name is what it is
-/// looked for by. The one nobody named sorts first, SQLite ordering a null
-/// before every string — which is where a harness's default belongs on a list
-/// its named accounts are the exceptions on.
+/// looked for by. The one nobody named sorts first — which is where a
+/// harness's default belongs on a list its named accounts are the exceptions
+/// on — and two named alike keep the order they were written down in.
 pub async fn profiles(pool: &SqlitePool) -> Result<Vec<Profile>> {
-    listed(pool, "name, rowid").await
+    let mut listed = profiles_as_saved(pool).await?;
+
+    listed.sort_by(|one, other| one.name.cmp(&other.name));
+
+    Ok(listed)
 }
 
-/// Every Profile, in the order they were written down here.
+/// Every Profile, in the order they were written down here: the records
+/// first, then the mirrors.
 ///
 /// What a choice of *the earliest saved* reads, which a uuid cannot be sorted
 /// into the way an integer id could.
 pub async fn profiles_as_saved(pool: &SqlitePool) -> Result<Vec<Profile>> {
-    listed(pool, "rowid").await
-}
-
-/// Every Profile, in `order`, which is one of the two above's and nothing
-/// anybody typed.
-async fn listed(pool: &SqlitePool, order: &str) -> Result<Vec<Profile>> {
     let mut tx = super::reading(pool, "listing the Profiles").await?;
 
-    let rows: Vec<Row> =
-        sqlx::query_as(&format!("SELECT {COLUMNS} FROM profiles ORDER BY {order}"))
-            .fetch_all(&mut *tx)
-            .await
-            .context("listing the Agent Profiles")?;
+    let mut listed = records_on(&mut tx).await?;
+    listed.extend(mirrors_on(&mut tx).await?);
+
+    Ok(listed)
+}
+
+/// Every live record with a binding on this device, as a [`Profile`].
+///
+/// **A record this device holds no binding of is left out**: what a session
+/// under it is run as is an account somewhere else, and nothing here can say
+/// where yet.
+async fn records_on(connection: &mut sqlx::SqliteConnection) -> Result<Vec<Profile>> {
+    let here = here(&mut *connection).await?;
+
+    let mut bindings: HashMap<String, Binding> = replicated::records_on::<Bindings>(connection)
+        .await?
+        .into_iter()
+        .filter(|binding| !binding.removed())
+        .map(|binding| (binding.uuid, binding.fields))
+        .collect();
+
+    replicated::records_on::<Profiles>(connection)
+        .await?
+        .into_iter()
+        .filter(|record| !record.removed())
+        .filter_map(|record| {
+            let binding = bindings.remove(&binding_uuid(&record.uuid, &here))?;
+            Some(profile_of(record.uuid, record.fields, &binding))
+        })
+        .collect()
+}
+
+/// Every mirror held, in the order each was written down here.
+async fn mirrors_on(connection: &mut sqlx::SqliteConnection) -> Result<Vec<Profile>> {
+    let rows: Vec<Row> = sqlx::query_as(&format!(
+        "SELECT {COLUMNS} FROM profiles WHERE home_device IS NOT NULL ORDER BY rowid"
+    ))
+    .fetch_all(&mut *connection)
+    .await
+    .context("listing the Agent Profiles mirrored from members")?;
 
     // The whole of the little table at once rather than a query per Profile: the
     // list is a handful of accounts, and reading it in one hop is the same shape
@@ -1295,7 +1504,7 @@ async fn listed(pool: &SqlitePool, order: &str) -> Result<Vec<Profile>> {
     let listed: Vec<(String, String)> = sqlx::query_as(
         "SELECT profile_id, model FROM profile_models ORDER BY profile_id, position",
     )
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut *connection)
     .await
     .context("listing the models the Agent Profiles run")?;
 
@@ -1305,10 +1514,8 @@ async fn listed(pool: &SqlitePool, order: &str) -> Result<Vec<Profile>> {
     }
 
     // And the homes the same way, for the types whose whole account is one.
-    // Empty for a list of Claude Profiles, which is what most installations
-    // hold.
     let kept: Vec<(String, String)> = sqlx::query_as("SELECT profile_id, home FROM profile_homes")
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut *connection)
         .await
         .context("listing the homes the Agent Profiles keep their accounts under")?;
 
@@ -1323,7 +1530,31 @@ async fn listed(pool: &SqlitePool, order: &str) -> Result<Vec<Profile>> {
         .collect()
 }
 
-/// One Profile, or `None` if there is no such Profile.
+/// One record and this device's binding of it, as a [`Profile`].
+fn profile_of(id: String, record: ProfileRecord, binding: &Binding) -> Result<Profile> {
+    let harness = AgentType::read(&record.harness)?;
+    let account = binding.account(harness, &id)?;
+
+    // Where it was minted, once the serve has said which device that is — see
+    // [`super::stamp_the_profiles`].
+    let minted = match (record.minted_on, record.minted_id) {
+        (Some(device), Some(id)) if !device.is_empty() => Some(Minted { device, id }),
+        _ => None,
+    };
+
+    Ok(Profile {
+        id,
+        name: record.name,
+        account,
+        models: record.models,
+        memory: record.memory,
+        mirror: None,
+        minted,
+    })
+}
+
+/// One Profile, or `None` if there is no such Profile — a removed record
+/// being none, and so is a record this device holds no binding of.
 pub async fn load_profile(pool: &SqlitePool, id: &str) -> Result<Option<Profile>> {
     let mut tx = super::reading(pool, "loading a Profile").await?;
 
@@ -1337,11 +1568,31 @@ pub(crate) async fn profile_on(
     connection: &mut sqlx::SqliteConnection,
     id: &str,
 ) -> Result<Option<Profile>> {
-    let row: Option<Row> = sqlx::query_as(&format!("SELECT {COLUMNS} FROM profiles WHERE id = ?",))
-        .bind(id)
-        .fetch_optional(&mut *connection)
-        .await
-        .with_context(|| format!("loading Profile {id}"))?;
+    if let Some(record) = replicated::record_on::<Profiles>(&mut *connection, id).await? {
+        if record.removed() {
+            return Ok(None);
+        }
+
+        let here = here(&mut *connection).await?;
+
+        let binding =
+            replicated::record_on::<Bindings>(&mut *connection, &binding_uuid(id, &here)).await?;
+
+        return match binding {
+            Some(binding) if !binding.removed() => {
+                profile_of(record.uuid, record.fields, &binding.fields).map(Some)
+            }
+            _ => Ok(None),
+        };
+    }
+
+    let row: Option<Row> = sqlx::query_as(&format!(
+        "SELECT {COLUMNS} FROM profiles WHERE id = ? AND home_device IS NOT NULL",
+    ))
+    .bind(id)
+    .fetch_optional(&mut *connection)
+    .await
+    .with_context(|| format!("loading Profile {id}"))?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -1367,6 +1618,25 @@ pub(crate) async fn profile_on(
         home.map(|(home,)| home),
     )
     .map(Some)
+}
+
+/// Whether a Profile is there to be picked under `id`: a live record or a
+/// mirror. What a Pairing being settled is checked against, there being no
+/// foreign key to check it — a record is nobody's to cascade from.
+pub(crate) async fn pickable(connection: &mut sqlx::SqliteConnection, id: &str) -> Result<bool> {
+    let there: Option<(i64,)> = sqlx::query_as(
+        "SELECT 1 FROM replicated WHERE kind = ? AND uuid = ? AND deleted_at IS NULL
+         UNION ALL
+         SELECT 1 FROM profiles WHERE id = ? AND home_device IS NOT NULL",
+    )
+    .bind(Profiles::NAME)
+    .bind(id)
+    .bind(id)
+    .fetch_optional(&mut *connection)
+    .await
+    .with_context(|| format!("looking for Profile {id}"))?;
+
+    Ok(there.is_some())
 }
 
 /// A row of the profiles table as a [`Profile`].
@@ -1666,4 +1936,190 @@ fn legacy_model(facts: &ProfileFacts) -> String {
 fn text(path: &Path) -> Result<&str> {
     path.to_str()
         .ok_or_else(|| anyhow!("the path {} is not valid UTF-8", path.display()))
+}
+
+/// **The switch**: every one of this device's own Profiles still kept as a row
+/// of `profiles` taken up into a record under the uuid it already carries, its
+/// account's paths into **this device's binding** of it — and the row, its
+/// models and its home taken away. Run as the database is opened, inside
+/// [`super::migrations`]'s transaction.
+///
+/// **Written by whichever device this database says it is**, which at the
+/// first open is none yet — see [`here`]: the serve says the real id over
+/// every record and binding written before it knew, in
+/// [`super::stamp_the_profiles`]. Where each was minted comes across as it
+/// stood on the row, for the same serve to finish saying.
+///
+/// In the order the rows were written down, which is the order the records are
+/// read back in. A uuid already held as a record is left as it is.
+pub(crate) async fn take_up(connection: &mut sqlx::SqliteConnection) -> Result<()> {
+    let rows: Vec<Row> = sqlx::query_as(&format!(
+        "SELECT {COLUMNS} FROM profiles WHERE home_device IS NULL ORDER BY rowid"
+    ))
+    .fetch_all(&mut *connection)
+    .await
+    .context("reading this device's own Profiles to take them up")?;
+
+    let here = here(&mut *connection).await?;
+    let stamp = replicated::now();
+
+    for row in rows {
+        let id = row.0.clone();
+
+        let listed: Vec<(String,)> = sqlx::query_as(
+            "SELECT model FROM profile_models WHERE profile_id = ? ORDER BY position",
+        )
+        .bind(&id)
+        .fetch_all(&mut *connection)
+        .await
+        .with_context(|| format!("reading the models Profile {id} runs"))?;
+
+        let home: Option<(String,)> =
+            sqlx::query_as("SELECT home FROM profile_homes WHERE profile_id = ?")
+                .bind(&id)
+                .fetch_optional(&mut *connection)
+                .await
+                .with_context(|| format!("reading the home Profile {id} is kept under"))?;
+
+        let (minted_on, minted_id) = (row.10.clone(), row.11);
+
+        let profile = read_row(
+            row,
+            listed.into_iter().map(|(model,)| model).collect(),
+            home.map(|(home,)| home),
+        )?;
+
+        let record = ProfileRecord {
+            name: profile.name.clone(),
+            harness: profile.agent_type().word().to_owned(),
+            models: profile.models.clone(),
+            memory: profile.memory,
+            minted_on,
+            minted_id,
+        };
+
+        for (kind, uuid, body) in [
+            (Profiles::NAME, id.clone(), serde_json::to_string(&record)),
+            (
+                Bindings::NAME,
+                binding_uuid(&id, &here),
+                serde_json::to_string(&Binding::of(&profile.account)?),
+            ),
+        ] {
+            let body = body.with_context(|| format!("writing down Profile {id} as a record"))?;
+
+            sqlx::query(
+                "INSERT INTO replicated (kind, uuid, updated_at, deleted_at, written_by, body)
+                 VALUES (?, ?, ?, NULL, ?, ?)
+                 ON CONFLICT (kind, uuid) DO NOTHING",
+            )
+            .bind(kind)
+            .bind(&uuid)
+            .bind(stamp)
+            .bind(&here)
+            .bind(body)
+            .execute(&mut *connection)
+            .await
+            .with_context(|| format!("taking up Profile {id} as a record"))?;
+        }
+
+        for statement in [
+            "DELETE FROM profile_models WHERE profile_id = ?",
+            "DELETE FROM profile_homes WHERE profile_id = ?",
+            "DELETE FROM profiles WHERE id = ?",
+        ] {
+            sqlx::query(statement)
+                .bind(&id)
+                .execute(&mut *connection)
+                .await
+                .with_context(|| format!("taking Profile {id} out of the profiles table"))?;
+        }
+    }
+
+    sqlx::query("INSERT INTO replicated_taken_up (kind) VALUES (?) ON CONFLICT (kind) DO NOTHING")
+        .bind(Profiles::NAME)
+        .execute(&mut *connection)
+        .await
+        .context("saying the Profiles have been taken up")?;
+
+    Ok(())
+}
+
+/// Say which device this database is the device of — see [`here`] — and say
+/// it over every record and binding written before it was known, or under an
+/// id it has had since: the switch's, a suite's, and those of a device whose
+/// id was issued again.
+///
+/// **This device's bindings follow it**: a binding is where *this machine*
+/// keeps the account, so one kept under an id this device no longer goes by
+/// is moved to the one it does.
+pub(crate) async fn this_device_is(
+    connection: &mut sqlx::SqliteConnection,
+    device: &str,
+) -> Result<()> {
+    let was = here(&mut *connection).await?;
+
+    if was != device {
+        let suffix = format!("/{was}");
+
+        let held: Vec<(String,)> = sqlx::query_as(
+            "SELECT uuid FROM replicated
+             WHERE kind = ? AND substr(uuid, -length(?)) = ?",
+        )
+        .bind(Bindings::NAME)
+        .bind(&suffix)
+        .bind(&suffix)
+        .fetch_all(&mut *connection)
+        .await
+        .context("reading the bindings kept under this device's former id")?;
+
+        for (uuid,) in held {
+            let profile = &uuid[..uuid.len() - suffix.len()];
+
+            sqlx::query(
+                "UPDATE OR IGNORE replicated SET uuid = ?, written_by = ?
+                 WHERE kind = ? AND uuid = ?",
+            )
+            .bind(binding_uuid(profile, device))
+            .bind(device)
+            .bind(Bindings::NAME)
+            .bind(&uuid)
+            .execute(&mut *connection)
+            .await
+            .with_context(|| format!("moving the binding {uuid} to this device's id"))?;
+        }
+
+        sqlx::query("UPDATE replicated SET written_by = ? WHERE kind = ? AND written_by = ?")
+            .bind(device)
+            .bind(Profiles::NAME)
+            .bind(&was)
+            .execute(&mut *connection)
+            .await
+            .context("saying which device wrote the Profiles written before it was known")?;
+
+        sqlx::query(
+            "INSERT INTO this_device (one, device) VALUES (1, ?)
+             ON CONFLICT (one) DO UPDATE SET device = excluded.device",
+        )
+        .bind(device)
+        .execute(&mut *connection)
+        .await
+        .context("saying which device this is")?;
+    }
+
+    // And where the Profiles numbered here before the uuids were minted, which
+    // the switch could not say.
+    sqlx::query(
+        "UPDATE replicated SET body = json_set(body, '$.minted_on', ?)
+         WHERE kind = ?
+           AND json_extract(body, '$.minted_id') IS NOT NULL
+           AND coalesce(json_extract(body, '$.minted_on'), '') = ''",
+    )
+    .bind(device)
+    .bind(Profiles::NAME)
+    .execute(&mut *connection)
+    .await
+    .context("saying which device the Profiles numbered before their uuids were minted on")?;
+
+    Ok(())
 }

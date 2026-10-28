@@ -4862,17 +4862,11 @@ fn stated_uuid(nth: u32) -> String {
 /// Renumber the Profiles a fixture saved to [`stated_uuid`]'s, in the order they
 /// were saved, and hand them back as they now read.
 ///
-/// Done straight after they are saved, while nothing but a Profile's own models
-/// and home name it, and in one transaction with the foreign keys checked at
-/// its end rather than at each statement: a Profile and its children change
+/// Done straight after they are saved, while nothing but a Profile's own
+/// binding names it, and in one transaction: a record and its binding change
 /// key together or not at all.
 async fn numbered(pool: &SqlitePool, profiles: Vec<store::Profile>) -> Vec<store::Profile> {
     let mut tx = pool.begin().await.unwrap();
-
-    sqlx::query("PRAGMA defer_foreign_keys = ON")
-        .execute(&mut *tx)
-        .await
-        .unwrap();
 
     let mut stated = Vec::new();
 
@@ -4880,9 +4874,9 @@ async fn numbered(pool: &SqlitePool, profiles: Vec<store::Profile>) -> Vec<store
         let id = stated_uuid(nth);
 
         for statement in [
-            "UPDATE profiles SET id = ? WHERE id = ?",
-            "UPDATE profile_models SET profile_id = ? WHERE profile_id = ?",
-            "UPDATE profile_homes SET profile_id = ? WHERE profile_id = ?",
+            "UPDATE replicated SET uuid = ? WHERE kind = 'profiles' AND uuid = ?",
+            "UPDATE replicated SET uuid = ?1 || substr(uuid, length(?2) + 1)
+             WHERE kind = 'profile_bindings' AND uuid LIKE ?2 || '/%'",
         ] {
             sqlx::query(statement)
                 .bind(&id)

@@ -1920,13 +1920,16 @@ impl Verkstead {
     async fn saves_numbered(&self, name: &str, was: i64) -> String {
         let id = self.saves(name).await;
 
-        sqlx::query("UPDATE profiles SET minted_on = ?, minted_id = ? WHERE id = ?")
-            .bind(self.device.id())
-            .bind(was)
-            .bind(&id)
-            .execute(&self.pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE replicated SET body = json_set(body, '$.minted_on', ?, '$.minted_id', ?)
+             WHERE kind = 'profiles' AND uuid = ?",
+        )
+        .bind(self.device.id())
+        .bind(was)
+        .bind(&id)
+        .execute(&self.pool)
+        .await
+        .unwrap();
 
         id
     }

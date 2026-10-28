@@ -95,15 +95,15 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     Account, Clash, Commit, Decision, Event, Finished, Lifecycle, Merging, Minted, Mirror, Pairing,
     ProfileFacts, PullRequest, RanUnder, RoadmapStage, Rollup, Saving, StageOf, Standing,
-    WaitingOn, asked_to_stop, check_rollup, clear_stop, commit_repo, conflict_fix_attempts,
-    conversations, create_profile, finish_wrap_up, fix_attempts, load_conversation, load_profile,
-    merging, open_database, open_pending_steer, pending_steer, profiles, pull_request,
-    pull_request_repo, pull_requests, record_another_pull_request, record_check_rollup,
-    record_commit, record_conflict_fix_attempt, record_fix_attempt, record_mirror,
-    recorded_commits, register_repo, remembered_pairings, renumbered_profiles, save_brief,
-    save_pending_steer, settle_wrap_up, stack, stage_roadmap, stamp_the_profiles, standing,
-    start_capture, start_conversation, start_grilling, start_stage, start_unnamed_conversation,
-    stop, stopped, timeline, update_profile, wrap_up_settled,
+    WaitingOn, asked_to_stop, binding_uuid, check_rollup, clear_stop, commit_repo,
+    conflict_fix_attempts, conversations, create_profile, finish_wrap_up, fix_attempts,
+    load_conversation, load_profile, merging, open_database, open_pending_steer, pending_steer,
+    profiles, pull_request, pull_request_repo, pull_requests, record_another_pull_request,
+    record_check_rollup, record_commit, record_conflict_fix_attempt, record_fix_attempt,
+    record_mirror, recorded_commits, register_repo, remembered_pairings, renumbered_profiles,
+    save_brief, save_pending_steer, settle_wrap_up, stack, stage_roadmap, stamp_the_profiles,
+    standing, start_capture, start_conversation, start_grilling, start_stage,
+    start_unnamed_conversation, stop, stopped, timeline, update_profile, wrap_up_settled,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -2497,6 +2497,12 @@ async fn profiles_of_before(dir: &Path) {
         .await
         .unwrap();
 
+    // Nor had it taken them up as records, there being no records.
+    sqlx::query("DELETE FROM replicated_taken_up WHERE kind = 'profiles'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
     sqlx::query(
         "CREATE TABLE profiles (
              id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2546,15 +2552,18 @@ fn claude(name: &str) -> Account {
     }
 }
 
-/// The integer a Profile of this device's own had before the uuids, as the row
-/// keeps it — read off the table, because the device half of where it was
-/// minted arrives only at the serve.
+/// The integer a Profile of this device's own had before the uuids, as its
+/// record keeps it — read off the table, because the device half of where it
+/// was minted arrives only at the serve.
 async fn minted_id(pool: &SqlitePool, id: &str) -> Option<i64> {
-    let (minted,): (Option<i64>,) = sqlx::query_as("SELECT minted_id FROM profiles WHERE id = ?")
-        .bind(id)
-        .fetch_one(pool)
-        .await
-        .unwrap();
+    let (minted,): (Option<i64>,) = sqlx::query_as(
+        "SELECT json_extract(body, '$.minted_id') FROM replicated
+         WHERE kind = 'profiles' AND uuid = ?",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
 
     minted
 }
@@ -2664,6 +2673,12 @@ async fn profiles_without_a_memory_switch(dir: &Path) {
         .await
         .unwrap();
 
+    // Nor had it taken them up as records, there being no records.
+    sqlx::query("DELETE FROM replicated_taken_up WHERE kind = 'profiles'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
     sqlx::query(
         "CREATE TABLE profiles (
              id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2762,6 +2777,12 @@ async fn profiles_named_across_every_device(dir: &Path) {
     let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
 
     sqlx::query("DROP TABLE profiles")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Nor had it taken them up as records, there being no records.
+    sqlx::query("DELETE FROM replicated_taken_up WHERE kind = 'profiles'")
         .execute(&pool)
         .await
         .unwrap();
@@ -3568,6 +3589,7 @@ async fn profiles_numbered_before_uuids(dir: &Path) -> (i64, i64) {
         "DROP TABLE profile_homes",
         "DROP TABLE repo_pairings",
         "DROP TABLE profiles",
+        "DELETE FROM replicated_taken_up WHERE kind = 'profiles'",
         "CREATE TABLE profiles (
              id          INTEGER PRIMARY KEY AUTOINCREMENT,
              name        TEXT,
@@ -3825,6 +3847,40 @@ async fn the_profiles_of_before_the_uuids_are_named_by_one_everywhere() {
             recorded,
             Some(ours.id.clone()),
             "the recorded steer: {opening}"
+        );
+
+        // This device's own is a record now, its paths this device's binding,
+        // and only the mirror is left a row of the old table.
+        let (bound,): (String,) = sqlx::query_as(
+            "SELECT json_extract(body, '$.claude_dir') FROM replicated
+             WHERE kind = 'profile_bindings' AND uuid = ?",
+        )
+        .bind(binding_uuid(&ours.id, THIS_DEVICE))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(bound, "/watched/accounts/work/.claude", "{opening}");
+
+        let (rows,): (i64,) = sqlx::query_as("SELECT count(*) FROM profiles WHERE id = ?")
+            .bind(&ours.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 0, "taken up out of the old table: {opening}");
+
+        let (keys,): (i64,) = sqlx::query_as(
+            "SELECT count(*) FROM (
+                 SELECT * FROM pragma_foreign_key_list('conversations')
+                 UNION ALL SELECT * FROM pragma_foreign_key_list('pending_steers')
+                 UNION ALL SELECT * FROM pragma_foreign_key_list('repo_pairings')
+             ) WHERE \"table\" = 'profiles'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            keys, 0,
+            "nothing names a Profile by a foreign key: {opening}"
         );
 
         assert_eq!(

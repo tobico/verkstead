@@ -1347,9 +1347,9 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              base_ref                  TEXT,
              state                     TEXT NOT NULL,
              rank                      TEXT,
-             grilling_profile_id       TEXT REFERENCES profiles(id),
-             implementation_profile_id TEXT REFERENCES profiles(id),
-             review_profile_id         TEXT REFERENCES profiles(id)
+             grilling_profile_id       TEXT,
+             implementation_profile_id TEXT,
+             review_profile_id         TEXT
          ) STRICT",
     )
     .execute(pool)
@@ -3352,10 +3352,10 @@ async fn choose(
 /// because a Pairing is both halves and either alone is not something to launch
 /// a session with. See [`steer_conversation`].
 ///
-/// The Profile is selected from `profiles` inside the statement rather than
-/// checked first, as a Conversation's Repo is: SQLite enforces a foreign key
-/// only when asked to, and a column naming a Profile that is not there is a
-/// session that fails to start with nobody watching.
+/// The Profile is looked for inside the transaction that writes it — a live
+/// record or a mirror, see `profiles::pickable` — there being no foreign key
+/// behind the column: a column naming a Profile that is not there is a session
+/// that fails to start with nobody watching.
 pub(crate) async fn settle(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     id: i64,
@@ -3363,15 +3363,16 @@ pub(crate) async fn settle(
     profile_id: &str,
     model: Option<&str>,
 ) -> Result<bool> {
+    if !super::profiles::pickable(tx, profile_id).await? {
+        return Ok(false);
+    }
+
     let changed = sqlx::query(&format!(
-        "UPDATE conversations
-         SET {} = (SELECT id FROM profiles WHERE id = ?)
-         WHERE id = ? AND EXISTS (SELECT 1 FROM profiles WHERE id = ?)",
+        "UPDATE conversations SET {} = ? WHERE id = ?",
         role.column()
     ))
     .bind(profile_id)
     .bind(id)
-    .bind(profile_id)
     .execute(&mut **tx)
     .await
     .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?
