@@ -383,7 +383,7 @@ async fn read(
 /// none.
 ///
 /// **[`Nudge::Devices`] only where the row moved.** That Nudge has mirroring and
-/// the Author mirroring read every member again, so one said on every take-up
+/// the record puller read every member again, so one said on every take-up
 /// would be a sweep of the whole cluster each time any stream came back; the
 /// row this stream was taken up against is what the answer is held up to.
 ///

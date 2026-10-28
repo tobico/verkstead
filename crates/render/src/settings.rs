@@ -749,8 +749,8 @@ pub struct AuthorSaved {
     pub github_token: Option<TokenSaved>,
 }
 
-/// One Author of the cluster's **one list**: this device's own, or a mirror of
-/// one a member holds at home (ADR-0025).
+/// One Author of the cluster's **one list**: a record every device holds,
+/// whichever made it (ADR-0028).
 ///
 /// What `GET /api/ui/authors` answers, to this device's pages and to a member
 /// across the link alike — which is why there is **nothing of the token** here,
@@ -767,35 +767,27 @@ pub struct AuthorEntry {
     pub name: String,
     pub email: String,
 
-    /// Whether the device it is at home on holds a GitHub token for it.
+    /// Whether this device's `secrets.yaml` holds a GitHub token for it.
     pub holds_token: bool,
-
-    /// The device it is at home on, or `null` for one of this device's own.
-    ///
-    /// A member taking this list in takes only the rows with none, so a mirror
-    /// is always one hop from its home and never a mirror of a mirror.
-    pub device: Option<crate::RowDevice>,
 }
 
-/// One of a member's Authors' **token**, as that device hands it to another
-/// member for the copy kept in its own `secrets.yaml` (ADR-0025).
+/// One Author's **token**, as a member holding a copy hands it to another for
+/// the copy kept in its own `secrets.yaml` (ADR-0028).
 ///
 /// A member's own call on the Peer Listener and never the viewer's: no page
-/// draws it, so it is not in the viewer's types. `null` is an Author its home
-/// holds no token for.
+/// draws it, so it is not in the viewer's types. `null` is an Author the
+/// device asked holds no token for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthorToken {
     pub token: Option<String>,
 }
 
-/// One Author's fields and its token, edited alone: what the Git section
-/// sends for a **mirror**, which is put to the device that Author is at home on
-/// as the ordinary edit of its own (ADR-0025).
+/// One Author's fields and its token, edited alone, on the device it is
+/// pressed on: a write to the Author's record there, which every member pulls.
 ///
-/// The Author alone rather than a [`SettingsEdit`], because a settings save is
-/// the whole of the files it is made on, and this device holds none of the
-/// home device's other settings to send. The fields are values and the token
-/// is an action, as they are in a settings save, for its reason.
+/// The Author alone rather than a [`SettingsEdit`], which is the whole of the
+/// files it is made on. The fields are values and the token is an action, as
+/// they are in a settings save, for its reason.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct AuthorEdit {
@@ -805,18 +797,17 @@ pub struct AuthorEdit {
     pub github_token: TokenEdit,
 }
 
-/// What became of an [`AuthorEdit`], in the words of the device the Author is
-/// at home on.
+/// What became of an [`AuthorEdit`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum AuthorEdited {
-    /// Written into that device's `config.yaml`, and the token into its
+    /// Written to the Author's record, and the token into this device's
     /// `secrets.yaml` where the edit set one — with what GitHub made of it,
-    /// asked from there, or `null` where the edit was not about a token.
+    /// asked from here, or `null` where the edit was not about a token.
     Saved { verified: Option<Verified> },
 
-    /// No Author with that uuid is configured there: one removed since the
-    /// page was drawn, most likely.
+    /// No live Author has that uuid: one removed since the page was drawn,
+    /// most likely.
     NoSuchAuthor,
 }
 
@@ -828,7 +819,8 @@ pub enum AuthorEdited {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum AuthorRemoved {
-    /// Out of `config.yaml`, and its token out of `secrets.yaml`.
+    /// A deletion stamp on its record, which every member pulls, and its
+    /// token out of `secrets.yaml`.
     Removed,
 
     /// No Author with that uuid is configured: one removed since the page was

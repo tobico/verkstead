@@ -473,11 +473,11 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     case "profiles":
       return [keyOf(device, "profiles")];
 
-    // The Authors moved: one saved or removed on this device, or the mirrors it
-    // holds of a member's rewritten. The one list the Git switcher and the
-    // Repos pane name an Author out of.
+    // The Authors moved: one saved or removed on this device, or a record
+    // pulled off a member. The one list the switchers and pickers name an
+    // Author out of, and the settings the Git section draws its rows from.
     case "authors":
-      return [keyOf(device, "authors")];
+      return [keyOf(device, "authors"), keyOf(device, "settings")];
 
     // Where a Profile's login has got to moved — which is what shows a second
     // device's modal the address the first one's login printed. This device's

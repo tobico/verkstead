@@ -1,14 +1,13 @@
 //! The cluster's **one list** of Authors, as every place that names one reads
-//! it: a device's own Authors and its mirrors of every member's, each mirror
-//! marked with the device it is at home on (ADR-0025).
+//! it: records every device holds, whichever made them, with no device mark
+//! (ADR-0028). Two Authors with one name and email are two rows.
 //!
 //! One query per device rather than one per pane, so the Git switcher, the
 //! Repos pane and the Brief's Author fact are one read of it — re-read on the
-//! `authors` Nudge, which a save or a removal here and a mirror rewritten off a
+//! `authors` Nudge, which a save or a removal here and a record pulled off a
 //! member both announce.
 
 import { listAuthors } from "./api/client";
-import type { AuthorEntry } from "./api/types";
 import { useReading } from "./freshness";
 import { keyOf, type Device } from "./reaching";
 
@@ -30,14 +29,4 @@ export function authorLabel(author: {
   name: string;
 }): string {
   return author.display_name || author.name || "New author";
-}
-
-/// And the same with the machine a mirror is at home on after it, the way a
-/// mirrored Profile's row names its machine: "Work · the-workstation".
-export function authorRow(
-  author: Pick<AuthorEntry, "display_name" | "name" | "device">,
-): string {
-  return author.device === null
-    ? authorLabel(author)
-    : `${authorLabel(author)} · ${author.device.name}`;
 }

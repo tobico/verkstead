@@ -128,7 +128,6 @@ pub(crate) fn listed(settings: &Settings) -> Vec<AuthorEntry> {
             name: author.name().unwrap_or_default().to_owned(),
             email: author.email().unwrap_or_default().to_owned(),
             holds_token: secrets.author_token(author.id()).is_some(),
-            device: None,
         })
         .collect()
 }

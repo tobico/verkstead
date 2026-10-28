@@ -380,7 +380,7 @@ import {
   unreadable,
   whenever,
 } from "./serving";
-import { MIRRORED, oneList } from "./authors";
+import { CLIENT, oneList } from "./authors";
 // And the Nudge stream, for the one pane that follows it rather than the cache:
 // the Code pane's tree re-reads the folders it has open on a `files` Nudge, and
 // those listings are held above the pane rather than in a query — see
@@ -9446,10 +9446,10 @@ describe("the author on the brief", () => {
     expect(terms(summary)).not.toContain("Author");
   });
 
-  /// A member's Author is one of the list, counted and named like this
-  /// device's own (ADR-0025).
-  it("names a mirrored author beside the repo", async () => {
-    const summary = await briefWith(ONE_AUTHOR, MIRRORED.id, MIRRORED);
+  /// An Author made on another device is one of the list, counted and named
+  /// like any other (ADR-0028).
+  it("names an author made on another device beside the repo", async () => {
+    const summary = await briefWith(ONE_AUTHOR, CLIENT.id, CLIENT);
 
     await waitFor(() => expect(said(summary, "Author")).toBe("Client"));
   });

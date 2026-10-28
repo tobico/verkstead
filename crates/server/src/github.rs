@@ -268,9 +268,9 @@ impl Gh {
     /// configured, which leaves the call to whatever login the host's `gh` has.
     ///
     /// The Author's this `Gh` asks as — see [`Gh::as_author`] and
-    /// [`crate::settings::Config::author_of`], which resolves a member's mirror
-    /// as well as this device's own, and [`crate::settings::Config::token_of`],
-    /// which reads a mirror's token off its copy. A mirror whose copy has not
+    /// [`crate::settings::Config::author_of`], which resolves any Author of the
+    /// cluster's one list, and [`crate::settings::Config::token_of`], which
+    /// reads its token off this device's copy. An Author whose copy has not
     /// arrived is nobody rather than the host.
     fn whom(&self) -> AsWhom {
         let Some(settings) = self.settings.as_ref() else {

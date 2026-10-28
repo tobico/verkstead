@@ -434,8 +434,7 @@ fn the_viewers_types_are_written_from_these() {
     // key of a save, refused by name while a Repo points at it.
     AuthorRemoved::export_all(&config).unwrap();
 
-    // And editing one Author alone, which is what a mirror's edit is put to its
-    // home device as.
+    // And editing one Author alone, a write to its record on this device.
     AuthorEdit::export_all(&config).unwrap();
     AuthorEdited::export_all(&config).unwrap();
 

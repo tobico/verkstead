@@ -478,7 +478,7 @@ mod tests {
         assert_eq!(config.kept_by(), Some(&kept_by()), "{}", files.config);
         assert!(
             config.authors().is_empty(),
-            "the Keeper's Authors reach the Annex as mirrors, not as its own: {}",
+            "the Keeper's Authors reach the Annex as records it pulls, not in its file: {}",
             files.config,
         );
         assert_eq!(files.secrets, "", "and no token of its own either");

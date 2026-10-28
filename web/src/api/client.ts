@@ -23,8 +23,6 @@ import type {
   Attached,
   AttachmentRemoved,
   AuthorEntry,
-  AuthorEdit,
-  AuthorEdited,
   AuthorRemoved,
   BacklogPane,
   Locked,
@@ -2351,8 +2349,8 @@ export function saveSettings(edit: SettingsEdit): Promise<SettingsSaved> {
   return post<SettingsSaved>("/api/ui/settings", edit);
 }
 
-/// The cluster's one list of Authors: this device's own, then a mirror of every
-/// member's, each marked with the device it is at home on.
+/// The cluster's one list of Authors, every record the device holds, whichever
+/// device made it.
 ///
 /// Of whichever device is asked: a member's own list is what names an Author
 /// beside work on that member, a Repo there recording a uuid out of it.
@@ -2366,17 +2364,6 @@ export function listAuthors(device: Device): Promise<AuthorEntry[]> {
 /// still pointing at it refuses it, naming the Repos.
 export function removeAuthor(id: string): Promise<AuthorRemoved> {
   return post<AuthorRemoved>(`/api/ui/authors/${encodeURIComponent(id)}/remove`);
-}
-
-/// Rewrite one Author's fields and set or clear its token, by its uuid, and
-/// nothing else of the settings — what the Git section sends for a member's
-/// Author, which the server puts to the device it is at home on. A machine
-/// that is not answering is a refusal naming it.
-export function editAuthor(
-  id: string,
-  edit: AuthorEdit,
-): Promise<AuthorEdited> {
-  return post<AuthorEdited>(`/api/ui/authors/${encodeURIComponent(id)}`, edit);
 }
 
 /// Empty every store of one language — sccache's too, for Rust.

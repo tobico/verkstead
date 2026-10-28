@@ -546,10 +546,8 @@ async fn an_author_made_on_one_device_is_on_the_other_and_an_edit_made_while_it_
     a.saves_author(WORK, "Ada Lovelace", "ada@work.example")
         .await;
 
-    let landed = b
-        .authors_saying(|rows| emailed(rows, WORK, "ada@work.example"))
+    b.authors_saying(|rows| emailed(rows, WORK, "ada@work.example"))
         .await;
-    assert_eq!(with(&landed, WORK).unwrap().device, None, "no device mark");
 
     let dir = a.switched_off().await;
 
@@ -734,7 +732,6 @@ async fn the_author_mirrors_are_records_until_the_real_ones_are_pulled() {
         [WORK]
     );
     assert_eq!(mirrored[0].email, "ada@mirrored.example");
-    assert_eq!(mirrored[0].device, None);
 
     let there: Option<(String,)> =
         sqlx::query_as("SELECT name FROM sqlite_master WHERE name = 'author_mirrors'")

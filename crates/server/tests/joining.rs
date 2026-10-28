@@ -2559,7 +2559,7 @@ async fn a_keepers_start_hands_its_annex_its_settings_about_the_work() {
     let config = kept.config();
     assert!(
         config.authors().is_empty(),
-        "the Keeper's Authors arrive as mirrors rather than copied"
+        "the Keeper's Authors arrive as pulled records rather than copied"
     );
     assert_eq!(config.instructions(), "Say it plainly.");
     assert_eq!(

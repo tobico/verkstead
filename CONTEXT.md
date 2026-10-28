@@ -80,11 +80,12 @@ GitHub is in use, a token — the human's own name on the work, where an **Agent
 Profile** is the account the agent runs under, and the two are picked
 independently. Keyed by a uuid, with an optional display name that falls back to
 the git name: the uuid is what a Repo records and what every device of a cluster
-agrees on, so the display name is free to change. Kept in `config.yaml` as
-`authors:`, the tokens in `secrets.yaml` under the uuid — the split the GitHub
+agrees on, so the display name is free to change. Kept as a record in the
+database, the tokens in `secrets.yaml` under the uuid — the split the GitHub
 token and the MCP header values already follow — and read at the moment a
 session is launched, so a change reaches the next session without a restart
-([ADR-0025](docs/adr/0025-a-repo-has-an-author.md)).
+([ADR-0025](docs/adr/0025-a-repo-has-an-author.md),
+[ADR-0028](docs/adr/0028-records-are-the-clusters.md)).
 **Every Repo has one**, picked at **Open repo** and **Create repo** where more
 than one exists and recorded silently where there is one, and shown and changed
 on the Repos pane. With one Author nothing on screen says so: the pickers, and
@@ -142,8 +143,11 @@ Author is refused by the **Preflight**, naming both; and **Create repo** on a
 member offers the one list.
 **On the settings page it is the Git section as it was**, with a dropdown at
 its head picking which Author the fields are about and **Add author** at its
-foot, the way the Repo dropdown carries its two presses. A member's Authors are
-rows of it after this device's own, marked with the machine each is at home on. The onboarding wizard
+foot, the way the Repo dropdown carries its two presses. Every Author of the
+cluster is a row of it and of every picker, wherever it was made, with no
+machine on it; two with one name and email are two rows until the human removes
+one. Add, edit and Remove are writes on the device pressed, a token verified
+there with that device's `gh`, and the others pull them. The onboarding wizard
 asks for one. The first start moves a single `git_author` and `github_token`
 into the list as that one Author, and records every Repo as its, unregistered
 ones included, so no Repo is ever without one.

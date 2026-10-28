@@ -1351,8 +1351,9 @@ async fn authors(State(state): State<AppState>) -> HttpResponse {
 /// `POST /api/ui/authors/{id}` — rewrite one Author's fields, and set or clear
 /// its token, and nothing else of either file.
 ///
-/// The Author's record written over and the token by the settings save's
-/// rules, then tried against GitHub after the writing for its reason.
+/// A write on this device whichever device made the Author: the record written
+/// over and the token by the settings save's rules, then tried against GitHub
+/// from here, with this device's `gh`, after the writing for its reason.
 async fn edit_author(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -1437,8 +1438,8 @@ async fn edit_author(
 
     match saved {
         Ok(outcome) => {
-            // Every member's mirror of it, and its copy of the token, redrawn
-            // on the read this sets going.
+            // Every member pulls the record on the Nudge, and fetches its copy
+            // of the token where the record says one moved.
             if matches!(outcome, AuthorEdited::Saved { .. }) {
                 state.nudges.announce(Nudge::Authors);
             }

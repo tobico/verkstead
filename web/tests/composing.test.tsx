@@ -96,7 +96,7 @@ import {
   openAgent,
   theWorkbench,
 } from "./bench";
-import { MIRRORED, oneList } from "./authors";
+import { CLIENT, oneList } from "./authors";
 import { carrying, drag, dropOn } from "./dragging";
 // The path field's own rows are `browsed`, the listbox's being `rows` below:
 // one page draws both, and a browse's levels are not what a picker offers.
@@ -3901,13 +3901,14 @@ describe("registering a repo from the Repo dropdown", () => {
     await waitFor(() => expect(stored().repo).toBe(OPENED.id));
   });
 
-  /// A member's Author is one the repo can be opened as too, named with the
-  /// machine it is at home on, and the pick of it goes out as its uuid.
-  it("offers a member's author with its machine, and opens a repo under it", async () => {
+  /// An Author made on another device is one the repo can be opened as too,
+  /// a row like any other with no machine on it, and the pick of it goes out
+  /// as its uuid.
+  it("offers an author made on another device unmarked, and opens a repo under it", async () => {
     const fetching = theWorkbench(
       whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
       whenever("/api/ui/settings", json(TOKENED)),
-      whenever("/api/ui/authors", json(oneList(TOKENED, MIRRORED))),
+      whenever("/api/ui/authors", json(oneList(TOKENED, CLIENT))),
     );
     const { container } = mount("/compose");
 
@@ -3919,28 +3920,27 @@ describe("registering a repo from the Repo dropdown", () => {
     expect([...pick.options].map((option) => option.text)).toEqual([
       "Select",
       "Ada Lovelace",
-      "Client · the-workstation",
+      "Client",
     ]);
 
-    fireEvent.change(pick, { target: { value: MIRRORED.id } });
+    fireEvent.change(pick, { target: { value: CLIENT.id } });
     register(field, OPENED.path);
 
     await waitFor(() =>
       expect(sent(fetching, "/api/ui/repos")).toEqual({
         path: OPENED.path,
-        author: MIRRORED.id,
+        author: CLIENT.id,
       }),
     );
   });
 
-  /// And a lone member's Author, with none of this device's own, is named on
-  /// the press without a pick being asked for: the server's silent pick is
-  /// this device's own one, of which there is none.
-  it("opens a repo under a lone member's author without asking", async () => {
+  /// And a lone Author, wherever it was made, is not asked about: the press
+  /// names nobody and the server records the one Author there is.
+  it("opens a repo under a lone author without asking", async () => {
     const fetching = theWorkbench(
       whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
       whenever("/api/ui/settings", json({ ...TOKENED, authors: [] })),
-      whenever("/api/ui/authors", json([MIRRORED])),
+      whenever("/api/ui/authors", json([CLIENT])),
     );
     const { container } = mount("/compose");
 
@@ -3958,7 +3958,6 @@ describe("registering a repo from the Repo dropdown", () => {
     await waitFor(() =>
       expect(sent(fetching, "/api/ui/repos")).toEqual({
         path: OPENED.path,
-        author: MIRRORED.id,
       }),
     );
   });
@@ -4755,33 +4754,23 @@ describe("the two repo rows on the picked device", () => {
     expect(stored().repo).toBeNull();
   });
 
-  /// The member's one list: an Author of its own with a token, and its mirror of
-  /// this device's own with none — marked with this device, it being at home
-  /// here.
+  /// The member's one list: an Author made there with a token, and one made
+  /// on this device with none — two records, neither marked.
   const THEIR_OWN: AuthorEntry = {
     id: "6e8f0a2c-3b4d-4e5f-9a1b-2c3d4e5f6a7b",
     display_name: "Laptop",
     name: "Ada Lovelace",
     email: "ada@laptop.example",
     holds_token: true,
-    device: null,
   };
 
-  const HOME_HERE: AuthorEntry = {
-    ...oneList(UNTOKENED)[0]!,
-    device: {
-      id: LINKED.this.device,
-      name: LINKED.this.name,
-      os: LINKED.this.os,
-      reachable: true,
-    },
-  };
+  const MADE_HERE_AUTHOR: AuthorEntry = oneList(UNTOKENED)[0]!;
 
   /// And the member's list served under it, with this device's own a single
   /// Author with a token, so that a card reading the wrong end draws no pick
   /// and a tick.
   const theirAuthors = () => [
-    whenever(at("/authors"), json([THEIR_OWN, HOME_HERE])),
+    whenever(at("/authors"), json([THEIR_OWN, MADE_HERE_AUTHOR])),
     whenever("/api/ui/authors", json(oneList(TOKENED))),
   ];
 
@@ -4804,11 +4793,11 @@ describe("the two repo rows on the picked device", () => {
     expect([...authorPick()!.options].map((option) => option.text)).toEqual([
       "Select",
       "Laptop",
-      `Ada Lovelace · ${LINKED.this.name}`,
+      "Ada Lovelace",
     ]);
 
     // This device's own holds no token over there, so the note stands.
-    fireEvent.change(authorPick()!, { target: { value: HOME_HERE.id } });
+    fireEvent.change(authorPick()!, { target: { value: MADE_HERE_AUTHOR.id } });
     await waitFor(() => expect(noRemote()).toBeTruthy());
     expect(screen.queryByLabelText(/on GitHub too/)).toBeNull();
 
@@ -4829,8 +4818,8 @@ describe("the two repo rows on the picked device", () => {
     });
   });
 
-  /// **Open repo** on the member the same way, and a pick of an Author at home
-  /// on this device goes out as the uuid the member mirrors it under.
+  /// **Open repo** on the member the same way, and a pick of an Author made on
+  /// this device goes out as its uuid, the same on the member.
   it("offers the member's authors on Open repo, this device's among them", async () => {
     const fetching = theirs(
       ...theirAuthors(),
@@ -4847,16 +4836,16 @@ describe("the two repo rows on the picked device", () => {
     expect([...authorPick()!.options].map((option) => option.text)).toEqual([
       "Select",
       "Laptop",
-      `Ada Lovelace · ${LINKED.this.name}`,
+      "Ada Lovelace",
     ]);
 
-    fireEvent.change(authorPick()!, { target: { value: HOME_HERE.id } });
+    fireEvent.change(authorPick()!, { target: { value: MADE_HERE_AUTHOR.id } });
     register(THEIR_OPENED.path);
 
     await waitFor(() => expect(stored().repo).toBe(THEIR_OPENED.id));
     expect(sent(fetching, at("/repos"))).toEqual({
       path: THEIR_OPENED.path,
-      author: HOME_HERE.id,
+      author: MADE_HERE_AUTHOR.id,
     });
   });
 

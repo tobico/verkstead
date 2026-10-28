@@ -123,7 +123,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import { keyOf, useDevice, type Device } from "../reaching";
 import { Picker } from "../picking";
 import { rowPress } from "../rows";
-import { authorLabel, authorRow, useAuthors } from "../authors";
+import { authorLabel, useAuthors } from "../authors";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./RepoList.module.css";
 import { SettingsCard } from "../settings/SettingsCard";
@@ -181,9 +181,9 @@ export const CREATE_REFUSAL: Record<CreateRefused, string> = {
 /// recorded as (ADR-0025): picked where the one list holds more than one, and
 /// the one there is, silently, where there is only one.
 ///
-/// Read off the one list of the device the Repo lands on — its own Authors and
-/// a mirror of every member's, this device's among them where that is a
-/// member — over the Relay the way the card's browse goes. That device is the
+/// Read off the one list of the device the Repo lands on — every record it
+/// holds, whichever device made it — over the Relay the way the card's browse
+/// goes. That device is the
 /// one that resolves the pick, so a list read here would offer an Author it
 /// has under another uuid or none at all. A read that has not answered, or
 /// failed, offers nothing to pick between, and the press goes out naming
@@ -192,18 +192,8 @@ export const CREATE_REFUSAL: Record<CreateRefused, string> = {
 function useAuthorPick(device: () => Device) {
   const listed = useAuthors(device);
 
-  /// Every Author, that device's own first.
+  /// Every Author, in the order the list has them.
   const authors = (): AuthorEntry[] => listed.data ?? [];
-
-  /// The only one there is, where it is a mirror: the server's silent pick is
-  /// that device's own one, so a lone mirror is named rather than left to it.
-  const lone = (): string | undefined => {
-    const [only, ...others] = authors();
-
-    return only !== undefined && others.length === 0 && only.device !== null
-      ? only.id
-      : undefined;
-  };
 
   /// Whether there is a choice to make at all.
   const asked = (): boolean => authors().length > 1;
@@ -226,8 +216,7 @@ function useAuthorPick(device: () => Device) {
     wanting: (): boolean => asked() && chosen() === "",
     /// What the press sends: the pick where there was one to make, and nothing
     /// where there was not.
-    sent: (): string | undefined =>
-      asked() ? chosen() || undefined : lone(),
+    sent: (): string | undefined => (asked() ? chosen() || undefined : undefined),
   };
 }
 
@@ -254,7 +243,7 @@ function AuthorPicker(props: {
         id={id}
         options={props.pick.authors()}
         value={(author) => author.id}
-        label={authorRow}
+        label={authorLabel}
         chosen={props.pick.chosen()}
         pick={(author) => {
           props.pick.setChosen(author);
@@ -433,9 +422,8 @@ export function ReposPane(props: {
     said: string | Live;
   } | null>(null);
 
-  // Who the Repos can be, read off the cluster's one list — this device's own
-  // Authors and a mirror of every member's: with one Author or none, no row
-  // says anything about it.
+  // Who the Repos can be, read off the cluster's one list: with one Author or
+  // none, no row says anything about it.
   const listed = useAuthors();
   const authors = (): AuthorEntry[] => listed.data ?? [];
   const asked = (): boolean => authors().length > 1;
@@ -636,7 +624,7 @@ function RowAuthor(props: {
         id={id}
         options={props.authors}
         value={(author) => author.id}
-        label={authorRow}
+        label={authorLabel}
         chosen={props.repo.author ?? ""}
         disabled={props.disabled}
         pick={(author) => {

@@ -70,7 +70,7 @@ import {
   whenever,
   type Answer,
 } from "./serving";
-import { MIRRORED, oneList } from "./authors";
+import { CLIENT, oneList } from "./authors";
 import repos from "./fixtures/repos.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -617,14 +617,14 @@ describe("the author of a repo", () => {
     );
   });
 
-  /// A member's Author counts towards the two, a repo pointed at one is
-  /// named by it with the machine it is at home on, and every row offers it
-  /// (ADR-0025).
-  it("names a mirrored author with its machine", async () => {
+  /// An Author made on another device counts towards the two, a repo pointed
+  /// at one is named by it with no machine, and every row offers it
+  /// (ADR-0028).
+  it("names an author made on another device, unmarked", async () => {
     serving(
-      whenever("/api/ui/repos", json(recorded(MIRRORED.id))),
+      whenever("/api/ui/repos", json(recorded(CLIENT.id))),
       whenever("/api/ui/settings", json(ONE_AUTHOR)),
-      whenever("/api/ui/authors", json(oneList(ONE_AUTHOR, MIRRORED))),
+      whenever("/api/ui/authors", json(oneList(ONE_AUTHOR, CLIENT))),
     );
     mountPane();
 
@@ -632,7 +632,7 @@ describe("the author of a repo", () => {
 
     expect(
       authorOf(REPOS[1]!.name)!.selectedOptions[0]!.textContent,
-    ).toBe("Client · the-workstation");
+    ).toBe("Client");
     expect(authorOf(FIRST.name)!.selectedOptions[0]!.textContent).toBe(
       WORK.name,
     );
@@ -643,7 +643,7 @@ describe("the author of a repo", () => {
     // And a repo of this device's own Author can be repointed at it.
     expect(
       [...authorOf(FIRST.name)!.options].map((option) => option.text),
-    ).toEqual([WORK.name, "Client · the-workstation"]);
+    ).toEqual([WORK.name, "Client"]);
   });
 
   /// A start on a repo whose author was deleted by hand is sent here, so the

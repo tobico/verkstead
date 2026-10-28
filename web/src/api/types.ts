@@ -712,26 +712,23 @@ id: string | null,
 display_name: string, name: string, email: string, };
 
 /**
- * One Author's fields and its token, edited alone: what the Git section
- * sends for a **mirror**, which is put to the device that Author is at home on
- * as the ordinary edit of its own (ADR-0025).
+ * One Author's fields and its token, edited alone, on the device it is
+ * pressed on: a write to the Author's record there, which every member pulls.
  *
- * The Author alone rather than a [`SettingsEdit`], because a settings save is
- * the whole of the files it is made on, and this device holds none of the
- * home device's other settings to send. The fields are values and the token
- * is an action, as they are in a settings save, for its reason.
+ * The Author alone rather than a [`SettingsEdit`], which is the whole of the
+ * files it is made on. The fields are values and the token is an action, as
+ * they are in a settings save, for its reason.
  */
 export type AuthorEdit = { display_name: string, name: string, email: string, github_token: TokenEdit, };
 
 /**
- * What became of an [`AuthorEdit`], in the words of the device the Author is
- * at home on.
+ * What became of an [`AuthorEdit`].
  */
 export type AuthorEdited = { "Saved": { verified: Verified | null, } } | "NoSuchAuthor";
 
 /**
- * One Author of the cluster's **one list**: this device's own, or a mirror of
- * one a member holds at home (ADR-0025).
+ * One Author of the cluster's **one list**: a record every device holds,
+ * whichever made it (ADR-0028).
  *
  * What `GET /api/ui/authors` answers, to this device's pages and to a member
  * across the link alike — which is why there is **nothing of the token** here,
@@ -744,16 +741,9 @@ export type AuthorEntry = { id: string,
  */
 display_name: string, name: string, email: string, 
 /**
- * Whether the device it is at home on holds a GitHub token for it.
+ * Whether this device's `secrets.yaml` holds a GitHub token for it.
  */
-holds_token: boolean, 
-/**
- * The device it is at home on, or `null` for one of this device's own.
- *
- * A member taking this list in takes only the rows with none, so a mirror
- * is always one hop from its home and never a mirror of a mirror.
- */
-device: RowDevice | null, };
+holds_token: boolean, };
 
 /**
  * What became of removing an Author, from the Git section's switcher.

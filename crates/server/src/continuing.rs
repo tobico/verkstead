@@ -2082,8 +2082,8 @@ async fn load(state: &AppState, conversation_id: i64) -> Option<store::Conversat
 /// What is missing that a stage cannot commit as, in the halt's words, and
 /// what to do about it: the Repo called `repo` named, and sent to the Repos
 /// pane, where its own record is why — an Author no longer in the one list, or
-/// none picked among several — or sent to the device a mirrored Author is at
-/// home on, where its token is still to arrive from; then the Repo's Author
+/// none picked among several — or told its token is on another device and
+/// still to arrive from one; then the Repo's Author
 /// named where there is more than one it could have been, and the sentence a
 /// missing git author always had where there is not.
 fn unsigned(config: &Config, recorded: Option<&str>, repo: &str) -> (String, String) {

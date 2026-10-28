@@ -1626,9 +1626,9 @@ impl Config {
     /// machine stands as it was: its sandbox binds, `session_path`,
     /// `languages` and `kept_by`.
     ///
-    /// **And not the Authors**: the Annex is a linked Member, so the Keeper's
-    /// reach it as mirrors over the one list (ADR-0025), and a copy here too
-    /// would be one Author at home on two devices.
+    /// **And not the Authors**: they are records in the database rather than
+    /// the file, and the Annex, a linked Member, pulls them the way every
+    /// member does (ADR-0028).
     pub fn working_as(&self, keeper: &Config) -> Config {
         Config {
             cleanup: keeper.cleanup.clone(),

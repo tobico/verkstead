@@ -56,6 +56,10 @@ and the alternative named is what was turned down.
   configured in the file somebody may hand-edit, what is secret in the file at
   mode `0600`. A database table holding the tokens was turned down, because it
   would move a credential out of the one file kept at that mode.
+  *(Amended by [ADR-0028](0028-records-are-the-clusters.md): the Authors are
+  replicated records in the database now, out of `config.yaml`, an `authors:`
+  key in the file ignored after the one move; the tokens stay in
+  `secrets.yaml` under the uuid.)*
 
 - **The first start moves the single keys into the list.** `git_author` and
   `github_token` become one Author with a fresh uuid and no display name, and
@@ -119,6 +123,10 @@ and the alternative named is what was turned down.
   Relay at start, on news and on membership moving. Keeping Authors per device,
   with a transfer preflight comparing name and email, was turned down: the
   human wants one list.
+  *(Amended by [ADR-0028](0028-records-are-the-clusters.md): there is no home
+  device and no mirror. Every device holds every Author as a replicated
+  record, newest write wins and a removal final, pulled from every member;
+  the one list carries no device mark.)*
 
 - **And a copy of the token in each device's own `secrets.yaml`**, under the
   uuid, written and taken away as the mirrors refresh. Fetching the token from
@@ -134,11 +142,18 @@ and the alternative named is what was turned down.
   unlinked or when the home answers that it holds none, and a home not
   answering leaves it as it stands. A session is handed its Repo's Author's
   token alone, however many copies the device holds.
+  *(Amended by [ADR-0028](0028-records-are-the-clusters.md): the token travels
+  from whoever holds one. The route answers any live Author this device holds
+  a token for, and a token set or cleared is a write to the record, which
+  tells the others to fetch or take their copy away.)*
 
 - **A mirror whose copy has not arrived yet refuses a Start by name**, naming
   the home device, the way a broken Profile mirror does; a pipeline step that
   needed it halts with a Notice. Treating it as a tokenless Author was turned
   down.
+  *(Amended by [ADR-0028](0028-records-are-the-clusters.md): the refusal
+  names no device — the token is on another device, to try again once one
+  holding it is reachable.)*
 
 - **A new Author is at home on the device that made it; editing a mirror is
   relayed home**, token verification included, as the ordinary edit of that
@@ -146,6 +161,11 @@ and the alternative named is what was turned down.
   left pointing at a mirror that has gone is a start refused by name there,
   under the rule above. Asking every member first was turned down, because a
   member not answering would block the removal.
+  *(Amended by [ADR-0028](0028-records-are-the-clusters.md): an Author is made,
+  edited and removed on whichever device is pressed, token verification
+  running there, and nothing is relayed. Removal asks every reachable member
+  for its Repos, a member not answering skipped and said rather than
+  blocking.)*
 
 - **A Transfer whose far Repo points at another Author is refused by the
   Preflight**, naming both. Repointing the far Repo as part of the move was

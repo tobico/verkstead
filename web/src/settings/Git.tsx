@@ -44,14 +44,11 @@
 //! registered Repo points at it, the Repos named under the dropdown: their next
 //! session would have nobody to commit as (ADR-0025).
 //!
-//! **A member's Authors are rows of the same dropdown**, after this device's
-//! own and marked with the machine each is at home on, because a cluster draws
-//! one list of them (ADR-0025). One of those picked is edited with the same
-//! fields, and the pane says which machine the press goes to: Save and Remove
-//! are put to the device it is at home on, as that device's own edit of it,
-//! the token verified there — see `editAuthor`. What is drawn afterwards is the
-//! mirror that device gives back rather than what was typed, and a machine that
-//! is not answering is named in the refusal.
+//! **Every Author of the cluster is a row of the same dropdown**, whichever
+//! device made it, with no device mark: each is a record every device holds
+//! (ADR-0028). Save and Remove are writes on this device, the token verified
+//! here with this device's `gh`, and every member pulls what they wrote. Two
+//! Authors with one name and email are two rows, until somebody removes one.
 //!
 //! Both halves read the one query. They are two views of the same two files, and
 //! a read apiece would be two reads of them — the cache is what makes the second
@@ -137,25 +134,20 @@ import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
 import {
-  editAuthor,
   loadSettings,
   removeAuthor,
   saveSettings,
 } from "../api/client";
-import { authorLabel, authorRow, useAuthors } from "../authors";
-import { osIcon } from "../devices";
+import { authorLabel } from "../authors";
 import { useReading } from "../freshness";
 import { Listbox, Picker } from "../picking";
 import type {
   Author,
-  AuthorEdit,
-  AuthorEdited,
   AuthorRemoved,
   AuthorSaved,
   ConflictResolution,
   IgnoreRule,
   IgnoredCommentsEdit,
-  RowDevice,
   RuleField,
   RuleRefused,
   SettingsEdit,
@@ -214,10 +206,6 @@ function standing(saved: () => TokenSaved): JSX.Element {
 function authorless(author: Author | AuthorSaved): boolean {
   return author.name === "" || author.email === "";
 }
-
-/// One row of the switcher: an Author this device's files hold, or a mirror of
-/// a member's — the device it is at home on, and whether a token is held there.
-type Listed = AuthorSaved & { device: RowDevice | null; holds_token: boolean };
 
 /// What one Author is missing, in the card's words — or `null` where it has
 /// everything a session needs.
@@ -371,51 +359,24 @@ export function GitPane(props: {
 
   const told = (): SettingsView | undefined => settings.data;
 
-  // And the cluster's one list, for the mirrors of every member's Authors.
-  const listed = useAuthors();
-
-  /// Every member's Author this device mirrors, as rows of the switcher.
-  const mirrors = (): Listed[] =>
-    (listed.data ?? [])
-      .filter((one) => one.device !== null)
-      .map((one) => ({
-        id: one.id,
-        display_name: one.display_name,
-        name: one.name,
-        email: one.email,
-        github_token: null,
-        device: one.device,
-        holds_token: one.holds_token,
-      }));
-
-  /// Every Author there is to pick between: the ones the files hold, the one
-  /// **Add author** opened on the end of them while it is still unsaved, and
-  /// then every member's.
-  const authors = (): Listed[] => {
-    const saved: Listed[] = (told()?.authors ?? []).map((one) => ({
-      ...one,
-      device: null,
-      holds_token: one.github_token !== null,
-    }));
+  /// Every Author there is to pick between: the cluster's one list, and the
+  /// one **Add author** opened on the end of it while it is still unsaved.
+  const authors = (): AuthorSaved[] => {
+    const saved = told()?.authors ?? [];
     const minted = adding();
 
-    const own: Listed[] =
-      minted === null || saved.some((one) => one.id === minted)
-        ? saved
-        : [
-            ...saved,
-            {
-              id: minted,
-              display_name: "",
-              name: "",
-              email: "",
-              github_token: null,
-              device: null,
-              holds_token: false,
-            },
-          ];
-
-    return [...own, ...mirrors()];
+    return minted === null || saved.some((one) => one.id === minted)
+      ? saved
+      : [
+          ...saved,
+          {
+            id: minted,
+            display_name: "",
+            name: "",
+            email: "",
+            github_token: null,
+          },
+        ];
   };
 
   /// Whether there are two to choose between, which is what draws the
@@ -429,7 +390,7 @@ export function GitPane(props: {
   /// which is what the card is drawn from too — the pane reads exactly as it
   /// did before there could be two. Its uuid is empty on a Verkstead with no
   /// Author yet, which a save sends as none.
-  const author = (): Listed | undefined => {
+  const author = (): AuthorSaved | undefined => {
     if (several()) {
       return authors().find((one) => one.id === chosen()) ?? authors()[0];
     }
@@ -441,15 +402,9 @@ export function GitPane(props: {
         ...standing.git_author,
         id: standing.git_author.id ?? "",
         github_token: standing.github_token,
-        device: null,
-        holds_token: standing.github_token !== null,
       }
     );
   };
-
-  /// The device the Author the fields are about is at home on, where that is
-  /// not this one: a mirror, whose Save and Remove are put to that device.
-  const mirror = (): RowDevice | null => author()?.device ?? null;
 
   /// Its uuid as a save names it: none, where there is no Author yet.
   const authorId = (): string | null => author()?.id || null;
@@ -459,13 +414,8 @@ export function GitPane(props: {
 
   const configured = () => author()?.github_token ?? null;
 
-  /// Whether the Author the fields are about holds a token — its own saved
-  /// one here, or one its home holds for a mirror, of which nothing more than
-  /// that crosses.
-  const holding = () =>
-    mirror() !== null
-      ? (author()?.holds_token ?? false)
-      : configured() !== null;
+  /// Whether this device holds a token for the Author the fields are about.
+  const holding = () => configured() !== null;
 
   const authorDisplayName = () => displayName() ?? author()?.display_name ?? "";
   const authorName = () => name() ?? author()?.name ?? "";
@@ -681,7 +631,6 @@ export function GitPane(props: {
 
     unedited();
     setUnremoved(null);
-    setUnsaved(null);
     if (id !== adding()) setAdding(null);
     setChosen(id);
   };
@@ -734,39 +683,6 @@ export function GitPane(props: {
     },
   }));
 
-  /// And a mirror's Save, which is put to the device it is at home on as that
-  /// device's own edit of it — the fields and the token, and nothing else of
-  /// this form, that device's other settings being its own.
-  ///
-  /// Nothing is written into the list from here: the server reads its home
-  /// again before it answers, so the read below is the mirror that device
-  /// gave back rather than what was typed.
-  const away = useMutation(() => ({
-    mutationFn: (sent: { id: string; edit: AuthorEdit }) =>
-      editAuthor(sent.id, sent.edit),
-    onSuccess: (outcome: AuthorEdited, sent) => {
-      void queries.invalidateQueries({ queryKey: ["authors"] });
-
-      if (outcome === "NoSuchAuthor") {
-        setUnsaved("That author isn't configured there any more.");
-        return;
-      }
-
-      setVerifiedAs(
-        outcome.Saved.verified === null
-          ? null
-          : { id: sent.id, verified: outcome.Saved.verified },
-      );
-      unedited();
-    },
-    onError: (error: Error) =>
-      setUnsaved(`The author couldn't be saved. ${error.message}`),
-  }));
-
-  // Why the last Save of a mirror did not land — its home not answering, or
-  // the Author gone from there — or `null`.
-  const [unsaved, setUnsaved] = createSignal<string | null>(null);
-
   /// Save, with whatever is to become of the token.
   ///
   /// The switch below rides along as it stands, along with everything else this
@@ -784,26 +700,6 @@ export function GitPane(props: {
     // a row a way to delete it, and what keeps a blank row somebody added and
     // left from turning down a save about their own email address.
     tidied();
-
-    // A mirror's fields and token go to its home, and the rest of the form
-    // stays here: the select and the checkbox save themselves, and the rules
-    // are this device's own — so a Save made over a mirror is about the mirror.
-    const home = mirror();
-    const id = authorId();
-
-    if (home !== null && id !== null) {
-      setUnsaved(null);
-      away.mutate({
-        id,
-        edit: {
-          display_name: authorDisplayName(),
-          name: authorName(),
-          email: authorEmail(),
-          github_token,
-        },
-      });
-      return;
-    }
 
     const about = editing(github_token);
     setSentAbout(about.id);
@@ -922,10 +818,7 @@ export function GitPane(props: {
                   id="git-author-pick"
                   options={authors()}
                   value={(one) => one.id}
-                  label={authorRow}
-                  icon={(one) =>
-                    one.device === null ? undefined : osIcon(one.device.os ?? "")
-                  }
+                  label={authorLabel}
                   chosen={author()?.id ?? ""}
                   pick={pick}
                   actions={[
@@ -944,26 +837,12 @@ export function GitPane(props: {
                       {typeof why() === "string" ? (
                         why()
                       ) : (
-                        <InUse
-                          repos={why() as string[]}
-                          home={mirror()?.name ?? null}
-                        />
+                        <InUse repos={why() as string[]} />
                       )}
                     </ErrorLine>
                   )}
                 </Show>
               </section>
-            </Show>
-
-            {/* A member's Author, picked: which machine a press of Save or
-                Remove goes to, said once above the fields it is about. */}
-            <Show when={mirror()}>
-              {(device) => (
-                <p class={styles.athome}>
-                  This author is at home on {device().name}. Saving or removing
-                  it here changes it there.
-                </p>
-              )}
             </Show>
 
             <section>
@@ -976,14 +855,6 @@ export function GitPane(props: {
               <TokenScopes class={styles.tokenScopes} />
 
               <Show when={configured()}>{(saved) => standing(saved)}</Show>
-
-              {/* A mirror's token is its home's, and nothing of it crosses
-                  but that there is one. */}
-              <Show when={mirror() !== null && holding()}>
-                <p class={styles.tokenStanding}>
-                  A token is saved on {mirror()!.name}.
-                </p>
-              </Show>
 
               {/* What GitHub said about the last token saved from here: the
                   account it authenticates as, or why nobody could be asked.
@@ -1030,7 +901,7 @@ export function GitPane(props: {
                     <button
                       type="button"
                       class={styles.clear}
-                      disabled={save.isPending || away.isPending}
+                      disabled={save.isPending}
                       onClick={() => {
                         setVerifiedAs(null);
                         write("Clear");
@@ -1262,16 +1133,10 @@ export function GitPane(props: {
             </section>
 
             <div class={styles.buttons}>
-              <button type="submit" disabled={save.isPending || away.isPending}>
+              <button type="submit" disabled={save.isPending}>
                 Save
               </button>
             </div>
-
-            {/* A mirror's Save that its home did not take, naming the
-                machine. */}
-            <Show when={unsaved()}>
-              {(why) => <ErrorLine class={styles.failure}>{why()}</ErrorLine>}
-            </Show>
 
             {/* A server that could not write the files, which is the one
                 thing here that is an error rather than an answer. Said
@@ -1291,7 +1156,6 @@ export function GitPane(props: {
       <ConfirmRemoval
         asked={removing()}
         keep={() => setRemoving(null)}
-        home={mirror()?.name ?? null}
         remove={() => {
           const gone = removing();
           setRemoving(null);
@@ -1304,12 +1168,7 @@ export function GitPane(props: {
 }
 
 /// The Repos a removal was refused over, named, and what to do about them.
-function InUse(props: {
-  repos: string[];
-  /// The machine those Repos are on, where the Author is a member's — or
-  /// `null` for this device's own.
-  home: string | null;
-}): JSX.Element {
+function InUse(props: { repos: string[] }): JSX.Element {
   const listed = (): string => {
     const repos = props.repos;
 
@@ -1322,7 +1181,7 @@ function InUse(props: {
     <>
       {listed()} {props.repos.length === 1 ? "is" : "are"} still this author's.
       Pick another author for {props.repos.length === 1 ? "it" : "them"} under
-      Repos{props.home === null ? "" : ` on ${props.home}`} first, or remove{" "}
+      Repos first, or remove{" "}
       {props.repos.length === 1 ? "it" : "them"}.
     </>
   );
@@ -1333,9 +1192,6 @@ function InUse(props: {
 function ConfirmRemoval(props: {
   /// The Author asked about, or `null` while nothing is being asked.
   asked: AuthorSaved | null;
-  /// The machine it is at home on, where it is a member's, whose settings it
-  /// comes out of — or `null` for this device's own.
-  home: string | null;
   /// The way back, which Escape and a press on the backdrop come to as well.
   keep: () => void;
   /// And the removal, made.
@@ -1354,9 +1210,8 @@ function ConfirmRemoval(props: {
         Remove {props.asked ? authorLabel(props.asked) : ""}?
       </p>
       <p class={styles.confirmingWhy}>
-        Its name, email and GitHub token come out of the settings
-        {props.home === null ? "" : ` on ${props.home}`}. Commits already made
-        as it stay as they are.
+        Its name, email and GitHub token come out of the settings on every
+        device. Commits already made as it stay as they are.
       </p>
       <div class={styles.confirmingOut}>
         <button
