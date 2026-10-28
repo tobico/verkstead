@@ -243,6 +243,27 @@ pub struct ProfileEntry {
     /// One list rather than a section per device: a Profile is a Profile, and
     /// which machine its account sits on is a fact on the row.
     pub device: Option<crate::RowDevice>,
+
+    /// Where this Profile was minted and the id it had there, for one of the
+    /// answering device's own that was numbered before Profiles had uuids —
+    /// absent for every other row.
+    ///
+    /// What a member's mirror of it from before the uuids is bridged by: that
+    /// mirror kept the device it was at home on and the id it had there, under
+    /// a provisional uuid of the member's own minting, and this pair matching
+    /// it is what rewrites the provisional uuid to this one (ADR-0028).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub minted: Option<ProfileMinted>,
+}
+
+/// Where a Profile numbered before the uuids was minted: the **Device Id** of
+/// the machine it was made on, and the integer id it had there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ProfileMinted {
+    pub device: String,
+    pub id: i64,
 }
 
 /// One file of a Profile's account as a member across the link is handed it: a

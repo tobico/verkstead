@@ -37,7 +37,7 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice, RowDevice,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileMinted, ProfileSaved, RoleChoice, RowDevice,
 };
 
 use crate::resolved::{Resolved, resolve};
@@ -213,6 +213,10 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
                     broken: broken(&profile, home.as_ref(), &harnesses, &signed_out),
                     login: lends(&profile),
                     device: home,
+                    minted: profile.minted.map(|minted| ProfileMinted {
+                        device: minted.device,
+                        id: minted.id,
+                    }),
                     name: profile.name,
                     account: account(&profile.account),
                     models: profile.models,

@@ -266,6 +266,55 @@ pub(crate) async fn renumbered(pool: &SqlitePool, data_dir: &Path) -> anyhow::Re
     Ok(())
 }
 
+/// Move the account mirror kept under a bridged mirror's provisional uuid to
+/// the uuid its home publishes — see [`store::bridge_mirror`].
+///
+/// For [`renumbered`]'s reason: the row that names a mirror is what takes it
+/// away, and a directory left under the provisional uuid is a member's login
+/// nothing names any more. And the next session under the Profile fetches into
+/// the one named by the real uuid, so the move is what keeps that one fetch
+/// rather than a fresh mirror beside a forgotten one.
+///
+/// Where one is already under the real uuid, the provisional one is taken away
+/// instead: a mirror is fetched fresh before every launch, so the one already
+/// in place loses nothing. Anything that will not move is a line in the log.
+pub(crate) async fn bridged(data_dir: &Path, from: &str, to: &str) {
+    // A router with no Data Directory has nowhere to have kept a mirror — see
+    // [`renumbered`].
+    if data_dir.as_os_str().is_empty() {
+        return;
+    }
+
+    let accounts = crate::sandbox::accounts(data_dir);
+    let from = accounts.join(from);
+    let to = accounts.join(to);
+
+    let moved = if tokio::fs::try_exists(&to).await.unwrap_or(false) {
+        tokio::fs::remove_dir_all(&from).await
+    } else {
+        tokio::fs::rename(&from, &to).await
+    };
+
+    match moved {
+        Ok(()) => tracing::info!(
+            from = %from.display(),
+            to = %to.display(),
+            "the mirror of a member's account moved to the uuid its home names the Profile by",
+        ),
+
+        // Never fetched, which is a Profile nothing was launched under here.
+        Err(why) if why.kind() == std::io::ErrorKind::NotFound => {}
+
+        Err(why) => tracing::warn!(
+            error = ?why,
+            from = %from.display(),
+            to = %to.display(),
+            "the mirror of a member's account could not be moved to the uuid its home names the \
+             Profile by",
+        ),
+    }
+}
+
 /// What a session or a terminal away from home holds until its ending, in one
 /// value: the login to write back, the store the sentence goes in where the home
 /// has gone away, and the cluster handle it travels over.

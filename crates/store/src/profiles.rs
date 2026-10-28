@@ -1006,10 +1006,9 @@ pub async fn record_mirror(
 /// out of the Repos' memory with it. See [`delete_profile`], whose reasons are
 /// these.
 ///
-/// **And a mirror held from before the uuids goes the same way**, its
-/// provisional uuid being one the member never said: until its home's own
-/// uuid is matched to it, a member read for the first time on this release
-/// finds none of what this device held of it.
+/// **A mirror held from before the uuids is bridged before this is asked** —
+/// see [`bridge_mirror`] — so what is left under a provisional uuid by then is
+/// a Profile its home no longer holds, and it goes the same way.
 ///
 /// What comes back is the uuids that were taken away, which is what the
 /// caller says a line about: a Profile leaving every device is worth one.
@@ -1055,6 +1054,132 @@ pub async fn forget_mirrors_except(
         .with_context(|| format!("forgetting the Profiles {device} no longer holds"))?;
 
     Ok(gone)
+}
+
+/// Bridge a mirror held from before the uuids onto the uuid its home now
+/// publishes for that Profile: the mirror of `home`'s Profile once numbered
+/// `was` there, held under a provisional uuid of this device's minting, is
+/// rewritten to `uuid` — and so is everything that named it.
+///
+/// **A rewrite rather than a removal and a fresh row**, which is the whole of
+/// what bridging is for (ADR-0028, *mirror rows are bridged, not dropped*): a
+/// Conversation's three Pairings and the Profile a signed-out stop waits on,
+/// the Repo's pairing memory, the pending and recorded steers, and the models
+/// and the home all name the Profile by its uuid, and every one of them is
+/// moved onto the real one in the same transaction. Nothing is nulled.
+///
+/// **Where a mirror under `uuid` is already held**, the provisional row's
+/// references move onto that one and the provisional row goes, its models and
+/// home with it: the row under the real uuid is what its home said last.
+///
+/// What comes back is the provisional uuid that was rewritten, for the caller
+/// to move what outside the database is named by it — the account mirror under
+/// the Data Directory. `None` where no mirror of that pair is held under any
+/// other uuid, which is every read of a member after the first.
+pub async fn bridge_mirror(
+    pool: &SqlitePool,
+    home: &str,
+    was: i64,
+    uuid: &str,
+) -> Result<Option<String>> {
+    let mut tx = super::writing(pool, "bridging a member's Profile to its uuid").await?;
+
+    let held: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM profiles WHERE home_device = ? AND home_id = ? AND id != ?")
+            .bind(home)
+            .bind(was)
+            .bind(uuid)
+            .fetch_optional(&mut *tx)
+            .await
+            .with_context(|| format!("looking for the mirror of Profile {was} on {home}"))?;
+
+    let Some((provisional,)) = held else {
+        return Ok(None);
+    };
+
+    let there: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT home_device FROM profiles WHERE id = ?")
+            .bind(uuid)
+            .fetch_optional(&mut *tx)
+            .await
+            .with_context(|| format!("looking for Profile {uuid} on this device"))?;
+
+    match there {
+        Some((None,)) => {
+            bail!("{home} said its Profile {was} is {uuid}, which is one of this device's own")
+        }
+
+        Some((Some(_),)) => {
+            rename_references(&mut tx, &provisional, uuid).await?;
+            forget_models(&mut tx, &provisional).await?;
+            forget_home(&mut tx, &provisional).await?;
+
+            sqlx::query("DELETE FROM profiles WHERE id = ?")
+                .bind(&provisional)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("removing the provisional mirror {provisional}"))?;
+        }
+
+        None => {
+            // The row and what hangs off it by key move in one go, which the
+            // foreign keys allow only once the transaction is over.
+            sqlx::query("PRAGMA defer_foreign_keys = ON")
+                .execute(&mut *tx)
+                .await
+                .context("deferring the foreign keys while a mirror is bridged")?;
+
+            for statement in [
+                "UPDATE profiles SET id = ? WHERE id = ?",
+                "UPDATE profile_models SET profile_id = ? WHERE profile_id = ?",
+                "UPDATE profile_homes SET profile_id = ? WHERE profile_id = ?",
+            ] {
+                sqlx::query(statement)
+                    .bind(uuid)
+                    .bind(&provisional)
+                    .execute(&mut *tx)
+                    .await
+                    .with_context(|| format!("bridging the mirror {provisional} to {uuid}"))?;
+            }
+
+            rename_references(&mut tx, &provisional, uuid).await?;
+        }
+    }
+
+    tx.commit()
+        .await
+        .with_context(|| format!("bridging the mirror {provisional} to {uuid}"))?;
+
+    Ok(Some(provisional))
+}
+
+/// Every reference to a Profile outside its own row and the two tables hung off
+/// it, moved from `from` to `to`.
+async fn rename_references(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    from: &str,
+    to: &str,
+) -> Result<()> {
+    for (table, column) in [
+        ("conversations", "grilling_profile_id"),
+        ("conversations", "implementation_profile_id"),
+        ("conversations", "review_profile_id"),
+        ("conversations", "stopped_signed_out"),
+        ("repo_pairings", "profile_id"),
+        ("pending_steers", "profile_id"),
+        ("steers", "profile_id"),
+    ] {
+        sqlx::query(&format!(
+            "UPDATE {table} SET {column} = ? WHERE {column} = ?"
+        ))
+        .bind(to)
+        .bind(from)
+        .execute(&mut **tx)
+        .await
+        .with_context(|| format!("naming Profile {to} for {from} in {table}.{column}"))?;
+    }
+
+    Ok(())
 }
 
 /// And every mirror of a device that is no longer a member of this cluster at

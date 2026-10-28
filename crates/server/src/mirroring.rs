@@ -431,7 +431,10 @@ async fn read_member(state: &AppState, device: &str) {
     // than being taken as *it answered nothing*.
     let its_own: Vec<&ProfileEntry> = rows.iter().filter(|row| row.device.is_none()).collect();
 
-    let mut wrote = 0;
+    // Every mirror held from before the uuids that this list now names, moved
+    // onto the uuid its home publishes before anything is written over it —
+    // see [`bridged`].
+    let mut wrote = bridged(state, device, &its_own).await;
 
     for row in &its_own {
         // Held under the member's own uuid, so one Profile is one uuid on both
@@ -487,6 +490,59 @@ async fn read_member(state: &AppState, device: &str) {
     if wrote > 0 || !gone.is_empty() {
         state.nudges.announce_here(Nudge::Profiles);
     }
+}
+
+/// Bridge each mirror of `device`'s held from before the uuids onto the uuid
+/// `device` now publishes for it, and say how many moved.
+///
+/// **What a mirror from before the uuids is matched by** is where its Profile
+/// was minted and the id it had there: the mirror kept the device it was at
+/// home on and the id it had there beside a provisional uuid, and the home's
+/// own row now publishes the same pair from its side (ADR-0028). Matched, the
+/// provisional uuid is rewritten to the home's in every reference at once —
+/// see [`store::bridge_mirror`] — and the account mirror under the Data
+/// Directory follows it. So every Pairing made against the mirror before the
+/// switch survives it, on whichever device updates first.
+///
+/// **Only a pair minted on `device` itself**: what a member says of where its
+/// own Profiles were minted is about that member, and a pair naming a third
+/// machine is not one it can speak for.
+async fn bridged(state: &AppState, device: &str, its_own: &[&ProfileEntry]) -> usize {
+    let mut bridged = 0;
+
+    for row in its_own {
+        let Some(minted) = row.minted.as_ref().filter(|minted| minted.device == device) else {
+            continue;
+        };
+
+        match store::bridge_mirror(&state.pool, device, minted.id, &row.id).await {
+            Ok(Some(provisional)) => {
+                tracing::info!(
+                    device,
+                    provisional = %provisional,
+                    profile = %row.id,
+                    "a mirror held from before the uuids is bridged onto its home's uuid",
+                );
+
+                account::bridged(&state.data_dir, &provisional, &row.id).await;
+
+                bridged += 1;
+            }
+
+            Ok(None) => {}
+
+            // Left provisional, Pairings and all, which is what it was: the next
+            // read of that member tries again.
+            Err(error) => tracing::error!(
+                error = ?error,
+                device,
+                profile = %row.id,
+                "a mirror held from before the uuids could not be bridged onto its home's uuid",
+            ),
+        }
+    }
+
+    bridged
 }
 
 /// Where a press over one Profile row is made, and what came of it where that is

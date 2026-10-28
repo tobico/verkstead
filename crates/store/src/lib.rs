@@ -169,7 +169,7 @@ pub use permitted::{forbid_device, permit_device, permitted_devices};
 pub use previews::{Preview, retire_preview, standing_previews, suggest_preview};
 pub use profiles::{
     Account, AgentType, Channel, Clash, Deleting, Minted, Mirror, Pairing, Picked, Profile,
-    ProfileFacts, Saving, create_profile, delete_profile, forget_mirrors_except,
+    ProfileFacts, Saving, bridge_mirror, create_profile, delete_profile, forget_mirrors_except,
     forget_mirrors_of_departed, load_profile, profiles, profiles_as_saved, record_mirror,
     update_profile,
 };

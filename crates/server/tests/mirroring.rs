@@ -50,7 +50,7 @@ use verkstead_server::peer::joining::Joins;
 use verkstead_server::peer::{self, Members};
 use verkstead_server::platform::{self, Environment, Platform};
 use verkstead_server::remote::Tailscale;
-use verkstead_server::{Routers, open_database, routers_answering_devices_telling, store};
+use verkstead_server::{Routers, open_database, routers_keeping_answering_devices_telling, store};
 use verkstead_store::{Linking, Mirror, forget_member, record_member};
 
 /// The device whose accounts are mirrored.
@@ -186,8 +186,9 @@ impl Verkstead {
         let Routers {
             workbench,
             over_the_link,
-        } = routers_answering_devices_telling(
+        } = routers_keeping_answering_devices_telling(
             pool.clone(),
+            dir.path().join("data"),
             cluster.clone(),
             nudges.clone(),
             machine,
@@ -1790,4 +1791,213 @@ async fn an_unreachable_member_a_release_apart_is_refused_without_the_gap() {
     let error: verkstead_schema::ApiError = serde_json::from_str(&said).unwrap();
 
     assert_eq!(error.error, format!("{A_MACHINE} couldn't be reached."));
+}
+
+/// Two Verksteads linked before the uuids, each with a Conversation paired with
+/// the other's Profile, end with one uuid per Profile on both ends and every
+/// Pairing intact — with A updated first.
+#[tokio::test]
+async fn the_mirrors_of_before_the_uuids_are_bridged_when_a_updates_first() {
+    bridged_whichever_updates_first(true).await;
+}
+
+/// And with B updated first.
+#[tokio::test]
+async fn the_mirrors_of_before_the_uuids_are_bridged_when_b_updates_first() {
+    bridged_whichever_updates_first(false).await;
+}
+
+/// One of the pair is on this release and the other is not, which is a trouble
+/// line on the first's row naming both releases and the mirrors of the second
+/// held as they were, Pairings and all; then the second updates, and both ends
+/// bridge their mirrors onto the uuid the other publishes.
+async fn bridged_whichever_updates_first(a_first: bool) {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+
+    let (machine, os) = this_machine();
+
+    let (first, second, second_id, second_name) = if a_first {
+        (&a, &b, B, machine.as_str())
+    } else {
+        (&b, &a, A, A_MACHINE)
+    };
+
+    // A release apart, neither can read the other's Profiles: the one behind
+    // answers integer ids, and reads the uuids it is answered with as nothing
+    // it knows. So both answer unreadably from before they are linked, and the
+    // one behind says the release it is on.
+    a.garbles(true);
+    b.garbles(true);
+    second.reading.now_running(Some("0.0.1"));
+
+    b.linked_to(&a.device, A_MACHINE, A_OS, vec![a.at()]).await;
+    a.linked_to(&b.device, &machine, &os, vec![b.at()]).await;
+
+    // Each device's own Profile, numbered before the uuids, and the other's
+    // mirror of it under a provisional uuid with the integer beside it.
+    let on_a = a.saves_numbered("on-a", 7).await;
+    let on_b = b.saves_numbered("on-b", 9).await;
+
+    let held_of_a = b.mirrors_from_before("on-a", A, 7).await;
+    let held_of_b = a.mirrors_from_before("on-b", B, 9).await;
+
+    // And a member's account fetched into the mirror under its provisional
+    // uuid, before the switch, on B.
+    let fetched = b.account_mirror(&held_of_a);
+    std::fs::create_dir_all(&fetched).unwrap();
+    std::fs::write(fetched.join(".claude.json"), "{}\n").unwrap();
+
+    let on_a_here = a.drafting().await;
+    a.picks(on_a_here, &held_of_b).await;
+
+    let on_b_here = b.drafting().await;
+    b.picks(on_b_here, &held_of_a).await;
+
+    let _first_holding = first.holding();
+
+    first
+        .trouble_on(
+            second_id,
+            Some(&format!(
+                "{second_name}'s Agent Profiles couldn't be read. {second_name} is on 0.0.1 and \
+                 this device is on {RUNNING}. Update {second_name}."
+            )),
+        )
+        .await;
+
+    let (first_conversation, first_held) = if a_first {
+        (on_a_here, &held_of_b)
+    } else {
+        (on_b_here, &held_of_a)
+    };
+
+    assert_eq!(
+        first.paired(first_conversation).await.as_deref(),
+        Some(first_held.as_str()),
+        "the mirror of the member a release behind is held as it was, Pairing and all",
+    );
+
+    // And the second updates, after which each reads the other.
+    a.garbles(false);
+    b.garbles(false);
+    second.reading.now_running(Some(RUNNING));
+
+    let _second_holding = second.holding();
+    first.nudges.announce(Nudge::Devices);
+
+    a.paired_with(on_a_here, &on_b).await;
+    b.paired_with(on_b_here, &on_a).await;
+
+    for (device, own, mirrored) in [(&a, &on_a, &on_b), (&b, &on_b, &on_a)] {
+        let rows = device
+            .profiles_saying(|rows| rows.iter().any(|row| &row.id == mirrored))
+            .await;
+
+        let mut ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+        ids.sort();
+
+        let mut both = vec![own.as_str(), mirrored.as_str()];
+        both.sort();
+
+        assert_eq!(ids, both, "one row per Profile, by the uuid it has at home");
+    }
+
+    assert!(
+        !fetched.exists(),
+        "the account mirror is no longer under the provisional uuid"
+    );
+    assert!(
+        b.account_mirror(&on_a).join(".claude.json").exists(),
+        "it followed the rewrite, so the next session fetches into it",
+    );
+}
+
+impl Verkstead {
+    /// A Profile saved on this device and numbered `was` before the uuids,
+    /// which is what the switch leaves of one: where it was minted and the id it
+    /// had there.
+    async fn saves_numbered(&self, name: &str, was: i64) -> String {
+        let id = self.saves(name).await;
+
+        sqlx::query("UPDATE profiles SET minted_on = ?, minted_id = ? WHERE id = ?")
+            .bind(self.device.id())
+            .bind(was)
+            .bind(&id)
+            .execute(&self.pool)
+            .await
+            .unwrap();
+
+        id
+    }
+
+    /// And a mirror of `home`'s Profile `was` as the switch leaves one: under a
+    /// provisional uuid of this device's minting, with the home and the integer
+    /// beside it. The provisional uuid is given back.
+    async fn mirrors_from_before(&self, name: &str, home: &str, was: i64) -> String {
+        let provisional = format!("0000000{was}-0000-4000-8000-{}", &self.device.id()[..12]);
+
+        let (claude_dir, config_file) = self.account(&format!("mirror-of-{name}"));
+
+        store::record_mirror(
+            &self.pool,
+            &provisional,
+            &Mirror {
+                device: home.to_owned(),
+                was: Some(was),
+                login: true,
+            },
+            &store::ProfileFacts {
+                name: Some(name.to_owned()),
+                account: store::Account::Claude {
+                    claude_dir,
+                    config_file,
+                },
+                models: vec![MODEL.to_owned()],
+                memory: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        provisional
+    }
+
+    /// Where this device keeps the account mirror of Profile `id`.
+    fn account_mirror(&self, id: &str) -> PathBuf {
+        self.dir.path().join("data").join("accounts").join(id)
+    }
+
+    /// The Profile a Conversation's implementation picker names.
+    async fn paired(&self, conversation: i64) -> Option<String> {
+        let drawn: ConversationView = reading(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}"),
+        )
+        .await;
+
+        drawn
+            .implementation_pairing
+            .map(|pairing| pairing.profile.id)
+    }
+
+    /// Wait until it names `profile`, or a panic saying what it named.
+    async fn paired_with(&self, conversation: i64, profile: &str) {
+        let mut last = None;
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                last = self.paired(conversation).await;
+
+                if last.as_deref() == Some(profile) {
+                    return;
+                }
+
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("the Pairing never named {profile}: it named {last:?}"));
+    }
 }

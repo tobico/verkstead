@@ -3762,7 +3762,13 @@ refresh. A mirror held from before the uuids carries a provisional uuid of this
 device's minting, with the id it had at home beside it, until that home's own
 uuid is matched to it; and this device's own Profiles numbered before the uuids
 keep where they were minted and the id they had, which is the same pair said
-from the home's side. What a row costs is that the two uniqueness rules above become
+from the home's side. **The pair is the bridge**: the home publishes it on each
+such row of its list, and the first read of it that matches rewrites the
+provisional uuid to the home's in everything that named it, the account mirror
+under the Data Directory included — so every Pairing survives the switch,
+whichever device updates first. A home a release behind cannot be read, which
+is a line on its Devices row naming both releases, and its mirrors stay
+provisional, Pairings and all, until it updates. What a row costs is that the two uniqueness rules above become
 *this device's own rows'*: two machines may each hold a `work`, and each the one
 unnamed Claude account, which is what nearly every installation holds.
 **Which machine an account sits on is a fact on the row**, drawn with the mark
