@@ -2570,10 +2570,16 @@ jobs:
 
           # Launch on Startup, registered the way Electron's login-item API
           # registers it: a value named `Verkstead`, holding the launcher in
-          # quotes and `--hidden` — see `desktop/src/startup.ts`.
+          # quotes and `--hidden` — see `desktop/src/startup.ts`. The key made
+          # first where it is missing, as Windows makes it for the first login
+          # item: a fresh runner's profile has none. Only where it is missing,
+          # because `New-Item -Force` over a key that exists empties it.
           start="\"$(cygpath -w "$INSTALL/Verkstead.exe")\" --hidden"
-          START="$start" powershell -NoProfile -Command \
-            "Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Verkstead -Value \$env:START"
+          START="$start" powershell -NoProfile -Command "
+            \$run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+            if (-not (Test-Path \$run)) { New-Item \$run -Force | Out-Null }
+            Set-ItemProperty \$run -Name Verkstead -Value \$env:START -ErrorAction Stop
+          "
 
           run "Installing this exe over $tag's msi" "$installer" /S
           one "installing it over $tag's msi"
