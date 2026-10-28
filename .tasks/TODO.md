@@ -28,7 +28,7 @@ cost wall clock rather than save it), and the Linux job inside this work.
 
 ## Tasks
 
-- [ ] 01: Open the measuring pull request and record the baseline — [details](01-measuring-pull-request-and-baseline.md)
+- [x] 01: Open the measuring pull request and record the baseline — [details](01-measuring-pull-request-and-baseline.md)
 - [ ] 02: One test binary each for store, schema and cli — [details](02-merge-store-schema-cli-tests.md)
 - [ ] 03: One test binary for the server, and the seven that stay alone — [details](03-merge-server-tests.md)
 - [ ] 04: Defender exclusions on the runner — [details](04-defender-exclusions.md)

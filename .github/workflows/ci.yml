@@ -557,7 +557,7 @@ jobs:
   # | Lever                               | Leg 1                 | Leg 2                 |
   # | ----------------------------------- | --------------------- | --------------------- |
   # | Baseline (`main`, run 40633314366)  | 10m04 + 20m26 = 31m35 | 8m20 + 17m00 = 26m05  |
-  # | Line tables, no examples built      |                       |                       |
+  # | Line tables, no examples built      | 7m04 + 19m52 = 28m04  | 7m08 + 17m04 = 25m02  |
   # | One test binary: store, schema, cli |                       |                       |
   # | One test binary: the server         |                       |                       |
   # | Defender exclusions                 |                       |                       |
@@ -571,6 +571,10 @@ jobs:
   # 4m39s, and the test binaries 11m38s on top. Its tests are about 4,200
   # test-seconds a leg, spread thinly over the suites: `conversations` is 16%
   # and nothing else is above 8%.
+  #
+  # Line tables took a leg's build from 8–10 minutes to 7, and the two legs'
+  # builds to within four seconds of each other (run 40649541515). The tests
+  # did not move, which is what the levers after it are for.
   #
   # `slice` partitioning deals the tests out one at a time across every binary,
   # so each leg gets its share of each suite rather than whole binaries. What
