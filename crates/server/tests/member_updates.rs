@@ -75,8 +75,9 @@ const PATIENCE: Duration = Duration::from_millis(300);
 const WAITING: Duration = Duration::from_secs(30);
 
 /// The latest stable release, as the pressing device's Update Notice learns
-/// it: what crow is told of and is to come back on.
-const RELEASE: &str = "0.3.0";
+/// it: what crow is told of and is to come back on. Far ahead of [`RUNNING`],
+/// so that it is still an update once the workspace's own version reaches it.
+const RELEASE: &str = "99.0.0";
 
 /// And how long crow has to come back where a test isn't about the deadline:
 /// longer than any restart here takes.
@@ -917,8 +918,12 @@ async fn a_member_back_on_the_new_release_is_drawn_on_it() {
 
     crow.comes_back_on(RELEASE);
 
-    let back = crow_comes_to(&pressing.workbench, |row| row.updating.is_none()).await;
-    assert_eq!(back.identity.version.as_deref(), Some(RELEASE));
+    // The Update is over as the stream is taken up, and the version crow came
+    // back on is written down by the reading that take-up sets off.
+    let back = crow_comes_to(&pressing.workbench, |row| {
+        row.updating.is_none() && row.identity.version.as_deref() == Some(RELEASE)
+    })
+    .await;
     assert!(!back.restarting);
     assert_eq!(back.trouble, None);
 
@@ -1015,8 +1020,10 @@ async fn a_member_that_never_comes_back_is_a_line_at_the_deadline() {
 
     crow.comes_back_on(RELEASE);
 
-    let back = crow_comes_to(&pressing.workbench, |row| row.trouble.is_none()).await;
-    assert_eq!(back.identity.version.as_deref(), Some(RELEASE));
+    crow_comes_to(&pressing.workbench, |row| {
+        row.trouble.is_none() && row.identity.version.as_deref() == Some(RELEASE)
+    })
+    .await;
 }
 
 /// Update all with raven asleep: raven's row says it couldn't be reached, crow
@@ -1075,13 +1082,13 @@ async fn update_all_updates_the_members_then_this_device_and_skips_a_sleeper() {
 
     crow.comes_back_on(RELEASE);
 
-    let done = devices_come_to(&pressing.workbench, |view| !view.updating_all).await;
+    let done = devices_come_to(&pressing.workbench, |view| {
+        !view.updating_all && member_in(view, CROW).identity.version.as_deref() == Some(RELEASE)
+    })
+    .await;
     assert_eq!(pressing.asking.lines(), vec![ASKED.to_owned()]);
     assert_eq!(done.this_updating, Some(ThisUpdating { percent: None }));
-
-    let crow = member_in(&done, CROW);
-    assert_eq!(crow.identity.version.as_deref(), Some(RELEASE));
-    assert_eq!(crow.trouble, None);
+    assert_eq!(member_in(&done, CROW).trouble, None);
 
     // The sleeper's row says it; nothing was tried on it, and crow updated.
     notices.none().await;

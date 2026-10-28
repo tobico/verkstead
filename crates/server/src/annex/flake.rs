@@ -521,8 +521,20 @@ mod tests {
             toplevel = c.system.build.toplevel.drvPath;
         }";
 
+        /// What stands in for the release asset, beside the flake.
+        const STAND_IN: &str = "release-asset";
+
         /// `files` written into a directory, evaluated, or `None` where there
         /// is no `nix`.
+        ///
+        /// **Against this checkout, not the release.** The written flake pins
+        /// the tag and asset of [`VERSION`], which do not exist until that
+        /// version is released — and the commit that bumps the version is
+        /// tested before it is — so the `verkstead` input is overridden with
+        /// this checkout's own module, the one that tag will hold, and the
+        /// binary input with a file beside the flake. The checkout is read as
+        /// `shallow`, since CI's is a depth-one clone, which Nix refuses to
+        /// lock as a whole history it cannot count the revisions of.
         fn evaluate(files: &Written, copied: bool) -> Option<(serde_json::Value, String)> {
             if Command::new("nix").arg("--version").output().is_err() {
                 println!("skipping the Annex flake's evaluation: no nix on PATH");
@@ -541,29 +553,22 @@ mod tests {
             // what it tracks is copied and not `target`; `shallow` because
             // CI's checkout is; and dirty locks allowed because a working tree
             // usually is.
-            let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .canonicalize()
-                .unwrap();
-            let stub = tempfile::tempdir().unwrap();
-            std::fs::write(stub.path().join(RELEASE_ASSET), "#!/bin/sh\n").unwrap();
-
+            let flake = format!("path:{}", dir.path().display());
+            let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
             let mut lock = Command::new("nix");
             lock.args(["--extra-experimental-features", "nix-command flakes"])
-                .args(["flake", "lock", "--allow-dirty-locks"])
+                .args(["flake", "lock", &flake, "--allow-dirty-locks"])
                 .args(["--override-input", "verkstead"])
-                .arg(format!("git+file://{}?shallow=1", checkout.display()));
+                .arg(format!(
+                    "git+file://{}?shallow=1",
+                    checkout.canonicalize().unwrap().display()
+                ));
             if !copied {
+                std::fs::write(dir.path().join(STAND_IN), "#!/bin/sh\n").unwrap();
                 lock.args(["--override-input", "verkstead-binary"])
-                    .arg(format!(
-                        "file+file://{}",
-                        stub.path().join(RELEASE_ASSET).display()
-                    ));
+                    .arg(format!("path:{}", dir.path().join(STAND_IN).display()));
             }
-            let locked = lock
-                .arg(format!("path:{}", dir.path().display()))
-                .output()
-                .unwrap();
+            let locked = lock.output().unwrap();
 
             assert!(
                 locked.status.success(),
@@ -576,8 +581,7 @@ mod tests {
                 .args(["eval", "--allow-dirty-locks"])
                 .arg("--json")
                 .arg(format!(
-                    "path:{}#nixosConfigurations.{CONFIGURATION}.config",
-                    dir.path().display()
+                    "{flake}#nixosConfigurations.{CONFIGURATION}.config"
                 ))
                 .args(["--apply", READ_BACK])
                 .output()
@@ -632,6 +636,7 @@ mod tests {
             assert!(!package.contains(COPIED_INSTALL), "{package}");
             assert!(read["toplevel"].as_str().unwrap().ends_with(".drv"));
             assert!(lock.contains("\"verkstead-binary\""), "{lock}");
+            assert!(lock.contains(STAND_IN), "{lock}");
         }
 
         #[test]

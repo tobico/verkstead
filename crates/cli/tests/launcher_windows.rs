@@ -302,11 +302,17 @@ async fn the_job_holds_the_launcher_and_what_it_started() {
     }
 }
 
-/// The one process whose parent is `launcher`, asked of the machine.
+/// The shell under `launcher`, asked of the machine.
 ///
 /// Asked from out here rather than printed from in there, and asked with
 /// PowerShell rather than `wmic`: this side runs as the human and may enumerate
 /// what it likes, and `wmic` is not on a Windows 11 machine any more.
+///
+/// The probe's `cmd.exe`, started after the launcher, rather than any process
+/// naming the launcher as its parent. Windows keeps a parent's id on its
+/// children after the parent has gone, and ids are reused: a launcher handed
+/// the id a boot-time `smss.exe` once had is the "parent" of `csrss.exe` and
+/// `wininit.exe` too, which no Job of ours will ever take.
 fn under(launcher: u32) -> Option<u32> {
     let listed = Command::new(POWERSHELL)
         .args([
@@ -314,7 +320,10 @@ fn under(launcher: u32) -> Option<u32> {
             "-NonInteractive",
             "-Command",
             &format!(
-                "(Get-CimInstance Win32_Process -Filter 'ParentProcessId={launcher}').ProcessId"
+                "$launcher = Get-CimInstance Win32_Process -Filter 'ProcessId={launcher}'; \
+                 (Get-CimInstance Win32_Process \
+                 -Filter \"ParentProcessId={launcher} AND Name='cmd.exe'\" | \
+                 Where-Object {{ $_.CreationDate -ge $launcher.CreationDate }}).ProcessId"
             ),
         ])
         .output()
