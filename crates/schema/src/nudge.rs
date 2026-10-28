@@ -164,6 +164,15 @@ pub enum Nudge {
     /// to this device's own pages where all that moved is what it pulled.
     Authors,
 
+    /// The Instructions text moved: saved here, or a member's record of it
+    /// merged into the table (ADR-0028).
+    ///
+    /// **What a member hears to pull this device's Instructions again**, as
+    /// [`Nudge::Authors`] is for the Authors — announced to the cluster where a
+    /// save here changes the text, and kept to this device's own pages where
+    /// all that moved is what it pulled.
+    Instructions,
+
     /// Where a Profile's login has got to moved: the harness printed the
     /// address, took a code, finished, or was killed.
     ///

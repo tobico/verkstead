@@ -1,6 +1,6 @@
 //! **Replicated records across a cluster**: every device holding every
-//! Author, each serving its whole table to its members and pulling theirs
-//! (ADR-0028).
+//! Author and the one Instructions text, each serving its whole table to its
+//! members and pulling theirs (ADR-0028).
 //!
 //! **Real Verksteads, real dials and real streams**, as `tests/mirroring.rs`
 //! stands them up for the Profiles: each serves `GET
@@ -9,7 +9,8 @@
 //! Authors Nudge, when its Nudge stream is taken up and when the membership
 //! moves. Every assertion reads a device's own `/api/ui/authors`, the list the
 //! Git switcher draws, and every Author is written the way the Git section
-//! writes one.
+//! writes one; the Instructions are read as a launch reads them, and saved as
+//! the settings page saves them.
 //!
 //! **A device switched off** is its Peer Listener stopped and its streams let
 //! go; **switched on** is a new server over the same Data Directory, which
@@ -113,6 +114,9 @@ impl Verkstead {
             .unwrap();
 
         replicating::authors::taken_up(&pool, &Settings::in_data_dir(dir.path()), id)
+            .await
+            .unwrap();
+        replicating::instructions::taken_up(&pool, &Settings::in_data_dir(dir.path()), id)
             .await
             .unwrap();
 
@@ -369,6 +373,67 @@ impl Verkstead {
 
     fn settings(&self) -> Settings {
         Settings::in_data_dir(self.dir.path())
+    }
+
+    /// The Instructions saved the way the settings page saves them, every
+    /// other section as a page that drew nothing sends it.
+    async fn saves_instructions(&self, text: &str) {
+        let (status, said) = pressing(
+            &self.workbench,
+            "/api/ui/settings",
+            Some(
+                &serde_json::json!({
+                    "git_author": { "display_name": "", "name": "", "email": "" },
+                    "github_token": "Keep",
+                    "languages": [{ "name": "rust", "enabled": true, "size": "" }],
+                    "cleanup": {
+                        "trim": { "enabled": true, "days": "" },
+                        "delete": { "enabled": false, "days": "" },
+                    },
+                    "at_once": { "roadmap_stages": "", "conversations": "" },
+                    "conflict_resolution": "Merge",
+                    "share_on_done": false,
+                    "sandbox_binds": [],
+                    "ignored_comments": "Keep",
+                    "mcp_servers": "Keep",
+                    "instructions": text,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert!(
+            status.is_success(),
+            "saving the Instructions: {status} {said}"
+        );
+    }
+
+    /// The text the next root built here is given — what a launch reads, see
+    /// `Settings::config` — once it is `text`, or a panic saying what it was.
+    async fn instructions_saying(&self, text: &str) {
+        let waited = tokio::time::timeout(WAITING, async {
+            while self.settings().config().instructions() != text {
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| {
+            panic!(
+                "the Instructions never said {text:?}: they said {:?}",
+                self.settings().config().instructions()
+            )
+        });
+    }
+
+    /// The stamp this device holds on the Instructions' record, where it holds
+    /// one.
+    async fn instructions_stamp(&self) -> Option<(i64, String)> {
+        sqlx::query_as("SELECT updated_at, written_by FROM replicated WHERE kind = 'instructions'")
+            .fetch_optional(&self.pool)
+            .await
+            .unwrap()
     }
 
     /// The token this device's `secrets.yaml` holds for the Author `id`.
@@ -1163,4 +1228,105 @@ async fn a_repo_with_a_live_conversation_refuses_repointing_them_all_and_the_aut
     assert_eq!(a.repo_author(theirs).await.as_deref(), Some(WORK));
     assert_eq!(b.repo_author(ours).await.as_deref(), Some(PERSONAL));
     assert!(with(&b.authors().await, WORK).is_some(), "the Author stays");
+}
+
+/// The Instructions saved on A are in the next root built on B after the
+/// Nudge; and with B switched off while A saves again, after B's start pull.
+#[tokio::test]
+async fn the_instructions_saved_on_one_device_are_given_on_the_other() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _b_holding = b.holding();
+
+    a.saves_instructions("Say it plainly.").await;
+    b.instructions_saying("Say it plainly.").await;
+
+    let dir = b.switched_off().await;
+    drop(_b_holding);
+
+    a.saves_instructions("Say it at length.").await;
+
+    let b = Verkstead::standing(B, dir).await;
+    a.links(&b).await;
+
+    b.instructions_saying("Say it at length.").await;
+}
+
+/// Clearing the text on B empties it on A — an empty text rather than a
+/// deletion stamp, so a session launched on A is given no instructions file
+/// — and a text typed afterwards stands again.
+#[tokio::test]
+async fn clearing_the_instructions_on_one_device_empties_them_on_the_other() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    a.saves_instructions("Say it plainly.").await;
+    b.instructions_saying("Say it plainly.").await;
+
+    b.saves_instructions("").await;
+    a.instructions_saying("").await;
+
+    b.saves_instructions("Say it again.").await;
+    a.instructions_saying("Say it again.").await;
+}
+
+/// Two devices upgraded, one whose `config.yaml` held a text and one whose
+/// held none: both show the text, whichever was upgraded last — an empty text
+/// is never taken up, so the later device wipes nobody's.
+#[tokio::test]
+async fn a_device_upgraded_with_no_text_wipes_nobodys() {
+    for texted_first in [true, false] {
+        let texted = tempfile::tempdir().unwrap();
+        std::fs::write(
+            texted.path().join("config.yaml"),
+            "instructions: Say it plainly.\n",
+        )
+        .unwrap();
+
+        let (a, b) = match texted_first {
+            true => {
+                let a = Verkstead::standing(A, texted).await;
+                (a, Verkstead::answering(B).await)
+            }
+            false => {
+                let b = Verkstead::answering(B).await;
+                (Verkstead::standing(A, texted).await, b)
+            }
+        };
+
+        assert_eq!(
+            b.instructions_stamp().await,
+            None,
+            "nothing taken up of no text"
+        );
+
+        linked(&a, &b).await;
+        let _b_holding = b.holding();
+
+        // A pull of each other's on the membership moving, which a running
+        // server makes when a device is linked.
+        a.nudges.announce(Nudge::Devices);
+        b.nudges.announce(Nudge::Devices);
+
+        a.instructions_saying("Say it plainly.").await;
+        b.instructions_saying("Say it plainly.").await;
+    }
+}
+
+/// A settings save about another section, carrying the text as the page drew
+/// it, leaves the Instructions' record as it was: its stamp unmoved.
+#[tokio::test]
+async fn a_save_about_another_section_leaves_the_instructions_stamp() {
+    let a = Verkstead::answering(A).await;
+
+    a.saves_instructions("Say it plainly.").await;
+    let stamp = a.instructions_stamp().await.expect("a record was written");
+
+    a.saves_instructions("Say it plainly.").await;
+
+    assert_eq!(a.instructions_stamp().await, Some(stamp));
 }

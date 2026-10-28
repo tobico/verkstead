@@ -6647,6 +6647,16 @@ async fn save_settings(
         return unavailable("The settings couldn't be saved.");
     }
 
+    // And the Instructions the same way, whose text the save writes to its
+    // record — see [`crate::replicating::instructions::taken_up`].
+    if let Err(error) =
+        crate::replicating::instructions::taken_up(&state.pool, &state.settings, &state.device)
+            .await
+    {
+        tracing::error!(error = ?error, "taking the Instructions up into the database failed");
+        return unavailable("The settings couldn't be saved.");
+    }
+
     // A save that adds an Author beside the only one there is ends the one
     // Author's standing for every Repo that records none, so they are recorded
     // as it first — see [`recording_the_only_author`].
@@ -6782,6 +6792,7 @@ async fn save_settings(
                     tried: Vec::new(),
                 },
                 Vec::new(),
+                false,
             ));
         }
 
@@ -6875,11 +6886,10 @@ async fn save_settings(
                 // And the declared servers, decided the same way and above the
                 // same refusal.
                 servers,
-                // And the text every session is given, as it was typed: a value
-                // like the binds above it, so what the page sent is what the
-                // file holds afterwards and a box cleared is a key taken away.
-                // Nothing about it can be refused — it is somebody's prose.
-                edit.instructions,
+                // And the text every session is given, which the file never
+                // holds: it is a record's, written below — see
+                // [`crate::settings::Settings::save_config`].
+                edit.instructions.clone(),
             )
             // On what the file already holds, for the reason the secrets below are
             // written that way. `session_path` is a key in this file the page has
@@ -6964,6 +6974,20 @@ async fn save_settings(
 
         drop(_authors_writing);
 
+        // And the Instructions' record, as it was typed — a value, so a box
+        // cleared is the empty text — and nothing written where the text is
+        // what the record already says: a save about another section rewrites
+        // nothing and tells nobody (ADR-0028). Nothing about it can be
+        // refused, being somebody's prose.
+        let instructions_moved = runtime
+            .block_on(crate::replicating::instructions::saved(
+                &pool,
+                &settings,
+                &device,
+                edit.instructions,
+            ))
+            .map_err(std::io::Error::other)?;
+
         // What GitHub made of it: whose it is, and what it may do. The second
         // half is here because a token that authenticates perfectly and cannot
         // write a gist is a token whose failure would otherwise be found by a
@@ -7017,12 +7041,13 @@ async fn save_settings(
                 tried: Vec::new(),
             },
             trying,
+            instructions_moved,
         ))
     })
     .await;
 
     match saved {
-        Ok(Ok((mut saved, trying))) => {
+        Ok(Ok((mut saved, trying, instructions_moved))) => {
             // After the writing and never before it — see [`crate::mcp`]: a URL
             // is typed once beside a token that will not be shown again, and a
             // server that could not be reached this minute is still a
@@ -7036,6 +7061,11 @@ async fn save_settings(
             if token_moved || crate::replicating::authors::listed(&state.settings) != authors_before
             {
                 state.nudges.announce(Nudge::Authors);
+            }
+
+            // And where it moved the Instructions, for the same reason.
+            if instructions_moved {
+                state.nudges.announce(Nudge::Instructions);
             }
 
             Json(saved).into_response()

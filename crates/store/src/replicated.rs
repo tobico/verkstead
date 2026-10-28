@@ -1,10 +1,10 @@
 //! The **Replicated records**: a record that is the cluster's rather than a
 //! device's, held by every device of it (ADR-0028).
 //!
-//! **One thing with record kinds on it.** Authors are the first kind; Agent
-//! Profiles and their bindings, the Instructions text and the declared MCP
-//! servers follow onto the same table, so what a record *is* is said here
-//! once. Every one of them is:
+//! **One thing with record kinds on it.** Authors were the first kind and the
+//! Instructions text the second; Agent Profiles and their bindings and the
+//! declared MCP servers follow onto the same table, so what a record *is* is
+//! said here once. Every one of them is:
 //!
 //! ```text
 //! kind        the kind it is, "authors" and so on
@@ -419,56 +419,7 @@ pub async fn merge<K: Kind>(pool: &SqlitePool, arriving: &[Record<K::Fields>]) -
     let mut moved = false;
 
     for record in arriving {
-        let held: Option<(i64, Option<i64>, String)> = sqlx::query_as(
-            "SELECT updated_at, deleted_at, written_by FROM replicated
-             WHERE kind = ? AND uuid = ?",
-        )
-        .bind(K::NAME)
-        .bind(&record.uuid)
-        .fetch_optional(&mut *tx)
-        .await
-        .with_context(|| format!("reading the {} record {}", K::NAME, record.uuid))?;
-
-        let wins = held
-            .as_ref()
-            .is_none_or(|(updated_at, deleted_at, written_by)| {
-                arriving_wins(
-                    Stamp {
-                        updated_at: *updated_at,
-                        deleted_at: *deleted_at,
-                        written_by,
-                    },
-                    record.stamp(),
-                )
-            });
-
-        if !wins {
-            continue;
-        }
-
-        let body = serde_json::to_string(&record.fields)
-            .with_context(|| format!("writing down the {} record {}", K::NAME, record.uuid))?;
-
-        sqlx::query(
-            "INSERT INTO replicated (kind, uuid, updated_at, deleted_at, written_by, body)
-             VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT (kind, uuid) DO UPDATE SET
-                 updated_at = excluded.updated_at,
-                 deleted_at = excluded.deleted_at,
-                 written_by = excluded.written_by,
-                 body = excluded.body",
-        )
-        .bind(K::NAME)
-        .bind(&record.uuid)
-        .bind(record.updated_at)
-        .bind(record.deleted_at)
-        .bind(&record.written_by)
-        .bind(body)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("merging the {} record {}", K::NAME, record.uuid))?;
-
-        moved = true;
+        moved |= merged::<K>(&mut tx, record).await?;
     }
 
     tx.commit()
@@ -476,6 +427,64 @@ pub async fn merge<K: Kind>(pool: &SqlitePool, arriving: &[Record<K::Fields>]) -
         .with_context(|| format!("merging the {} records", K::NAME))?;
 
     Ok(moved)
+}
+
+/// One record arriving, merged by [`arriving_wins`] inside `tx` — and whether
+/// it moved anything here.
+async fn merged<K: Kind>(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    record: &Record<K::Fields>,
+) -> Result<bool> {
+    let held: Option<(i64, Option<i64>, String)> = sqlx::query_as(
+        "SELECT updated_at, deleted_at, written_by FROM replicated
+         WHERE kind = ? AND uuid = ?",
+    )
+    .bind(K::NAME)
+    .bind(&record.uuid)
+    .fetch_optional(&mut **tx)
+    .await
+    .with_context(|| format!("reading the {} record {}", K::NAME, record.uuid))?;
+
+    let wins = held
+        .as_ref()
+        .is_none_or(|(updated_at, deleted_at, written_by)| {
+            arriving_wins(
+                Stamp {
+                    updated_at: *updated_at,
+                    deleted_at: *deleted_at,
+                    written_by,
+                },
+                record.stamp(),
+            )
+        });
+
+    if !wins {
+        return Ok(false);
+    }
+
+    let body = serde_json::to_string(&record.fields)
+        .with_context(|| format!("writing down the {} record {}", K::NAME, record.uuid))?;
+
+    sqlx::query(
+        "INSERT INTO replicated (kind, uuid, updated_at, deleted_at, written_by, body)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (kind, uuid) DO UPDATE SET
+             updated_at = excluded.updated_at,
+             deleted_at = excluded.deleted_at,
+             written_by = excluded.written_by,
+             body = excluded.body",
+    )
+    .bind(K::NAME)
+    .bind(&record.uuid)
+    .bind(record.updated_at)
+    .bind(record.deleted_at)
+    .bind(&record.written_by)
+    .bind(body)
+    .execute(&mut **tx)
+    .await
+    .with_context(|| format!("merging the {} record {}", K::NAME, record.uuid))?;
+
+    Ok(true)
 }
 
 /// Whether kind `K` has been taken up already — see [`take_up`].
@@ -529,6 +538,46 @@ pub async fn take_up<K: Kind>(
         .execute(&mut *tx)
         .await
         .with_context(|| format!("taking up the {} record {uuid}", K::NAME))?;
+    }
+
+    sqlx::query("INSERT INTO replicated_taken_up (kind) VALUES (?) ON CONFLICT (kind) DO NOTHING")
+        .bind(K::NAME)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("saying the {} have been taken up", K::NAME))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("taking up the {}", K::NAME))
+}
+
+/// And the same where what is taken up is to lose to any write made since:
+/// every one of `kept` **stamped at the epoch**, older than any edit, and merged
+/// by [`arriving_wins`] — so that between two devices' taken-up records of one
+/// uuid, the Device Id decides, and every device keeps the same one.
+///
+/// For a kind whose old place every device kept a copy of, which each device
+/// upgraded takes up as its own: the Instructions text. Whichever was upgraded
+/// last, a write made since the first upgrade is the one that stands.
+pub async fn take_up_as_the_oldest<K: Kind>(
+    pool: &SqlitePool,
+    device: &str,
+    kept: &[(String, K::Fields)],
+) -> Result<()> {
+    let mut tx = super::writing(pool, "taking records up").await?;
+
+    for (uuid, fields) in kept {
+        merged::<K>(
+            &mut tx,
+            &Record {
+                uuid: uuid.clone(),
+                updated_at: 0,
+                deleted_at: None,
+                written_by: device.to_owned(),
+                fields: fields.clone(),
+            },
+        )
+        .await?;
     }
 
     sqlx::query("INSERT INTO replicated_taken_up (kind) VALUES (?) ON CONFLICT (kind) DO NOTHING")

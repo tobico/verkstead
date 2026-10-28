@@ -1967,9 +1967,8 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
     assert!(saved.settings.share_on_done, "the switch stands");
 }
 
-/// The text every session is given goes into the file and comes back off it,
-/// line breaks and all — through a restart, because a session reads this file
-/// afresh rather than reading anything the server has been holding.
+/// The text every session is given goes into its record and comes back off
+/// it, line breaks and all — through a restart, which reads the record again.
 ///
 /// The one setting on this page written for something other than Verkstead to
 /// read: what is in the box is handed to a harness, so what survives the round
@@ -1996,21 +1995,24 @@ async fn the_instructions_go_in_and_come_back_verbatim() {
     assert_eq!(settings(&restarted).await.instructions, text);
 }
 
-/// And clearing the box takes the key out of the file rather than leaving an
-/// empty one behind: a key holding nothing would read as a setting somebody
-/// made.
+/// And the text is never written into `config.yaml`: it is a record in the
+/// database, the cluster's (ADR-0028) — and clearing the box is an empty text
+/// rather than a key left behind.
 #[tokio::test]
-async fn clearing_the_instructions_writes_the_key_away() {
+async fn the_instructions_are_never_written_into_the_file() {
     let (dir, app) = app().await;
 
     save_instructions(&app, "Prefer the smallest change.").await;
 
     let config = dir.path().join("config.yaml");
+    let written = std::fs::read_to_string(&config).unwrap_or_default();
     assert!(
-        std::fs::read_to_string(&config)
-            .unwrap()
-            .contains("instructions"),
-        "the text somebody typed is in config.yaml",
+        !written.contains("instructions"),
+        "the text somebody typed is not in config.yaml: {written}",
+    );
+    assert_eq!(
+        settings(&app).await.instructions,
+        "Prefer the smallest change."
     );
 
     let saved = save_instructions(&app, "").await;
@@ -2020,7 +2022,7 @@ async fn clearing_the_instructions_writes_the_key_away() {
     let written = std::fs::read_to_string(&config).unwrap();
     assert!(
         !written.contains("instructions"),
-        "and clearing it takes the key away: {written}",
+        "and clearing it leaves no key behind: {written}",
     );
 }
 

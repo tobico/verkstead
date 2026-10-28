@@ -2517,11 +2517,13 @@ fn keepers_config(instructions: &str, second: &str) -> String {
 }
 
 /// The Annex has no settings of its own: everything in the Keeper's files
-/// about the work is handed in at every start — the Instructions, the MCP
-/// servers and their header values, how much runs at once, the Cleanup, the
+/// about the work is handed in at every start — the MCP servers and their
+/// header values, how much runs at once, the Cleanup, the
 /// comments ignored, how a conflict is resolved and whether the record is
-/// shared on Done. Not its Authors or their tokens, which reach the Annex as
-/// mirrors over the one list (ADR-0025). A change on the Keeper reaches
+/// shared on Done. Not its Authors or their tokens, nor the Instructions,
+/// which reach the Annex as records pulled like any member's (ADR-0028): the
+/// Keeper no longer writes an `instructions:` key in, and the Annex's own old
+/// copy is left for its start to drop. A change on the Keeper reaches
 /// the Annex the next time the two start together, a server the Keeper no
 /// longer declares is gone from both files, and the Annex's own keys stand.
 #[tokio::test]
@@ -2561,7 +2563,11 @@ async fn a_keepers_start_hands_its_annex_its_settings_about_the_work() {
         config.authors().is_empty(),
         "the Keeper's Authors arrive as pulled records rather than copied"
     );
-    assert_eq!(config.instructions(), "Say it plainly.");
+    assert_eq!(
+        config.instructions(),
+        "The annex's own words.",
+        "the Keeper's text is not written in",
+    );
     assert_eq!(
         config
             .mcp_servers()
@@ -2616,7 +2622,7 @@ async fn a_keepers_start_hands_its_annex_its_settings_about_the_work() {
         .await;
 
     let config = kept.config();
-    assert_eq!(config.instructions(), "Say it at length.");
+    assert_eq!(config.instructions(), "The annex's own words.");
     assert_eq!(config.mcp_servers().len(), 1, "the tracker, gone");
     assert_eq!(config.sandbox_binds(), ["/annexes/own"]);
 

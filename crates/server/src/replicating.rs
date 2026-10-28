@@ -6,8 +6,9 @@
 //! wrote it — and the two rules a record is merged and stamped by are the
 //! store's, said once for every kind — see [`store::replicated`]. What lives
 //! here is each kind's own: what its fields are, where it was kept before it
-//! was a record, and who holds it in memory. Authors are the first, and the
-//! Agent Profiles with their bindings the second.
+//! was a record, and who holds it in memory. Authors are the first, the
+//! Agent Profiles with their bindings the second, and the Instructions text
+//! the third.
 //!
 //! **Every device serves its whole table** of a kind on [`RECORDS`], behind
 //! the Member Gate — live records and removed ones, whoever wrote them — so a
@@ -29,6 +30,7 @@
 //! reader's.
 
 pub mod authors;
+pub mod instructions;
 pub mod profiles;
 
 use std::future::Future;
@@ -96,6 +98,7 @@ async fn served(State(state): State<AppState>, Path(kind): Path<String>) -> Resp
         authors::Authors::NAME => table::<authors::Authors>(&state).await,
         crate::store::Profiles::NAME => table::<crate::store::Profiles>(&state).await,
         crate::store::Bindings::NAME => table::<crate::store::Bindings>(&state).await,
+        instructions::Instructions::NAME => table::<instructions::Instructions>(&state).await,
         _ => (
             StatusCode::NOT_FOUND,
             "this device keeps no records of that kind\n",
@@ -170,7 +173,8 @@ pub(crate) fn pulling(state: &AppState) {
 
         tokio::spawn(pulled::<authors::Authors>(state.clone()));
         tokio::spawn(pulled::<crate::store::Profiles>(state.clone()));
-        tokio::spawn(pulled::<crate::store::Bindings>(state));
+        tokio::spawn(pulled::<crate::store::Bindings>(state.clone()));
+        tokio::spawn(pulled::<instructions::Instructions>(state));
     });
 }
 

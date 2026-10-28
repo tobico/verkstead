@@ -60,6 +60,9 @@
     "kind": "authors"
   },
   {
+    "kind": "instructions"
+  },
+  {
     "kind": "everything"
   }
 ]

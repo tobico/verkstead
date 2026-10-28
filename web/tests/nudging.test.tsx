@@ -559,6 +559,9 @@ const ABOUT: Record<string, readonly string[]> = {
   // The one list of Authors, which the Brief's Author fact reads — a pane this
   // sweep never opens — and the Git switcher and the Repos pane beside it.
   authors: [],
+  // The Instructions text, which the settings page alone draws — a pane this
+  // sweep never opens.
+  instructions: [],
   // The joins in flight, which move the list the modal is drawn from and the
   // Devices section of the Remote access pane. Neither is among the five: the
   // modal is read by the shell rather than by a page, and the Devices section

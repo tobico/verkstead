@@ -476,7 +476,7 @@ const SCOPED_TO: i64 = 7;
 ///
 /// One of each rather than one per file: this is a vocabulary rather than a set
 /// of payloads, and what a reader of it wants to see is the whole of it at once.
-const KINDS: [Nudge; 18] = [
+const KINDS: [Nudge; 19] = [
     Nudge::Transcript {
         conversation: SCOPED_TO,
     },
@@ -512,6 +512,7 @@ const KINDS: [Nudge; 18] = [
     Nudge::Discovered,
     Nudge::Profiles,
     Nudge::Authors,
+    Nudge::Instructions,
     Nudge::Everything,
 ];
 

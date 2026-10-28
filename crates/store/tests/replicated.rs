@@ -8,7 +8,8 @@
 use serde::{Deserialize, Serialize};
 use verkstead_store::open_database;
 use verkstead_store::replicated::{
-    Kind, Record, Written, live_records, merge, records, remove, rewrite, take_up, taken_up, write,
+    Kind, Record, Written, live_records, merge, records, remove, rewrite, take_up,
+    take_up_as_the_oldest, taken_up, write,
 };
 
 /// A kind of no consequence, standing in for Authors.
@@ -398,4 +399,51 @@ async fn a_take_up_replaces_a_record_stamped_oldest() {
     let held = records::<Notes>(&pool).await.unwrap();
     assert_eq!(held[0].fields, note("own"));
     assert_eq!(held[0].written_by, "a");
+}
+
+/// A kind taken up as the oldest is stamped at the epoch, so any write made
+/// since wins it; and between two devices' taken-up records of one uuid, the
+/// Device Id decides, whichever was taken up last.
+#[tokio::test]
+async fn a_take_up_as_the_oldest_loses_to_any_write_and_ties_by_device() {
+    let (_dir, pool) = fresh_pool().await;
+
+    take_up_as_the_oldest::<Notes>(&pool, "a", &[("one".to_owned(), note("a's"))])
+        .await
+        .unwrap();
+    assert!(taken_up::<Notes>(&pool).await.unwrap());
+
+    let held = records::<Notes>(&pool).await.unwrap();
+    assert_eq!((held[0].updated_at, held[0].written_by.as_str()), (0, "a"));
+
+    // Another device's taken-up text arriving: `b` is the greater id, so it
+    // wins here — and `a`'s arriving where `b`'s is held would not.
+    let theirs = Record {
+        uuid: "one".to_owned(),
+        updated_at: 0,
+        deleted_at: None,
+        written_by: "b".to_owned(),
+        fields: note("b's"),
+    };
+    assert!(merge::<Notes>(&pool, &[theirs]).await.unwrap());
+    take_up_as_the_oldest::<Notes>(&pool, "a", &[("one".to_owned(), note("a's again"))])
+        .await
+        .unwrap();
+    assert_eq!(
+        records::<Notes>(&pool).await.unwrap()[0].fields,
+        note("b's")
+    );
+
+    // And any write since wins over a taken-up one.
+    let (_other, fresh) = fresh_pool().await;
+    write::<Notes>(&fresh, "a", "one", &note("edited"))
+        .await
+        .unwrap();
+    take_up_as_the_oldest::<Notes>(&fresh, "z", &[("one".to_owned(), note("old"))])
+        .await
+        .unwrap();
+    assert_eq!(
+        records::<Notes>(&fresh).await.unwrap()[0].fields,
+        note("edited")
+    );
 }

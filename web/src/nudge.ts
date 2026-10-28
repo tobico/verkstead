@@ -483,6 +483,11 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     case "authors":
       return [keyOf(device, "authors"), keyOf(device, "settings")];
 
+    // The Instructions text moved: saved on this device, or a record of it
+    // pulled off a member. The settings page draws it, and nothing else does.
+    case "instructions":
+      return [keyOf(device, "settings")];
+
     // Where a Profile's login has got to moved — which is what shows a second
     // device's modal the address the first one's login printed. This device's
     // own: a login is only ever run where the account is at home.

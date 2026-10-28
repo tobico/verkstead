@@ -60,8 +60,6 @@
 //!     url: https://mcp.example.com/docs
 //!     headers:
 //!       - Authorization
-//! instructions: |
-//!   Prefer the smallest change that does the job.
 //! kept_by:
 //!   device: 86f1933fecb070cbee865fbb84819d14
 //!   fingerprint: "3F:0A:…"
@@ -90,6 +88,11 @@
 //! for these files' readers — see [`Settings::holding_authors`] — and a key
 //! written back into the file by hand is ignored, the log saying so. The
 //! token stays here, under the uuid.
+//!
+//! **Nor are the Instructions**, one replicated text for the cluster, newest
+//! write winning: an `instructions:` key is taken up once and dropped the same
+//! way — see [`crate::replicating::instructions`] and
+//! [`Settings::holding_instructions`].
 //!
 //! **Nothing here is ever an error.** A file that is not there, one that is
 //! empty, and one nothing can parse all come back as nothing configured: the
@@ -225,6 +228,15 @@ struct Held {
     /// Whether the log has been told that `config.yaml` holds an `authors:`
     /// key nothing reads any more — once per run, rather than at every read.
     ignoring_said: AtomicBool,
+
+    /// And the Instructions text out of its record, the same way — see
+    /// [`Settings::holding_instructions`]. `None` until it first is, and an
+    /// empty text where there is no record or the record was cleared.
+    instructions: RwLock<Option<String>>,
+
+    /// And whether the log has been told about an `instructions:` key nothing
+    /// reads any more.
+    ignoring_instructions_said: AtomicBool,
 }
 
 /// Every Data Directory's held lists, so that every handle on one directory
@@ -295,6 +307,45 @@ impl Settings {
             .is_some()
     }
 
+    /// Hold `text` as the Instructions every session is given: the text of
+    /// its record in the database's table, for [`Settings::config`] to lay
+    /// over whatever `config.yaml` says — held for the reason the Authors are,
+    /// a Built Root being composed on a blocking thread from these files alone.
+    ///
+    /// **And from then on `config.yaml` is not read for it**: an
+    /// `instructions:` key written into the file by hand is ignored, the log
+    /// saying so once — see [`crate::replicating::instructions`].
+    pub fn holding_instructions(&self, text: String) {
+        *self
+            .held
+            .instructions
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(text);
+    }
+
+    /// Forget the Instructions held, as a new start of the server would.
+    #[cfg(test)]
+    pub(crate) fn forgetting_the_instructions(&self) {
+        *self
+            .held
+            .instructions
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        self.held
+            .ignoring_instructions_said
+            .store(false, Ordering::Relaxed);
+    }
+
+    /// Whether the Instructions are held off their record yet — see
+    /// [`Settings::holding_instructions`].
+    pub fn holds_instructions(&self) -> bool {
+        self.held
+            .instructions
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+    }
+
     /// Where `secrets.yaml` is, which is what writes it and what says so on a
     /// settings page.
     pub fn secrets_path(&self) -> PathBuf {
@@ -342,6 +393,33 @@ impl Settings {
                 Config::default()
             }),
         };
+
+        // The record's Instructions over the file's, once it is held, for the
+        // reason the Authors below are.
+        let instructions = self
+            .held
+            .instructions
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+
+        if let Some(text) = instructions {
+            if config.instructions.is_some()
+                && !self
+                    .held
+                    .ignoring_instructions_said
+                    .swap(true, Ordering::Relaxed)
+            {
+                tracing::warn!(
+                    path = %path.display(),
+                    "config.yaml holds an `instructions:` key, which is ignored: the \
+                     Instructions are kept in the database now, and are edited on the \
+                     settings page",
+                );
+            }
+
+            config.instructions = prose_written(text);
+        }
 
         // The table's Authors over the file's, once there are any held: the
         // file was emptied of them as they were taken up, so an `authors:` key
@@ -440,10 +518,23 @@ impl Settings {
     /// whatever `config` says of them is the table's, read back by
     /// [`Settings::config`], and writing it into the file would be a second
     /// copy nothing reads.
+    ///
+    /// **And never with the Instructions in it once they are held**, for the
+    /// same reason — see [`Settings::holding_instructions`].
     pub fn save_config(&self, config: &Config) -> std::io::Result<()> {
-        if self.holds_authors() && !config.authors.is_empty() {
+        let authors = self.holds_authors() && !config.authors.is_empty();
+        let instructions = self.holds_instructions() && config.instructions.is_some();
+
+        if authors || instructions {
             let config = Config {
-                authors: Vec::new(),
+                authors: match authors {
+                    true => Vec::new(),
+                    false => config.authors.clone(),
+                },
+                instructions: match instructions {
+                    true => None,
+                    false => config.instructions.clone(),
+                },
                 ..config.clone()
             };
 
@@ -541,6 +632,37 @@ impl Settings {
 
         let config = Config {
             authors: Vec::new(),
+            ..config
+        };
+
+        write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE)
+    }
+
+    /// The Instructions `config.yaml` holds as written, for taking them up into
+    /// the database, and whether the file is an Annex's — or `None` where the
+    /// file will not parse, which is the human's to fix.
+    pub(crate) fn instructions_as_written(&self) -> Option<(String, bool)> {
+        Self::parsed(&self.config_path(), Config::read).map(|config| {
+            let kept = config.kept_by.is_some();
+            (config.instructions.unwrap_or_default(), kept)
+        })
+    }
+
+    /// Take the `instructions:` key out of `config.yaml`, every other key as
+    /// it stands, once the text is a record — see
+    /// [`crate::replicating::instructions`]. Nothing is written where the file
+    /// holds none, and a file that will not parse is left for the human.
+    pub(crate) fn dropping_the_instructions(&self) -> std::io::Result<()> {
+        let Some(config) = Self::parsed(&self.config_path(), Config::read) else {
+            return Ok(());
+        };
+
+        if config.instructions.is_none() {
+            return Ok(());
+        }
+
+        let config = Config {
+            instructions: None,
             ..config
         };
 
@@ -1253,22 +1375,20 @@ pub struct Config {
     mcp_servers: Vec<McpServer>,
 
     /// And the one text every session is given, whatever harness runs it: what
-    /// a human would have put in their own global `CLAUDE.md`, said once here
+    /// a human would have put in their own global `CLAUDE.md`, said once
     /// because a Built Root holds none of the account's own files.
     ///
-    /// One text for the whole installation rather than one per Agent Profile,
-    /// which is why it is in this file rather than beside a Profile in the
-    /// store: it is a thing Verkstead is *told*, like the author above it and
-    /// the binds beside it, and it is read afresh the moment a session needs it
-    /// — a change on the settings page reaches the next session, and a running
-    /// one keeps what it started with.
+    /// **Read here only to be taken up.** The Instructions are a Replicated
+    /// record now, one text for the whole cluster (ADR-0028): this key is what
+    /// a file from before held, taken up into the database once and dropped
+    /// from the file — see [`crate::replicating::instructions`] — and after
+    /// that the record's text is laid over it by [`Settings::config`] and never
+    /// written back by [`Settings::save_config`].
     ///
     /// Nothing here can be wrong. It is a paragraph of somebody's prose, so
     /// there is nothing to parse and nothing to refuse: an absent key, an
     /// absent file and one nothing can read all mean an empty text, which is a
-    /// session told nothing beyond what its Repo carries. An `Option` for that
-    /// reason and written away when it is nothing, so that clearing the box
-    /// takes the key out of the file rather than leaving an empty one behind.
+    /// session told nothing beyond what its Repo carries.
     ///
     /// Kept exactly as it was typed, which is the one thing in this file not
     /// put through [`blank_is_nothing`] — see [`prose_written`]. What the
@@ -1618,17 +1738,18 @@ impl Config {
     /// [`crate::annex::booting`]).
     ///
     /// **The Keeper's values, not a merge** (ADR-0024, *The Annex has no
-    /// settings of its own*): the Instructions, the MCP servers with their
-    /// header names, how much runs at once, the Cleanup, the comments Wrapping
+    /// settings of its own*): the MCP servers with their header names, how much runs at once, the Cleanup, the comments Wrapping
     /// ignores, how a conflict is resolved and whether the record is shared on
     /// Done — each one as the Keeper's file has it, so a server the Keeper no
     /// longer declares is gone here too. Everything about the Annex's own
     /// machine stands as it was: its sandbox binds, `session_path`,
     /// `languages` and `kept_by`.
     ///
-    /// **And not the Authors**: they are records in the database rather than
-    /// the file, and the Annex, a linked Member, pulls them the way every
-    /// member does (ADR-0028).
+    /// **And not the Authors or the Instructions**: they are records in the
+    /// database rather than the file, and the Annex, a linked Member, pulls
+    /// them the way every member does (ADR-0028). An `instructions:` key the
+    /// Annex's file still holds is the Keeper's old copy, which the Annex
+    /// drops at its own start rather than takes up.
     pub fn working_as(&self, keeper: &Config) -> Config {
         Config {
             cleanup: keeper.cleanup.clone(),
@@ -1637,7 +1758,6 @@ impl Config {
             share_on_done: keeper.share_on_done,
             ignored_comments: keeper.ignored_comments.clone(),
             mcp_servers: keeper.mcp_servers.clone(),
-            instructions: keeper.instructions.clone(),
             ..self.clone()
         }
     }
@@ -2968,7 +3088,7 @@ pub(crate) fn blank_is_nothing(value: String) -> Option<String> {
 /// that ends a paragraph are the writing rather than slips in it — and a
 /// harness is handed this verbatim, so a save that tidied it would be one
 /// nobody asked for.
-fn prose_written(text: String) -> Option<String> {
+pub(crate) fn prose_written(text: String) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 

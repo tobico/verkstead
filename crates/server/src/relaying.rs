@@ -597,6 +597,7 @@ pub(crate) enum Unread {
 pub(crate) enum Read {
     Profiles,
     Authors,
+    Instructions,
     Conversations,
 }
 
@@ -605,6 +606,7 @@ impl Read {
         match self {
             Read::Profiles => "Agent Profiles",
             Read::Authors => "Authors",
+            Read::Instructions => "Instructions",
             Read::Conversations => "Conversations",
         }
     }

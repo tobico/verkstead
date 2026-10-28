@@ -980,23 +980,28 @@ harness runs it — what a human would otherwise keep in their own global
 `CLAUDE.md`, said once here instead. A **Built Root** holds none of the
 account's own files, so the account's global instructions are not in one, and
 this is what stands where they would have been.
-**One text for the whole installation** rather than one per **Agent Profile**,
-kept in `config.yaml` beside the Authors and the **Sandbox Configuration**'s
-binds — a thing Verkstead is *told* rather than one it finds. It saves as a
-value the way those do: what the page sends is what the file holds afterwards,
-so clearing the box takes the key away rather than leaving an empty one. Nothing
-in it can be refused, there being no grammar in a paragraph of prose to get
-wrong, and an absent key, an empty one and one nothing can parse are the same
-empty text.
-**Becoming one text for the cluster** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a replicated record in the database rather than `config.yaml`, the newest write winning on every device, cleared being an empty text. The `cluster-owned-records` roadmap lands it.
+**One text for the whole cluster** rather than one per **Agent Profile** or
+per device: a **Replicated record** in the database, one record under a uuid
+that is the same on every device, the newest write winning
+([ADR-0028](docs/adr/0028-records-are-the-clusters.md)). A save on any device
+is the text every device's next session is given. **Cleared is an empty
+text**, written like any other and never a deletion stamp, so a text typed
+afterwards stands. A save from the settings page writes the record only where
+the text changed, so a save about another section moves nothing. Nothing in it
+can be refused, there being no grammar in a paragraph of prose to get wrong.
+**Out of `config.yaml`**: the `instructions:` key a device from before held is
+taken up once at its start and dropped from the file, and a key written back
+by hand is ignored, the log saying so. An empty text is never taken up, so a
+device that never had one wipes nobody's; a taken-up text is stamped older than
+any edit, the Device Id deciding between two. An **Annex** takes nothing up.
 **Written into each root as the file that harness reads**, verbatim and alone:
 no heading over it and no line saying where it came from. Claude's
 `.claude/CLAUDE.md`, Codex's `.codex/AGENTS.md`, Grok Build's `.grok/AGENTS.md`,
 and the config directory's `AGENTS.md` for OpenCode. Verkstead's own file like
 the configuration file beside it: written rather than joined, never the
 account's, and nothing of it written back as a session ends.
-**Read at the moment a root is built**, like the rest of `config.yaml`: a text
-saved on the settings page reaches the next session, and a running one keeps
+**Read at the moment a root is built**: a text saved on the settings page,
+here or on any member, reaches the next session, and a running one keeps
 what it started with. A text nobody typed is no file at all, so a root then
 holds exactly what it held before there was such a setting.
 **The Repo's own instructions are untouched.** A `CLAUDE.md` or an `AGENTS.md`
@@ -2243,12 +2248,12 @@ Keeper's start, terminated at its stop, never waited on — a workbench opens
 on the Keeper while the Annex is still coming up, and its rows read
 *unreachable* until it answers. It is reached through the **Annex Forward**,
 and it has no settings of its own: what is about the work rather than the
-machine — the Instructions, the MCP servers and their header values, the
-at-once limit, Cleanup, the ignored comments, the conflict resolution and
-sharing on Done — is copied in from its Keeper at every boot. **Its Authors
+machine — the MCP servers and their header values, the at-once limit,
+Cleanup, the ignored comments, the conflict resolution and sharing on Done — is
+copied in from its Keeper at every boot. **Its Authors and the Instructions
 are not copied**: it holds none of its own, and the Keeper's reach it as
-records, the way they reach any member — so with one, a Repo there is that
-one's.
+records, the way they reach any member — so with one Author, a Repo there is
+that one's.
 **And it never enters Onboarding Mode**: a kept Annex is told so in its
 config and skips the verdict, its objective being met by its Keeper's
 Profiles, which arrive as records it runs from a copy of.
