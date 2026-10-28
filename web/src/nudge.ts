@@ -458,8 +458,12 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     //
     // **And the Components row**, whose release is the one the Keeper's start
     // reads off its Annex as it links it, which is announced as this kind.
+    //
+    // **And the Profiles**: every card draws a line per device of the cluster,
+    // and a device first linking names its own unnamed Profiles after itself in
+    // the write that links it, which no Profiles news follows.
     case "devices":
-      return [["devices"], ["conversations"], ["components"]];
+      return [["devices"], ["conversations"], ["components"], ["profiles"]];
 
     // And what is *out there* moving, which is a different list and a different
     // question: a device nobody has typed an address for was heard advertising

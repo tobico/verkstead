@@ -688,6 +688,20 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the this_device table")?;
 
+    // And what it is called, said by the serve, and whether its own unnamed
+    // Profiles have been named after it — see [`named_after_here`]. One row at
+    // most, and none until the serve has said a name.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS this_device_called (
+             one   INTEGER PRIMARY KEY CHECK (one = 1),
+             name  TEXT NOT NULL,
+             named INTEGER NOT NULL DEFAULT 0
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the this_device_called table")?;
+
     // The rule the column's own `UNIQUE` carried: no two Profiles of this
     // device's own called the same thing. Over the local rows alone now — what a
     // member calls its accounts is that machine's business, and a picker tells
@@ -1937,4 +1951,113 @@ pub(crate) async fn this_device_is(
     .context("saying which device the Profiles numbered before their uuids were minted on")?;
 
     Ok(())
+}
+
+/// Say what this device is called — its name as the Devices pane draws it —
+/// and name its own unnamed Profiles after it where it has members and has
+/// not yet: what the serve says once it knows both which device this is and
+/// what it is called. **The switch on a device that has members** is this:
+/// its first serve on this release, with the members it already had.
+///
+/// The uuids of the Profiles named, for the members to be told.
+pub async fn this_device_called(pool: &SqlitePool, name: &str) -> Result<Vec<String>> {
+    let mut tx = super::writing(pool, "saying what this device is called").await?;
+
+    sqlx::query(
+        "INSERT INTO this_device_called (one, name) VALUES (1, ?)
+         ON CONFLICT (one) DO UPDATE SET name = excluded.name",
+    )
+    .bind(name)
+    .execute(&mut *tx)
+    .await
+    .context("saying what this device is called")?;
+
+    let named = named_after_here(&mut tx).await?;
+
+    tx.commit()
+        .await
+        .context("naming this device's unnamed Profiles after it")?;
+
+    Ok(named)
+}
+
+/// **Name this device's own unnamed Profiles after it, once** (ADR-0028): two
+/// unnamed Claude Profiles are two records nothing merges, so a cluster whose
+/// every device brought one would draw *Default* once per device in every
+/// picker. Asked as the serve says the name — see [`this_device_called`] —
+/// and as a member is recorded, inside that write: a device going from no
+/// members to one is a device first linking, whichever side of the link it is
+/// on, and an Annex kept is linked by the same write.
+///
+/// **Nothing at all** on a device with no members, which leaves its unnamed
+/// Profiles as they are; on one the serve has not said a name for yet, which
+/// it does once it has; and on one that has been through this already — so a
+/// name the human cleared afterwards stays cleared across a restart and every
+/// later link. That one goes through once the device has members, whether or
+/// not anything was unnamed.
+///
+/// **Its own** is a live record this device holds a live binding of: one that
+/// arrived by replication is bound on the device that made it, and is that
+/// device's to name. Every unnamed one takes the one name whatever its harness,
+/// the name rule being per harness; and a name the table already holds is not
+/// in its way, the rules being the press's — two alike are kept and drawn so,
+/// as a pair arriving by replication is.
+///
+/// An ordinary record write, so it replicates. The uuids named come back.
+pub(crate) async fn named_after_here(
+    connection: &mut sqlx::SqliteConnection,
+) -> Result<Vec<String>> {
+    let called: Option<(String, bool)> =
+        sqlx::query_as("SELECT name, named FROM this_device_called")
+            .fetch_optional(&mut *connection)
+            .await
+            .context("reading what this device is called")?;
+
+    let Some((name, false)) = called else {
+        return Ok(Vec::new());
+    };
+
+    let (members,): (i64,) = sqlx::query_as("SELECT count(*) FROM members")
+        .fetch_one(&mut *connection)
+        .await
+        .context("counting the devices this one is linked to")?;
+
+    if members == 0 {
+        return Ok(Vec::new());
+    }
+
+    let here = here(&mut *connection).await?;
+    let mut named = Vec::new();
+
+    for record in replicated::records_on::<Profiles>(&mut *connection).await? {
+        if record.removed() || record.fields.name.is_some() {
+            continue;
+        }
+
+        let bound =
+            replicated::record_on::<Bindings>(&mut *connection, &binding_uuid(&record.uuid, &here))
+                .await?
+                .is_some_and(|binding| !binding.removed());
+
+        if !bound {
+            continue;
+        }
+
+        let fields = ProfileRecord {
+            name: Some(name.clone()),
+            ..record.fields
+        };
+
+        replicated::written_on::<Profiles>(&mut *connection, &here, &record.uuid, &fields, false)
+            .await?;
+
+        named.push(record.uuid);
+    }
+
+    sqlx::query("UPDATE this_device_called SET named = 1")
+        .execute(&mut *connection)
+        .await
+        .context("saying this device's unnamed Profiles have been named after it")?;
+
+    Ok(named)
 }

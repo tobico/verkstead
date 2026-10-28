@@ -570,8 +570,10 @@ const ABOUT: Record<string, readonly string[]> = {
   // sidebar. The membership decides which rows are on the merged list and
   // whether any row carries a machine at all, so a device unlinked is its
   // Conversations to take off the list and the last one unlinked is every
-  // remaining row to redraw without a device.
-  devices: [SIDEBAR],
+  // remaining row to redraw without a device. And the Profiles, every card
+  // drawing a line per device of the cluster, and a device first linking
+  // naming its own unnamed Profiles after itself in the write that links it.
+  devices: [SIDEBAR, PROFILES],
   // And what is out there rather than in the cluster: a device nobody has typed
   // an address for was heard advertising itself, or one that had been heard
   // stopped. It names the Discovered list under that same section — not the

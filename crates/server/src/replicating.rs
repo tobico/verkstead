@@ -156,6 +156,11 @@ pub(crate) fn pulling(state: &AppState) {
             return;
         }
 
+        // And what it is called, which a device with members names its own
+        // unnamed Profiles after, once — see [`crate::store::this_device_called`].
+        // Before the pullers, so a member's first pull of them finds them named.
+        named(&state).await;
+
         // And whether each account bound here holds a login, said on its
         // binding before a member asks — see [`crate::profiles::looked`].
         crate::profiles::looked_at_all(&state).await;
@@ -164,6 +169,30 @@ pub(crate) fn pulling(state: &AppState) {
         tokio::spawn(pulled::<crate::store::Profiles>(state.clone()));
         tokio::spawn(pulled::<crate::store::Bindings>(state));
     });
+}
+
+/// Say what this device is called to the Profiles, as the Devices pane draws
+/// it, and tell the members where that named any.
+async fn named(state: &AppState) {
+    let Some(devices) = state.devices.as_ref() else {
+        return;
+    };
+
+    match crate::store::this_device_called(&state.pool, &devices.name()).await {
+        Ok(named) if named.is_empty() => {}
+        Ok(named) => {
+            tracing::info!(
+                profiles = named.len(),
+                "this device's unnamed Profiles are named after it, it having members",
+            );
+            state.nudges.announce(Nudge::Profiles);
+        }
+        Err(error) => tracing::error!(
+            error = ?error,
+            "what this device is called could not be said to the Profiles, so its unnamed \
+             ones are not named after it",
+        ),
+    }
 }
 
 /// Every member pulled once, and then whatever a Nudge says to pull again —

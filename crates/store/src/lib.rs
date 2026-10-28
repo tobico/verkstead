@@ -171,7 +171,7 @@ pub use profiles::{
     Account, AgentType, Binding, Bindings, BoundWhere, Channel, Clash, Deleting, Minted, Pairing,
     Picked, Profile, ProfileFacts, ProfileRecord, Profiles, Saving, Settled, Unbound, binding_uuid,
     bound_where, create_profile, delete_profile, load_profile, logins_held, profile_arrived,
-    profiles, profiles_as_saved, settle, update_profile,
+    profiles, profiles_as_saved, settle, this_device_called, update_profile,
 };
 pub use pull_requests::{
     Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup,

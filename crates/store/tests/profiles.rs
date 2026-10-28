@@ -11,13 +11,14 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_store::replicated::{Record, merge, records};
 use verkstead_store::{
-    Account, AgentType, Binding, Bindings, Chosen, Clash, Deleting, Event, Lifecycle, Pairing,
-    PendingForm, PendingPairing, Picked, Profile, ProfileFacts, ProfileRecord, Profiles, Saving,
-    Settled, Unbound, binding_uuid, create_profile, delete_profile, load_conversation,
-    load_profile, logins_held, open_database, open_pending_steer, profiles, register_repo,
-    save_pending_steer, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
-    settle, skip_review, stamp_the_profiles, start_capture, start_conversation, start_grilling,
-    timeline, update_profile,
+    Account, AgentType, Binding, Bindings, Chosen, Clash, Deleting, Event, Lifecycle, Linking,
+    Pairing, PendingForm, PendingPairing, Picked, Profile, ProfileFacts, ProfileRecord, Profiles,
+    Saving, Settled, Unbound, binding_uuid, create_profile, delete_profile, load_conversation,
+    load_profile, logins_held, open_database, open_pending_steer, profile_arrived, profiles,
+    record_member, register_repo, save_pending_steer, set_grilling_pairing,
+    set_implementation_pairing, set_review_pairing, settle, skip_review, stamp_the_profiles,
+    start_capture, start_conversation, start_grilling, this_device_called, timeline,
+    update_profile,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -2223,5 +2224,172 @@ async fn a_pair_that_matches_no_mirror_bridges_nothing() {
         naming_rows(&pool, "conversations", "grilling_profile_id", &provisional).await,
         1,
         "the Pairing still names the mirror",
+    );
+}
+
+/// What this device is called, as the serve says it: the name its unnamed
+/// Profiles are named after.
+const CALLED: &str = "the-workstation";
+
+/// A member's device, and the uuid of a Profile it made.
+const MEMBER_DEVICE: &str = "0011223344556677889900aabbccddee";
+const MEMBER: &str = "7d3c1b2a-0f4e-4a5b-9c8d-1e2f3a4b5c6d";
+
+/// A member, written down the way a link writes one.
+async fn linked(pool: &SqlitePool, device: &str) {
+    record_member(
+        pool,
+        &Linking {
+            device: device.to_owned(),
+            name: format!("{device}-machine"),
+            os: "Linux".to_owned(),
+            addresses: vec!["127.0.0.1:1".to_owned()],
+            fingerprint: format!("{device}-fingerprint"),
+            kept_by: None,
+            version: None,
+            install: None,
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// What every Profile here is called, by harness, in the order written down.
+async fn called_here(pool: &SqlitePool) -> Vec<(String, Option<String>)> {
+    records::<Profiles>(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|record| (record.fields.harness, record.fields.name))
+        .collect()
+}
+
+/// A device in no cluster leaves its unnamed Profiles unnamed: there is
+/// nothing for them to be told apart from.
+#[tokio::test]
+async fn a_device_in_no_cluster_leaves_its_unnamed_profiles_unnamed() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    create_profile(&pool, &unnamed(claude("default")))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(this_device_called(&pool, CALLED).await.unwrap().is_empty());
+    assert!(this_device_called(&pool, CALLED).await.unwrap().is_empty());
+
+    assert_eq!(called_here(&pool).await, [("claude".to_owned(), None)]);
+}
+
+/// **At the switch, on a device that has members**: the serve saying what it
+/// is called names each of its own unnamed Profiles after it, whatever the
+/// harness — and never one a member made, which is bound there, nor one
+/// already named, nor one removed.
+#[tokio::test]
+async fn at_the_switch_a_device_with_members_names_its_own_unnamed_profiles() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    let claude_one = create_profile(&pool, &unnamed(claude("default")))
+        .await
+        .unwrap()
+        .unwrap();
+    let codex_one = create_profile(&pool, &unnamed(codex("default")))
+        .await
+        .unwrap()
+        .unwrap();
+    saved(&pool, "work").await;
+
+    // A Profile already called what this device is, which the naming is not
+    // turned away by: the rules are the press's.
+    saved(&pool, CALLED).await;
+
+    profile_arrived(&pool, MEMBER, MEMBER_DEVICE, &unnamed(claude("theirs")))
+        .await
+        .unwrap();
+
+    linked(&pool, MEMBER_DEVICE).await;
+
+    assert_eq!(
+        called_here(&pool)
+            .await
+            .iter()
+            .filter(|(_, name)| name.is_none())
+            .count(),
+        3,
+        "nothing is named while the serve has not said what this device is called",
+    );
+
+    let named = this_device_called(&pool, CALLED).await.unwrap();
+
+    assert_eq!(named, [claude_one.id.clone(), codex_one.id.clone()]);
+    assert_eq!(
+        called_here(&pool).await,
+        [
+            ("claude".to_owned(), Some(CALLED.to_owned())),
+            ("codex".to_owned(), Some(CALLED.to_owned())),
+            ("claude".to_owned(), Some("work".to_owned())),
+            ("claude".to_owned(), Some(CALLED.to_owned())),
+            ("claude".to_owned(), None),
+        ],
+        "this device's own, two alike with the one already called so; the member's \
+         left for it to name",
+    );
+
+    let written = records::<Profiles>(&pool).await.unwrap();
+    assert_eq!(
+        written[0].written_by, THIS_DEVICE,
+        "an ordinary record write, which replicates",
+    );
+}
+
+/// **When a device first links**: the write that records its first member
+/// names its own unnamed Profiles, once — a name the human cleared afterwards
+/// stays cleared across a restart and a later link.
+#[tokio::test]
+async fn a_device_first_linking_names_its_unnamed_profiles_once() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+    this_device_called(&pool, CALLED).await.unwrap();
+
+    let default = create_profile(&pool, &unnamed(claude("default")))
+        .await
+        .unwrap()
+        .unwrap();
+
+    linked(&pool, MEMBER_DEVICE).await;
+
+    assert_eq!(
+        load_profile(&pool, &default.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .name
+            .as_deref(),
+        Some(CALLED),
+        "named in the write that linked it",
+    );
+
+    assert_eq!(
+        update_profile(&pool, &default.id, &unnamed(claude("default")))
+            .await
+            .unwrap(),
+        Saving::Saved,
+        "and the human clears it",
+    );
+
+    // A restart, which says the name again, and a later link.
+    assert!(this_device_called(&pool, CALLED).await.unwrap().is_empty());
+    linked(&pool, "ff11223344556677889900aabbccddee").await;
+
+    assert_eq!(
+        load_profile(&pool, &default.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .name,
+        None,
+        "the name cleared stays cleared",
     );
 }

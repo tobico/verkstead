@@ -548,6 +548,11 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
 
     advertised(&mut tx, linking).await?;
 
+    // And a device first linking names its own unnamed Profiles after itself,
+    // in the same write that makes it one — see
+    // [`super::profiles::named_after_here`].
+    super::profiles::named_after_here(&mut tx).await?;
+
     tx.commit()
         .await
         .with_context(|| format!("recording device {} as a member", linking.device))

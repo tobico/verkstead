@@ -26,4 +26,4 @@ Roadmap stage: [02: Profiles by uuid, bound per device](docs/roadmaps/cluster-ow
 - [x] 04: Replicated across the cluster — [details](04-replicated-across-the-cluster.md)
 - [x] 05: Launch on an unbound device, brokenness per device — [details](05-launch-on-an-unbound-device.md)
 - [x] 06: The card's line per device — [details](06-the-cards-line-per-device.md)
-- [ ] 07: Naming the unnamed — [details](07-naming-the-unnamed.md)
+- [x] 07: Naming the unnamed — [details](07-naming-the-unnamed.md)

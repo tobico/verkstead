@@ -1008,6 +1008,48 @@ async fn the_profiles_of_an_unlinked_device_stay() {
     assert_eq!(names(&b.profiles().await), vec!["here", "work"]);
 }
 
+/// Two Verksteads on this release, each with an unnamed Claude Profile, linked:
+/// each names its own after itself as it links, so every picker reads the two
+/// devices' names rather than *Default* twice — and a Verkstead in no cluster
+/// left its own unnamed.
+#[tokio::test]
+async fn two_verksteads_each_with_an_unnamed_claude_read_as_their_two_names_once_linked() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+
+    a.saves_unnamed().await;
+    b.saves_unnamed().await;
+
+    tokio::time::sleep(SETTLING).await;
+
+    for alone in [&a, &b] {
+        assert_eq!(
+            names(&alone.profiles().await),
+            vec!["Default"],
+            "in no cluster, nothing is named",
+        );
+    }
+
+    b.linked_to(&a.device, A_MACHINE, A_OS, vec![a.at()]).await;
+
+    let (machine, os) = this_machine();
+    a.linked_to(&b.device, &machine, &os, vec![b.at()]).await;
+
+    let _holding = b.holding();
+    let _other = a.holding();
+
+    let mut both = vec![A_MACHINE, machine.as_str()];
+    both.sort();
+
+    for device in [&a, &b] {
+        let rows = device
+            .profiles_saying(|rows| rows.len() == 2 && rows.iter().all(|row| row.name.is_some()))
+            .await;
+
+        assert_eq!(names(&rows), both, "each device named after itself");
+    }
+}
+
 /// The card carries a line per device of the cluster, saying how each runs the
 /// Profile: A bound at the paths its binding holds, B from a copy — and B's
 /// card says the same of the one record, off the binding it pulled.
