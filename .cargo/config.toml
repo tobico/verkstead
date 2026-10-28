@@ -12,3 +12,12 @@ TS_RS_EXPORT_DIR = { value = "web/src/api", relative = true }
 # hands back a `number` for it whatever the type says. `bigint` would be a type
 # that disagreed with the value at runtime.
 TS_RS_LARGE_INT = "number"
+
+# **Windows links with rust-lld**, the LLD that rustc ships in its own sysroot,
+# rather than MSVC's `link.exe`. The name alone is enough: rustc reads the
+# `lld-link` flavour off it and puts the sysroot's tool directory on the
+# linker's `PATH`, so nothing has to be installed and every Windows build —
+# CI's legs and a developer's machine alike — links the same way. What it
+# saved is in the Windows job's ledger in `.github/workflows/ci.yml`.
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
