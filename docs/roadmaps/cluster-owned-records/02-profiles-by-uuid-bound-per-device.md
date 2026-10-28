@@ -54,7 +54,7 @@ mirror**.
   Pairings are already uuids; the bridge rewrites the provisional uuid to the
   real one. A member too old to publish is a trouble line naming both versions,
   its Profiles absent from the pickers meanwhile.
-- **Removal is a tombstone**, and a tombstone arriving nulls every Pairing
+- **Removal is a deletion stamp**, and a removed record arriving nulls every Pairing
   that named the uuid, as `forget_mirror` does today.
 - **Brokenness stays per device**: the harness absent here, in the onboarding
   probe's words; not bound here and no bound device reachable, naming none.
@@ -76,7 +76,7 @@ mirror**.
    this device's paths become its binding at the switch; the pickers and the
    settings section read the merged table with no device marks.
    - A Profile made on A is in B's pickers with no binding on B.
-   - Renaming on B redraws on A off the pulled record; removing on A tombstones
+   - Renaming on B redraws on A off the pulled record; removing on A stamps it removed
      and nulls B's Pairings.
 
 3. **Bridging the mirrors and naming the unnamed.** The record carries where it

@@ -21,9 +21,9 @@ rewrites the **Instructions** and **MCP server** terms and amends
   record other devices write is a thing Verkstead finds. Sandbox binds stay
   where they are, being paths on one machine.
 - **Instructions: one text, newest wins**; a per-device text with a
-  copy-to-all press was turned down. Cleared is an empty text, not a tombstone.
+  copy-to-all press was turned down. Cleared is an empty text, not a deletion stamp.
 - **A declaration gets a uuid**; keying by name and letting a redeclaration
-  beat the tombstone was turned down, so *a removal is final* holds here too.
+  beat the deletion stamp was turned down, so *a removal is final* holds here too.
   The name stays the identity the agent and the chips see and is never renamed.
 - **What a Conversation holds is still the name**; a chip whose name has no
   live declaration says the server is gone, and attaching a name nothing live
@@ -33,7 +33,7 @@ rewrites the **Instructions** and **MCP server** terms and amends
   down.
 - **Header values are secrets**, kept in `secrets.yaml` **under the
   declaration's uuid** rather than its name, copied to every device over the
-  gated route, taken away with the tombstone — so deleting `docs` and
+  gated route, taken away with the deletion stamp — so deleting `docs` and
   declaring it again never has the old removal wipe the new values, in
   whichever order a device pulls the two; fetching them at launch from a holder was
   turned down.
@@ -56,7 +56,7 @@ rewrites the **Instructions** and **MCP server** terms and amends
 3. **Header values everywhere.** `mcp_headers` in `secrets.yaml` rekeyed from
    the name to the uuid once; the values route answers any declaration this
    device holds values for; copies written on news and taken away with the
-   tombstone; a session on any device is handed them.
+   deletion stamp; a session on any device is handed them.
    - A header set on A reaches a session launched on B.
    - Deleting `docs` on A and declaring it again with a new header: B, pulling
      both at once, keeps the new value.

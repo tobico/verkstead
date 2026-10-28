@@ -43,7 +43,7 @@ turned down.
   symptoms separately was not offered; the human asked for this.
 
 - **Per record, the newest write wins**, the device id breaking a tie, and **a
-  removal is final** — a tombstone is never overwritten by a later edit, so an
+  removal is final** — a removed record is never overwritten by a later edit, so an
   edit made on a device that was apart when the removal happened stays
   removed. Letting the newest write win even over a removal, which would bring
   a removed record back, and per-field timestamps, which would let concurrent
@@ -59,12 +59,12 @@ turned down.
   record: a local edit always beats what it was made on top of, and skew
   only decides between edits neither of which had seen the other.
 
-- **Every device serves its whole table** — rows and tombstones, whoever wrote
+- **Every device serves its whole table** — rows and removed records, whoever wrote
   them — on a route of the Peer Listener behind the Member Gate, and the others
   **pull and merge** at start, on the existing *moved* Nudge, when a member's
   Nudge stream is taken up again and when the membership moves. A pull is
   idempotent, so a missed Nudge costs nothing, and a record whose writer has
-  gone still reaches a newcomer through whoever holds it. Tombstones are kept;
+  gone still reaches a newcomer through whoever holds it. Removed records are kept;
   the tables are tiny. Pushing changed rows to each member on write, queued as
   owed while a member is unreachable, was turned down.
 
@@ -130,13 +130,13 @@ turned down.
 
 - **Authors, MCP servers and Instructions leave `config.yaml` for the
   database.** A record other devices write, carrying a timestamp and a
-  tombstone, is a thing Verkstead *finds*, and `config.yaml` has only ever
+  deletion stamp, is a thing Verkstead *finds*, and `config.yaml` has only ever
   held what it is *told*. Tokens and header values stay in `secrets.yaml`,
   copied to every device over the gated route as Author tokens already are.
   Keeping them in `config.yaml` with a timestamp per entry and a deleted list,
   replication writing that file on every device, was turned down. The
   Instructions are one replicated text, newest wins, cleared being an empty
-  text rather than a tombstone; a per-device text with a copy-to-all press was
+  text rather than a deletion stamp; a per-device text with a copy-to-all press was
   turned down.
 
 - **A declared MCP server gets a uuid.** Its name stays what the agent and the
@@ -144,7 +144,7 @@ turned down.
   deleting and declaring the same name again is a new record, which is what
   lets *a removal is final* hold without an exception for the one documented
   way to rename a server. Keying by name and letting a redeclaration beat the
-  tombstone was turned down. Its header values are keyed by the uuid too, so
+  deletion stamp was turned down. Its header values are keyed by the uuid too, so
   the removal of an old declaration never takes away the values of a new one
   of the same name. A name that replication leaves with two live
   declarations launches neither: the chip says the two clash until one is
