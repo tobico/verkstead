@@ -72,9 +72,12 @@ where
     /// What a failed read of a member's table is said as on its row.
     const READ: Read;
 
-    /// Hand what a merge moved on to whatever reads the kind in memory, and
-    /// tell this device's pages.
-    fn merged(state: &AppState) -> impl Future<Output = anyhow::Result<()>> + Send;
+    /// Hand what a merge moved on to whatever reads the kind in memory.
+    /// Nothing, for a kind read out of the database every time. The pages and
+    /// the members are told by the puller, with [`Self::MOVED`].
+    fn merged(_state: &AppState) -> impl Future<Output = anyhow::Result<()>> + Send {
+        async { Ok(()) }
+    }
 
     /// What else a member's records being read says to do, whether or not the
     /// merge moved anything — fetching what the records name and this device
@@ -272,9 +275,11 @@ where
 /// this device cannot read: every record here stands as it is. One that
 /// answered is said on its row, with both releases — see [`FailedReads`].
 ///
-/// **And the news stays here**: what moved is this device's copy of records
-/// the member already holds, and telling it so would only have it pull back
-/// what it served.
+/// **And what moved is this device's news**, told to its pages and to every
+/// member: a device linked to this one and not yet to the writer — one an
+/// introduction has not reached — hears of the record only from here. The
+/// member that served it pulls it back and merges nothing, and a merge that
+/// moved nothing says nothing, so the news stops there.
 async fn pull_member<K: Replicating>(state: &AppState, device: &str)
 where
     K::Fields: Send + Sync,
@@ -327,12 +332,16 @@ where
         }
     };
 
-    if merged && let Err(error) = K::merged(state).await {
-        tracing::error!(
-            error = ?error,
-            kind = K::NAME,
-            "a member's records were merged and could not be handed on",
-        );
+    if merged {
+        if let Err(error) = K::merged(state).await {
+            tracing::error!(
+                error = ?error,
+                kind = K::NAME,
+                "a member's records were merged and could not be handed on",
+            );
+        }
+
+        state.nudges.announce(K::MOVED);
     }
 
     if let Err(error) = K::pulled(state).await {

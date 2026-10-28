@@ -29,12 +29,6 @@ impl Replicating for store::Profiles {
     const MOVED: Nudge = Nudge::Profiles;
     const READ: Read = Read::Profiles;
 
-    async fn merged(state: &AppState) -> Result<()> {
-        state.nudges.announce_here(Nudge::Profiles);
-
-        Ok(())
-    }
-
     /// Whatever the records arriving name settled, whether or not this pull
     /// moved one: a bridge that could not be made last time — the home too old
     /// to publish, or the record not yet here — is tried again.
@@ -49,12 +43,6 @@ impl Replicating for store::Bindings {
     /// The same word as the records': both are served by one route, and a
     /// member that cannot answer one cannot answer the other.
     const READ: Read = Read::Profiles;
-
-    async fn merged(state: &AppState) -> Result<()> {
-        state.nudges.announce_here(Nudge::Profiles);
-
-        Ok(())
-    }
 }
 
 /// Settle what the Profile records name — see [`store::settle`] — and move what

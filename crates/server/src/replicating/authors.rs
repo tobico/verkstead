@@ -60,12 +60,10 @@ impl Replicating for Authors {
     const READ: Read = Read::Authors;
 
     /// The merged records held for the settings — taken up first, where a
-    /// server stood up without a serve has not — and the pages told.
+    /// server stood up without a serve has not.
     async fn merged(state: &AppState) -> Result<()> {
         taken_up(&state.pool, &state.settings, &state.device).await?;
         held(&state.pool, &state.settings, &state.device).await?;
-
-        state.nudges.announce_here(Nudge::Authors);
 
         Ok(())
     }
