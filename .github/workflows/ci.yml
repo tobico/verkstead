@@ -602,14 +602,17 @@ jobs:
   # `.config/nextest.toml` holds serial is serial per leg, which is all it needs
   # to be: each leg is a machine of its own, with a session account of its own.
   windows:
-    name: Windows (${{ matrix.partition }}/2)
+    name: Windows (${{ matrix.partition }}/10)
     runs-on: windows-2025
     strategy:
-      # A red leg does not cancel its sibling: what the other half of the suite
-      # says is worth having from the same run.
+      # A red leg does not cancel the others: what the rest of the suite says
+      # is worth having from the same run.
       fail-fast: false
+      # Ten legs, the most this budget allows itself — the ledger above says
+      # why that many. The count is said three times, and the three move
+      # together: this list, the job's name, and the `slice:` of the test step.
       matrix:
-        partition: [1, 2]
+        partition: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       # **Defender looks away from what the run writes.** The image scans every
       # file written with real-time protection on, which taxes a build that
@@ -685,7 +688,7 @@ jobs:
 
       # A key of its own, as the macOS job has: this is a third dependency tree,
       # and one shared with either of the others would have them evicting each
-      # other. The two legs share it, because they build the same tree.
+      # other. Every leg shares it, because they all build the same tree.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           key: windows
@@ -790,17 +793,17 @@ jobs:
       # **To the end, whatever fails on the way.** nextest stops at its first
       # failure by default and leaves the rest of the leg unrun, which is a red
       # check saying nothing about the tests it cancelled — the same reason the
-      # matrix above lets a red leg's sibling finish.
+      # matrix above lets the other legs finish beside a red one.
       - name: Test
         run: >
           cargo nextest run --workspace
-          --partition slice:${{ matrix.partition }}/2 --no-fail-fast
+          --partition slice:${{ matrix.partition }}/10 --no-fail-fast
 
       # **And the doc-tests, which nextest does not run.** The workspace has
       # none today, so this step costs little. It is here so that the first one
       # somebody writes runs on this machine too, rather than being skipped
       # without a word — the Linux job's `cargo test` runs them already. On the
-      # first leg alone: they are not partitioned, so both would run all of them.
+      # first leg alone: they are not partitioned, so every leg would run all of them.
       - name: Doc-tests
         if: matrix.partition == 1
         run: cargo test --doc --workspace
