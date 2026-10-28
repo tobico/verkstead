@@ -605,6 +605,53 @@ jobs:
       matrix:
         partition: [1, 2]
     steps:
+      # **Defender looks away from what the run writes.** The image scans every
+      # file written with real-time protection on, which taxes a build that
+      # writes object files by the thousand and a suite that spawns processes
+      # and makes temporary directories by the hundred. Safe here and nowhere
+      # else: the runner is a throwaway VM whose only purpose is this run, and
+      # what lands in these directories is this repository's own source, the
+      # pinned toolchain and what they build — the same reasoning as the `Rust`
+      # job relaxing AppArmor for the sandbox suite. Never on a machine anybody
+      # keeps.
+      #
+      # First, before the checkout writes anything. A runner with no Defender,
+      # with real-time protection already off, or refusing the preference fails
+      # here aloud rather than passing quietly: a measurement against a step
+      # that did nothing is no measurement.
+      - name: Exclude the build and the tests from Defender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $status = Get-MpComputerStatus
+          if (-not $status.RealTimeProtectionEnabled) {
+            throw 'Defender real-time protection is not on, so there is nothing to exclude from.'
+          }
+
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
+          $rustupHome = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $env:USERPROFILE '.rustup' }
+          $paths = @(
+            $env:GITHUB_WORKSPACE,
+            (Join-Path $env:GITHUB_WORKSPACE 'target'),
+            $env:RUNNER_TEMP,
+            $env:TEMP,
+            $cargoHome,
+            $rustupHome
+          )
+
+          foreach ($path in $paths) {
+            Add-MpPreference -ExclusionPath $path
+          }
+
+          $excluded = (Get-MpPreference).ExclusionPath
+          foreach ($path in $paths) {
+            if ($excluded -notcontains $path) {
+              throw "Defender did not take the exclusion for $path."
+            }
+            Write-Output "Excluded from real-time scanning: $path"
+          }
+
       # Before the checkout, because it is the checkout this is about. Git for
       # Windows converts line endings on the way out of the repository by
       # default, and half of what this suite asserts is text: a fixture, a
