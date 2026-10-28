@@ -1023,7 +1023,7 @@ thing Verkstead is *told* rather than one it finds — and read at the moment a
 session is launched, so a corrected URL fixes every Conversation that attached
 that server. An absent key, an empty one and one nothing can parse are the same
 no servers, and an entry missing either half is dropped as the file is read.
-**Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a replicated record in the database rather than `config.yaml`, carrying a uuid — the name still what the agent and the chips see, unique among the live declarations across the cluster, and declaring a deleted name again a new record — with the header values copied to every device's `secrets.yaml`. The `cluster-owned-records` roadmap lands it.
+**Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a replicated record in the database rather than `config.yaml`, carrying a uuid — the name still what the agent and the chips see, unique among the live declarations across the cluster, and declaring a deleted name again a new record — with the header values copied to every device's `secrets.yaml` under the uuid, and a name two live declarations share launching neither. The `cluster-owned-records` roadmap lands it.
 **Except the header values, which are in `secrets.yaml`** under the server's
 name, where the GitHub token is: the names are part of the declaration and are
 written with it, and what goes in each of them is a secret. So a header is

@@ -141,7 +141,11 @@ turned down.
   deleting and declaring the same name again is a new record, which is what
   lets *a removal is final* hold without an exception for the one documented
   way to rename a server. Keying by name and letting a redeclaration beat the
-  tombstone was turned down.
+  tombstone was turned down. Its header values are keyed by the uuid too, so
+  the removal of an old declaration never takes away the values of a new one
+  of the same name. A name that replication leaves with two live
+  declarations launches neither: the chip says the two clash until one is
+  renamed or removed, rather than Verkstead picking one the human did not.
 
 - **Removing an Author checks this device's Repos and every reachable
   member's**, naming the Repo and the device, and skips a member that is not

@@ -27,9 +27,15 @@ rewrites the **Instructions** and **MCP server** terms and amends
   The name stays the identity the agent and the chips see and is never renamed.
 - **What a Conversation holds is still the name**; a chip whose name has no
   live declaration says the server is gone, and attaching a name nothing live
-  declares is refused.
-- **Header values are secrets**, copied to every device over the gated route,
-  taken away with the tombstone; fetching them at launch from a holder was
+  declares is refused. A name with two live declarations, which only
+  replication can bring about, launches neither and its chip says the two
+  clash until one is renamed or removed; newest-declaration-wins was turned
+  down.
+- **Header values are secrets**, kept in `secrets.yaml` **under the
+  declaration's uuid** rather than its name, copied to every device over the
+  gated route, taken away with the tombstone — so deleting `docs` and
+  declaring it again never has the old removal wipe the new values, in
+  whichever order a device pulls the two; fetching them at launch from a holder was
   turned down.
 - **Uniqueness at the press** among live names against the whole table; a
   pair arriving by replication is kept and drawn.
@@ -47,13 +53,19 @@ rewrites the **Instructions** and **MCP server** terms and amends
    - A server declared on A is on B's Attach menu; deleting and redeclaring a
      name on B is a new record A sees as gone then new.
 
-3. **Header values everywhere.** The values route answers any declaration this
+3. **Header values everywhere.** `mcp_headers` in `secrets.yaml` rekeyed from
+   the name to the uuid once; the values route answers any declaration this
    device holds values for; copies written on news and taken away with the
    tombstone; a session on any device is handed them.
    - A header set on A reaches a session launched on B.
+   - Deleting `docs` on A and declaring it again with a new header: B, pulling
+     both at once, keeps the new value.
 
 4. **The chips and the refusals.** *Gone* reads off no live declaration of the
-   name; attaching a dead name is refused.
+   name; attaching a dead name is refused; a name with two live declarations
+   is a clash on the chip and launches neither.
+   - Two devices apart each declare `docs`; once they meet, a session
+     attached to `docs` is handed neither and the chip says they clash.
 
 ## Re-verify at start
 
