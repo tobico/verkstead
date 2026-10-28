@@ -616,17 +616,25 @@ jobs:
       # keeps.
       #
       # First, before the checkout writes anything. A runner with no Defender,
-      # with real-time protection already off, or refusing the preference fails
-      # here aloud rather than passing quietly: a measurement against a step
-      # that did nothing is no measurement.
+      # or refusing the preference, fails here aloud rather than passing
+      # quietly: a measurement against a step that did nothing is no
+      # measurement.
+      #
+      # **The windows-2025 image already has real-time protection off** (run
+      # 40678176057), so today these exclusions have nothing to work against —
+      # the ledger below says what that came to. The step stays so that an
+      # image which turns it back on costs this job nothing, and it says on
+      # the run which of the two it found.
       - name: Exclude the build and the tests from Defender
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
           $status = Get-MpComputerStatus
-          if (-not $status.RealTimeProtectionEnabled) {
-            throw 'Defender real-time protection is not on, so there is nothing to exclude from.'
+          if ($status.RealTimeProtectionEnabled) {
+            Write-Output 'Defender real-time protection is on: excluding what the run writes.'
+          } else {
+            Write-Output '::notice title=Defender::Real-time protection is already off on this image, so the exclusions change nothing today.'
           }
 
           $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
