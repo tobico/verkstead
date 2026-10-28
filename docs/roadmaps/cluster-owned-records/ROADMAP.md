@@ -32,7 +32,7 @@ chose too.
 
 ## Stages
 
-- [ ] 01: Records are the cluster's — Authors first — [brief](01-records-are-the-clusters.md) — no dependencies
+- [ ] 01: Records are the cluster's — Authors first — [brief](01-records-are-the-clusters.md) — no dependencies *(in progress: `roadmaps/cluster-owned-records/01-records-are-the-clusters`)*
 - [ ] 02: Profiles by uuid, bound per device — [brief](02-profiles-by-uuid-bound-per-device.md) — after 01
 - [ ] 03: The replicated login — [brief](03-the-replicated-login.md) — after 02
 - [ ] 04: Memory unioned in and fanned out — [brief](04-memory-unioned-in-and-fanned-out.md) — after 02
