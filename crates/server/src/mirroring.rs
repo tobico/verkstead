@@ -308,7 +308,7 @@ async fn pruned(state: &AppState) {
 /// louder.** The row is already gone, the Profile is off every list and every
 /// picker, and what is left behind is a file to sweep rather than a press to
 /// refuse — the next removal of that member's is not held up by it.
-async fn swept(state: &AppState, gone: &[i64]) {
+async fn swept(state: &AppState, gone: &[String]) {
     // Nothing went, which is every refresh but the one after a removal — and
     // this runs once per member per Nudge, so it is the case to answer before
     // borrowing a thread to do nothing on.
@@ -322,7 +322,7 @@ async fn swept(state: &AppState, gone: &[i64]) {
 
     let mirrors: Vec<PathBuf> = gone
         .iter()
-        .map(|id| agents.homes().account_mirror(*id))
+        .map(|id| agents.homes().account_mirror(id))
         .collect();
 
     let taken = tokio::task::spawn_blocking(move || {
@@ -434,13 +434,16 @@ async fn read_member(state: &AppState, device: &str) {
     let mut wrote = 0;
 
     for row in &its_own {
+        // Held under the member's own uuid, so one Profile is one uuid on both
+        // ends. Nothing was numbered there before the uuids for a mirror made
+        // now, so it carries no integer from home.
         let at = store::Mirror {
             device: device.to_owned(),
-            id: row.id,
+            was: None,
             login: row.login,
         };
 
-        match store::record_mirror(&state.pool, &at, &facts(row)).await {
+        match store::record_mirror(&state.pool, &row.id, &at, &facts(row)).await {
             Ok(_) => wrote += 1,
 
             // One Profile that could not be written down is one row missing from
@@ -449,13 +452,13 @@ async fn read_member(state: &AppState, device: &str) {
             Err(error) => tracing::error!(
                 error = ?error,
                 device,
-                profile = row.id,
+                profile = %row.id,
                 "a member's Agent Profile could not be written down",
             ),
         }
     }
 
-    let held: Vec<i64> = its_own.iter().map(|row| row.id).collect();
+    let held: Vec<String> = its_own.iter().map(|row| row.id.clone()).collect();
 
     let gone = match store::forget_mirrors_except(&state.pool, device, &held).await {
         Ok(gone) => gone,
@@ -515,7 +518,7 @@ pub(crate) enum Pressed<T> {
 /// it is.** The form over a mirror is the form over any other Profile — every
 /// device's Profiles section lists everyone's, which is the human's choice over
 /// editing an account only where it lives — and what crosses the link is what
-/// was typed, addressed by the id the mirror records for that Profile at home.
+/// was typed, addressed by the uuid, which is the Profile's at home as well.
 /// Nothing here judges any of it: the paths belong to the home machine's
 /// filesystem, and the two uniqueness rules are that device's own rows' (see the
 /// `profiles` table's partial indexes). So the answer is that device's own — a
@@ -536,7 +539,7 @@ pub(crate) enum Pressed<T> {
 /// answers [`Pressed::Here`].
 pub(crate) async fn edited(
     state: &AppState,
-    id: i64,
+    id: &str,
     edit: &ProfileEdit,
 ) -> Result<Pressed<ProfileSaved>> {
     let Some(at) = home_of(&state.pool, id).await? else {
@@ -545,7 +548,7 @@ pub(crate) async fn edited(
 
     let call = Call {
         method: reqwest::Method::POST,
-        onwards: format!("{PROFILES}/{}", at.id),
+        onwards: format!("{PROFILES}/{id}"),
         headers: as_json(),
         body: Streamed::saying(serde_json::to_vec(edit)?),
     };
@@ -579,14 +582,14 @@ pub(crate) async fn edited(
 /// Pairings that named it, so a Profile removed from B leaves a Conversation on C
 /// reading as one nothing has been picked for. This device's own mirror is read
 /// again at once rather than waiting for the news to come back round.
-pub(crate) async fn removed(state: &AppState, id: i64) -> Result<Pressed<ProfileDeleted>> {
+pub(crate) async fn removed(state: &AppState, id: &str) -> Result<Pressed<ProfileDeleted>> {
     let Some(at) = home_of(&state.pool, id).await? else {
         return Ok(Pressed::Here);
     };
 
     let call = Call {
         method: reqwest::Method::POST,
-        onwards: format!("{PROFILES}/{}/delete", at.id),
+        onwards: format!("{PROFILES}/{id}/delete"),
         headers: as_json(),
         body: Streamed::Nothing,
     };
@@ -624,15 +627,15 @@ async fn redrawn(state: &AppState, device: &str) {
     read_member(state, device).await;
 }
 
-/// Which device a Profile row is at home on and what it is numbered there — or
-/// `None` for one of this device's own, which is every row on a Verkstead that is
+/// Which device a Profile row is at home on — or `None` for one of this
+/// device's own, which is every row on a Verkstead that is
 /// linked to nothing.
 ///
 /// **A row that is not there at all reads as this device's own**, so the press
 /// falls through to the local half and is refused in the words a press over a
 /// Profile that has gone is always refused in. A second sentence for one finding
 /// would be two ways of saying *that profile is gone*.
-async fn home_of(pool: &SqlitePool, id: i64) -> Result<Option<store::Mirror>> {
+async fn home_of(pool: &SqlitePool, id: &str) -> Result<Option<store::Mirror>> {
     Ok(store::load_profile(pool, id)
         .await?
         .and_then(|profile| profile.mirror))

@@ -2406,6 +2406,21 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         .await
         .context("stamping the Conversations of a database written before there were birth keys")?;
 
+    // And the device this one's own Profiles were minted on, where they were
+    // numbered before they had uuids — see [`store::stamp_the_profiles`]. Here
+    // for the reason the two above are, and before the routes because the
+    // Profile list a member reads carries it.
+    store::stamp_the_profiles(&pool, device.id())
+        .await
+        .context("stamping the Profiles of a database written before they had uuids")?;
+
+    // And each member's account mirrored here moved from the Profile's integer
+    // to its uuid, before anything launches into one — see
+    // [`mirroring::account::renumbered`].
+    mirroring::account::renumbered(&pool, &data_dir)
+        .await
+        .context("moving the account mirrors to the uuids their Profiles are named by")?;
+
     // And the listener that presents it, taken now: the peer port is the second
     // address this start claims, and one somebody else is already on is a
     // misconfiguration to refuse here rather than a Verkstead that comes up

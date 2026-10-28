@@ -194,7 +194,7 @@ impl Workbench {
 
     /// A Claude Profile with no login yet, saved the way the form saves one,
     /// with the stub in the directory its login is started in.
-    async fn claude_profile(&self, name: &str) -> i64 {
+    async fn claude_profile(&self, name: &str) -> String {
         let home = self.accounts.path().join(name);
         let claude_dir = home.join(".claude");
         let config_file = home.join(".claude.json");
@@ -227,7 +227,7 @@ impl Workbench {
             .expect("the Profile was saved")
             .id;
 
-        let place = self.place(id);
+        let place = self.place(&id);
         std::fs::create_dir_all(&place).unwrap();
         std::fs::write(place.join(STUB), SCRIPT).unwrap();
 
@@ -235,7 +235,7 @@ impl Workbench {
     }
 
     /// The directory `profile`'s login is started in.
-    fn place(&self, profile: i64) -> PathBuf {
+    fn place(&self, profile: &str) -> PathBuf {
         self.dir
             .path()
             .join("homes")
@@ -254,7 +254,7 @@ impl Workbench {
     }
 
     /// The processes the stub has been started as for `profile`.
-    fn started(&self, profile: i64) -> Vec<u32> {
+    fn started(&self, profile: &str) -> Vec<u32> {
         std::fs::read_to_string(self.place(profile).join("pids"))
             .unwrap_or_default()
             .lines()
@@ -263,15 +263,28 @@ impl Workbench {
     }
 
     /// Whether the boundary `profile`'s login ran behind is still written down.
-    fn boundary_kept(&self, profile: i64) -> bool {
+    ///
+    /// Kept under the negative number the server reads off the uuid: its FNV-1a
+    /// hash kept to sixty-two bits and turned negative past zero. That is
+    /// `sandbox::login_boundary`'s arithmetic said again here, the function being
+    /// the crate's own — and a test reading the wrong directory would pass for
+    /// the boundary having gone.
+    fn boundary_kept(&self, profile: &str) -> bool {
+        let hashed = profile
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+        let boundary = -1 - (hashed >> 2) as i64;
+
         self.dir
             .path()
             .join("containers")
-            .join((-profile).to_string())
+            .join(boundary.to_string())
             .exists()
     }
 
-    async fn opened(&self, profile: i64, viewer: &str) -> LoginState {
+    async fn opened(&self, profile: &str, viewer: &str) -> LoginState {
         let (status, said) = self
             .press(
                 &format!("/api/ui/profiles/{profile}/login"),
@@ -283,7 +296,7 @@ impl Workbench {
         serde_json::from_str(&said).unwrap()
     }
 
-    async fn closed(&self, profile: i64, viewer: &str) {
+    async fn closed(&self, profile: &str, viewer: &str) {
         let (status, said) = self
             .press(
                 &format!("/api/ui/profiles/{profile}/login/close"),
@@ -294,7 +307,7 @@ impl Workbench {
         assert!(status.is_success(), "{said}");
     }
 
-    async fn coded(&self, profile: i64, code: &str) -> (StatusCode, String) {
+    async fn coded(&self, profile: &str, code: &str) -> (StatusCode, String) {
         self.press(
             &format!("/api/ui/profiles/{profile}/login/code"),
             serde_json::json!({ "code": code }),
@@ -302,7 +315,7 @@ impl Workbench {
         .await
     }
 
-    async fn reading(&self, profile: i64) -> Option<LoginState> {
+    async fn reading(&self, profile: &str) -> Option<LoginState> {
         let answered = self
             .app
             .clone()
@@ -325,7 +338,7 @@ impl Workbench {
     /// was instead.
     async fn read_until(
         &self,
-        profile: i64,
+        profile: &str,
         until: impl Fn(&Option<LoginState>) -> bool,
     ) -> Option<LoginState> {
         let deadline = Instant::now() + WAITING;
@@ -346,7 +359,7 @@ impl Workbench {
         }
     }
 
-    async fn waiting(&self, profile: i64) -> String {
+    async fn waiting(&self, profile: &str) -> String {
         match self
             .read_until(profile, |reading| {
                 matches!(reading, Some(LoginState::Waiting { .. }))
@@ -359,7 +372,7 @@ impl Workbench {
     }
 
     /// Until none of `profile`'s stubs is running, or a panic.
-    async fn none_running(&self, profile: i64) {
+    async fn none_running(&self, profile: &str) {
         let deadline = Instant::now() + WAITING;
 
         loop {
@@ -461,32 +474,32 @@ async fn a_code_handed_to_the_login_leaves_the_login_in_the_account() {
     let profile = workbench.claude_profile("work").await;
 
     assert_eq!(
-        workbench.opened(profile, "laptop").await,
+        workbench.opened(&profile, "laptop").await,
         LoginState::Starting
     );
 
-    let url = workbench.waiting(profile).await;
+    let url = workbench.waiting(&profile).await;
     assert!(
         url.starts_with("https://claude.com/cai/oauth/authorize?"),
         "{url}"
     );
     assert_eq!(workbench.login_of("work"), None);
 
-    let (status, said) = workbench.coded(profile, GOOD_CODE).await;
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
     assert_eq!(status, StatusCode::OK, "{said}");
 
     workbench
-        .read_until(profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
         .await;
 
     let login = workbench.login_of("work").expect("the account has a login");
     assert!(login.contains(GOOD_CODE), "{login}");
 
     // And the boundary it ran behind is gone with it.
-    assert!(!workbench.boundary_kept(profile));
+    assert!(!workbench.boundary_kept(&profile));
 
-    workbench.closed(profile, "laptop").await;
-    assert_eq!(workbench.reading(profile).await, None);
+    workbench.closed(&profile, "laptop").await;
+    assert_eq!(workbench.reading(&profile).await, None);
 }
 
 #[tokio::test]
@@ -494,13 +507,13 @@ async fn the_last_device_closing_the_modal_kills_the_login() {
     let workbench = Workbench::new(Duration::from_secs(600)).await;
     let profile = workbench.claude_profile("work").await;
 
-    workbench.opened(profile, "laptop").await;
-    workbench.waiting(profile).await;
-    assert_eq!(workbench.started(profile).len(), 1);
+    workbench.opened(&profile, "laptop").await;
+    workbench.waiting(&profile).await;
+    assert_eq!(workbench.started(&profile).len(), 1);
 
-    workbench.closed(profile, "laptop").await;
+    workbench.closed(&profile, "laptop").await;
 
-    workbench.none_running(profile).await;
+    workbench.none_running(&profile).await;
     assert_eq!(workbench.login_of("work"), None);
 }
 
@@ -512,19 +525,19 @@ async fn a_login_left_past_its_limit_is_killed() {
     let warming = Workbench::new(Duration::from_secs(600)).await;
     let warmed = warming.claude_profile("warming").await;
 
-    warming.opened(warmed, "laptop").await;
-    warming.waiting(warmed).await;
-    warming.closed(warmed, "laptop").await;
-    warming.none_running(warmed).await;
+    warming.opened(&warmed, "laptop").await;
+    warming.waiting(&warmed).await;
+    warming.closed(&warmed, "laptop").await;
+    warming.none_running(&warmed).await;
 
     let workbench = Workbench::new(LIMIT).await;
     let profile = workbench.claude_profile("work").await;
 
-    workbench.opened(profile, "laptop").await;
-    workbench.waiting(profile).await;
+    workbench.opened(&profile, "laptop").await;
+    workbench.waiting(&profile).await;
 
     let ended = workbench
-        .read_until(profile, |reading| {
+        .read_until(&profile, |reading| {
             matches!(reading, Some(LoginState::Failed { .. }))
         })
         .await;
@@ -536,5 +549,5 @@ async fn a_login_left_past_its_limit_is_killed() {
         _ => unreachable!(),
     }
 
-    workbench.none_running(profile).await;
+    workbench.none_running(&profile).await;
 }

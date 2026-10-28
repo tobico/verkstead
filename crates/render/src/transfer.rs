@@ -287,18 +287,14 @@ pub struct PairingAcross {
     pub model: Option<String>,
 }
 
-/// An Agent Profile named the way a cluster names one: the device it is at home
-/// on, and the id it has **there**.
+/// An Agent Profile named the way a cluster names one: by its **uuid**, which
+/// is the same on every device that holds it (ADR-0028).
 ///
-/// **Never the sender's local id.** A Profile on one machine is a row on every
-/// other that has heard of it — a mirror, with a local id of its own — so the
-/// pair is the one name for it that means the same thing on both ends. The
-/// receiving device turns it back into an id of its own, which is its own row
-/// where the account is at home there and its mirror where it is not.
+/// The receiving device finds the row it holds under that uuid, which is its
+/// own where the account is at home there and its mirror where it is not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProfileAcross {
-    pub device: String,
-    pub id: i64,
+    pub id: String,
 }
 
 /// The word that the move is over, and which machine the work came off.

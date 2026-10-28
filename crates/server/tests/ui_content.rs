@@ -1663,13 +1663,13 @@ fn wrap_up_proposal() -> QuestionSet {
 /// any of them can be recorded in — every fixture below chooses before it
 /// advances.
 async fn pairings(pool: &SqlitePool, conversation: i64, profiles: &[store::Profile]) {
-    store::set_grilling_pairing(pool, conversation, profiles[0].id, profiles[0].model())
+    store::set_grilling_pairing(pool, conversation, &profiles[0].id, profiles[0].model())
         .await
         .unwrap();
-    store::set_implementation_pairing(pool, conversation, profiles[1].id, profiles[1].model())
+    store::set_implementation_pairing(pool, conversation, &profiles[1].id, profiles[1].model())
         .await
         .unwrap();
-    store::set_review_pairing(pool, conversation, profiles[2].id, profiles[2].model())
+    store::set_review_pairing(pool, conversation, &profiles[2].id, profiles[2].model())
         .await
         .unwrap();
 }
@@ -2118,6 +2118,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .unwrap(),
         );
     }
+    let profiles = numbered(&pool, profiles).await;
     write(
         "profiles.json",
         &pin_health(&get(&app, "/api/ui/profiles").await),
@@ -2831,10 +2832,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_pairing(&pool, waiting, profiles[0].id, None)
+    store::set_grilling_pairing(&pool, waiting, &profiles[0].id, None)
         .await
         .unwrap();
-    store::set_implementation_pairing(&pool, waiting, profiles[1].id, None)
+    store::set_implementation_pairing(&pool, waiting, &profiles[1].id, None)
         .await
         .unwrap();
     store::save_brief(
@@ -4299,26 +4300,30 @@ const A_THIRD_DEVICE: &str = "99887766554433221100aabbccddeeff";
 async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
     let (dir, pool, app) = empty_app().await;
 
+    let mut profiles = Vec::new();
     for (name, home, models) in [
         ("fable", "/srv/accounts/fable", &["claude-fable-5"][..]),
         ("opus", "/srv/accounts/opus", &["claude-opus-5"][..]),
     ] {
-        store::create_profile(
-            &pool,
-            &store::ProfileFacts {
-                name: Some(name.to_owned()),
-                account: store::Account::Claude {
-                    claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
-                    config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
+        profiles.push(
+            store::create_profile(
+                &pool,
+                &store::ProfileFacts {
+                    name: Some(name.to_owned()),
+                    account: store::Account::Claude {
+                        claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
+                        config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
+                    },
+                    models: models.iter().map(|model| (*model).to_owned()).collect(),
+                    memory: true,
                 },
-                models: models.iter().map(|model| (*model).to_owned()).collect(),
-                memory: true,
-            },
-        )
-        .await
-        .unwrap()
-        .unwrap();
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        );
     }
+    numbered(&pool, profiles).await;
 
     verkstead_store::record_member(
         &pool,
@@ -4336,14 +4341,15 @@ async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
     .await
     .unwrap();
 
-    // Numbered the way the member numbers it rather than the way this device
-    // would: the id on the row is that machine's, and the local id this write
-    // hands out is what everything here names it by.
+    // Held under the uuid the member knows it by, which is what everything
+    // here names it by too: one Profile is one uuid on every device holding it.
+    // The third of the stated ones, after this device's own two.
     verkstead_store::record_mirror(
         &pool,
+        &stated_uuid(3),
         &verkstead_store::Mirror {
             device: A_MEMBER.to_owned(),
-            id: 4,
+            was: None,
             login: true,
         },
         &store::ProfileFacts {
@@ -4837,6 +4843,67 @@ fn pin_tried(json: &str) -> String {
     ]);
 
     serde_json::to_string(&payload).unwrap()
+}
+
+/// The uuid the `nth` Profile in a fixture is stated as: the digit, over and
+/// over, in the shape of a version-4 uuid.
+///
+/// A Profile's uuid is minted by SQLite as it is saved, so a fixture written
+/// with the ones it was given would be different bytes on every run — and the
+/// files are committed, the diff being the review. These are what the viewer's
+/// tests read instead, and a reader can tell at a glance which row is which.
+fn stated_uuid(nth: u32) -> String {
+    let digit = char::from_digit(nth, 10).expect("a fixture states fewer than ten Profiles");
+    let run = |many: usize| std::iter::repeat_n(digit, many).collect::<String>();
+
+    format!("{}-{}-4{}-8{}-{}", run(8), run(4), run(3), run(3), run(12))
+}
+
+/// Renumber the Profiles a fixture saved to [`stated_uuid`]'s, in the order they
+/// were saved, and hand them back as they now read.
+///
+/// Done straight after they are saved, while nothing but a Profile's own models
+/// and home name it, and in one transaction with the foreign keys checked at
+/// its end rather than at each statement: a Profile and its children change
+/// key together or not at all.
+async fn numbered(pool: &SqlitePool, profiles: Vec<store::Profile>) -> Vec<store::Profile> {
+    let mut tx = pool.begin().await.unwrap();
+
+    sqlx::query("PRAGMA defer_foreign_keys = ON")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+    let mut stated = Vec::new();
+
+    for (nth, profile) in (1..).zip(&profiles) {
+        let id = stated_uuid(nth);
+
+        for statement in [
+            "UPDATE profiles SET id = ? WHERE id = ?",
+            "UPDATE profile_models SET profile_id = ? WHERE profile_id = ?",
+            "UPDATE profile_homes SET profile_id = ? WHERE profile_id = ?",
+        ] {
+            sqlx::query(statement)
+                .bind(&id)
+                .bind(&profile.id)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+        }
+
+        stated.push(id);
+    }
+
+    tx.commit().await.unwrap();
+
+    let mut read = Vec::new();
+
+    for id in stated {
+        read.push(store::load_profile(pool, &id).await.unwrap().unwrap());
+    }
+
+    read
 }
 
 /// Pin everything in a payload that the filesystem would otherwise decide: a

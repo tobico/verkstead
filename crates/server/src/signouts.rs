@@ -212,9 +212,9 @@ pub(crate) struct Watch {
     conversation_id: i64,
     event_id: i64,
 
-    /// The Profile this session runs under, by its id on this device: what the
-    /// stop records a login as waiting on.
-    profile_id: i64,
+    /// The Profile this session runs under, by its uuid: what the stop records
+    /// a login as waiting on.
+    profile_id: String,
 
     /// And what it is called, which is what the Notice and the push name.
     profile: String,
@@ -247,7 +247,7 @@ impl Watch {
     pub(crate) fn on(
         conversation_id: i64,
         event_id: i64,
-        profile_id: i64,
+        profile_id: String,
         profile: String,
         home: Home,
         agent_type: store::AgentType,
@@ -348,7 +348,7 @@ async fn signed_out(pool: &SqlitePool, nudges: &Nudges, watch: &Watch, said: &st
         nudges,
         conversation_id,
         crate::stopping::Decided::SignedOut {
-            id: watch.profile_id,
+            id: &watch.profile_id,
             profile: &watch.profile,
         },
         crate::stalls::driving(lifecycle),
@@ -504,11 +504,11 @@ async fn carry_on(state: AppState, conversation_id: i64) {
 /// ought to be running now. A run stopped for any other reason, or waiting on
 /// another Profile, is left as it is. A refusal leaves its run stopped where
 /// the human will find it, and pressing Resume there says why.
-pub(crate) async fn logged_in(state: AppState, profile: i64) {
-    let waiting = match store::signed_out_on(&state.pool, profile).await {
+pub(crate) async fn logged_in(state: AppState, profile: String) {
+    let waiting = match store::signed_out_on(&state.pool, &profile).await {
         Ok(waiting) => waiting,
         Err(error) => {
-            tracing::error!(error = ?error, profile_id = profile, "reading the runs a login unblocks failed");
+            tracing::error!(error = ?error, profile_id = %profile, "reading the runs a login unblocks failed");
             return;
         }
     };
@@ -519,19 +519,19 @@ pub(crate) async fn logged_in(state: AppState, profile: i64) {
         {
             Ok(verkstead_render::Resumed::Resumed) => tracing::info!(
                 conversation_id,
-                profile_id = profile,
+                profile_id = %profile,
                 "a login unblocked a run, so it is being driven again"
             ),
             Ok(refusal) => tracing::warn!(
                 conversation_id,
-                profile_id = profile,
+                profile_id = %profile,
                 ?refusal,
                 "a login unblocked a run, but nothing could be started for it"
             ),
             Err(error) => tracing::error!(
                 error = ?error,
                 conversation_id,
-                profile_id = profile,
+                profile_id = %profile,
                 "starting a run a login unblocked failed"
             ),
         }
@@ -568,7 +568,7 @@ mod tests {
         Watch::on(
             1,
             2,
-            3,
+            "3".to_owned(),
             "fable".to_owned(),
             Home::Here,
             Claude,

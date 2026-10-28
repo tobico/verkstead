@@ -2416,8 +2416,10 @@ pub(crate) async fn conversation_view(
     // only while the stop stands, and only for an account at home here. A
     // mirror's login is made on its own device, and its Notice says which
     // (ADR-0022). A Profile that has gone since offers nothing.
-    let log_in = match marked.and_then(|stopped| Some((stopped.notice, stopped.signed_out?))) {
-        Some((notice, profile)) => match store::load_profile(&state.pool, profile).await {
+    let log_in = match marked
+        .and_then(|stopped| Some((stopped.notice, stopped.signed_out.clone()?)))
+    {
+        Some((notice, profile)) => match store::load_profile(&state.pool, &profile).await {
             Ok(Some(profile)) if profile.mirror.is_none() => Some((
                 notice,
                 verkstead_render::NoticeLogIn {
@@ -5999,11 +6001,7 @@ async fn edit_profile(
     Path(id): Path<String>,
     Json(edit): Json<ProfileEdit>,
 ) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(verkstead_render::ProfileSaved::NoSuchProfile).into_response();
-    };
-
-    match crate::mirroring::edited(&state, id, &edit).await {
+    match crate::mirroring::edited(&state, &id, &edit).await {
         // One of this device's own rows, which is every row where there is no
         // cluster: the press falls through to the half below.
         Ok(crate::mirroring::Pressed::Here) => {}
@@ -6020,20 +6018,20 @@ async fn edit_profile(
         Err(error) => {
             tracing::error!(
                 error = ?error,
-                profile_id = id,
+                profile_id = %id,
                 "reading which device an Agent Profile is at home on failed",
             );
             return unavailable("The agent profile couldn't be saved.");
         }
     }
 
-    match crate::profiles::edit(&state.pool, id, &edit).await {
+    match crate::profiles::edit(&state.pool, &id, &edit).await {
         Ok(outcome) => {
             moved_profiles(&state, outcome == verkstead_render::ProfileSaved::Saved);
             Json(outcome).into_response()
         }
         Err(error) => {
-            tracing::error!(error = ?error, profile_id = id, "rewriting an Agent Profile failed");
+            tracing::error!(error = ?error, profile_id = %id, "rewriting an Agent Profile failed");
             unavailable("The agent profile couldn't be saved.")
         }
     }
@@ -6056,15 +6054,11 @@ async fn login_opened(
     Path(id): Path<String>,
     Json(opened): Json<verkstead_render::LoginOpened>,
 ) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    let profile = match store::load_profile(&state.pool, id).await {
+    let profile = match store::load_profile(&state.pool, &id).await {
         Ok(Some(profile)) => profile,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, profile_id = id, "reading an Agent Profile failed");
+            tracing::error!(error = ?error, profile_id = %id, "reading an Agent Profile failed");
             return unavailable("The agent profile couldn't be read.");
         }
     };
@@ -6097,11 +6091,7 @@ async fn login_opened(
 
 /// Where a Profile's login has got to — `null` where none is running.
 async fn login_reading(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    Json(state.logins.reading(id)).into_response()
+    Json(state.logins.reading(&id)).into_response()
 }
 
 /// The code the login page handed back, for the login waiting on it.
@@ -6110,13 +6100,11 @@ async fn login_coded(
     Path(id): Path<String>,
     Json(code): Json<verkstead_render::LoginCode>,
 ) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    match state.logins.coded(id, &code.code) {
+    match state.logins.coded(&id, &code.code) {
         Ok(reading) => {
-            state.nudges.announce_here(Nudge::Login { profile: id });
+            state.nudges.announce_here(Nudge::Login {
+                profile: id.clone(),
+            });
             Json(reading).into_response()
         }
         Err(crate::logins::Refusal::NotRunning) => refused(
@@ -6137,21 +6125,13 @@ async fn login_closed(
     Path(id): Path<String>,
     Json(closed): Json<verkstead_render::LoginClosed>,
 ) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    state.logins.closed(id, &closed.viewer);
+    state.logins.closed(&id, &closed.viewer);
 
     StatusCode::NO_CONTENT.into_response()
 }
 
 async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(verkstead_render::ProfileDeleted::NoSuchProfile).into_response();
-    };
-
-    match crate::mirroring::removed(&state, id).await {
+    match crate::mirroring::removed(&state, &id).await {
         Ok(crate::mirroring::Pressed::Here) => {}
 
         Ok(crate::mirroring::Pressed::Away(outcome)) => {
@@ -6166,20 +6146,20 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
         Err(error) => {
             tracing::error!(
                 error = ?error,
-                profile_id = id,
+                profile_id = %id,
                 "reading which device an Agent Profile is at home on failed",
             );
             return unavailable("The agent profile couldn't be removed.");
         }
     }
 
-    match crate::profiles::remove(&state.pool, id).await {
+    match crate::profiles::remove(&state.pool, &id).await {
         Ok(outcome) => {
             moved_profiles(&state, outcome == verkstead_render::ProfileDeleted::Removed);
             Json(outcome).into_response()
         }
         Err(error) => {
-            tracing::error!(error = ?error, profile_id = id, "removing an Agent Profile failed");
+            tracing::error!(error = ?error, profile_id = %id, "removing an Agent Profile failed");
             unavailable("The agent profile couldn't be removed.")
         }
     }

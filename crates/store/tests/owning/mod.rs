@@ -277,7 +277,7 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     .unwrap()
     .expect("nothing is called that yet");
 
-    set_grilling_pairing(pool, id, profile.id, Some("gpt-5"))
+    set_grilling_pairing(pool, id, &profile.id, Some("gpt-5"))
         .await
         .unwrap();
     skip_review(pool, id).await.unwrap();

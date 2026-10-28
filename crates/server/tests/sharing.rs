@@ -664,7 +664,7 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
     .unwrap()
     .unwrap();
 
-    store::set_grilling_pairing(&pool, id, profile.id, profile.model())
+    store::set_grilling_pairing(&pool, id, &profile.id, profile.model())
         .await
         .unwrap();
 
@@ -1761,7 +1761,7 @@ async fn a_steer_that_boards_carries_no_path_to_the_account_it_picked() {
                 digest: false,
                 interrupt: false,
                 pairing: Some(verkstead_store::PickedPairing {
-                    profile_id: profile.id,
+                    profile_id: &profile.id,
                     model: "claude-opus-5",
                 }),
             },

@@ -842,16 +842,24 @@ pub(crate) fn taken_back(data_dir: &Path, conversation: i64) {
 /// boundary is an identity, where a boundary is kept by Conversation and a
 /// login has none — see [`Sandbox::for_login`].
 ///
-/// **The Profile's id turned negative, which no Conversation's is.** A
-/// Conversation's id is a SQLite row id, which begins at one, and zero is the
-/// Compile Server's — see `entries::NOBODYS`. A Profile's id begins at one too,
-/// so no two Profiles share one of these either.
+/// **A negative number read off the Profile's uuid, which no Conversation's
+/// id is.** A Conversation's id is a SQLite row id, which begins at one, and
+/// zero is the Compile Server's — see `entries::NOBODYS`. The number is the
+/// uuid's FNV-1a hash kept to sixty-two bits and turned negative past zero, so
+/// it is never either of those, it is the same for one Profile at every start,
+/// and two Profiles share one only by a chance of one in four quintillion.
 ///
 /// Swept at startup by the ordinary rule, which takes back every record whose
 /// Conversation is not working — see [`crate::boundaries`] — and is the right
 /// answer for these: no login outlives the server that ran it.
-pub(crate) fn login_boundary(profile_id: i64) -> i64 {
-    -profile_id
+pub(crate) fn login_boundary(profile_id: &str) -> i64 {
+    let hashed = profile_id
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+
+    -1 - (hashed >> 2) as i64
 }
 
 /// The boundary a Profile's login ran behind, taken off this machine once the
@@ -860,7 +868,7 @@ pub(crate) fn login_boundary(profile_id: i64) -> i64 {
 /// wrapper.
 ///
 /// Blocks: it walks back the directory trees the entries were written on.
-pub(crate) fn login_taken_back(homes: &Homes, profile_id: i64) {
+pub(crate) fn login_taken_back(homes: &Homes, profile_id: &str) {
     taken_back(&homes.data, login_boundary(profile_id));
 }
 
@@ -3100,7 +3108,7 @@ impl Homes {
     ///
     /// The directory Claude is started in is under it too, there being no
     /// Worktree: an empty one of the login's own, made here — see [`Home::place`].
-    pub(crate) fn for_login(&self, profile_id: i64) -> Home {
+    pub(crate) fn for_login(&self, profile_id: &str) -> Home {
         let built = self.root.join(format!("login-{profile_id}"));
 
         let path = match self.platform {
@@ -3132,11 +3140,17 @@ impl Homes {
     /// the one account. It is written fresh from the home device before each
     /// launch — see [`crate::mirroring::account`].
     ///
-    /// Named by the **local** Profile id, which is the id a mirror keeps across
-    /// every refresh of the row.
-    pub(crate) fn account_mirror(&self, profile_id: i64) -> PathBuf {
-        self.data.join(ACCOUNTS).join(profile_id.to_string())
+    /// Named by the Profile's **uuid**, which is the one a mirror is held
+    /// under across every refresh of the row.
+    pub(crate) fn account_mirror(&self, profile_id: &str) -> PathBuf {
+        accounts(&self.data).join(profile_id)
     }
+}
+
+/// The directory the account mirrors are kept under in `data_dir`, one per
+/// Profile — see [`Homes::account_mirror`].
+pub(crate) fn accounts(data_dir: &Path) -> PathBuf {
+    data_dir.join(ACCOUNTS)
 }
 
 /// The directory `~` means inside one sandbox, and the handoff directory that
@@ -4323,7 +4337,7 @@ impl Sandbox {
         verkstead: &Executable,
         secrets: &Secrets,
     ) -> Option<Sandbox> {
-        let home = homes.for_login(profile.id);
+        let home = homes.for_login(&profile.id);
         let place = home.place();
 
         if let Err(error) = std::fs::create_dir_all(&place) {
@@ -4387,7 +4401,7 @@ impl Sandbox {
             shell: None,
             build_cache: None,
             platform: homes.platform(),
-            conversation: Some(login_boundary(profile.id)),
+            conversation: Some(login_boundary(&profile.id)),
             data_dir: homes.data.clone(),
             // Off the same two files a session's is, and for its reason — see
             // [`Sandbox::for_conversation`].
@@ -7775,7 +7789,10 @@ mod tests {
                 "the account as the home device keeps it is on another drive",
             );
 
-            let mirrored = kept_in(elsewhere, &homes.account_mirror(11));
+            let mirrored = kept_in(
+                elsewhere,
+                &homes.account_mirror("0b0e4c1a-5d2f-4e7b-9a3c-6f1d2e3b4a5c"),
+            );
 
             assert_eq!(
                 across_volumes(

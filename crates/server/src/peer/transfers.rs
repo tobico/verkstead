@@ -551,7 +551,10 @@ async fn carries_on(state: &AppState, id: i64) {
 /// here is a Steer somebody ran a year ago, and an account deleted since is a
 /// name no machine can keep. The column lands empty and the rest of the Steer
 /// stands — see `store::slices`.
-async fn accounts(state: &AppState, record: &RecordAcross) -> Result<HashMap<i64, i64>, Response> {
+async fn accounts(
+    state: &AppState,
+    record: &RecordAcross,
+) -> Result<HashMap<String, String>, Response> {
     if record.profiles.is_empty() {
         return Ok(HashMap::new());
     }
@@ -572,7 +575,7 @@ async fn accounts(state: &AppState, record: &RecordAcross) -> Result<HashMap<i64
     Ok(record
         .profiles
         .iter()
-        .filter_map(|(there, named)| Some((*there, here(&profiles, &state.device, named)?)))
+        .filter_map(|named| Some((named.id.clone(), here(&profiles, named)?)))
         .collect())
 }
 
@@ -788,13 +791,11 @@ async fn resolved(
             PickedAcross::Skipped => store::ArrivingPicked::Skipped,
 
             PickedAcross::Under(pairing) => {
-                let Some(profile_id) = here(&profiles, &state.device, &pairing.profile) else {
+                let Some(profile_id) = here(&profiles, &pairing.profile) else {
                     return Err((
                         StatusCode::BAD_REQUEST,
                         format!(
-                            "this device holds no Agent Profile for the one at home on {device} \
-                             as {id}\n",
-                            device = pairing.profile.device,
+                            "this device holds no Agent Profile {id}\n",
                             id = pairing.profile.id,
                         ),
                     )
@@ -817,23 +818,14 @@ async fn resolved(
 /// Which row of this device's `profiles` is the Profile a transfer names, where
 /// one is.
 ///
-/// Two ways to be it, and they are the same fact read from the two sides: the
-/// account is at home **here**, in which case the pair names this device and one
-/// of its own rows; or it is at home on some other machine, in which case what
-/// this device holds is a **mirror** of it, marked with that machine and the id
-/// it has there — see [`crate::mirroring`].
-///
-/// One of this device's own rows is never matched by the mirror arm and a mirror
-/// is never matched by the first, which is what keeps a Profile from being read
-/// as its own mirror on the machine it is at home on.
-fn here(profiles: &[store::Profile], device: &str, named: &ProfileAcross) -> Option<i64> {
+/// The row held under its uuid, which is one Profile's on every device: one
+/// of this device's own where the account is at home here, and its **mirror**
+/// where it is at home on some other machine — see [`crate::mirroring`].
+fn here(profiles: &[store::Profile], named: &ProfileAcross) -> Option<String> {
     profiles
         .iter()
-        .find(|profile| match &profile.mirror {
-            None => named.device == device && named.id == profile.id,
-            Some(mirror) => mirror.device == named.device && mirror.id == named.id,
-        })
-        .map(|profile| profile.id)
+        .find(|profile| profile.id == named.id)
+        .map(|profile| profile.id.clone())
 }
 
 /// The routes, over the state the workbench answers out of — mounted by

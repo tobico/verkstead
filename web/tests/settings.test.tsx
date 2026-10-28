@@ -2463,14 +2463,18 @@ describe("the path a details pane stands at", () => {
     );
   });
 
-  /// A segment that is no id the server ever issued names no pane at all, and
-  /// leaves the details as bare as they are when nothing is open: the URL is a
-  /// record of what was picked rather than a promise that it is still there.
-  it("leaves the details bare where the path names nothing", async () => {
+  /// A segment that is no uuid anything is saved under still names a Profile's
+  /// pane, and the pane says the Profile is gone rather than drawing a form: the
+  /// URL is a record of what was picked rather than a promise that it is still
+  /// there.
+  it("says the profile is gone where the path names one nothing is saved under", async () => {
     const { container } = thePage("/settings/profiles/nonsense");
 
     await drawn(container, `.${profileList.profiles} .${profileList.profile}`);
-    expect(panes(container)[2]!.textContent).toBe("");
+    await waitFor(() =>
+      expect(panes(container)[2]!.textContent).toContain("That profile is gone."),
+    );
+    expect(screen.queryByLabelText(/^Name/)).toBeNull();
   });
 });
 
@@ -2482,7 +2486,9 @@ describe("where a settings details pane stands", () => {
     expect(pathTo("git")).toBe("/settings/git");
     expect(pathTo("sandbox")).toBe("/settings/sandbox");
     expect(pathTo("instructions")).toBe("/settings/instructions");
-    expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
+    expect(pathTo(opensProfile("77777777-7777-4777-8777-777777777777"))).toBe(
+      "/settings/profiles/77777777-7777-4777-8777-777777777777",
+    );
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
     expect(pathTo("repos")).toBe("/settings/repos");
   });
@@ -2493,7 +2499,7 @@ describe("where a settings details pane stands", () => {
       "sandbox",
       "instructions",
       "repos",
-      opensProfile(7),
+      opensProfile("77777777-7777-4777-8777-777777777777"),
       opensProfile("new"),
     ] as const) {
       expect(openingAt(pathTo(opening))).toBe(opening);
@@ -2503,12 +2509,21 @@ describe("where a settings details pane stands", () => {
   /// Which Profile an opening is about, asked of the opening rather than of the
   /// path — it is what says which card reads as open.
   it("says which profile an opening names, and which names none", () => {
-    expect(profileOpened(opensProfile(7))).toBe(7);
+    expect(profileOpened(opensProfile("77777777-7777-4777-8777-777777777777"))).toBe("77777777-7777-4777-8777-777777777777");
     expect(profileOpened(opensProfile("new"))).toBe("new");
     expect(profileOpened("git")).toBeNull();
     expect(profileOpened("repos")).toBeNull();
     expect(profileOpened(null)).toBeNull();
   });
+
+  /// A Profile's uuid is not read apart: any one segment under the profiles
+  /// names one, and a uuid nothing is saved under is the pane's to answer.
+  it.each([["nonsense"], ["7"], ["7.5"]])(
+    "reads /settings/profiles/%s as a profile's opening",
+    (which) => {
+      expect(openingAt(`/settings/profiles/${which}`)).toBe(opensProfile(which));
+    },
+  );
 
   /// The settings' own path opens nothing, and neither does anything that is
   /// not a path of ours — whatever it starts with.
@@ -2518,9 +2533,7 @@ describe("where a settings details pane stands", () => {
     ["/settings/nonsense"],
     ["/settings/git/extra"],
     ["/settings/profiles"],
-    ["/settings/profiles/nonsense"],
-    ["/settings/profiles/7/extra"],
-    ["/settings/profiles/7.5"],
+    ["/settings/profiles/77777777-7777-4777-8777-777777777777/extra"],
     // Every one of these named a Repo's own pane or the form that registered
     // another, and the segment reaches nothing now: the Repos are the word
     // above, whole.

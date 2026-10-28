@@ -70,10 +70,10 @@ pub const LEFT: &str = "/api/peer/v1/profiles/{profile}/memory/left";
 /// call.
 pub(crate) async fn held(
     State(state): State<AppState>,
-    At(profile): At<i64>,
+    At(profile): At<String>,
     Json(wanted): Json<MemoryWanted>,
 ) -> Response {
-    let Some((account, parts)) = named(&state, profile, &wanted).await else {
+    let Some((account, parts)) = named(&state, &profile, &wanted).await else {
         return (
             StatusCode::NOT_FOUND,
             "this device holds no Agent Profile of its own under that id\n",
@@ -86,7 +86,7 @@ pub(crate) async fn held(
 
         Ok(Err(why)) => {
             tracing::error!(
-                profile,
+                profile = %profile,
                 "the memory store a member asked after could not be read off the disk: {why:#}",
             );
 
@@ -100,7 +100,7 @@ pub(crate) async fn held(
         Err(why) => {
             tracing::error!(
                 error = ?why,
-                profile,
+                profile = %profile,
                 "reading the memory store a member asked after ended badly",
             );
 
@@ -127,12 +127,12 @@ pub(crate) async fn held(
 /// repositories.
 pub(crate) async fn written(
     State(state): State<AppState>,
-    At(profile): At<i64>,
+    At(profile): At<String>,
     Json(left): Json<MemoryLeft>,
 ) -> Response {
     let MemoryLeft { wanted, files } = left;
 
-    let Some((account, parts)) = named(&state, profile, &wanted).await else {
+    let Some((account, parts)) = named(&state, &profile, &wanted).await else {
         return (
             StatusCode::NOT_FOUND,
             "this device holds no Agent Profile of its own under that id\n",
@@ -145,7 +145,7 @@ pub(crate) async fn written(
     match tokio::task::spawn_blocking(move || written_down(&account, &parts, &files)).await {
         Ok(Ok(_)) => {
             tracing::debug!(
-                profile,
+                profile = %profile,
                 carrying,
                 "what a member's session wrote to its memory store was written into this \
                  device's account",
@@ -156,7 +156,7 @@ pub(crate) async fn written(
 
         Ok(Err(why)) => {
             tracing::error!(
-                profile,
+                profile = %profile,
                 "what a member's session wrote to its memory store could not be written into \
                  this device's account: {why:#}",
             );
@@ -171,7 +171,7 @@ pub(crate) async fn written(
         Err(why) => {
             tracing::error!(
                 error = ?why,
-                profile,
+                profile = %profile,
                 "writing what a member's session left in its memory store ended badly",
             );
 
@@ -199,7 +199,7 @@ pub(crate) async fn written(
 /// [`carried`].
 async fn named(
     state: &AppState,
-    profile: i64,
+    profile: &str,
     wanted: &MemoryWanted,
 ) -> Option<(PathBuf, Vec<Part>)> {
     let held = match store::load_profile(&state.pool, profile).await {
@@ -208,7 +208,7 @@ async fn named(
         Err(why) => {
             tracing::error!(
                 error = ?why,
-                profile,
+                profile = %profile,
                 "a member asked after one of this device's memory stores and the Profile could \
                  not be read",
             );
@@ -236,7 +236,7 @@ async fn named(
             Err(why) => {
                 tracing::error!(
                     error = ?why,
-                    profile,
+                    profile = %profile,
                     "the Repo a member named of this device's own could not be read",
                 );
 
@@ -312,7 +312,7 @@ async fn named(
         Err(why) => {
             tracing::error!(
                 error = ?why,
-                profile,
+                profile = %profile,
                 "naming the parts of this device's own memory store ended badly",
             );
 

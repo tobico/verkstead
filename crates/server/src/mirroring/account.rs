@@ -100,9 +100,12 @@ pub struct Mirrored {
 /// [`Closing`]: crate::sandbox::Closing
 #[derive(Debug, Clone)]
 pub struct Lent {
-    /// The device the account is at home on, and the Profile's id there — which is
-    /// the id the write-back is addressed by, the way every press over a mirror is.
+    /// The device the account is at home on.
     at: store::Mirror,
+
+    /// And the Profile's uuid, which is the one it has there too — what the
+    /// write-back is addressed by, the way every press over a mirror is.
+    profile: String,
 
     /// Where the mirror keeps its login, on this device.
     login: PathBuf,
@@ -152,12 +155,12 @@ pub async fn fetched(
     let said: Vec<AccountFile> = relaying::word_from(
         devices,
         &at.device,
-        relaying::asking(ACCOUNT.replace("{profile}", &at.id.to_string())),
+        relaying::asking(ACCOUNT.replace("{profile}", &profile.id)),
         MOST_AN_ACCOUNT_IS,
     )
     .await?;
 
-    let under = homes.account_mirror(profile.id);
+    let under = homes.account_mirror(&profile.id);
     let agent_type = profile.agent_type();
 
     // What came down in the login, taken before the answer is written down and off
@@ -202,10 +205,65 @@ pub async fn fetched(
         },
         lent: Lent {
             at,
+            profile: profile.id.clone(),
             login: under.join(inside),
             came_down,
         },
     }))
+}
+
+/// Move each account mirror kept under a Profile's integer id to the uuid the
+/// switch gave that Profile — see [`store::renumbered_profiles`].
+///
+/// **The mirror is a member's login on this disk**, and what takes one away is
+/// the row that names it going — see [`super::swept`], which finds it by the
+/// uuid. So a directory left under the integer would be a login nothing will
+/// ever take away again: it is moved, at the first start, before any route is
+/// answered.
+///
+/// A directory that is not there is a Profile nothing was ever launched under
+/// here, which is let go of the same as one moved. One that will not move is a
+/// line in the log, and asked about again at the next start.
+pub(crate) async fn renumbered(pool: &SqlitePool, data_dir: &Path) -> anyhow::Result<()> {
+    // A router with no Data Directory has nowhere to have kept a mirror, and
+    // the empty path would resolve to the working directory — see
+    // [`crate::nowhere`].
+    if data_dir.as_os_str().is_empty() {
+        return Ok(());
+    }
+
+    let accounts = crate::sandbox::accounts(data_dir);
+
+    for (was, uuid) in store::renumbered_profiles(pool).await? {
+        let from = accounts.join(was.to_string());
+        let to = accounts.join(&uuid);
+
+        match tokio::fs::rename(&from, &to).await {
+            Ok(()) => tracing::info!(
+                from = %from.display(),
+                to = %to.display(),
+                "the mirror of a member's account moved to the uuid its Profile is named by now",
+            ),
+
+            Err(why) if why.kind() == std::io::ErrorKind::NotFound => {}
+
+            Err(why) => {
+                tracing::warn!(
+                    error = ?why,
+                    from = %from.display(),
+                    to = %to.display(),
+                    "the mirror of a member's account could not be moved to the uuid its Profile \
+                     is named by now",
+                );
+
+                continue;
+            }
+        }
+
+        store::renumbering_done(pool, was).await?;
+    }
+
+    Ok(())
 }
 
 /// What a session or a terminal away from home holds until its ending, in one
@@ -263,6 +321,7 @@ impl Lending {
             lent:
                 Lent {
                     at,
+                    profile,
                     login,
                     came_down,
                 },
@@ -309,7 +368,7 @@ impl Lending {
 
         let call = Call {
             method: reqwest::Method::POST,
-            onwards: LOGIN.replace("{profile}", &at.id.to_string()),
+            onwards: LOGIN.replace("{profile}", &profile),
             headers: as_json(),
             body: Streamed::saying(body),
         };
@@ -549,6 +608,48 @@ fn owner_only(path: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A member's account mirrored under a Profile's integer moves to the uuid
+    /// the switch gave it, and the record of the move is let go of — so a
+    /// second start finds nothing to move.
+    #[tokio::test]
+    async fn an_account_mirror_moves_from_the_integer_to_the_uuid() {
+        let held = tempfile::tempdir().unwrap();
+        let pool = store::open_database(&held.path().join("verkstead.db"))
+            .await
+            .unwrap();
+        let uuid = "5e1f0a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b";
+
+        sqlx::query("INSERT INTO profiles_renumbered (was, uuid) VALUES (2, ?), (3, ?)")
+            .bind(uuid)
+            .bind("9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let accounts = crate::sandbox::accounts(held.path());
+        std::fs::create_dir_all(accounts.join("2/.claude")).unwrap();
+        std::fs::write(accounts.join("2/.claude/.credentials.json"), "{}").unwrap();
+
+        renumbered(&pool, held.path()).await.unwrap();
+
+        assert!(
+            !accounts.join("2").exists(),
+            "nothing is left under the integer"
+        );
+        assert!(
+            accounts
+                .join(uuid)
+                .join(".claude/.credentials.json")
+                .is_file(),
+            "and the login is under the uuid",
+        );
+        assert_eq!(
+            store::renumbered_profiles(&pool).await.unwrap(),
+            Vec::new(),
+            "a Profile nothing was mirrored for is let go of too",
+        );
+    }
 
     /// A path of an account's own is taken, and one that would land anywhere but
     /// under the mirror is not a file of an account.

@@ -30,6 +30,12 @@
 //! a Profile's name is unique among *this* device's own rows and the rule is a
 //! partial index, which a column constraint cannot be.
 //!
+//! And a fourth is a key changing type: a Profile is named by a uuid rather
+//! than by its integer (ADR-0028), so `profiles` and everything that names one
+//! are rewritten in one go — see [`profiles_that_were_numbered_here`]. Like the
+//! ranks below, half of it is the serve's: which device a Profile was minted
+//! on, and the account mirrors on disk named by the integer.
+//!
 //! Twelve of them are a column arriving rather than rows moving between tables —
 //! the Review role's Profile, the branch name somebody settled on, whether a
 //! branch is still waiting to be named, whether a session is idling on a stored
@@ -111,7 +117,348 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     memos_left_before_there_were_titles(pool).await?;
     previews_suggested_before_there_were_descriptions(pool).await?;
     profiles_whose_name_was_unique_everywhere(pool).await?;
-    author_mirrors_that_are_records_now(pool).await
+    author_mirrors_that_are_records_now(pool).await?;
+    profiles_that_were_numbered_here(pool).await
+}
+
+/// Name every Agent Profile by a **uuid** rather than by its local integer id,
+/// and convert everything that names one (ADR-0028).
+///
+/// **Each row is given a uuid of this device's minting**: one of this device's
+/// own for good, and a mirror provisionally — its home will publish the uuid it
+/// minted for the same Profile, and the bridge rewrites the provisional one to
+/// that. Either way every Pairing is already a uuid. One of this device's own
+/// keeps the integer it had as where it was minted, the device half of that
+/// pair arriving at the serve — see [`stamp_the_profiles`]; a mirror keeps the
+/// device it is at home on and the integer it had there, which is the same
+/// pair said from this side.
+///
+/// **Every reference follows in the one transaction**: the three Pairing
+/// columns of a Conversation and the Profile a signed-out stop is waiting on,
+/// the Repo's memory of its last Pairing, a half-written steer, every recorded
+/// steer, and the two tables hung off `profiles`. The tables the Profile id
+/// was a key of — `profiles`, its two children and `repo_pairings`, whose
+/// column cannot be null — are rebuilt the way the rewrites above rebuild one;
+/// a column that is one of many on a big table is added beside the old one as
+/// text, filled, and put in its place, which SQLite does in place.
+///
+/// **And the old integers are kept in a table of their own** — see
+/// [`renumbered_profiles`] — because a mirror's account is a directory under
+/// the Data Directory named by the id, and only the serve can move it.
+///
+/// Foreign keys off on the one connection, for the reason the rebuild above
+/// says, and checked before the commit.
+///
+/// Safe to run twice: what says whether there is anything to do is the id
+/// still being an integer, and after the first run it is text.
+async fn profiles_that_were_numbered_here(pool: &SqlitePool) -> Result<()> {
+    let kind: Option<(String,)> =
+        sqlx::query_as("SELECT type FROM pragma_table_info('profiles') WHERE name = 'id'")
+            .fetch_optional(pool)
+            .await
+            .context("looking at whether a Profile is still numbered")?;
+
+    if kind.is_none_or(|(kind,)| !kind.eq_ignore_ascii_case("INTEGER")) {
+        return Ok(());
+    }
+
+    // The columns the rebuild carries across, asked for once more for the
+    // reason the rewrite above asks for them: a database old enough has had
+    // them stripped by an earlier rebuild.
+    super::profiles::mirror_columns(pool).await?;
+    super::profiles::home_login_column(pool).await?;
+
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("naming every Profile by a uuid")?;
+
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
+        .await
+        .context("holding the foreign keys off while the Profiles are renumbered")?;
+
+    let rebuilt = renumber_profiles(&mut conn).await;
+
+    // However that went, for the reason the rebuilds above put it back.
+    let restored = sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *conn)
+        .await
+        .context("putting the foreign keys back on");
+
+    rebuilt?;
+    restored?;
+
+    Ok(())
+}
+
+/// That rewrite, in one transaction on the connection whose foreign keys are
+/// off.
+async fn renumber_profiles(conn: &mut sqlx::SqliteConnection) -> Result<()> {
+    use sqlx::Connection;
+
+    let mut tx = conn
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .context("naming every Profile by a uuid")?;
+
+    // Which uuid each integer became, minted here once per row. Declared by
+    // [`super::profiles::apply_schema`] too, so it is there to be read on a
+    // database that never needed this.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS profiles_renumbered (
+             was  INTEGER PRIMARY KEY,
+             uuid TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the table that says which uuid each Profile became")?;
+
+    sqlx::query(&format!(
+        "INSERT INTO profiles_renumbered (was, uuid)
+         SELECT id, {} FROM profiles",
+        super::profiles::MINTED_UUID,
+    ))
+    .execute(&mut *tx)
+    .await
+    .context("minting a uuid for every saved Profile")?;
+
+    // The shape written out rather than borrowed, for the reason every rewrite
+    // here gives.
+    sqlx::query(
+        "CREATE TABLE profiles_by_uuid (
+             id          TEXT PRIMARY KEY,
+             name        TEXT,
+             claude_dir  TEXT NOT NULL,
+             config_file TEXT NOT NULL,
+             model       TEXT NOT NULL,
+             agent_type  TEXT NOT NULL,
+             memory      INTEGER NOT NULL DEFAULT 1,
+             home_device TEXT,
+             home_id     INTEGER,
+             home_login  INTEGER,
+             minted_on   TEXT,
+             minted_id   INTEGER
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the profiles table over to be keyed by a uuid")?;
+
+    // In the order they were numbered, which is the order the rows are read
+    // back in where two sort alike.
+    sqlx::query(
+        "INSERT INTO profiles_by_uuid
+             (id, name, claude_dir, config_file, model, agent_type, memory, home_device, home_id,
+              home_login, minted_on, minted_id)
+         SELECT r.uuid, p.name, p.claude_dir, p.config_file, p.model, p.agent_type, p.memory,
+                p.home_device, p.home_id, p.home_login, NULL,
+                CASE WHEN p.home_device IS NULL THEN p.id END
+         FROM profiles p JOIN profiles_renumbered r ON r.was = p.id
+         ORDER BY p.id",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("carrying the saved Profiles across under their uuids")?;
+
+    // The two tables hung off a Profile, and the Repo's memory, whose Profile
+    // column is a key or cannot be null: rebuilt beside themselves.
+    for (table, shape, columns) in [
+        (
+            "profile_models",
+            "profile_id TEXT NOT NULL REFERENCES profiles(id),
+             position   INTEGER NOT NULL,
+             model      TEXT NOT NULL,
+             PRIMARY KEY (profile_id, position)",
+            "position, model",
+        ),
+        (
+            "profile_homes",
+            "profile_id TEXT PRIMARY KEY REFERENCES profiles(id),
+             home       TEXT NOT NULL",
+            "home",
+        ),
+        (
+            "repo_pairings",
+            "repo_id    INTEGER NOT NULL REFERENCES repos(id),
+             role       TEXT NOT NULL,
+             profile_id TEXT NOT NULL REFERENCES profiles(id),
+             model      TEXT NOT NULL,
+             PRIMARY KEY (repo_id, role)",
+            "repo_id, role, model",
+        ),
+    ] {
+        sqlx::query(&format!("CREATE TABLE {table}_by_uuid ({shape}) STRICT"))
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("making the {table} table over to name a Profile by uuid"))?;
+
+        let carried = columns
+            .split(", ")
+            .map(|column| format!("t.{column}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        sqlx::query(&format!(
+            "INSERT INTO {table}_by_uuid (profile_id, {columns})
+             SELECT r.uuid, {carried}
+             FROM {table} t JOIN profiles_renumbered r ON r.was = t.profile_id"
+        ))
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("carrying the {table} across"))?;
+
+        sqlx::query(&format!("DROP TABLE {table}"))
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("taking away the {table} table as it was"))?;
+
+        sqlx::query(&format!("ALTER TABLE {table}_by_uuid RENAME TO {table}"))
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("putting the rebuilt {table} table where the old one was"))?;
+    }
+
+    // And a column that is one of many on a big table: a text column beside
+    // it, filled, then put in its place. A Profile the integer named and no
+    // row is any more — a recorded steer's, which has no foreign key — lands
+    // empty, which is what that steer drew already.
+    for (table, column, references) in [
+        ("conversations", "grilling_profile_id", true),
+        ("conversations", "implementation_profile_id", true),
+        ("conversations", "review_profile_id", true),
+        ("conversations", "stopped_signed_out", false),
+        ("pending_steers", "profile_id", true),
+        ("steers", "profile_id", false),
+    ] {
+        let kind: Option<(String,)> = sqlx::query_as(&format!(
+            "SELECT type FROM pragma_table_info('{table}') WHERE name = ?"
+        ))
+        .bind(column)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("looking at the {table} table's {column} column"))?;
+
+        if kind.is_none_or(|(kind,)| !kind.eq_ignore_ascii_case("INTEGER")) {
+            continue;
+        }
+
+        let constraint = if references {
+            " REFERENCES profiles(id)"
+        } else {
+            ""
+        };
+
+        for statement in [
+            format!("ALTER TABLE {table} ADD COLUMN {column}_by_uuid TEXT{constraint}"),
+            format!(
+                "UPDATE {table} SET {column}_by_uuid =
+                     (SELECT uuid FROM profiles_renumbered WHERE was = {table}.{column})
+                 WHERE {column} IS NOT NULL"
+            ),
+            format!("ALTER TABLE {table} DROP COLUMN {column}"),
+            format!("ALTER TABLE {table} RENAME COLUMN {column}_by_uuid TO {column}"),
+        ] {
+            sqlx::query(&statement)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("naming a Profile by uuid in {table}.{column}"))?;
+        }
+    }
+
+    sqlx::query("DROP TABLE profiles")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the profiles table as it was")?;
+
+    sqlx::query("ALTER TABLE profiles_by_uuid RENAME TO profiles")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt profiles table where the old one was")?;
+
+    // The drop took the indexes with it, and `apply_schema` has already run
+    // this start — so they are made again here, for the reason the rebuild
+    // above makes its own.
+    for (index, over) in [
+        ("profiles_named_here", "(name) WHERE home_device IS NULL"),
+        (
+            "profiles_one_unnamed_here_per_agent",
+            "(agent_type) WHERE name IS NULL AND home_device IS NULL",
+        ),
+        (
+            "profiles_one_mirror_per_home",
+            "(home_device, home_id) WHERE home_device IS NOT NULL",
+        ),
+    ] {
+        sqlx::query(&format!(
+            "CREATE UNIQUE INDEX IF NOT EXISTS {index} ON profiles {over}",
+        ))
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("putting the {index} index back on the rebuilt table"))?;
+    }
+
+    let dangling: (i64,) = sqlx::query_as("SELECT count(*) FROM pragma_foreign_key_check")
+        .fetch_one(&mut *tx)
+        .await
+        .context("checking that nothing was left naming a Profile that is not there")?;
+
+    if dangling.0 != 0 {
+        bail!(
+            "naming the Profiles by uuid left {} rows naming a Profile that is not there",
+            dangling.0
+        );
+    }
+
+    tx.commit().await.context("naming every Profile by a uuid")
+}
+
+/// Say which device this one's own renumbered Profiles were minted on: the
+/// device half of [`super::Profile::minted`], which nothing in [`apply`] can
+/// know.
+///
+/// **The same shape as [`stamp_the_births`], and for its reason**: the device
+/// identity is read out of the very pool an open runs on, so the serve calls
+/// this once the identity is issued and before any route is answered.
+///
+/// One statement, and safe to run twice: a row already stamped is left alone.
+pub async fn stamp_the_profiles(pool: &SqlitePool, device: &str) -> Result<()> {
+    sqlx::query(
+        "UPDATE profiles SET minted_on = ?
+         WHERE minted_id IS NOT NULL AND minted_on IS NULL AND home_device IS NULL",
+    )
+    .bind(device)
+    .execute(pool)
+    .await
+    .context("saying which device the Profiles numbered before their uuids were minted on")?;
+
+    Ok(())
+}
+
+/// Every Profile the switch to uuids renumbered whose integer still has
+/// something named by it outside the database: the integer it had, and the
+/// uuid it is now.
+///
+/// What the serve reads to move each mirror's account directory under the
+/// Data Directory from the one to the other, and then lets go of with
+/// [`renumbering_done`]. Empty on a database that never had an integer.
+pub async fn renumbered_profiles(pool: &SqlitePool) -> Result<Vec<(i64, String)>> {
+    sqlx::query_as("SELECT was, uuid FROM profiles_renumbered ORDER BY was")
+        .fetch_all(pool)
+        .await
+        .context("reading which uuid each Profile numbered before them became")
+}
+
+/// And let go of one, once what was named by its integer has been moved.
+pub async fn renumbering_done(pool: &SqlitePool, was: i64) -> Result<()> {
+    sqlx::query("DELETE FROM profiles_renumbered WHERE was = ?")
+        .bind(was)
+        .execute(pool)
+        .await
+        .with_context(|| format!("letting go of what Profile {was} was renumbered to"))?;
+
+    Ok(())
 }
 
 /// Write every **Author mirror** this device held down as a record of the

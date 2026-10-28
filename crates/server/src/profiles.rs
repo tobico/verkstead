@@ -59,7 +59,7 @@ pub(crate) async fn create(pool: &SqlitePool, edit: &ProfileEdit) -> Result<Prof
 
 /// Rewrite one, whole. Everything about a Profile is the human's to change:
 /// nothing has been built from it that a change would contradict.
-pub(crate) async fn edit(pool: &SqlitePool, id: i64, edit: &ProfileEdit) -> Result<ProfileSaved> {
+pub(crate) async fn edit(pool: &SqlitePool, id: &str, edit: &ProfileEdit) -> Result<ProfileSaved> {
     let facts = match checked(edit).await? {
         Ok(facts) => facts,
         Err(refusal) => return Ok(refusal),
@@ -79,7 +79,7 @@ pub(crate) async fn edit(pool: &SqlitePool, id: i64, edit: &ProfileEdit) -> Resu
 /// takes the Profile out of every Pairing that named it in the one transaction
 /// that removes it, and a Conversation left with an empty picker is read as one
 /// that has not chosen — see [`picked`].
-pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<ProfileDeleted> {
+pub(crate) async fn remove(pool: &SqlitePool, id: &str) -> Result<ProfileDeleted> {
     Ok(match store::delete_profile(pool, id).await? {
         store::Deleting::Deleted => ProfileDeleted::Removed,
         store::Deleting::NoSuchProfile => ProfileDeleted::NoSuchProfile,
@@ -209,7 +209,7 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
                     .map(|mirror| whose(&homes, &mirror.device));
 
                 ProfileEntry {
-                    id: profile.id,
+                    id: profile.id.clone(),
                     broken: broken(&profile, home.as_ref(), &harnesses, &signed_out),
                     login: lends(&profile),
                     device: home,
@@ -417,7 +417,7 @@ fn broken(
     profile: &store::Profile,
     home: Option<&RowDevice>,
     harnesses: &HashMap<store::AgentType, bool>,
-    signed_out: &HashSet<i64>,
+    signed_out: &HashSet<String>,
 ) -> Option<Broken> {
     if profile.mirror.is_some() {
         if home.is_some_and(|home| !home.reachable) {
@@ -639,7 +639,7 @@ pub(crate) async fn choose_grilling(
     }
 
     Ok(chosen(
-        store::set_grilling_pairing(pool, id, choice.profile_id, Some(&choice.model)).await?,
+        store::set_grilling_pairing(pool, id, &choice.profile_id, Some(&choice.model)).await?,
     ))
 }
 
@@ -654,7 +654,8 @@ pub(crate) async fn choose_implementation(
     }
 
     Ok(chosen(
-        store::set_implementation_pairing(pool, id, choice.profile_id, Some(&choice.model)).await?,
+        store::set_implementation_pairing(pool, id, &choice.profile_id, Some(&choice.model))
+            .await?,
     ))
 }
 
@@ -678,7 +679,7 @@ pub(crate) async fn choose_review(
     }
 
     Ok(chosen(
-        store::set_review_pairing(pool, id, choice.profile_id, Some(&choice.model)).await?,
+        store::set_review_pairing(pool, id, &choice.profile_id, Some(&choice.model)).await?,
     ))
 }
 
@@ -710,7 +711,7 @@ pub(crate) async fn unlisted(
     pool: &SqlitePool,
     choice: &ProfileChoice,
 ) -> Result<Option<Unlisted>> {
-    let Some(profile) = store::load_profile(pool, choice.profile_id).await? else {
+    let Some(profile) = store::load_profile(pool, &choice.profile_id).await? else {
         return Ok(Some(Unlisted::NoSuchProfile));
     };
 

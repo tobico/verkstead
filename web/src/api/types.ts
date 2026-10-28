@@ -4169,10 +4169,10 @@ log_in: NoticeLogIn | null, };
  */
 export type NoticeLogIn = { 
 /**
- * The Profile, by its id on this device. Always a Claude one: that is the
- * one harness Verkstead runs a login for.
+ * The Profile, by its uuid. Always a Claude one: that is the one harness
+ * Verkstead runs a login for.
  */
-profile: number, 
+profile: string, 
 /**
  * What the human called it, where they called it anything — which the
  * modal reads beside the harness, the way the Profile's card does.
@@ -4186,7 +4186,7 @@ name: string | null, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "login", profile: number, } | { "kind": "everything" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "login", profile: string, } | { "kind": "everything" };
 
 /**
  * One Nudge as it goes down a stream: what moved, and **whose news it is**.
@@ -4211,7 +4211,7 @@ export type Nudged = {
  * Device Id — absent for this device's own, which is every Nudge a
  * workbench has ever sent about its own work.
  */
-device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "login", profile: number, } | { "kind": "everything" });
+device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "login", profile: string, } | { "kind": "everything" });
 
 /**
  * And the same of every Conversation at once: what a member offers the device
@@ -4789,7 +4789,11 @@ export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, confi
 /**
  * Which Profile and model a Conversation is pairing for one of its roles.
  */
-export type ProfileChoice = { profile_id: number, 
+export type ProfileChoice = { 
+/**
+ * The Profile, by its uuid.
+ */
+profile_id: string, 
 /**
  * One of that Profile's models. Never absent: there is no default model
  * anywhere, so a Pairing is picked whole or not at all.
@@ -4851,7 +4855,11 @@ memory: boolean, };
  * whatever was typed to save them: those are what will be bind-mounted, so
  * those are what is worth showing.
  */
-export type ProfileEntry = { id: number, 
+export type ProfileEntry = { 
+/**
+ * The uuid it is known by, the same on every device that holds it.
+ */
+id: string, 
 /**
  * What the human calls this account, and `null` where they have called it
  * nothing.

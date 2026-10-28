@@ -110,7 +110,7 @@ function mounting(what: () => JSX.Element) {
 }
 
 /// The cards in the middle pane, and what pressing one of them asked for.
-function mountCards(opening: number | "new" | null = null) {
+function mountCards(opening: string | null = null) {
   const open = vi.fn();
   const add = vi.fn();
 
@@ -124,7 +124,7 @@ function mountCards(opening: number | "new" | null = null) {
 }
 
 /// The form in the details pane, and what its two ways out asked for.
-function mountPane(profile: number | "new") {
+function mountPane(profile: string) {
   const back = vi.fn();
   const done = vi.fn();
 
@@ -284,7 +284,7 @@ function home(account: ProfileAccount) {
 /// sends that type's own shape.
 const CODEX: ProfileEntry = {
   ...FABLE,
-  id: 9,
+  id: "99999999-9999-4999-8999-999999999999",
   name: "work",
   account: { agent_type: "Codex", home: "/srv/accounts/work/.codex" },
   models: ["gpt-5-codex"],
@@ -885,7 +885,7 @@ describe("logging an account in", () => {
   it("offers none on an account of another harness", async () => {
     const codex: ProfileEntry = {
       ...FABLE,
-      id: 9,
+      id: "99999999-9999-4999-8999-999999999999",
       name: "codex",
       account: { agent_type: "Codex", home: "/home/me/.codex" },
     };
@@ -1435,7 +1435,7 @@ describe("the pane a card opens", () => {
   /// would write to an id nothing is saved under.
   it("says so when the path names a profile that is gone", async () => {
     theProfiles();
-    mountPane(404);
+    mountPane("40404040-4040-4040-8040-404040404040");
 
     await waitFor(() => screen.getByText("That profile is gone."));
     expect(screen.queryByLabelText("Name")).toBeNull();

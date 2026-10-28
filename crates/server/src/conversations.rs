@@ -208,7 +208,7 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
         store::set_grilling_pairing(
             &state.pool,
             id,
-            pairing.profile.id,
+            &pairing.profile.id,
             pairing.model.as_deref(),
         )
         .await?;
@@ -218,7 +218,7 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
         store::set_implementation_pairing(
             &state.pool,
             id,
-            pairing.profile.id,
+            &pairing.profile.id,
             pairing.model.as_deref(),
         )
         .await?;
@@ -232,7 +232,7 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
         store::set_review_pairing(
             &state.pool,
             id,
-            pairing.profile.id,
+            &pairing.profile.id,
             pairing.model.as_deref(),
         )
         .await?;
@@ -300,7 +300,7 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
 /// and a default that does not is an empty picker.
 async fn unremembered(state: &AppState) -> Result<RepoPairingsView> {
     let last = store::last_started_pairings(&state.pool).await?;
-    let profiles = store::profiles(&state.pool).await?;
+    let profiles = store::profiles_as_saved(&state.pool).await?;
 
     let under = |pairing: Option<PairingView>| match pairing {
         Some(pairing) => PickedView::Under(pairing),

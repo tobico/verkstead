@@ -166,7 +166,7 @@ pub struct Stopped {
     ///
     /// What the Notice's Log in press opens, and what a login on that Profile
     /// reads to find the runs it unblocks.
-    pub signed_out: Option<i64>,
+    pub signed_out: Option<String>,
 }
 
 /// The columns a stop lives in, added to `conversations` rather than declared
@@ -233,7 +233,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .context("looking for the stopped_signed_out column of a Conversation")?;
 
     if there.is_none() {
-        sqlx::query("ALTER TABLE conversations ADD COLUMN stopped_signed_out INTEGER")
+        sqlx::query("ALTER TABLE conversations ADD COLUMN stopped_signed_out TEXT")
             .execute(pool)
             .await
             .context("adding the stopped_signed_out column to the Conversations")?;
@@ -397,7 +397,7 @@ pub async fn stop_signed_out(
     pool: &SqlitePool,
     conversation_id: i64,
     markdown: &str,
-    profile: i64,
+    profile: &str,
 ) -> Result<Option<i64>> {
     match write_stop(
         pool,
@@ -459,7 +459,7 @@ pub async fn stop_as_asked(
 #[derive(Clone, Copy)]
 struct Carried<'a> {
     resets: Option<&'a str>,
-    signed_out: Option<i64>,
+    signed_out: Option<&'a str>,
 }
 
 /// What landing a stop came to — see [`stop_as_asked`].
@@ -594,7 +594,7 @@ pub async fn stopped(pool: &SqlitePool, conversation_id: i64) -> Result<Option<S
         Option<String>,
         Option<i64>,
         Option<String>,
-        Option<i64>,
+        Option<String>,
     );
 
     let row: Option<Row> = sqlx::query_as(
@@ -631,7 +631,7 @@ pub async fn stopped(pool: &SqlitePool, conversation_id: i64) -> Result<Option<S
 /// Nothing else is: a run stopped for any other reason is waiting on something
 /// a login does not fix, and one waiting on another Profile is waiting on
 /// another account.
-pub async fn signed_out_on(pool: &SqlitePool, profile: i64) -> Result<Vec<i64>> {
+pub async fn signed_out_on(pool: &SqlitePool, profile: &str) -> Result<Vec<i64>> {
     let rows: Vec<(i64,)> = sqlx::query_as(
         "SELECT id FROM conversations
           WHERE stopped_at IS NOT NULL AND stopped_signed_out = ?

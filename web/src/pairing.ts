@@ -161,7 +161,7 @@ export function choice(picked: string): ProfileChoice {
   const colon = picked.indexOf(":");
 
   return {
-    profile_id: Number(picked.slice(0, colon)),
+    profile_id: picked.slice(0, colon),
     model: picked.slice(colon + 1),
   };
 }
@@ -174,7 +174,7 @@ export function choice(picked: string): ProfileChoice {
 /// work start.
 ///
 /// A colon and nothing after it, which no pairing can spell — [`value`] writes
-/// a profile id before its colon and there is no profile numbered nothing.
+/// a profile uuid before its colon and there is no profile called nothing.
 export const NONE = ":";
 
 /// What is chosen now for a role that can be picked away as well as paired.

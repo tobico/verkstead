@@ -155,7 +155,10 @@ pub use memos::{
     Memo, Retirement, Retiring, StandingMemo, leave_memo, memo_of, restore_memo, retire_memo,
     standing_memos,
 };
-pub use migrations::{rank_the_conversations, record_the_repo_authors, stamp_the_births};
+pub use migrations::{
+    rank_the_conversations, record_the_repo_authors, renumbered_profiles, renumbering_done,
+    stamp_the_births, stamp_the_profiles,
+};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use pending_steers::{
@@ -165,9 +168,10 @@ pub use pending_steers::{
 pub use permitted::{forbid_device, permit_device, permitted_devices};
 pub use previews::{Preview, retire_preview, standing_previews, suggest_preview};
 pub use profiles::{
-    Account, AgentType, Channel, Clash, Deleting, Mirror, Pairing, Picked, Profile, ProfileFacts,
-    Saving, create_profile, delete_profile, forget_mirrors_except, forget_mirrors_of_departed,
-    load_profile, profiles, record_mirror, update_profile,
+    Account, AgentType, Channel, Clash, Deleting, Minted, Mirror, Pairing, Picked, Profile,
+    ProfileFacts, Saving, create_profile, delete_profile, forget_mirrors_except,
+    forget_mirrors_of_departed, load_profile, profiles, profiles_as_saved, record_mirror,
+    update_profile,
 };
 pub use pull_requests::{
     Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup,

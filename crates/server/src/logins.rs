@@ -151,7 +151,7 @@ const NO_BROWSER: &str = "true";
 /// second device's open a join rather than a second login.
 #[derive(Clone, Default)]
 pub(crate) struct Logins {
-    held: Arc<Mutex<HashMap<i64, Login>>>,
+    held: Arc<Mutex<HashMap<String, Login>>>,
 
     /// What tells an entry from the one that replaced it, so that a run that
     /// was killed does not write its ending over its successor's.
@@ -160,7 +160,7 @@ pub(crate) struct Logins {
     /// The Profiles whose account `claude auth status` last found with no
     /// login — see [`asked`]. Held here rather than in the store: it is a
     /// reading of the account, and a restart asks again at the next press.
-    signed_out: Arc<Mutex<HashSet<i64>>>,
+    signed_out: Arc<Mutex<HashSet<String>>>,
 }
 
 struct Login {
@@ -232,7 +232,7 @@ impl Logins {
         let (stop, stopped) = oneshot::channel();
 
         held.insert(
-            profile.id,
+            profile.id.clone(),
             Login {
                 run,
                 state: LoginState::Starting,
@@ -258,22 +258,22 @@ impl Logins {
     }
 
     /// Where `profile`'s login has got to, or `None` where there is none.
-    pub(crate) fn reading(&self, profile: i64) -> Option<LoginState> {
+    pub(crate) fn reading(&self, profile: &str) -> Option<LoginState> {
         let held = self
             .held
             .lock()
             .expect("the login register is not poisoned");
 
-        held.get(&profile).map(|login| login.state.clone())
+        held.get(profile).map(|login| login.state.clone())
     }
 
     /// The code the login page handed back, for the login waiting for it.
-    pub(crate) fn coded(&self, profile: i64, code: &str) -> Result<LoginState, Refusal> {
+    pub(crate) fn coded(&self, profile: &str, code: &str) -> Result<LoginState, Refusal> {
         let mut held = self
             .held
             .lock()
             .expect("the login register is not poisoned");
-        let login = held.get_mut(&profile).ok_or(Refusal::NotRunning)?;
+        let login = held.get_mut(profile).ok_or(Refusal::NotRunning)?;
 
         let (LoginState::Waiting { .. }, Some(codes)) = (&login.state, &login.codes) else {
             return Err(Refusal::NotWaiting);
@@ -289,7 +289,7 @@ impl Logins {
 
     /// The Profiles found signed out, for the rows read off them — see
     /// [`crate::profiles`].
-    pub(crate) fn signed_out(&self) -> HashSet<i64> {
+    pub(crate) fn signed_out(&self) -> HashSet<String> {
         self.signed_out
             .lock()
             .expect("the signed-out register is not poisoned")
@@ -298,7 +298,7 @@ impl Logins {
 
     /// Put down what the account of `profile` was found to be, and say so to
     /// every device where the Profile's row reads differently for it.
-    fn found(&self, state: &AppState, profile: i64, logged_in: bool) {
+    fn found(&self, state: &AppState, profile: &str, logged_in: bool) {
         let moved = {
             let mut signed_out = self
                 .signed_out
@@ -306,8 +306,8 @@ impl Logins {
                 .expect("the signed-out register is not poisoned");
 
             match logged_in {
-                true => signed_out.remove(&profile),
-                false => signed_out.insert(profile),
+                true => signed_out.remove(profile),
+                false => signed_out.insert(profile.to_owned()),
             }
         };
 
@@ -318,20 +318,20 @@ impl Logins {
 
     /// `viewer` closing the modal on `profile`. The last one to close it ends
     /// the login, killing the harness if it is still running.
-    pub(crate) fn closed(&self, profile: i64, viewer: &str) {
+    pub(crate) fn closed(&self, profile: &str, viewer: &str) {
         let mut held = self
             .held
             .lock()
             .expect("the login register is not poisoned");
 
-        let Some(login) = held.get_mut(&profile) else {
+        let Some(login) = held.get_mut(profile) else {
             return;
         };
 
         login.viewers.remove(viewer);
 
         if login.viewers.is_empty()
-            && let Some(login) = held.remove(&profile)
+            && let Some(login) = held.remove(profile)
             && let Some(stop) = login.stop
         {
             let _ = stop.send(());
@@ -362,7 +362,7 @@ impl Logins {
         }
 
         run.state.nudges.announce_here(Nudge::Login {
-            profile: run.profile.id,
+            profile: run.profile.id.clone(),
         });
     }
 
@@ -463,8 +463,8 @@ impl Logins {
         // [`crate::sandbox::login_taken_back`]. Taken back before the modal is
         // told, so that a device opening it again starts behind a fresh one.
         let agents = run.agents.clone();
-        let profile = run.profile.id;
-        let _ = tokio::task::spawn_blocking(move || agents.login_over(profile)).await;
+        let profile = run.profile.id.clone();
+        let _ = tokio::task::spawn_blocking(move || agents.login_over(&profile)).await;
 
         let Some(state) = state else {
             return;
@@ -481,7 +481,7 @@ impl Logins {
 
             tokio::spawn(crate::signouts::logged_in(
                 run.state.clone(),
-                run.profile.id,
+                run.profile.id.clone(),
             ));
         }
 
@@ -864,7 +864,7 @@ pub(crate) async fn asked<'a>(
     for profile in profiles {
         if profile.mirror.is_some()
             || profile.agent_type() != store::AgentType::Claude
-            || !seen.insert(profile.id)
+            || !seen.insert(profile.id.clone())
         {
             continue;
         }
@@ -884,7 +884,7 @@ pub(crate) async fn asked<'a>(
         }
 
         if let Some(logged_in) = status(agents.clone(), profile.clone(), STATUS_LIMIT).await {
-            state.logins.found(state, profile.id, logged_in);
+            state.logins.found(state, &profile.id, logged_in);
         }
     }
 }

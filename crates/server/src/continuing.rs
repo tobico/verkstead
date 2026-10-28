@@ -1877,7 +1877,7 @@ pub(crate) async fn settle(
         store::set_grilling_pairing(
             &state.pool,
             id,
-            grilling.profile.id,
+            &grilling.profile.id,
             grilling.model.as_deref(),
         )
         .await?;
@@ -1887,7 +1887,7 @@ pub(crate) async fn settle(
         store::set_implementation_pairing(
             &state.pool,
             id,
-            implementation.profile.id,
+            &implementation.profile.id,
             implementation.model.as_deref(),
         )
         .await?;
@@ -1899,7 +1899,7 @@ pub(crate) async fn settle(
             store::skip_review(&state.pool, id).await?;
         }
         store::Picked::Under(review) => {
-            store::set_review_pairing(&state.pool, id, review.profile.id, review.model.as_deref())
+            store::set_review_pairing(&state.pool, id, &review.profile.id, review.model.as_deref())
                 .await?;
         }
     }

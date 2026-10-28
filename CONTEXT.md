@@ -3753,12 +3753,16 @@ from before Verkstead wrote the name down already drew.
 another keeps a **mirror** per Profile that other device holds: a row of its own
 `profiles` table carrying what a row is drawn and picked by — the name, the
 harness, the account as the far end holds it, the models and the memory switch —
-marked with the **Device Id** it is at home on and the id it has there
-(ADR-0020). A row rather than a list held in memory, because a Pairing, a Repo's
-memory of what it was last grilled with and every Conversation name a Profile by
-a **local** id, and a mirror is what gives a member's account one here — so
-nothing that reads a Profile id changes, and a mirror keeps its local id across
-every refresh. What that costs is that the two uniqueness rules above become
+marked with the **Device Id** it is at home on (ADR-0020). **Every Profile is
+named by its uuid** (ADR-0028): a Pairing, a Repo's memory of what it was last
+grilled with, a steer, a Transfer, the peer routes and every Conversation name
+one by it, and a mirror is held under the uuid its home knows the Profile by —
+so one Profile is one uuid on both ends, and a mirror keeps it across every
+refresh. A mirror held from before the uuids carries a provisional uuid of this
+device's minting, with the id it had at home beside it, until that home's own
+uuid is matched to it; and this device's own Profiles numbered before the uuids
+keep where they were minted and the id they had, which is the same pair said
+from the home's side. What a row costs is that the two uniqueness rules above become
 *this device's own rows'*: two machines may each hold a `work`, and each the one
 unnamed Claude account, which is what nearly every installation holds.
 **Which machine an account sits on is a fact on the row**, drawn with the mark
@@ -3927,7 +3931,7 @@ Nothing downstream of the launch knows the difference: the four parts, the trust
 seeded into the copied `.claude.json`, the launch line and the model are what they
 already were.
 **Becoming the copy under a cluster-owned Profile** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): the login is replicated, newest write wins, published by every device the Profile is bound on at launch, at ending and on the refresh schedule, so a quiet device blocks no start and nothing is fetched from a home. The `cluster-owned-records` roadmap lands it; what follows is the mirror as it stands.
-**Per Profile, under the Data Directory**, named by the **local** Profile id —
+**Per Profile, under the Data Directory**, named by the Profile's uuid —
 which is what makes the Windows rule hold by construction: a session's profile is
 under that same directory, so the hard link that joins the login in never crosses
 a volume, and the refusal for an account on another volume cannot fire for a
@@ -3952,8 +3956,8 @@ instructions file, or any other repository's transcripts. The memory store is no
 on the list: it is joined rather than composed, and is carried entry by entry on
 its own terms — see **Memory sync**.
 **A member's own call rather than the viewer's**: the home device answers it at
-`/api/peer/v1/profiles/<id>/account` on the **Peer Listener** behind the **Member
-Gate**, by the id the mirror row records for it there, and only for a Profile of
+`/api/peer/v1/profiles/<uuid>/account` on the **Peer Listener** behind the
+**Member Gate**, by the uuid the Profile has on both devices, and only for a Profile of
 its own — a row that is itself a mirror is an account on a third machine.
 **A home that is not answering starts no session**, and says which machine: a
 session launched under an account nothing fetched is one that comes up logged out
@@ -3963,7 +3967,7 @@ mirror whose home has stopped answering is **broken** on the row long before
 anybody presses anything, and the press is refused there — see **Agent
 Profile**. This is what catches a machine that went away between the two.
 **And the login is written back as the session ends**, at
-`/api/peer/v1/profiles/<id>/account/login` on the same listener behind the same
+`/api/peer/v1/profiles/<uuid>/account/login` on the same listener behind the same
 gate. It is the one file of a root a session genuinely changes — the harness
 refreshes its OAuth pair as it works — so an account lent out and never written
 back would be one signing itself out a session at a time. What the session left is
@@ -4051,9 +4055,9 @@ worktrees directory onto the same stem this Worktree carries, which is the path
 it would have used for this work and is what leaves the transcript findable when
 the work comes home.
 **A member's own call rather than the viewer's**, beside the account's: the home
-device answers at `/api/peer/v1/profiles/<id>/memory` on the **Peer Listener**
+device answers at `/api/peer/v1/profiles/<uuid>/memory` on the **Peer Listener**
 behind the **Member Gate**, and takes what the session left at
-`/api/peer/v1/profiles/<id>/memory/left`. A press rather than a path each way,
+`/api/peer/v1/profiles/<uuid>/memory/left`. A press rather than a path each way,
 the question being three facts about the asking device's side and one of them a
 list.
 **Only what changed travels back**, which is the account mirror's rule for the

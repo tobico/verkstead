@@ -10,11 +10,12 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, AgentType, Chosen, Clash, Deleting, Event, Lifecycle, Pairing, PendingForm,
+    Account, AgentType, Chosen, Clash, Deleting, Event, Lifecycle, Mirror, Pairing, PendingForm,
     PendingPairing, Picked, Profile, ProfileFacts, Saving, create_profile, delete_profile,
-    load_conversation, load_profile, open_database, open_pending_steer, profiles, register_repo,
-    save_pending_steer, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
-    skip_review, start_capture, start_conversation, start_grilling, timeline, update_profile,
+    forget_mirrors_except, load_conversation, load_profile, open_database, open_pending_steer,
+    profiles, record_mirror, register_repo, save_pending_steer, set_grilling_pairing,
+    set_implementation_pairing, set_review_pairing, skip_review, start_capture, start_conversation,
+    start_grilling, timeline, update_profile,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -135,7 +136,7 @@ async fn a_saved_profile_holds_its_account_and_its_models() {
     assert_eq!(profile.agent_type(), AgentType::Claude);
 
     assert_eq!(
-        load_profile(&pool, profile.id).await.unwrap(),
+        load_profile(&pool, &profile.id).await.unwrap(),
         Some(profile)
     );
 }
@@ -148,8 +149,8 @@ async fn a_profile_naming_an_agent_type_this_binary_has_not_got_is_refused_by_na
     let (_dir, pool) = fresh_pool().await;
 
     sqlx::query(
-        "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
-         VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO profiles (id, name, claude_dir, config_file, model, agent_type)
+         VALUES ('0b0e4c1a-5d2f-4e7b-9a3c-6f1d2e3b4a5c', ?, ?, ?, ?, ?)",
     )
     .bind("work")
     .bind("")
@@ -179,8 +180,8 @@ async fn a_profile_whose_account_is_a_home_it_has_not_got_is_refused() {
     let (_dir, pool) = fresh_pool().await;
 
     sqlx::query(
-        "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
-         VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO profiles (id, name, claude_dir, config_file, model, agent_type)
+         VALUES ('0b0e4c1a-5d2f-4e7b-9a3c-6f1d2e3b4a5c', ?, ?, ?, ?, ?)",
     )
     .bind("work")
     .bind("")
@@ -205,7 +206,7 @@ async fn a_profiles_single_home_directory_has_a_table_of_its_own() {
     let (_dir, pool) = fresh_pool().await;
     let profile = saved(&pool, "work").await;
 
-    keep_home(&pool, profile.id, "/watched/accounts/work").await;
+    keep_home(&pool, &profile.id, "/watched/accounts/work").await;
 
     let home: (String,) = sqlx::query_as("SELECT home FROM profile_homes WHERE profile_id = ?")
         .bind(profile.id)
@@ -235,7 +236,7 @@ async fn a_profile_whose_account_is_one_home_round_trips_with_it() {
     assert_eq!(saved.account, codex("work"));
     assert_eq!(saved.agent_type(), AgentType::Codex);
 
-    let loaded = load_profile(&pool, saved.id)
+    let loaded = load_profile(&pool, &saved.id)
         .await
         .unwrap()
         .expect("the Profile was just saved");
@@ -282,7 +283,7 @@ async fn the_types_that_each_keep_one_home_read_back_as_themselves() {
     assert_eq!(latest.agent_type(), AgentType::OpenCode);
 
     for profile in [&saved, &latest] {
-        let loaded = load_profile(&pool, profile.id)
+        let loaded = load_profile(&pool, &profile.id)
             .await
             .unwrap()
             .expect("the Profile was just saved");
@@ -313,14 +314,14 @@ async fn rewriting_a_profile_with_a_home_replaces_the_home() {
         .unwrap();
 
     assert_eq!(
-        update_profile(&pool, saved.id, &facts_for("work", codex("moved")))
+        update_profile(&pool, &saved.id, &facts_for("work", codex("moved")))
             .await
             .unwrap(),
         Saving::Saved
     );
     assert_eq!(homes(&pool).await, 1, "one home, the one it is under now");
     assert_eq!(
-        load_profile(&pool, saved.id)
+        load_profile(&pool, &saved.id)
             .await
             .unwrap()
             .unwrap()
@@ -340,7 +341,7 @@ async fn removing_a_profile_with_a_home_takes_the_home_it_wrote() {
         .unwrap();
 
     assert_eq!(
-        delete_profile(&pool, saved.id).await.unwrap(),
+        delete_profile(&pool, &saved.id).await.unwrap(),
         Deleting::Deleted
     );
     assert_eq!(homes(&pool).await, 0);
@@ -356,7 +357,7 @@ async fn a_claude_profile_writes_no_home_at_all() {
     assert_eq!(homes(&pool).await, 0);
 
     assert_eq!(
-        update_profile(&pool, saved.id, &facts("work"))
+        update_profile(&pool, &saved.id, &facts("work"))
             .await
             .unwrap(),
         Saving::Saved
@@ -375,10 +376,10 @@ async fn removing_a_profile_takes_the_home_it_kept_its_account_under_with_it() {
     let (_dir, pool) = fresh_pool().await;
     let profile = saved(&pool, "work").await;
 
-    keep_home(&pool, profile.id, "/watched/accounts/work").await;
+    keep_home(&pool, &profile.id, "/watched/accounts/work").await;
 
     assert_eq!(
-        delete_profile(&pool, profile.id).await.unwrap(),
+        delete_profile(&pool, &profile.id).await.unwrap(),
         Deleting::Deleted
     );
     assert_eq!(
@@ -396,10 +397,10 @@ async fn rewriting_a_profile_replaces_the_home_its_account_was_under() {
     let (_dir, pool) = fresh_pool().await;
     let profile = saved(&pool, "work").await;
 
-    keep_home(&pool, profile.id, "/watched/accounts/work").await;
+    keep_home(&pool, &profile.id, "/watched/accounts/work").await;
 
     assert_eq!(
-        update_profile(&pool, profile.id, &facts("work"))
+        update_profile(&pool, &profile.id, &facts("work"))
             .await
             .unwrap(),
         Saving::Saved
@@ -414,7 +415,7 @@ async fn rewriting_a_profile_replaces_the_home_its_account_was_under() {
 /// A home written straight into the table, standing in for the backend that
 /// will keep its whole account under one: there is no type with a home yet, so
 /// nothing above the store can put a row here.
-async fn keep_home(pool: &SqlitePool, id: i64, home: &str) {
+async fn keep_home(pool: &SqlitePool, id: &str, home: &str) {
     sqlx::query("INSERT INTO profile_homes (profile_id, home) VALUES (?, ?)")
         .bind(id)
         .bind(home)
@@ -449,7 +450,7 @@ async fn a_profile_holds_every_model_it_lists_in_the_order_it_was_given() {
     let profile = create_profile(&pool, &several).await.unwrap().unwrap();
     assert_eq!(profile.models, several.models);
 
-    let read = load_profile(&pool, profile.id).await.unwrap().unwrap();
+    let read = load_profile(&pool, &profile.id).await.unwrap().unwrap();
     assert_eq!(read.models, several.models);
 
     let listed = profiles(&pool).await.unwrap();
@@ -465,15 +466,15 @@ async fn rewriting_a_profile_replaces_its_list_rather_than_adding_to_it() {
 
     let mut shorter = facts("work");
     shorter.models = vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()];
-    update_profile(&pool, profile.id, &shorter).await.unwrap();
+    update_profile(&pool, &profile.id, &shorter).await.unwrap();
 
     let mut shorter_still = facts("work");
     shorter_still.models = vec!["claude-opus-5".to_owned()];
-    update_profile(&pool, profile.id, &shorter_still)
+    update_profile(&pool, &profile.id, &shorter_still)
         .await
         .unwrap();
 
-    let read = load_profile(&pool, profile.id).await.unwrap().unwrap();
+    let read = load_profile(&pool, &profile.id).await.unwrap().unwrap();
     assert_eq!(read.models, ["claude-opus-5"]);
 }
 
@@ -485,8 +486,8 @@ async fn a_profile_written_before_the_list_reads_its_old_model_as_its_only_one()
     let (_dir, pool) = fresh_pool().await;
 
     sqlx::query(
-        "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
-         VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO profiles (id, name, claude_dir, config_file, model, agent_type)
+         VALUES ('0b0e4c1a-5d2f-4e7b-9a3c-6f1d2e3b4a5c', ?, ?, ?, ?, ?)",
     )
     .bind("work")
     .bind("/watched/accounts/work/.claude")
@@ -501,7 +502,7 @@ async fn a_profile_written_before_the_list_reads_its_old_model_as_its_only_one()
     assert_eq!(listed[0].models, ["claude-opus-5"]);
     assert_eq!(listed[0].account, claude("work"));
 
-    let read = load_profile(&pool, listed[0].id).await.unwrap().unwrap();
+    let read = load_profile(&pool, &listed[0].id).await.unwrap().unwrap();
     assert_eq!(read.models, ["claude-opus-5"]);
     assert_eq!(read.account, claude("work"));
 }
@@ -587,7 +588,7 @@ async fn taking_the_name_off_a_second_profile_is_refused() {
     let named = saved(&pool, "anthropic").await;
 
     assert_eq!(
-        update_profile(&pool, named.id, &unnamed(claude("anthropic")))
+        update_profile(&pool, &named.id, &unnamed(claude("anthropic")))
             .await
             .unwrap(),
         Saving::DefaultTaken,
@@ -601,7 +602,7 @@ async fn taking_the_name_off_a_second_profile_is_refused() {
         .expect("the unnamed one is on the list");
 
     assert_eq!(
-        update_profile(&pool, alone.id, &unnamed(claude("work")))
+        update_profile(&pool, &alone.id, &unnamed(claude("work")))
             .await
             .unwrap(),
         Saving::Saved,
@@ -630,11 +631,11 @@ async fn everything_about_a_profile_is_the_humans_to_rewrite() {
     changed.models = vec!["claude-fable-5".to_owned()];
 
     assert_eq!(
-        update_profile(&pool, profile.id, &changed).await.unwrap(),
+        update_profile(&pool, &profile.id, &changed).await.unwrap(),
         Saving::Saved
     );
 
-    let read = load_profile(&pool, profile.id).await.unwrap().unwrap();
+    let read = load_profile(&pool, &profile.id).await.unwrap().unwrap();
     assert_eq!(read.name.as_deref(), Some("anthropic"));
     assert_eq!(read.models, ["claude-fable-5"]);
     assert_eq!(read.account, claude("anthropic"));
@@ -652,7 +653,7 @@ async fn a_profile_holds_its_memory_switch_either_way() {
         .unwrap();
     assert!(!created.memory);
     assert!(
-        !load_profile(&pool, created.id)
+        !load_profile(&pool, &created.id)
             .await
             .unwrap()
             .unwrap()
@@ -663,7 +664,7 @@ async fn a_profile_holds_its_memory_switch_either_way() {
     assert!(remembering.memory);
 
     assert_eq!(
-        update_profile(&pool, remembering.id, &forgetting_as("remembering"))
+        update_profile(&pool, &remembering.id, &forgetting_as("remembering"))
             .await
             .unwrap(),
         Saving::Saved
@@ -684,13 +685,13 @@ async fn a_profile_holds_its_memory_switch_either_way() {
     );
 
     assert_eq!(
-        update_profile(&pool, remembering.id, &facts("remembering"))
+        update_profile(&pool, &remembering.id, &facts("remembering"))
             .await
             .unwrap(),
         Saving::Saved
     );
     assert!(
-        load_profile(&pool, remembering.id)
+        load_profile(&pool, &remembering.id)
             .await
             .unwrap()
             .unwrap()
@@ -717,11 +718,13 @@ async fn a_profile_keeping_its_own_name_is_not_refused() {
     same_name.models = vec!["claude-fable-5".to_owned()];
 
     assert_eq!(
-        update_profile(&pool, profile.id, &same_name).await.unwrap(),
+        update_profile(&pool, &profile.id, &same_name)
+            .await
+            .unwrap(),
         Saving::Saved
     );
     assert_eq!(
-        load_profile(&pool, profile.id)
+        load_profile(&pool, &profile.id)
             .await
             .unwrap()
             .unwrap()
@@ -737,13 +740,13 @@ async fn renaming_a_profile_to_another_ones_name_is_refused() {
     let personal = saved(&pool, "personal").await;
 
     assert_eq!(
-        update_profile(&pool, personal.id, &facts("work"))
+        update_profile(&pool, &personal.id, &facts("work"))
             .await
             .unwrap(),
         Saving::NameTaken
     );
     assert_eq!(
-        load_profile(&pool, personal.id)
+        load_profile(&pool, &personal.id)
             .await
             .unwrap()
             .unwrap()
@@ -758,10 +761,17 @@ async fn rewriting_a_profile_that_is_not_there_says_so() {
     let (_dir, pool) = fresh_pool().await;
 
     assert_eq!(
-        update_profile(&pool, 404, &facts("work")).await.unwrap(),
+        update_profile(&pool, "no-such-profile", &facts("work"))
+            .await
+            .unwrap(),
         Saving::NoSuchProfile
     );
-    assert!(load_profile(&pool, 404).await.unwrap().is_none());
+    assert!(
+        load_profile(&pool, "no-such-profile")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -770,13 +780,13 @@ async fn a_profile_nobody_is_running_under_is_removed() {
     let profile = saved(&pool, "work").await;
 
     assert_eq!(
-        delete_profile(&pool, profile.id).await.unwrap(),
+        delete_profile(&pool, &profile.id).await.unwrap(),
         Deleting::Deleted
     );
     assert!(profiles(&pool).await.unwrap().is_empty());
 
     assert_eq!(
-        delete_profile(&pool, profile.id).await.unwrap(),
+        delete_profile(&pool, &profile.id).await.unwrap(),
         Deleting::NoSuchProfile
     );
 }
@@ -795,15 +805,15 @@ async fn a_profile_a_conversation_has_chosen_is_removed_and_nulled_out_of_it() {
     let grilling = saved(&pool, "fable").await;
     let implementing = saved(&pool, "opus").await;
 
-    set_grilling_pairing(&pool, id, grilling.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &grilling.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, implementing.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &implementing.id, Some(MODEL))
         .await
         .unwrap();
 
     assert_eq!(
-        delete_profile(&pool, grilling.id).await.unwrap(),
+        delete_profile(&pool, &grilling.id).await.unwrap(),
         Deleting::Deleted
     );
 
@@ -816,7 +826,7 @@ async fn a_profile_a_conversation_has_chosen_is_removed_and_nulled_out_of_it() {
     assert_eq!(
         conversation
             .implementation_pairing
-            .map(|pairing| pairing.profile.id),
+            .map(|pairing| pairing.profile.id.clone()),
         Some(implementing.id),
         "and the role that named another account is untouched",
     );
@@ -836,18 +846,18 @@ async fn removing_a_profile_nulls_it_out_of_all_three_roles() {
     let id = conversation(&pool).await;
     let one = saved(&pool, "work").await;
 
-    set_grilling_pairing(&pool, id, one.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &one.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, one.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &one.id, Some(MODEL))
         .await
         .unwrap();
-    set_review_pairing(&pool, id, one.id, Some(MODEL))
+    set_review_pairing(&pool, id, &one.id, Some(MODEL))
         .await
         .unwrap();
 
     assert_eq!(
-        delete_profile(&pool, one.id).await.unwrap(),
+        delete_profile(&pool, &one.id).await.unwrap(),
         Deleting::Deleted
     );
 
@@ -868,14 +878,14 @@ async fn removing_a_profile_takes_the_model_paired_with_it_too() {
     let going = saved(&pool, "fable").await;
     let staying = saved(&pool, "opus").await;
 
-    set_grilling_pairing(&pool, id, going.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &going.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, staying.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &staying.id, Some(MODEL))
         .await
         .unwrap();
 
-    delete_profile(&pool, going.id).await.unwrap();
+    delete_profile(&pool, &going.id).await.unwrap();
 
     let paired: Vec<(String,)> =
         sqlx::query_as("SELECT role FROM pairing_models WHERE conversation_id = ?")
@@ -906,10 +916,10 @@ async fn a_profile_a_started_conversation_runs_under_is_removed_all_the_same() {
     let id = conversation(&pool).await;
     let profile = saved(&pool, "work").await;
 
-    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, profile.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -924,7 +934,7 @@ async fn a_profile_a_started_conversation_runs_under_is_removed_all_the_same() {
     .unwrap();
 
     assert_eq!(
-        delete_profile(&pool, profile.id).await.unwrap(),
+        delete_profile(&pool, &profile.id).await.unwrap(),
         Deleting::Deleted
     );
 
@@ -961,15 +971,15 @@ async fn a_removal_neither_writes_nor_clears_the_row_that_runs_no_session() {
     let profile = saved(&pool, "work").await;
 
     skip_review(&pool, kept).await.unwrap();
-    set_grilling_pairing(&pool, kept, profile.id, Some(MODEL))
+    set_grilling_pairing(&pool, kept, &profile.id, Some(MODEL))
         .await
         .unwrap();
 
-    set_review_pairing(&pool, paired, profile.id, Some(MODEL))
+    set_review_pairing(&pool, paired, &profile.id, Some(MODEL))
         .await
         .unwrap();
 
-    delete_profile(&pool, profile.id).await.unwrap();
+    delete_profile(&pool, &profile.id).await.unwrap();
 
     assert_eq!(
         load_conversation(&pool, kept)
@@ -1002,10 +1012,10 @@ async fn removing_a_profile_leaves_what_ran_under_it_on_the_record() {
     let id = conversation(&pool).await;
     let profile = saved(&pool, "work").await;
 
-    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, profile.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -1031,7 +1041,7 @@ async fn removing_a_profile_leaves_what_ran_under_it_on_the_record() {
     .await
     .unwrap();
 
-    delete_profile(&pool, profile.id).await.unwrap();
+    delete_profile(&pool, &profile.id).await.unwrap();
 
     let ran = timeline(&pool, id)
         .await
@@ -1067,7 +1077,7 @@ async fn a_session_under_a_profile_nobody_named_records_no_name() {
         .unwrap()
         .expect("nothing of this harness is unnamed yet");
 
-    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -1131,13 +1141,13 @@ async fn a_removal_leaves_no_row_anywhere_that_names_the_profile() {
         .unwrap()
         .unwrap();
 
-    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, profile.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
-    set_review_pairing(&pool, id, profile.id, Some(MODEL))
+    set_review_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -1150,7 +1160,7 @@ async fn a_removal_leaves_no_row_anywhere_that_names_the_profile() {
         id,
         &PendingForm {
             pairing: Some(PendingPairing {
-                profile_id: profile.id,
+                profile_id: profile.id.clone(),
                 model: MODEL.to_owned(),
             }),
             ..PendingForm::default()
@@ -1180,20 +1190,20 @@ async fn a_removal_leaves_no_row_anywhere_that_names_the_profile() {
 
     for (table, column) in &naming {
         assert!(
-            naming_rows(&pool, table, column, profile.id).await > 0,
+            naming_rows(&pool, table, column, &profile.id).await > 0,
             "nothing in {table}.{column} names the Profile, so its removal is \
              something this test never sees happen",
         );
     }
 
     assert_eq!(
-        delete_profile(&pool, profile.id).await.unwrap(),
+        delete_profile(&pool, &profile.id).await.unwrap(),
         Deleting::Deleted
     );
 
     for (table, column) in &naming {
         assert_eq!(
-            naming_rows(&pool, table, column, profile.id).await,
+            naming_rows(&pool, table, column, &profile.id).await,
             0,
             "{table}.{column} still names the Profile that was removed",
         );
@@ -1232,7 +1242,7 @@ async fn names_a_profile(pool: &SqlitePool) -> Vec<(String, String)> {
 }
 
 /// How many rows of one of them name this Profile.
-async fn naming_rows(pool: &SqlitePool, table: &str, column: &str, id: i64) -> i64 {
+async fn naming_rows(pool: &SqlitePool, table: &str, column: &str, id: &str) -> i64 {
     let (rows,): (i64,) =
         sqlx::query_as(&format!("SELECT COUNT(*) FROM {table} WHERE {column} = ?"))
             .bind(id)
@@ -1253,7 +1263,7 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     let opus = saved(&pool, "opus").await;
 
     assert_eq!(
-        set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+        set_grilling_pairing(&pool, id, &fable.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::Chosen
@@ -1263,13 +1273,13 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     // grill from.
     let half = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        half.grilling_pairing.as_ref().map(|p| p.profile.id),
+        half.grilling_pairing.as_ref().map(|p| p.profile.id.clone()),
         Some(fable.id)
     );
     assert_eq!(half.implementation_pairing, None);
 
     assert_eq!(
-        set_implementation_pairing(&pool, id, opus.id, Some(MODEL))
+        set_implementation_pairing(&pool, id, &opus.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::Chosen
@@ -1307,7 +1317,7 @@ async fn a_pairing_holds_the_model_it_was_chosen_with() {
     .unwrap()
     .unwrap();
 
-    set_grilling_pairing(&pool, id, profile.id, Some("claude-fable-5"))
+    set_grilling_pairing(&pool, id, &profile.id, Some("claude-fable-5"))
         .await
         .unwrap();
 
@@ -1322,7 +1332,7 @@ async fn a_pairing_holds_the_model_it_was_chosen_with() {
 
     // And choosing again replaces both halves rather than leaving the old model
     // beside the new Profile.
-    set_grilling_pairing(&pool, id, profile.id, Some("claude-opus-5"))
+    set_grilling_pairing(&pool, id, &profile.id, Some("claude-opus-5"))
         .await
         .unwrap();
 
@@ -1375,10 +1385,10 @@ async fn a_pairing_cannot_be_chosen_once_grilling_has_started() {
     let fable = saved(&pool, "fable").await;
     let opus = saved(&pool, "opus").await;
 
-    set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, fable.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -1393,13 +1403,13 @@ async fn a_pairing_cannot_be_chosen_once_grilling_has_started() {
     .unwrap();
 
     assert_eq!(
-        set_grilling_pairing(&pool, id, opus.id, Some(MODEL))
+        set_grilling_pairing(&pool, id, &opus.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::NotDrafting
     );
     assert_eq!(
-        set_implementation_pairing(&pool, id, opus.id, Some(MODEL))
+        set_implementation_pairing(&pool, id, &opus.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::NotDrafting
@@ -1429,21 +1439,26 @@ async fn one_profile_can_be_both_of_a_conversations_choices() {
     let id = conversation(&pool).await;
     let only = saved(&pool, "work").await;
 
-    set_grilling_pairing(&pool, id, only.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &only.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, only.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &only.id, Some(MODEL))
         .await
         .unwrap();
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        conversation.grilling_pairing.as_ref().map(|p| p.profile.id),
-        Some(only.id)
+        conversation
+            .grilling_pairing
+            .as_ref()
+            .map(|p| p.profile.id.clone()),
+        Some(only.id.clone())
     );
     assert_eq!(
-        conversation.implementation_pairing.map(|p| p.profile.id),
-        Some(only.id)
+        conversation
+            .implementation_pairing
+            .map(|p| p.profile.id.clone()),
+        Some(only.id.clone())
     );
 }
 
@@ -1455,13 +1470,13 @@ async fn a_profile_that_is_not_there_cannot_be_chosen() {
     let id = conversation(&pool).await;
 
     assert_eq!(
-        set_grilling_pairing(&pool, id, 404, Some(MODEL))
+        set_grilling_pairing(&pool, id, "no-such-profile", Some(MODEL))
             .await
             .unwrap(),
         Chosen::NoSuchProfile
     );
     assert_eq!(
-        set_implementation_pairing(&pool, id, 404, Some(MODEL))
+        set_implementation_pairing(&pool, id, "no-such-profile", Some(MODEL))
             .await
             .unwrap(),
         Chosen::NoSuchProfile
@@ -1478,13 +1493,13 @@ async fn choosing_on_a_conversation_that_is_not_there_says_so() {
     let profile = saved(&pool, "work").await;
 
     assert_eq!(
-        set_grilling_pairing(&pool, 404, profile.id, Some(MODEL))
+        set_grilling_pairing(&pool, 404, &profile.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::NoSuchConversation
     );
     assert_eq!(
-        set_implementation_pairing(&pool, 404, profile.id, Some(MODEL))
+        set_implementation_pairing(&pool, 404, &profile.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::NoSuchConversation
@@ -1514,10 +1529,10 @@ async fn profiles_and_the_choices_made_of_them_survive_a_restart() {
     let id = conversation(&pool).await;
     let fable = saved(&pool, "fable").await;
     let opus = saved(&pool, "opus").await;
-    set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, opus.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &opus.id, Some(MODEL))
         .await
         .unwrap();
     pool.close().await;
@@ -1591,7 +1606,7 @@ async fn picking_a_review_pairing_and_picking_none_replace_each_other() {
     let id = conversation(&pool).await;
     let fable = saved(&pool, "fable").await;
 
-    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+    set_review_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
     skip_review(&pool, id).await.unwrap();
@@ -1606,7 +1621,7 @@ async fn picking_a_review_pairing_and_picking_none_replace_each_other() {
         "the account it was going to be reviewed under is off it",
     );
 
-    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+    set_review_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -1617,7 +1632,7 @@ async fn picking_a_review_pairing_and_picking_none_replace_each_other() {
         .review_pairing;
 
     assert_eq!(
-        picked.pairing().map(|pairing| pairing.profile.id),
+        picked.pairing().map(|pairing| pairing.profile.id.clone()),
         Some(fable.id),
         "and picking an account back takes the row that ran nothing away",
     );
@@ -1630,13 +1645,13 @@ async fn no_review_cannot_be_picked_once_grilling_has_started() {
     let id = conversation(&pool).await;
     let fable = saved(&pool, "fable").await;
 
-    set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, fable.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
-    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+    set_review_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -1659,8 +1674,122 @@ async fn no_review_cannot_be_picked_once_grilling_has_started() {
             .unwrap()
             .review_pairing
             .pairing()
-            .map(|pairing| pairing.profile.id),
+            .map(|pairing| pairing.profile.id.clone()),
         Some(fable.id),
         "and what it was grilled under is exactly where it was",
     );
+}
+
+/// The member the mirrors below are at home on.
+const A_MEMBER: &str = "0011223344556677889900aabbccddee";
+
+/// Where a mirror made since the uuids is at home: the member, and no integer
+/// from before.
+fn at_a_member() -> Mirror {
+    Mirror {
+        device: A_MEMBER.to_owned(),
+        was: None,
+        login: true,
+    }
+}
+
+/// A Profile saved here is minted a uuid of its own, and two are never alike.
+#[tokio::test]
+async fn a_profile_saved_here_is_named_by_a_uuid_of_its_own() {
+    let (_dir, pool) = fresh_pool().await;
+    let work = saved(&pool, "work").await;
+    let personal = saved(&pool, "personal").await;
+
+    for profile in [&work, &personal] {
+        assert_eq!(profile.id.len(), 36, "a uuid: {}", profile.id);
+        assert_eq!(profile.minted, None, "and never numbered anything else");
+    }
+    assert_ne!(work.id, personal.id);
+    assert_eq!(load_profile(&pool, &work.id).await.unwrap(), Some(work));
+}
+
+/// A mirror is held under the uuid its home knows the Profile by, so one
+/// Profile is one uuid on both ends, and a refresh rewrites that row rather
+/// than writing another beside it.
+#[tokio::test]
+async fn a_mirror_is_held_under_its_homes_uuid() {
+    let (_dir, pool) = fresh_pool().await;
+    let theirs = "5e1f0a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b";
+
+    record_mirror(&pool, theirs, &at_a_member(), &facts("work"))
+        .await
+        .unwrap();
+    record_mirror(&pool, theirs, &at_a_member(), &facts("renamed"))
+        .await
+        .unwrap();
+
+    let held = profiles(&pool).await.unwrap();
+    assert_eq!(held.len(), 1, "one row, rewritten");
+    assert_eq!(held[0].id, theirs);
+    assert_eq!(held[0].name.as_deref(), Some("renamed"));
+    assert_eq!(held[0].mirror, Some(at_a_member()));
+}
+
+/// A member saying it holds a Profile under one of this device's own uuids is
+/// refused, and this device's row is left as it was: a row of this device's
+/// own turned into a mirror of itself would be an account nobody here could
+/// launch.
+#[tokio::test]
+async fn a_member_cannot_write_over_one_of_this_devices_own() {
+    let (_dir, pool) = fresh_pool().await;
+    let ours = saved(&pool, "work").await;
+
+    assert!(
+        record_mirror(&pool, &ours.id, &at_a_member(), &facts("theirs"))
+            .await
+            .is_err()
+    );
+    assert_eq!(load_profile(&pool, &ours.id).await.unwrap(), Some(ours));
+}
+
+/// A mirror held from before the uuids, under a provisional uuid of this
+/// device's minting, is one the member never names — so a member read on this
+/// release forgets it, out of every Pairing that named it.
+#[tokio::test]
+async fn a_mirror_from_before_the_uuids_is_forgotten_by_a_member_that_never_names_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let provisional = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+    let theirs = "5e1f0a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b";
+
+    record_mirror(
+        &pool,
+        provisional,
+        &Mirror {
+            was: Some(5),
+            ..at_a_member()
+        },
+        &facts("old"),
+    )
+    .await
+    .unwrap();
+    record_mirror(&pool, theirs, &at_a_member(), &facts("new"))
+        .await
+        .unwrap();
+
+    let id = conversation(&pool).await;
+    set_grilling_pairing(&pool, id, provisional, Some("claude-opus-5"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        forget_mirrors_except(&pool, A_MEMBER, &[theirs.to_owned()])
+            .await
+            .unwrap(),
+        vec![provisional.to_owned()],
+    );
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .grilling_pairing,
+        None,
+        "the Pairing that named it goes with it",
+    );
+    assert!(load_profile(&pool, theirs).await.unwrap().is_some());
 }

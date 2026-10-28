@@ -144,7 +144,7 @@ impl Workbench {
     }
 
     /// A Claude Profile with no login yet, saved the way the form saves one.
-    async fn claude_profile(&self, name: &str) -> i64 {
+    async fn claude_profile(&self, name: &str) -> String {
         let (claude_dir, config_file) = self.pair(name);
 
         let saved = self
@@ -186,7 +186,7 @@ impl Workbench {
 
     /// A draft Investigate on a fresh repository, run under `profile`, with
     /// everything settled but whether its account is logged in.
-    async fn investigation_under(&self, profile: i64) -> i64 {
+    async fn investigation_under(&self, profile: &str) -> i64 {
         let repo = self.accounts.path().join("repo");
         std::fs::create_dir_all(&repo).unwrap();
 
@@ -254,7 +254,7 @@ impl Workbench {
     }
 
     /// Why the Profile's row says it cannot be run under, if it does.
-    async fn broken(&self, profile: i64) -> Option<Broken> {
+    async fn broken(&self, profile: &str) -> Option<Broken> {
         let answered = self
             .app
             .clone()
@@ -287,7 +287,7 @@ impl Workbench {
     }
 
     /// How many logins the stub has been started as for `profile`.
-    fn started(&self, profile: i64) -> usize {
+    fn started(&self, profile: &str) -> usize {
         std::fs::read_to_string(
             self.dir
                 .path()
@@ -322,7 +322,7 @@ impl Workbench {
             .count()
     }
 
-    async fn opened(&self, profile: i64, viewer: &str) -> LoginState {
+    async fn opened(&self, profile: &str, viewer: &str) -> LoginState {
         let (status, said) = self
             .press(
                 &format!("/api/ui/profiles/{profile}/login"),
@@ -334,7 +334,7 @@ impl Workbench {
         serde_json::from_str(&said).unwrap()
     }
 
-    async fn closed(&self, profile: i64, viewer: &str) {
+    async fn closed(&self, profile: &str, viewer: &str) {
         let (status, said) = self
             .press(
                 &format!("/api/ui/profiles/{profile}/login/close"),
@@ -345,7 +345,7 @@ impl Workbench {
         assert!(status.is_success(), "{said}");
     }
 
-    async fn coded(&self, profile: i64, code: &str) -> (StatusCode, String) {
+    async fn coded(&self, profile: &str, code: &str) -> (StatusCode, String) {
         self.press(
             &format!("/api/ui/profiles/{profile}/login/code"),
             serde_json::json!({ "code": code }),
@@ -353,7 +353,7 @@ impl Workbench {
         .await
     }
 
-    async fn reading(&self, profile: i64) -> Option<LoginState> {
+    async fn reading(&self, profile: &str) -> Option<LoginState> {
         let answered = self
             .app
             .clone()
@@ -376,7 +376,7 @@ impl Workbench {
     /// was instead.
     async fn read_until(
         &self,
-        profile: i64,
+        profile: &str,
         until: impl Fn(&Option<LoginState>) -> bool,
     ) -> Option<LoginState> {
         let deadline = Instant::now() + WAITING;
@@ -397,7 +397,7 @@ impl Workbench {
         }
     }
 
-    async fn waiting(&self, profile: i64) -> String {
+    async fn waiting(&self, profile: &str) -> String {
         match self
             .read_until(profile, |reading| {
                 matches!(reading, Some(LoginState::Waiting { .. }))
@@ -457,29 +457,29 @@ async fn a_code_handed_to_the_login_leaves_the_login_in_the_account() {
     let profile = workbench.claude_profile("work").await;
 
     assert_eq!(
-        workbench.opened(profile, "laptop").await,
+        workbench.opened(&profile, "laptop").await,
         LoginState::Starting
     );
 
-    let url = workbench.waiting(profile).await;
+    let url = workbench.waiting(&profile).await;
     assert!(
         url.starts_with("https://claude.com/cai/oauth/authorize?"),
         "{url}"
     );
     assert_eq!(workbench.login_of("work"), None);
 
-    let (status, said) = workbench.coded(profile, GOOD_CODE).await;
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
     assert_eq!(status, StatusCode::OK, "{said}");
 
     workbench
-        .read_until(profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
         .await;
 
     let login = workbench.login_of("work").expect("the account has a login");
     assert!(login.contains(GOOD_CODE), "{login}");
 
-    workbench.closed(profile, "laptop").await;
-    assert_eq!(workbench.reading(profile).await, None);
+    workbench.closed(&profile, "laptop").await;
+    assert_eq!(workbench.reading(&profile).await, None);
 }
 
 /// A human takes longer than a few seconds over the page the address opens, and
@@ -492,24 +492,24 @@ async fn a_login_outlives_the_thread_its_sandbox_was_built_on() {
     let workbench = Workbench::new(Duration::from_secs(600)).await;
     let profile = workbench.claude_profile("work").await;
 
-    workbench.opened(profile, "laptop").await;
-    workbench.waiting(profile).await;
+    workbench.opened(&profile, "laptop").await;
+    workbench.waiting(&profile).await;
 
     tokio::time::sleep(Duration::from_secs(15)).await;
     assert!(
         matches!(
-            workbench.reading(profile).await,
+            workbench.reading(&profile).await,
             Some(LoginState::Waiting { .. })
         ),
         "{:?}",
-        workbench.reading(profile).await
+        workbench.reading(&profile).await
     );
 
-    let (status, said) = workbench.coded(profile, GOOD_CODE).await;
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
     assert_eq!(status, StatusCode::OK, "{said}");
 
     workbench
-        .read_until(profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
         .await;
 }
 
@@ -518,15 +518,15 @@ async fn a_refused_code_starts_a_fresh_login_with_a_new_address() {
     let workbench = Workbench::new(Duration::from_secs(600)).await;
     let profile = workbench.claude_profile("work").await;
 
-    workbench.opened(profile, "laptop").await;
-    let first = workbench.waiting(profile).await;
+    workbench.opened(&profile, "laptop").await;
+    let first = workbench.waiting(&profile).await;
 
-    let (status, said) = workbench.coded(profile, "wrong#code").await;
+    let (status, said) = workbench.coded(&profile, "wrong#code").await;
     assert_eq!(status, StatusCode::OK, "{said}");
 
     let again = workbench
         .read_until(
-            profile,
+            &profile,
             |reading| matches!(reading, Some(LoginState::Waiting { url, .. }) if url != &first),
         )
         .await;
@@ -537,19 +537,19 @@ async fn a_refused_code_starts_a_fresh_login_with_a_new_address() {
     let refused = refused.expect("the modal is told the code was refused");
     assert!(refused.contains("didn't accept"), "{refused}");
 
-    assert_eq!(workbench.started(profile), 2, "a second login was started");
+    assert_eq!(workbench.started(&profile), 2, "a second login was started");
     assert_eq!(workbench.running(), 1, "and only once the first had gone");
     assert_eq!(workbench.login_of("work"), None);
 
-    let (status, said) = workbench.coded(profile, GOOD_CODE).await;
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
     assert_eq!(status, StatusCode::OK, "{said}");
 
     workbench
-        .read_until(profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
         .await;
     assert!(workbench.login_of("work").is_some());
 
-    workbench.closed(profile, "laptop").await;
+    workbench.closed(&profile, "laptop").await;
     workbench.none_running().await;
 }
 
@@ -558,14 +558,14 @@ async fn a_code_cut_short_is_asked_for_again_on_the_same_address() {
     let workbench = Workbench::new(Duration::from_secs(600)).await;
     let profile = workbench.claude_profile("work").await;
 
-    workbench.opened(profile, "laptop").await;
-    let url = workbench.waiting(profile).await;
+    workbench.opened(&profile, "laptop").await;
+    let url = workbench.waiting(&profile).await;
 
-    let (status, said) = workbench.coded(profile, "good").await;
+    let (status, said) = workbench.coded(&profile, "good").await;
     assert_eq!(status, StatusCode::OK, "{said}");
 
     let again = workbench
-        .read_until(profile, |reading| {
+        .read_until(&profile, |reading| {
             matches!(
                 reading,
                 Some(LoginState::Waiting {
@@ -582,16 +582,16 @@ async fn a_code_cut_short_is_asked_for_again_on_the_same_address() {
     assert_eq!(same, url);
     let refused = refused.unwrap();
     assert!(refused.contains("whole code"), "{refused}");
-    assert_eq!(workbench.started(profile), 1);
+    assert_eq!(workbench.started(&profile), 1);
 
-    let (status, said) = workbench.coded(profile, GOOD_CODE).await;
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
     assert_eq!(status, StatusCode::OK, "{said}");
 
     workbench
-        .read_until(profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
         .await;
 
-    workbench.closed(profile, "laptop").await;
+    workbench.closed(&profile, "laptop").await;
 }
 
 #[tokio::test]
@@ -599,11 +599,11 @@ async fn a_second_device_joins_the_login_already_running() {
     let workbench = Workbench::new(Duration::from_secs(600)).await;
     let profile = workbench.claude_profile("work").await;
 
-    workbench.opened(profile, "laptop").await;
-    let url = workbench.waiting(profile).await;
+    workbench.opened(&profile, "laptop").await;
+    let url = workbench.waiting(&profile).await;
 
     assert_eq!(
-        workbench.opened(profile, "phone").await,
+        workbench.opened(&profile, "phone").await,
         LoginState::Waiting {
             url: url.clone(),
             refused: None
@@ -611,22 +611,22 @@ async fn a_second_device_joins_the_login_already_running() {
         "the phone is shown the address the laptop's login printed"
     );
     assert_eq!(
-        workbench.started(profile),
+        workbench.started(&profile),
         1,
         "and no second login was started"
     );
     assert_eq!(workbench.running(), 1);
 
     // The laptop going leaves the phone's login running.
-    workbench.closed(profile, "laptop").await;
+    workbench.closed(&profile, "laptop").await;
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(
-        workbench.reading(profile).await,
+        workbench.reading(&profile).await,
         Some(LoginState::Waiting { url, refused: None })
     );
     assert_eq!(workbench.running(), 1);
 
-    workbench.closed(profile, "phone").await;
+    workbench.closed(&profile, "phone").await;
     workbench.none_running().await;
 }
 
@@ -635,14 +635,14 @@ async fn the_last_device_closing_the_modal_kills_the_login() {
     let workbench = Workbench::new(Duration::from_secs(600)).await;
     let profile = workbench.claude_profile("work").await;
 
-    workbench.opened(profile, "laptop").await;
-    workbench.waiting(profile).await;
+    workbench.opened(&profile, "laptop").await;
+    workbench.waiting(&profile).await;
     assert_eq!(workbench.running(), 1);
 
-    workbench.closed(profile, "laptop").await;
+    workbench.closed(&profile, "laptop").await;
 
     workbench.none_running().await;
-    assert_eq!(workbench.reading(profile).await, None);
+    assert_eq!(workbench.reading(&profile).await, None);
     assert_eq!(workbench.login_of("work"), None);
 }
 
@@ -651,11 +651,11 @@ async fn a_login_left_past_its_limit_is_killed() {
     let workbench = Workbench::new(Duration::from_secs(1)).await;
     let profile = workbench.claude_profile("work").await;
 
-    workbench.opened(profile, "laptop").await;
-    workbench.waiting(profile).await;
+    workbench.opened(&profile, "laptop").await;
+    workbench.waiting(&profile).await;
 
     let ended = workbench
-        .read_until(profile, |reading| {
+        .read_until(&profile, |reading| {
             matches!(reading, Some(LoginState::Failed { .. }))
         })
         .await;
@@ -667,7 +667,7 @@ async fn a_login_left_past_its_limit_is_killed() {
     workbench.none_running().await;
 
     // And a code arriving after it is refused rather than written to nothing.
-    let (status, _) = workbench.coded(profile, GOOD_CODE).await;
+    let (status, _) = workbench.coded(&profile, GOOD_CODE).await;
     assert_eq!(status, StatusCode::CONFLICT);
 }
 
@@ -676,11 +676,14 @@ async fn a_mirrored_profile_is_not_logged_in_here() {
     let workbench = Workbench::new(Duration::from_secs(600)).await;
     let (claude_dir, config_file) = workbench.pair("mirror");
 
-    let id = store::record_mirror(
+    let id = "4e0f1d2c-0000-4000-8000-000000000004";
+
+    store::record_mirror(
         &workbench.pool,
+        id,
         &store::Mirror {
             device: "0011223344556677889900aabbccddee".to_owned(),
-            id: 4,
+            was: None,
             login: true,
         },
         &store::ProfileFacts {
@@ -726,7 +729,9 @@ async fn a_profile_of_another_harness_is_not_logged_in_here() {
         .await;
     assert_eq!(saved.0, StatusCode::OK, "{}", saved.1);
 
-    let id = store::profiles(&workbench.pool).await.unwrap()[0].id;
+    let id = store::profiles(&workbench.pool).await.unwrap()[0]
+        .id
+        .clone();
 
     let (status, said) = workbench
         .press(
@@ -745,10 +750,10 @@ async fn a_profile_of_another_harness_is_not_logged_in_here() {
 async fn a_press_under_a_signed_out_account_is_refused_until_it_logs_in() {
     let workbench = Workbench::new(Duration::from_secs(600)).await;
     let profile = workbench.claude_profile("work").await;
-    let conversation = workbench.investigation_under(profile).await;
+    let conversation = workbench.investigation_under(&profile).await;
 
     assert_eq!(
-        workbench.broken(profile).await,
+        workbench.broken(&profile).await,
         None,
         "nothing has asked yet, so nothing reads as wrong",
     );
@@ -761,7 +766,7 @@ async fn a_press_under_a_signed_out_account_is_refused_until_it_logs_in() {
             device: None,
         }),
     );
-    assert_eq!(workbench.broken(profile).await, Some(Broken::SignedOut));
+    assert_eq!(workbench.broken(&profile).await, Some(Broken::SignedOut));
 
     let refused = store::load_conversation(&workbench.pool, conversation)
         .await
@@ -774,17 +779,17 @@ async fn a_press_under_a_signed_out_account_is_refused_until_it_logs_in() {
     );
     assert_eq!(refused.worktree, None, "and nothing was checked out");
 
-    workbench.opened(profile, "laptop").await;
-    workbench.waiting(profile).await;
-    let (status, said) = workbench.coded(profile, GOOD_CODE).await;
+    workbench.opened(&profile, "laptop").await;
+    workbench.waiting(&profile).await;
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
     assert_eq!(status, StatusCode::OK, "{said}");
     workbench
-        .read_until(profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
         .await;
-    workbench.closed(profile, "laptop").await;
+    workbench.closed(&profile, "laptop").await;
 
     assert_eq!(
-        workbench.broken(profile).await,
+        workbench.broken(&profile).await,
         None,
         "the login put the row right",
     );
@@ -805,11 +810,11 @@ async fn a_harness_that_is_not_there_does_not_read_as_signed_out() {
     )
     .await;
     let profile = workbench.claude_profile("work").await;
-    let conversation = workbench.investigation_under(profile).await;
+    let conversation = workbench.investigation_under(&profile).await;
 
     assert_eq!(
         workbench.pressed(conversation).await,
         GrillingStarted::Started
     );
-    assert_eq!(workbench.broken(profile).await, None);
+    assert_eq!(workbench.broken(&profile).await, None);
 }

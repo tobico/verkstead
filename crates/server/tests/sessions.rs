@@ -917,7 +917,12 @@ impl Grilling {
 
     /// The same submit with a Pairing picked: what the work runs under from
     /// here, which is recorded as the Conversation's own.
-    async fn steer_under(&self, target: &str, profile_id: i64, model: &str) -> ConversationSteered {
+    async fn steer_under(
+        &self,
+        target: &str,
+        profile_id: &str,
+        model: &str,
+    ) -> ConversationSteered {
         post(
             &self.app,
             &format!("/api/ui/conversations/{}/steer/submit", self.id),
@@ -931,7 +936,7 @@ impl Grilling {
     }
 
     /// The Agent Profile of that name, as the form's picker reads the list.
-    async fn profile(&self, name: &str) -> i64 {
+    async fn profile(&self, name: &str) -> String {
         let profiles: Vec<verkstead_render::ProfileEntry> =
             get(&self.app, "/api/ui/profiles").await;
 
@@ -3808,7 +3813,7 @@ fn handoff(view: &ConversationView) -> Option<&verkstead_render::HandoffEvent> {
 /// every Conversation here is paired with; the second is there so that a pick
 /// can change the *model* under a Profile that does not change, which is a
 /// different pick and not the same one made twice.
-async fn profile(app: &Router, root: &Path, name: &str) -> i64 {
+async fn profile(app: &Router, root: &Path, name: &str) -> String {
     let claude_dir = root.join(name).join(".claude");
     let config_file = root.join(name).join(".claude.json");
     std::fs::create_dir_all(&claude_dir).unwrap();
@@ -17100,7 +17105,7 @@ async fn an_account_that_signs_out_stops_the_run_with_a_log_in_press() {
     );
     assert_eq!(
         stop.signed_out,
-        Some(implementation.id),
+        Some(implementation.id.clone()),
         "and the stop records which login it is waiting on",
     );
 
@@ -17279,7 +17284,7 @@ async fn a_login_resumes_every_run_it_unblocks() {
                 .await
                 .unwrap()
                 .and_then(|stop| stop.signed_out),
-            Some(implementation),
+            Some(implementation.clone()),
             "Conversation {id} is waiting on the implementation Profile's login",
         );
     }
@@ -17908,11 +17913,11 @@ async fn nothing_moves_a_stopped_conversation_onto_another_profile() {
         after
             .grilling_pairing
             .as_ref()
-            .map(|pairing| pairing.profile.id),
+            .map(|pairing| pairing.profile.id.clone()),
         before
             .grilling_pairing
             .as_ref()
-            .map(|pairing| pairing.profile.id),
+            .map(|pairing| pairing.profile.id.clone()),
     );
     assert_eq!(
         after
@@ -19617,7 +19622,8 @@ async fn the_servers_places_hold_a_settle_back_and_never_a_press() {
             .iter()
             .find(|profile| profile.name.as_deref() == Some(role))
             .expect("the Profiles the roadmap Conversation was paired under are still saved")
-            .id;
+            .id
+            .clone();
 
         let pairing = serde_json::json!({
             "profile_id": profile,
@@ -19808,7 +19814,8 @@ async fn composed_beside(fixture: &Grilling, process: Process) -> i64 {
         .iter()
         .find(|profile| profile.name.as_deref() == Some("implementation"))
         .expect("the bench saved an implementation Profile for the roadmap")
-        .id;
+        .id
+        .clone();
 
     let chosen: verkstead_render::ProfileChosen = post(
         &fixture.app,
@@ -26047,7 +26054,7 @@ async fn a_narrowed_wrap_up_whose_round_was_forgotten_settles_it_all_again() {
 
     assert_eq!(
         fixture
-            .steer_under("Grilling", profile, "claude-implementation-5")
+            .steer_under("Grilling", &profile, "claude-implementation-5")
             .await,
         ConversationSteered::Steered,
     );
@@ -36062,7 +36069,7 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
     let picked = fixture.profile("grilling").await;
 
     assert_ne!(
-        Some(picked),
+        Some(picked.clone()),
         fixture
             .view()
             .await
@@ -36078,20 +36085,24 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
     // between the read and the pick, and both are refused before anything moves.
     assert_eq!(
         fixture
-            .steer_under("Wrapping", 404, "claude-grilling-5")
+            .steer_under(
+                "Wrapping",
+                "00000000-0000-4000-8000-000000000404",
+                "claude-grilling-5"
+            )
             .await,
         ConversationSteered::NoSuchProfile,
     );
     assert_eq!(
         fixture
-            .steer_under("Wrapping", picked, "claude-nothing-5")
+            .steer_under("Wrapping", &picked, "claude-nothing-5")
             .await,
         ConversationSteered::NoSuchModel,
     );
 
     assert_eq!(
         fixture
-            .steer_under("Wrapping", picked, "claude-grilling-5")
+            .steer_under("Wrapping", &picked, "claude-grilling-5")
             .await,
         ConversationSteered::Steered,
     );
@@ -36130,7 +36141,7 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
     assert!(matches!(fixture.steer().await, SteerOpened::Opened));
     assert_eq!(
         fixture
-            .steer_under("Wrapping", picked, "claude-grilling-4.8")
+            .steer_under("Wrapping", &picked, "claude-grilling-4.8")
             .await,
         ConversationSteered::Steered,
     );

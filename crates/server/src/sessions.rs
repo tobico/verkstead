@@ -351,7 +351,7 @@ impl Agents {
     /// `profile_id` is over — see [`crate::sandbox::login_taken_back`].
     ///
     /// Blocks.
-    pub(crate) fn login_over(&self, profile_id: i64) {
+    pub(crate) fn login_over(&self, profile_id: &str) {
         crate::sandbox::login_taken_back(&self.homes, profile_id);
     }
 
@@ -3266,7 +3266,7 @@ impl Sessions {
         let signouts = crate::signouts::Watch::on(
             conversation_id,
             event_id,
-            pairing.profile.id,
+            pairing.profile.id.clone(),
             crate::profiles::shown(pairing.profile.name.as_deref()).to_owned(),
             match &pairing.profile.mirror {
                 None => crate::signouts::Home::Here,
@@ -4636,7 +4636,7 @@ mod tests {
 
     fn profile() -> store::Profile {
         store::Profile {
-            id: 1,
+            id: "1".to_owned(),
             name: Some("fable".to_owned()),
             account: store::Account::Claude {
                 claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
@@ -4645,6 +4645,7 @@ mod tests {
             models: vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()],
             memory: true,
             mirror: None,
+            minted: None,
         }
     }
 
@@ -4662,7 +4663,7 @@ mod tests {
     fn codex_pairing() -> store::Pairing {
         store::Pairing {
             profile: store::Profile {
-                id: 2,
+                id: "2".to_owned(),
                 name: Some("work".to_owned()),
                 account: store::Account::Codex {
                     home: PathBuf::from("/srv/accounts/work/.codex"),
@@ -4670,6 +4671,7 @@ mod tests {
                 models: vec!["gpt-5-codex".to_owned()],
                 memory: true,
                 mirror: None,
+                minted: None,
             },
             model: Some("gpt-5-codex".to_owned()),
         }
@@ -4679,7 +4681,7 @@ mod tests {
     fn grok_pairing() -> store::Pairing {
         store::Pairing {
             profile: store::Profile {
-                id: 3,
+                id: "3".to_owned(),
                 name: Some("xai".to_owned()),
                 account: store::Account::Grok {
                     home: PathBuf::from("/srv/accounts/work/.grok"),
@@ -4687,6 +4689,7 @@ mod tests {
                 models: vec!["grok-4.6".to_owned()],
                 memory: true,
                 mirror: None,
+                minted: None,
             },
             model: Some("grok-4.6".to_owned()),
         }
@@ -4698,7 +4701,7 @@ mod tests {
     fn opencode_pairing() -> store::Pairing {
         store::Pairing {
             profile: store::Profile {
-                id: 4,
+                id: "4".to_owned(),
                 name: Some("zen".to_owned()),
                 account: store::Account::OpenCode {
                     home: PathBuf::from("/srv/accounts/zen/opencode"),
@@ -4706,6 +4709,7 @@ mod tests {
                 models: vec!["opencode/big-pickle".to_owned()],
                 memory: true,
                 mirror: None,
+                minted: None,
             },
             model: Some("opencode/big-pickle".to_owned()),
         }

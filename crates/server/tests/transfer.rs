@@ -450,7 +450,7 @@ impl Verkstead {
 
     /// An account of this device's own, really on disk, with a Profile saved over
     /// it the way the form saves one.
-    async fn account(&self) -> i64 {
+    async fn account(&self) -> String {
         self.account_keeping(true).await
     }
 
@@ -458,7 +458,7 @@ impl Verkstead {
     /// decides whether a session under it is given the account's store or one of
     /// its own and empty — and so, across a move, whether there is anything of the
     /// harness's record on the far end to carry a conversation on from.
-    async fn account_keeping(&self, memory: bool) -> i64 {
+    async fn account_keeping(&self, memory: bool) -> String {
         let under = self.elsewhere.path().join(ACCOUNT);
         let claude_dir = under.join(".claude");
         let config_file = under.join(".claude.json");
@@ -503,7 +503,7 @@ impl Verkstead {
     /// takes to resume one is a store put right rather than a store that crossed,
     /// so a test about it has to run on a Grok Profile rather than on a Claude one
     /// under another name.
-    async fn grok_account(&self) -> i64 {
+    async fn grok_account(&self) -> String {
         let home = self.elsewhere.path().join(ACCOUNT).join(".grok");
 
         std::fs::create_dir_all(home.join("sessions")).unwrap();
@@ -536,7 +536,7 @@ impl Verkstead {
     /// id at launch, so what a carried conversation is resumed by is an id read out
     /// of the log the session wrote. Which is a thing only a Codex Profile can be
     /// tested on.
-    async fn codex_account(&self) -> i64 {
+    async fn codex_account(&self) -> String {
         let home = self.elsewhere.path().join(ACCOUNT).join(".codex");
 
         std::fs::create_dir_all(home.join("sessions")).unwrap();
@@ -569,7 +569,7 @@ impl Verkstead {
     /// than a tree: what it takes to resume one is a row brought onto this
     /// device's Worktree inside a file that crossed whole, which is a thing only
     /// an OpenCode Profile can be tested on.
-    async fn opencode_account(&self) -> i64 {
+    async fn opencode_account(&self) -> String {
         let home = self.elsewhere.path().join(ACCOUNT).join("opencode");
 
         // The two directories that *are* the account, which is what a Profile of
@@ -631,11 +631,11 @@ impl Verkstead {
     /// rather than off a directory the test made — because the store a resume is
     /// resolved against is the one that arrived, and nothing about the arrival is
     /// the test's to place.
-    fn opencode_mirrored(&self, profile_id: i64) -> PathBuf {
+    fn opencode_mirrored(&self, profile_id: &str) -> PathBuf {
         self._dir
             .path()
             .join("accounts")
-            .join(profile_id.to_string())
+            .join(profile_id)
             .join(OPENCODE_STORE)
     }
 
@@ -668,13 +668,13 @@ impl Verkstead {
     /// takes attachments while it is drafting and no longer.
     ///
     /// What starts it is [`Self::grills`], one press along.
-    async fn drafting_under(&self, profile: i64) -> i64 {
+    async fn drafting_under(&self, profile: &str) -> i64 {
         self.drafting_under_on(profile, MODEL).await
     }
 
     /// The same over a Profile whose models are another harness's, which is the one
     /// thing a Pairing has to agree with the account about.
-    async fn drafting_under_on(&self, profile: i64, model: &str) -> i64 {
+    async fn drafting_under_on(&self, profile: &str, model: &str) -> i64 {
         let repos: Vec<verkstead_render::RepoEntry> =
             reading(&self.workbench, "/api/ui/repos").await;
 
@@ -2068,7 +2068,7 @@ async fn ready_to_carry_grok_on(
     let holding = b.holding();
     b.profile_called(ACCOUNT).await;
 
-    let conversation = a.drafting_under_on(account, GROK_MODEL).await;
+    let conversation = a.drafting_under_on(&account, GROK_MODEL).await;
 
     a.grills(conversation).await;
 
@@ -2116,7 +2116,7 @@ async fn ready_to_carry_codex_on(
     let holding = b.holding();
     b.profile_called(ACCOUNT).await;
 
-    let conversation = a.drafting_under_on(account, CODEX_MODEL).await;
+    let conversation = a.drafting_under_on(&account, CODEX_MODEL).await;
 
     a.grills(conversation).await;
 
@@ -2137,7 +2137,7 @@ async fn ready_to_carry_opencode_on(
     here: &Path,
     there: &Path,
     spill: &Path,
-) -> (Verkstead, Verkstead, Holding, i64, i64) {
+) -> (Verkstead, Verkstead, Holding, i64, String) {
     let a = Verkstead::running(A, &opencode_that_carries_on_at(here, OPENED_HERE), spill).await;
     let b = Verkstead::running(
         B,
@@ -2159,7 +2159,7 @@ async fn ready_to_carry_opencode_on(
     let holding = b.holding();
     let mirror = b.profile_called(ACCOUNT).await.id;
 
-    let conversation = a.drafting_under_on(account, OPENCODE_MODEL).await;
+    let conversation = a.drafting_under_on(&account, OPENCODE_MODEL).await;
 
     a.grills(conversation).await;
 
@@ -2231,7 +2231,7 @@ async fn drafted_at(
     let holding = b.holding();
     b.profile_called(ACCOUNT).await;
 
-    let conversation = a.drafting_under(account).await;
+    let conversation = a.drafting_under(&account).await;
 
     (a, b, holding, conversation)
 }
@@ -2493,8 +2493,8 @@ async fn the_conversation_arrives_in_the_state_it_was_in() {
         arrived
             .implementation_pairing
             .as_ref()
-            .map(|pairing| pairing.profile.id),
-        Some(mirror.id),
+            .map(|pairing| pairing.profile.id.as_str()),
+        Some(mirror.id.as_str()),
         "and the implementation's, which is the same account here",
     );
 
@@ -4445,7 +4445,7 @@ async fn the_set_a_resumed_session_was_idling_on_stays_open_under_the_id_the_not
     // Sets from one, so without it the id the Set was asked under and the id it
     // lands as would be the same number — and the note's two halves would prove
     // nothing about either.
-    let mine = b.drafting_under(b.profile_called(ACCOUNT).await.id).await;
+    let mine = b.drafting_under(&b.profile_called(ACCOUNT).await.id).await;
     b.asks(mine, ASKED).await;
 
     a.printed(conversation, "grilling").await;
@@ -5599,7 +5599,7 @@ async fn an_opencode_grilling_transferred_mid_interview_carries_on_in_the_row_th
     );
 
     assert_eq!(
-        opencode_directory_of(&b.opencode_mirrored(mirror), OPENCODE_CHOSE).await,
+        opencode_directory_of(&b.opencode_mirrored(&mirror), OPENCODE_CHOSE).await,
         over_there.display().to_string(),
         "and the row in the store that landed here says the Worktree the work is \
          now in rather than the one it left, which is where opencode resumes a \
@@ -5622,7 +5622,7 @@ async fn an_opencode_grilling_transferred_mid_interview_carries_on_in_the_row_th
     // way A's was and into the store that arrived.
     let adding = SqlitePool::connect_with(
         sqlx::sqlite::SqliteConnectOptions::new()
-            .filename(b.opencode_mirrored(mirror))
+            .filename(b.opencode_mirrored(&mirror))
             .create_if_missing(false),
     )
     .await
@@ -5699,7 +5699,7 @@ async fn an_opencode_store_with_no_row_for_the_session_falls_through_to_verkstea
     );
 
     assert_eq!(
-        opencode_directory_of(&b.opencode_mirrored(mirror), "ses_elsewhere").await,
+        opencode_directory_of(&b.opencode_mirrored(&mirror), "ses_elsewhere").await,
         elsewhere.display().to_string(),
         "and the store that landed here is as it arrived: a resume that found no \
          row of its own leaves somebody else's alone rather than writing a guess \
@@ -5823,7 +5823,7 @@ async fn the_account_is_home_before_the_work_leaves_and_the_far_end_runs_under_i
     let _holding = a.holding();
     let mirror = a.profile_called(ACCOUNT).await;
 
-    let conversation = a.drafting_under(mirror.id).await;
+    let conversation = a.drafting_under(&mirror.id).await;
     a.grills(conversation).await;
 
     // The session is up, has been lent B's account, and has refreshed the login

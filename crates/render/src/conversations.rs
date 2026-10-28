@@ -2458,9 +2458,9 @@ pub struct NoticeEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct NoticeLogIn {
-    /// The Profile, by its id on this device. Always a Claude one: that is the
-    /// one harness Verkstead runs a login for.
-    pub profile: i64,
+    /// The Profile, by its uuid. Always a Claude one: that is the one harness
+    /// Verkstead runs a login for.
+    pub profile: String,
 
     /// What the human called it, where they called it anything — which the
     /// modal reads beside the harness, the way the Profile's card does.

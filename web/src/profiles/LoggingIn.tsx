@@ -39,7 +39,7 @@ import styles from "./LoggingIn.module.css";
 
 /// The modal, open over `profile` for as long as it is mounted.
 export function LoggingIn(props: {
-  profile: number;
+  profile: string;
   /// What the human asked to be called — the card's own reading.
   called: string;
   close: () => void;

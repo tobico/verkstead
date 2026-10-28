@@ -87,8 +87,8 @@ pub(crate) enum Decided<'a> {
     /// on, which is what the Notice's Log in press opens and what a login on
     /// that Profile looks for.
     SignedOut {
-        /// The Profile, by its id on this device.
-        id: i64,
+        /// The Profile, by its uuid.
+        id: &'a str,
 
         /// And what it is called, which is what the push names.
         profile: &'a str,
@@ -131,7 +131,7 @@ impl<'a> Decided<'a> {
     }
 
     /// And the Profile a login is waiting on, which is a signed-out stop's alone.
-    fn signed_out(self) -> Option<i64> {
+    fn signed_out(self) -> Option<&'a str> {
         match self {
             Self::SignedOut { id, .. } => Some(id),
             Self::Verkstead | Self::OutOfWindow { .. } | Self::Human | Self::Nobody => None,

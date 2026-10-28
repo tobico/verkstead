@@ -20,7 +20,7 @@ Roadmap stage: [02: Profiles by uuid, bound per device](docs/roadmaps/cluster-ow
 
 ## Tasks
 
-- [ ] 01: The uuid everywhere — [details](01-the-uuid-everywhere.md)
+- [x] 01: The uuid everywhere — [details](01-the-uuid-everywhere.md)
 - [ ] 02: The mirrors bridged — [details](02-the-mirrors-bridged.md)
 - [ ] 03: The record and the binding, here — [details](03-the-record-and-the-binding-here.md)
 - [ ] 04: Replicated across the cluster — [details](04-replicated-across-the-cluster.md)

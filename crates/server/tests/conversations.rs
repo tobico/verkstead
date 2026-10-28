@@ -1635,7 +1635,7 @@ fn pair(elsewhere: &Path, account: &str) -> (PathBuf, PathBuf) {
 }
 
 /// Save an Agent Profile and hand back its id.
-async fn profile(app: &Router, elsewhere: &Path, name: &str) -> i64 {
+async fn profile(app: &Router, elsewhere: &Path, name: &str) -> String {
     let (claude_dir, config_file) = pair(elsewhere, name);
 
     let saved: ProfileSaved = post(
@@ -1664,7 +1664,7 @@ async fn profile(app: &Router, elsewhere: &Path, name: &str) -> i64 {
 
 /// Pair a Profile with the one model [`profile`] gives every Profile here, for
 /// one of a Conversation's roles.
-async fn choose(app: &Router, id: i64, role: &str, profile_id: i64) {
+async fn choose(app: &Router, id: i64, role: &str, profile_id: &str) {
     let pairing = serde_json::json!({ "profile_id": profile_id, "model": "claude-opus-5" });
 
     // The review picker offers a row that is not an account, so what it sends is
@@ -1744,7 +1744,7 @@ async fn force_stop(app: &Router, id: i64) -> ConversationStopped {
 
 /// And remove an Agent Profile, whoever had chosen it — which is how a
 /// Conversation comes to be one Resume refuses by name.
-async fn remove_profile(app: &Router, profile_id: i64) -> verkstead_render::ProfileDeleted {
+async fn remove_profile(app: &Router, profile_id: &str) -> verkstead_render::ProfileDeleted {
     post(
         app,
         &format!("/api/ui/profiles/{profile_id}/delete"),
@@ -1971,9 +1971,9 @@ async fn ready(app: &Router, elsewhere: &Path, repo_id: i64) -> i64 {
     let grilling = profile(app, elsewhere, "fable").await;
     let implementation = profile(app, elsewhere, "opus").await;
     let review = profile(app, elsewhere, "haiku").await;
-    choose(app, id, "grilling", grilling).await;
-    choose(app, id, "implementation", implementation).await;
-    choose(app, id, "review", review).await;
+    choose(app, id, "grilling", &grilling).await;
+    choose(app, id, "implementation", &implementation).await;
+    choose(app, id, "review", &review).await;
 
     assert_eq!(
         write_brief(app, id, "# Rate limiting\n\nThe API has none.\n").await,
@@ -2076,8 +2076,8 @@ async fn tinker(app: &Router, elsewhere: &Path, repo_id: i64) -> i64 {
 
     let implementation = profile(app, elsewhere, "opus").await;
     let review = profile(app, elsewhere, "haiku").await;
-    choose(app, id, "implementation", implementation).await;
-    choose(app, id, "review", review).await;
+    choose(app, id, "implementation", &implementation).await;
+    choose(app, id, "review", &review).await;
 
     assert_eq!(
         write_brief(app, id, "# Rate limiting\n\nThe API has none.\n").await,
@@ -2113,7 +2113,7 @@ async fn a_tinker_waits_on_two_roles_and_never_on_the_grilling_one() {
         &app,
         id,
         "implementation",
-        profile(&app, elsewhere.path(), "opus").await,
+        &profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
 
@@ -2256,7 +2256,7 @@ async fn investigate(app: &Router, elsewhere: &Path, repo_id: i64) -> i64 {
     );
 
     let implementation = profile(app, elsewhere, "opus").await;
-    choose(app, id, "implementation", implementation).await;
+    choose(app, id, "implementation", &implementation).await;
 
     assert_eq!(
         write_brief(app, id, "# Rate limiting\n\nThe API has none.\n").await,
@@ -2293,7 +2293,7 @@ async fn an_investigate_waits_on_one_role_and_a_brief_and_nothing_else() {
         &app,
         id,
         "implementation",
-        profile(&app, elsewhere.path(), "opus").await,
+        &profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
 
@@ -2678,7 +2678,7 @@ async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
         &app,
         id,
         "grilling",
-        profile(&app, elsewhere.path(), "fable").await,
+        &profile(&app, elsewhere.path(), "fable").await,
     )
     .await;
     assert_eq!(
@@ -2690,7 +2690,7 @@ async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
         &app,
         id,
         "implementation",
-        profile(&app, elsewhere.path(), "opus").await,
+        &profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
     assert_eq!(grill(&app, id).await, GrillingStarted::NoReviewProfile);
@@ -2699,7 +2699,7 @@ async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
         &app,
         id,
         "review",
-        profile(&app, elsewhere.path(), "haiku").await,
+        &profile(&app, elsewhere.path(), "haiku").await,
     )
     .await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
@@ -2739,21 +2739,21 @@ async fn starting_is_refused_when_the_brief_is_empty() {
         &app,
         id,
         "grilling",
-        profile(&app, elsewhere.path(), "fable").await,
+        &profile(&app, elsewhere.path(), "fable").await,
     )
     .await;
     choose(
         &app,
         id,
         "implementation",
-        profile(&app, elsewhere.path(), "opus").await,
+        &profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
     choose(
         &app,
         id,
         "review",
-        profile(&app, elsewhere.path(), "haiku").await,
+        &profile(&app, elsewhere.path(), "haiku").await,
     )
     .await;
 
@@ -4300,9 +4300,9 @@ async fn a_refused_resume_leaves_the_pending_steer() {
     let grilling = profile(&app, elsewhere.path(), "fable").await;
     let implementation = profile(&app, elsewhere.path(), "opus").await;
     let review = profile(&app, elsewhere.path(), "haiku").await;
-    choose(&app, id, "grilling", grilling).await;
-    choose(&app, id, "implementation", implementation).await;
-    choose(&app, id, "review", review).await;
+    choose(&app, id, "grilling", &grilling).await;
+    choose(&app, id, "implementation", &implementation).await;
+    choose(&app, id, "review", &review).await;
     assert_eq!(
         write_brief(&app, id, "# Rate limiting\n\nThe API has none.\n").await,
         BriefSaved::Saved
@@ -4331,7 +4331,7 @@ async fn a_refused_resume_leaves_the_pending_steer() {
     // that makes Resume refuse a Conversation there is otherwise nothing wrong
     // with, and the refusal that sends the human back to the steer.
     assert_eq!(
-        remove_profile(&app, grilling).await,
+        remove_profile(&app, &grilling).await,
         verkstead_render::ProfileDeleted::Removed,
     );
 
@@ -4804,9 +4804,9 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
     let grilling = profile(&app, elsewhere.path(), "fable").await;
     let implementation = profile(&app, elsewhere.path(), "opus").await;
     let review = profile(&app, elsewhere.path(), "haiku").await;
-    choose(&app, id, "grilling", grilling).await;
-    choose(&app, id, "implementation", implementation).await;
-    choose(&app, id, "review", review).await;
+    choose(&app, id, "grilling", &grilling).await;
+    choose(&app, id, "implementation", &implementation).await;
+    choose(&app, id, "review", &review).await;
 
     assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
@@ -4862,7 +4862,8 @@ async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another()
         .as_ref()
         .expect("the fixture picks one per role")
         .profile
-        .id;
+        .id
+        .clone();
 
     let removed: verkstead_render::ProfileDeleted = post(
         &app,
@@ -5040,15 +5041,15 @@ async fn steering_into_wrapping_leaves_a_review_account_the_human_chose_alone() 
     assert_eq!(
         view.review_pairing
             .pairing()
-            .map(|pairing| pairing.profile.id),
-        Some(reviewing.profile.id),
+            .map(|pairing| pairing.profile.id.as_str()),
+        Some(reviewing.profile.id.as_str()),
         "and the account chosen to review is still the one that reviews",
     );
     assert_eq!(
         view.grilling_pairing
             .as_ref()
-            .map(|pairing| pairing.profile.id),
-        Some(interviewing.profile.id),
+            .map(|pairing| pairing.profile.id.as_str()),
+        Some(interviewing.profile.id.as_str()),
         "and the role nothing wraps under is exactly where it was",
     );
 }
@@ -5073,10 +5074,10 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
         &app,
         id,
         "grilling",
-        profile(&app, elsewhere.path(), "fable").await,
+        &profile(&app, elsewhere.path(), "fable").await,
     )
     .await;
-    choose(&app, id, "implementation", building).await;
+    choose(&app, id, "implementation", &building).await;
 
     assert_eq!(steer(&app, id).await, SteerOpened::Opened);
 
@@ -5143,7 +5144,7 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
             .await
             .review_pairing
             .pairing()
-            .map(|pairing| pairing.profile.id),
+            .map(|pairing| pairing.profile.id.clone()),
         Some(building),
         "a role with nothing picked for it takes the pick",
     );
@@ -6104,8 +6105,8 @@ async fn closing_one_conversation_sweeps_the_strays_and_leaves_the_live_worktree
     let working = started(&app, repo_id).await;
     write_brief(&app, working, "# Another\n\nThe API still has none.\n").await;
     let profiles: Vec<verkstead_render::ProfileEntry> = get(&app, "/api/ui/profiles").await;
-    choose(&app, working, "grilling", profiles[0].id).await;
-    choose(&app, working, "implementation", profiles[1].id).await;
+    choose(&app, working, "grilling", &profiles[0].id).await;
+    choose(&app, working, "implementation", &profiles[1].id).await;
     assert_eq!(grill(&app, working).await, GrillingStarted::Started);
 
     let working_path = PathBuf::from(opened(&app, working).await.worktree.unwrap().path);
@@ -6571,8 +6572,8 @@ async fn two_conversations_wanting_one_name_get_a_directory_each() {
     let second = started(&app, repo_id).await;
     write_brief(&app, second, "# Another\n").await;
     let profiles: Vec<verkstead_render::ProfileEntry> = get(&app, "/api/ui/profiles").await;
-    choose(&app, second, "grilling", profiles[0].id).await;
-    choose(&app, second, "implementation", profiles[1].id).await;
+    choose(&app, second, "grilling", &profiles[0].id).await;
+    choose(&app, second, "implementation", &profiles[1].id).await;
     assert_eq!(
         rename(&app, second, "rate-limiting-2").await,
         BranchRenamed::Renamed
@@ -7176,7 +7177,7 @@ async fn a_signed_out_stop_offers_the_login_only_for_an_account_at_home_here() {
 
     let here = store::profiles(&pool).await.unwrap().remove(0);
 
-    let notice = store::stop_signed_out(&pool, id, "Signed out.\n", here.id)
+    let notice = store::stop_signed_out(&pool, id, "Signed out.\n", &here.id)
         .await
         .unwrap()
         .expect("the Conversation was running");
@@ -7211,11 +7212,14 @@ async fn a_signed_out_stop_offers_the_login_only_for_an_account_at_home_here() {
         "and a stop that has been taken away offers nothing",
     );
 
-    let mirror = store::record_mirror(
+    let mirror = "4e0f1d2c-0000-4000-8000-000000000004";
+
+    store::record_mirror(
         &pool,
+        mirror,
         &store::Mirror {
             device: "aa00bb11cc22dd33ee44ff5566778899".to_owned(),
-            id: 4,
+            was: None,
             login: true,
         },
         &store::ProfileFacts {
@@ -7292,7 +7296,7 @@ async fn a_sessions_event_says_what_it_was_launched_under() {
         .expect("the grilling was paired before it started")
         .clone();
     let pairing = store::Pairing {
-        profile: store::load_profile(&pool, picked.profile.id)
+        profile: store::load_profile(&pool, &picked.profile.id)
             .await
             .unwrap()
             .expect("the Profile is still there"),
@@ -7339,7 +7343,7 @@ async fn a_sessions_event_says_which_harness_ran_it() {
 
     let profile_id = codex_profile(&app, elsewhere.path(), "hopper").await;
     let pairing = store::Pairing {
-        profile: store::load_profile(&pool, profile_id)
+        profile: store::load_profile(&pool, &profile_id)
             .await
             .unwrap()
             .expect("the Profile just saved is there"),
@@ -7388,7 +7392,7 @@ async fn what_the_profile_became_afterwards_changes_nothing() {
         .expect("the grilling was paired before it started")
         .clone();
     let pairing = store::Pairing {
-        profile: store::load_profile(&pool, picked.profile.id)
+        profile: store::load_profile(&pool, &picked.profile.id)
             .await
             .unwrap()
             .expect("the Profile is still there"),
@@ -7439,7 +7443,7 @@ fn codex_home(elsewhere: &Path, account: &str) -> PathBuf {
 /// Save a Codex Profile and hand back its id, [`profile`]'s way: through the
 /// endpoint the human saves one through, so what is recorded is what a save
 /// leaves behind.
-async fn codex_profile(app: &Router, elsewhere: &Path, name: &str) -> i64 {
+async fn codex_profile(app: &Router, elsewhere: &Path, name: &str) -> String {
     let saved: ProfileSaved = post(
         app,
         "/api/ui/profiles",
@@ -7514,7 +7518,7 @@ async fn a_session_paired_before_the_agent_was_recorded_says_nothing_about_it() 
         .expect("the grilling was paired before it started")
         .clone();
     let pairing = store::Pairing {
-        profile: store::load_profile(&pool, picked.profile.id)
+        profile: store::load_profile(&pool, &picked.profile.id)
             .await
             .unwrap()
             .expect("the Profile is still there"),
@@ -8684,9 +8688,9 @@ async fn ready_to_adopt(app: &Router, elsewhere: &Path, repo_id: i64, name: &str
     let grilling = profile(app, elsewhere, "fable").await;
     let implementation = profile(app, elsewhere, "opus").await;
     let review = profile(app, elsewhere, "haiku").await;
-    choose(app, id, "grilling", grilling).await;
-    choose(app, id, "implementation", implementation).await;
-    choose(app, id, "review", review).await;
+    choose(app, id, "grilling", &grilling).await;
+    choose(app, id, "implementation", &implementation).await;
+    choose(app, id, "review", &review).await;
 
     id
 }
@@ -8704,11 +8708,12 @@ async fn ready_to_adopt_again(app: &Router, repo_id: i64, name: &str) -> i64 {
             .find(|profile| profile.name.as_deref() == Some(wanted))
             .expect("the Profiles of the first adoption are still saved")
             .id
+            .clone()
     };
 
-    choose(app, id, "grilling", saved("fable")).await;
-    choose(app, id, "implementation", saved("opus")).await;
-    choose(app, id, "review", saved("haiku")).await;
+    choose(app, id, "grilling", &saved("fable")).await;
+    choose(app, id, "implementation", &saved("opus")).await;
+    choose(app, id, "review", &saved("haiku")).await;
 
     id
 }
@@ -10400,7 +10405,7 @@ async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
         &app,
         id,
         "grilling",
-        profile(&app, elsewhere.path(), "fable").await,
+        &profile(&app, elsewhere.path(), "fable").await,
     )
     .await;
 
@@ -10414,7 +10419,7 @@ async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
         &app,
         id,
         "implementation",
-        profile(&app, elsewhere.path(), "opus").await,
+        &profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
 
@@ -10425,7 +10430,7 @@ async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
         &app,
         id,
         "review",
-        profile(&app, elsewhere.path(), "haiku").await,
+        &profile(&app, elsewhere.path(), "haiku").await,
     )
     .await;
 
@@ -11245,7 +11250,7 @@ async fn a_review_is_refused_by_name_for_each_profile_it_is_short_of() {
         &app,
         id,
         "implementation",
-        profile(&app, elsewhere.path(), "opus").await,
+        &profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
 
@@ -11256,7 +11261,7 @@ async fn a_review_is_refused_by_name_for_each_profile_it_is_short_of() {
         &app,
         id,
         "review",
-        profile(&app, elsewhere.path(), "haiku").await,
+        &profile(&app, elsewhere.path(), "haiku").await,
     )
     .await;
 
@@ -11418,7 +11423,7 @@ async fn ready_to_review(app: &Router, elsewhere: &Path, repo_id: i64, brief: &s
     let implementation = profile(app, elsewhere, "opus").await;
     let review = profile(app, elsewhere, "haiku").await;
 
-    ready_to_review_under(app, repo_id, brief, implementation, review).await
+    ready_to_review_under(app, repo_id, brief, &implementation, &review).await
 }
 
 /// The same over Profiles already saved, which is what a test wanting two
@@ -11429,8 +11434,8 @@ async fn ready_to_review_under(
     app: &Router,
     repo_id: i64,
     brief: &str,
-    implementation: i64,
-    review: i64,
+    implementation: &str,
+    review: &str,
 ) -> i64 {
     let id = started(app, repo_id).await;
 
@@ -11619,7 +11624,7 @@ async fn a_review_naming_a_number_nothing_is_open_under_is_refused_by_name() {
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
     let nothing =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
 
     assert_eq!(
         press_take_up(&app, nothing).await,
@@ -11631,7 +11636,7 @@ async fn a_review_naming_a_number_nothing_is_open_under_is_refused_by_name() {
     on_github(&repo, 41, "rate-limiting", "main", "MERGED", false);
 
     let merged =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
 
     assert_eq!(
         press_take_up(&app, merged).await,
@@ -11697,11 +11702,17 @@ async fn a_review_over_a_pull_request_another_conversation_is_at_work_on_leads_t
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
     let first =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
 
-    let second =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up too.\n", implementation, review).await;
+    let second = ready_to_review_under(
+        &app,
+        repo_id,
+        "Wrap #41 up too.\n",
+        &implementation,
+        &review,
+    )
+    .await;
 
     assert_eq!(
         press_take_up(&app, second).await,
@@ -11743,12 +11754,12 @@ async fn a_review_over_a_branch_another_conversation_is_at_work_on_leads_there()
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
     let first =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
 
     // And the second is pointed at the *branch*, which names the same piece of
     // work without ever saying the number.
-    let second = pointed_at_the_branch(&app, repo_id, implementation, review).await;
+    let second = pointed_at_the_branch(&app, repo_id, &implementation, &review).await;
 
     assert_eq!(
         press_take_up(&app, second).await,
@@ -11785,7 +11796,7 @@ async fn a_review_over_a_finished_conversations_pull_request_closes_it_and_takes
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
     let first =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
     finished_with_it(&app, first).await;
 
@@ -11793,8 +11804,8 @@ async fn a_review_over_a_finished_conversations_pull_request_closes_it_and_takes
         &app,
         repo_id,
         "Read the limiter again.\n#41\n",
-        implementation,
-        review,
+        &implementation,
+        &review,
     )
     .await;
 
@@ -11846,11 +11857,11 @@ async fn a_fix_merge_issues_over_a_finished_conversations_pull_request_closes_it
 
     let implementation = profile(&app, elsewhere.path(), "opus").await;
 
-    let first = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", implementation).await;
+    let first = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", &implementation).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
     finished_with_it(&app, first).await;
 
-    let second = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+    let second = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", &implementation).await;
 
     assert_eq!(press_take_up(&app, second).await, TakenUp::TakenUp);
 
@@ -11882,7 +11893,7 @@ async fn a_review_over_the_branch_of_a_finished_conversations_pull_request_close
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
     let first =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
     finished_with_it(&app, first).await;
 
@@ -11891,7 +11902,7 @@ async fn a_review_over_the_branch_of_a_finished_conversations_pull_request_close
         "Done keeps its checkout, so the branch is standing in it",
     );
 
-    let second = pointed_at_the_branch(&app, repo_id, implementation, review).await;
+    let second = pointed_at_the_branch(&app, repo_id, &implementation, &review).await;
 
     assert_eq!(press_take_up(&app, second).await, TakenUp::TakenUp);
 
@@ -11951,8 +11962,8 @@ async fn a_holder_that_is_closed_or_archived_is_passed_over_and_left_as_it_was()
             &app,
             repo_id,
             &format!("Wrap #{number} up.\n"),
-            implementation,
-            review,
+            &implementation,
+            &review,
         )
         .await;
         assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
@@ -11968,8 +11979,8 @@ async fn a_holder_that_is_closed_or_archived_is_passed_over_and_left_as_it_was()
             &app,
             repo_id,
             &format!("Read #{number} again.\n"),
-            implementation,
-            review,
+            &implementation,
+            &review,
         )
         .await;
 
@@ -12012,7 +12023,7 @@ async fn a_take_up_is_refused_by_every_state_the_holders_work_is_still_in() {
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
     let first =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
 
     for word in [
@@ -12024,9 +12035,14 @@ async fn a_take_up_is_refused_by_every_state_the_holders_work_is_still_in() {
     ] {
         left_in(&dir, first, word).await;
 
-        let second =
-            ready_to_review_under(&app, repo_id, "Wrap #41 up too.\n", implementation, review)
-                .await;
+        let second = ready_to_review_under(
+            &app,
+            repo_id,
+            "Wrap #41 up too.\n",
+            &implementation,
+            &review,
+        )
+        .await;
 
         assert_eq!(
             press_take_up(&app, second).await,
@@ -12068,7 +12084,7 @@ async fn a_start_refused_for_its_profiles_or_its_target_closes_nothing() {
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
     let first =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
     finished_with_it(&app, first).await;
 
@@ -12076,8 +12092,14 @@ async fn a_start_refused_for_its_profiles_or_its_target_closes_nothing() {
     // has open: the Target is read and GitHub asked before the record is.
     on_github(&repo, 41, "rate-limiting", "main", "MERGED", false);
 
-    let merged =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up too.\n", implementation, review).await;
+    let merged = ready_to_review_under(
+        &app,
+        repo_id,
+        "Wrap #41 up too.\n",
+        &implementation,
+        &review,
+    )
+    .await;
 
     assert_eq!(
         press_take_up(&app, merged).await,
@@ -12099,8 +12121,8 @@ async fn a_start_refused_for_its_profiles_or_its_target_closes_nothing() {
         &app,
         repo_id,
         "Wrap #41 up as well.\n",
-        implementation,
-        review,
+        &implementation,
+        &review,
     )
     .await;
     std::fs::remove_dir_all(elsewhere.path().join("opus")).unwrap();
@@ -12143,7 +12165,7 @@ async fn a_finished_holder_with_uncommitted_changes_stops_the_press_naming_it() 
         let review = profile(&app, elsewhere.path(), "haiku").await;
 
         let first =
-            ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+            ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
         assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
         finished_with_it(&app, first).await;
 
@@ -12153,8 +12175,8 @@ async fn a_finished_holder_with_uncommitted_changes_stops_the_press_naming_it() 
             &app,
             repo_id,
             "Read the limiter again.\n#41\n",
-            implementation,
-            review,
+            &implementation,
+            &review,
         )
         .await;
 
@@ -12213,7 +12235,7 @@ async fn a_finished_holders_companion_checkout_stops_the_press_too() {
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
     let first =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
 
     assert_eq!(
         add_companion(&app, first, askance).await,
@@ -12244,8 +12266,8 @@ async fn a_finished_holders_companion_checkout_stops_the_press_too() {
         &app,
         repo_id,
         "Read the limiter again.\n#41\n",
-        implementation,
-        review,
+        &implementation,
+        &review,
     )
     .await;
 
@@ -12285,7 +12307,7 @@ async fn the_second_press_closes_the_holder_and_takes_the_pull_request_up() {
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
     let first =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
     finished_with_it(&app, first).await;
     left_uncommitted(&app, first, Change::Modified).await;
@@ -12294,8 +12316,8 @@ async fn the_second_press_closes_the_holder_and_takes_the_pull_request_up() {
         &app,
         repo_id,
         "Read the limiter again.\n#41\n",
-        implementation,
-        review,
+        &implementation,
+        &review,
     )
     .await;
 
@@ -12342,7 +12364,7 @@ async fn a_confirmation_that_does_not_name_what_is_held_stops_the_press_again() 
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
     let first =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
     finished_with_it(&app, first).await;
 
@@ -12350,8 +12372,8 @@ async fn a_confirmation_that_does_not_name_what_is_held_stops_the_press_again() 
         &app,
         repo_id,
         "Read the limiter again.\n#41\n",
-        implementation,
-        review,
+        &implementation,
+        &review,
     )
     .await;
 
@@ -12393,7 +12415,7 @@ async fn a_finished_holder_with_a_clean_or_missing_checkout_is_closed_with_no_qu
         let review = profile(&app, elsewhere.path(), "haiku").await;
 
         let first =
-            ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+            ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
         assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
         finished_with_it(&app, first).await;
 
@@ -12411,8 +12433,8 @@ async fn a_finished_holder_with_a_clean_or_missing_checkout_is_closed_with_no_qu
             &app,
             repo_id,
             "Read the limiter again.\n#41\n",
-            implementation,
-            review,
+            &implementation,
+            &review,
         )
         .await;
 
@@ -12450,7 +12472,7 @@ async fn a_finished_holder_whose_checkout_git_will_not_read_stops_the_press() {
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
     let first =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
     finished_with_it(&app, first).await;
 
@@ -12484,8 +12506,8 @@ async fn a_finished_holder_whose_checkout_git_will_not_read_stops_the_press() {
         &app,
         repo_id,
         "Read the limiter again.\n#41\n",
-        implementation,
-        review,
+        &implementation,
+        &review,
     )
     .await;
 
@@ -12580,8 +12602,8 @@ fn changed(worktree: &Path) -> Vec<String> {
 async fn pointed_at_the_branch(
     app: &Router,
     repo_id: i64,
-    implementation: i64,
-    review: i64,
+    implementation: &str,
+    review: &str,
 ) -> i64 {
     let id = started(app, repo_id).await;
 
@@ -12798,8 +12820,8 @@ async fn a_review_over_a_branch_that_is_not_on_origin_is_refused_by_name() {
             &app,
             repo_id,
             "The limiter is built.\n",
-            implementation,
-            review,
+            &implementation,
+            &review,
         )
         .await;
 
@@ -12864,8 +12886,8 @@ async fn a_review_over_a_branch_git_will_not_move_is_refused_by_name() {
             &app,
             repo_id,
             "The limiter is built.\n",
-            implementation,
-            review,
+            &implementation,
+            &review,
         )
         .await;
         assert_eq!(
@@ -12890,8 +12912,8 @@ async fn a_review_over_a_branch_git_will_not_move_is_refused_by_name() {
         &app,
         repo_id,
         "The limiter is built.\n",
-        implementation,
-        review,
+        &implementation,
+        &review,
     )
     .await;
     assert_eq!(
@@ -13060,8 +13082,8 @@ async fn a_review_waits_on_its_target_and_takes_up_what_it_names() {
         write_brief(&app, id, "The limiter wants a read.\n").await,
         BriefSaved::Saved,
     );
-    choose(&app, id, "implementation", implementation).await;
-    choose(&app, id, "review", review).await;
+    choose(&app, id, "implementation", &implementation).await;
+    choose(&app, id, "review", &review).await;
 
     assert!(
         !opened(&app, id).await.ready_to_grill,
@@ -13108,14 +13130,14 @@ async fn a_review_is_ready_on_a_brief_and_both_pairings() {
     );
 
     let implementation = profile(&app, elsewhere.path(), "opus").await;
-    choose(&app, id, "implementation", implementation).await;
+    choose(&app, id, "implementation", &implementation).await;
     assert!(
         !opened(&app, id).await.ready_to_grill,
         "and one of the two roles",
     );
 
     let review = profile(&app, elsewhere.path(), "haiku").await;
-    choose(&app, id, "review", review).await;
+    choose(&app, id, "review", &review).await;
 
     let view = opened(&app, id).await;
     assert!(view.ready_to_grill);
@@ -13173,7 +13195,7 @@ async fn ready_to_fix(app: &Router, elsewhere: &Path, repo_id: i64, brief: &str)
     let id = started(app, repo_id).await;
     let implementation = profile(app, elsewhere, "opus").await;
 
-    settled_as_a_fix(app, id, brief, implementation).await;
+    settled_as_a_fix(app, id, brief, &implementation).await;
 
     id
 }
@@ -13182,7 +13204,7 @@ async fn ready_to_fix(app: &Router, elsewhere: &Path, repo_id: i64, brief: &str)
 /// drafts wants: a Profile's name is unique across the workbench, so saving it
 /// twice is a refusal rather than a second Profile.
 #[cfg(unix)]
-async fn ready_to_fix_under(app: &Router, repo_id: i64, brief: &str, implementation: i64) -> i64 {
+async fn ready_to_fix_under(app: &Router, repo_id: i64, brief: &str, implementation: &str) -> i64 {
     let id = started(app, repo_id).await;
 
     settled_as_a_fix(app, id, brief, implementation).await;
@@ -13192,7 +13214,7 @@ async fn ready_to_fix_under(app: &Router, repo_id: i64, brief: &str, implementat
 
 /// What both of those settle on the draft they were handed.
 #[cfg(unix)]
-async fn settled_as_a_fix(app: &Router, id: i64, brief: &str, implementation: i64) {
+async fn settled_as_a_fix(app: &Router, id: i64, brief: &str, implementation: &str) {
     assert_eq!(
         pick_process(app, id, Process::FixMergeIssues).await,
         ProcessPicked::Picked
@@ -13220,7 +13242,7 @@ async fn a_fix_merge_issues_is_ready_on_a_brief_a_target_and_one_pairing() {
     assert!(!opened(&app, id).await.ready_to_grill, "nothing is settled");
 
     let implementation = profile(&app, elsewhere.path(), "opus").await;
-    choose(&app, id, "implementation", implementation).await;
+    choose(&app, id, "implementation", &implementation).await;
     assert!(
         !opened(&app, id).await.ready_to_grill,
         "the one role, and neither a brief nor a target",
@@ -13411,7 +13433,7 @@ async fn a_fix_merge_issues_keeps_every_take_up_refusal_by_name() {
     let implementation = profile(&app, elsewhere.path(), "opus").await;
 
     // A branch origin has nothing under.
-    let astray = ready_to_fix_under(&app, repo_id, "It will not merge.\n", implementation).await;
+    let astray = ready_to_fix_under(&app, repo_id, "It will not merge.\n", &implementation).await;
     assert_eq!(
         name_target(&app, astray, "rate-limits").await,
         TargetRecorded::Recorded,
@@ -13423,7 +13445,7 @@ async fn a_fix_merge_issues_keeps_every_take_up_refusal_by_name() {
     // could push a fix to.
     on_github(&repo, 41, "rate-limiting", "main", "OPEN", true);
 
-    let forked = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", implementation).await;
+    let forked = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", &implementation).await;
     assert_eq!(press_take_up(&app, forked).await, TakenUp::Fork);
     nothing_taken_up(&app, forked, &repo).await;
 }
@@ -13526,7 +13548,7 @@ async fn a_lone_pull_request_records_one_and_a_fork_is_no_link() {
 
     let implementation = profile(&app, elsewhere.path(), "opus").await;
 
-    let lone = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", implementation).await;
+    let lone = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", &implementation).await;
     assert_eq!(press_take_up(&app, lone).await, TakenUp::TakenUp);
 
     assert_eq!(
@@ -13547,7 +13569,7 @@ async fn a_lone_pull_request_records_one_and_a_fork_is_no_link() {
     on_github(&repo, 50, "stage-01", "main", "OPEN", false);
     on_github(&repo, 51, "from-a-fork", "stage-01", "OPEN", true);
 
-    let under = ready_to_fix_under(&app, repo_id, "Wrap #50 up.\n", implementation).await;
+    let under = ready_to_fix_under(&app, repo_id, "Wrap #50 up.\n", &implementation).await;
     assert_eq!(press_take_up(&app, under).await, TakenUp::TakenUp);
 
     assert_eq!(
@@ -13578,8 +13600,8 @@ async fn standing_on(
     app: &Router,
     repo_id: i64,
     number: i64,
-    implementation: i64,
-    review: i64,
+    implementation: &str,
+    review: &str,
 ) -> i64 {
     let id = ready_to_review_under(
         app,
@@ -13614,13 +13636,13 @@ async fn a_fix_merge_issues_over_a_stack_closes_the_conversations_on_its_neighbo
     let implementation = profile(&app, elsewhere.path(), "opus").await;
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
-    let below = standing_on(&app, repo_id, 40, implementation, review).await;
+    let below = standing_on(&app, repo_id, 40, &implementation, &review).await;
     finished_with_it(&app, below).await;
 
-    let above = standing_on(&app, repo_id, 42, implementation, review).await;
+    let above = standing_on(&app, repo_id, 42, &implementation, &review).await;
     finished_with_it(&app, above).await;
 
-    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", &implementation).await;
 
     assert_eq!(
         press_take_up(&app, fixing).await,
@@ -13698,15 +13720,15 @@ async fn a_neighbour_still_at_work_refuses_the_start_and_nothing_is_closed() {
 
     // The link below has finished with its pull request, the one above has not —
     // and the pull request being named has a finished holder of its own.
-    let below = standing_on(&app, repo_id, 40, implementation, review).await;
+    let below = standing_on(&app, repo_id, 40, &implementation, &review).await;
     finished_with_it(&app, below).await;
 
-    let holder = standing_on(&app, repo_id, 41, implementation, review).await;
+    let holder = standing_on(&app, repo_id, 41, &implementation, &review).await;
     finished_with_it(&app, holder).await;
 
-    let above = standing_on(&app, repo_id, 42, implementation, review).await;
+    let above = standing_on(&app, repo_id, 42, &implementation, &review).await;
 
-    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", &implementation).await;
 
     assert_eq!(
         press_take_up(&app, fixing).await,
@@ -13774,7 +13796,7 @@ async fn a_link_checked_out_by_nobody_refuses_the_start_naming_where() {
         ],
     );
 
-    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", &implementation).await;
 
     assert_eq!(
         press_take_up(&app, fixing).await,
@@ -13821,20 +13843,20 @@ async fn a_stacks_uncommitted_changes_are_asked_about_in_one_list() {
     let implementation = profile(&app, elsewhere.path(), "opus").await;
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
-    let below = standing_on(&app, repo_id, 40, implementation, review).await;
+    let below = standing_on(&app, repo_id, 40, &implementation, &review).await;
     finished_with_it(&app, below).await;
     left_uncommitted(&app, below, Change::Untracked).await;
 
-    let holder = standing_on(&app, repo_id, 41, implementation, review).await;
+    let holder = standing_on(&app, repo_id, 41, &implementation, &review).await;
     finished_with_it(&app, holder).await;
     left_uncommitted(&app, holder, Change::Modified).await;
 
     // And a neighbour with nothing to lose, which is closed without being asked
     // about.
-    let above = standing_on(&app, repo_id, 42, implementation, review).await;
+    let above = standing_on(&app, repo_id, 42, &implementation, &review).await;
     finished_with_it(&app, above).await;
 
-    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", &implementation).await;
 
     assert_eq!(
         press_take_up(&app, fixing).await,
@@ -13966,12 +13988,12 @@ async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claime
 
     // The bottom of the stack, taken up by a Conversation of its own and stopped
     // since — which is what a stacked stage that has been closed leaves behind.
-    let below = ready_to_fix_under(&app, repo_id, "Wrap #40 up.\n", implementation).await;
+    let below = ready_to_fix_under(&app, repo_id, "Wrap #40 up.\n", &implementation).await;
     assert_eq!(press_take_up(&app, below).await, TakenUp::TakenUp);
     assert_eq!(close(&app, below).await, ConversationClosed::Closed);
 
     // And the middle, which is a link of the same chain and nobody's work.
-    let id = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", implementation).await;
+    let id = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", &implementation).await;
     assert_eq!(
         press_take_up(&app, id).await,
         TakenUp::TakenUp,
@@ -13994,7 +14016,7 @@ async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claime
     // And the refusal is untouched where it is about the pull request somebody
     // was pointed at and is still at work on: a third Conversation over `#41`
     // leads to the one on it.
-    let second = ready_to_fix_under(&app, repo_id, "Wrap #41 up too.\n", implementation).await;
+    let second = ready_to_fix_under(&app, repo_id, "Wrap #41 up too.\n", &implementation).await;
 
     assert_eq!(
         press_take_up(&app, second).await,
@@ -14019,7 +14041,7 @@ async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claime
 /// Both walked through the presses that reach them rather than written into the
 /// row, because what is under test is a record two take-ups really made.
 #[cfg(unix)]
-async fn handed_over(app: &Router, repo_id: i64, implementation: i64, review: i64) -> (i64, i64) {
+async fn handed_over(app: &Router, repo_id: i64, implementation: &str, review: &str) -> (i64, i64) {
     let first = ready_to_review_under(app, repo_id, "Wrap #41 up.\n", implementation, review).await;
 
     assert_eq!(press_take_up(app, first).await, TakenUp::TakenUp);
@@ -14059,7 +14081,7 @@ async fn a_steer_back_into_a_wrap_up_closes_the_conversation_that_took_the_pull_
     let implementation = profile(&app, elsewhere.path(), "opus").await;
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
-    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+    let (first, second) = handed_over(&app, repo_id, &implementation, &review).await;
 
     assert_eq!(steer(&app, first).await, SteerOpened::Opened);
     assert_eq!(
@@ -14114,7 +14136,7 @@ async fn a_steer_back_into_a_follow_up_makes_way_the_same() {
     let implementation = profile(&app, elsewhere.path(), "opus").await;
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
-    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+    let (first, second) = handed_over(&app, repo_id, &implementation, &review).await;
 
     assert_eq!(steer(&app, first).await, SteerOpened::Opened);
     assert_eq!(
@@ -14147,7 +14169,7 @@ async fn a_steer_onto_a_pull_request_somebody_is_at_work_on_is_refused_naming_it
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
     let first =
-        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
 
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
     finished_with_it(&app, first).await;
@@ -14159,8 +14181,8 @@ async fn a_steer_onto_a_pull_request_somebody_is_at_work_on_is_refused_naming_it
         &app,
         repo_id,
         "Read the limiter again.\n#41\n",
-        implementation,
-        review,
+        &implementation,
+        &review,
     )
     .await;
 
@@ -14213,7 +14235,7 @@ async fn a_steer_whose_holder_holds_something_stops_the_submit_naming_it() {
     let implementation = profile(&app, elsewhere.path(), "opus").await;
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
-    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+    let (first, second) = handed_over(&app, repo_id, &implementation, &review).await;
     let left = left_uncommitted(&app, second, Change::Modified).await;
 
     assert_eq!(steer(&app, first).await, SteerOpened::Opened);
@@ -14275,7 +14297,7 @@ async fn a_steers_confirmation_that_names_nobody_stops_it_again() {
     let implementation = profile(&app, elsewhere.path(), "opus").await;
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
-    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+    let (first, second) = handed_over(&app, repo_id, &implementation, &review).await;
     left_uncommitted(&app, second, Change::Untracked).await;
 
     assert_eq!(steer(&app, first).await, SteerOpened::Opened);
@@ -14310,7 +14332,7 @@ async fn a_steer_into_done_closes_nothing() {
     let implementation = profile(&app, elsewhere.path(), "opus").await;
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
-    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+    let (first, second) = handed_over(&app, repo_id, &implementation, &review).await;
 
     assert_eq!(steer(&app, first).await, SteerOpened::Opened);
     assert_eq!(
@@ -14346,7 +14368,7 @@ async fn a_steer_over_a_pull_request_nobody_else_has_is_unchanged() {
     let implementation = profile(&app, elsewhere.path(), "opus").await;
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
-    let id = ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+    let id = ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", &implementation, &review).await;
 
     assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
     finished_with_it(&app, id).await;
@@ -15264,14 +15286,14 @@ async fn no_review_makes_a_draft_as_ready_to_start_as_a_review_pairing_does() {
         &app,
         id,
         "grilling",
-        profile(&app, elsewhere.path(), "fable").await,
+        &profile(&app, elsewhere.path(), "fable").await,
     )
     .await;
     choose(
         &app,
         id,
         "implementation",
-        profile(&app, elsewhere.path(), "opus").await,
+        &profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
 
@@ -15331,14 +15353,14 @@ async fn an_empty_grilling_picker_refuses_the_start_until_a_pairing_answers_it()
         &app,
         id,
         "implementation",
-        profile(&app, elsewhere.path(), "opus").await,
+        &profile(&app, elsewhere.path(), "opus").await,
     )
     .await;
     choose(
         &app,
         id,
         "review",
-        profile(&app, elsewhere.path(), "haiku").await,
+        &profile(&app, elsewhere.path(), "haiku").await,
     )
     .await;
 
@@ -15353,7 +15375,7 @@ async fn an_empty_grilling_picker_refuses_the_start_until_a_pairing_answers_it()
         &app,
         id,
         "grilling",
-        profile(&app, elsewhere.path(), "fable").await,
+        &profile(&app, elsewhere.path(), "fable").await,
     )
     .await;
 

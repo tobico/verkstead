@@ -104,10 +104,12 @@ pub struct Syncing {
     pool: SqlitePool,
     devices: Option<Devices>,
 
-    /// The device the account is at home on, and the Profile's id there — which
-    /// is what the write-back is addressed by, the way every press over a mirror
-    /// is.
+    /// The device the account is at home on.
     at: store::Mirror,
+
+    /// And the Profile's uuid, which is the one it has there too — what the
+    /// write-back is addressed by, the way every press over a mirror is.
+    profile: String,
 
     /// The mirror's own account directory on this device, which every part is
     /// said from.
@@ -250,7 +252,7 @@ pub async fn pulled(
         return None;
     };
 
-    let call = match asking(at.id, MEMORY, &wanted) {
+    let call = match asking(&profile.id, MEMORY, &wanted) {
         Some(call) => call,
         None => return None,
     };
@@ -316,6 +318,7 @@ pub async fn pulled(
         pool: pool.clone(),
         devices: devices.cloned(),
         at: at.clone(),
+        profile: profile.id.clone(),
         account,
         parts,
         wanted,
@@ -350,6 +353,7 @@ impl Syncing {
             pool,
             devices,
             at,
+            profile,
             account,
             parts,
             wanted,
@@ -407,7 +411,7 @@ impl Syncing {
 
         let call = Call {
             method: reqwest::Method::POST,
-            onwards: LEFT.replace("{profile}", &at.id.to_string()),
+            onwards: LEFT.replace("{profile}", &profile),
             headers: as_json(),
             body: Streamed::saying(body),
         };
@@ -526,7 +530,7 @@ pub(crate) fn carried(parts: Vec<Part>, repo: bool, worktree: bool) -> Vec<Part>
 /// device's side — which of that device's Repos this repository is, what this
 /// Worktree is called, and every session id this Conversation has had — and none
 /// of them is a thing to spell into a path.
-fn asking(profile: i64, onwards: &str, wanted: &MemoryWanted) -> Option<Call> {
+fn asking(profile: &str, onwards: &str, wanted: &MemoryWanted) -> Option<Call> {
     let body = match serde_json::to_vec(wanted) {
         Ok(body) => body,
 
@@ -542,7 +546,7 @@ fn asking(profile: i64, onwards: &str, wanted: &MemoryWanted) -> Option<Call> {
 
     Some(Call {
         method: reqwest::Method::POST,
-        onwards: onwards.replace("{profile}", &profile.to_string()),
+        onwards: onwards.replace("{profile}", profile),
         headers: as_json(),
         body: Streamed::saying(body),
     })

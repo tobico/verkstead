@@ -53,8 +53,8 @@ fn model(harness: AgentType, role: Role) -> &'static str {
     }
 }
 
-/// The platform default for `role`, out of the Profiles saved — or
-/// [`Picked::Nothing`] where there is no Profile to run one under.
+/// The platform default for `role`, out of the Profiles in the order they were
+/// saved — or [`Picked::Nothing`] where there is no Profile to run one under.
 ///
 /// Unjudged: whether the Profile's account is still where it was left is the
 /// filesystem's question, and it is asked by whoever prefills with this.
@@ -89,10 +89,11 @@ pub(crate) fn platform_default(profiles: &[Profile], role: Role) -> Picked {
 
 /// The one Profile of `harness` a default would run under: the unnamed one,
 /// which is the harness's own account where it has one, and otherwise whichever
-/// was saved first.
+/// was saved first — `profiles` being in the order they were saved, and the
+/// first of equals being the one kept.
 fn account(profiles: &[Profile], harness: AgentType) -> Option<&Profile> {
     profiles
         .iter()
         .filter(|profile| profile.agent_type() == harness)
-        .min_by_key(|profile| (profile.name.is_some(), profile.id))
+        .min_by_key(|profile| profile.name.is_some())
 }

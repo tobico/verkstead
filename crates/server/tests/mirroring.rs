@@ -12,9 +12,10 @@
 //!
 //! **And what the mirrors are is rows in B's store**, which is the whole of why
 //! they exist: a Pairing, a Repo's memory and a Conversation all name a Profile
-//! by a **local** id, and a mirror is what gives one of A's accounts an id here.
-//! So the assertions about a removal are assertions about B's Conversations, and
-//! the one about a refresh is that the id did not move.
+//! by a row in this device's store, and a mirror is what gives one of A's
+//! accounts a row here — held under the uuid A knows it by. So the assertions
+//! about a removal are assertions about B's Conversations, and the one about a
+//! refresh is that the row did not move.
 //!
 //! **Unix, with `tests/accounts.rs` and `tests/news.rs`**, and for the reason
 //! those two are: what a device here is judged on is a `PATH` of this suite's
@@ -400,7 +401,7 @@ impl Verkstead {
     }
 
     /// A Profile saved on this device, the way the form saves one.
-    async fn saves(&self, name: &str) -> i64 {
+    async fn saves(&self, name: &str) -> String {
         let account = self.account(name);
 
         self.saving(name, account).await
@@ -408,14 +409,14 @@ impl Verkstead {
 
     /// And one over an account nobody is logged in to, which is a Profile that
     /// is perfectly runnable here and cannot be used away at all.
-    async fn saves_logged_out(&self, name: &str) -> i64 {
+    async fn saves_logged_out(&self, name: &str) -> String {
         let account = self.account_nobody_is_logged_in_to(name);
 
         self.saving(name, account).await
     }
 
     /// Both of them: the form's own press, over whichever account was made.
-    async fn saving(&self, name: &str, (claude_dir, config_file): (PathBuf, PathBuf)) -> i64 {
+    async fn saving(&self, name: &str, (claude_dir, config_file): (PathBuf, PathBuf)) -> String {
         let said = press(
             &self.workbench,
             PROFILES,
@@ -447,7 +448,7 @@ impl Verkstead {
 
     /// And rewritten, whole, which is what the form does to one that is already
     /// there.
-    async fn renames(&self, id: i64, to: &str) {
+    async fn renames(&self, id: &str, to: &str) {
         let (claude_dir, config_file) = self.account(to);
 
         let said = press(
@@ -473,7 +474,7 @@ impl Verkstead {
     }
 
     /// And taken away.
-    async fn removes(&self, id: i64) {
+    async fn removes(&self, id: &str) {
         let said = press(&self.workbench, &format!("{PROFILES}/{id}/delete"), None).await;
 
         assert_eq!(said, "\"Removed\"", "removing {id}");
@@ -535,7 +536,7 @@ impl Verkstead {
     }
 
     /// And the removal, with the status left to be read for the same reason.
-    async fn pressing_removal(&self, id: i64) -> (StatusCode, String) {
+    async fn pressing_removal(&self, id: &str) -> (StatusCode, String) {
         pressing(&self.workbench, &format!("{PROFILES}/{id}/delete"), None).await
     }
 
@@ -587,7 +588,7 @@ impl Verkstead {
 
     /// All three of a Conversation's pickers filled in with one Pairing, the way
     /// the composer fills them.
-    async fn picks(&self, conversation: i64, profile: i64) {
+    async fn picks(&self, conversation: i64, profile: &str) {
         let pairing = serde_json::json!({ "profile_id": profile, "model": MODEL }).to_string();
         let role =
             serde_json::json!({ "pairing": { "profile_id": profile, "model": MODEL } }).to_string();
@@ -826,7 +827,7 @@ async fn a_members_profiles_are_listed_here_beside_this_devices_own() {
 }
 
 /// A Profile renamed on A reaches B on the refresh, on the row it already had:
-/// the local id is what a Pairing here names, so it must not move.
+/// the row is what a Pairing here names, so it must not move.
 #[tokio::test]
 async fn a_rename_at_home_reaches_the_other_device_without_moving_the_row() {
     let (a, b, _holding) = linked_up().await;
@@ -836,12 +837,12 @@ async fn a_rename_at_home_reaches_the_other_device_without_moving_the_row() {
     let landed = b
         .profiles_saying(|rows| called(rows, "work").is_some())
         .await;
-    let here = called(&landed, "work").unwrap().id;
+    let here = called(&landed, "work").unwrap().id.clone();
 
     let conversation = b.drafting().await;
-    b.picks(conversation, here).await;
+    b.picks(conversation, &here).await;
 
-    a.renames(there, "weekend").await;
+    a.renames(&there, "weekend").await;
 
     let rows = b
         .profiles_saying(|rows| called(rows, "weekend").is_some())
@@ -880,12 +881,12 @@ async fn a_removal_at_home_takes_the_mirror_and_nulls_the_pairings_that_named_it
     a.saves("weekend").await;
 
     let landed = b.profiles_saying(|rows| rows.len() == 2).await;
-    let here = called(&landed, "work").unwrap().id;
+    let here = called(&landed, "work").unwrap().id.clone();
 
     let conversation = b.drafting().await;
-    b.picks(conversation, here).await;
+    b.picks(conversation, &here).await;
 
-    a.removes(there).await;
+    a.removes(&there).await;
 
     let rows = b.profiles_saying(|rows| rows.len() == 1).await;
 
@@ -916,10 +917,10 @@ async fn the_work_starts_under_a_mirror() {
     let landed = b
         .profiles_saying(|rows| called(rows, "work").is_some())
         .await;
-    let here = called(&landed, "work").unwrap().id;
+    let here = called(&landed, "work").unwrap().id.clone();
 
     let conversation = b.drafting().await;
-    b.picks(conversation, here).await;
+    b.picks(conversation, &here).await;
 
     assert_eq!(
         b.starts(conversation).await,
@@ -947,9 +948,10 @@ async fn a_member_that_stops_answering_keeps_its_rows() {
     // wrote down.
     store::record_mirror(
         &b.pool,
+        "7e0f1d2c-0000-4000-8000-000000000007",
         &Mirror {
             device: A.to_owned(),
-            id: 7,
+            was: None,
             login: true,
         },
         &store::ProfileFacts {
@@ -1020,9 +1022,10 @@ async fn a_members_own_profiles_are_taken_and_its_mirrors_are_not() {
     // refresher writes one.
     store::record_mirror(
         &a.pool,
+        "3e0f1d2c-0000-4000-8000-000000000003",
         &Mirror {
             device: C.to_owned(),
-            id: 3,
+            was: None,
             login: true,
         },
         &store::ProfileFacts {
@@ -1074,7 +1077,7 @@ async fn an_edit_made_here_lands_in_the_home_devices_own_profiles() {
     // A Pairing made against the mirror, so that *the row did not move* is an
     // assertion about something that names it.
     let conversation = b.drafting().await;
-    b.picks(conversation, mirror.id).await;
+    b.picks(conversation, &mirror.id).await;
 
     let (status, said) = b.saves_over(&mirror, Some("weekend")).await;
 
@@ -1220,22 +1223,22 @@ async fn a_removal_pressed_here_takes_the_profile_off_home_and_every_mirror_with
         .profiles_saying(|rows| called(rows, "work").is_some())
         .await;
 
-    let here = called(&on_b, "work").unwrap().id;
-    let over_there = called(&on_c, "work").unwrap().id;
+    let here = called(&on_b, "work").unwrap().id.clone();
+    let over_there = called(&on_c, "work").unwrap().id.clone();
 
     // One Conversation per device, each having picked the account: on A its own
     // row, and on the other two the mirror of it.
     let at_a = a.drafting().await;
-    a.picks(at_a, there).await;
+    a.picks(at_a, &there).await;
 
     let at_b = b.drafting().await;
-    b.picks(at_b, here).await;
+    b.picks(at_b, &here).await;
 
     let at_c = c.drafting().await;
-    c.picks(at_c, over_there).await;
+    c.picks(at_c, &over_there).await;
 
     // The press, made over the mirror on the device whose account it is not.
-    b.removes(here).await;
+    b.removes(&here).await;
 
     assert!(
         called(&a.profiles().await, "work").is_none(),
@@ -1283,9 +1286,10 @@ async fn with_the_home_device_away_both_presses_are_refused_naming_it() {
     // down.
     store::record_mirror(
         &b.pool,
+        "7e0f1d2c-0000-4000-8000-000000000007",
         &Mirror {
             device: A.to_owned(),
-            id: 7,
+            was: None,
             login: true,
         },
         &store::ProfileFacts {
@@ -1316,7 +1320,7 @@ async fn with_the_home_device_away_both_presses_are_refused_naming_it() {
         "the machine is named by the name the human gave it: {said}",
     );
 
-    let (status, said) = b.pressing_removal(mirror.id).await;
+    let (status, said) = b.pressing_removal(&mirror.id).await;
 
     assert_eq!(status, StatusCode::BAD_GATEWAY, "and so is the removal");
     assert!(said.contains(A_MACHINE), "named the same way: {said}");
@@ -1382,7 +1386,7 @@ async fn a_profile_with_no_login_at_home_reads_as_not_usable_away() {
     assert_eq!(names(&landed), vec!["keychain"]);
 
     let conversation = b.drafting().await;
-    b.picks(conversation, mirror.id).await;
+    b.picks(conversation, &mirror.id).await;
 
     assert_eq!(
         b.starts(conversation).await,
@@ -1467,7 +1471,7 @@ async fn a_mirror_whose_harness_is_absent_here_reads_broken_here_alone() {
     );
 
     let conversation = b.drafting().await;
-    b.picks(conversation, mirror.id).await;
+    b.picks(conversation, &mirror.id).await;
 
     assert_eq!(
         b.starts(conversation).await,
@@ -1495,9 +1499,10 @@ async fn a_mirror_whose_home_is_not_answering_reads_unreachable_and_refuses_star
     // wrote down — a login and all, because what is wrong is not the account.
     store::record_mirror(
         &b.pool,
+        "7e0f1d2c-0000-4000-8000-000000000007",
         &Mirror {
             device: A.to_owned(),
-            id: 7,
+            was: None,
             login: true,
         },
         &store::ProfileFacts {
@@ -1535,7 +1540,7 @@ async fn a_mirror_whose_home_is_not_answering_reads_unreachable_and_refuses_star
     assert_eq!(names(&rows), vec!["work"], "and it stays on the list");
 
     let conversation = b.drafting().await;
-    b.picks(conversation, mirror.id).await;
+    b.picks(conversation, &mirror.id).await;
 
     assert_eq!(
         b.starts(conversation).await,
@@ -1559,10 +1564,10 @@ async fn a_pairing_against_a_broken_mirror_still_reads_as_a_pairing() {
     let landed = b
         .profiles_saying(|rows| called(rows, "work").is_some())
         .await;
-    let here = called(&landed, "work").expect("the mirror").id;
+    let here = called(&landed, "work").expect("the mirror").id.clone();
 
     let conversation = b.drafting().await;
-    b.picks(conversation, here).await;
+    b.picks(conversation, &here).await;
 
     // The account signs itself out at home, which is a mirror with no login to
     // be made of it.
@@ -1756,9 +1761,10 @@ async fn an_unreachable_member_a_release_apart_is_refused_without_the_gap() {
 
     store::record_mirror(
         &b.pool,
+        "7e0f1d2c-0000-4000-8000-000000000007",
         &Mirror {
             device: A.to_owned(),
-            id: 7,
+            was: None,
             login: true,
         },
         &store::ProfileFacts {

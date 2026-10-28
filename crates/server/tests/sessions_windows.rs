@@ -1060,7 +1060,7 @@ fn said(text: &str, named: &[(&str, &Path)]) -> String {
 
 /// An Agent Profile saved over that account, on models that are worth reading
 /// back.
-async fn profile(app: &Router, account: &Path, name: &str) -> i64 {
+async fn profile(app: &Router, account: &Path, name: &str) -> String {
     let saved: ProfileSaved = post(
         app,
         "/api/ui/profiles",

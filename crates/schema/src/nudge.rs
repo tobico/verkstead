@@ -25,7 +25,7 @@ use ts_rs::TS;
 /// A page too old to know a kind treats it as everything having moved, which is
 /// the behaviour every kind used to get — so a new kind is safe to add and an
 /// old page stays correct against a newer server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Nudge {
@@ -169,7 +169,7 @@ pub enum Nudge {
     ///
     /// What lets a second device's modal show the address the first one's
     /// login printed, without either of them asking again.
-    Login { profile: i64 },
+    Login { profile: String },
 
     /// Everything of one device's, which is the widest thing there is to say:
     /// read back whatever of it is on screen.

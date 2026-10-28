@@ -102,10 +102,10 @@ pub enum ArrivingPicked {
     /// arrived rather than argued with.
     Skipped,
 
-    /// The Profile and model its sessions run under, the Profile by this
-    /// device's own id for it.
+    /// The Profile and model its sessions run under, the Profile by the uuid
+    /// this device holds it under — which is the one it has everywhere.
     Under {
-        profile_id: i64,
+        profile_id: String,
         model: Option<String>,
     },
 }

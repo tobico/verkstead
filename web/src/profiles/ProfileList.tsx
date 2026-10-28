@@ -380,9 +380,9 @@ function useProfiles() {
 export function ProfileList(props: {
   /// Which Profile's pane is open — its id, `"new"` while the blank form is, or
   /// `null` where the details pane is showing something else entirely.
-  opening: number | "new" | null;
+  opening: string | null;
   /// Open one, which is what pressing a card does.
-  open: (id: number) => void;
+  open: (id: string) => void;
   /// And open the blank form, which is what the plus does.
   add: () => void;
 }): JSX.Element {
@@ -613,7 +613,7 @@ function loggedIn(profile: ProfileEntry): boolean {
 export function ProfilePane(props: {
   /// Which Profile the form is about: its id, or `"new"` for one that does not
   /// exist yet.
-  profile: number | "new";
+  profile: string;
   /// The way back to the settings, which is a change of level rather than a
   /// navigation: what is open stays open, and the URL goes on saying so.
   back: () => void;
@@ -658,7 +658,7 @@ export function ProfilePane(props: {
   };
 
   const remove = useMutation(() => ({
-    mutationFn: (id: number) => deleteProfile(id),
+    mutationFn: (id: string) => deleteProfile(id),
     onSuccess: (outcome: ProfileDeleted) => {
       // A profile that was already gone is one this page's list is wrong about,
       // and reading it again is both the correction and the explanation.

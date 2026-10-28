@@ -74,7 +74,7 @@ async fn repo(pool: &SqlitePool) -> i64 {
 }
 
 /// An Agent Profile of this device's own for a Pairing to name.
-async fn profile(pool: &SqlitePool, name: &str) -> i64 {
+async fn profile(pool: &SqlitePool, name: &str) -> String {
     create_profile(
         pool,
         &ProfileFacts {
@@ -94,7 +94,7 @@ async fn profile(pool: &SqlitePool, name: &str) -> i64 {
 
 /// The Conversation as a transfer hands it over: grilling, on a branch somebody
 /// settled on, at the rank it already sat at and under the key it was born.
-fn arriving(repo_id: i64, profile_id: i64) -> Arrival {
+fn arriving(repo_id: i64, profile_id: &str) -> Arrival {
     Arrival {
         born: Birth {
             device: THE_OTHER_DEVICE.to_owned(),
@@ -107,11 +107,11 @@ fn arriving(repo_id: i64, profile_id: i64) -> Arrival {
         state: Lifecycle::Grilling,
         rank: RANK.to_owned(),
         grilling: ArrivingPicked::Under {
-            profile_id,
+            profile_id: profile_id.to_owned(),
             model: Some("gpt-5".to_owned()),
         },
         implementation: ArrivingPicked::Under {
-            profile_id,
+            profile_id: profile_id.to_owned(),
             model: Some("gpt-5".to_owned()),
         },
         review: ArrivingPicked::Skipped,
@@ -124,7 +124,7 @@ async fn a_conversation_arrives_under_this_devices_own_id_with_everything_else_a
     let repo = repo(&pool).await;
     let profile = profile(&pool, "work").await;
 
-    let landed = arrive(&pool, &arriving(repo, profile))
+    let landed = arrive(&pool, &arriving(repo, &profile))
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -140,15 +140,17 @@ async fn a_conversation_arrives_under_this_devices_own_id_with_everything_else_a
     assert_eq!(held.repo.id, repo, "in the Repo the matching settled");
 
     assert_eq!(
-        held.grilling_pairing.as_ref().map(|under| under.profile.id),
-        Some(profile),
+        held.grilling_pairing
+            .as_ref()
+            .map(|under| under.profile.id.clone()),
+        Some(profile.clone()),
         "and the grilling runs under a Profile of this device's own",
     );
     assert_eq!(
         held.implementation_pairing
             .as_ref()
-            .map(|under| under.profile.id),
-        Some(profile),
+            .map(|under| under.profile.id.clone()),
+        Some(profile.clone()),
         "and so does the implementation",
     );
     assert_eq!(
@@ -172,7 +174,7 @@ async fn the_rank_and_the_birth_key_arrive_as_they_were_rather_than_being_invent
         .unwrap()
         .expect("the Repo is registered");
 
-    let landed = arrive(&pool, &arriving(repo, profile))
+    let landed = arrive(&pool, &arriving(repo, &profile))
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -218,7 +220,7 @@ async fn nothing_arrives_against_a_repo_this_device_no_longer_holds() {
     let profile = profile(&pool, "work").await;
 
     assert_eq!(
-        arrive(&pool, &arriving(404, profile)).await.unwrap(),
+        arrive(&pool, &arriving(404, &profile)).await.unwrap(),
         None,
         "the id was matched against this registry a moment ago, and a Repo that \
          has gone since is no repository to put work in",
@@ -236,7 +238,7 @@ async fn a_copy_whose_move_never_finished_is_swept_whatever_state_it_is_in() {
     let repo = repo(&pool).await;
     let profile = profile(&pool, "work").await;
 
-    let landed = arrive(&pool, &arriving(repo, profile))
+    let landed = arrive(&pool, &arriving(repo, &profile))
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -294,7 +296,7 @@ async fn the_checkout_lands_against_the_row_that_arrived_before_it() {
     let repo = repo(&pool).await;
     let profile = profile(&pool, "work").await;
 
-    let landed = arrive(&pool, &arriving(repo, profile))
+    let landed = arrive(&pool, &arriving(repo, &profile))
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -355,7 +357,7 @@ async fn the_companions_checkouts_land_with_the_conversations_own() {
         .expect("nothing was registered at that path yet")
         .id;
 
-    let landed = arrive(&pool, &arriving(repo, profile))
+    let landed = arrive(&pool, &arriving(repo, &profile))
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -451,7 +453,7 @@ async fn a_conversation_coming_home_lands_on_the_row_it_left() {
         born: born.clone(),
         state: Lifecycle::Implementing,
         branch: "rate-limiting-again".to_owned(),
-        ..arriving(repo, profile)
+        ..arriving(repo, &profile)
     };
 
     assert_eq!(
@@ -486,8 +488,10 @@ async fn a_conversation_coming_home_lands_on_the_row_it_left() {
         "on the branch it is on now",
     );
     assert_eq!(
-        held.grilling_pairing.as_ref().map(|under| under.profile.id),
-        Some(profile),
+        held.grilling_pairing
+            .as_ref()
+            .map(|under| under.profile.id.clone()),
+        Some(profile.clone()),
         "under the Pairings that came with it",
     );
     assert_eq!(
@@ -540,7 +544,7 @@ async fn a_conversation_coming_home_to_a_repo_that_has_gone_is_refused() {
             device: THIS_DEVICE.to_owned(),
             id: ours,
         },
-        ..arriving(404, profile)
+        ..arriving(404, &profile)
     };
 
     assert_eq!(

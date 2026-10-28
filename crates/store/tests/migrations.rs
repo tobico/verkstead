@@ -93,16 +93,17 @@ use std::path::PathBuf;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, Clash, Commit, Decision, Event, Finished, Lifecycle, Merging, Mirror, Pairing,
+    Account, Clash, Commit, Decision, Event, Finished, Lifecycle, Merging, Minted, Mirror, Pairing,
     ProfileFacts, PullRequest, RanUnder, RoadmapStage, Rollup, Saving, StageOf, Standing,
     WaitingOn, asked_to_stop, check_rollup, clear_stop, commit_repo, conflict_fix_attempts,
     conversations, create_profile, finish_wrap_up, fix_attempts, load_conversation, load_profile,
     merging, open_database, open_pending_steer, pending_steer, profiles, pull_request,
     pull_request_repo, pull_requests, record_another_pull_request, record_check_rollup,
     record_commit, record_conflict_fix_attempt, record_fix_attempt, record_mirror,
-    recorded_commits, register_repo, save_brief, save_pending_steer, settle_wrap_up, stack,
-    stage_roadmap, standing, start_capture, start_conversation, start_grilling, start_stage,
-    start_unnamed_conversation, stop, stopped, timeline, update_profile, wrap_up_settled,
+    recorded_commits, register_repo, remembered_pairings, renumbered_profiles, save_brief,
+    save_pending_steer, settle_wrap_up, stack, stage_roadmap, stamp_the_profiles, standing,
+    start_capture, start_conversation, start_grilling, start_stage, start_unnamed_conversation,
+    stop, stopped, timeline, update_profile, wrap_up_settled,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -2545,6 +2546,30 @@ fn claude(name: &str) -> Account {
     }
 }
 
+/// The integer a Profile of this device's own had before the uuids, as the row
+/// keeps it — read off the table, because the device half of where it was
+/// minted arrives only at the serve.
+async fn minted_id(pool: &SqlitePool, id: &str) -> Option<i64> {
+    let (minted,): (Option<i64>,) = sqlx::query_as("SELECT minted_id FROM profiles WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+    minted
+}
+
+/// The uuid of this device's own Profile called `name`.
+async fn named(pool: &SqlitePool, name: &str) -> String {
+    profiles(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|profile| profile.name.as_deref() == Some(name) && profile.mirror.is_none())
+        .expect("a Profile of this device's own called that")
+        .id
+}
+
 /// Every saved Profile keeps its name, its account and its models — nothing here
 /// writes a null over what somebody typed — and both uniqueness rules hold over
 /// the rebuilt table afterwards.
@@ -2566,8 +2591,9 @@ async fn the_profiles_of_before_keep_their_names_and_both_rules_hold() {
         assert_eq!(saved[0].name.as_deref(), Some("personal"));
         assert_eq!(saved[1].name.as_deref(), Some("work"));
         assert_eq!(
-            saved[1].id, 1,
-            "the ids come across, being what points here"
+            minted_id(&pool, &saved[1].id).await,
+            Some(1),
+            "the ids come across as where each was minted, being what a mirror of it holds"
         );
         assert_eq!(saved[1].account, claude("work"));
         assert_eq!(saved[1].models, ["claude-opus-5"]);
@@ -2608,14 +2634,14 @@ async fn the_profiles_of_before_keep_their_names_and_both_rules_hold() {
         memory: true,
     };
 
+    let fresh = create_profile(&pool, &unnamed(claude("default")))
+        .await
+        .unwrap()
+        .expect("a harness with no unnamed Profile takes one");
     assert_eq!(
-        create_profile(&pool, &unnamed(claude("default")))
-            .await
-            .unwrap()
-            .expect("a harness with no unnamed Profile takes one")
-            .id,
-        3,
-        "the rebuilt table goes on counting from where the old one left off",
+        minted_id(&pool, &fresh.id).await,
+        None,
+        "a Profile saved after the rebuild was never numbered anything else",
     );
     assert_eq!(
         create_profile(&pool, &unnamed(claude("second")))
@@ -2697,10 +2723,12 @@ async fn the_profiles_of_before_the_memory_switch_share_their_memory() {
         .await
         .unwrap();
 
+    let work = named(&pool, "work").await;
+
     assert_eq!(
         update_profile(
             &pool,
-            1,
+            &work,
             &ProfileFacts {
                 name: Some("work".to_owned()),
                 account: claude("work"),
@@ -2718,7 +2746,7 @@ async fn the_profiles_of_before_the_memory_switch_share_their_memory() {
         .await
         .unwrap();
     assert!(
-        !load_profile(&pool, 1).await.unwrap().unwrap().memory,
+        !load_profile(&pool, &work).await.unwrap().unwrap().memory,
         "a reopening does not switch it back on"
     );
 }
@@ -2816,8 +2844,9 @@ async fn the_profiles_of_before_the_mirrors_take_a_members_beside_them() {
         assert_eq!(saved[0].name, None, "the unnamed one sorts first");
         assert_eq!(saved[1].name.as_deref(), Some("work"));
         assert_eq!(
-            saved[1].id, 1,
-            "the ids come across, being what points here"
+            minted_id(&pool, &saved[1].id).await,
+            Some(1),
+            "the ids come across as where each was minted, being what a mirror of it holds"
         );
         assert_eq!(saved[1].account, claude("work"));
         assert_eq!(saved[1].models, ["claude-opus-5"]);
@@ -2836,12 +2865,13 @@ async fn the_profiles_of_before_the_mirrors_take_a_members_beside_them() {
     // A member's account called what this device already calls one of its own,
     // and a member's unnamed Claude account beside this device's: two rows the
     // old table's rules would each have refused.
-    for (at_home, name) in [(7, Some("work")), (9, None)] {
+    for (at_home, name) in [("theirs-work", Some("work")), ("theirs-default", None)] {
         record_mirror(
             &pool,
+            at_home,
             &Mirror {
                 device: "0011223344556677889900aabbccddee".to_owned(),
-                id: at_home,
+                was: None,
                 login: true,
             },
             &ProfileFacts {
@@ -2932,11 +2962,14 @@ async fn a_mirrors_login_at_home_survives_the_rewrites() {
         .await
         .unwrap();
 
-    let id = record_mirror(
+    let id = "theirs-keychain";
+
+    record_mirror(
         &pool,
+        id,
         &Mirror {
             device: "0011223344556677889900aabbccddee".to_owned(),
-            id: 7,
+            was: None,
             login: false,
         },
         &ProfileFacts {
@@ -3488,4 +3521,341 @@ async fn a_stage_recorded_before_the_label_keeps_its_roadmap_and_no_stage() {
 
         pool.close().await;
     }
+}
+
+/// The member a mirror in the database below is at home on.
+const A_MEMBER: &str = "0011223344556677889900aabbccddee";
+
+/// A database whose Profiles were numbered, which is every Verkstead before a
+/// Profile was the cluster's (ADR-0028): `work` is this device's own and
+/// numbered 1, and `theirs` is a mirror numbered 2 here of the Profile a member
+/// numbers 5.
+///
+/// One Conversation names both, in every place a Profile was named: its three
+/// Pairings, a signed-out stop, its pending steer and a recorded steer — and
+/// its Repo remembers the mirror. Everything that holds a Profile is put back
+/// in the shape it had, columns of integers, and the rest is left as today's.
+async fn profiles_numbered_before_uuids(dir: &Path) -> (i64, i64) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE, None)
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_grilling(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        Path::new("/data/worktrees/verkstead-rate-limiting"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    open_pending_steer(&pool, id).await.unwrap();
+
+    let mut conn = pool.acquire().await.unwrap();
+
+    for statement in [
+        "DROP TABLE profile_models",
+        "DROP TABLE profile_homes",
+        "DROP TABLE repo_pairings",
+        "DROP TABLE profiles",
+        "CREATE TABLE profiles (
+             id          INTEGER PRIMARY KEY AUTOINCREMENT,
+             name        TEXT,
+             claude_dir  TEXT NOT NULL,
+             config_file TEXT NOT NULL,
+             model       TEXT NOT NULL,
+             agent_type  TEXT NOT NULL,
+             memory      INTEGER NOT NULL DEFAULT 1,
+             home_device TEXT,
+             home_id     INTEGER,
+             home_login  INTEGER
+         ) STRICT",
+        "CREATE TABLE profile_models (
+             profile_id INTEGER NOT NULL REFERENCES profiles(id),
+             position   INTEGER NOT NULL,
+             model      TEXT NOT NULL,
+             PRIMARY KEY (profile_id, position)
+         ) STRICT",
+        "CREATE TABLE profile_homes (
+             profile_id INTEGER PRIMARY KEY REFERENCES profiles(id),
+             home       TEXT NOT NULL
+         ) STRICT",
+        "CREATE TABLE repo_pairings (
+             repo_id    INTEGER NOT NULL REFERENCES repos(id),
+             role       TEXT NOT NULL,
+             profile_id INTEGER NOT NULL REFERENCES profiles(id),
+             model      TEXT NOT NULL,
+             PRIMARY KEY (repo_id, role)
+         ) STRICT",
+        "ALTER TABLE conversations DROP COLUMN grilling_profile_id",
+        "ALTER TABLE conversations ADD COLUMN grilling_profile_id INTEGER REFERENCES profiles(id)",
+        "ALTER TABLE conversations DROP COLUMN implementation_profile_id",
+        "ALTER TABLE conversations ADD COLUMN implementation_profile_id INTEGER \
+         REFERENCES profiles(id)",
+        "ALTER TABLE conversations DROP COLUMN review_profile_id",
+        "ALTER TABLE conversations ADD COLUMN review_profile_id INTEGER REFERENCES profiles(id)",
+        "ALTER TABLE conversations DROP COLUMN stopped_signed_out",
+        "ALTER TABLE conversations ADD COLUMN stopped_signed_out INTEGER",
+        "ALTER TABLE pending_steers DROP COLUMN profile_id",
+        "ALTER TABLE pending_steers ADD COLUMN profile_id INTEGER REFERENCES profiles(id)",
+        "ALTER TABLE steers DROP COLUMN profile_id",
+        "ALTER TABLE steers ADD COLUMN profile_id INTEGER",
+    ] {
+        // On the one connection: a column dropped on one and added on another
+        // that has not caught up with the drop is refused as one it has.
+        sqlx::query(statement).execute(&mut *conn).await.unwrap();
+    }
+
+    drop(conn);
+
+    for (number, account, home) in [(1, "work", None), (2, "theirs", Some((A_MEMBER, 5)))] {
+        sqlx::query(
+            "INSERT INTO profiles
+                 (id, name, claude_dir, config_file, model, agent_type, home_device, home_id,
+                  home_login)
+             VALUES (?, 'work', ?, ?, 'claude-opus-5', 'claude', ?, ?, ?)",
+        )
+        .bind(number)
+        .bind(format!("/watched/accounts/{account}/.claude"))
+        .bind(format!("/watched/accounts/{account}/.claude.json"))
+        .bind(home.map(|(device, _)| device))
+        .bind(home.map(|(_, id)| id))
+        .bind(home.map(|_| true))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO profile_models (profile_id, position, model)
+             VALUES (?, 0, 'claude-opus-5'), (?, 1, 'claude-fable-5')",
+        )
+        .bind(number)
+        .bind(number)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    sqlx::query(
+        "UPDATE conversations
+         SET grilling_profile_id = 1, implementation_profile_id = 2, review_profile_id = 1,
+             stopped_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), stopped_by = 'verkstead',
+             stopped_notice = (SELECT max(id) FROM timeline_events WHERE conversation_id = ?),
+             stopped_signed_out = 1
+         WHERE id = ?",
+    )
+    .bind(id)
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for role in ["grilling", "implementation", "review"] {
+        sqlx::query(
+            "INSERT INTO pairing_models (conversation_id, role, model) VALUES (?, ?, 'claude-fable-5')",
+        )
+        .bind(id)
+        .bind(role)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    sqlx::query(
+        "INSERT INTO repo_pairings (repo_id, role, profile_id, model)
+         VALUES (?, 'grilling', 2, 'claude-opus-5')",
+    )
+    .bind(repo)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "UPDATE pending_steers SET profile_id = 2, model = 'claude-opus-5'
+         WHERE conversation_id = ?",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO steers (event_id, conversation_id, digest, interrupt, profile_id, model)
+         SELECT max(id), ?, 0, 0, 1, 'claude-opus-5' FROM timeline_events WHERE conversation_id = ?",
+    )
+    .bind(id)
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    pool.close().await;
+
+    (repo, id)
+}
+
+/// Every Profile is named by a uuid after the switch, and everything that named
+/// one by its integer names the same Profile by that uuid: a Conversation's
+/// three Pairings, the Profile its signed-out stop is waiting on, its pending
+/// steer, a recorded steer and the Repo's memory. This device's own keeps where
+/// it was minted; a mirror keeps the device and the id it had at home; and a
+/// second open mints nothing again.
+#[tokio::test]
+async fn the_profiles_of_before_the_uuids_are_named_by_one_everywhere() {
+    let dir = tempfile::tempdir().unwrap();
+    let (repo, id) = profiles_numbered_before_uuids(dir.path()).await;
+
+    let mut first: Option<(String, String)> = None;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again, and nothing is minted twice",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+        stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+        let saved = profiles(&pool).await.unwrap();
+        assert_eq!(saved.len(), 2, "{opening}");
+
+        let ours = saved
+            .iter()
+            .find(|profile| profile.mirror.is_none())
+            .expect("this device's own");
+        let theirs = saved
+            .iter()
+            .find(|profile| profile.mirror.is_some())
+            .expect("the member's");
+
+        for profile in [ours, theirs] {
+            assert_eq!(profile.id.len(), 36, "a uuid: {}", profile.id);
+            assert_eq!(&profile.id[14..15], "4", "of version four: {}", profile.id);
+            assert_eq!(profile.models, ["claude-opus-5", "claude-fable-5"]);
+        }
+        assert_ne!(ours.id, theirs.id);
+
+        assert_eq!(
+            ours.minted,
+            Some(Minted {
+                device: THIS_DEVICE.to_owned(),
+                id: 1,
+            }),
+            "this device's own keeps where it was minted: {opening}",
+        );
+        assert_eq!(theirs.minted, None);
+        assert_eq!(
+            theirs.mirror,
+            Some(Mirror {
+                device: A_MEMBER.to_owned(),
+                was: Some(5),
+                login: true,
+            }),
+            "a mirror keeps where it is at home and the id it had there: {opening}",
+        );
+
+        let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+        let named = |pairing: Option<&Pairing>| {
+            pairing.map(|pairing| (pairing.profile.id.clone(), pairing.model.clone()))
+        };
+        let model = Some("claude-fable-5".to_owned());
+
+        assert_eq!(
+            named(conversation.grilling_pairing.as_ref()),
+            Some((ours.id.clone(), model.clone())),
+            "the grilling Pairing: {opening}",
+        );
+        assert_eq!(
+            named(conversation.implementation_pairing.as_ref()),
+            Some((theirs.id.clone(), model.clone())),
+            "the implementation Pairing: {opening}",
+        );
+        assert_eq!(
+            named(conversation.review_pairing.pairing()),
+            Some((ours.id.clone(), model.clone())),
+            "the review Pairing: {opening}",
+        );
+
+        assert_eq!(
+            stopped(&pool, id).await.unwrap().unwrap().signed_out,
+            Some(ours.id.clone()),
+            "the login a signed-out stop is waiting on: {opening}",
+        );
+
+        assert_eq!(
+            remembered_pairings(&pool, repo)
+                .await
+                .unwrap()
+                .grilling
+                .pairing()
+                .map(|pairing| pairing.profile.id.clone()),
+            Some(theirs.id.clone()),
+            "the Repo's memory of its last Pairing: {opening}",
+        );
+
+        assert_eq!(
+            pending_steer(&pool, id)
+                .await
+                .unwrap()
+                .unwrap()
+                .form
+                .pairing
+                .map(|pairing| pairing.profile_id),
+            Some(theirs.id.clone()),
+            "the pending steer's picker: {opening}",
+        );
+
+        let (recorded,): (Option<String>,) =
+            sqlx::query_as("SELECT profile_id FROM steers WHERE conversation_id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            recorded,
+            Some(ours.id.clone()),
+            "the recorded steer: {opening}"
+        );
+
+        assert_eq!(
+            renumbered_profiles(&pool).await.unwrap(),
+            vec![(1, ours.id.clone()), (2, theirs.id.clone())],
+            "and which integer became which uuid, for the serve to move what is named by \
+             one outside the database: {opening}",
+        );
+
+        match &first {
+            None => first = Some((ours.id.clone(), theirs.id.clone())),
+            Some(was) => assert_eq!(was, &(ours.id.clone(), theirs.id.clone()), "{opening}"),
+        }
+
+        pool.close().await;
+    }
+}
+
+/// A database made fresh keys its Profiles by uuid and has nothing to renumber.
+#[tokio::test]
+async fn a_fresh_database_keys_its_profiles_by_uuid() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let declared: Option<(String,)> =
+        sqlx::query_as("SELECT type FROM pragma_table_info('profiles') WHERE name = 'id'")
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+    assert_eq!(declared, Some(("TEXT".to_owned(),)));
+    assert_eq!(renumbered_profiles(&pool).await.unwrap(), Vec::new());
 }

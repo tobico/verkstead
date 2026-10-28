@@ -188,7 +188,7 @@ pub struct Renaming {
     /// the ordinary end of an account deleted a year after the Steer that ran
     /// under it: the column lands empty rather than pointing at somebody else's
     /// account, and the rest of the row stands.
-    pub profiles: HashMap<i64, i64>,
+    pub profiles: HashMap<String, String>,
 }
 
 /// What one column of a carried row holds.
@@ -920,14 +920,24 @@ impl Slice {
         self.named(Holds::Repo)
     }
 
-    /// And every Agent Profile it names.
-    pub fn profiles(&self) -> BTreeSet<i64> {
-        self.named(Holds::Profile)
+    /// And every Agent Profile it names, by uuid.
+    pub fn profiles(&self) -> BTreeSet<String> {
+        let mut named = BTreeSet::new();
+
+        for (rows, at) in self.columns(Holds::Profile) {
+            named.extend(rows.rows.iter().filter_map(|row| match row.get(at)? {
+                Cell::Text(id) => Some(id.clone()),
+                _ => None,
+            }));
+        }
+
+        named
     }
 
-    /// The ids held by every column of that kind.
-    fn named(&self, kind: Holds) -> BTreeSet<i64> {
-        let mut named = BTreeSet::new();
+    /// Every table of the slice that has a column of that kind, and where in
+    /// its rows the column is.
+    fn columns(&self, kind: Holds) -> Vec<(&Rows, usize)> {
+        let mut found = Vec::new();
 
         for rows in &self.tables {
             let Some(carried) = CARRIED.iter().find(|carried| carried.table == rows.table) else {
@@ -939,19 +949,28 @@ impl Slice {
                     continue;
                 }
 
-                let Some(at) = rows.columns.iter().position(|name| name == column) else {
-                    continue;
-                };
-
-                named.extend(
-                    rows.rows
-                        .iter()
-                        .filter_map(|row| row.get(at)?.id())
-                        // The Repo column that holds no repository, which is
-                        // nothing to go and match — see [`NO_REPOSITORY`].
-                        .filter(|id| !(kind == Holds::Repo && *id == NO_REPOSITORY)),
-                );
+                if let Some(at) = rows.columns.iter().position(|name| name == column) {
+                    found.push((rows, at));
+                }
             }
+        }
+
+        found
+    }
+
+    /// The ids held by every column of that kind.
+    fn named(&self, kind: Holds) -> BTreeSet<i64> {
+        let mut named = BTreeSet::new();
+
+        for (rows, at) in self.columns(kind) {
+            named.extend(
+                rows.rows
+                    .iter()
+                    .filter_map(|row| row.get(at)?.id())
+                    // The Repo column that holds no repository, which is
+                    // nothing to go and match — see [`NO_REPOSITORY`].
+                    .filter(|id| !(kind == Holds::Repo && *id == NO_REPOSITORY)),
+            );
         }
 
         named
@@ -1131,8 +1150,13 @@ impl Landing<'_> {
                 // and the alternative to an empty column is a row pointing at
                 // somebody else's account.
                 Some(Holds::Profile) => {
-                    match cell.id().and_then(|was| self.renaming.profiles.get(&was)) {
-                        Some(here) => Cell::Int(*here),
+                    let here = match &cell {
+                        Cell::Text(was) => self.renaming.profiles.get(was),
+                        _ => None,
+                    };
+
+                    match here {
+                        Some(here) => Cell::Text(here.clone()),
                         None => Cell::Null,
                     }
                 }

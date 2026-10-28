@@ -69,7 +69,7 @@ describe("the settings page's own paths", () => {
   /// And the one named by an id, which takes the word `new` in the same
   /// segment.
   for (const opening of [
-    opensProfile(4),
+    opensProfile("44444444-4444-4444-8444-444444444444"),
     opensProfile("new"),
   ] satisfies Opening[]) {
     it(`opens ${opening} at the path its card leads to`, () => {

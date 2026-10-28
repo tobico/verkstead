@@ -188,7 +188,8 @@ pub struct ProfileTrouble {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileEntry {
-    pub id: i64,
+    /// The uuid it is known by, the same on every device that holds it.
+    pub id: String,
 
     /// What the human calls this account, and `null` where they have called it
     /// nothing.
@@ -528,7 +529,8 @@ pub struct RoleChoice {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileChoice {
-    pub profile_id: i64,
+    /// The Profile, by its uuid.
+    pub profile_id: String,
 
     /// One of that Profile's models. Never absent: there is no default model
     /// anywhere, so a Pairing is picked whole or not at all.

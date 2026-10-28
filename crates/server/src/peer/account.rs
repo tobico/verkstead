@@ -87,14 +87,14 @@ const MOST_A_LOGIN_IS: usize = 64 * 1024;
 ///
 /// The reads go in one blocking task: they are a handful of small files, and a
 /// launch asks once.
-pub(crate) async fn held(State(state): State<AppState>, Path(profile): Path<i64>) -> Response {
-    let held = match store::load_profile(&state.pool, profile).await {
+pub(crate) async fn held(State(state): State<AppState>, Path(profile): Path<String>) -> Response {
+    let held = match store::load_profile(&state.pool, &profile).await {
         Ok(held) => held,
 
         Err(why) => {
             tracing::error!(
                 error = ?why,
-                profile,
+                profile = %profile,
                 "a member asked after one of this device's accounts and the Profile could not \
                  be read",
             );
@@ -146,7 +146,7 @@ pub(crate) async fn held(State(state): State<AppState>, Path(profile): Path<i64>
         Err(why) => {
             tracing::error!(
                 error = ?why,
-                profile,
+                profile = %profile,
                 "the account a member asked after could not be read off the disk",
             );
 
@@ -186,16 +186,16 @@ pub(crate) async fn held(State(state): State<AppState>, Path(profile): Path<i64>
 /// and a row that has gone is a Profile removed while a session ran under it.
 pub(crate) async fn written(
     State(state): State<AppState>,
-    Path(profile): Path<i64>,
+    Path(profile): Path<String>,
     Json(sent): Json<AccountLogin>,
 ) -> Response {
-    let held = match store::load_profile(&state.pool, profile).await {
+    let held = match store::load_profile(&state.pool, &profile).await {
         Ok(held) => held,
 
         Err(why) => {
             tracing::error!(
                 error = ?why,
-                profile,
+                profile = %profile,
                 "a member sent back the login of one of this device's accounts and the Profile \
                  could not be read",
             );
@@ -230,7 +230,7 @@ pub(crate) async fn written(
     {
         Ok(Ok(())) => {
             tracing::debug!(
-                profile,
+                profile = %profile,
                 "the login a member's session left was written into this device's account",
             );
 
@@ -240,7 +240,7 @@ pub(crate) async fn written(
         Ok(Err(why)) => {
             tracing::error!(
                 error = ?why,
-                profile,
+                profile = %profile,
                 login = %login.display(),
                 "the login a member's session left could not be written into this device's \
                  account, so that account may read as signed out here",
@@ -256,7 +256,7 @@ pub(crate) async fn written(
         Err(why) => {
             tracing::error!(
                 error = ?why,
-                profile,
+                profile = %profile,
                 "writing the login a member's session left ended badly",
             );
 

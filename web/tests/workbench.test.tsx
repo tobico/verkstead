@@ -6166,7 +6166,7 @@ describe("a conversation's pairings", () => {
       account: { agent_type: "Grok", home: "/srv/accounts/grok" },
       broken: null,
       login: true,
-      id: 9,
+      id: "99999999-9999-4999-8999-999999999999",
       memory: true,
       device: null,
       models: ["grok-4.6"],
@@ -13380,7 +13380,7 @@ describe("steering a conversation", () => {
     await waitFor(() => expect(writes(fetching, STEER_SAVE)).toBe(1));
     expect(sent(fetching, STEER_SAVE)).toMatchObject({
       target: "Grilling",
-      pairing: { profile_id: 3, model: "claude-sonnet-5" },
+      pairing: { profile_id: PROFILES[2]!.id, model: "claude-sonnet-5" },
     });
   });
 
@@ -13392,7 +13392,7 @@ describe("steering a conversation", () => {
     theGrillingSteering({
       pending_steer: pending({
         target: "Grilling",
-        pairing: { profile_id: 3, model: "claude-sonnet-5" },
+        pairing: { profile_id: PROFILES[2]!.id, model: "claude-sonnet-5" },
       }),
     });
     const { container } = mount(`/conversations/${GRILLING.id}/steer`);
@@ -17741,7 +17741,7 @@ describe("the notice of a stop", () => {
 describe("a run stopped because its account signed out", () => {
   /// The press the server puts on the stop's own notice, for an account at
   /// home on this device (ADR-0022).
-  const PRESS = { profile: 2, name: "opus" };
+  const PRESS = { profile: PROFILES[1]!.id, name: "opus" };
   const LOGIN = `/api/ui/profiles/${PRESS.profile}/login`;
 
   /// The stopped conversation with that press on its notice, or none.

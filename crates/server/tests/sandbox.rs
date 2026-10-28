@@ -978,10 +978,10 @@ async fn grilling_with(
         .unwrap()
         .expect("the Conversation starts");
 
-    store::set_grilling_pairing(&pool, id, profile.id, profile.model())
+    store::set_grilling_pairing(&pool, id, &profile.id, profile.model())
         .await
         .unwrap();
-    store::set_implementation_pairing(&pool, id, profile.id, profile.model())
+    store::set_implementation_pairing(&pool, id, &profile.id, profile.model())
         .await
         .unwrap();
 
