@@ -73,6 +73,12 @@ use crate::store;
 /// reason — see [`super::MOST_THE_PROFILES_ARE`].
 const MOST_AN_ACCOUNT_IS: usize = 1024 * 1024;
 
+/// What a launch from a copy is refused with where no device it is bound on
+/// holds a login to fetch: the gap, naming no device — the row's own reading of
+/// it, see [`verkstead_render::Broken::NoBoundDevice`].
+const NO_BOUND_DEVICE: &str =
+    "No device this profile is bound on has a login to copy. Log in on one of them.";
+
 /// A member's account mirrored here for a launch to be made out of: the Profile
 /// the launch reads in the mirror row's place, and what its ending has to write
 /// back home.
@@ -121,6 +127,14 @@ pub struct Lent {
     came_down: Option<Fingerprint>,
 }
 
+impl Lent {
+    /// The **Device Id** the account was fetched from: one the Profile is bound
+    /// on, and the one the memory store is synced with and a sign-out names.
+    pub fn at(&self) -> &str {
+        &self.at
+    }
+}
+
 /// What a login is remembered by across a session: the SHA-256 of what came down
 /// in it.
 ///
@@ -152,21 +166,35 @@ pub async fn fetched(
         return Ok(None);
     };
 
-    let Some(at) = unbound.device().map(str::to_owned) else {
-        return Err(Refusal::ours(
-            "This profile isn't bound on any device linked here, so there's no account to run \
-             it from."
-                .to_owned(),
-        ));
-    };
+    // The first device bound on it, whose binding holds a login, that
+    // answers: one not answering is passed over for the next, and where none
+    // answered the first one's refusal is the one said, it naming a machine.
+    let mut refused = None;
+    let mut fetched = None;
 
-    let said: Vec<AccountFile> = relaying::word_from(
-        devices,
-        &at,
-        relaying::asking(ACCOUNT.replace("{profile}", &profile.id)),
-        MOST_AN_ACCOUNT_IS,
-    )
-    .await?;
+    for at in &unbound.lending {
+        match relaying::word_from::<Vec<AccountFile>>(
+            devices,
+            at,
+            relaying::asking(ACCOUNT.replace("{profile}", &profile.id)),
+            MOST_AN_ACCOUNT_IS,
+        )
+        .await
+        {
+            Ok(said) => {
+                fetched = Some((at.clone(), said));
+                break;
+            }
+
+            Err(why) => {
+                refused.get_or_insert(why);
+            }
+        }
+    }
+
+    let Some((at, said)) = fetched else {
+        return Err(refused.unwrap_or_else(|| Refusal::ours(NO_BOUND_DEVICE.to_owned())));
+    };
 
     let under = homes.account_mirror(&profile.id);
     let agent_type = profile.agent_type();
@@ -384,6 +412,11 @@ impl Lending {
             devices: devices.cloned(),
             lent,
         }
+    }
+
+    /// The **Device Id** the account was fetched from — see [`Lent::at`].
+    pub fn at(&self) -> &str {
+        self.lent.at()
     }
 
     /// The login a session away from home left, written back into the account it

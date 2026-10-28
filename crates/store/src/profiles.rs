@@ -270,7 +270,7 @@ pub struct Minted {
 }
 
 /// Where a Profile this device holds no binding of is bound: the devices whose
-/// binding of it this device holds.
+/// binding of it this device holds, and which of them hold a login.
 ///
 /// **Its [`Profile::account`] is the first of those devices' paths**, which
 /// belong to no filesystem here — two machines set up alike hold the same
@@ -284,14 +284,11 @@ pub struct Unbound {
     /// order those bindings were written down here. Empty where none has
     /// arrived.
     pub bound_on: Vec<String>,
-}
 
-impl Unbound {
-    /// The device a session here fetches the account from: the first that
-    /// holds a binding of it, or `None` where none does.
-    pub fn device(&self) -> Option<&str> {
-        self.bound_on.first().map(String::as_str)
-    }
+    /// And those of them whose binding **holds a login file**, in the same
+    /// order: the devices a session here can fetch the account from. A binding
+    /// without one is not a source — there is nothing in it to copy.
+    pub lending: Vec<String>,
 }
 
 impl Profile {
@@ -540,6 +537,22 @@ pub struct Binding {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<String>,
+
+    /// Whether the account at those paths holds a **login file**, as the
+    /// device bound on it last looked — see [`logins_held`]. A binding without
+    /// one is no source for a device running the Profile from a copy.
+    ///
+    /// Taken to hold one where a binding does not say, which is every binding
+    /// written before it was said: what that device's next look says goes over
+    /// it.
+    #[serde(default = "holding")]
+    pub login: bool,
+}
+
+/// What a binding that says nothing of its login is taken to hold — see
+/// [`Binding::login`].
+fn holding() -> bool {
+    true
 }
 
 impl Binding {
@@ -553,13 +566,20 @@ impl Binding {
                 claude_dir: Some(text(claude_dir)?.to_owned()),
                 config_file: Some(text(config_file)?.to_owned()),
                 home: None,
+                login: holding(),
             },
             Account::Codex { home } | Account::Grok { home } | Account::OpenCode { home } => Self {
                 claude_dir: None,
                 config_file: None,
                 home: Some(text(home)?.to_owned()),
+                login: holding(),
             },
         })
+    }
+
+    /// The paths it names, whatever it says of the login.
+    fn paths(&self) -> (&Option<String>, &Option<String>, &Option<String>) {
+        (&self.claude_dir, &self.config_file, &self.home)
     }
 
     /// And the account it is, for a Profile of `harness` — refused where it is
@@ -958,9 +978,15 @@ pub async fn update_profile(pool: &SqlitePool, id: &str, facts: &ProfileFacts) -
 
     let here = here(&mut tx).await?;
 
-    let bound = replicated::record_on::<Bindings>(&mut tx, &binding_uuid(id, &here))
+    // This device's binding, where it holds a live one: whether the account
+    // at its paths held a login is what it last looked, and a save that kept
+    // the paths keeps that — see [`logins_held`].
+    let binding = replicated::record_on::<Bindings>(&mut tx, &binding_uuid(id, &here))
         .await?
-        .is_some_and(|binding| !binding.removed());
+        .filter(|binding| !binding.removed())
+        .map(|binding| binding.fields);
+
+    let bound = binding.is_some();
 
     let facts = match bound {
         true => facts.clone(),
@@ -986,12 +1012,18 @@ pub async fn update_profile(pool: &SqlitePool, id: &str, facts: &ProfileFacts) -
     )
     .await?;
 
-    if bound {
+    if let Some(held) = binding {
+        let mut binding = Binding::of(&facts.account)?;
+
+        if binding.paths() == held.paths() {
+            binding.login = held.login;
+        }
+
         replicated::written_on::<Bindings>(
             &mut tx,
             &here,
             &binding_uuid(id, &here),
-            &Binding::of(&facts.account)?,
+            &binding,
             true,
         )
         .await?;
@@ -1051,6 +1083,72 @@ pub async fn delete_profile(pool: &SqlitePool, id: &str) -> Result<Deleting> {
         .with_context(|| format!("removing Profile {id}"))?;
 
     Ok(Deleting::Deleted)
+}
+
+/// Say whether the account each of this device's bindings names holds a
+/// login file: each `(Profile uuid, held)` written over this device's binding
+/// of it where that binding says otherwise, and nothing else touched.
+///
+/// **The bound device is the one that can look**, so it is the one that says:
+/// a device running the Profile from a copy fetches the account from a device
+/// whose binding holds one, and a binding written here replicates like any
+/// other. Asked by the server whenever it reads its Profiles — see
+/// `verkstead_server::profiles`. `true` where any binding moved, which is the
+/// members' cue to pull.
+///
+/// Read before anything is written, so the ordinary read — where nothing moved
+/// — takes no writer's lock.
+pub async fn logins_held(pool: &SqlitePool, held: &[(String, bool)]) -> Result<bool> {
+    let moving = {
+        let mut tx = super::reading(pool, "reading which accounts hold a login").await?;
+        let here = here(&mut tx).await?;
+        let mut moving = false;
+
+        for (id, login) in held {
+            moving |= replicated::record_on::<Bindings>(&mut tx, &binding_uuid(id, &here))
+                .await?
+                .is_some_and(|binding| !binding.removed() && binding.fields.login != *login);
+        }
+
+        moving
+    };
+
+    if !moving {
+        return Ok(false);
+    }
+
+    let mut tx = super::writing(pool, "saying which accounts hold a login").await?;
+
+    let here = here(&mut tx).await?;
+    let mut moved = false;
+
+    for (id, login) in held {
+        let uuid = binding_uuid(id, &here);
+
+        let Some(binding) = replicated::record_on::<Bindings>(&mut tx, &uuid).await? else {
+            continue;
+        };
+
+        if binding.removed() || binding.fields.login == *login {
+            continue;
+        }
+
+        let binding = Binding {
+            login: *login,
+            ..binding.fields
+        };
+
+        moved |= matches!(
+            replicated::written_on::<Bindings>(&mut tx, &here, &uuid, &binding, false).await?,
+            replicated::Written::Written
+        );
+    }
+
+    tx.commit()
+        .await
+        .context("saying which accounts hold a login")?;
+
+    Ok(moved)
 }
 
 /// Write `facts` down as the record and the binding `device` wrote of the
@@ -1291,9 +1389,17 @@ fn profile_of(
                 .find_map(|(_, binding)| binding.account(harness, &id).ok())
                 .unwrap_or_else(|| Account::nowhere(harness));
 
-            let bound_on = elsewhere.map(|(device, _)| device.clone()).collect();
+            let bound_on = elsewhere
+                .clone()
+                .map(|(device, _)| device.clone())
+                .collect();
 
-            (account, Some(Unbound { bound_on }))
+            let lending = elsewhere
+                .filter(|(_, binding)| binding.login)
+                .map(|(device, _)| device.clone())
+                .collect();
+
+            (account, Some(Unbound { bound_on, lending }))
         }
     };
 

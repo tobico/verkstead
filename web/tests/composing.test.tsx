@@ -1204,11 +1204,10 @@ describe("the device the compose page is drafting onto", () => {
   /// row saying what is in the way is something to go and put right, and a row
   /// quietly missing is a human looking for a profile they know they saved.
   ///
-  /// Three findings and one word apiece — the short form of the sentence the
+  /// Two findings and a few words apiece — the short form of the sentence the
   /// card in the Profiles section says in full, see `src/broken.ts`.
   it.each([
-    ["HomeUnreachable", "unreachable"],
-    ["NoLoginAtHome", "no login at home"],
+    ["NoBoundDevice", "no bound device reachable"],
     ["HarnessMissing", "not on this machine"],
   ] as const)("keeps a member's account reading %s on the picker", async (broken, said) => {
     theCluster(

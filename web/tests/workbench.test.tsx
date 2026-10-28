@@ -7999,18 +7999,18 @@ describe("starting the work", () => {
       },
       /Its claude directory is gone/,
     ],
-    // A profile of a member's that cannot be run from here says which machine
-    // to go to, the finding being about that one rather than about this — see
-    // `src/broken.ts`, which is where the one sentence is written.
+    // A profile not bound here with no bound device to fetch it from says the
+    // gap, naming no device — see `src/broken.ts`, which is where the one
+    // sentence is written.
     [
       {
         ProfileBroken: {
-          broken: "HomeUnreachable",
+          broken: "NoBoundDevice",
           agent_type: "Claude",
-          device: "the-workstation",
+          device: null,
         },
       },
-      /the-workstation is unreachable/,
+      /No device it's bound on with a login is reachable/,
     ],
     ["WorktreeRefused", /Git wouldn't make the worktree/],
     ["NotDrafting", /already been started/],

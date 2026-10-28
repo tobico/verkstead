@@ -208,10 +208,7 @@ pub(crate) async fn written(
         }
     };
 
-    let Some(account) = held
-        .filter(|held| held.unbound.is_none())
-        .map(|held| held.account)
-    else {
+    let Some(held) = held.filter(|held| held.unbound.is_none()) else {
         return (
             StatusCode::NOT_FOUND,
             "this device holds no binding of an Agent Profile under that id\n",
@@ -219,7 +216,7 @@ pub(crate) async fn written(
             .into_response();
     };
 
-    let login = crate::sandbox::root::login_at(&account);
+    let login = crate::sandbox::root::login_at(&held.account);
 
     match tokio::task::spawn_blocking({
         let login = login.clone();
@@ -233,6 +230,11 @@ pub(crate) async fn written(
                 profile = %profile,
                 "the login a member's session left was written into this device's account",
             );
+
+            // An account that had none holds one now, which its binding says
+            // for every device that would fetch it — see
+            // [`crate::profiles::looked`].
+            crate::profiles::looked(&state, std::slice::from_ref(&held)).await;
 
             StatusCode::NO_CONTENT.into_response()
         }

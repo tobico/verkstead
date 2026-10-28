@@ -170,8 +170,8 @@ pub use previews::{Preview, retire_preview, standing_previews, suggest_preview};
 pub use profiles::{
     Account, AgentType, Binding, Bindings, Channel, Clash, Deleting, Minted, Pairing, Picked,
     Profile, ProfileFacts, ProfileRecord, Profiles, Saving, Settled, Unbound, binding_uuid,
-    create_profile, delete_profile, load_profile, profile_arrived, profiles, profiles_as_saved,
-    settle, update_profile,
+    create_profile, delete_profile, load_profile, logins_held, profile_arrived, profiles,
+    profiles_as_saved, settle, update_profile,
 };
 pub use pull_requests::{
     Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup,

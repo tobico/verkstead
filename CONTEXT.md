@@ -3782,34 +3782,37 @@ switch, whichever device updates first.
 picker: a Profile has no home to mark, and two alike that arrived by
 replication are drawn two alike.
 **And a session runs under a Profile not bound here wherever it is drawn**, the
-account being fetched from a device it is bound on before each launch — see
-**Account mirror**. Nothing about that machine's paths is judged here: they
-belong to that filesystem, and what a session is given is the copy.
+account being fetched before each launch from the first device it is bound on
+whose binding holds a login and that answers — see **Account mirror**. Nothing
+about that machine's paths is judged here: they belong to that filesystem, and
+what a session is given is the copy. The memory store is synced with that same
+device, and the login written back to it as the session ends.
 **Which does not make such a Profile unbreakable; it makes it break over other
-things.** Brokenness is answered per read for every Profile — one bound here
-against its own paths — and for one bound elsewhere the question is the three
-that would stop a launch here, asked **in the order a launch would meet them**.
-**The device it is bound on is not answering**, which is this device's own
-reading of its membership and reads the way that machine reads in the sidebar:
-nothing can be fetched, so nothing can be built. **The account there holds no
-login file**, which is what a Claude login in the macOS Keychain comes to, and
-a sign-out there with it — there is nothing to copy, the fix is a login on that
-machine, and the Profile is meanwhile perfectly runnable there. **Or the harness is not on this machine**,
-which is the onboarding probe's own question answered in the onboarding probe's
-own word, rather than a second vocabulary for one fact.
-**Whether an account holds a login file is a fact on a row bound here**: one
-with none says *it cannot be used from another device*, which is a note rather
-than a trouble. A binding does not carry it to the other devices, so one not
-bound on the Profile finds a missing login at the fetch.
-**Refused rather than hidden.** None of the three takes the row out of a picker
-or out of the Profiles section, and a Conversation paired with one reads as
-paired with a **broken** Profile rather than as one nothing was picked for: a
-row saying why it cannot be run is something to go and put right, where a row
-quietly missing is a human looking for a Profile they know they saved. What they
-do refuse is the **Start**, **by name and before anything starts** — the refusal
-carries what the row carries, so the sentence at the press is the sentence
-already on the row, and a Start refused over a machine that is not answering
-names that machine.
+things.** Brokenness is answered **per device**, per read, for every Profile —
+one bound here against its own paths — and for one bound elsewhere the question
+is the two that would stop a launch here, asked **in the order a launch would
+meet them**. **No device it is bound on with a login is reachable**, which is
+this device's own reading of its membership — the reading a machine is drawn
+unreachable off in the sidebar — and **names no device**: what is missing is a
+source, any of them. A binding whose account holds no login file is no source,
+which is what a Claude login in the macOS Keychain comes to, and a sign-out
+there with it; the fix is a login on that machine. **Or the harness is not on
+this machine**, which is the onboarding probe's own question answered in the
+onboarding probe's own words, rather than a second vocabulary for one fact.
+**Whether an account holds a login file is its binding's to say**, and the
+device bound on it is the one that looks — at every read of its Profiles, at its
+start, and as a login written back lands — writing it on its binding where it
+moved, which replicates. On the device it is bound on an account with none says
+*it cannot be used from another device*, which is a note rather than a trouble:
+it is perfectly runnable there.
+**Refused rather than hidden.** Neither takes the row out of a picker or out of
+the Profiles section, and a Conversation paired with one reads as paired with a
+**broken** Profile rather than as one nothing was picked for: a row saying why
+it cannot be run is something to go and put right, where a row quietly missing
+is a human looking for a Profile they know they saved. What they do refuse is
+the **Start**, **by name and before anything starts** — the refusal carries what
+the row carries, so the sentence at the press is the sentence already on the
+row.
 **An edit or a removal is a local write on whichever device it is pressed**,
 which replicates — there is no home to relay it to, and a device that is not
 answering stops nobody saving. Both uniqueness rules are checked at the press
@@ -3952,13 +3955,15 @@ its own terms — see **Memory sync**.
 **Member Gate**, by the uuid the Profile has on every device, and only for a
 Profile bound there — one it runs from a copy of is an account on a third
 machine.
-**A home that is not answering starts no session**, and says which machine: a
-session launched under an account nothing fetched is one that comes up logged out
-with nothing on the Timeline saying why, so the refusal goes in the session's
-Capture naming the machine. Which is the backstop rather than the reading: a
-mirror whose home has stopped answering is **broken** on the row long before
-anybody presses anything, and the press is refused there — see **Agent
-Profile**. This is what catches a machine that went away between the two.
+**A bound device that is not answering starts no session**, and says which
+machine: a session launched under an account nothing fetched is one that comes
+up logged out with nothing on the Timeline saying why, so the refusal goes in
+the session's Capture naming the machine — the first one asked, where none of
+the devices bound on it with a login answered. Which is the backstop rather than
+the reading: a Profile with no such device reachable is **broken** on the row
+long before anybody presses anything, and the press is refused there — see
+**Agent Profile**. This is what catches a machine that went away between the
+two.
 **And the login is written back as the session ends**, at
 `/api/peer/v1/profiles/<uuid>/account/login` on the same listener behind the same
 gate. It is the one file of a root a session genuinely changes — the harness

@@ -2891,19 +2891,15 @@ impl Sessions {
         // carry.
         let (launching_under, lending, syncing) = match mirrored {
             Some(crate::mirroring::account::Mirrored { profile, lent }) => {
-                let syncing = match pairing
-                    .profile
-                    .unbound
-                    .as_ref()
-                    .and_then(|unbound| unbound.device())
-                {
-                    Some(at) => {
-                        crate::mirroring::memory::pulled(pool, devices, conversation, at, &profile)
-                            .await
-                    }
-
-                    None => None,
-                };
+                // From the device the account was fetched from, and back to it.
+                let syncing = crate::mirroring::memory::pulled(
+                    pool,
+                    devices,
+                    conversation,
+                    lent.at(),
+                    &profile,
+                )
+                .await;
 
                 (
                     Some(store::Pairing {
@@ -3273,14 +3269,9 @@ impl Sessions {
             event_id,
             pairing.profile.id.clone(),
             crate::profiles::shown(pairing.profile.name.as_deref()).to_owned(),
-            match pairing
-                .profile
-                .unbound
-                .as_ref()
-                .and_then(|unbound| unbound.device())
-            {
+            match &lending {
                 None => crate::signouts::Home::Here,
-                Some(device) => crate::signouts::Home::Away(device.to_owned()),
+                Some(lending) => crate::signouts::Home::Away(lending.at().to_owned()),
             },
             pairing.profile.agent_type(),
             login,

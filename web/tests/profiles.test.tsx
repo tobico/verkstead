@@ -587,7 +587,7 @@ describe("a member's accounts", () => {
 /// **Refused rather than hidden**: every one of them stays on the list and in
 /// the pickers, because a row saying why it cannot be run is something to go
 /// and put right and a row quietly missing is a human looking for a Profile
-/// they know they saved. What the server decides is which of the three it is —
+/// they know they saved. What the server decides is which of the two it is —
 /// `crates/server/tests/replicated_profiles.rs` is where that is asked — and
 /// what is asked here is that the card says it.
 describe("a member's account that cannot be run from here", () => {
@@ -597,38 +597,15 @@ describe("a member's account that cannot be run from here", () => {
     { ...MIRROR, broken },
   ];
 
-  it("says the device it is bound on has stopped answering", async () => {
-    serving(whenever("/api/ui/profiles", json(troubled("HomeUnreachable"))));
+  it("says no device it is bound on with a login is answering", async () => {
+    serving(whenever("/api/ui/profiles", json(troubled("NoBoundDevice"))));
     mountCards();
 
     await waitFor(() => screen.getByText(reads(MIRROR)));
 
-    // The word the sidebar wears for the same finding: one dial worked down
-    // that machine's addresses and reached none of them.
+    // Naming no device: what is missing is a source, any of them.
     const said =
-      "Its account can't be fetched, because the device it's bound on is unreachable. No session here can run under it.";
-    const card = theCard(reads(MIRROR));
-
-    expect(marks(card)).toEqual([{ label: said, red: true }]);
-    expect(card.textContent).not.toContain(said);
-  });
-
-  /// A login kept in the macOS Keychain leaves no file for another device to
-  /// copy, and neither does a sign-out. The fix is a login on the machine the
-  /// account is on.
-  it("says to log in where the account has no login file", async () => {
-    serving(
-      whenever(
-        "/api/ui/profiles",
-        json([CLUSTER[0]!, { ...MIRROR, broken: "NoLoginAtHome", login: false }]),
-      ),
-    );
-    mountCards();
-
-    await waitFor(() => screen.getByText(reads(MIRROR)));
-
-    const said =
-      "Its account on the device it's bound on has no login file, so there's nothing to copy here. Log in on that machine.";
+      "No device it's bound on with a login is reachable, so no session here can run under it.";
     const card = theCard(reads(MIRROR));
 
     expect(marks(card)).toEqual([{ label: said, red: true }]);
@@ -652,7 +629,7 @@ describe("a member's account that cannot be run from here", () => {
   });
 
   /// And none of them takes the row off the list: two rows in, two rows drawn.
-  it.each(["HomeUnreachable", "NoLoginAtHome", "HarnessMissing"] as const)(
+  it.each(["NoBoundDevice", "HarnessMissing"] as const)(
     "leaves a row reading %s on the list",
     async (broken) => {
       serving(whenever("/api/ui/profiles", json(troubled(broken))));

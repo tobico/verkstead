@@ -3000,6 +3000,7 @@ async fn arrived(pool: &SqlitePool, uuid: &str, device: &str, name: Option<&str>
                 claude_dir: Some("/theirs/.claude".to_owned()),
                 config_file: Some("/theirs/.claude.json".to_owned()),
                 home: None,
+                login: true,
             },
         }],
     )

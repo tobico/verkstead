@@ -156,6 +156,10 @@ pub(crate) fn pulling(state: &AppState) {
             return;
         }
 
+        // And whether each account bound here holds a login, said on its
+        // binding before a member asks — see [`crate::profiles::looked`].
+        crate::profiles::looked_at_all(&state).await;
+
         tokio::spawn(pulled::<authors::Authors>(state.clone()));
         tokio::spawn(pulled::<crate::store::Profiles>(state.clone()));
         tokio::spawn(pulled::<crate::store::Bindings>(state));

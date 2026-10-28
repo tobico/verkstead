@@ -733,6 +733,19 @@ fn called<'a>(rows: &'a [ProfileEntry], name: &str) -> Option<&'a ProfileEntry> 
     rows.iter().find(|row| row.name.as_deref() == Some(name))
 }
 
+/// Whether the row called `name` is here **with a binding of it**: the record
+/// and the bindings are pulled apart, so a row can be drawn a moment before
+/// any device's paths for it have arrived — empty paths, and no device to
+/// fetch its account from.
+fn landed(rows: &[ProfileEntry], name: &str) -> bool {
+    called(rows, name).is_some_and(|row| match &row.account {
+        verkstead_render::ProfileAccount::Claude { claude_dir, .. } => !claude_dir.is_empty(),
+        verkstead_render::ProfileAccount::Codex { home }
+        | verkstead_render::ProfileAccount::Grok { home }
+        | verkstead_render::ProfileAccount::OpenCode { home } => !home.is_empty(),
+    })
+}
+
 /// And what every row on it is called, for an assertion that says what it did
 /// find.
 fn names(rows: &[ProfileEntry]) -> Vec<&str> {
@@ -751,9 +764,7 @@ async fn a_members_profiles_are_listed_here_beside_this_devices_own() {
     a.saves("work").await;
     b.saves("here").await;
 
-    let rows = b
-        .profiles_saying(|rows| called(rows, "work").is_some())
-        .await;
+    let rows = b.profiles_saying(|rows| landed(rows, "work")).await;
 
     assert_eq!(names(&rows), vec!["here", "work"], "one list, by name");
 
@@ -793,8 +804,7 @@ async fn a_rename_on_the_device_that_made_it_reaches_the_other_under_its_uuid() 
 
     let id = a.saves("work").await;
 
-    b.profiles_saying(|rows| called(rows, "work").is_some())
-        .await;
+    b.profiles_saying(|rows| landed(rows, "work")).await;
 
     let conversation = b.drafting().await;
     b.picks(conversation, &id).await;
@@ -824,9 +834,7 @@ async fn a_rename_on_another_device_redraws_on_the_one_that_made_it() {
 
     let id = a.saves("work").await;
 
-    let landed = b
-        .profiles_saying(|rows| called(rows, "work").is_some())
-        .await;
+    let landed = b.profiles_saying(|rows| landed(rows, "work")).await;
     let theirs = called(&landed, "work").unwrap().clone();
 
     let conversation = a.drafting().await;
@@ -914,8 +922,7 @@ async fn the_work_starts_under_a_profile_bound_on_another_device() {
 
     let id = a.saves("work").await;
 
-    b.profiles_saying(|rows| called(rows, "work").is_some())
-        .await;
+    b.profiles_saying(|rows| landed(rows, "work")).await;
 
     let conversation = b.drafting().await;
     b.picks(conversation, &id).await;
@@ -961,7 +968,7 @@ async fn a_member_that_stops_answering_keeps_its_records() {
     assert_eq!(names(&rows), vec!["work"], "the record stands");
     assert_eq!(
         rows[0].broken,
-        Some(verkstead_render::Broken::HomeUnreachable),
+        Some(verkstead_render::Broken::NoBoundDevice),
         "and the device it is bound on is not answering",
     );
 }
@@ -975,8 +982,7 @@ async fn the_profiles_of_an_unlinked_device_stay() {
     a.saves("work").await;
     b.saves("here").await;
 
-    b.profiles_saying(|rows| called(rows, "work").is_some())
-        .await;
+    b.profiles_saying(|rows| landed(rows, "work")).await;
 
     forget_member(&b.pool, A).await.unwrap();
     b.nudges.announce(Nudge::Devices);
@@ -1078,10 +1084,8 @@ async fn a_removal_pressed_here_reaches_every_device() {
 
     let id = a.saves("work").await;
 
-    b.profiles_saying(|rows| called(rows, "work").is_some())
-        .await;
-    c.profiles_saying(|rows| called(rows, "work").is_some())
-        .await;
+    b.profiles_saying(|rows| landed(rows, "work")).await;
+    c.profiles_saying(|rows| landed(rows, "work")).await;
 
     let mut picked = Vec::new();
 
@@ -1159,9 +1163,7 @@ async fn a_profile_whose_harness_is_absent_here_reads_broken_here_alone() {
         "A has the harness, so there is nothing wrong with it there",
     );
 
-    let landed = b
-        .profiles_saying(|rows| called(rows, "work").is_some())
-        .await;
+    let landed = b.profiles_saying(|rows| landed(rows, "work")).await;
 
     assert_eq!(
         called(&landed, "work").unwrap().broken,
@@ -1222,16 +1224,58 @@ async fn a_profile_whose_bound_device_is_not_answering_refuses_start() {
 
     assert_eq!(
         called(&rows, "work").unwrap().broken,
-        Some(verkstead_render::Broken::HomeUnreachable),
+        Some(verkstead_render::Broken::NoBoundDevice),
     );
+
+    let conversation = b.drafting().await;
+    b.picks(conversation, &id).await;
+
+    assert_eq!(b.starts(conversation).await, refused_over("NoBoundDevice"),);
+}
+
+/// A device bound on a Profile says on its binding whether the account there
+/// holds a login file, and a binding without one is no source: B reads the
+/// Profile as having no bound device to fetch from, naming none, and Start is
+/// refused over it. A login made on A since is said on its binding at A's next
+/// read, and B reads the Profile as one to run under.
+#[tokio::test]
+async fn a_binding_with_no_login_is_no_source_until_its_device_has_one() {
+    let (a, b, _holding) = linked_up().await;
+
+    let account = a.account_nobody_is_logged_in_to("work");
+    let id = a.saving("work", account.clone()).await;
+
+    let rows = b
+        .profiles_saying(|rows| called(rows, "work").is_some_and(|row| row.broken.is_some()))
+        .await;
+
+    let row = called(&rows, "work").unwrap();
+    assert_eq!(row.broken, Some(verkstead_render::Broken::NoBoundDevice));
+    assert!(!row.login, "and nothing to copy anywhere");
 
     let conversation = b.drafting().await;
     b.picks(conversation, &id).await;
 
     assert_eq!(
         b.starts(conversation).await,
-        refused_over("HomeUnreachable"),
+        refused_over("NoBoundDevice"),
+        "refused naming the gap rather than coming up logged out",
     );
+
+    // A login on A, which A's next read of its Profiles finds and says.
+    std::fs::write(
+        account.0.join(".credentials.json"),
+        "{\"claudeAiOauth\":{\"accessToken\":\"sk-ant-oat01-work\"}}",
+    )
+    .unwrap();
+
+    a.profiles().await;
+
+    let rows = b
+        .profiles_saying(|rows| called(rows, "work").is_some_and(|row| row.broken.is_none()))
+        .await;
+
+    assert!(called(&rows, "work").unwrap().login);
 }
 
 /// A member a release apart whose Profile records this device cannot read has
@@ -1319,8 +1363,7 @@ async fn a_member_too_old_to_serve_the_route_is_a_trouble_line_and_its_profiles_
     a.reading.now_running(Some(RUNNING));
     b.nudges.announce(Nudge::Devices);
 
-    b.profiles_saying(|rows| called(rows, "work").is_some())
-        .await;
+    b.profiles_saying(|rows| landed(rows, "work")).await;
     b.trouble_on(A, None).await;
 }
 

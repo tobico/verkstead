@@ -17,13 +17,19 @@
 //! is answered out of the record and out of this device.
 //!
 //! **Which does not make such a Profile unbreakable**, it makes it break over
-//! different things: the three that would stop a launch here, asked in the
-//! order a launch would meet them. Whether the bound device is answering at
-//! all, whether the account over there holds a login there is anything to
-//! fetch, and whether the harness is on *this* machine. Each is named on the
-//! row and each refuses a Start by name, before a session comes up logged out
-//! with nothing saying why — see [`broken`], where the three are decided, and
-//! [`verkstead_render::Broken`], which is the vocabulary they are said in.
+//! different things: the two that would stop a launch here, asked in the order
+//! a launch would meet them. Whether a device it is bound on, whose account
+//! there holds a login, is answering at all, and whether the harness is on
+//! *this* machine. Each is named on the row and each refuses a Start by name,
+//! before a session comes up logged out with nothing saying why — see
+//! [`broken`], where the two are decided, and [`verkstead_render::Broken`],
+//! which is the vocabulary they are said in. **Per device**: every device
+//! answers them for itself.
+//!
+//! **Whether a bound account holds a login is said by the device it is bound
+//! on**, the one that can look: every read here looks at this device's own
+//! bound accounts and writes what it saw onto their bindings where that moved,
+//! which replicate — see [`looked`].
 //!
 //! Nothing here mounts anything. A Profile is a record of an account a session
 //! will later be run under; the bind-mounting arrives with the stage that runs
@@ -178,6 +184,60 @@ pub(crate) async fn picked(state: &AppState, picked: store::Picked) -> Result<Pi
     })
 }
 
+/// Look at whether the account of each Profile bound here holds a login file,
+/// and say so on this device's binding of it where that moved — see
+/// [`store::logins_held`] — telling the members to pull where it did.
+///
+/// **The device bound on an account is the only one that can look**, and a
+/// device running the Profile from a copy fetches only from a binding that
+/// holds one. So it is asked on every read of this device's Profiles, at the
+/// start, and as a login written back by a member lands; a read where nothing
+/// moved writes nothing.
+pub(crate) async fn looked(state: &AppState, profiles: &[store::Profile]) {
+    let bound: Vec<store::Profile> = profiles
+        .iter()
+        .filter(|profile| profile.unbound.is_none())
+        .cloned()
+        .collect();
+
+    if bound.is_empty() {
+        return;
+    }
+
+    let held = tokio::task::spawn_blocking(move || {
+        bound
+            .iter()
+            .map(|profile| (profile.id.clone(), lends(profile)))
+            .collect::<Vec<_>>()
+    })
+    .await;
+
+    let Ok(held) = held else {
+        return;
+    };
+
+    match store::logins_held(&state.pool, &held).await {
+        Ok(true) => state.nudges.announce(verkstead_schema::Nudge::Profiles),
+        Ok(false) => {}
+        Err(why) => tracing::warn!(
+            error = ?why,
+            "whether this device's accounts hold a login could not be written onto their \
+             bindings, so a member may fetch from one that has none",
+        ),
+    }
+}
+
+/// And the same for every Profile this device holds, read for it.
+pub(crate) async fn looked_at_all(state: &AppState) {
+    match store::profiles(&state.pool).await {
+        Ok(profiles) => looked(state, &profiles).await,
+        Err(why) => tracing::warn!(
+            error = ?why,
+            "the Profiles could not be read to look at whether their accounts hold a login",
+        ),
+    }
+}
+
 /// Read a batch of Profiles into rows, looking at the filesystem once for the
 /// lot of them.
 ///
@@ -195,6 +255,8 @@ pub(crate) async fn picked(state: &AppState, picked: store::Picked) -> Result<Pi
 /// this box. One probe for the batch and one `PATH` walk per harness in it,
 /// inside the same blocking hop the paths are resolved in.
 async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<ProfileEntry>> {
+    looked(state, &profiles).await;
+
     let members = members_of(&state.pool, &profiles).await?;
     let machine = state.onboarding.machine().clone();
     let signed_out = state.logins.signed_out();
@@ -218,12 +280,14 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
         profiles
             .into_iter()
             .map(|profile| {
-                // Whether the device a launch would fetch from is answering,
-                // for one not bound here: no device being bound is none.
+                // Whether a device a launch could fetch from is answering, for
+                // one not bound here: one bound with a login, and none being
+                // none.
                 let reachable = profile.unbound.as_ref().is_none_or(|unbound| {
                     unbound
-                        .device()
-                        .is_some_and(|device| whose(&members, device).reachable)
+                        .lending
+                        .iter()
+                        .any(|device| whose(&members, device).reachable)
                 });
 
                 ProfileEntry {
@@ -273,9 +337,8 @@ pub(crate) async fn members_by_device(pool: &SqlitePool) -> Result<HashMap<Strin
 /// says whether it can be used on a device it is not bound on at all.
 ///
 /// One bound here is looked at here, at the one path the harness keeps a login
-/// under. One bound elsewhere is taken to hold one, the bindings carrying no
-/// word of it yet: a bound device whose account holds none is found out at the
-/// fetch, and the session refused there.
+/// under. One bound elsewhere holds one where any device's binding of it says
+/// so — see [`store::Unbound::lending`].
 ///
 /// A login kept somewhere that is not a file — a Claude login in the macOS
 /// Keychain — reads the same as a sign-out, which is what it is from here: there
@@ -284,7 +347,7 @@ pub(crate) async fn members_by_device(pool: &SqlitePool) -> Result<HashMap<Strin
 /// it.
 fn lends(profile: &store::Profile) -> bool {
     match &profile.unbound {
-        Some(_) => true,
+        Some(unbound) => !unbound.lending.is_empty(),
         None => matches!(
             resolve(&crate::sandbox::root::login_at(&profile.account)),
             Resolved::At(_)
@@ -396,7 +459,7 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// a dangling symlink where the account was is a Profile that cannot be run
 /// under.
 ///
-/// **A Profile not bound here is answered before any of that and asks three
+/// **A Profile not bound here is answered before any of that and asks two
 /// other questions.** The paths on it are another machine's, so resolving them
 /// here would be asking the wrong filesystem a question it may well answer
 /// *yes* to — two machines set up alike hold the same paths, and the account
@@ -405,23 +468,22 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// fetched from a device it is bound on into a copy under this device's Data
 /// Directory before each launch. See [`crate::mirroring::account`].
 ///
-/// So what is asked instead is the three things that would stop *that*, **in
-/// the order a launch would meet them**: the bound device is dialled, the
-/// account is fetched out of it, and the harness is run here.
+/// So what is asked instead is the two things that would stop *that*, **in the
+/// order a launch would meet them**: a bound device is dialled and the account
+/// fetched out of it, and the harness is run here.
 ///
-/// 1. **The bound device is not answering**, or no device is bound —
-///    [`Broken::HomeUnreachable`]. Nothing can be fetched, so nothing can be
-///    built. This device's own reading of its membership is what says so,
-///    which is the same reading the sidebar draws a member unreachable off,
-///    and `reachable` is it.
-/// 2. **The account there holds no login file** — [`Broken::NoLoginAtHome`].
-///    See [`lends`].
-/// 3. **The harness is not on this machine** — [`Broken::HarnessMissing`]. The
+/// 1. **No device it is bound on whose binding holds a login is answering** —
+///    [`Broken::NoBoundDevice`], naming none. Nothing can be fetched, so
+///    nothing can be built. This device's own reading of its membership is
+///    what says so, which is the same reading the sidebar draws a member
+///    unreachable off, and `reachable` is it. A binding with no login is no
+///    source — see [`lends`].
+/// 2. **The harness is not on this machine** — [`Broken::HarnessMissing`]. The
 ///    onboarding probe's own finding, in that step's own word.
 ///
-/// **And that is the whole of it** for such a Profile: a row that passes all
-/// three is a row to run under, and there is nothing about this filesystem to
-/// go and put right.
+/// **And that is the whole of it** for such a Profile: a row that passes both
+/// is a row to run under, and there is nothing about this filesystem to go and
+/// put right.
 ///
 /// **One bound here may also have signed out** — [`Broken::SignedOut`] — where
 /// a press found its account with no login. Asked after its paths, which a
@@ -435,11 +497,7 @@ fn broken(
 ) -> Option<Broken> {
     if profile.unbound.is_some() {
         if !reachable {
-            return Some(Broken::HomeUnreachable);
-        }
-
-        if !lends(profile) {
-            return Some(Broken::NoLoginAtHome);
+            return Some(Broken::NoBoundDevice);
         }
 
         // Absent from the map is a batch nothing probed, which cannot happen

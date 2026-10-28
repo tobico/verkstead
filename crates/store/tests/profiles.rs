@@ -14,10 +14,10 @@ use verkstead_store::{
     Account, AgentType, Binding, Bindings, Chosen, Clash, Deleting, Event, Lifecycle, Pairing,
     PendingForm, PendingPairing, Picked, Profile, ProfileFacts, ProfileRecord, Profiles, Saving,
     Settled, Unbound, binding_uuid, create_profile, delete_profile, load_conversation,
-    load_profile, open_database, open_pending_steer, profiles, register_repo, save_pending_steer,
-    set_grilling_pairing, set_implementation_pairing, set_review_pairing, settle, skip_review,
-    stamp_the_profiles, start_capture, start_conversation, start_grilling, timeline,
-    update_profile,
+    load_profile, logins_held, open_database, open_pending_steer, profiles, register_repo,
+    save_pending_steer, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
+    settle, skip_review, stamp_the_profiles, start_capture, start_conversation, start_grilling,
+    timeline, update_profile,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -1834,6 +1834,7 @@ async fn bound_at_home(pool: &SqlitePool, name: &str) {
                 claude_dir: Some(claude_dir.to_string_lossy().into_owned()),
                 config_file: Some(config_file.to_string_lossy().into_owned()),
                 home: None,
+                login: true,
             },
         }],
     )
@@ -1859,7 +1860,10 @@ async fn a_members_profile_is_listed_with_no_binding_here() {
     );
     assert_eq!(
         listed[0].unbound,
-        Some(Unbound { bound_on: vec![] }),
+        Some(Unbound {
+            bound_on: vec![],
+            lending: vec![],
+        }),
         "bound nowhere this device has heard of",
     );
 
@@ -1871,6 +1875,7 @@ async fn a_members_profile_is_listed_with_no_binding_here() {
         held.unbound,
         Some(Unbound {
             bound_on: vec![HOME.to_owned()],
+            lending: vec![HOME.to_owned()],
         }),
     );
     assert_eq!(held.account, claude("theirs"), "the member's paths");
@@ -1882,6 +1887,77 @@ async fn a_members_profile_is_listed_with_no_binding_here() {
             .unwrap(),
         Chosen::Chosen,
         "and it is picked like any other",
+    );
+}
+
+/// A binding says whether the account at its paths holds a login, as the
+/// device bound on it last looked: written over this device's own binding where
+/// it moved, kept by a save that keeps the paths, and a member's binding that
+/// holds none is no device to fetch the account from.
+#[tokio::test]
+async fn a_binding_says_whether_its_account_holds_a_login() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    let ours = saved(&pool, "ours").await;
+
+    let login = |pool: SqlitePool, id: String| async move {
+        records::<Bindings>(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|binding| binding.uuid == binding_uuid(&id, THIS_DEVICE))
+            .expect("this device's binding")
+            .fields
+            .login
+    };
+
+    assert!(
+        login(pool.clone(), ours.id.clone()).await,
+        "taken to hold one until this device has looked",
+    );
+
+    let held = [(ours.id.clone(), false)];
+    assert!(logins_held(&pool, &held).await.unwrap(), "moved");
+    assert!(!logins_held(&pool, &held).await.unwrap(), "and said once");
+    assert!(!login(pool.clone(), ours.id.clone()).await);
+
+    update_profile(&pool, &ours.id, &facts_for("renamed", claude("ours")))
+        .await
+        .unwrap();
+    assert!(
+        !login(pool.clone(), ours.id.clone()).await,
+        "a save over the same paths keeps what was looked",
+    );
+
+    // A member's, bound there with no login file.
+    arrived(&pool, "theirs", None, 1, false).await;
+    bound_at_home(&pool, "theirs").await;
+
+    let mut binding = records::<Bindings>(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|binding| binding.uuid == binding_uuid(AT_HOME, HOME))
+        .unwrap();
+    binding.fields.login = false;
+    binding.updated_at = 2;
+    merge::<Bindings>(&pool, &[binding]).await.unwrap();
+
+    assert!(
+        !logins_held(&pool, &[(AT_HOME.to_owned(), true)])
+            .await
+            .unwrap(),
+        "and nothing is said over another device's binding",
+    );
+
+    assert_eq!(
+        load_profile(&pool, AT_HOME).await.unwrap().unwrap().unbound,
+        Some(Unbound {
+            bound_on: vec![HOME.to_owned()],
+            lending: vec![],
+        }),
+        "bound there, and nothing to fetch from it",
     );
 }
 

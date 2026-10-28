@@ -916,20 +916,20 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * was written down. This is what has become of its account since — the pair
  * for a Claude Profile, and the one home for every type that keeps one.
  *
- * **And three of them are a mirror's**, which is the same question asked of a
- * Profile whose account is on another machine. None of that machine's paths is
- * judged here — they belong to no filesystem this device can read — so what is
- * asked instead is the three things that would stop a launch away from home,
- * in the order a launch would meet them: the home device answering at all, an
- * account with a login to lend, and the harness to run it on this machine.
+ * **And two of them are a Profile's not bound here**, whose account is on
+ * other machines. None of their paths is judged here — they belong to no
+ * filesystem this device can read — so what is asked instead is the two things
+ * that would stop a launch from a copy, in the order a launch would meet them:
+ * a bound device holding a login answering at all, and the harness to run it
+ * on this machine. **Per device**: every device answers them for itself.
  *
  * **Refused rather than hidden.** A row that says why it cannot be run is
  * something to go and put right, and a row quietly missing is a human looking
- * for a Profile they know they saved. So none of the three takes a row out of
+ * for a Profile they know they saved. So none of them takes a row out of
  * a picker, and a Pairing made against one goes on reading as a Pairing — with
  * a broken Profile in it.
  */
-export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "HomeUnreachable" | "NoLoginAtHome" | "HarnessMissing" | "SignedOut";
+export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "NoBoundDevice" | "HarnessMissing" | "SignedOut";
 
 /**
  * One session's Capture, whole, as the details pane receives it.
@@ -4888,16 +4888,16 @@ models: Array<string>,
 broken: Broken | null, 
 /**
  * Whether the account this row names holds a **login file**, which is what
- * says the Profile can be used away from the device it is at home on.
+ * says the Profile can be used from a device it is not bound on.
  *
- * Answered on the row wherever it is drawn, and by the device the account
- * is on: a mirror carries what that machine last said, and this device's
- * own rows are looked at here. A login kept somewhere that is not a file —
- * the macOS Keychain — leaves nothing for another device to mirror, and so
- * does a sign-out; either way the account is still perfectly runnable on
- * the machine it is on, which is why this is a fact beside [`Self::broken`]
- * rather than a way of being it. A *mirror* with no login at home is
- * broken, and that is [`Broken::NoLoginAtHome`].
+ * Answered by the devices the account is on: one bound here is looked at
+ * here, and one bound elsewhere carries what its bindings last said. A
+ * login kept somewhere that is not a file — the macOS Keychain — leaves
+ * nothing for another device to copy, and so does a sign-out; either way
+ * the account is still perfectly runnable on the machine it is on, which
+ * is why this is a fact beside [`Self::broken`] rather than a way of being
+ * it. One not bound here with no login on any bound device it can reach is
+ * broken, and that is [`Broken::NoBoundDevice`].
  */
 login: boolean, 
 /**

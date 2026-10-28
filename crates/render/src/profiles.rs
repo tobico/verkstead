@@ -100,16 +100,16 @@ impl ProfileAccount {
 /// was written down. This is what has become of its account since — the pair
 /// for a Claude Profile, and the one home for every type that keeps one.
 ///
-/// **And three of them are a mirror's**, which is the same question asked of a
-/// Profile whose account is on another machine. None of that machine's paths is
-/// judged here — they belong to no filesystem this device can read — so what is
-/// asked instead is the three things that would stop a launch away from home,
-/// in the order a launch would meet them: the home device answering at all, an
-/// account with a login to lend, and the harness to run it on this machine.
+/// **And two of them are a Profile's not bound here**, whose account is on
+/// other machines. None of their paths is judged here — they belong to no
+/// filesystem this device can read — so what is asked instead is the two things
+/// that would stop a launch from a copy, in the order a launch would meet them:
+/// a bound device holding a login answering at all, and the harness to run it
+/// on this machine. **Per device**: every device answers them for itself.
 ///
 /// **Refused rather than hidden.** A row that says why it cannot be run is
 /// something to go and put right, and a row quietly missing is a human looking
-/// for a Profile they know they saved. So none of the three takes a row out of
+/// for a Profile they know they saved. So none of them takes a row out of
 /// a picker, and a Pairing made against one goes on reading as a Pairing — with
 /// a broken Profile in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,32 +124,24 @@ pub enum Broken {
     /// The home the account was kept under is not there any more.
     HomeMissing,
 
-    /// The device this Profile is at home on has stopped answering, so its
-    /// account cannot be fetched and no root here can be built out of it.
+    /// Not bound on this device, and no device it is bound on whose binding
+    /// holds a login is answering — so there is nowhere to fetch the account
+    /// from, and no root here can be built out of it.
     ///
-    /// The first of the three a launch away from home would meet, and the one
-    /// that makes the other two answers about a moment that has passed: what
-    /// the row says of them is what that machine last said.
-    HomeUnreachable,
-
-    /// The account at home holds no login file, so there is nothing to mirror
-    /// and the Profile cannot be used away from its own device at all.
-    ///
-    /// A Claude login kept in the macOS Keychain is the case this exists for,
-    /// and a sign-out at home comes to the same thing — the file goes, the row
-    /// says the Profile has none, and the fix is a login on the machine the
-    /// account is on.
-    NoLoginAtHome,
+    /// Names no device: what is missing is *a* source, and with more than one
+    /// binding any of them would do. A device bound on it whose account holds
+    /// no login file is no source either — there is nothing in it to copy.
+    NoBoundDevice,
 
     /// The harness this Profile runs is not on *this* machine, whatever is true
-    /// of it at home.
+    /// of it on the devices it is bound on.
     ///
     /// The onboarding probe's own finding, asked of the program a session of
-    /// this type is launched as — so a mirror reads it in that step's own word
+    /// this type is launched as — so a row reads it in that step's own word
     /// rather than in a second vocabulary for one fact.
     HarnessMissing,
 
-    /// The Claude account at home here has no login: `claude auth status` said
+    /// The Claude account bound here has no login: `claude auth status` said
     /// so when a press was about to start a session under it.
     ///
     /// Remembered from that press rather than asked at every read, the asking
@@ -215,16 +207,16 @@ pub struct ProfileEntry {
     pub broken: Option<Broken>,
 
     /// Whether the account this row names holds a **login file**, which is what
-    /// says the Profile can be used away from the device it is at home on.
+    /// says the Profile can be used from a device it is not bound on.
     ///
-    /// Answered on the row wherever it is drawn, and by the device the account
-    /// is on: a mirror carries what that machine last said, and this device's
-    /// own rows are looked at here. A login kept somewhere that is not a file —
-    /// the macOS Keychain — leaves nothing for another device to mirror, and so
-    /// does a sign-out; either way the account is still perfectly runnable on
-    /// the machine it is on, which is why this is a fact beside [`Self::broken`]
-    /// rather than a way of being it. A *mirror* with no login at home is
-    /// broken, and that is [`Broken::NoLoginAtHome`].
+    /// Answered by the devices the account is on: one bound here is looked at
+    /// here, and one bound elsewhere carries what its bindings last said. A
+    /// login kept somewhere that is not a file — the macOS Keychain — leaves
+    /// nothing for another device to copy, and so does a sign-out; either way
+    /// the account is still perfectly runnable on the machine it is on, which
+    /// is why this is a fact beside [`Self::broken`] rather than a way of being
+    /// it. One not bound here with no login on any bound device it can reach is
+    /// broken, and that is [`Broken::NoBoundDevice`].
     pub login: bool,
 
     /// Whether a session under this Profile shares the account's memory store,
