@@ -279,6 +279,10 @@ function launch(name, feedUrl, remembered) {
     writeFileSync(join(userData, "updating.json"), JSON.stringify({ version: remembered }));
   }
 
+  // Without `VERKSTEAD_CLI`, which the step that packed the feed is handed
+  // and which the app honours over its own bundle (`src/cli.ts`): left in, the
+  // app starts the step's loose binary, which reads itself as a bare `Binary`
+  // install and refuses the Update this run is here to press.
   const env = {
     ...process.env,
     VERKSTEAD_DATA_DIR: data,
@@ -288,6 +292,7 @@ function launch(name, feedUrl, remembered) {
     XDG_CACHE_HOME: join(home, "cache"),
     ...(zeroing ? { APPIMAGE_EXTRACT_AND_RUN: "1" } : {}),
   };
+  delete env.VERKSTEAD_CLI;
 
   const output = openSync(join(home, "app.out"), "w");
   run = {
