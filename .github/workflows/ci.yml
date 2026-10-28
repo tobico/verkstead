@@ -563,7 +563,7 @@ jobs:
   # | Baseline (`main`, run 40633314366)  | 10m04 + 20m26 = 31m35 | 8m20 + 17m00 = 26m05  |
   # | Line tables, no examples built      | 7m04 + 19m52 = 28m04  | 7m08 + 17m04 = 25m02  |
   # | One test binary: store, schema, cli | 6m07 + 18m04 = 25m14  | 6m32 + 15m56 = 23m19  |
-  # | One test binary: the server         |                       |                       |
+  # | One test binary: the server         | 4m48 + 17m27 = 23m23  | 5m12 + 17m39 = 23m50  |
   # | Defender exclusions                 |                       |                       |
   # | The legs                            |                       |                       |
   # | rust-lld                            |                       |                       |
@@ -583,6 +583,13 @@ jobs:
   # One test binary each for the store, schema and cli took another minute off
   # the build, three links where there were 53 (run 40659022110). The tests
   # moved by the noise between runners, not by the merge.
+  #
+  # One test binary for the server, beside the seven that stay alone, took
+  # the build to about five minutes, eight links where there were 76 (run
+  # 40671281679), and the tests again moved by the noise alone. Leg 2 is its
+  # re-run: its first attempt built in 2m59 and failed one `author_mirrors`
+  # test that is a process of its own under nextest, so not the merge's —
+  # which says how far two runners' builds of one commit can still differ.
   #
   # `slice` partitioning deals the tests out one at a time across every binary,
   # so each leg gets its share of each suite rather than whole binaries. What
