@@ -565,7 +565,7 @@ jobs:
   # | One test binary: store, schema, cli | 6m07 + 18m04 = 25m14  | 6m32 + 15m56 = 23m19  |
   # | One test binary: the server         | 4m48 + 17m27 = 23m23  | 5m12 + 17m39 = 23m50  |
   # | Defender exclusions                 | 5m10 + 17m49 = 24m09  | 4m54 + 19m13 = 25m21  |
-  # | The legs                            |                       |                       |
+  # | The legs (ten; leg 9 the slowest)   | 3m44 + 5m03 = 9m51    | 5m07 + 4m36 = 10m43   |
   # | rust-lld                            |                       |                       |
   # | Template repositories               |                       |                       |
   #
@@ -596,6 +596,33 @@ jobs:
   # 40678349026, whose step says so as a notice). The builds and tests moved
   # by the noise alone, and the step costs six seconds, so it stays — an image
   # that turns protection back on would cost this job nothing.
+  #
+  # The legs: ten, the cap this budget set itself (run 40689227811). The count
+  # was chosen from the Defender row: 37 minutes of test between two legs, so
+  # with about five minutes of build and one of setup on every leg, seven
+  # minutes a leg wanted something over thirty legs, and ten was as near as
+  # the cap allowed. What each of the ten came to:
+  #
+  # | Leg | Build + test = job    |   | Leg | Build + test = job    |
+  # | --- | --------------------- | - | --- | --------------------- |
+  # | 1   | 3m44 + 5m03 = 9m51    |   | 6   | 3m29 + 4m18 = 8m45    |
+  # | 2   | 5m07 + 4m36 = 10m43   |   | 7   | 4m54 + 6m11 = 12m00   |
+  # | 3   | 5m01 + 4m04 = 10m03   |   | 8   | 4m04 + 6m59 = 12m06   |
+  # | 4   | 5m06 + 4m17 = 10m39   |   | 9   | 4m19 + 8m23 = 13m59   |
+  # | 5   | 5m43 + 5m08 = 11m49   |   | 10  | 5m35 + 4m24 = 11m03   |
+  #
+  # **No leg came in under seven, and the slowest is all but seven minutes over.** The
+  # test time did not divide by five: ten legs tested for 53 minutes between
+  # them where two had tested for 37, because a test runs slower beside
+  # three others on a leg than its share of the old figure says — most of the
+  # server's and the store's suite tests take ten seconds or more apiece here,
+  # making repositories, and a leg's test time is set by its slowest few
+  # rather than by its count. Leg 9's is four `conversations` tests that ran
+  # together and took 80 to 120 seconds each, where on the two legs before
+  # they took 4 to 10. More legs were not added because ten is the cap, and
+  # because what is left is the build — 3m29 to 5m43 by the runner alone —
+  # and the per-test cost of a repository, which are rust-lld's and the
+  # template repositories' to take down rather than an eleventh leg's.
   #
   # `slice` partitioning deals the tests out one at a time across every binary,
   # so each leg gets its share of each suite rather than whole binaries. What
