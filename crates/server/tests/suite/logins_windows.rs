@@ -82,15 +82,27 @@ const STUB: &str = "agent.ps1";
 /// started and which process it is, prints the address and the prompt, and
 /// takes one line for the code; it writes the login where Claude would, under
 /// the HOME the sandbox gives it.
+///
+/// **Not one cmdlet in it**, which is `tests/suite/sessions_windows.rs`'s rule
+/// for its stand-ins, and here it is the difference between seconds and
+/// minutes. A cmdlet is found by PowerShell searching its modules, and the
+/// first search as the session account on a runner took three to four minutes
+/// before the stub printed a word (run 40785712519, whose log has the boundary
+/// written in 21 ms and then nothing until the address). So it is the language
+/// and the framework and nothing else: `[System.IO.Path]` rather than
+/// `Join-Path` and `Split-Path`, `[System.IO.File]` rather than `Add-Content`,
+/// `Set-Content` and `Test-Path`, and `[System.Random]` rather than
+/// `Get-Random`.
 const SCRIPT: &str = r#"
-$credentials = Join-Path $env:HOME '.claude\.credentials.json'
+$credentials = [System.IO.Path]::Combine($env:HOME, '.claude', '.credentials.json')
+$here = [Environment]::CurrentDirectory
 
 switch ($args[1]) {
   'login' {
-    Add-Content -Path '.\started' -Value 'started'
-    Add-Content -Path '.\pids' -Value $PID
+    [System.IO.File]::AppendAllText([System.IO.Path]::Combine($here, 'started'), "started`r`n")
+    [System.IO.File]::AppendAllText([System.IO.Path]::Combine($here, 'pids'), "$PID`r`n")
     [Console]::Out.WriteLine('Opening browser to sign in...')
-    [Console]::Out.WriteLine("If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&state=$(Get-Random)")
+    [Console]::Out.WriteLine("If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&state=$([System.Random]::new().Next())")
     [Console]::Out.Write('Paste code here if prompted > ')
     [Console]::Out.Flush()
     $code = [Console]::In.ReadLine()
@@ -98,12 +110,12 @@ switch ($args[1]) {
       [Console]::Error.WriteLine('Login failed: Request failed with status code 400')
       exit 1
     }
-    New-Item -ItemType Directory -Force -Path (Split-Path $credentials) | Out-Null
-    Set-Content -Path $credentials -Value "{`"claudeAiOauth`":{`"accessToken`":`"$code`"}}" -NoNewline
+    [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($credentials))
+    [System.IO.File]::WriteAllText($credentials, "{`"claudeAiOauth`":{`"accessToken`":`"$code`"}}")
     exit 0
   }
   'status' {
-    if (Test-Path $credentials) { exit 0 } else { exit 1 }
+    if ([System.IO.File]::Exists($credentials)) { exit 0 } else { exit 1 }
   }
 }
 "#;

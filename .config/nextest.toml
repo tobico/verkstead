@@ -33,6 +33,17 @@ session-account = { max-threads = 1 }
 # is a test failing about the scheduler. The in-crate tests are the `writing`
 # module's alone — the rest of the server's own tests on this platform name
 # identities without logging on as one.
+#
+# **And first on their leg rather than last.** The first boundary on a runner
+# writes a step on the runner's own profile directory, and writing that list
+# makes Windows walk everything under the profile: 55 seconds of one test, once
+# a leg, whichever test it falls to (run 40785712519). Every boundary after it
+# finds the step standing. That cost is the machine's and not a test's, so it
+# cannot come out of the tests — but at the default priority this group sorts
+# near the end of every leg, so one test was alone at the tail. Started first,
+# the group's one-at-a-time turns run beside the rest of the leg on the other
+# threads instead of after it. Nothing here waits on another test having run
+# first: a test of this group on a leg of its own still passes.
 [[profile.default.overrides]]
 filter = '''
     (binary_id(verkstead-server::suite) & test(/^(sessions_windows|logins_windows|sandbox_windows|account_windows)::/))
@@ -40,6 +51,7 @@ filter = '''
   | (binary_id(verkstead-server) & test(/^sandbox::granting::writing::tests::/))
 '''
 test-group = 'session-account'
+priority = 100
 
 # **The one test that waits on a PowerShell to say something**, with nothing
 # else running beside it. A first `powershell.exe` on the runner is slow on its
