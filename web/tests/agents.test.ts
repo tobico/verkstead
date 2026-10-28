@@ -30,6 +30,7 @@ const profile = (
   memory: true,
   broken: null,
   login: true,
+  devices: [],
   /// Bound on this device, which is every account on a Verkstead linked to
   /// nothing.
   bound: true,

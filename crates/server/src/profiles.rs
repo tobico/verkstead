@@ -42,7 +42,8 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileMinted, ProfileSaved, RoleChoice, RowDevice,
+    ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry, ProfileMinted, ProfileSaved,
+    RoleChoice, RowDevice,
 };
 
 use crate::resolved::{Resolved, resolve};
@@ -245,10 +246,9 @@ pub(crate) async fn looked_at_all(state: &AppState) {
 /// together rather than one call per Profile, since the whole point of the batch
 /// is that it is one hop off the runtime instead of a list's worth.
 ///
-/// **And the devices the ones not bound here are bound on, read once beside
-/// them**, for whether the one a launch would fetch from is answering — see
-/// [`broken`]. Asked only where there is such a Profile in the batch, so the
-/// ordinary installation pays nothing for it.
+/// **And the membership, read once beside them**, for whether a device a
+/// launch of one not bound here would fetch from is answering — see
+/// [`broken`] — and for the card's line per device: see [`Lines`].
 ///
 /// **And the machine itself goes in with them**, for the one thing such a
 /// Profile is judged against here: whether the harness it runs is installed on
@@ -257,7 +257,12 @@ pub(crate) async fn looked_at_all(state: &AppState) {
 async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<ProfileEntry>> {
     looked(state, &profiles).await;
 
-    let members = members_of(&state.pool, &profiles).await?;
+    let members = store::members(&state.pool).await?;
+    let lines = Lines::read(state, &members).await?;
+    let members: HashMap<String, store::Member> = members
+        .into_iter()
+        .map(|member| (member.device.clone(), member))
+        .collect();
     let machine = state.onboarding.machine().clone();
     let signed_out = state.logins.signed_out();
 
@@ -303,6 +308,7 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
                     account: account(&profile.account),
                     models: profile.models,
                     memory: profile.memory,
+                    devices: lines.of(&profile.id),
                 }
             })
             .collect()
@@ -310,27 +316,79 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
     .await?)
 }
 
-/// The membership, where any of `profiles` is not bound here, and nothing at
-/// all otherwise.
-async fn members_of(
-    pool: &SqlitePool,
-    profiles: &[store::Profile],
-) -> Result<HashMap<String, store::Member>> {
-    if !profiles.iter().any(|profile| profile.unbound.is_some()) {
-        return Ok(HashMap::new());
-    }
-
-    members_by_device(pool).await
+/// What a Profile card's line per device is drawn off: every device of the
+/// cluster, this one first and then the members in the order the Devices
+/// section lists them, and where each Profile is bound.
+///
+/// **Nothing at all on a Verkstead in no cluster**, and on a router with no
+/// identity: one device is the only place anything could be bound, and a line
+/// would say what the card already does. The bindings are read only where
+/// there is a line to draw.
+struct Lines {
+    /// What each device is drawn as, by the Device Id its bindings are
+    /// written under — this device's own first, with no id.
+    devices: Vec<(String, RowDevice)>,
+    bound: store::BoundWhere,
 }
 
-/// Every member of this device's cluster, by its Device Id: what a device a
-/// Profile is bound on is read off — see [`whose`].
-pub(crate) async fn members_by_device(pool: &SqlitePool) -> Result<HashMap<String, store::Member>> {
-    Ok(store::members(pool)
-        .await?
-        .into_iter()
-        .map(|member| (member.device.clone(), member))
-        .collect())
+impl Lines {
+    async fn read(state: &AppState, members: &[store::Member]) -> Result<Self> {
+        let (Some(here), false) = (state.devices.as_ref(), members.is_empty()) else {
+            return Ok(Self {
+                devices: Vec::new(),
+                bound: store::BoundWhere::default(),
+            });
+        };
+
+        let bound = store::bound_where(&state.pool).await?;
+
+        // This device drawn as the Devices section draws it, and each member
+        // as it last answered.
+        let this = RowDevice {
+            id: None,
+            name: here.name(),
+            os: Some(here.os()),
+            reachable: true,
+        };
+
+        let devices = std::iter::once((bound.here.clone(), this))
+            .chain(members.iter().map(|member| {
+                (
+                    member.device.clone(),
+                    RowDevice {
+                        id: Some(member.device.clone()),
+                        name: member.name.clone(),
+                        os: Some(member.os.clone()),
+                        reachable: member.reachable,
+                    },
+                )
+            }))
+            .collect();
+
+        Ok(Self { devices, bound })
+    }
+
+    /// The lines of the Profile `id`: a binding's account on every device
+    /// holding one, and *runs from a copy* on every other.
+    fn of(&self, id: &str) -> Vec<ProfileDevice> {
+        let bound = self
+            .bound
+            .bound
+            .get(id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+
+        self.devices
+            .iter()
+            .map(|(device, row)| ProfileDevice {
+                device: row.clone(),
+                bound: bound
+                    .iter()
+                    .find(|(on, _)| on == device)
+                    .map(|(_, held)| account(held)),
+            })
+            .collect()
+    }
 }
 
 /// Whether the account this row names holds a **login file** — the fact that

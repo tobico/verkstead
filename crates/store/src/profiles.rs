@@ -1337,6 +1337,61 @@ pub async fn profiles_as_saved(pool: &SqlitePool) -> Result<Vec<Profile>> {
         .collect()
 }
 
+/// Where every live Profile is bound, by its uuid: each device holding a
+/// binding of it — this one among them — with the account that binding names
+/// there, in the order those bindings were written down here.
+///
+/// What the Profile card's line per device is drawn off. A binding not of its
+/// Profile's shape, which is one somebody edited by hand, is left out rather
+/// than taking the rest with it, and a Profile bound nowhere is not in it.
+///
+/// **With the id this device's own bindings are written under**, which is
+/// what [`Profile::unbound`] is read against — the empty string where the
+/// serve has not said one yet (see [`here`]) — so the card's line for this
+/// device and the row's own reading of whether it is bound here are the one
+/// answer.
+pub async fn bound_where(pool: &SqlitePool) -> Result<BoundWhere> {
+    let mut tx = super::reading(pool, "reading where the Profiles are bound").await?;
+
+    let here = here(&mut tx).await?;
+    let mut bindings = bindings_on(&mut tx).await?;
+    let mut bound = HashMap::new();
+
+    for record in replicated::records_on::<Profiles>(&mut tx).await? {
+        if record.removed() {
+            continue;
+        }
+
+        let Some(devices) = bindings.remove(&record.uuid) else {
+            continue;
+        };
+
+        let harness = AgentType::read(&record.fields.harness)?;
+
+        let accounts = devices
+            .into_iter()
+            .filter_map(|(device, binding)| {
+                Some((device, binding.account(harness, &record.uuid).ok()?))
+            })
+            .collect();
+
+        bound.insert(record.uuid, accounts);
+    }
+
+    Ok(BoundWhere { here, bound })
+}
+
+/// Where every live Profile is bound — see [`bound_where`].
+#[derive(Debug, Clone, Default)]
+pub struct BoundWhere {
+    /// The id this device's own bindings are written under.
+    pub here: String,
+
+    /// Each device holding a binding of a Profile, by the Profile's uuid, with
+    /// the account it names there.
+    pub bound: HashMap<String, Vec<(String, Account)>>,
+}
+
 /// Every live binding, by the Profile it binds: each device's, in the order
 /// they were written down here.
 async fn bindings_on(

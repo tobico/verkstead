@@ -309,15 +309,16 @@ pub struct ConversationEntry {
 /// the OS is worth drawing at all (see [`RowDevice::os`]).
 ///
 /// The sidebar's rows carry one only for another device's work. A Profile
-/// card's mirror carries one too, for the device its account lives on, and
-/// always in full — see [`crate::ProfileEntry`].
+/// card's line per device carries one too, this device's own among them, and
+/// always in full — see [`crate::ProfileDevice`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct RowDevice {
-    /// The **Device Id**. Never `null` on what a server answers today — this
-    /// device's own rows carry no `RowDevice` at all — but the viewer reads
-    /// `null` as *this device*, the shape it keys its queries and composes its
-    /// paths by, so a local URL keeps the shape it has always had.
+    /// The **Device Id**, or `null` for *this device*: the shape the viewer
+    /// keys its queries and composes its paths by, so a local URL keeps the
+    /// shape it has always had. A sidebar row of this device's own carries no
+    /// `RowDevice` at all; a Profile card's line for this device carries one
+    /// with no id.
     pub id: Option<String>,
 
     /// What it is shown as: the hostname of the machine, as that machine last
@@ -334,8 +335,8 @@ pub struct RowDevice {
     /// is already on says nothing. The hub decides it, by the server's
     /// `platform::same_mark` — the viewer's `osIcon` rule said a second time.
     ///
-    /// **Never `null` on a Profile card's mirror**, which draws the device's
-    /// full badge whatever the hub is.
+    /// **Never `null` on a Profile card's line per device**, which draws the
+    /// device's full badge whatever the hub is.
     pub os: Option<String>,
 
     /// And whether the device is answering. `false` is the row drawn dimmed,

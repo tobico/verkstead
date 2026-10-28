@@ -971,6 +971,22 @@ async fn a_member_that_stops_answering_keeps_its_records() {
         Some(verkstead_render::Broken::NoBoundDevice),
         "and the device it is bound on is not answering",
     );
+
+    let theirs = rows[0]
+        .devices
+        .iter()
+        .find(|line| line.device.id.as_deref() == Some(A))
+        .expect("the member keeps its line");
+
+    assert!(!theirs.device.reachable, "drawn as not answering");
+    assert_eq!(
+        theirs.bound,
+        Some(verkstead_render::ProfileAccount::Claude {
+            claude_dir: "/home/you/accounts/work/.claude".to_owned(),
+            config_file: "/home/you/accounts/work/.claude.json".to_owned(),
+        }),
+        "from the last binding of it this device holds",
+    );
 }
 
 /// A device that is no longer a member takes nothing with it: a record is the
@@ -990,6 +1006,99 @@ async fn the_profiles_of_an_unlinked_device_stay() {
     tokio::time::sleep(SETTLING).await;
 
     assert_eq!(names(&b.profiles().await), vec!["here", "work"]);
+}
+
+/// The card carries a line per device of the cluster, saying how each runs the
+/// Profile: A bound at the paths its binding holds, B from a copy — and B's
+/// card says the same of the one record, off the binding it pulled.
+#[tokio::test]
+async fn the_card_says_where_each_device_is_bound_and_which_runs_from_a_copy() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.saves("work").await;
+
+    let theirs = b.profiles_saying(|rows| landed(rows, "work")).await;
+    let ours = a.profiles().await;
+
+    let on_a = called(&ours, "work").unwrap();
+    let on_b = called(&theirs, "work").unwrap();
+    let (machine, _) = this_machine();
+
+    let lines = |row: &ProfileEntry| {
+        row.devices
+            .iter()
+            .map(|line| {
+                (
+                    line.device.id.clone(),
+                    line.device.name.clone(),
+                    line.bound.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        lines(on_a),
+        vec![
+            (None, A_MACHINE.to_owned(), Some(on_a.account.clone())),
+            (Some(B.to_owned()), machine.clone(), None),
+        ],
+        "on A: this device first, bound at its paths, and B running from a copy",
+    );
+    assert_eq!(
+        lines(on_b),
+        vec![
+            (None, machine, None),
+            (
+                Some(A.to_owned()),
+                A_MACHINE.to_owned(),
+                Some(on_a.account.clone())
+            ),
+        ],
+        "and on B the same two facts, B's own line first",
+    );
+    assert!(
+        on_b.devices.iter().all(|line| line.device.reachable),
+        "both answering: {:#?}",
+        on_b.devices,
+    );
+}
+
+/// A Verkstead in no cluster draws its card as before, with no line at all; a
+/// device linked to it gains its line on every card, and loses it once it is
+/// unlinked — whatever binding it left behind.
+#[tokio::test]
+async fn a_device_linked_gains_its_line_and_one_unlinked_loses_it() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+
+    b.saves("here").await;
+
+    let alone = b.profiles().await;
+    assert!(
+        alone[0].devices.is_empty(),
+        "no cluster, no device lines: {:#?}",
+        alone[0].devices,
+    );
+
+    b.linked_to(&a.device, A_MACHINE, A_OS, vec![a.at()]).await;
+
+    let linked = b.profiles().await;
+    let lines = &linked[0].devices;
+
+    assert_eq!(lines.len(), 2, "this device and A: {lines:#?}");
+    assert!(lines[0].device.id.is_none() && lines[0].bound.is_some());
+    assert_eq!(lines[1].device.id.as_deref(), Some(A));
+    assert_eq!(lines[1].device.name, A_MACHINE);
+    assert_eq!(lines[1].device.os.as_deref(), Some(A_OS));
+    assert_eq!(lines[1].bound, None, "A runs it from a copy");
+
+    forget_member(&b.pool, A).await.unwrap();
+
+    assert!(
+        b.profiles().await[0].devices.is_empty(),
+        "unlinked, and the line goes with the link",
+    );
 }
 
 /// A Profile made on a third device reaches B through A, which holds it: every

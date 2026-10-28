@@ -329,6 +329,7 @@ describe("a shared conversation", () => {
                       id: "11111111-1111-4111-8111-111111111111",
                       broken: null,
                       login: true,
+                      devices: [],
                       name: "work",
                       account: {
                         agent_type: "Claude",

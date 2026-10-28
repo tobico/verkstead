@@ -229,9 +229,20 @@ pub struct ProfileEntry {
     /// is a Profile bound on other devices alone, whose paths on the row are
     /// one of theirs and belong to no filesystem here.
     ///
-    /// No device is drawn on the row either way: a Profile is the cluster's,
-    /// and has no home to mark.
+    /// No device is drawn on the row's own line either way: a Profile is the
+    /// cluster's, and has no home to mark. Where it is bound is
+    /// [`Self::devices`].
     pub bound: bool,
+
+    /// How each device of the cluster runs it, a line apiece: this device
+    /// first, then every member in the order the Devices section lists them —
+    /// see [`ProfileDevice`].
+    ///
+    /// **Empty on a Verkstead in no cluster**, whose one device is the only
+    /// place anything could be bound and says nothing a line would. A member
+    /// not answering keeps its line, drawn from the last binding of it this
+    /// device holds; one unlinked loses it, whatever binding it left behind.
+    pub devices: Vec<ProfileDevice>,
 
     /// Where this Profile was minted and the id it had there, for one that was
     /// numbered before Profiles had uuids — absent for every other row.
@@ -241,6 +252,26 @@ pub struct ProfileEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typescript", ts(optional))]
     pub minted: Option<ProfileMinted>,
+}
+
+/// One device's line on a Profile card: the device, and whether it holds a
+/// **binding** of the Profile.
+///
+/// Every device draws every device's line off what it holds, the bindings
+/// replicating like the records they bind (ADR-0028). A binding is only ever
+/// written by the device it names, so the paths on another device's line are
+/// that device's to change and nobody else's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ProfileDevice {
+    /// Which device, drawn in full: its name, the mark for its OS and whether
+    /// it is answering. The `id` is `null` on this device's own line.
+    pub device: crate::RowDevice,
+
+    /// The account its binding names, in the harness's own shape, or `null`
+    /// for a device holding no binding — one that **runs from a copy** of the
+    /// account under its own Data Directory.
+    pub bound: Option<ProfileAccount>,
 }
 
 /// Where a Profile numbered before the uuids was minted: the **Device Id** of

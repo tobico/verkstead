@@ -3875,8 +3875,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     // And the Agent Profiles of a device that is in a cluster, which is the
     // other list a membership changes the shape of: every device lists every
-    // member's accounts beside its own, each mirror row saying which machine it
-    // is at home on (ADR-0020, *Shared Profiles*).
+    // Profile of the cluster, each card with a line per device saying whether
+    // that device is bound on it or runs it from a copy (ADR-0028).
     //
     // An app of its own rather than a member added to the one the Profiles above
     // are written from, because a membership is not local to one reading: a
@@ -4283,22 +4283,42 @@ const ANOTHER_MEMBER: &str = "ffeeddccbbaa00998877665544332211";
 #[cfg(unix)]
 const A_THIRD_DEVICE: &str = "99887766554433221100aabbccddeeff";
 
-/// A router whose Profiles are a cluster's: two of this device's own, and one
-/// **mirror** of a member's, which is the row every device in a cluster keeps
-/// per Profile it has heard of (ADR-0020, *Shared Profiles*).
+/// A router whose Profiles are a cluster's: two bound on this device, and one
+/// of a member's bound there alone, which is a record every device in a
+/// cluster holds (ADR-0028).
 ///
-/// The member row beside it is what the mirror is drawn with: the machine's
-/// name and the word its mark comes off are this device's own reading of its
-/// membership rather than anything the far end sent with the Profile. So the
-/// fixture holds both, which is what a linked Verkstead holds.
+/// **Answering for a device**, so that every card carries its line per device:
+/// this machine bound at its paths or running from a copy, and the member
+/// beside it. The member's name and the word its mark comes off are this
+/// device's own reading of its membership rather than anything the far end
+/// sent with the Profile, so the fixture holds both, which is what a linked
+/// Verkstead holds.
 ///
-/// The mirror's account paths are the member's own — `/home/you/…` on a Mac,
-/// which is nowhere on the box writing this — and that is the point of them:
-/// what a session away from home is given is another stage's, and until then
-/// the row reads as one whose account is not on this device.
+/// The member's account paths are its own — `/home/you/…` on a Mac, which is
+/// nowhere on the box writing this — and that is the point of them: what a
+/// session here is given is the account fetched from there.
 #[cfg(unix)]
 async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
-    let (dir, pool, app) = empty_app().await;
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let reading = Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], WORKBENCH),
+        Platform::Linux,
+        None,
+        vec!["192.168.1.24".parse().unwrap()],
+    )
+    .calling_itself(A_MACHINE_NAME, "Linux");
+
+    let devices = Devices::of(
+        Device::stated(dir.path(), A_DEVICE).unwrap(),
+        reading,
+        Members::recorded(pool.clone()),
+        Joins::recorded(pool.clone()),
+    );
+    let app = router_answering_devices(pool.clone(), devices);
 
     let mut profiles = Vec::new();
     for (name, home, models) in [

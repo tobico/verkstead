@@ -4816,6 +4816,28 @@ export type ProfileChosen = "Chosen" | "NoSuchConversation" | "NoSuchProfile" | 
 export type ProfileDeleted = "Removed" | "NoSuchProfile";
 
 /**
+ * One device's line on a Profile card: the device, and whether it holds a
+ * **binding** of the Profile.
+ *
+ * Every device draws every device's line off what it holds, the bindings
+ * replicating like the records they bind (ADR-0028). A binding is only ever
+ * written by the device it names, so the paths on another device's line are
+ * that device's to change and nobody else's.
+ */
+export type ProfileDevice = { 
+/**
+ * Which device, drawn in full: its name, the mark for its OS and whether
+ * it is answering. The `id` is `null` on this device's own line.
+ */
+device: RowDevice, 
+/**
+ * The account its binding names, in the harness's own shape, or `null`
+ * for a device holding no binding — one that **runs from a copy** of the
+ * account under its own Data Directory.
+ */
+bound: ProfileAccount | null, };
+
+/**
  * A Profile as the human has just written it, for saving or for rewriting.
  *
  * The account says which type it is, because the fields beside it are that
@@ -4912,10 +4934,22 @@ memory: boolean,
  * is a Profile bound on other devices alone, whose paths on the row are
  * one of theirs and belong to no filesystem here.
  *
- * No device is drawn on the row either way: a Profile is the cluster's,
- * and has no home to mark.
+ * No device is drawn on the row's own line either way: a Profile is the
+ * cluster's, and has no home to mark. Where it is bound is
+ * [`Self::devices`].
  */
 bound: boolean, 
+/**
+ * How each device of the cluster runs it, a line apiece: this device
+ * first, then every member in the order the Devices section lists them —
+ * see [`ProfileDevice`].
+ *
+ * **Empty on a Verkstead in no cluster**, whose one device is the only
+ * place anything could be bound and says nothing a line would. A member
+ * not answering keeps its line, drawn from the last binding of it this
+ * device holds; one unlinked loses it, whatever binding it left behind.
+ */
+devices: Array<ProfileDevice>, 
 /**
  * Where this Profile was minted and the id it had there, for one that was
  * numbered before Profiles had uuids — absent for every other row.
@@ -5691,15 +5725,16 @@ export type RoleChoice = { pairing: ProfileChoice | null, };
  * the OS is worth drawing at all (see [`RowDevice::os`]).
  *
  * The sidebar's rows carry one only for another device's work. A Profile
- * card's mirror carries one too, for the device its account lives on, and
- * always in full — see [`crate::ProfileEntry`].
+ * card's line per device carries one too, this device's own among them, and
+ * always in full — see [`crate::ProfileDevice`].
  */
 export type RowDevice = { 
 /**
- * The **Device Id**. Never `null` on what a server answers today — this
- * device's own rows carry no `RowDevice` at all — but the viewer reads
- * `null` as *this device*, the shape it keys its queries and composes its
- * paths by, so a local URL keeps the shape it has always had.
+ * The **Device Id**, or `null` for *this device*: the shape the viewer
+ * keys its queries and composes its paths by, so a local URL keeps the
+ * shape it has always had. A sidebar row of this device's own carries no
+ * `RowDevice` at all; a Profile card's line for this device carries one
+ * with no id.
  */
 id: string | null, 
 /**
@@ -5718,8 +5753,8 @@ name: string,
  * is already on says nothing. The hub decides it, by the server's
  * `platform::same_mark` — the viewer's `osIcon` rule said a second time.
  *
- * **Never `null` on a Profile card's mirror**, which draws the device's
- * full badge whatever the hub is.
+ * **Never `null` on a Profile card's line per device**, which draws the
+ * device's full badge whatever the hub is.
  */
 os: string | null, 
 /**

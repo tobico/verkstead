@@ -45,15 +45,24 @@
 //! What is on the card is what a list is scanned for: one line reading as the
 //! harness's mark, the harness, and the profile's own name after an em dash —
 //! "Claude Code — Personal" — with a red mark after the name where the account
-//! has gone. The mounted paths come off it and into the pane, which has room for
-//! them, and so do the models: a profile carries every model its account can
+//! has gone. The mounted paths come off its line and into the pane, which has
+//! room for them — the lines per device below are where a cluster says where
+//! each is bound — and so do the models: a profile carries every model its account can
 //! launch, and a card that listed them put a line of ids under every row. The
 //! agent type stays on the card as the mark it is drawn by rather than as a
 //! word, and is the form's own field in the pane, over the paths it decides.
 //!
-//! No machine is drawn on a card: a profile is the cluster's, every device
-//! holding the one record, so there is no home to mark — and two alike that
-//! arrived by replication are drawn two alike.
+//! No machine is drawn on a card's own line: a profile is the cluster's, every
+//! device holding the one record, so there is no home to mark — and two alike
+//! that arrived by replication are drawn two alike.
+//!
+//! Under it, in a cluster, is **a line per device** — this one first, then the
+//! members as the Devices section lists them — saying how that device runs it:
+//! bound at the paths its binding holds, or from a copy. The only place a
+//! device is named on a profile, and drawn off the bindings every device holds
+//! of every other, so a member that is not answering keeps its line, dimmed,
+//! from the last binding of it this device holds. A Verkstead in no cluster has
+//! one place anything could be bound, and draws no line at all.
 //!
 //! The warning itself is the pane's. A card holding a broken profile is dimmed
 //! and carries a red `circle-exclamation` after its name, read aloud as the
@@ -147,10 +156,12 @@ import { NOT_USABLE_AWAY, brokenReading } from "../broken";
 import type {
   ProfileAccount,
   ProfileDeleted,
+  ProfileDevice,
   ProfileEdit,
   ProfileEntry,
   ProfileSaved,
 } from "../api/types";
+import { osIcon } from "../devices";
 import { useReading } from "../freshness";
 import { rowPress } from "../rows";
 import { KNOWN_MODELS, known, prettify } from "../models";
@@ -549,6 +560,16 @@ function ProfileCard(props: {
             </Show>
           </span>
         </div>
+
+        {/* And how each device of the cluster runs it, a line apiece: none
+            at all on a Verkstead in no cluster. */}
+        <Show when={props.profile.devices.length > 0}>
+          <ul class={styles.devices}>
+            <For each={props.profile.devices}>
+              {(line) => <DeviceLine line={line} />}
+            </For>
+          </ul>
+        </Show>
       </CardButton>
       {/* Beside the card rather than inside it, so that nothing pressed in the
           modal is a press on the card. */}
@@ -561,6 +582,54 @@ function ProfileCard(props: {
       </Show>
     </li>
   );
+}
+
+/// One device's line on a card: the device, drawn as the Devices section
+/// draws it, and either the paths its binding holds or that it runs from a copy.
+///
+/// Read, never edited, from here: a binding is written only by the device it
+/// names, and this device's own is what the form in the pane rewrites.
+function DeviceLine(props: { line: ProfileDevice }): JSX.Element {
+  const device = () => props.line.device;
+  const os = () => device().os ?? "";
+
+  return (
+    <li
+      class={[
+        styles.device,
+        device().reachable ? undefined : styles.unreachable,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <Icon of={osIcon(os())} label={os()} class={styles.os} />
+      <span class={styles.deviceName}>
+        {device().name}
+        <Show when={device().id === null}>
+          {" "}
+          <span class={styles.here}>this device</span>
+        </Show>
+      </span>
+      <Show
+        when={props.line.bound}
+        fallback={<span class={styles.how}>runs from a copy</span>}
+      >
+        {(account) => (
+          <span class={styles.how} title={paths(account())}>
+            bound at <code>{paths(account())}</code>
+          </span>
+        )}
+      </Show>
+    </li>
+  );
+}
+
+/// The paths a binding holds, in its harness's shape: Claude's pair, or the one
+/// home every harness after it keeps.
+function paths(account: ProfileAccount): string {
+  return ACCOUNT_FIELDS[account.agent_type]
+    .map((field) => path(account, field.key))
+    .join(" and ");
 }
 
 /// Whether the account is one with no login file bound here: perfectly

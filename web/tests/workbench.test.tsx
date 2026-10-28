@@ -6169,6 +6169,7 @@ describe("a conversation's pairings", () => {
       id: "99999999-9999-4999-8999-999999999999",
       memory: true,
       bound: true,
+      devices: [],
       models: ["grok-4.6"],
       name: "grok",
     },

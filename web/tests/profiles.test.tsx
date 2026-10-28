@@ -226,8 +226,13 @@ function theCard(name: string): HTMLElement {
 
 /// The marks a card wears after its name, each read aloud as the sentence it
 /// stands for — the sentence itself being the pane's.
+///
+/// Off the card's own line alone: the lines under it, in a cluster, carry each
+/// device's OS mark, which says nothing about the account.
 function marks(card: HTMLElement): Array<{ label: string; red: boolean }> {
-  return [...card.querySelectorAll('svg[role="img"]')].map((mark) => ({
+  const line = card.querySelector(`.${styles.line}`)!;
+
+  return [...line.querySelectorAll('svg[role="img"]')].map((mark) => ({
     label: mark.getAttribute("aria-label")!,
     red: mark.classList.contains(styles.trouble!),
   }));
@@ -416,6 +421,9 @@ describe("the cards", () => {
   /// for them: a list is scanned before it is read, and two absolute paths a
   /// card deep are neither. The agent type is on the card as the mark and the
   /// backend's own name rather than as the word the record is written in.
+  ///
+  /// On a Verkstead in no cluster, which this fixture is: in one, the line per
+  /// device says where each is bound — see below.
   it("keeps the paths off the card", async () => {
     theProfiles();
     mountCards();
@@ -504,7 +512,7 @@ describe("the cards", () => {
 /// `tests/fixtures/profiles-shared.json` is that list as the server really
 /// answers it — two bound here and one bound on a member alone.
 describe("a member's accounts", () => {
-  it("says no machine on any card", async () => {
+  it("says no machine on any card's own line", async () => {
     serving(whenever("/api/ui/profiles", json(CLUSTER)));
     mountCards();
 
@@ -512,7 +520,8 @@ describe("a member's accounts", () => {
 
     // The reading and nothing after it: no machine, and no login to offer on
     // an account this device runs from a copy of.
-    expect(theCard(reads(MIRROR)).textContent).toBe(reads(MIRROR));
+    const line = theCard(reads(MIRROR)).querySelector(`.${styles.line}`)!;
+    expect(line.textContent).toBe(reads(MIRROR));
   });
 
   /// And nothing is wrong with it: the paths on the row are another machine's
@@ -578,6 +587,98 @@ describe("a member's accounts", () => {
       models: MIRROR.models,
       memory: MIRROR.memory,
     });
+  });
+});
+
+/// Under the card's own line, in a cluster, a line per device: this one first,
+/// then the members, each bound at the paths its binding holds or running from
+/// a copy. The fixture is the server's own answer — see
+/// `crates/server/tests/replicated_profiles.rs` for the two devices drawing it.
+describe("the card's line per device", () => {
+  /// What each line under a card reads, in order.
+  function lines(card: HTMLElement): string[] {
+    return [...card.querySelectorAll(`.${styles.device}`)].map(
+      (line) => line.textContent ?? "",
+    );
+  }
+
+  it("says this device is bound at its paths and the member runs from a copy", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(CLUSTER[0]!)));
+
+    const account = pair(CLUSTER[0]!.account);
+
+    expect(lines(theCard(reads(CLUSTER[0]!)))).toEqual([
+      `workbench this devicebound at ${account.claude_dir} and ${account.config_file}`,
+      "laptopruns from a copy",
+    ]);
+  });
+
+  it("says the same of one bound on the member alone, the other way round", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    const account = pair(MIRROR.account);
+
+    expect(lines(theCard(reads(MIRROR)))).toEqual([
+      "workbench this deviceruns from a copy",
+      `laptopbound at ${account.claude_dir} and ${account.config_file}`,
+    ]);
+  });
+
+  /// Each under its machine's mark, read aloud as the OS word, the way the
+  /// Devices section draws a device.
+  it("draws each device under the mark of its OS", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    const labels = [
+      ...theCard(reads(MIRROR)).querySelectorAll(
+        `.${styles.device} svg[role="img"]`,
+      ),
+    ].map((mark) => mark.getAttribute("aria-label"));
+
+    expect(labels).toEqual(["Linux", "macOS"]);
+  });
+
+  /// A member that is not answering keeps its line, from the last binding of
+  /// it this device holds, dimmed the way its Devices row is.
+  it("dims the line of a member that is not answering", async () => {
+    const away: ProfileEntry = {
+      ...MIRROR,
+      devices: MIRROR.devices.map((line) =>
+        line.device.id === null
+          ? line
+          : { ...line, device: { ...line.device, reachable: false } },
+      ),
+    };
+    serving(whenever("/api/ui/profiles", json([away])));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    const drawn = theCard(reads(MIRROR)).querySelectorAll(`.${styles.device}`);
+
+    expect(drawn[0]!.classList).not.toContain(styles.unreachable);
+    expect(drawn[1]!.classList).toContain(styles.unreachable);
+    expect(drawn[1]!.textContent).toContain("bound at");
+  });
+
+  /// And a Verkstead in no cluster draws its cards as before.
+  it("draws no line at all in no cluster", async () => {
+    theProfiles();
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+
+    expect(FABLE.devices).toEqual([]);
+    expect(lines(theCard(reads(FABLE)))).toEqual([]);
   });
 });
 

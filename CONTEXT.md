@@ -3751,7 +3751,7 @@ Profile anything falls back to: there is no default Profile, exactly as there is
 no default model. And a session run under one writes no name into its record, so
 a finished run draws as the harness and the model alone — which is how a record
 from before Verkstead wrote the name down already drew.
-**A Profile is a Replicated record** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): its name, its harness, its models and its memory switch, under the uuid every reference to it names, with an `updated_at` and a deletion stamp — so **a removal is a deletion stamp**, kept, and nulls every Pairing that named the uuid on its way. **The account's paths are a binding**, a record of their own per Profile per device, keyed `<uuid>/<device>` and written only by the device it names: this device's binding is what a session here is run as, and a record this device holds no binding of is run from a copy of the account fetched from a device it is bound on. At the switch every device's own Profiles became records under the uuids they already carried, and each device's paths its binding. **Becoming the cluster's**: the card carrying a line per device, and a device with no binding running from a copy built from the replicated login; in a cluster, an unnamed Profile is named after its device at the switch, and as its device first links. The `cluster-owned-records` roadmap lands it.
+**A Profile is a Replicated record** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): its name, its harness, its models and its memory switch, under the uuid every reference to it names, with an `updated_at` and a deletion stamp — so **a removal is a deletion stamp**, kept, and nulls every Pairing that named the uuid on its way. **The account's paths are a binding**, a record of their own per Profile per device, keyed `<uuid>/<device>` and written only by the device it names: this device's binding is what a session here is run as, and a record this device holds no binding of is run from a copy of the account fetched from a device it is bound on. At the switch every device's own Profiles became records under the uuids they already carried, and each device's paths its binding. **Becoming the cluster's**: a device with no binding running from a copy built from the replicated login; in a cluster, an unnamed Profile is named after its device at the switch, and as its device first links. The `cluster-owned-records` roadmap lands it.
 **A cluster's Profiles are one list on every device of it.** The records and
 the bindings **replicate** like every Replicated record: each device serves its
 whole table of both on the records route behind the **Member Gate**, and pulls
@@ -3778,9 +3778,20 @@ provisional mirror is in no list and its Pairings hold; once it arrives, the
 provisional uuid is rewritten to the record's in everything that named it, the
 account copy under the Data Directory included — so every Pairing survives the
 switch, whichever device updates first.
-**No device is drawn on a Profile's row**, on the settings card or on any pairing
-picker: a Profile has no home to mark, and two alike that arrived by
+**No device is drawn on a Profile's row**, on the settings card's own line or on
+any pairing picker: a Profile has no home to mark, and two alike that arrived by
 replication are drawn two alike.
+**The card carries a line per device instead**, in a cluster: this device first,
+then every member as the Devices section lists them, each saying how that
+device runs the Profile — **bound**, at the paths its binding holds in the
+harness's own shape, or ***runs from a copy*** where it holds none. Every device
+draws every device's line off the bindings it holds, so a member not answering
+keeps its line, dimmed, from its last binding, and a member unlinked loses its
+line whatever binding it left behind. These lines are the only place a device
+is named on a Profile, and none of them is edited from another device: a
+binding is written by the device it names, and this device's own is what the
+form in the pane the card opens rewrites. A Verkstead in no cluster draws no line
+at all.
 **And a session runs under a Profile not bound here wherever it is drawn**, the
 account being fetched before each launch from the first device it is bound on
 whose binding holds a login and that answers — see **Account mirror**. Nothing
