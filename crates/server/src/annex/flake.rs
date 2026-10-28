@@ -512,8 +512,18 @@ mod tests {
             toplevel = c.system.build.toplevel.drvPath;
         }";
 
+        /// What stands in for the release asset, beside the flake.
+        const STAND_IN: &str = "release-asset";
+
         /// `files` written into a directory, evaluated, or `None` where there
         /// is no `nix`.
+        ///
+        /// **Against this checkout, not the release.** The written flake pins
+        /// the tag and asset of [`VERSION`], which do not exist until that
+        /// version is released — and the commit that bumps the version is
+        /// tested before it is — so the `verkstead` input is overridden with
+        /// this checkout's own module, the one that tag will hold, and the
+        /// binary input with a file beside the flake.
         fn evaluate(files: &Written, copied: bool) -> Option<(serde_json::Value, String)> {
             if Command::new("nix").arg("--version").output().is_err() {
                 println!("skipping the Annex flake's evaluation: no nix on PATH");
@@ -527,13 +537,35 @@ mod tests {
                 std::fs::write(dir.path().join(COPIED_BINARY), "#!/bin/sh\n").unwrap();
             }
 
+            let flake = format!("path:{}", dir.path().display());
+            let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let mut lock = Command::new("nix");
+            lock.args(["--extra-experimental-features", "nix-command flakes"])
+                .args(["flake", "lock", &flake, "--allow-dirty-locks"])
+                .args(["--override-input", "verkstead"])
+                .arg(format!(
+                    "git+file://{}",
+                    checkout.canonicalize().unwrap().display()
+                ));
+            if !copied {
+                std::fs::write(dir.path().join(STAND_IN), "#!/bin/sh\n").unwrap();
+                lock.args(["--override-input", "verkstead-binary"])
+                    .arg(format!("path:{}", dir.path().join(STAND_IN).display()));
+            }
+            let locked = lock.output().unwrap();
+
+            assert!(
+                locked.status.success(),
+                "{}",
+                String::from_utf8_lossy(&locked.stderr)
+            );
+
             let output = Command::new("nix")
                 .args(["--extra-experimental-features", "nix-command flakes"])
                 .arg("eval")
                 .arg("--json")
                 .arg(format!(
-                    "path:{}#nixosConfigurations.{CONFIGURATION}.config",
-                    dir.path().display()
+                    "{flake}#nixosConfigurations.{CONFIGURATION}.config"
                 ))
                 .args(["--apply", READ_BACK])
                 .output()
@@ -588,10 +620,7 @@ mod tests {
             assert!(!package.contains(COPIED_INSTALL), "{package}");
             assert!(read["toplevel"].as_str().unwrap().ends_with(".drv"));
             assert!(lock.contains("\"verkstead-binary\""), "{lock}");
-            assert!(
-                lock.contains(&format!("releases/download/v{VERSION}/{RELEASE_ASSET}")),
-                "{lock}"
-            );
+            assert!(lock.contains(STAND_IN), "{lock}");
         }
 
         #[test]
