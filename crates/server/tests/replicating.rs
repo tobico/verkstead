@@ -116,8 +116,16 @@ impl Verkstead {
             .await
             .unwrap();
 
-        let device = Device::stated(dir.path(), id).unwrap();
         let members = Members::recorded(pool.clone());
+
+        // A device brought back keeps the identity it had, the way a real
+        // start does: stated afresh, it would come back under a certificate
+        // its members do not hold, and its start pull would race the test
+        // writing the new one down.
+        let device = match dir.path().join("device.id").exists() {
+            true => Device::issued(dir.path(), &members).await.unwrap(),
+            false => Device::stated(dir.path(), id).unwrap(),
+        };
         let nudges = Nudges::new();
 
         let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &device)
