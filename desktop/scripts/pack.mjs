@@ -450,25 +450,79 @@ const binaries = cli();
 process.stdout.write(`The sidecar is ${binaries.join(" and ")}\n`);
 stage(binaries);
 
-// No platform flag: electron-builder packs for the machine it is running on,
-// which is what each of the three artifacts has always been built by — and what
-// keeps this one command rather than one per platform.
-//
-// **And never a publish**, said on every pack rather than only a release
-// leg's: `electron-builder.yml` names a `github` provider so that the update
-// metadata is written, and electron-builder left to itself publishes to it
-// whenever it finds itself on CI at a tag. The Release is
-// `.github/workflows/release.yml`'s to make, metadata and all.
-const packing = spawn(
-  process.execPath,
-  [builder(), "--publish", "never", ...signing(), ...args],
-  { cwd: DESKTOP, stdio: "inherit" },
-);
+const signs = signing();
 
-packing.on("exit", (code, signal) => {
-  const status = signal !== null ? 1 : (code ?? 0);
-  if (status === 0 && MAC) {
-    signed();
+/// Whether this pack notarizes, which is `signing` handing electron-builder
+/// nothing on top of the configuration on a Mac — see there.
+const notarizing = MAC && signs.length === 0;
+
+/// How many times a pack whose staple alone failed is packed again.
+const STAPLE_ATTEMPTS = 3;
+
+/// What electron-builder logs when `stapler` could not fetch the ticket it was
+/// to staple, from `@electron/notarize`.
+const STAPLE_FAILED = "Failed to staple your application";
+
+/// **A staple that fails is packed again**, because the notary has already
+/// accepted the app by then and what failed is `stapler` fetching the ticket
+/// from Apple's CloudKit — a connection Apple's end drops now and then ("The
+/// network connection was lost", error 68). electron-builder staples inside
+/// its notarizing and has no hook between the two, so the pack is what is run
+/// again; the notary accepts the same app a second time. Any other failure is
+/// the pack's own and is not retried. Piped only when notarizing, so that
+/// every other pack keeps electron-builder's terminal as it was.
+function pack(attempt) {
+  // No platform flag: electron-builder packs for the machine it is running on,
+  // which is what each of the three artifacts has always been built by — and what
+  // keeps this one command rather than one per platform.
+  //
+  // **And never a publish**, said on every pack rather than only a release
+  // leg's: `electron-builder.yml` names a `github` provider so that the update
+  // metadata is written, and electron-builder left to itself publishes to it
+  // whenever it finds itself on CI at a tag. The Release is
+  // `.github/workflows/release.yml`'s to make, metadata and all.
+  const packing = spawn(
+    process.execPath,
+    [builder(), "--publish", "never", ...signs, ...args],
+    { cwd: DESKTOP, stdio: notarizing ? ["inherit", "pipe", "pipe"] : "inherit" },
+  );
+
+  let stapleFailed = false;
+  if (notarizing) {
+    for (const [from, to] of [
+      [packing.stdout, process.stdout],
+      [packing.stderr, process.stderr],
+    ]) {
+      // With the end of the chunk before, so that a line split across two
+      // is still read.
+      let tail = "";
+      from.on("data", (chunk) => {
+        to.write(chunk);
+        const read = tail + chunk.toString();
+        stapleFailed ||= read.includes(STAPLE_FAILED);
+        tail = read.slice(-STAPLE_FAILED.length);
+      });
+    }
   }
-  process.exit(status);
-});
+
+  packing.on("close", (code, signal) => {
+    const status = signal !== null ? 1 : (code ?? 0);
+    if (status !== 0 && stapleFailed && attempt < STAPLE_ATTEMPTS) {
+      process.stdout.write(
+        `The notarization ticket could not be stapled, so packing again ` +
+          `(attempt ${attempt + 1} of ${STAPLE_ATTEMPTS})\n`,
+      );
+      pack(attempt + 1);
+      return;
+    }
+    if (status === 0 && MAC) {
+      signed();
+    }
+    // Ended by running out of work rather than by `process.exit`, which drops
+    // whatever of the piped output is still queued — and on a Mac a pipe is
+    // written asynchronously, so that is the tail of a failing pack's log.
+    process.exitCode = status;
+  });
+}
+
+pack(1);
