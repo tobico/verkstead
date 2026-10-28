@@ -566,7 +566,7 @@ jobs:
   # | One test binary: the server         | 4m48 + 17m27 = 23m23  | 5m12 + 17m39 = 23m50  |
   # | Defender exclusions                 | 5m10 + 17m49 = 24m09  | 4m54 + 19m13 = 25m21  |
   # | The legs (ten; leg 9 the slowest)   | 3m44 + 5m03 = 9m51    | 5m07 + 4m36 = 10m43   |
-  # | rust-lld                            |                       |                       |
+  # | rust-lld (reverted)                 | 5m20 + 4m37 = 11m26   | 5m09 + 4m50 = 11m21   |
   # | Template repositories               |                       |                       |
   #
   # The baseline is the last green run on `main` before this work, 2026-10-28.
@@ -623,6 +623,15 @@ jobs:
   # because what is left is the build — 3m29 to 5m43 by the runner alone —
   # and the per-test cost of a repository, which are rust-lld's and the
   # template repositories' to take down rather than an eleventh leg's.
+  #
+  # rust-lld did not stay. Linked with the LLD rustc ships rather than MSVC's
+  # `link.exe` (run 40694314360), the ten legs built in 3m51 to 5m23, a mean
+  # of 4m55, where the legs' row built in 3m29 to 5m43, a mean of 4m42 — the
+  # noise between runners and nothing else. With line tables only and eight
+  # test binaries, linking is no longer what a leg's build spends its time
+  # on. It linked the whole workspace and every leg was green with it — leg
+  # 7 on its re-run, past a CLI pipe test whose restarted server found its
+  # pipe still held — and the next commit took it back out.
   #
   # `slice` partitioning deals the tests out one at a time across every binary,
   # so each leg gets its share of each suite rather than whole binaries. What
