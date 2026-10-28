@@ -523,7 +523,9 @@ mod tests {
         /// version is released — and the commit that bumps the version is
         /// tested before it is — so the `verkstead` input is overridden with
         /// this checkout's own module, the one that tag will hold, and the
-        /// binary input with a file beside the flake.
+        /// binary input with a file beside the flake. The checkout is read as
+        /// `shallow`, since CI's is a depth-one clone, which Nix refuses to
+        /// lock as a whole history it cannot count the revisions of.
         fn evaluate(files: &Written, copied: bool) -> Option<(serde_json::Value, String)> {
             if Command::new("nix").arg("--version").output().is_err() {
                 println!("skipping the Annex flake's evaluation: no nix on PATH");
@@ -544,7 +546,7 @@ mod tests {
                 .args(["flake", "lock", &flake, "--allow-dirty-locks"])
                 .args(["--override-input", "verkstead"])
                 .arg(format!(
-                    "git+file://{}",
+                    "git+file://{}?shallow=1",
                     checkout.canonicalize().unwrap().display()
                 ));
             if !copied {
