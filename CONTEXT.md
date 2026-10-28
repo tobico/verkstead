@@ -112,6 +112,7 @@ whose Author is gone from the one list refuses a start by name and halts with a
 **Notice** where nobody pressed; and a **Companion Repo** of another Author is
 refused on the composer, read-only or read-write alike, a sandbox having one
 environment.
+**Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a record every device holds under the uuid, with an `updated_at` and a deletion stamp, the newest write winning and a removal final — no home device, nothing relayed, and the record in the database rather than `config.yaml`, the token staying in `secrets.yaml`. Removing one then checks this device's Repos and every reachable member's and offers *Repoint them all to…*. The `cluster-owned-records` roadmap lands it; until its stage does, the mirror below is how an Author crosses the cluster.
 **One list across a cluster**, the way the Profiles are one. An Author is at home
 on the device whose files hold it; every other device keeps a mirror row in
 its database, keyed by the uuid — the display name, the git name, the email,
@@ -979,6 +980,7 @@ so clearing the box takes the key away rather than leaving an empty one. Nothing
 in it can be refused, there being no grammar in a paragraph of prose to get
 wrong, and an absent key, an empty one and one nothing can parse are the same
 empty text.
+**Becoming one text for the cluster** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a replicated record in the database rather than `config.yaml`, the newest write winning on every device, cleared being an empty text. The `cluster-owned-records` roadmap lands it.
 **Written into each root as the file that harness reads**, verbatim and alone:
 no heading over it and no line saying where it came from. Claude's
 `.claude/CLAUDE.md`, Codex's `.codex/AGENTS.md`, Grok Build's `.grok/AGENTS.md`,
@@ -1021,6 +1023,7 @@ thing Verkstead is *told* rather than one it finds — and read at the moment a
 session is launched, so a corrected URL fixes every Conversation that attached
 that server. An absent key, an empty one and one nothing can parse are the same
 no servers, and an entry missing either half is dropped as the file is read.
+**Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a replicated record in the database rather than `config.yaml`, carrying a uuid — the name still what the agent and the chips see, unique among the live declarations across the cluster, and declaring a deleted name again a new record — with the header values copied to every device's `secrets.yaml`. The `cluster-owned-records` roadmap lands it.
 **Except the header values, which are in `secrets.yaml`** under the server's
 name, where the GitHub token is: the names are part of the declaration and are
 written with it, and what goes in each of them is a secret. So a header is
@@ -3716,6 +3719,7 @@ Profile anything falls back to: there is no default Profile, exactly as there is
 no default model. And a session run under one writes no name into its record, so
 a finished run draws as the harness and the model alone — which is how a record
 from before Verkstead wrote the name down already drew.
+**Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a record every device holds under a uuid that every reference to a Profile becomes, with an `updated_at` and a deletion stamp; the account paths become a **binding** of one device, a row per device so the card carries a line apiece, and a device with no binding runs from a copy built from the replicated login. In a cluster, an unnamed Profile is named after its device at the switch. The `cluster-owned-records` roadmap lands it; until its stage does, the mirror below is how a Profile crosses the cluster.
 **A cluster's Profiles are one list on every device of it.** A device linked to
 another keeps a **mirror** per Profile that other device holds: a row of its own
 `profiles` table carrying what a row is drawn and picked by — the name, the
@@ -3893,6 +3897,7 @@ built out of that, exactly as it is built out of an account on this machine.
 Nothing downstream of the launch knows the difference: the four parts, the trust
 seeded into the copied `.claude.json`, the launch line and the model are what they
 already were.
+**Becoming the copy under a cluster-owned Profile** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): the login is replicated, newest write wins, published by every device the Profile is bound on at launch, at ending and on the refresh schedule, so a quiet device blocks no start and nothing is fetched from a home. The `cluster-owned-records` roadmap lands it; what follows is the mirror as it stands.
 **Per Profile, under the Data Directory**, named by the **local** Profile id —
 which is what makes the Windows rule hold by construction: a session's profile is
 under that same directory, so the hard link that joins the login in never crosses
@@ -3966,6 +3971,7 @@ what the home account remembers of this Repo and of this Conversation is
 written into the mirror; as the session ends, what the session wrote goes back.
 That is what makes a session run on B readable on A afterwards, and what a
 harness's own resume stands on after a **Transfer**.
+**Becoming union in and fan out** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): this Repo's and this Worktree's entries pulled from every reachable device before launch, the newer file winning, and what the session wrote pushed to every reachable device after, nothing deleted anywhere, OpenCode's one database taken newest whole. The `cluster-owned-records` roadmap lands it; what follows is the sync as it stands.
 **The memory switch holds away from home.** Switched off, nothing syncs in
 either direction and the session starts on an empty store, exactly as it does
 at home.
