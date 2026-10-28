@@ -3924,16 +3924,23 @@ export type McpHeaderEdit = { name: string, value: HeaderEdit, };
  * with a value is send a new one. So this is not the shape a save sends, unlike
  * [`IgnoreRule`], which is the same both ways: see [`McpServerEdit`].
  *
- * **The name is the identity** — lowercase letters, digits and hyphens, unique
- * among the declarations, and never changed. It is what a Conversation's chip
- * refers to and what the agent sees in front of the server's tool names, so a
- * renamed declaration would be one every chip pointing at it had lost.
+ * **The name is the identity the agent and the chips see** — lowercase
+ * letters, digits and hyphens, unique among the live declarations, and never
+ * changed. It is what a Conversation's chip refers to and what the agent sees
+ * in front of the server's tool names, so a renamed declaration would be one
+ * every chip pointing at it had lost. **The record is the uuid**: a name
+ * removed and declared again is a new record under a new one.
  *
  * **HTTP only.** There is no command, no arguments and no transport to choose:
  * a stdio server is a child process an agent starts inside its own sandbox, and
  * it was turned down in the grilling this was settled in.
  */
-export type McpServer = { name: string, url: string, 
+export type McpServer = { 
+/**
+ * The uuid of the declaration's record, which a save sends back to say
+ * which record a row is (ADR-0028).
+ */
+id: string, name: string, url: string, 
 /**
  * The headers it is spoken to with, in the order they are sent. Empty is a
  * server that wants none.
@@ -3953,7 +3960,13 @@ headers: Array<McpHeader>, };
  * taken off the row is one the declaration no longer names, and one added is a
  * name with a value to set.
  */
-export type McpServerEdit = { name: string, url: string, headers: Array<McpHeaderEdit>, };
+export type McpServerEdit = { 
+/**
+ * The uuid of the record the row was drawn from, or `null` for a row
+ * added on the page — a new declaration, under a uuid the server mints.
+ * A row drawn from a record keeps that record's name, whatever it sends.
+ */
+id: string | null, name: string, url: string, headers: Array<McpHeaderEdit>, };
 
 /**
  * What is to become of the declared MCP servers on a save.
@@ -3962,7 +3975,7 @@ export type McpServerEdit = { name: string, url: string, headers: Array<McpHeade
  * thing on this page a save can be refused over, so a section that is not about
  * them says nothing about them and cannot be turned down by one.
  */
-export type McpServersEdit = "Keep" | { "Set": { servers: Array<McpServerEdit>, } };
+export type McpServersEdit = "Keep" | { "Set": { servers: Array<McpServerEdit>, removed: Array<string>, } };
 
 /**
  * A Memo as the page receives it: what the session named it and wrote, who it
@@ -4185,7 +4198,7 @@ name: string | null, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "login", profile: string, } | { "kind": "everything" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "login", profile: string, } | { "kind": "everything" };
 
 /**
  * One Nudge as it goes down a stream: what moved, and **whose news it is**.
@@ -4210,7 +4223,7 @@ export type Nudged = {
  * Device Id — absent for this device's own, which is every Nudge a
  * workbench has ever sent about its own work.
  */
-device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "login", profile: string, } | { "kind": "everything" });
+device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "login", profile: string, } | { "kind": "everything" });
 
 /**
  * And the same of every Conversation at once: what a member offers the device

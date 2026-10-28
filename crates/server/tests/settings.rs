@@ -2829,8 +2829,43 @@ async fn sending_no_rules_takes_the_ones_that_were_there_away() {
 }
 
 /// Save a list of MCP server declarations and leave the rest of both files
-/// alone, which is what the section's own press sends.
+/// alone, which is what the section's own press sends — each row of a name
+/// already declared carrying that record's uuid, and every declaration not
+/// sent removed by its uuid, the way the page says which rows are which.
 async fn save_servers(app: &Router, servers: serde_json::Value) -> SettingsSaved {
+    let standing = settings(app).await.mcp_servers;
+    let mut servers = servers;
+    let rows = servers.as_array_mut().expect("a list of rows");
+
+    for row in rows.iter_mut() {
+        let named = standing
+            .iter()
+            .find(|declared| row["name"].as_str() == Some(declared.name.as_str()));
+
+        if let Some(declared) = named {
+            row["id"] = declared.id.clone().into();
+        }
+    }
+
+    let removed: Vec<String> = standing
+        .iter()
+        .filter(|declared| {
+            !rows
+                .iter()
+                .any(|row| row["name"].as_str() == Some(declared.name.as_str()))
+        })
+        .map(|declared| declared.id.clone())
+        .collect();
+
+    save_servers_removing(app, servers, removed).await
+}
+
+/// And the same with the rows and the removals said outright.
+async fn save_servers_removing(
+    app: &Router,
+    servers: serde_json::Value,
+    removed: Vec<String>,
+) -> SettingsSaved {
     save(
         app,
         &serde_json::json!({
@@ -2843,7 +2878,7 @@ async fn save_servers(app: &Router, servers: serde_json::Value) -> SettingsSaved
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
-            "mcp_servers": { "Set": { "servers": servers } },
+            "mcp_servers": { "Set": { "servers": servers, "removed": removed } },
             "instructions": "",
         }),
     )
@@ -2879,14 +2914,29 @@ fn clear(name: &str) -> serde_json::Value {
 
 /// And the declaration as it comes back, for comparing against: a name, a URL
 /// and the names of its headers.
-fn declared(name: &str, url: &str) -> McpServer {
+fn declared(name: &str, url: &str) -> Declared {
     declaring(name, url, &[])
+}
+
+/// A declaration as it comes back, bar the uuid of its record, which the
+/// server mints — what [`declared`] and [`declaring`] compare against.
+#[derive(Debug)]
+struct Declared(McpServer);
+
+impl PartialEq<Declared> for McpServer {
+    fn eq(&self, other: &Declared) -> bool {
+        McpServer {
+            id: other.0.id.clone(),
+            ..self.clone()
+        } == other.0
+    }
 }
 
 /// And one with headers on it, each its name and whether a value is kept to
 /// send in it.
-fn declaring(name: &str, url: &str, headers: &[(&str, bool)]) -> McpServer {
-    McpServer {
+fn declaring(name: &str, url: &str, headers: &[(&str, bool)]) -> Declared {
+    Declared(McpServer {
+        id: String::new(),
         name: name.to_owned(),
         url: url.to_owned(),
         headers: headers
@@ -2896,7 +2946,7 @@ fn declaring(name: &str, url: &str, headers: &[(&str, bool)]) -> McpServer {
                 set: *set,
             })
             .collect(),
-    }
+    })
 }
 
 /// What `secrets.yaml` holds now, as text — which is where a header value is
@@ -2943,10 +2993,11 @@ async fn the_declared_servers_go_in_and_come_back() {
     assert_eq!(settings(&app).await.mcp_servers, saved.settings.mcp_servers);
 }
 
-/// The file rather than the process: a second server over the same Data
-/// Directory reads what the first one wrote.
+/// The database rather than the process or `config.yaml`: a second server
+/// over the same Data Directory reads what the first one wrote, and the file
+/// holds none of it (ADR-0028).
 #[tokio::test]
-async fn the_declarations_are_in_the_config_file_and_outlive_the_server() {
+async fn the_declarations_are_records_and_outlive_the_server() {
     let (dir, app) = app().await;
 
     save_servers(
@@ -2955,13 +3006,9 @@ async fn the_declarations_are_in_the_config_file_and_outlive_the_server() {
     )
     .await;
 
-    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap_or_default();
 
-    assert!(written.contains("mcp_servers"), "{written}");
-    assert!(
-        written.contains("https://mcp.example.com/docs"),
-        "{written}"
-    );
+    assert!(!written.contains("mcp_servers"), "{written}");
 
     let restarted = app_over(dir.path()).await;
 
@@ -3282,12 +3329,12 @@ async fn a_headers_name_comes_back_and_its_value_never_does() {
     assert!(written.contains("Bearer sk-averysecretkey"), "{written}");
     assert!(written.contains("verkstead"), "{written}");
 
-    // And `config.yaml` holds the names and no part of either value, the two
-    // files being split by what is secret rather than by what it configures.
-    let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    // And `config.yaml` holds no part of either value, nor the declaration,
+    // which is a record now.
+    let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap_or_default();
 
-    assert!(config.contains("Authorization"), "{config}");
     assert!(!config.contains("sk-averysecretkey"), "{config}");
+    assert!(!config.contains("Authorization"), "{config}");
 }
 
 /// The promise the token's own test makes, made again for a header: a value that
@@ -3468,8 +3515,8 @@ async fn a_header_taken_off_the_declaration_takes_its_value_with_it() {
 }
 
 /// Deleting a declaration takes its headers with it, so declaring that name
-/// again starts with none — the secrets are held under the name that declared
-/// them, and a name nobody declares holds nothing.
+/// again starts with none — the secrets are held under the uuid of the
+/// declaration, and declaring the name again is a new one.
 #[tokio::test]
 async fn deleting_a_server_takes_its_header_values_with_it() {
     let (dir, app) = app().await;

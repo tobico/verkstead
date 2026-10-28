@@ -1793,8 +1793,8 @@ fn standing(
     // And every member's Replicated records pulled and merged into this
     // device's, beside it and on the same channel: read once now, and again
     // whenever a member says its records moved or the membership itself does,
-    // so every device holds the cluster's Authors, Agent Profiles and
-    // Instructions (ADR-0028) — see [`replicating`].
+    // so every device holds the cluster's Authors, Agent Profiles, Instructions
+    // and MCP servers (ADR-0028) — see [`replicating`].
     replicating::pulling(&state);
 
     // And what this device forwards, on the same channel again: a member's
@@ -2516,6 +2516,14 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     replicating::instructions::taken_up(&pool, &settings, device.id())
         .await
         .context("taking the Instructions up out of config.yaml into the database")?;
+
+    // And the declared MCP servers the same way, once: each under a uuid
+    // derived from its name, stamped older than any edit, its header values
+    // rekeyed under that uuid; an Annex's never taken up — see
+    // [`replicating::mcp_servers::taken_up`].
+    replicating::mcp_servers::taken_up(&pool, &settings, device.id())
+        .await
+        .context("taking the MCP servers up out of config.yaml into the database")?;
 
     // And the shared build cache, which is resolved for the reason the binds
     // above are and *made* here, which they never are — see

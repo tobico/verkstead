@@ -5653,6 +5653,7 @@ describe("the MCP servers a compose page holds", () => {
   const declaring = (...names: string[]): SettingsView => ({
     ...SETTINGS,
     mcp_servers: names.map((name) => ({
+      id: `uuid-of-${name}`,
       name,
       url: `https://mcp.example.com/${name}`,
       headers: [],
@@ -5708,7 +5709,12 @@ describe("the MCP servers a compose page holds", () => {
             ...SETTINGS,
             mcp_servers: [
               ...SETTINGS.mcp_servers,
-              { name: "wiki", url: "https://mcp.example.com/wiki", headers: [] },
+              {
+                id: "uuid-of-wiki",
+                name: "wiki",
+                url: "https://mcp.example.com/wiki",
+                headers: [],
+              },
             ],
           },
           verified: null,

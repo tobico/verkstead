@@ -4822,6 +4822,13 @@ fn pin_written_at(json: &str, under: &str) -> String {
         }
     }
 
+    // And every declaration's uuid, which a save mints fresh: pinned to the one
+    // its name would be taken up under, which is a uuid all the same.
+    for server in settings["mcp_servers"].as_array_mut().into_iter().flatten() {
+        let name = server["name"].as_str().unwrap_or_default().to_owned();
+        server["id"] = verkstead_server::replicating::mcp_servers::derived_uuid(&name).into();
+    }
+
     serde_json::to_string(&payload).unwrap()
 }
 

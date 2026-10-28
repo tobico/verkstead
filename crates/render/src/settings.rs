@@ -1200,10 +1200,12 @@ pub enum IgnoredCommentsEdit {
 /// with a value is send a new one. So this is not the shape a save sends, unlike
 /// [`IgnoreRule`], which is the same both ways: see [`McpServerEdit`].
 ///
-/// **The name is the identity** — lowercase letters, digits and hyphens, unique
-/// among the declarations, and never changed. It is what a Conversation's chip
-/// refers to and what the agent sees in front of the server's tool names, so a
-/// renamed declaration would be one every chip pointing at it had lost.
+/// **The name is the identity the agent and the chips see** — lowercase
+/// letters, digits and hyphens, unique among the live declarations, and never
+/// changed. It is what a Conversation's chip refers to and what the agent sees
+/// in front of the server's tool names, so a renamed declaration would be one
+/// every chip pointing at it had lost. **The record is the uuid**: a name
+/// removed and declared again is a new record under a new one.
 ///
 /// **HTTP only.** There is no command, no arguments and no transport to choose:
 /// a stdio server is a child process an agent starts inside its own sandbox, and
@@ -1211,6 +1213,9 @@ pub enum IgnoredCommentsEdit {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct McpServer {
+    /// The uuid of the declaration's record, which a save sends back to say
+    /// which record a row is (ADR-0028).
+    pub id: String,
     pub name: String,
     pub url: String,
 
@@ -1252,6 +1257,10 @@ pub struct McpHeader {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct McpServerEdit {
+    /// The uuid of the record the row was drawn from, or `null` for a row
+    /// added on the page — a new declaration, under a uuid the server mints.
+    /// A row drawn from a record keeps that record's name, whatever it sends.
+    pub id: Option<String>,
     pub name: String,
     pub url: String,
     pub headers: Vec<McpHeaderEdit>,
@@ -1300,11 +1309,20 @@ pub enum McpServersEdit {
     /// own sends.
     Keep,
 
-    /// Write these in place of whatever is there — the whole list, in the order
-    /// it is to be read back in, so a row taken off the page is a declaration
-    /// taken out of the file. An empty list is the human having removed the
-    /// last one.
-    Set { servers: Vec<McpServerEdit> },
+    /// Write these: every row the page holds, in the order it draws them —
+    /// each drawn from a record an edit of it, each added a new declaration —
+    /// and a deletion stamp on each record of `removed`, by uuid, which is
+    /// every row taken off the page.
+    ///
+    /// **Removed by uuid rather than by being left out**, because the page is
+    /// not the only writer: a declaration merged from another device after the
+    /// page was read is one it never drew, and leaving it out says nothing
+    /// about it.
+    Set {
+        servers: Vec<McpServerEdit>,
+        #[serde(default)]
+        removed: Vec<String>,
+    },
 }
 
 /// One declaration a save was turned down over, by where it stood in what was

@@ -15,7 +15,7 @@
 //! author_tokens:
 //!   3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01: ghp_...
 //! mcp_headers:
-//!   docs:
+//!   9c1d7e52-4b3a-5f08-8e6d-2a7c0b9f3e14:
 //!     Authorization: Bearer ...
 //! ```
 //!
@@ -55,11 +55,6 @@
 //! ignored_comments:
 //!   - author: coderabbitai
 //!     body: billing
-//! mcp_servers:
-//!   - name: docs
-//!     url: https://mcp.example.com/docs
-//!     headers:
-//!       - Authorization
 //! kept_by:
 //!   device: 86f1933fecb070cbee865fbb84819d14
 //!   fingerprint: "3F:0A:…"
@@ -93,6 +88,12 @@
 //! write winning: an `instructions:` key is taken up once and dropped the same
 //! way — see [`crate::replicating::instructions`] and
 //! [`Settings::holding_instructions`].
+//!
+//! **Nor are the declared MCP servers**, a record each under a uuid: the
+//! `mcp_servers:` key is taken up once and dropped, and the header values in
+//! the other file are keyed by the declaration's uuid rather than its name
+//! from the same move on — see [`crate::replicating::mcp_servers`] and
+//! [`Settings::holding_mcp_servers`].
 //!
 //! **Nothing here is ever an error.** A file that is not there, one that is
 //! empty, and one nothing can parse all come back as nothing configured: the
@@ -237,6 +238,15 @@ struct Held {
     /// And whether the log has been told about an `instructions:` key nothing
     /// reads any more.
     ignoring_instructions_said: AtomicBool,
+
+    /// And the live MCP server declarations out of their records, the same
+    /// way — see [`Settings::holding_mcp_servers`]. `None` until they first
+    /// are.
+    mcp_servers: RwLock<Option<Vec<McpServer>>>,
+
+    /// And whether the log has been told about an `mcp_servers:` key nothing
+    /// reads any more.
+    ignoring_servers_said: AtomicBool,
 }
 
 /// Every Data Directory's held lists, so that every handle on one directory
@@ -346,6 +356,45 @@ impl Settings {
             .is_some()
     }
 
+    /// Hold `servers` as every MCP server declared: the live records of the
+    /// database's table, each carrying its uuid, in the order they were first
+    /// written down — for [`Settings::config`] to lay over whatever
+    /// `config.yaml` says, for the reason the Authors are held.
+    ///
+    /// **And from then on `config.yaml` is not read for them**: an
+    /// `mcp_servers:` key written into the file by hand is ignored, the log
+    /// saying so once — see [`crate::replicating::mcp_servers`].
+    pub fn holding_mcp_servers(&self, servers: Vec<McpServer>) {
+        *self
+            .held
+            .mcp_servers
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(servers);
+    }
+
+    /// Forget the declarations held, as a new start of the server would.
+    #[cfg(test)]
+    pub(crate) fn forgetting_the_mcp_servers(&self) {
+        *self
+            .held
+            .mcp_servers
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        self.held
+            .ignoring_servers_said
+            .store(false, Ordering::Relaxed);
+    }
+
+    /// Whether the declarations are held off their records yet — see
+    /// [`Settings::holding_mcp_servers`].
+    pub fn holds_mcp_servers(&self) -> bool {
+        self.held
+            .mcp_servers
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+    }
+
     /// Where `secrets.yaml` is, which is what writes it and what says so on a
     /// settings page.
     pub fn secrets_path(&self) -> PathBuf {
@@ -419,6 +468,32 @@ impl Settings {
             }
 
             config.instructions = prose_written(text);
+        }
+
+        // And the records' declarations over the file's, the same way.
+        let servers = self
+            .held
+            .mcp_servers
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+
+        if let Some(servers) = servers {
+            if !config.mcp_servers.is_empty()
+                && !self
+                    .held
+                    .ignoring_servers_said
+                    .swap(true, Ordering::Relaxed)
+            {
+                tracing::warn!(
+                    path = %path.display(),
+                    "config.yaml holds an `mcp_servers:` key, which is ignored: the MCP \
+                     servers are kept in the database now, and are declared and removed on \
+                     the settings page",
+                );
+            }
+
+            config.mcp_servers = servers;
         }
 
         // The table's Authors over the file's, once there are any held: the
@@ -519,26 +594,22 @@ impl Settings {
     /// [`Settings::config`], and writing it into the file would be a second
     /// copy nothing reads.
     ///
-    /// **And never with the Instructions in it once they are held**, for the
-    /// same reason — see [`Settings::holding_instructions`].
+    /// **And never with the Instructions or the MCP servers in it once they
+    /// are held**, for the same reason — see [`Settings::holding_instructions`]
+    /// and [`Settings::holding_mcp_servers`].
     pub fn save_config(&self, config: &Config) -> std::io::Result<()> {
-        let authors = self.holds_authors() && !config.authors.is_empty();
-        let instructions = self.holds_instructions() && config.instructions.is_some();
+        let mut config = config.clone();
 
-        if authors || instructions {
-            let config = Config {
-                authors: match authors {
-                    true => Vec::new(),
-                    false => config.authors.clone(),
-                },
-                instructions: match instructions {
-                    true => None,
-                    false => config.instructions.clone(),
-                },
-                ..config.clone()
-            };
+        if self.holds_authors() {
+            config.authors = Vec::new();
+        }
 
-            return write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE);
+        if self.holds_instructions() {
+            config.instructions = None;
+        }
+
+        if self.holds_mcp_servers() {
+            config.mcp_servers = Vec::new();
         }
 
         write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE)
@@ -667,6 +738,67 @@ impl Settings {
         };
 
         write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE)
+    }
+
+    /// The MCP servers `config.yaml` declares as written, for taking them up
+    /// into the database, and whether the file is an Annex's — or `None` where
+    /// the file will not parse, which is the human's to fix.
+    pub(crate) fn mcp_servers_as_written(&self) -> Option<(Vec<McpServer>, bool)> {
+        Self::parsed(&self.config_path(), Config::read)
+            .map(|config| (config.mcp_servers, config.kept_by.is_some()))
+    }
+
+    /// Take the `mcp_servers:` key out of `config.yaml`, every other key as
+    /// it stands, once the declarations are records — see
+    /// [`crate::replicating::mcp_servers`]. Nothing is written where the file
+    /// holds none, and a file that will not parse is left for the human.
+    pub(crate) fn dropping_the_mcp_servers(&self) -> std::io::Result<()> {
+        let Some(config) = Self::parsed(&self.config_path(), Config::read) else {
+            return Ok(());
+        };
+
+        if config.mcp_servers.is_empty() {
+            return Ok(());
+        }
+
+        let config = Config {
+            mcp_servers: Vec::new(),
+            ..config
+        };
+
+        write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE)
+    }
+
+    /// Move each server's header values in `secrets.yaml` from under its name
+    /// to under its uuid, by the `(name, uuid)` pairs of `moved` — every other
+    /// secret as it stands, and a name already moved, or holding nothing,
+    /// left alone. Nothing is written where nothing moved, and a file that
+    /// will not parse is left for the human.
+    ///
+    /// The other half of taking the declarations up — see
+    /// [`crate::replicating::mcp_servers`]: keyed by the uuid, a name deleted
+    /// and declared again never inherits the old declaration's values.
+    pub(crate) fn rekeying_the_mcp_headers(
+        &self,
+        moved: &[(String, String)],
+    ) -> std::io::Result<()> {
+        let Some(mut secrets) = Self::parsed(&self.secrets_path(), Secrets::read) else {
+            return Ok(());
+        };
+
+        let mut moving = false;
+
+        for (name, uuid) in moved {
+            if let Some(values) = secrets.mcp_headers.remove(name) {
+                secrets.mcp_headers.insert(uuid.clone(), values);
+                moving = true;
+            }
+        }
+
+        match moving {
+            true => self.save_secrets(&secrets),
+            false => Ok(()),
+        }
     }
 
     /// Set the token of the Author whose uuid is `id` in `secrets.yaml`, or
@@ -932,8 +1064,9 @@ pub struct Secrets {
     session_account_password: Option<String>,
 
     /// And the header values each declared MCP server is spoken to with, by
-    /// the server's name and then by the headers: `{"docs": {"Authorization":
-    /// "Bearer ..."}}`, and empty on an installation that has declared none.
+    /// the declaration's uuid and then by the headers:
+    /// `{"9c1d7e52-…": {"Authorization": "Bearer ..."}}`, and empty on an
+    /// installation that has declared none.
     ///
     /// **Here because every one of them is a secret.** A header is what an
     /// API key or a bearer token is sent in, and static headers are the only
@@ -943,14 +1076,21 @@ pub struct Secrets {
     /// goes where the GitHub token goes, and what comes back to the page is
     /// the names and nothing else.
     ///
-    /// **The names are in `config.yaml` and the values are here**, which is
-    /// the one thing in either file said in both. A header name is nobody's
-    /// secret and it is part of the declaration — what the page draws, and
-    /// what says which headers a server has at all — so it is written where
-    /// the declaration is. This holds what may not be read back, and holds it
-    /// under the name that declared it: a header the declaration does not
-    /// name is not sent, and a server that is no longer declared has nothing
-    /// left here at all — see [`Secrets::with_mcp_headers`].
+    /// **The names are on the declaration's record and the values are
+    /// here.** A header name is nobody's secret and it is part of the
+    /// declaration — what the page draws, and what says which headers a
+    /// server has at all — so it is written where the declaration is. This
+    /// holds what may not be read back, and holds it **under the uuid of the
+    /// declaration** rather than its name (ADR-0028): a name deleted and
+    /// declared again is a new record, and never inherits the old one's
+    /// values. A header the declaration does not name is not sent, and a
+    /// declaration that is no longer live has nothing left here at all — see
+    /// [`Secrets::with_mcp_headers`].
+    ///
+    /// **Keyed by the name in a file from before the records**, which the
+    /// move rekeys once — see [`Settings::rekeying_the_mcp_headers`]. Until
+    /// it has, a declaration read off `config.yaml` carries no uuid, and is
+    /// looked up here by its name — see [`McpServer::key`].
     ///
     /// A map rather than the declaration's own order, because the order of
     /// headers on a request is nobody's business and a map is what is read
@@ -1032,19 +1172,19 @@ impl Secrets {
         }
     }
 
-    /// And these secrets with the header values of every server in `declared`
-    /// written down — each header's own action applied to what is kept for it,
-    /// and the headers of every server *not* in `declared` gone.
+    /// And these secrets with the header values of every declaration in
+    /// `declared` written down, by its uuid — each header's own action applied
+    /// to what is kept for it, and the headers of every declaration *not* in
+    /// `declared` gone.
     ///
     /// Which is what a save of the MCP servers section writes. `declared` is
-    /// that section as it is to stand: one entry per server, holding the header
-    /// names that server declares and what is to become of each of their values
-    /// — see [`HeaderValue`].
+    /// every live declaration as it is to stand: one entry per uuid, holding
+    /// the header names it declares and what is to become of each of their
+    /// values — see [`HeaderValue`].
     ///
-    /// **A server left out loses its headers**, which is how a declaration
-    /// deleted on the page takes its secrets with it: the section sends the
-    /// whole list, so a server that is not in it is one nobody declares any
-    /// more, and declaring that name again starts with nothing kept for it.
+    /// **A declaration left out loses its headers**, which is how one removed
+    /// on the page takes its secrets with it: declaring that name again is a
+    /// new uuid, and starts with nothing kept for it.
     ///
     /// **A header with no value is no header.** One cleared, one set to
     /// whitespace and one never typed come to the same nothing, and nothing is
@@ -1121,14 +1261,13 @@ impl Secrets {
         self.session_account_password.as_deref()
     }
 
-    /// And what is sent in `header` to the server declared as `server`, or
-    /// `None` where nothing is kept for it — a header declared and never given
-    /// a value, or one that was cleared.
+    /// And what is sent in `header` to the declaration whose uuid is
+    /// `server`, or `None` where nothing is kept for it — a header declared and
+    /// never given a value, or one that was cleared.
     ///
-    /// By name both ways round, because that is what this file holds: the
-    /// declaration says which headers a server has and in what order, and this
-    /// says what goes in each of them — see [`Config::attached_among`], which
-    /// is where the two are put together.
+    /// The declaration says which headers a server has and in what order, and
+    /// this says what goes in each of them — see [`Config::attached_among`],
+    /// which is where the two are put together, by [`McpServer::key`].
     pub fn mcp_header(&self, server: &str, header: &str) -> Option<&str> {
         self.mcp_headers
             .get(server)?
@@ -1354,11 +1493,16 @@ pub struct Config {
     /// each, spoken to over HTTP, out of which a Conversation attaches the ones
     /// its sessions are launched with.
     ///
-    /// Declared here rather than beside a Conversation because a declaration is
-    /// a thing Verkstead is *told*, like the binds above it and the
-    /// instructions below: said once for the machine, read at the moment it is
-    /// needed, and referred to by name from wherever it is attached. What a
-    /// Conversation holds is that name.
+    /// Declared rather than beside a Conversation because a declaration is a
+    /// thing Verkstead is *told*, referred to by name from wherever it is
+    /// attached. What a Conversation holds is that name.
+    ///
+    /// **Read here only to be taken up.** A declaration is a Replicated record
+    /// now, the cluster's (ADR-0028): this key is what a file from before
+    /// held, taken up into the database once and dropped from the file — see
+    /// [`crate::replicating::mcp_servers`] — and after that the records'
+    /// declarations are laid over it by [`Settings::config`] and never written
+    /// back by [`Settings::save_config`].
     ///
     /// Read the way everything else in this file is, and refused the way the
     /// rules above it are. An absent key, an absent file and one nothing can
@@ -1738,18 +1882,18 @@ impl Config {
     /// [`crate::annex::booting`]).
     ///
     /// **The Keeper's values, not a merge** (ADR-0024, *The Annex has no
-    /// settings of its own*): the MCP servers with their header names, how much runs at once, the Cleanup, the comments Wrapping
+    /// settings of its own*): how much runs at once, the Cleanup, the comments Wrapping
     /// ignores, how a conflict is resolved and whether the record is shared on
-    /// Done — each one as the Keeper's file has it, so a server the Keeper no
-    /// longer declares is gone here too. Everything about the Annex's own
+    /// Done — each one as the Keeper's file has it. Everything about the Annex's own
     /// machine stands as it was: its sandbox binds, `session_path`,
     /// `languages` and `kept_by`.
     ///
-    /// **And not the Authors or the Instructions**: they are records in the
-    /// database rather than the file, and the Annex, a linked Member, pulls
-    /// them the way every member does (ADR-0028). An `instructions:` key the
-    /// Annex's file still holds is the Keeper's old copy, which the Annex
-    /// drops at its own start rather than takes up.
+    /// **And not the Authors, the Instructions or the MCP servers**: they are
+    /// records in the database rather than the file, and the Annex, a linked
+    /// Member, pulls them the way every member does (ADR-0028). An
+    /// `instructions:` or `mcp_servers:` key the Annex's file still holds is
+    /// the Keeper's old copy, which the Annex drops at its own start rather
+    /// than takes up.
     pub fn working_as(&self, keeper: &Config) -> Config {
         Config {
             cleanup: keeper.cleanup.clone(),
@@ -1757,7 +1901,6 @@ impl Config {
             conflict_resolution: keeper.conflict_resolution,
             share_on_done: keeper.share_on_done,
             ignored_comments: keeper.ignored_comments.clone(),
-            mcp_servers: keeper.mcp_servers.clone(),
             ..self.clone()
         }
     }
@@ -1894,11 +2037,14 @@ impl Config {
                     .mcp_servers
                     .iter()
                     .find(|server| server.name() == Some(name))
-                    .map(McpServer::headers)
-                    .unwrap_or_default()
-                    .iter()
-                    .filter_map(|header| {
-                        Some((header.clone(), secrets.mcp_header(name, header)?.to_owned()))
+                    .into_iter()
+                    .flat_map(|server| {
+                        server.headers().iter().filter_map(|header| {
+                            Some((
+                                header.clone(),
+                                secrets.mcp_header(server.key()?, header)?.to_owned(),
+                            ))
+                        })
                     })
                     .collect(),
             })
@@ -2692,6 +2838,12 @@ fn rules_kept(rules: Vec<IgnoreRule>) -> Vec<IgnoreRule> {
 /// all, and is dropped as the file is read — see [`servers_kept`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct McpServer {
+    /// The uuid of the record it is, which is what its header values are kept
+    /// under — or `None` for one read off `config.yaml`, which only a file
+    /// from before the records holds. Never written into the file.
+    #[serde(skip)]
+    id: Option<String>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
 
@@ -2704,7 +2856,7 @@ pub struct McpServer {
     /// ordinary declaration.
     ///
     /// **The names only.** Every value is a secret and is in `secrets.yaml`
-    /// under this server's name — see [`Secrets::mcp_header`]. What is here is
+    /// under this declaration's uuid — see [`Secrets::mcp_header`]. What is here is
     /// what may be read back to the page and what says which headers there are
     /// at all; a name declared with nothing kept for it is a header nothing is
     /// sent in.
@@ -2738,10 +2890,33 @@ impl McpServer {
         }
 
         McpServer {
+            id: None,
             name: name.and_then(blank_is_nothing),
             url: url.and_then(blank_is_nothing),
             headers: kept,
         }
+    }
+
+    /// The same declaration as the record under `id` — see
+    /// [`crate::replicating::mcp_servers`].
+    pub fn recorded_as(self, id: String) -> McpServer {
+        McpServer {
+            id: Some(id),
+            ..self
+        }
+    }
+
+    /// The uuid of its record, or `None` for one read off `config.yaml`.
+    pub fn id(&self) -> Option<&str> {
+        self.id.as_deref()
+    }
+
+    /// What its header values are kept under in `secrets.yaml`: its record's
+    /// uuid, or its name where it is read off a `config.yaml` from before the
+    /// records, whose values are still under the name — see the `mcp_headers`
+    /// field of [`Secrets`].
+    pub fn key(&self) -> Option<&str> {
+        self.id().or(self.name())
     }
 
     /// What a Conversation refers to this server by, and what the agent sees in
@@ -2862,8 +3037,10 @@ pub fn trouble_among(servers: &[McpServer]) -> Vec<(usize, ServerTrouble)> {
         .collect()
 }
 
-/// What is wrong with one declaration, given the ones written down before it.
-fn trouble(server: &McpServer, above: &[McpServer]) -> Option<ServerTrouble> {
+/// What is wrong with one declaration, given the ones written down before it —
+/// every live declaration this device holds that the save leaves standing,
+/// where a save declares a new one.
+pub fn trouble(server: &McpServer, above: &[McpServer]) -> Option<ServerTrouble> {
     let Some(name) = server.name() else {
         return Some(ServerTrouble::Name(
             "A server is referred to by name, so it needs one.".to_owned(),

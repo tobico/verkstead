@@ -6710,6 +6710,16 @@ async fn save_settings(
     let device = state.device.clone();
 
     let saved = tokio::task::spawn_blocking(move || {
+        // The declarations taken up first, where a server stood up without a
+        // serve has not: what a save's names are checked against and its rows
+        // written over is the records — see
+        // [`crate::replicating::mcp_servers`].
+        runtime
+            .block_on(crate::replicating::mcp_servers::taken_up(
+                &pool, &settings, &device,
+            ))
+            .map_err(std::io::Error::other)?;
+
         // What the rules are to be afterwards, and what is wrong with them —
         // both before a byte of either file is written, because a refusal here
         // is the whole request refused. A save that wrote the author down and
@@ -6738,28 +6748,29 @@ async fn save_settings(
         // touched. A save turned down over a name is the whole request refused,
         // like one turned down over a pattern.
         //
-        // And what is to become of the header values with them, which is the
-        // one thing this section writes into the *other* file: a declaration is
-        // a name, a URL and the names of its headers, and every value is a
-        // secret kept where the token is kept — see [`header_actions`].
-        let (servers, headers, refused_servers) = match &edit.mcp_servers {
+        // Each row is a record: one drawn from a record an edit of it, one
+        // added a new declaration, and each of `removed` a deletion stamp —
+        // and a new name is checked against every live record this device
+        // holds, whoever wrote it (ADR-0028).
+        let (declaring, refused_servers) = match &edit.mcp_servers {
             // Whatever is declared, carried through untouched — a name this page
-            // would have refused included. The reading half keeps one of those
-            // and this half is not entitled to drop it: a save about the build
-            // cache has no business rewriting a declaration, and no business
-            // being refused over one either.
+            // would have refused included. A save about the build cache has no
+            // business rewriting a declaration, and no business being refused
+            // over one either.
             //
             // And nothing at all about the headers, which is what leaves every
             // key where it is: a section that says nothing about the
             // declarations says nothing about their secrets either.
-            McpServersEdit::Keep => (settings.config().mcp_servers().to_vec(), None, Vec::new()),
+            McpServersEdit::Keep => (None, Vec::new()),
 
-            McpServersEdit::Set { servers: sent } => {
-                let servers: Vec<_> = sent.iter().map(as_declared).collect();
-                let refused = server_refusals(&servers);
-                let headers = header_actions(&servers, sent);
+            McpServersEdit::Set {
+                servers: sent,
+                removed,
+            } => {
+                let rows: Vec<_> = sent.iter().map(as_row).collect();
+                let refused = server_refusals(settings.config().mcp_servers(), &rows, removed);
 
-                (servers, Some(headers), refused)
+                (Some((rows, sent.clone(), removed.clone())), refused)
             }
         };
 
@@ -6792,6 +6803,7 @@ async fn save_settings(
                     tried: Vec::new(),
                 },
                 Vec::new(),
+                false,
                 false,
             ));
         }
@@ -6883,9 +6895,10 @@ async fn save_settings(
                 // And the rules, decided above: either what was already written down
                 // or the whole list the page sent, in the order it sent it.
                 rules,
-                // And the declared servers, decided the same way and above the
-                // same refusal.
-                servers,
+                // And the declared servers, which the file never holds: they are
+                // records, written below — see
+                // [`crate::settings::Settings::save_config`].
+                settings.config().mcp_servers().to_vec(),
                 // And the text every session is given, which the file never
                 // holds: it is a record's, written below — see
                 // [`crate::settings::Settings::save_config`].
@@ -6911,6 +6924,31 @@ async fn save_settings(
         // Once for both of them rather than a write apiece: what the file holds
         // afterwards is one thing, and two writes would be a window in which it
         // held half of it.
+        //
+        // The declarations' records first, where this save was about them, so
+        // that a row added has the uuid its header values are kept under — and
+        // what is to become of every live declaration's values with them: the
+        // one thing this section writes into `secrets.yaml` — see
+        // [`header_actions`].
+        let mut servers_moved = false;
+        let headers = match &declaring {
+            None => None,
+            Some((rows, sent, removed)) => {
+                let (written, moved) = runtime
+                    .block_on(crate::replicating::mcp_servers::saved(
+                        &pool, &settings, &device, rows, removed,
+                    ))
+                    .map_err(std::io::Error::other)?;
+                servers_moved = moved;
+
+                Some(header_actions(
+                    settings.config().mcp_servers(),
+                    &written,
+                    sent,
+                ))
+            }
+        };
+
         // And the Author's token and record written together, so the copying
         // of the members' tokens never reads one without the other — see
         // [`crate::replicating::authors::copied`].
@@ -6919,9 +6957,9 @@ async fn save_settings(
         let mut secrets = settings.secrets();
         let mut writing = false;
 
-        // The headers first, where this save was about the declarations: the
-        // servers the section did not send are the ones whose keys go, which is
-        // how deleting a declaration takes its secrets with it.
+        // The headers first, where this save was about the declarations: a
+        // declaration no longer live is one whose keys go, which is how
+        // removing one takes its secrets with it.
         if let Some(headers) = &headers {
             secrets = secrets.with_mcp_headers(headers);
             writing = true;
@@ -7042,12 +7080,13 @@ async fn save_settings(
             },
             trying,
             instructions_moved,
+            servers_moved,
         ))
     })
     .await;
 
     match saved {
-        Ok(Ok((mut saved, trying, instructions_moved))) => {
+        Ok(Ok((mut saved, trying, instructions_moved, servers_moved))) => {
             // After the writing and never before it — see [`crate::mcp`]: a URL
             // is typed once beside a token that will not be shown again, and a
             // server that could not be reached this minute is still a
@@ -7066,6 +7105,11 @@ async fn save_settings(
             // And where it moved the Instructions, for the same reason.
             if instructions_moved {
                 state.nudges.announce(Nudge::Instructions);
+            }
+
+            // And where it moved the declarations.
+            if servers_moved {
+                state.nudges.announce(Nudge::McpServers);
             }
 
             Json(saved).into_response()
@@ -7455,52 +7499,65 @@ fn as_written(rule: &crate::settings::IgnoreRule) -> IgnoreRule {
     }
 }
 
-/// One MCP server as `config.yaml` holds it, out of what the page sent: a name,
-/// a URL and the names of its headers, each blank one nothing at all.
+/// One row of the MCP servers section, out of what the page sent: the record
+/// it was drawn from, and a name, a URL and the names of its headers, each
+/// blank one nothing at all.
 ///
 /// The header *values* are not here. They are secrets and they are in
 /// `secrets.yaml` — see [`header_actions`], which is the other half of one of
 /// these.
-fn as_declared(server: &McpServerEdit) -> crate::settings::McpServer {
-    crate::settings::McpServer::of(
-        Some(server.name.clone()),
-        Some(server.url.clone()),
-        server
-            .headers
-            .iter()
-            .map(|header| header.name.clone())
-            .collect(),
-    )
+fn as_row(server: &McpServerEdit) -> crate::replicating::mcp_servers::Row {
+    crate::replicating::mcp_servers::Row {
+        id: server.id.clone(),
+        server: crate::settings::McpServer::of(
+            Some(server.name.clone()),
+            Some(server.url.clone()),
+            server
+                .headers
+                .iter()
+                .map(|header| header.name.clone())
+                .collect(),
+        ),
+    }
 }
 
-/// And what is to become of each of their values, by the name the declaration
-/// ended up with: what [`crate::settings::Secrets::with_mcp_headers`] writes.
+/// And what is to become of the header values of every live declaration, by
+/// its uuid, once a save has been written: what
+/// [`crate::settings::Secrets::with_mcp_headers`] writes. `written` is the uuid
+/// each of `sent` was written under.
 ///
-/// Read off `declared` rather than off `sent`, so that the two halves of a
-/// declaration cannot come apart: a header whose name was blank, or one written
-/// twice, is one header or none by the time the file holds it — see
-/// [`crate::settings::McpServer::of`] — and a secret written under a name no
-/// declaration carries would be one nothing could ever send or take away.
+/// Read off the declarations as they now stand rather than off `sent`, so that
+/// the two halves of one cannot come apart: a header whose name was blank, or
+/// one written twice, is one header or none by the time the record holds it —
+/// see [`crate::settings::McpServer::of`] — and a secret written under a name
+/// no declaration carries would be one nothing could ever send or take away.
 ///
-/// A declared header the page said nothing about is kept. That is only ever a
-/// hand-edited `config.yaml`, this being built out of what the page sent; and
-/// keeping is what every other untouched value does.
+/// A declared header the page said nothing about is kept, and so is every
+/// header of a declaration the page did not send — one merged from another
+/// device after it was read: keeping is what every other untouched value does.
 fn header_actions(
     declared: &[crate::settings::McpServer],
+    written: &[Option<String>],
     sent: &[McpServerEdit],
 ) -> Vec<(String, Vec<(String, crate::settings::HeaderValue)>)> {
     declared
         .iter()
-        .zip(sent)
-        .filter_map(|(declared, sent)| {
+        .filter_map(|declared| {
+            let uuid = declared.key()?;
+            let sent = written
+                .iter()
+                .zip(sent)
+                .find(|(written, _)| written.as_deref() == Some(uuid))
+                .map(|(_, sent)| sent);
+
             let headers = declared
                 .headers()
                 .iter()
                 .map(|header| {
                     let wanted = sent
-                        .headers
-                        .iter()
-                        .find(|edit| edit.name.trim() == header)
+                        .and_then(|sent| {
+                            sent.headers.iter().find(|edit| edit.name.trim() == header)
+                        })
                         .map(|edit| match &edit.value {
                             HeaderEdit::Keep => crate::settings::HeaderValue::Keep,
                             HeaderEdit::Set { value } => {
@@ -7514,27 +7571,20 @@ fn header_actions(
                 })
                 .collect();
 
-            Some((declared.name()?.to_owned(), headers))
+            Some((uuid.to_owned(), headers))
         })
         .collect()
 }
 
-/// And the other way round, for the read: a half the file does not hold is an
-/// empty box on the page, which is the same thing said in the shape a form
-/// holds.
-///
-/// Which is only ever a hand-edit. A declaration missing either half is dropped
-/// as the file is read — see `settings::servers_kept` — so what reaches here has
-/// both, and the fallbacks are what keeps this honest rather than what it is
-/// for.
+/// And the other way round, for the read: a declaration as the section draws
+/// its row, its record's uuid with it.
 fn as_declared_row(
     server: &crate::settings::McpServer,
     secrets: &crate::settings::Secrets,
 ) -> McpServer {
-    let name = server.name().unwrap_or_default();
-
     McpServer {
-        name: name.to_owned(),
+        id: server.key().unwrap_or_default().to_owned(),
+        name: server.name().unwrap_or_default().to_owned(),
         url: server.url().unwrap_or_default().to_owned(),
         // The names of its headers, each saying whether anything is kept to
         // send in it, and no part of a value: that is what the token's own view
@@ -7545,20 +7595,26 @@ fn as_declared_row(
             .iter()
             .map(|header| McpHeader {
                 name: header.clone(),
-                set: secrets.mcp_header(name, header).is_some(),
+                set: server
+                    .key()
+                    .and_then(|key| secrets.mcp_header(key, header))
+                    .is_some(),
             })
             .collect(),
     }
 }
 
-/// What is wrong with the declarations a save is asking for, one entry per row
-/// at fault, and empty where there is nothing wrong with any of them.
-///
-/// Over the whole list rather than one at a time, because one of the two things
-/// that can be wrong with a name is that another declaration has it — see
-/// `settings::trouble_among`, which is where that is decided.
-fn server_refusals(servers: &[crate::settings::McpServer]) -> Vec<ServerRefused> {
-    crate::settings::trouble_among(servers)
+/// What is wrong with the rows a save is asking for, one entry per row at
+/// fault, and empty where there is nothing wrong with any of them — a new
+/// name checked against every live record — see
+/// [`crate::replicating::mcp_servers::refusals`], which is where that is
+/// decided.
+fn server_refusals(
+    live: &[crate::settings::McpServer],
+    rows: &[crate::replicating::mcp_servers::Row],
+    removed: &[String],
+) -> Vec<ServerRefused> {
+    crate::replicating::mcp_servers::refusals(live, rows, removed)
         .into_iter()
         .map(|(at, trouble)| {
             let (field, why) = match trouble {

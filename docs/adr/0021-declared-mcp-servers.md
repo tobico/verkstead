@@ -58,7 +58,9 @@ and the alternative named is what was turned down.
 - **A chip is a reference by name, read at each launch.** What a Conversation
   stores is the name it attached, and the URL and the headers are read out of
   the settings at the moment a session starts — the declaration out of
-  `config.yaml`, and the header values out of `secrets.yaml` beside it. So
+  `config.yaml`, and the header values out of `secrets.yaml` beside it
+  (*amended*: the declaration is a replicated record in the database now —
+  see the amendment at the end). So
   correcting a URL fixes every Conversation that attached that server, and
   nothing goes stale. Which is why **the name is the identity** — lowercase
   letters, digits and hyphens, unique among the declarations, refused at the
@@ -113,4 +115,23 @@ every session that ran before this and every Conversation that attaches none.
 The declarations live in `config.yaml` and follow that file's contract: read at
 the moment they are needed, so a change reaches the next session without a
 restart, and an absent, empty or unparseable key is no servers rather than an
-error.
+error. *Amended — see below: they are not kept in `config.yaml` any more.*
+
+## Amended: the declarations are the cluster's
+
+*Amended 2026-10-28, by [ADR-0028](0028-records-are-the-clusters.md).* The
+declarations are **not kept in `config.yaml`** any more. Each is a Replicated
+record in the database, the cluster's rather than one device's, under a uuid:
+its name, its URL and its header names. `config.yaml`'s `mcp_servers:` is taken
+up into the table once and dropped, each declaration under a uuid derived from
+its name so that one declared by hand on two devices becomes one record, and
+the header values in `secrets.yaml` are keyed by that uuid rather than the name
+from the same move on.
+
+What stands: the name is still the identity the agent and the chips see, never
+renamed, and what a Conversation holds. What moves: a removal is a deletion
+stamp, and **declaring a removed name again is a new record** under a new uuid
+— so it never inherits the old one's values. Names are unique among the live
+declarations, refused at the press against every one this device holds,
+whoever wrote it.
+

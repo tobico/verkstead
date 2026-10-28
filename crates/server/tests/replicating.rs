@@ -119,6 +119,9 @@ impl Verkstead {
         replicating::instructions::taken_up(&pool, &Settings::in_data_dir(dir.path()), id)
             .await
             .unwrap();
+        replicating::mcp_servers::taken_up(&pool, &Settings::in_data_dir(dir.path()), id)
+            .await
+            .unwrap();
 
         let members = Members::recorded(pool.clone());
 
@@ -407,6 +410,100 @@ impl Verkstead {
             status.is_success(),
             "saving the Instructions: {status} {said}"
         );
+    }
+
+    /// The MCP servers section saved the way the settings page saves it: the
+    /// rows it holds, each `(uuid, name, url)` with `None` for a row added,
+    /// and the uuids of the rows taken off. What came back.
+    async fn declares(
+        &self,
+        rows: &[(Option<&str>, &str, &str)],
+        removed: &[&str],
+    ) -> verkstead_render::SettingsSaved {
+        let servers: Vec<_> = rows
+            .iter()
+            .map(|(id, name, url)| {
+                serde_json::json!({ "id": id, "name": name, "url": url, "headers": [] })
+            })
+            .collect();
+
+        let (status, said) = pressing(
+            &self.workbench,
+            "/api/ui/settings",
+            Some(
+                &serde_json::json!({
+                    "git_author": { "display_name": "", "name": "", "email": "" },
+                    "github_token": "Keep",
+                    "languages": [{ "name": "rust", "enabled": true, "size": "" }],
+                    "cleanup": {
+                        "trim": { "enabled": true, "days": "" },
+                        "delete": { "enabled": false, "days": "" },
+                    },
+                    "at_once": { "roadmap_stages": "", "conversations": "" },
+                    "conflict_resolution": "Merge",
+                    "share_on_done": false,
+                    "sandbox_binds": [],
+                    "ignored_comments": "Keep",
+                    "mcp_servers": { "Set": { "servers": servers, "removed": removed } },
+                    "instructions": "",
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert!(status.is_success(), "declaring: {status} {said}");
+
+        serde_json::from_str(&said).unwrap()
+    }
+
+    /// The declarations this device's settings page and Attach menu draw, by
+    /// `(uuid, name)`, once `what` holds of them — or a panic saying what they
+    /// were.
+    async fn servers_saying(
+        &self,
+        what: impl Fn(&[(String, String)]) -> bool,
+    ) -> Vec<(String, String)> {
+        let drawn = || async {
+            reading::<verkstead_render::SettingsView>(&self.workbench, "/api/ui/settings")
+                .await
+                .mcp_servers
+                .into_iter()
+                .map(|server| (server.id, server.name))
+                .collect::<Vec<_>>()
+        };
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                let servers = drawn().await;
+                if what(&servers) {
+                    return servers;
+                }
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        match waited {
+            Ok(servers) => servers,
+            Err(_) => panic!("the MCP servers never came to that: {:?}", drawn().await),
+        }
+    }
+
+    /// Every declaration's record this device holds, removed ones included, as
+    /// `(uuid, name, removed)`.
+    async fn server_records(&self) -> Vec<(String, String, bool)> {
+        let rows: Vec<(String, String, Option<i64>)> = sqlx::query_as(
+            "SELECT uuid, json_extract(body, '$.name'), deleted_at FROM replicated
+             WHERE kind = 'mcp_servers' ORDER BY rowid",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .unwrap();
+
+        rows.into_iter()
+            .map(|(uuid, name, deleted)| (uuid, name, deleted.is_some()))
+            .collect()
     }
 
     /// The text the next root built here is given — what a launch reads, see
@@ -1329,4 +1426,147 @@ async fn a_save_about_another_section_leaves_the_instructions_stamp() {
     a.saves_instructions("Say it plainly.").await;
 
     assert_eq!(a.instructions_stamp().await, Some(stamp));
+}
+
+/// A server declared on A is on B's Attach menu — the settings read both
+/// draw it from — and a session on B attached to it is launched with it.
+#[tokio::test]
+async fn a_server_declared_on_one_device_is_attachable_and_launched_on_the_other() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _b_holding = b.holding();
+
+    a.declares(&[(None, "docs", "https://docs.example.com/mcp")], &[])
+        .await;
+
+    b.servers_saying(|servers| servers.iter().any(|(_, name)| name == "docs"))
+        .await;
+
+    assert_eq!(
+        b.settings().config().servers_among(&["docs".to_owned()]),
+        [("docs", "https://docs.example.com/mcp")],
+        "what a launch on B is handed"
+    );
+}
+
+/// Deleting `docs` on B and declaring it again is a new record under a new
+/// uuid: A sees the old one removed and the new one live.
+#[tokio::test]
+async fn a_name_deleted_and_declared_again_is_a_new_record_on_every_device() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    a.declares(&[(None, "docs", "https://one.example.com/mcp")], &[])
+        .await;
+    let first = b
+        .servers_saying(|servers| servers.iter().any(|(_, name)| name == "docs"))
+        .await[0]
+        .0
+        .clone();
+
+    b.declares(&[], &[&first]).await;
+    b.declares(&[(None, "docs", "https://two.example.com/mcp")], &[])
+        .await;
+
+    let second = a
+        .servers_saying(|servers| servers.len() == 1 && servers[0].0 != first)
+        .await[0]
+        .0
+        .clone();
+
+    assert_ne!(first, second);
+    assert_eq!(
+        a.server_records().await,
+        [
+            (first, "docs".to_owned(), true),
+            (second, "docs".to_owned(), false),
+        ]
+    );
+    assert_eq!(
+        a.settings().config().servers_among(&["docs".to_owned()]),
+        [("docs", "https://two.example.com/mcp")]
+    );
+}
+
+/// `docs` declared by hand on two devices before the upgrade is one record
+/// after it — the uuid taken up being derived from the name — with no clash.
+#[tokio::test]
+async fn a_server_declared_on_two_devices_before_the_upgrade_is_one_record() {
+    let mut dirs = Vec::new();
+
+    for url in ["https://one.example.com/mcp", "https://two.example.com/mcp"] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            format!("mcp_servers:\n- name: docs\n  url: {url}\n"),
+        )
+        .unwrap();
+        dirs.push(dir);
+    }
+
+    let b_dir = dirs.pop().unwrap();
+    let a = Verkstead::standing(A, dirs.pop().unwrap()).await;
+    let b = Verkstead::standing(B, b_dir).await;
+    linked(&a, &b).await;
+
+    a.nudges.announce(Nudge::Devices);
+    b.nudges.announce(Nudge::Devices);
+
+    // The Device Id deciding between the two taken-up copies, the same way
+    // on both.
+    for device in [&a, &b] {
+        let records = device.server_records().await;
+        assert_eq!(records.len(), 1, "{records:?}");
+
+        let url = || {
+            device
+                .settings()
+                .config()
+                .servers_among(&["docs".to_owned()])
+                .iter()
+                .map(|(_, url)| (*url).to_owned())
+                .collect::<Vec<_>>()
+        };
+
+        let waited = tokio::time::timeout(WAITING, async {
+            while url() != ["https://one.example.com/mcp"] {
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        assert!(waited.is_ok(), "{:?}", url());
+    }
+}
+
+/// Declaring a name that a live record from another device already has is
+/// refused at the press — even from a page drawn before that record arrived,
+/// which sends no row of it.
+#[tokio::test]
+async fn a_name_another_device_declared_is_refused_at_the_press() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _b_holding = b.holding();
+
+    a.declares(&[(None, "docs", "https://docs.example.com/mcp")], &[])
+        .await;
+    b.servers_saying(|servers| !servers.is_empty()).await;
+
+    let saved = b
+        .declares(&[(None, "docs", "https://elsewhere.example.com/mcp")], &[])
+        .await;
+
+    assert_eq!(
+        saved.refused_servers.len(),
+        1,
+        "{:?}",
+        saved.refused_servers
+    );
+    assert_eq!(saved.refused_servers[0].server, 0);
+    assert_eq!(b.server_records().await.len(), 1, "nothing written");
 }

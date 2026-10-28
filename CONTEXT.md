@@ -1031,20 +1031,25 @@ the field at fault. **A server is never renamed**: everything that refers to one
 refers to it by that name, so the settings page offers a name on a new
 declaration alone and changing one is deleting it and declaring another. The URL
 and the headers are edited.
-**Kept in `config.yaml`** beside the Authors and the **Instructions** — a
-thing Verkstead is *told* rather than one it finds — and read at the moment a
-session is launched, so a corrected URL fixes every Conversation that attached
-that server. An absent key, an empty one and one nothing can parse are the same
-no servers, and an entry missing either half is dropped as the file is read.
+**A replicated record in the database**, the cluster's like the Authors and
+the **Instructions** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)):
+one per declaration, under a **uuid**, its fields the name, the URL and the
+header names. `config.yaml`'s old `mcp_servers:` key is taken up once, each
+declaration under a uuid derived from its name so that one declared by hand on
+two devices is one record, and dropped. Read at the moment a session is
+launched, so a corrected URL fixes every Conversation that attached that
+server. **Removing one is a deletion stamp, and declaring a removed name again
+is a new record** under a new uuid; names are unique among the live
+declarations, refused at the press against every one this device holds.
 **Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a replicated record in the database rather than `config.yaml`, carrying a uuid — the name still what the agent and the chips see, unique among the live declarations across the cluster, and declaring a deleted name again a new record — with the header values copied to every device's `secrets.yaml` under the uuid, and a name two live declarations share launching neither. The `cluster-owned-records` roadmap lands it.
-**Except the header values, which are in `secrets.yaml`** under the server's
-name, where the GitHub token is: the names are part of the declaration and are
+**Except the header values, which are in `secrets.yaml`** under the
+declaration's uuid, where the GitHub token is: the names are part of the declaration and are
 written with it, and what goes in each of them is a secret. So a header is
 edited as an *action* rather than as a value, one apiece — keep it, set it, or
 clear it — and a value box left blank keeps what is there, the way the token's
 does. A header the declaration names with nothing kept for it is one nothing is
-sent in, and deleting a declaration takes its values with it, so the same name
-declared again starts with none.
+sent in, and removing a declaration takes its values with it, so the same name
+declared again — a new uuid — starts with none.
 The section saves as an action rather than a value, the way the **Ignore rule**s
 do and for the same reason: it is one of the two things on that page a save can
 be *refused* over, so a section that is not about the declarations says nothing
@@ -2248,11 +2253,11 @@ Keeper's start, terminated at its stop, never waited on — a workbench opens
 on the Keeper while the Annex is still coming up, and its rows read
 *unreachable* until it answers. It is reached through the **Annex Forward**,
 and it has no settings of its own: what is about the work rather than the
-machine — the MCP servers and their header values, the at-once limit,
-Cleanup, the ignored comments, the conflict resolution and sharing on Done — is
-copied in from its Keeper at every boot. **Its Authors and the Instructions
-are not copied**: it holds none of its own, and the Keeper's reach it as
-records, the way they reach any member — so with one Author, a Repo there is
+machine — the MCP servers' header values, the at-once limit, Cleanup, the
+ignored comments, the conflict resolution and sharing on Done — is copied in
+from its Keeper at every boot. **Its Authors, the Instructions and the MCP
+servers' declarations are not copied**: it holds none of its own, and the
+Keeper's reach it as records, the way they reach any member — so with one Author, a Repo there is
 that one's.
 **And it never enters Onboarding Mode**: a kept Annex is told so in its
 config and skips the verdict, its objective being met by its Keeper's

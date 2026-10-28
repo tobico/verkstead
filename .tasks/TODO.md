@@ -20,6 +20,6 @@ Roadmap stage: [05: Instructions and MCP servers](docs/roadmaps/cluster-owned-re
 ## Tasks
 
 - [x] 01: Instructions on the facility — [details](01-instructions-on-the-facility.md)
-- [ ] 02: Declarations on the facility — [details](02-declarations-on-the-facility.md)
+- [x] 02: Declarations on the facility — [details](02-declarations-on-the-facility.md)
 - [ ] 03: Header values everywhere — [details](03-header-values-everywhere.md)
 - [ ] 04: Clashes, the chips and the refusals — [details](04-clashes-the-chips-and-the-refusals.md)

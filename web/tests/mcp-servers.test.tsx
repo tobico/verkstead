@@ -225,6 +225,7 @@ function valueBox(at: number, which: number): HTMLInputElement {
 /// header named and kept, which is what stops a corrected URL taking a key away.
 function keeping(server: McpServer, url: string = server.url) {
   return {
+    id: server.id,
     name: server.name,
     url,
     headers: server.headers.map((header) => ({
@@ -341,6 +342,7 @@ describe("the pane", () => {
 
   it("sends the declaration that was added, with the rest of the file", async () => {
     const declared = {
+      id: "uuid-of-tickets",
       name: "tickets",
       url: "https://mcp.example.com/tickets",
       headers: [],
@@ -380,7 +382,12 @@ describe("the pane", () => {
         share_on_done: UNSET.share_on_done,
         sandbox_binds: [],
         instructions: "",
-        mcp_servers: { Set: { servers: [declared] } },
+        mcp_servers: {
+          Set: {
+            servers: [{ ...declared, id: null }],
+            removed: [],
+          },
+        },
       }),
     );
   });
@@ -405,7 +412,10 @@ describe("the pane", () => {
       expect(sent(fetching)).toEqual({
         ...REST,
         mcp_servers: {
-          Set: { servers: [keeping(DECLARED, url), keeping(BESIDE)] },
+          Set: {
+            servers: [keeping(DECLARED, url), keeping(BESIDE)],
+            removed: [],
+          },
         },
       }),
     );
@@ -434,7 +444,13 @@ describe("the pane", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        mcp_servers: { Set: { servers: [] } },
+        // Each by its record's uuid, which is how a removal is said.
+        mcp_servers: {
+          Set: {
+            servers: [],
+            removed: TOLD.mcp_servers.map((server) => server.id),
+          },
+        },
       }),
     );
   });
@@ -469,7 +485,12 @@ describe("the pane", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        mcp_servers: { Set: { servers: TOLD.mcp_servers.map((s) => keeping(s)) } },
+        mcp_servers: {
+          Set: {
+            servers: TOLD.mcp_servers.map((s) => keeping(s)),
+            removed: [],
+          },
+        },
       }),
     );
   });
@@ -572,6 +593,7 @@ describe("the pane", () => {
   /// declaration now, so its name stops being a field.
   it("lets go of what was typed once the save lands", async () => {
     const declared = {
+      id: "uuid-of-tickets",
       name: "tickets",
       url: "https://mcp.example.com/tickets",
       headers: [],
@@ -650,6 +672,7 @@ describe("the pane", () => {
           Set: {
             servers: [
               {
+                id: DECLARED.id,
                 name: DECLARED.name,
                 url: DECLARED.url,
                 headers: [
@@ -662,6 +685,7 @@ describe("the pane", () => {
               },
               keeping(BESIDE),
             ],
+            removed: [],
           },
         },
       }),
@@ -690,6 +714,7 @@ describe("the pane", () => {
           Set: {
             servers: [
               {
+                id: DECLARED.id,
                 name: DECLARED.name,
                 url: DECLARED.url,
                 headers: [
@@ -699,6 +724,7 @@ describe("the pane", () => {
               },
               keeping(BESIDE),
             ],
+            removed: [],
           },
         },
       }),

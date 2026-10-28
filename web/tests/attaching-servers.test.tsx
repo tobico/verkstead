@@ -100,6 +100,7 @@ function declaring(...names: string[]): SettingsView {
   return {
     ...SETTINGS,
     mcp_servers: names.map((name) => ({
+      id: `uuid-of-${name}`,
       name,
       url: `https://mcp.example.com/${name}`,
       headers: [],
@@ -244,7 +245,7 @@ describe("adding a server from the Attach menu", () => {
   /// each header kept, and the new one at the end — and then the attach of the
   /// name it was saved under, which is what *confirmed* means here.
   it("declares the server and attaches it to the Conversation", async () => {
-    const NEW = { name: "wiki", url: "https://mcp.example.com/wiki" };
+    const NEW = { id: "uuid-of-wiki", name: "wiki", url: "https://mcp.example.com/wiki" };
     const fetching = theWorkbench(
       whenever(
         "/api/ui/settings",
@@ -296,6 +297,7 @@ describe("adding a server from the Attach menu", () => {
       Set: {
         servers: [
           ...SETTINGS.mcp_servers.map((one) => ({
+            id: one.id,
             name: one.name,
             url: one.url,
             headers: one.headers.map((header) => ({
@@ -305,9 +307,12 @@ describe("adding a server from the Attach menu", () => {
           })),
           {
             ...NEW,
+            // A new declaration, whose uuid the server mints.
+            id: null,
             headers: [{ name: "Authorization", value: { Set: { value: "Bearer abc" } } }],
           },
         ],
+        removed: [],
       },
     });
     // And everything else on the settings left as it stands.
@@ -371,7 +376,7 @@ describe("adding a server from the Attach menu", () => {
   /// card stays up to say so, with the attach one press further on, so a
   /// mistyped URL is caught where it was typed.
   it("holds the card open on a server that was not reached, until Attach anyway", async () => {
-    const NEW = { name: "wiki", url: "https://mcp.example.com/wikki" };
+    const NEW = { id: "uuid-of-wiki", name: "wiki", url: "https://mcp.example.com/wikki" };
     const fetching = theWorkbench(
       whenever(
         "/api/ui/settings",
@@ -442,6 +447,7 @@ describe("adding a server from the Attach menu", () => {
           return json({
             ...landed(
               servers.map((one) => ({
+                id: one.id ?? `uuid-of-${one.name}`,
                 name: one.name,
                 url: one.url,
                 headers: [],

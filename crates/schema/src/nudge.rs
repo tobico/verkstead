@@ -173,6 +173,13 @@ pub enum Nudge {
     /// all that moved is what it pulled.
     Instructions,
 
+    /// The declared MCP servers moved: one declared, edited or removed here,
+    /// or a member's records of them merged into the table (ADR-0028).
+    ///
+    /// **What a member hears to pull this device's declarations again**, as
+    /// [`Nudge::Authors`] is for the Authors.
+    McpServers,
+
     /// Where a Profile's login has got to moved: the harness printed the
     /// address, took a code, finished, or was killed.
     ///

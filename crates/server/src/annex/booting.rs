@@ -31,11 +31,12 @@
 //!
 //! **And the Keeper's settings about the work handed in first**, at every
 //! start rather than at make alone: the Annex has no settings of its own, so
-//! its sessions are given the Keeper's MCP servers, at-once limit and Cleanup,
-//! and a change on the Keeper reaches them the next time the two start
-//! together — see [`InTheBox::working_as`]. Not its Authors or its
-//! Instructions: those are records, which reach the Annex as a linked member
-//! pulls them, token copies and all (ADR-0028).
+//! its sessions are given the Keeper's at-once limit and Cleanup, and the
+//! header values of its MCP servers, and a change on the Keeper reaches them
+//! the next time the two start together — see [`InTheBox::working_as`]. Not
+//! its Authors, its Instructions or its MCP servers' declarations: those are
+//! records, which reach the Annex as a linked member pulls them, token copies
+//! and all (ADR-0028).
 //!
 //! **And pinned to the Keeper's own release before it is linked**, where its
 //! flake says another: the files written again, the Verkstead inputs alone
@@ -990,7 +991,9 @@ mod tests {
         );
     }
 
-    /// A Keeper with Instructions and an MCP server with an auth header, and
+    /// A Keeper with Instructions, an MCP server with an auth header and
+    /// Done sharing the record — the last the one key of its file it still
+    /// hands in, the first two being records now — and
     /// the Annex's files as a start that copied them leaves them: a bind and
     /// its Keeper of its own beside what was copied.
     fn keeper_and_copied() -> (tempfile::TempDir, Settings, String, String) {
@@ -1000,7 +1003,8 @@ mod tests {
         std::fs::write(
             keeper.config_path(),
             "instructions: Say it plainly.\n\
-             mcp_servers:\n- name: docs\n  url: https://docs.example.com/mcp\n  headers: [Authorization]\n",
+             mcp_servers:\n- name: docs\n  url: https://docs.example.com/mcp\n  headers: [Authorization]\n\
+             share_on_done: true\n",
         )
         .unwrap();
         std::fs::write(
