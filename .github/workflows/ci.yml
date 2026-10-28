@@ -564,7 +564,7 @@ jobs:
   # | Line tables, no examples built      | 7m04 + 19m52 = 28m04  | 7m08 + 17m04 = 25m02  |
   # | One test binary: store, schema, cli | 6m07 + 18m04 = 25m14  | 6m32 + 15m56 = 23m19  |
   # | One test binary: the server         | 4m48 + 17m27 = 23m23  | 5m12 + 17m39 = 23m50  |
-  # | Defender exclusions                 |                       |                       |
+  # | Defender exclusions                 | 5m10 + 17m49 = 24m09  | 4m54 + 19m13 = 25m21  |
   # | The legs                            |                       |                       |
   # | rust-lld                            |                       |                       |
   # | Template repositories               |                       |                       |
@@ -590,6 +590,12 @@ jobs:
   # re-run: its first attempt built in 2m59 and failed one `author_mirrors`
   # test that is a process of its own under nextest, so not the merge's —
   # which says how far two runners' builds of one commit can still differ.
+  #
+  # Defender exclusions bought nothing, because there was nothing to buy: the
+  # windows-2025 image already runs with real-time protection off (run
+  # 40678349026, whose step says so as a notice). The builds and tests moved
+  # by the noise alone, and the step costs six seconds, so it stays — an image
+  # that turns protection back on would cost this job nothing.
   #
   # `slice` partitioning deals the tests out one at a time across every binary,
   # so each leg gets its share of each suite rather than whole binaries. What
