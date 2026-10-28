@@ -182,7 +182,7 @@ describe("the Attach menu on a draft's composer", () => {
                 ...OPEN,
                 mcp_servers: [
                   ...OPEN.mcp_servers,
-                  { name: "tickets", declared: true },
+                  { name: "tickets", declared: true, clashes: false },
                 ],
               }
             : OPEN,
@@ -597,6 +597,56 @@ describe("the chips on a draft's composer", () => {
     expect(gone.textContent).toContain("archive");
     expect(
       within(gone).getByRole("button", { name: "Remove archive" }),
+    ).toBeTruthy();
+  });
+
+  /// A name two declarations share — two devices that each declared it apart —
+  /// is not offered: a session would be handed neither, and the server refuses
+  /// to attach it.
+  it("leaves out a name two declarations clash over", async () => {
+    const settings = declaring("tickets", "alerts");
+    theWorkbench(
+      whenever(
+        "/api/ui/settings",
+        json({
+          ...settings,
+          mcp_servers: [
+            ...settings.mcp_servers,
+            { ...settings.mcp_servers[0]!, id: "another-tickets" },
+          ],
+        }),
+      ),
+    );
+
+    const menu = await openMenu(await openComposer());
+
+    expect(rows(menu)).toEqual(["Attach file…", "alerts", "Add a server…"]);
+  });
+
+  /// And a chip on a name that clashes says so, keeping its ×.
+  it("says so where two declarations clash over the name", async () => {
+    theWorkbench(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}`,
+        json({
+          ...OPEN,
+          mcp_servers: [{ name: "docs", declared: true, clashes: true }],
+        }),
+      ),
+    );
+
+    const pane = await openComposer();
+    const clashing = await waitFor(() => {
+      const found = chips(pane).find((chip) =>
+        chip.classList.contains(pill.missing!),
+      );
+      expect(found, "expected a chip that clashes").toBeTruthy();
+      return found!;
+    });
+
+    expect(clashing.textContent).toContain("two clash until one is removed");
+    expect(
+      within(clashing).getByRole("button", { name: "Remove docs" }),
     ).toBeTruthy();
   });
 

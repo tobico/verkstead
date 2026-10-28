@@ -57,7 +57,7 @@ use crate::github::Gh;
 use crate::handoffs::Handoffs;
 use crate::merging;
 use crate::repos::git;
-use crate::settings::{Author, Config, Signature, Unauthored};
+use crate::settings::{Author, Config, Declaration, Signature, Unauthored};
 use crate::skills;
 use crate::stages::Startable;
 use crate::store;
@@ -995,9 +995,14 @@ pub(crate) async fn attached(pool: &SqlitePool, id: i64) -> Result<Vec<Attachmen
 /// nothing — which is not the same thing as the chip whose declaration went
 /// afterwards, that one being a reference the human made while it meant
 /// something.
+///
+/// And refused where two live declarations clash over the name, for the same
+/// reason: a session would be handed neither, so the chip would be born broken.
 pub(crate) async fn attach_server(state: &AppState, id: i64, name: &str) -> Result<ServerAttached> {
-    if !declared_servers(state).iter().any(|held| held == name) {
-        return Ok(ServerAttached::NoSuchServer);
+    match state.settings.config().declaration_of(name) {
+        Declaration::One(_) => {}
+        Declaration::Gone => return Ok(ServerAttached::NoSuchServer),
+        Declaration::Clash => return Ok(ServerAttached::Clashes),
     }
 
     // Whether there was one to put on is nothing to report: a name the
@@ -1030,39 +1035,33 @@ pub(crate) async fn detach_server(state: &AppState, id: i64, name: &str) -> Resu
 }
 
 /// The Conversation's MCP servers, in the shape the workbench draws them: each
-/// name, and whether the settings still declare one by it.
+/// name, whether the settings still declare one by it, and whether two
+/// declarations clash over it.
 ///
 /// The settings are read here rather than sent to the page beside the record,
-/// because what the page has to draw is one chip per name and the fact it needs
-/// about each is this one — the URL is no business of a viewer's and the headers
+/// because what the page has to draw is one chip per name and the facts it needs
+/// about each are these — the URL is no business of a viewer's and the headers
 /// beside it are secrets.
+///
+/// Read rather than remembered, which is the declarations' own contract: one
+/// added, corrected, deleted or replicated in takes effect on the next thing
+/// that asks.
 pub(crate) async fn attached_servers(state: &AppState, id: i64) -> Result<Vec<AttachedServerView>> {
-    let declared = declared_servers(state);
+    let config = state.settings.config();
 
     Ok(store::mcp_servers(&state.pool, id)
         .await?
         .into_iter()
-        .map(|name| AttachedServerView {
-            declared: declared.contains(&name),
-            name,
+        .map(|name| {
+            let declaration = config.declaration_of(&name);
+
+            AttachedServerView {
+                declared: declaration != Declaration::Gone,
+                clashes: declaration == Declaration::Clash,
+                name,
+            }
         })
         .collect())
-}
-
-/// What the settings declare, by name, as of this moment.
-///
-/// Read rather than remembered, which is `config.yaml`'s own contract: a
-/// declaration added, corrected or deleted takes effect on the next thing that
-/// asks. A half-written entry is no declaration and never reaches here — see
-/// `servers_kept` in [`crate::settings`].
-fn declared_servers(state: &AppState) -> Vec<String> {
-    state
-        .settings
-        .config()
-        .mcp_servers()
-        .iter()
-        .filter_map(|server| server.name().map(str::to_owned))
-        .collect()
 }
 
 /// Why a Conversation's files are not the human's to change, or `None` where

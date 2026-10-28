@@ -29,8 +29,8 @@ use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    AuthorEntry, AuthorRemoved, DevicesView, PointingRepo, Registered, RepoEntry, UnrepointedRepo,
-    Unrepointing,
+    AuthorEntry, AuthorRemoved, ConversationView, DevicesView, PointingRepo, Registered, RepoEntry,
+    ServerAttached, Started, UnrepointedRepo, Unrepointing,
 };
 use verkstead_schema::Nudge;
 use verkstead_server::device::reading::{RUNNING, Reading};
@@ -713,6 +713,49 @@ impl Verkstead {
             Registered::Added(repo) => repo.id,
             refused => panic!("registering {name}: {refused:?}"),
         }
+    }
+
+    /// A draft Conversation on a Repo registered here as `author`'s, by id.
+    async fn drafts(&self, author: &str) -> i64 {
+        let repo = self.registers("widgets", author).await;
+
+        let (status, said) = pressing(
+            &self.workbench,
+            "/api/ui/conversations",
+            Some(&serde_json::json!({ "repo_id": repo }).to_string()),
+        )
+        .await;
+
+        assert!(status.is_success(), "starting a draft: {status} {said}");
+
+        match serde_json::from_str(&said).unwrap() {
+            Started::Started { id } => id,
+            refused => panic!("starting a draft: {refused:?}"),
+        }
+    }
+
+    /// Attach the MCP server `name` to the draft `id`, as the Attach menu does.
+    async fn attaches(&self, id: i64, name: &str) -> ServerAttached {
+        let (status, said) = pressing(
+            &self.workbench,
+            &format!("/api/ui/conversations/{id}/mcp-servers/{name}"),
+            None,
+        )
+        .await;
+
+        assert!(status.is_success(), "attaching {name}: {status} {said}");
+
+        serde_json::from_str(&said).unwrap()
+    }
+
+    /// The chips the Conversation `id` draws, as `(name, declared, clashes)`.
+    async fn chips(&self, id: i64) -> Vec<(String, bool, bool)> {
+        reading::<ConversationView>(&self.workbench, &format!("/api/ui/conversations/{id}"))
+            .await
+            .mcp_servers
+            .into_iter()
+            .map(|server| (server.name, server.declared, server.clashes))
+            .collect()
     }
 
     /// The Author the Repo `id` records.
@@ -1653,6 +1696,91 @@ async fn a_name_another_device_declared_is_refused_at_the_press() {
     );
     assert_eq!(saved.refused_servers[0].server, 0);
     assert_eq!(b.server_records().await.len(), 1, "nothing written");
+}
+
+/// Two devices apart each declare `docs`; once they meet, the two clash on
+/// both: the settings section draws both rows, a session attached to `docs` is
+/// handed neither, its chip says they clash, and attaching it again is refused.
+/// Removing one on B clears the clash on both, and the next session on either
+/// gets the survivor.
+#[tokio::test]
+async fn a_name_two_devices_declared_apart_clashes_until_one_is_removed() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+
+    let mut drafts = Vec::new();
+
+    for (device, url) in [
+        (&a, "https://one.example.com/mcp"),
+        (&b, "https://two.example.com/mcp"),
+    ] {
+        device
+            .saves_author(WORK, "Ada Lovelace", "ada@work.example")
+            .await;
+        device.declares(&[(None, "docs", url)], &[]).await;
+
+        let draft = device.drafts(WORK).await;
+        assert_eq!(
+            device.attaches(draft, "docs").await,
+            ServerAttached::Attached
+        );
+        drafts.push(draft);
+    }
+
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+    a.nudges.announce(Nudge::Devices);
+    b.nudges.announce(Nudge::Devices);
+
+    let mut both = Vec::new();
+
+    for (device, draft) in [(&a, drafts[0]), (&b, drafts[1])] {
+        let servers = device.servers_saying(|servers| servers.len() == 2).await;
+        assert!(
+            servers.iter().all(|(_, name)| name == "docs"),
+            "{servers:?}"
+        );
+        both = servers;
+
+        assert!(device.launched_with("docs").is_empty(), "handed neither");
+        assert_eq!(device.chips(draft).await, [("docs".to_owned(), true, true)]);
+        assert_eq!(
+            device.attaches(draft, "docs").await,
+            ServerAttached::Clashes
+        );
+        assert_eq!(
+            device.attaches(draft, "tickets").await,
+            ServerAttached::NoSuchServer
+        );
+    }
+
+    // B removes the one A declared, which is the one at one.example.com.
+    let theirs = a
+        .settings()
+        .config()
+        .mcp_servers()
+        .iter()
+        .find(|server| server.url() == Some("https://one.example.com/mcp"))
+        .and_then(|server| server.id().map(str::to_owned))
+        .unwrap();
+    assert!(both.iter().any(|(id, _)| *id == theirs));
+
+    b.declares(&[], &[&theirs]).await;
+
+    for (device, draft) in [(&a, drafts[0]), (&b, drafts[1])] {
+        device.servers_saying(|servers| servers.len() == 1).await;
+
+        assert_eq!(
+            device.launched_with("docs"),
+            [("https://two.example.com/mcp".to_owned(), Vec::new())],
+            "the survivor"
+        );
+        assert_eq!(
+            device.chips(draft).await,
+            [("docs".to_owned(), true, false)]
+        );
+    }
 }
 
 const DOCS_URL: &str = "https://docs.example.com/mcp";

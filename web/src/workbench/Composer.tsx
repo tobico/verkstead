@@ -749,6 +749,8 @@ export const SERVER_REFUSAL: Record<
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "The work has started, so its servers are settled.",
   NoSuchServer: "That server is no longer declared in the settings.",
+  Clashes:
+    "Two servers share that name. Remove one in the settings to attach it.",
 };
 
 /// What a draft's composer does about its MCP servers, held once for the pane:
@@ -853,11 +855,26 @@ function serversOn(what: {
     what.conversation().mcp_servers.map((server) => ({
       name: server.name,
       gone: !server.declared,
+      clashes: server.clashes,
       remove: what.frozen() ? undefined : () => forget(server.name),
       removing: working().includes(server.name),
     }));
 
   return { chips, attach, refused };
+}
+
+/// The names two or more of `declared` share, which only two devices declaring
+/// one apart brings about: a session is handed neither until one is removed on
+/// the settings page.
+export function clashing(declared: Array<McpServer>): Set<string> {
+  const seen = new Set<string>();
+  const twice = new Set<string>();
+
+  for (const server of declared) {
+    (seen.has(server.name) ? twice : seen).add(server.name);
+  }
+
+  return twice;
 }
 
 /// The section an Attach menu holds under *Attach file*: **MCP Servers**, one
@@ -903,10 +920,14 @@ export function ServerRows(props: {
 
   const attached = () => new Set(props.attached);
 
-  /// The declarations this Conversation could still be given.
+  /// The declarations this Conversation could still be given: not one already
+  /// on, and not a name two declarations clash over, which a session would be
+  /// handed neither of and the server refuses to attach.
   const offerable = (): Array<McpServer> =>
     (settings.data?.mcp_servers ?? []).filter(
-      (server) => !attached().has(server.name),
+      (server) =>
+        !attached().has(server.name) &&
+        !clashing(settings.data?.mcp_servers ?? []).has(server.name),
     );
 
   const heading = createUniqueId();

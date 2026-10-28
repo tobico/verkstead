@@ -608,9 +608,16 @@ name: string,
  * Read at the moment the Conversation is, as everything about a
  * declaration is: a server deleted from the settings turns this false on
  * every Conversation that attached it, and declaring one of that name
- * again turns it back.
+ * again turns it back. True where two or more do — see [`Self::clashes`].
  */
-declared: boolean, };
+declared: boolean, 
+/**
+ * Whether two or more live declarations share the name, which only
+ * replication brings about: two devices that each declared it while
+ * apart. A session is handed neither, and the chip says the two clash
+ * until one is removed on the settings page.
+ */
+clashes: boolean, };
 
 /**
  * What a file was attached to.
@@ -5964,7 +5971,7 @@ export type ServeView = { "serve": "Off" } | { "serve": "On", address: string, }
  * attached*: a server the Conversation holds already is taken out of the menu,
  * and the state a second press asks for is the state there is.
  */
-export type ServerAttached = "Attached" | "NoSuchConversation" | "NotDrafting" | "NoSuchServer";
+export type ServerAttached = "Attached" | "NoSuchConversation" | "NotDrafting" | "NoSuchServer" | "Clashes";
 
 /**
  * Which of a declaration's two halves something is about.

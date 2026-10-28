@@ -63,6 +63,7 @@
   },
   "mcp_servers": [
     {
+      "clashes": false,
       "declared": true,
       "name": "docs"
     }

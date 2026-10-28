@@ -148,6 +148,7 @@ export function Brief(props: {
         chips={props.conversation.mcp_servers.map((server) => ({
           name: server.name,
           gone: !server.declared,
+          clashes: server.clashes,
         }))}
         class={styles.attachments}
       />

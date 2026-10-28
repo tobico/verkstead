@@ -86,10 +86,12 @@
   },
   "mcp_servers": [
     {
+      "clashes": false,
       "declared": true,
       "name": "docs"
     },
     {
+      "clashes": false,
       "declared": false,
       "name": "archive"
     }

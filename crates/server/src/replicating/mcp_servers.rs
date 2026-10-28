@@ -29,8 +29,9 @@
 //!
 //! **Names are unique at the press**, against every live record this device
 //! holds, whoever wrote it — see [`refusals`]. Two of a name can only arrive
-//! by replication, from two devices that each declared it apart; both are kept,
-//! and a launch takes the first.
+//! by replication, from two devices that each declared it apart; both are kept
+//! and drawn, and a launch hands neither until one is removed — see
+//! [`crate::settings::Config::declaration_of`].
 //!
 //! **Held in memory for the settings**, as the Authors and the Instructions
 //! are: every write here and every merge hands the live declarations on to

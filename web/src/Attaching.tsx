@@ -129,6 +129,11 @@ export type Chip = {
   /// says under it.
   gone?: boolean;
 
+  /// Whether two declarations share the name, which only two devices declaring
+  /// it apart brings about: a session is handed neither until one is removed,
+  /// and the chip says so.
+  clashes?: boolean;
+
   /// Taking it off, where that is something that can be done at all — nothing
   /// past a freeze, exactly as a pill's.
   remove?: () => void;
@@ -541,7 +546,7 @@ function ServerChip(props: { chip: Chip }): JSX.Element {
   return (
     <li
       class={`${styles.attachment} ${styles.server}`}
-      classList={{ [styles.missing!]: props.chip.gone }}
+      classList={{ [styles.missing!]: props.chip.gone || props.chip.clashes }}
     >
       {/* What kind of thing it is, said as a shape rather than as a word: the
           row is read across, and a chip that spelled out what it was would be
@@ -555,6 +560,11 @@ function ServerChip(props: { chip: Chip }): JSX.Element {
           nobody could look up. */}
       <Show when={props.chip.gone}>
         <span class={styles.attachmentSize}>no longer declared</span>
+      </Show>
+      <Show when={props.chip.clashes}>
+        <span class={styles.attachmentSize}>
+          two clash until one is removed
+        </span>
       </Show>
 
       <Show when={props.chip.remove !== undefined}>

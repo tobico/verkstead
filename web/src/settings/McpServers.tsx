@@ -312,6 +312,12 @@ export function McpServersPane(props: {
 
   const told = (): SettingsView | undefined => settings.data;
 
+  /// Whether `row` is a declared one whose name another declared row shares.
+  const clashes = (row: Editing): boolean =>
+    !row.fresh &&
+    drawn().filter((other) => !other.fresh && other.name === row.name).length >
+      1;
+
   /// The rows as they are drawn: what has been edited, or what is declared while
   /// nothing has been.
   const drawn = (): Editing[] =>
@@ -624,6 +630,16 @@ export function McpServersPane(props: {
                         {(why) => (
                           <ErrorLine class={styles.trouble}>{why()}</ErrorLine>
                         )}
+                      </Show>
+                      {/* Two declared rows of one name, which only two devices
+                          declaring it apart brings about. A server is never
+                          renamed, so removing one is the only way out, and
+                          either Remove does it. */}
+                      <Show when={clashes(row())}>
+                        <ErrorLine class={styles.trouble}>
+                          Another server shares this name, so neither is
+                          given to a session. Remove one of them.
+                        </ErrorLine>
                       </Show>
 
                       <label for={`mcp-url-${at}`}>URL</label>

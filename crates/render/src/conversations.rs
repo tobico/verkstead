@@ -1344,8 +1344,14 @@ pub struct AttachedServerView {
     /// Read at the moment the Conversation is, as everything about a
     /// declaration is: a server deleted from the settings turns this false on
     /// every Conversation that attached it, and declaring one of that name
-    /// again turns it back.
+    /// again turns it back. True where two or more do — see [`Self::clashes`].
     pub declared: bool,
+
+    /// Whether two or more live declarations share the name, which only
+    /// replication brings about: two devices that each declared it while
+    /// apart. A session is handed neither, and the chip says the two clash
+    /// until one is removed on the settings page.
+    pub clashes: bool,
 }
 
 /// One companion repo of a Conversation: which Repo, how far into it a session
@@ -4269,6 +4275,12 @@ pub enum ServerAttached {
     /// name, and one made against a name nothing answers to would be a chip born
     /// pointing at nothing.
     NoSuchServer,
+
+    /// Two or more live declarations share that name, which only replication
+    /// brings about, and a session would be handed neither: a chip made now
+    /// would be one born clashing. Removing one on the settings page is the way
+    /// out.
+    Clashes,
 }
 
 /// And of taking one off again.

@@ -290,6 +290,27 @@ describe("the pane", () => {
     expect(screen.getByText(BESIDE.name)).toBeTruthy();
   });
 
+  /// Two declarations of one name, which only two devices declaring it apart
+  /// brings about, are both drawn, each with its own Remove, and each says the
+  /// other is there and one has to go.
+  it("draws both rows of a clashing pair and says one has to go", async () => {
+    theSettings({
+      ...TOLD,
+      mcp_servers: [DECLARED, { ...DECLARED, id: "another", url: BESIDE.url }],
+    });
+    mountPane();
+
+    await waitFor(() => expect(urlBox(1).value).toBe(BESIDE.url));
+    expect(urlBox(0).value).toBe(DECLARED.url);
+    expect(screen.getAllByText(DECLARED.name)).toHaveLength(2);
+    expect(
+      screen.getAllByText(/Another server shares this name/),
+    ).toHaveLength(2);
+    expect(
+      screen.getAllByRole("button", { name: new RegExp(`Remove`) }).length,
+    ).toBeGreaterThanOrEqual(2);
+  });
+
   /// The rule this section is built around: the name of a declaration that is
   /// already made is words rather than a box, because everything that refers to
   /// a server refers to it by that name.

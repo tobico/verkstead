@@ -1010,7 +1010,7 @@ above it the way the human's global file used to be.
 _Avoid_: global CLAUDE.md, system prompt, preamble, rules
 
 **MCP server**:
-A tool server an agent may call, **declared** once for the installation on the
+A tool server an agent may call, **declared** once for the cluster on the
 settings page and **attached** to a Conversation from the Attach button where
 its Brief is written. The one deliberate way an MCP server reaches a session at
 all: a **Built Root** has the account's own taken out for every harness, so a
@@ -1024,40 +1024,51 @@ rather than a setting. The headers are static values typed once — no OAuth,
 there being no browser at three in the morning — and they are **secrets**:
 written where a secret is written, never read back to the page, and readable by
 Verkstead because a session has to be handed them.
-**The name is the identity**, so it is lowercase letters, digits and hyphens and
-unique among the declarations, and it is what the agent sees in front of the
-server's tool names. A name that is neither is refused as it is typed, naming
-the field at fault. **A server is never renamed**: everything that refers to one
-refers to it by that name, so the settings page offers a name on a new
-declaration alone and changing one is deleting it and declaring another. The URL
-and the headers are edited.
-**A replicated record in the database**, the cluster's like the Authors and
-the **Instructions** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)):
-one per declaration, under a **uuid**, its fields the name, the URL and the
-header names. `config.yaml`'s old `mcp_servers:` key is taken up once, each
-declaration under a uuid derived from its name so that one declared by hand on
-two devices is one record, and dropped. Read at the moment a session is
-launched, so a corrected URL fixes every Conversation that attached that
-server. **Removing one is a deletion stamp, and declaring a removed name again
-is a new record** under a new uuid; names are unique among the live
-declarations, refused at the press against every one this device holds.
-**Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a name two live declarations share launching neither. The `cluster-owned-records` roadmap lands it.
+**A replicated record in the database**, the cluster's like the **Author**s and
+the **Instructions** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md),
+amending ADR-0021's *kept in `config.yaml`*): one per declaration, under a
+**uuid**, its fields the name, the URL, the header names and a digest of each
+header's value. Every device serves and pulls it, so a server declared on one
+is on every other's Attach menu. `config.yaml`'s old `mcp_servers:` key is
+taken up once, each declaration under a uuid derived from its name so that one
+declared by hand on two devices is one record, and dropped. Read at the moment
+a session is launched, so a corrected URL fixes every Conversation that
+attached that server.
+**The name is still the identity the agent and the chips see**, so it is
+lowercase letters, digits and hyphens, and it is what the agent sees in front
+of the server's tool names. A name that is neither is refused as it is typed,
+naming the field at fault. **A server is never renamed**: everything that
+refers to one refers to it by that name, so the settings page offers a name on
+a new declaration alone and changing one is removing it and declaring another.
+The URL and the headers are edited.
+**Unique among the live declarations across the cluster**, refused at the press
+against every live record this device holds, whoever wrote it. **Removing one
+is a deletion stamp, and declaring a removed name again is a new record** under
+a new uuid, so a removal is final here as it is for every record.
+**A name two live declarations share launches neither.** Only replication
+brings that about — two devices that each declared `docs` while apart — and
+neither is the one meant, so a session attached to `docs` is handed neither,
+its chip says the two **clash until one is removed**, and attaching the name
+is refused. The settings section draws both rows, each with its own Remove,
+and removing either on any device clears the clash everywhere once the removal
+replicates. Newest-declaration-wins was considered and turned down: it would
+hand a session a server the human on the other device never meant it to have.
 **Except the header values, which are in `secrets.yaml`** under the
-declaration's uuid, where the GitHub token is: the names are part of the declaration and are
-written with it, and what goes in each of them is a secret. So a header is
-edited as an *action* rather than as a value, one apiece — keep it, set it, or
-clear it — and a value box left blank keeps what is there, the way the token's
-does. A header the declaration names with nothing kept for it is one nothing is
-sent in, and removing a declaration takes its values with it, so the same name
-declared again — a new uuid — starts with none.
-**The values reach every device's `secrets.yaml`**, as an **Author**'s token
-does: the record carries a digest of each, never the value, so setting,
+declaration's uuid, where the GitHub token is: the names are part of the
+declaration and are written with it, and what goes in each of them is a secret.
+So a header is edited as an *action* rather than as a value, one apiece — keep
+it, set it, or clear it — and a value box left blank keeps what is there, the
+way the token's does. A header the declaration names with nothing kept for it
+is one nothing is sent in.
+**The values are copied to every device's `secrets.yaml`**, as an **Author**'s
+token is: the record carries a digest of each, never the value, so setting,
 rotating or clearing one is a write to it, and after every pull a device whose
 copy is not the one the record names asks its members for it, the writer
 first, and keeps what matches. There is no home; they travel from whoever
 holds them, and a member not answering leaves the copy as it stands. A removed
 declaration's copy goes everywhere with its deletion stamp, and being under
-the uuid, the old removal never takes a redeclared name's new values.
+the uuid, the old removal never takes a redeclared name's new values,
+whichever order a device pulls the two in.
 The section saves as an action rather than a value, the way the **Ignore rule**s
 do and for the same reason: it is one of the two things on that page a save can
 be *refused* over, so a section that is not about the declarations says nothing
@@ -1071,10 +1082,11 @@ once the work starts, and a read-only row afterwards, exactly as an
 **Attachment** is. What holds them is the Conversation rather than the round, so
 a later drafting round draws the ones it already had — attached, and still the
 human's to take off.
-**A chip whose declaration has been deleted says the server is gone** rather
+**A chip whose name has no live declaration says the server is gone** rather
 than disappearing — the reference was made on purpose, and taking it off is the
-human's — while attaching a name nothing is declared by is refused, the menu it
-was picked from having been drawn a moment earlier.
+human's — while attaching a name nothing live declares is refused, the menu it
+was picked from having been drawn a moment earlier. A name two declarations
+clash over is left off the menu, and its chip says they clash.
 **The servers are a section of the Attach menu of their own**, headed **MCP
 Servers** under *Attach file*, with **Add a server…** at its foot: a card asking
 what a new declaration on the settings page asks, saved as that page saves one,
@@ -1120,8 +1132,8 @@ front of its tool names — `mcp__<server>__<tool>` on Claude and on Codex,
 `<server>__<tool>` on Grok Build, `<server>_<tool>` on OpenCode. Which is the
 one thing about a server a session cannot work out for itself; what it is *for*
 is the Brief's to say, as a file's is. No section at all where a Conversation
-has attached none, and none for a name whose declaration has since been deleted,
-that one being nothing the session was launched with.
+has attached none, and none for a name with no live declaration or with two
+that clash, either being nothing the session was launched with.
 **An unreachable server never holds a launch**: the session starts, and what the
 harness makes of a server that will not answer is said inside it. A declaration
 is tried once on save, while the human is looking at the page, and that is a

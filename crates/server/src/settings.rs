@@ -2027,6 +2027,27 @@ impl Config {
         &self.mcp_servers
     }
 
+    /// What the live declarations say behind one name a Conversation holds:
+    /// one, none, or two or more.
+    ///
+    /// Two or more can only come about by replication — the press refuses a
+    /// name another live declaration has — from two devices that each declared
+    /// it while apart (ADR-0028). Neither is the one meant, so neither is
+    /// launched, and the chip says the two clash until one is removed;
+    /// newest-declaration-wins was turned down.
+    pub fn declaration_of(&self, name: &str) -> Declaration<'_> {
+        let mut named = self
+            .mcp_servers
+            .iter()
+            .filter(|server| server.name() == Some(name));
+
+        match (named.next(), named.next()) {
+            (None, _) => Declaration::Gone,
+            (Some(server), None) => Declaration::One(server),
+            (Some(_), Some(_)) => Declaration::Clash,
+        }
+    }
+
     /// And the ones `attached` names, each as its name and the URL it is
     /// reached at — which is what a Conversation's chips come to at the moment
     /// a session is launched.
@@ -2036,22 +2057,32 @@ impl Config {
     /// Conversation being launched.
     ///
     /// **A name nothing declares is left out**, silently as far as the launch
-    /// goes. A chip whose declaration has since been deleted is already drawn
-    /// as a server that is gone — see the server's
-    /// `conversations::attached_servers` — and there is nowhere to send an
-    /// agent, so there is nothing to write into a root and nothing to tell a
-    /// session about. Holding the launch over it would stop the work for a
-    /// reference the human can see is broken.
+    /// goes, **and so is a name two declarations clash over** — see
+    /// [`Config::declaration_of`]. Either chip is already drawn saying so —
+    /// see the server's `conversations::attached_servers` — and there is
+    /// nowhere to send an agent, so there is nothing to write into a root and
+    /// nothing to tell a session about. Holding the launch over it would stop
+    /// the work for a reference the human can see is broken.
     pub fn servers_among<'a>(&'a self, attached: &[String]) -> Vec<(&'a str, &'a str)> {
+        self.declarations_among(attached)
+            .filter_map(|server| Some((server.name()?, server.url()?)))
+            .collect()
+    }
+
+    /// The one live declaration behind each of `attached` that has exactly
+    /// one, in the order they were attached.
+    fn declarations_among<'a>(
+        &'a self,
+        attached: &[String],
+    ) -> impl Iterator<Item = &'a McpServer> {
         attached
             .iter()
-            .filter_map(|name| {
-                self.mcp_servers
-                    .iter()
-                    .find(|server| server.name() == Some(name.as_str()))
-                    .and_then(|server| Some((server.name()?, server.url()?)))
+            .filter_map(|name| match self.declaration_of(name) {
+                Declaration::One(server) => Some(server),
+                Declaration::Gone | Declaration::Clash => None,
             })
-            .collect()
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 
     /// And the same again with the header values `secrets` keeps for each of
@@ -2068,25 +2099,22 @@ impl Config {
     /// an empty one fails obscurely — which is [`blank_is_nothing`]'s reason
     /// said about a header.
     pub fn attached_among(&self, attached: &[String], secrets: &Secrets) -> Vec<AttachedServer> {
-        self.servers_among(attached)
-            .into_iter()
-            .map(|(name, url)| AttachedServer {
-                name: name.to_owned(),
-                url: url.to_owned(),
-                headers: self
-                    .mcp_servers
-                    .iter()
-                    .find(|server| server.name() == Some(name))
-                    .into_iter()
-                    .flat_map(|server| {
-                        server.headers().iter().filter_map(|header| {
+        self.declarations_among(attached)
+            .filter_map(|server| {
+                Some(AttachedServer {
+                    name: server.name()?.to_owned(),
+                    url: server.url()?.to_owned(),
+                    headers: server
+                        .headers()
+                        .iter()
+                        .filter_map(|header| {
                             Some((
                                 header.clone(),
                                 secrets.mcp_header(server.key()?, header)?.to_owned(),
                             ))
                         })
-                    })
-                    .collect(),
+                        .collect(),
+                })
             })
             .collect()
     }
@@ -3009,6 +3037,21 @@ pub enum HeaderValue {
 /// **The values are here in the clear**, and that is the limit of the secrecy:
 /// they are kept from the page and the wire rather than from the agent, which
 /// reads its own configuration — see ADR-0021.
+/// What the live declarations say behind one name — see
+/// [`Config::declaration_of`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Declaration<'a> {
+    /// The one declaration of that name, which is what is launched.
+    One(&'a McpServer),
+
+    /// Nothing live declares it: the chip says the server is gone.
+    Gone,
+
+    /// Two or more live declarations share it, which only replication brings
+    /// about: neither is launched, and the chip says they clash.
+    Clash,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachedServer {
     name: String,
