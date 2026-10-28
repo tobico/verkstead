@@ -811,25 +811,80 @@ pub enum AuthorEdited {
     NoSuchAuthor,
 }
 
-/// What became of removing an Author, from the Git section's switcher.
+/// What became of removing an Author, from the Git section's switcher — or of
+/// **Repoint them all to…** on the refusal, which removes it once every Repo
+/// pointing at it has been pointed elsewhere.
 ///
-/// Refused while a registered Repo points at it (ADR-0025): its next session
-/// would have nobody to commit as. An unregistered Repo keeps the association
-/// as history and blocks nothing.
+/// Refused while a registered Repo points at it (ADR-0025, ADR-0028): its next
+/// session would have nobody to commit as. This device's Repos are looked at
+/// and every member's that answers; a member that does not is skipped and named
+/// in `unasked`, and blocks nothing. An unregistered Repo keeps the association
+/// as history and blocks nothing either.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum AuthorRemoved {
     /// A deletion stamp on its record, which every member pulls, and its
-    /// token out of `secrets.yaml`.
-    Removed,
+    /// token out of `secrets.yaml`. `unasked` names the members that were not
+    /// answering, whose Repos were not looked at.
+    Removed { unasked: Vec<String> },
 
     /// No Author with that uuid is configured: one removed since the page was
-    /// drawn, most likely.
+    /// drawn, most likely. Or, for a repoint, the Author picked to repoint to.
     NoSuchAuthor,
 
-    /// Registered Repos point at it, named, alphabetically as the Repos pane
-    /// lists them. Never empty.
-    InUse { repos: Vec<String> },
+    /// Registered Repos point at it, each with its device: this device's first,
+    /// then each member's, alphabetically within each. Never empty.
+    InUse {
+        repos: Vec<PointingRepo>,
+        unasked: Vec<String>,
+    },
+
+    /// **Repoint them all to…** was refused for these Repos, so the Author
+    /// stays. The rest were repointed. Never empty.
+    Unrepointed {
+        repos: Vec<UnrepointedRepo>,
+        unasked: Vec<String>,
+    },
+}
+
+/// A Repo an Author's removal found pointing at it, named with its device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PointingRepo {
+    /// What its device calls it, which is its directory's own name.
+    pub name: String,
+
+    /// The member it is registered on, by the name the human gave that
+    /// machine, or `null` for this device.
+    pub device: Option<String>,
+}
+
+/// A Repo **Repoint them all to…** could not repoint, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct UnrepointedRepo {
+    pub repo: PointingRepo,
+    pub why: Unrepointing,
+}
+
+/// Why one Repo was not repointed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Unrepointing {
+    /// Live work has it in it, named by branch, as a repoint on its own row is
+    /// refused: the Conversations on it in `on`, and the ones holding it as a
+    /// Companion Repo in `beside`.
+    InUse {
+        on: Vec<String>,
+        beside: Vec<String>,
+    },
+
+    /// Its device does not hold the Author picked yet: one made since that
+    /// device last pulled the records.
+    NoSuchAuthor,
+
+    /// Its device did not take the repoint, in a sentence naming the machine.
+    Refused(String),
 }
 
 /// Everything about the Author's token that is not the token.

@@ -21,4 +21,4 @@ Roadmap stage: [01: Records are the cluster's — Authors first](docs/roadmaps/c
 - [x] 02: Replicated across the cluster — [details](02-replicated-across-the-cluster.md)
 - [x] 03: Tokens from whoever holds one — [details](03-tokens-from-whoever-holds-one.md)
 - [x] 04: The Git section without homes — [details](04-the-git-section-without-homes.md)
-- [ ] 05: Removal across devices and Repoint them all — [details](05-removal-across-devices-and-repoint-them-all.md)
+- [x] 05: Removal across devices and Repoint them all — [details](05-removal-across-devices-and-repoint-them-all.md)

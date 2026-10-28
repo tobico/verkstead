@@ -39,7 +39,8 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    AuthorRemoved, Cloned, Created, Registered, RepoEntry, RepoRemoved, RepoView, Repointed,
+    AuthorRemoved, Cloned, Created, PointingRepo, Registered, RepoEntry, RepoRemoved, RepoView,
+    Repointed,
 };
 use verkstead_server::settings::{Author, Recorded, Settings};
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
@@ -1595,6 +1596,14 @@ async fn remove_author(app: &Router, id: &str) -> AuthorRemoved {
     .await
 }
 
+/// A Repo of this device's, as a removal names one.
+fn here(name: &str) -> PointingRepo {
+    PointingRepo {
+        name: name.to_owned(),
+        device: None,
+    }
+}
+
 /// An Author two registered Repos point at is refused removal naming both;
 /// once both are unregistered — their association kept as history — it goes,
 /// and its token with it.
@@ -1618,7 +1627,8 @@ async fn an_author_repos_point_at_is_refused_removal_naming_them() {
     assert_eq!(
         remove_author(&app, "personal").await,
         AuthorRemoved::InUse {
-            repos: vec!["askance".to_owned(), "verkstead".to_owned()],
+            repos: vec![here("askance"), here("verkstead")],
+            unasked: vec![],
         },
     );
     assert!(
@@ -1634,7 +1644,7 @@ async fn an_author_repos_point_at_is_refused_removal_naming_them() {
 
     assert_eq!(
         remove_author(&app, "personal").await,
-        AuthorRemoved::Removed
+        AuthorRemoved::Removed { unasked: vec![] }
     );
 
     let settings = Settings::in_data_dir(dir.path());

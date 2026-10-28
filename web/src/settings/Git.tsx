@@ -120,6 +120,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
+  For,
   Index,
   Match,
   Show,
@@ -136,6 +137,7 @@ import { QuietButton } from "../QuietButton";
 import {
   loadSettings,
   removeAuthor,
+  repointAuthors,
   saveSettings,
 } from "../api/client";
 import { authorLabel } from "../authors";
@@ -148,6 +150,7 @@ import type {
   ConflictResolution,
   IgnoreRule,
   IgnoredCommentsEdit,
+  PointingRepo,
   RuleField,
   RuleRefused,
   SettingsEdit,
@@ -155,6 +158,7 @@ import type {
   SettingsView,
   TokenEdit,
   TokenSaved,
+  UnrepointedRepo,
   Verified,
 } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
@@ -589,36 +593,66 @@ export function GitPane(props: {
   const [removing, setRemoving] = createSignal<AuthorSaved | null>(null);
 
   // And why the last removal did not happen: the Repos still pointing at the
-  // Author, or a sentence. Nothing clears it but another press or a switch.
-  const [unremoved, setUnremoved] = createSignal<string[] | string | null>(
-    null,
-  );
+  // Author, on every device that answered, the ones **Repoint them all to…**
+  // could not repoint, or a sentence. Nothing clears it but another press or
+  // a switch.
+  const [unremoved, setUnremoved] = createSignal<Unremoved | null>(null);
+
+  // And the members a removal that went through could not ask, whose Repos
+  // were not looked at.
+  const [unasked, setUnasked] = createSignal<string[]>([]);
+
+  /// What a removal answered, either way it was asked for. `gone` is the
+  /// Author it was about.
+  const removed = (gone: AuthorSaved, outcome: AuthorRemoved) => {
+    // Read again either way: the Author list is the records', and the Repos
+    // pane's rows are drawn against it — and a repoint moved some of them.
+    void queries.invalidateQueries({ queryKey: ["settings"] });
+    void queries.invalidateQueries({ queryKey: ["repos"] });
+    void queries.invalidateQueries({ queryKey: ["authors"] });
+
+    if (outcome === "NoSuchAuthor") {
+      setUnremoved({ said: "That author isn't configured any more." });
+    } else if ("Removed" in outcome) {
+      unedited();
+      setChosen(null);
+      setUnremoved(null);
+      setUnasked(outcome.Removed.unasked);
+    } else if ("InUse" in outcome) {
+      setUnremoved({ author: gone, inUse: outcome.InUse });
+    } else {
+      setUnremoved({ author: gone, unrepointed: outcome.Unrepointed });
+    }
+  };
 
   const removal = useMutation(() => ({
     mutationFn: (gone: AuthorSaved) => removeAuthor(gone.id),
-    onSuccess: (outcome: AuthorRemoved) => {
-      // Read again either way: the Author list is the files', and the Repos
-      // pane's rows are drawn against it.
-      void queries.invalidateQueries({ queryKey: ["settings"] });
-      void queries.invalidateQueries({ queryKey: ["repos"] });
-      void queries.invalidateQueries({ queryKey: ["authors"] });
-
-      if (outcome === "Removed") {
-        unedited();
-        setChosen(null);
-      } else if (outcome === "NoSuchAuthor") {
-        setUnremoved("That author isn't configured any more.");
-      } else {
-        setUnremoved(outcome.InUse.repos);
-      }
-    },
+    onSuccess: (outcome: AuthorRemoved, gone: AuthorSaved) =>
+      removed(gone, outcome),
     onError: (error: Error) =>
-      setUnremoved(`The author couldn't be removed. ${error.message}`),
+      setUnremoved({
+        said: `The author couldn't be removed. ${error.message}`,
+      }),
+  }));
+
+  // **Repoint them all to…**, pressed on a refusal.
+  const repointing = useMutation(() => ({
+    mutationFn: (pick: { gone: AuthorSaved; to: string }) =>
+      repointAuthors(pick.gone.id, pick.to),
+    onSuccess: (
+      outcome: AuthorRemoved,
+      pick: { gone: AuthorSaved; to: string },
+    ) => removed(pick.gone, outcome),
+    onError: (error: Error) =>
+      setUnremoved({
+        said: `The repos couldn't be repointed. ${error.message}`,
+      }),
   }));
 
   /// What **Remove author** does, which is ask rather than act.
   const askRemoval = () => {
     setUnremoved(null);
+    setUnasked([]);
     setRemoving(author() ?? null);
   };
 
@@ -631,6 +665,7 @@ export function GitPane(props: {
 
     unedited();
     setUnremoved(null);
+    setUnasked([]);
     if (id !== adding()) setAdding(null);
     setChosen(id);
   };
@@ -831,17 +866,45 @@ export function GitPane(props: {
                   ]}
                 />
 
-                <Show when={unremoved()}>
-                  {(why) => (
-                    <ErrorLine>
-                      {typeof why() === "string" ? (
-                        why()
-                      ) : (
-                        <InUse repos={why() as string[]} />
-                      )}
-                    </ErrorLine>
-                  )}
+                {/* Keyed, so a refusal replacing a refusal — the repoint's
+                    answering the removal's — is drawn afresh. */}
+                <Show when={unremoved()} keyed>
+                  {(refused) => {
+                    if ("said" in refused) {
+                      return <ErrorLine>{refused.said}</ErrorLine>;
+                    }
+
+                    return (
+                      <>
+                        <ErrorLine>
+                          {"inUse" in refused ? (
+                            <InUse repos={refused.inUse.repos} />
+                          ) : (
+                            <Unrepointed repos={refused.unrepointed.repos} />
+                          )}
+                        </ErrorLine>
+                        <Unasked
+                          devices={
+                            "inUse" in refused
+                              ? refused.inUse.unasked
+                              : refused.unrepointed.unasked
+                          }
+                        />
+                        <RepointAll
+                          authors={authors().filter(
+                            (one) => one.id !== refused.author.id,
+                          )}
+                          disabled={repointing.isPending}
+                          pick={(to) =>
+                            repointing.mutate({ gone: refused.author, to })
+                          }
+                        />
+                      </>
+                    );
+                  }}
                 </Show>
+
+                <Unasked devices={unasked()} />
               </section>
             </Show>
 
@@ -1167,23 +1230,126 @@ export function GitPane(props: {
   );
 }
 
-/// The Repos a removal was refused over, named, and what to do about them.
-function InUse(props: { repos: string[] }): JSX.Element {
-  const listed = (): string => {
-    const repos = props.repos;
+/// Why a removal did not happen, as the line under the dropdown draws it: the
+/// Author it was about and what refused it, or a sentence.
+type Unremoved =
+  | { said: string }
+  | {
+      author: AuthorSaved;
+      inUse: Extract<AuthorRemoved, { InUse: unknown }>["InUse"];
+    }
+  | {
+      author: AuthorSaved;
+      unrepointed: Extract<
+        AuthorRemoved,
+        { Unrepointed: unknown }
+      >["Unrepointed"];
+    };
 
-    if (repos.length <= 2) return repos.join(" and ");
+/// Names in a sentence, with the serial comma: `a`, `a and b`, `a, b, and c`.
+function listed(names: string[]): string {
+  if (names.length <= 2) return names.join(" and ");
 
-    return `${repos.slice(0, -1).join(", ")}, and ${repos[repos.length - 1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
+/// A Repo named with its device: *widgets on this device*, *widgets on
+/// desk-pc*.
+function where(repo: PointingRepo): string {
+  return `${repo.name} on ${repo.device ?? "this device"}`;
+}
+
+/// The Repos a removal was refused over, each named with its device.
+function InUse(props: { repos: PointingRepo[] }): JSX.Element {
+  return (
+    <>
+      {listed(props.repos.map(where))} {props.repos.length === 1 ? "is" : "are"}{" "}
+      still this author's. Repoint {props.repos.length === 1 ? "it" : "them"} to
+      another author, or remove {props.repos.length === 1 ? "it" : "them"} under
+      Repos.
+    </>
+  );
+}
+
+/// The Repos **Repoint them all to…** could not repoint, each with why — and
+/// that the Author stays.
+function Unrepointed(props: { repos: UnrepointedRepo[] }): JSX.Element {
+  const why = (one: UnrepointedRepo): string => {
+    const refused = one.why;
+
+    if (refused === "NoSuchAuthor") {
+      return `${one.repo.device ?? "This device"} doesn't have that author yet.`;
+    }
+
+    if ("Refused" in refused) return refused.Refused;
+
+    const { on, beside } = refused.InUse;
+    const going = (branches: string[]) =>
+      `${listed(branches)} ${branches.length === 1 ? "is" : "are"} still going`;
+
+    return [
+      on.length > 0 ? `${going(on)} on it.` : "",
+      beside.length > 0 ? `${going(beside)} with it as a companion.` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
   };
 
   return (
     <>
-      {listed()} {props.repos.length === 1 ? "is" : "are"} still this author's.
-      Pick another author for {props.repos.length === 1 ? "it" : "them"} under
-      Repos first, or remove{" "}
-      {props.repos.length === 1 ? "it" : "them"}.
+      <For each={props.repos}>
+        {(one) => (
+          <>
+            {where(one.repo)} wasn't repointed. {why(one)}{" "}
+          </>
+        )}
+      </For>
+      The author stays.
     </>
+  );
+}
+
+/// The members a removal could not ask, said so their Repos are known not to
+/// have been looked at. Nothing where every member answered.
+function Unasked(props: { devices: string[] }): JSX.Element {
+  return (
+    <Show when={props.devices.length > 0}>
+      <Note>
+        {listed(props.devices)}{" "}
+        {props.devices.length === 1 ? "wasn't" : "weren't"} answering, so{" "}
+        {props.devices.length === 1 ? "its" : "their"} repos weren't checked.
+      </Note>
+    </Show>
+  );
+}
+
+/// **Repoint them all to…**: a pick of another Author, which points every
+/// Repo the refusal named at it and then removes the one asked about.
+function RepointAll(props: {
+  authors: AuthorSaved[];
+  disabled: boolean;
+  pick: (to: string) => void;
+}): JSX.Element {
+  const id = createUniqueId();
+
+  return (
+    <Show when={props.authors.length > 0}>
+      <div>
+        <label for={id}>Repoint them all to…</label>
+        <Picker
+          id={id}
+          options={props.authors}
+          value={(one) => one.id}
+          label={authorLabel}
+          chosen=""
+          disabled={props.disabled}
+          pick={(to) => {
+            if (to) props.pick(to);
+          }}
+          nothing="Select"
+        />
+      </div>
+    </Show>
   );
 }
 

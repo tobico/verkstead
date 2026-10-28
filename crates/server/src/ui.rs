@@ -677,6 +677,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // And one Author edited alone, which is what the Git section sends.
         .route("/api/ui/authors/{id}", post(edit_author))
         .route("/api/ui/authors/{id}/remove", post(remove_author))
+        .route("/api/ui/authors/{id}/repoint", post(repoint_authors))
         // Emptying one language's stores, which is an act rather than a value
         // the settings hold, so a route of its own rather than a key of a save.
         .route("/api/ui/languages/{name}/clear", post(clear_language))
@@ -1456,15 +1457,56 @@ async fn edit_author(
 /// `POST /api/ui/authors/{id}/remove` — take one Author out of the settings.
 ///
 /// Every refusal is a named outcome in the body, the Repo removal's way: the
-/// Repos pointing at it are what the switcher puts in words.
+/// Repos pointing at it, this device's and every answering member's, are what
+/// the switcher puts in words.
 ///
 /// A removal is a deletion stamp on the Author's record, which every member
 /// merges on the pull this sets going.
 async fn remove_author(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
-    match crate::repos::remove_author(&state.pool, &state.settings, &state.device, &id).await {
+    let removed = crate::repos::remove_author(
+        &state.pool,
+        &state.settings,
+        &state.device,
+        state.devices.as_ref(),
+        &id,
+    )
+    .await;
+
+    author_removed(&state, &id, removed)
+}
+
+/// `POST /api/ui/authors/{id}/repoint` — **Repoint them all to…**: every Repo
+/// pointing at the Author, here and on every answering member, pointed at the
+/// one the body names, and then the Author removed. See
+/// [`crate::repos::repoint_authors`].
+async fn repoint_authors(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(repointing): Json<verkstead_render::Repointing>,
+) -> HttpResponse {
+    let removed = crate::repos::repoint_authors(
+        &state.pool,
+        &state.settings,
+        &state.device,
+        state.devices.as_ref(),
+        &id,
+        &repointing.author,
+    )
+    .await;
+
+    author_removed(&state, &id, removed)
+}
+
+/// What a removal answers, either way it was asked for.
+fn author_removed(
+    state: &AppState,
+    id: &str,
+    removed: anyhow::Result<verkstead_render::AuthorRemoved>,
+) -> HttpResponse {
+    match removed {
         Ok(outcome) => {
             // Every member pulls the deletion stamp on the Nudge.
-            if outcome == verkstead_render::AuthorRemoved::Removed {
+            if matches!(outcome, verkstead_render::AuthorRemoved::Removed { .. }) {
                 state.nudges.announce(Nudge::Authors);
             }
 

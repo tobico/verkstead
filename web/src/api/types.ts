@@ -746,13 +746,17 @@ display_name: string, name: string, email: string,
 holds_token: boolean, };
 
 /**
- * What became of removing an Author, from the Git section's switcher.
+ * What became of removing an Author, from the Git section's switcher — or of
+ * **Repoint them all to…** on the refusal, which removes it once every Repo
+ * pointing at it has been pointed elsewhere.
  *
- * Refused while a registered Repo points at it (ADR-0025): its next session
- * would have nobody to commit as. An unregistered Repo keeps the association
- * as history and blocks nothing.
+ * Refused while a registered Repo points at it (ADR-0025, ADR-0028): its next
+ * session would have nobody to commit as. This device's Repos are looked at
+ * and every member's that answers; a member that does not is skipped and named
+ * in `unasked`, and blocks nothing. An unregistered Repo keeps the association
+ * as history and blocks nothing either.
  */
-export type AuthorRemoved = "Removed" | "NoSuchAuthor" | { "InUse": { repos: Array<string>, } };
+export type AuthorRemoved = { "Removed": { unasked: Array<string>, } } | "NoSuchAuthor" | { "InUse": { repos: Array<PointingRepo>, unasked: Array<string>, } } | { "Unrepointed": { repos: Array<UnrepointedRepo>, unasked: Array<string>, } };
 
 /**
  * One Author as the settings files hold it, with what can be said about its
@@ -4622,6 +4626,20 @@ export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": Ta
 export type Platform = "Linux" | "MacOs" | "Windows";
 
 /**
+ * A Repo an Author's removal found pointing at it, named with its device.
+ */
+export type PointingRepo = { 
+/**
+ * What its device calls it, which is its directory's own name.
+ */
+name: string, 
+/**
+ * The member it is registered on, by the name the human gave that
+ * machine, or `null` for this device.
+ */
+device: string | null, };
+
+/**
  * What the terminals on a Conversation offered to one device are listening on
  * — the reading a device takes over the link, of the member running them.
  *
@@ -7866,6 +7884,16 @@ at: string, set_id: number,
  * been told nothing by the row.
  */
 why: string, };
+
+/**
+ * A Repo **Repoint them all to…** could not repoint, and why.
+ */
+export type UnrepointedRepo = { repo: PointingRepo, why: Unrepointing, };
+
+/**
+ * Why one Repo was not repointed.
+ */
+export type Unrepointing = { "InUse": { on: Array<string>, beside: Array<string>, } } | "NoSuchAuthor" | { "Refused": string };
 
 /**
  * A device asking not to be told any more, named by its endpoint — which is the

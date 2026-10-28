@@ -1504,13 +1504,30 @@ async function pickAuthor(label: string) {
   fireEvent.click(await waitFor(() => screen.getByRole("option", { name: label })));
 }
 
+/// Pick `author`, press **Remove author**, and the card's own Remove.
+async function removing(author: AuthorSaved) {
+  await pickAuthor(author.name);
+  await pickAuthor("Remove author");
+
+  const asking = await waitFor(() => screen.getByRole("dialog"));
+  fireEvent.click(
+    [...asking.querySelectorAll("button")].find(
+      (one) => one.textContent === "Remove",
+    )!,
+  );
+}
+
 describe("the authors", () => {
   /// **Remove author** asks once, naming the Author, and sends nothing until
   /// the card's own Remove is pressed.
   it("asks once before removing an Author", async () => {
     const fetching = serving(
       whenever("/api/ui/settings", json(TWO)),
-      whenever(`/api/ui/authors/${SECOND.id}/remove`, json("Removed"), "POST"),
+      whenever(
+        `/api/ui/authors/${SECOND.id}/remove`,
+        json({ Removed: { unasked: [] } }),
+        "POST",
+      ),
     );
     mountPane();
     await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
@@ -1536,32 +1553,134 @@ describe("the authors", () => {
     await waitFor(() => expect(removals()).toHaveLength(1));
   });
 
-  /// Refused while registered repos point at it, naming them under the
-  /// dropdown — where the human is looking when they pressed it.
-  it("names the repos a removal was refused over", async () => {
+  /// Refused while registered repos point at it, naming each with its device
+  /// under the dropdown — where the human is looking when they pressed it —
+  /// and the member that wasn't answering.
+  it("names the repos a removal was refused over, with their devices", async () => {
     serving(
       whenever("/api/ui/settings", json(TWO)),
       whenever(
         `/api/ui/authors/${SECOND.id}/remove`,
-        json({ InUse: { repos: ["askance", "verkstead"] } }),
+        json({
+          InUse: {
+            repos: [
+              { name: "askance", device: null },
+              { name: "verkstead", device: "desk-pc" },
+            ],
+            unasked: ["laptop"],
+          },
+        }),
         "POST",
       ),
     );
     mountPane();
     await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
 
-    await pickAuthor(SECOND.name);
-    await pickAuthor("Remove author");
-
-    const asking = await waitFor(() => screen.getByRole("dialog"));
-    fireEvent.click(
-      [...asking.querySelectorAll("button")].find(
-        (one) => one.textContent === "Remove",
-      )!,
-    );
+    await removing(SECOND);
 
     await waitFor(() =>
-      screen.getByText(/askance and verkstead are still this author's/),
+      screen.getByText(
+        /askance on this device and verkstead on desk-pc are still this author's/,
+      ),
+    );
+    screen.getByText(/laptop wasn't answering, so its repos weren't checked/);
+    screen.getByRole("combobox", { name: "Repoint them all to…" });
+  });
+
+  /// **Repoint them all to…** offers every other Author, and a pick sends the
+  /// repoint for the one whose removal was refused.
+  it("repoints them all to the Author picked, and then the removal goes", async () => {
+    const fetching = serving(
+      whenever("/api/ui/settings", json(TWO)),
+      whenever(
+        `/api/ui/authors/${SECOND.id}/remove`,
+        json({
+          InUse: {
+            repos: [{ name: "verkstead", device: "desk-pc" }],
+            unasked: [],
+          },
+        }),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/authors/${SECOND.id}/repoint`,
+        json({ Removed: { unasked: [] } }),
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await removing(SECOND);
+
+    const picker = (await waitFor(() =>
+      screen.getByRole("combobox", { name: "Repoint them all to…" }),
+    )) as HTMLSelectElement;
+    expect([...picker.options].map((one) => one.value).filter(Boolean)).toEqual(
+      [TWO.authors[0]!.id],
+    );
+
+    fireEvent.change(picker, { target: { value: TWO.authors[0]!.id } });
+
+    await waitFor(() => {
+      const sent = fetching.mock.calls.find(([asked]) =>
+        String(asked).endsWith("/repoint"),
+      );
+      expect(sent).toBeDefined();
+      expect(JSON.parse(String(sent![1]!.body))).toEqual({
+        author: TWO.authors[0]!.id,
+      });
+    });
+    await waitFor(() =>
+      expect(screen.queryByText(/still this author's/)).toBeNull(),
+    );
+  });
+
+  /// A repo the repoint was refused on is named with why, and the Author
+  /// stays.
+  it("names a repo live work kept from being repointed", async () => {
+    serving(
+      whenever("/api/ui/settings", json(TWO)),
+      whenever(
+        `/api/ui/authors/${SECOND.id}/remove`,
+        json({
+          InUse: {
+            repos: [{ name: "verkstead", device: "desk-pc" }],
+            unasked: [],
+          },
+        }),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/authors/${SECOND.id}/repoint`,
+        json({
+          Unrepointed: {
+            repos: [
+              {
+                repo: { name: "verkstead", device: "desk-pc" },
+                why: { InUse: { on: ["rate-limiting"], beside: [] } },
+              },
+            ],
+            unasked: [],
+          },
+        }),
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await removing(SECOND);
+
+    const picker = await waitFor(() =>
+      screen.getByRole("combobox", { name: "Repoint them all to…" }),
+    );
+    fireEvent.change(picker, { target: { value: TWO.authors[0]!.id } });
+
+    await waitFor(() =>
+      screen.getByText(
+        /verkstead on desk-pc wasn't repointed\. rate-limiting is still going on it\..*The author stays\./,
+      ),
     );
   });
 

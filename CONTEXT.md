@@ -133,9 +133,10 @@ answering leaves a copy as it stands. A session carries its own Repo's
 Author's token and none of the others this device holds.
 A Repo is pointed at an Author made on another device the way it is at one made
 here, and everything that reads a Repo's Author reads its name and email and
-the token this device holds. Removal checks this device's Repos, a member's
-Repo left pointing at an Author removed refusing its start under the rule
-above. An Author whose record says a token is held, and whose copy has not
+the token this device holds. Removal checks this device's Repos and every
+reachable member's, naming each with its device and offering *Repoint them all
+to…*; a member not answering is skipped and said, and a Repo of its left
+pointing at an Author removed refuses its start under the rule above. An Author whose record says a token is held, and whose copy has not
 arrived here, refuses a **Start** by name and halts a
 pipeline step with a Notice, and nothing Verkstead does on its Repo falls back
 to the host's own login meanwhile; a **Transfer** whose far Repo points at another

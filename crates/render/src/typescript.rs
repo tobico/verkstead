@@ -431,7 +431,8 @@ fn the_viewers_types_are_written_from_these() {
     SettingsSaved::export_all(&config).unwrap();
 
     // And taking one Author away, which is a press of its own rather than a
-    // key of a save, refused by name while a Repo points at it.
+    // key of a save, refused by name while a Repo points at it, here or on a
+    // member — and the repoint of every such Repo the refusal offers.
     AuthorRemoved::export_all(&config).unwrap();
 
     // And editing one Author alone, a write to its record on this device.

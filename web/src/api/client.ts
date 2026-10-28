@@ -2361,9 +2361,20 @@ export function listAuthors(device: Device): Promise<AuthorEntry[]> {
 /// Take one Author out of the settings, by its uuid: its entry and its token.
 ///
 /// The outcome is the answer's body, a Repo removal's way: a registered Repo
-/// still pointing at it refuses it, naming the Repos.
+/// still pointing at it — here or on any member that answers — refuses it,
+/// naming the Repos with their devices.
 export function removeAuthor(id: string): Promise<AuthorRemoved> {
   return post<AuthorRemoved>(`/api/ui/authors/${encodeURIComponent(id)}/remove`);
+}
+
+/// **Repoint them all to…**: every Repo pointing at the Author `id`, on every
+/// device that answers, pointed at the Author `to` — and then `id` removed.
+/// Answered as a removal is, a Repo that refused the repoint named instead.
+export function repointAuthors(id: string, to: string): Promise<AuthorRemoved> {
+  return post<AuthorRemoved>(
+    `/api/ui/authors/${encodeURIComponent(id)}/repoint`,
+    { author: to },
+  );
 }
 
 /// Empty every store of one language — sccache's too, for Rust.

@@ -34,11 +34,13 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 use verkstead_render::{
-    AuthorRemoved, Cloned, Created, Creation, Registered, RepoEntry, RepoRemoved, RepoView,
-    Repointed,
+    AuthorRemoved, AuthorThere, Cloned, Created, Creation, PointingRepo, Registered, RepoEntry,
+    RepoRemoved, RepoView, Repointed, Repointing, UnrepointedRepo, Unrepointing,
 };
 
+use crate::device::Devices;
 use crate::github::Gh;
+use crate::relaying::{self, Call, Streamed, as_json};
 use crate::resolved::{Resolved, resolve};
 use crate::settings::{Author, Config, Signature};
 use crate::store;
@@ -900,19 +902,26 @@ pub(crate) async fn repoint(
 }
 
 /// Remove the Author with the uuid `id` — a deletion stamp on its record —
-/// from the Git section's switcher, if no registered Repo points at it.
+/// from the Git section's switcher, if no registered Repo points at it, on
+/// this device or on any member that answers (ADR-0028).
 ///
 /// **Points at** as [`crate::settings::Config::author_of`] reads it, so a Repo
-/// recording nothing is the only Author's and blocks removing it. An
+/// recording nothing is the only Author's and blocks removing it — and a
+/// member's Repo as that member resolves it, see [`pointing_at`]. An
 /// unregistered Repo keeps its association as history and blocks nothing: it
-/// is not on [`store::registered_repos`]. The look and the write are not one
-/// transaction — the Repos are read before the record is stamped — so a Repo
-/// registered as this Author in the instant between is the vanished Author a
-/// hand edit makes, refused by name at its next start.
+/// is not on [`store::registered_repos`].
+///
+/// **A member not answering is skipped and named**, rather than blocking the
+/// removal: a Repo of its pointing at the Author refuses its next Start by
+/// name, as a hand-edited one does. The look and the write are not one
+/// transaction either — the Repos are read before the record is stamped — so
+/// a Repo registered as this Author in the instant between is that same
+/// vanished Author.
 pub(crate) async fn remove_author(
     pool: &SqlitePool,
     settings: &crate::settings::Settings,
     device: &str,
+    devices: Option<&Devices>,
     id: &str,
 ) -> Result<AuthorRemoved> {
     crate::replicating::authors::taken_up(pool, settings, device).await?;
@@ -923,23 +932,246 @@ pub(crate) async fn remove_author(
         return Ok(AuthorRemoved::NoSuchAuthor);
     }
 
-    let repos: Vec<String> = store::registered_repos(pool)
-        .await?
-        .into_iter()
-        .filter(|repo| config.author_of(repo.author.as_deref()).map(Author::id) == Some(id))
-        .map(|repo| repo.name)
-        .collect();
+    let (pointing, unasked) = pointing_at(pool, &config, devices, id).await?;
 
-    if !repos.is_empty() {
-        return Ok(AuthorRemoved::InUse { repos });
+    if !pointing.is_empty() {
+        return Ok(AuthorRemoved::InUse {
+            repos: pointing.into_iter().map(|one| one.repo).collect(),
+            unasked,
+        });
     }
 
     Ok(
         match crate::replicating::authors::removed(pool, settings, device, id).await? {
-            true => AuthorRemoved::Removed,
+            true => AuthorRemoved::Removed { unasked },
             false => AuthorRemoved::NoSuchAuthor,
         },
     )
+}
+
+/// **Repoint them all to…**: point every Repo that points at the Author `id` —
+/// this device's and every answering member's — at the Author `to`, and then
+/// remove `id` as [`remove_author`] does.
+///
+/// **Each under the repoint's own rule**: this device's through [`repoint`],
+/// and a member's by putting the same press to that member from here, which
+/// answers it out of its own store. A Repo live work has in it refuses by
+/// name, and so does one whose device does not hold `to` yet or did not take
+/// the press; where any refused, the Author stays and what refused is said —
+/// the rest stay repointed, each having been a repoint the human asked for.
+/// A Repo unregistered in the meantime points at nothing and is let be.
+///
+/// The Repos are gathered again here rather than taken off the refusal the
+/// page drew, so what is repointed is what points at the Author now.
+pub(crate) async fn repoint_authors(
+    pool: &SqlitePool,
+    settings: &crate::settings::Settings,
+    device: &str,
+    devices: Option<&Devices>,
+    id: &str,
+    to: &str,
+) -> Result<AuthorRemoved> {
+    crate::replicating::authors::taken_up(pool, settings, device).await?;
+
+    let config = settings.config();
+
+    if id == to || config.author(id).is_none() || config.author(to).is_none() {
+        return Ok(AuthorRemoved::NoSuchAuthor);
+    }
+
+    let (pointing, unasked) = pointing_at(pool, &config, devices, id).await?;
+    let mut refused = Vec::new();
+
+    for one in pointing {
+        let why = match &one.on {
+            None => match repoint(pool, &config, one.id, to).await? {
+                Repointed::Repointed(_) | Repointed::NoSuchRepo => None,
+                Repointed::NoSuchAuthor => Some(Unrepointing::NoSuchAuthor),
+                Repointed::InUse { on, beside } => Some(Unrepointing::InUse { on, beside }),
+            },
+
+            Some(member) => repointed_on(devices, member, one.id, to).await,
+        };
+
+        if let Some(why) = why {
+            refused.push(UnrepointedRepo {
+                repo: one.repo,
+                why,
+            });
+        }
+    }
+
+    if !refused.is_empty() {
+        return Ok(AuthorRemoved::Unrepointed {
+            repos: refused,
+            unasked,
+        });
+    }
+
+    Ok(
+        match crate::replicating::authors::removed(pool, settings, device, id).await? {
+            true => AuthorRemoved::Removed { unasked },
+            false => AuthorRemoved::NoSuchAuthor,
+        },
+    )
+}
+
+/// The most a member's answer to a repoint may be: one Repo's row, which is
+/// some hundreds of bytes. The bound is for the machine that answers and then
+/// writes without stopping.
+const MOST_A_REPOINT_IS: usize = 64 * 1024;
+
+/// Put a repoint of the Repo `id` at the Author `to` to `member`, the press its
+/// own Repos pane makes — `None` where it was repointed, or is unregistered
+/// there now, and why not otherwise.
+async fn repointed_on(
+    devices: Option<&Devices>,
+    member: &str,
+    id: i64,
+    to: &str,
+) -> Option<Unrepointing> {
+    let call = Call {
+        method: reqwest::Method::POST,
+        onwards: format!("/api/ui/repos/{id}/author"),
+        headers: as_json(),
+        body: Streamed::saying(
+            serde_json::to_vec(&Repointing {
+                author: to.to_owned(),
+            })
+            .expect("a repoint is always JSON"),
+        ),
+    };
+
+    match relaying::word_from::<Repointed>(devices, member, call, MOST_A_REPOINT_IS).await {
+        Ok(Repointed::Repointed(_) | Repointed::NoSuchRepo) => None,
+        Ok(Repointed::NoSuchAuthor) => Some(Unrepointing::NoSuchAuthor),
+        Ok(Repointed::InUse { on, beside }) => Some(Unrepointing::InUse { on, beside }),
+        Err(refusal) => Some(Unrepointing::Refused(refusal.saying)),
+    }
+}
+
+/// A registered Repo found pointing at an Author: named with its device for
+/// the page, and where and under which id it is to be repointed.
+struct Pointing {
+    repo: PointingRepo,
+
+    /// The member it is registered on, by Device Id, or `None` for this device.
+    on: Option<String>,
+
+    /// Its id on that device.
+    id: i64,
+}
+
+/// Every registered Repo pointing at the Author `id`: this device's first, as
+/// [`store::registered_repos`] orders them, then each member's in the order the
+/// membership lists them, alphabetically within each — and the names of the
+/// members that were not answering, whose Repos are not looked at.
+///
+/// **A member's Repos as that member resolves them**, off the Author its own
+/// reading of [`crate::peer::repos::REPOS`] says each works as: whether a Repo
+/// recording nothing is the only Author's is a question only the device holding
+/// it can answer. **Every member is asked at once** and given
+/// [`crate::matching::MOST_A_MEMBER_IS_WAITED_ON`], the Repo dropdown's
+/// patience, so a laptop with its lid shut is a short pause and a name in
+/// `unasked` rather than a removal that never answers.
+async fn pointing_at(
+    pool: &SqlitePool,
+    config: &Config,
+    devices: Option<&Devices>,
+    id: &str,
+) -> Result<(Vec<Pointing>, Vec<String>)> {
+    let mut pointing: Vec<Pointing> = store::registered_repos(pool)
+        .await?
+        .into_iter()
+        .filter(|repo| config.author_of(repo.author.as_deref()).map(Author::id) == Some(id))
+        .map(|repo| Pointing {
+            repo: PointingRepo {
+                name: repo.name,
+                device: None,
+            },
+            on: None,
+            id: repo.id,
+        })
+        .collect();
+
+    let mut unasked = Vec::new();
+
+    let Some(devices) = devices else {
+        return Ok((pointing, unasked));
+    };
+
+    let members = devices
+        .membership()
+        .rows()
+        .await
+        .context("reading the devices this one is linked to")?;
+
+    let mut asking = tokio::task::JoinSet::new();
+
+    for (order, member) in members.into_iter().enumerate() {
+        let devices = devices.clone();
+
+        asking.spawn(async move {
+            let read = tokio::time::timeout(
+                crate::matching::MOST_A_MEMBER_IS_WAITED_ON,
+                crate::matching::registry_of(&devices, &member.device),
+            )
+            .await;
+
+            let read = match read {
+                Ok(Ok(theirs)) => Some(theirs),
+
+                Ok(Err(refusal)) => {
+                    tracing::info!(
+                        device = %member.device,
+                        "a member's Repos could not be read for an Author's removal: {}",
+                        refusal.saying,
+                    );
+                    None
+                }
+
+                Err(_) => {
+                    tracing::info!(
+                        device = %member.device,
+                        "a member did not say what Repos it holds in time for an Author's removal",
+                    );
+                    None
+                }
+            };
+
+            (order, member, read)
+        });
+    }
+
+    let mut answered = asking.join_all().await;
+    answered.sort_by_key(|(order, _, _)| *order);
+
+    for (_, member, read) in answered {
+        let Some(mut theirs) = read else {
+            unasked.push(member.name);
+            continue;
+        };
+
+        theirs.sort_by(|one, other| one.name.cmp(&other.name).then(one.id.cmp(&other.id)));
+
+        pointing.extend(
+            theirs
+                .into_iter()
+                .filter(
+                    |there| matches!(&there.author, AuthorThere::As { id: as_, .. } if as_ == id),
+                )
+                .map(|there| Pointing {
+                    repo: PointingRepo {
+                        name: there.name,
+                        device: Some(member.name.clone()),
+                    },
+                    on: Some(member.device.clone()),
+                    id: there.id,
+                }),
+        );
+    }
+
+    Ok((pointing, unasked))
 }
 
 /// The branch a Conversation branches from unless it is told otherwise.

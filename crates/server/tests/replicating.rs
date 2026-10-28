@@ -27,7 +27,10 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{AuthorEntry, DevicesView};
+use verkstead_render::{
+    AuthorEntry, AuthorRemoved, DevicesView, PointingRepo, Registered, RepoEntry, UnrepointedRepo,
+    Unrepointing,
+};
 use verkstead_schema::Nudge;
 use verkstead_server::device::reading::{RUNNING, Reading};
 use verkstead_server::device::{Device, Devices};
@@ -62,6 +65,7 @@ const RECORDS: &str = "/api/peer/v1/records/authors";
 const TOKENS: &str = "/api/peer/v1/authors/";
 
 const WORK: &str = "6f1c2a52-7d0e-4c55-9a43-0d6b8f3e2a11";
+const PERSONAL: &str = "0b7e5f3a-2c41-4d8e-b6a9-5e3f1c7d9a20";
 
 const PATIENCE: std::time::Duration = std::time::Duration::from_millis(300);
 const WAITING: std::time::Duration = std::time::Duration::from_secs(10);
@@ -394,7 +398,88 @@ impl Verkstead {
         .await;
 
         assert!(status.is_success(), "removing {id}: {status} {said}");
-        assert_eq!(said, "\"Removed\"", "removing {id}");
+        assert!(said.contains("\"Removed\""), "removing {id}: {said}");
+    }
+
+    /// The removal pressed, and what it answered.
+    async fn removing_author(&self, id: &str) -> AuthorRemoved {
+        let (status, said) = pressing(
+            &self.workbench,
+            &format!("/api/ui/authors/{id}/remove"),
+            None,
+        )
+        .await;
+
+        assert!(status.is_success(), "removing {id}: {status} {said}");
+        serde_json::from_str(&said).unwrap()
+    }
+
+    /// **Repoint them all to…** pressed on the refusal, and what it answered.
+    async fn repointing_all(&self, id: &str, to: &str) -> AuthorRemoved {
+        let (status, said) = pressing(
+            &self.workbench,
+            &format!("/api/ui/authors/{id}/repoint"),
+            Some(&serde_json::json!({ "author": to }).to_string()),
+        )
+        .await;
+
+        assert!(status.is_success(), "repointing {id}: {status} {said}");
+        serde_json::from_str(&said).unwrap()
+    }
+
+    /// A repository made under this device's directory and registered as
+    /// the Author `author`, by its id.
+    async fn registers(&self, name: &str, author: &str) -> i64 {
+        let path = self.dir.path().join("src").join(name);
+        std::fs::create_dir_all(&path).unwrap();
+
+        for args in [
+            &["init", "--initial-branch", "main"][..],
+            &[
+                "-c",
+                "user.email=t@verkstead.invalid",
+                "-c",
+                "user.name=T",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "first",
+            ],
+        ] {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&path)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .expect("git should be on the PATH for these tests");
+            assert!(status.success(), "git {args:?}");
+        }
+
+        let (status, said) = pressing(
+            &self.workbench,
+            "/api/ui/repos",
+            Some(&serde_json::json!({ "path": path, "author": author }).to_string()),
+        )
+        .await;
+
+        assert!(status.is_success(), "registering {name}: {status} {said}");
+
+        match serde_json::from_str(&said).unwrap() {
+            Registered::Added(repo) => repo.id,
+            refused => panic!("registering {name}: {refused:?}"),
+        }
+    }
+
+    /// The Author the Repo `id` records.
+    async fn repo_author(&self, id: i64) -> Option<String> {
+        let repos: Vec<RepoEntry> = reading(&self.workbench, "/api/ui/repos").await;
+
+        repos
+            .into_iter()
+            .find(|repo| repo.id == id)
+            .expect("the Repo is registered")
+            .author
     }
 
     async fn authors(&self) -> Vec<AuthorEntry> {
@@ -946,4 +1031,128 @@ async fn the_token_route_answers_from_whoever_holds_one() {
     assert_eq!(asked("other").await.unwrap(), None, "no token held");
     let refused = asked("no-such-uuid").await.unwrap_err();
     assert!(refused.saying.contains("404"), "{}", refused.saying);
+}
+
+/// A Repo of `device`'s, as a removal names one.
+fn on(name: &str, device: Option<&str>) -> PointingRepo {
+    PointingRepo {
+        name: name.to_owned(),
+        device: device.map(str::to_owned),
+    }
+}
+
+/// A and B holding WORK and PERSONAL, made on A, each pulled by B.
+async fn two_authors_on_both() -> (Verkstead, Verkstead, Holding, Holding) {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let a_holding = a.holding();
+    let b_holding = b.holding();
+
+    a.saves_author(WORK, "Ada Lovelace", "ada@work.example")
+        .await;
+    a.saves_author(PERSONAL, "Ada Lovelace", "ada@home.example")
+        .await;
+    b.authors_saying(|rows| with(rows, WORK).is_some() && with(rows, PERSONAL).is_some())
+        .await;
+
+    (a, b, a_holding, b_holding)
+}
+
+/// Removing an Author a member's Repo points at is refused naming that Repo
+/// and the member's device, beside this device's own — and a member not
+/// answering is skipped and said, blocking nothing once nothing else points.
+#[tokio::test]
+async fn removing_an_author_a_members_repo_points_at_names_the_repo_and_its_device() {
+    let (a, b, _a_holding, _b_holding) = two_authors_on_both().await;
+
+    let theirs = a.registers("widgets", WORK).await;
+    b.registers("gadgets", WORK).await;
+
+    let c = Verkstead::answering(C).await;
+    linked(&b, &c).await;
+    let _gone = c.switched_off().await;
+    let not_answering = platform::hostname();
+
+    assert_eq!(
+        b.removing_author(WORK).await,
+        AuthorRemoved::InUse {
+            repos: vec![on("gadgets", None), on("widgets", Some(A_MACHINE))],
+            unasked: vec![not_answering.clone()],
+        },
+    );
+    assert!(
+        with(&b.authors().await, WORK).is_some(),
+        "nothing was removed"
+    );
+
+    // Nothing points at PERSONAL anywhere answering, so the silent member
+    // does not stop it.
+    assert_eq!(
+        b.removing_author(PERSONAL).await,
+        AuthorRemoved::Removed {
+            unasked: vec![not_answering],
+        },
+    );
+    a.authors_saying(|rows| with(rows, PERSONAL).is_none())
+        .await;
+    assert_eq!(a.repo_author(theirs).await.as_deref(), Some(WORK));
+}
+
+/// **Repoint them all to…** repoints this device's Repo and the member's from
+/// here, and then the Author is removed on every device.
+#[tokio::test]
+async fn repointing_them_all_repoints_every_devices_repos_and_then_removes_the_author() {
+    let (a, b, _a_holding, _b_holding) = two_authors_on_both().await;
+
+    let theirs = a.registers("widgets", WORK).await;
+    let ours = b.registers("gadgets", WORK).await;
+
+    assert_eq!(
+        b.repointing_all(WORK, PERSONAL).await,
+        AuthorRemoved::Removed { unasked: vec![] },
+    );
+
+    assert_eq!(a.repo_author(theirs).await.as_deref(), Some(PERSONAL));
+    assert_eq!(b.repo_author(ours).await.as_deref(), Some(PERSONAL));
+    assert!(with(&b.authors().await, WORK).is_none());
+    a.authors_saying(|rows| with(rows, WORK).is_none() && with(rows, PERSONAL).is_some())
+        .await;
+}
+
+/// A member's Repo with a live Conversation on it refuses the repoint by
+/// name, and the Author stays; this device's Repo, under no live work, is
+/// repointed all the same.
+#[tokio::test]
+async fn a_repo_with_a_live_conversation_refuses_repointing_them_all_and_the_author_stays() {
+    let (a, b, _a_holding, _b_holding) = two_authors_on_both().await;
+
+    let theirs = a.registers("widgets", WORK).await;
+    let ours = b.registers("gadgets", WORK).await;
+
+    let going = verkstead_store::start_conversation(&a.pool, theirs, "rate-limiting", A, None)
+        .await
+        .unwrap()
+        .unwrap();
+    verkstead_store::set_state(&a.pool, going, verkstead_store::Lifecycle::Grilling)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        b.repointing_all(WORK, PERSONAL).await,
+        AuthorRemoved::Unrepointed {
+            repos: vec![UnrepointedRepo {
+                repo: on("widgets", Some(A_MACHINE)),
+                why: Unrepointing::InUse {
+                    on: vec!["rate-limiting".to_owned()],
+                    beside: vec![],
+                },
+            }],
+            unasked: vec![],
+        },
+    );
+
+    assert_eq!(a.repo_author(theirs).await.as_deref(), Some(WORK));
+    assert_eq!(b.repo_author(ours).await.as_deref(), Some(PERSONAL));
+    assert!(with(&b.authors().await, WORK).is_some(), "the Author stays");
 }
