@@ -36,4 +36,4 @@ chose too.
 - [x] 02: Profiles by uuid, bound per device — [brief](02-profiles-by-uuid-bound-per-device.md) — after 01
 - [ ] 03: The replicated login — [brief](03-the-replicated-login.md) — after 02
 - [ ] 04: Memory unioned in and fanned out — [brief](04-memory-unioned-in-and-fanned-out.md) — after 02
-- [ ] 05: Instructions and MCP servers — [brief](05-instructions-and-mcp-servers.md) — after 01
+- [ ] 05: Instructions and MCP servers — [brief](05-instructions-and-mcp-servers.md) — after 01 *(in progress: `roadmaps/cluster-owned-records/05-instructions-and-mcp-servers`)*
