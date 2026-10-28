@@ -567,7 +567,7 @@ jobs:
   # | Defender exclusions                 | 5m10 + 17m49 = 24m09  | 4m54 + 19m13 = 25m21  |
   # | The legs (ten; leg 9 the slowest)   | 3m44 + 5m03 = 9m51    | 5m07 + 4m36 = 10m43   |
   # | rust-lld (reverted)                 | 5m20 + 4m37 = 11m26   | 5m09 + 4m50 = 11m21   |
-  # | Template repositories               |                       |                       |
+  # | Template repositories               | 5m17 + 4m14 = 10m43   | 5m11 + 3m51 = 9m57    |
   #
   # The baseline is the last green run on `main` before this work, 2026-10-28.
   # Its build is the 129 test binaries, each compiled and linked by MSVC with
@@ -632,6 +632,27 @@ jobs:
   # on. It linked the whole workspace and every leg was green with it — leg
   # 7 on its re-run, past a CLI pipe test whose restarted server found its
   # pipe still held — and the next commit took it back out.
+  #
+  # Template repositories: a `conversations` or `repos` test copies its git
+  # repository from one made once per leg rather than running five `git`
+  # processes for it, eight for a clone (run 40702569526). Those tests came
+  # to 4.6 seconds apiece on a leg, where they had been ten or more, and the
+  # ten legs tested for 48m45 between them where the legs' row had tested
+  # for 53m23; the slowest leg's test fell from 8m23 to 6m32. What each of
+  # the ten came to:
+  #
+  # | Leg | Build + test = job    |   | Leg | Build + test = job    |
+  # | --- | --------------------- | - | --- | --------------------- |
+  # | 1   | 5m17 + 4m14 = 10m43   |   | 6   | 4m52 + 6m16 = 12m08   |
+  # | 2   | 5m11 + 3m51 = 9m57    |   | 7   | 3m51 + 6m32 = 11m22   |
+  # | 3   | 3m30 + 3m33 = 7m55    |   | 8   | 4m53 + 4m38 = 10m30   |
+  # | 4   | 3m52 + 6m10 = 11m09   |   | 9   | 5m04 + 3m47 = 9m44    |
+  # | 5   | 3m31 + 3m57 = 8m19    |   | 10  | 5m34 + 5m47 = 12m48   |
+  #
+  # The legs over six minutes of test are now set by one test each rather
+  # than a crowd: a `logins_windows` test of 200 to 250 seconds on legs 6 and
+  # 7, a `sandbox_windows` one of 156 on leg 4, and three `joining` tests of
+  # 70 to 80 seconds together on leg 10.
   #
   # `slice` partitioning deals the tests out one at a time across every binary,
   # so each leg gets its share of each suite rather than whole binaries. What

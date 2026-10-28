@@ -34,5 +34,5 @@ cost wall clock rather than save it), and the Linux job inside this work.
 - [x] 04: Defender exclusions on the runner — [details](04-defender-exclusions.md)
 - [x] 05: Deal the suite over the legs the budget needs — [details](05-legs.md)
 - [x] 06: Try rust-lld — [details](06-rust-lld.md)
-- [ ] 07: Template repositories for the suites that make one — [details](07-template-repositories.md)
+- [x] 07: Template repositories for the suites that make one — [details](07-template-repositories.md)
 - [ ] 08: The hard timeout, the final ledger and the Linux issue — [details](08-timeout-ledger-linux-issue.md)
