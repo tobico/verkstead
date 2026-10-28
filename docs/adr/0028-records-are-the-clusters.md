@@ -97,9 +97,13 @@ turned down.
 
 - **The login is replicated, newest write wins.** A bound device reads its
   account's login at each launch, at each session's ending and on the refresh
-  schedule, and publishes it where it differs; every device keeps the newest
-  it has heard of and an unbound one builds its copy from that. So a quiet
-  device blocks no start. The risk is ADR-0020's, now across more copies: two
+  schedule, and publishes it where the file has changed since this device
+  last wrote or read it — never merely where it differs from the newest
+  heard of, which would publish a stale file over a login a copy has just
+  refreshed — stamped with the file's own change time. Every device keeps the
+  newest it has heard of; a bound one writes a newer arrival into its account
+  file before its next launch reads it, and an unbound one builds its copy
+  from it. So a quiet device blocks no start. The risk is ADR-0020's, now across more copies: two
   devices refreshing one OAuth pair may sign one out, and the fix is a login
   on a bound device. Watching the account directory for changes was turned
   down in favour of the three moments.

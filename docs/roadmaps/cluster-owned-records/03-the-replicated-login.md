@@ -25,6 +25,14 @@ rewrites the **Account mirror** term in full.
   bound device; a session's ending on an unbound device publishes the copy's
   login the same way, which is the write-back a home used to take. Watching
   the account directory was turned down.
+- **Only a changed file publishes.** A bound device publishes when its file
+  has changed since it last wrote or read it — the fingerprint the mirror
+  already keeps — never because the file differs from the newest login heard
+  of: a bound device launching before it has taken in a copy's refreshed
+  login would otherwise publish its stale file with a later stamp, and the
+  rotated refresh token would be lost everywhere. The login is stamped with
+  the file's own change time, and a newer arrival is written into a bound
+  device's account file before its next launch reads it.
 - **The login is a secret**, so it travels on the Peer Listener behind the
   Member Gate as the token does, never down `/api/ui/`; only the allowlist of
   files a Built Root is made from travels — the login and the composed
@@ -47,10 +55,15 @@ rewrites the **Account mirror** term in full.
    - A login published on A is held on B and C; the newest of two wins.
 
 2. **Publishing.** A bound device reads and publishes at launch, ending and on
-   the refresh schedule; a session's ending on a copy publishes too; unchanged
-   is not sent, by the fingerprint the mirror already keeps.
+   the refresh schedule; a session's ending on a copy publishes too; a file
+   unchanged since this device last wrote or read it is not sent, by the
+   fingerprint the mirror already keeps, and a login is stamped with the
+   file's change time. A newer arrival is written into a bound device's
+   account file.
    - A token refreshed inside a session on B is what A's next session gets,
      and what A's own account file holds afterwards.
+   - A launching on A before it has taken in B's refreshed login publishes
+     nothing, and B's login is still the newest everywhere afterwards.
 
 3. **The copy.** An unbound device builds its copy under the Data Directory
    from the newest login it holds, written beside and renamed over so a running
