@@ -543,21 +543,39 @@ jobs:
   # does. This job is the Windows machine this project has, and it is what will
   # say the port goes on holding.
   #
-  # **Two legs, each running half the suite**, because one was not enough to
-  # come near the `Rust` job's ten minutes or so. Measured on the pull request
-  # that brought nextest in: the job was 39–43 minutes before it, and with
-  # nextest it had passed 17 minutes (a 4½-minute build, then 11½ minutes of
-  # tests) with a quarter of the suite still to run. Those tests were using all
-  # four of the runner's cores the whole time, so there was nothing left to gain
-  # on one machine. A second leg costs a second cached build, and the repository
-  # is public, so the runner itself is free.
+  # **The budget: every leg under ten minutes, the typical run near seven.**
+  # Seven rather than nine and a half, because two legs of one run have differed
+  # by two minutes of build alone, and a typical run at the limit is a red check
+  # on an unlucky runner. Free four-core runners only: the repository is public,
+  # so a leg costs nothing but its own cached build.
+  #
+  # **The ledger.** Each lever lands as a commit of its own on one pull request,
+  # and its row is the run of that commit — every leg's build and test time,
+  # read off the run's job timings, as `build + test = job`. A lever that did
+  # not pay keeps its row, saying so.
+  #
+  # | Lever                               | Leg 1                 | Leg 2                 |
+  # | ----------------------------------- | --------------------- | --------------------- |
+  # | Baseline (`main`, run 40633314366)  | 10m04 + 20m26 = 31m35 | 8m20 + 17m00 = 26m05  |
+  # | Line tables, no examples built      |                       |                       |
+  # | One test binary: store, schema, cli |                       |                       |
+  # | One test binary: the server         |                       |                       |
+  # | Defender exclusions                 |                       |                       |
+  # | The legs                            |                       |                       |
+  # | rust-lld                            |                       |                       |
+  # | Template repositories               |                       |                       |
+  #
+  # The baseline is the last green run on `main` before this work, 2026-10-28.
+  # Its build is the 129 test binaries, each compiled and linked by MSVC with
+  # full debug info — on four cores the workspace's libraries and binaries take
+  # 4m39s, and the test binaries 11m38s on top. Its tests are about 4,200
+  # test-seconds a leg, spread thinly over the suites: `conversations` is 16%
+  # and nothing else is above 8%.
   #
   # `slice` partitioning deals the tests out one at a time across every binary,
-  # so each leg gets half of each suite rather than whole binaries, and
-  # `crates/server/tests/conversations.rs`, a third of the test time on its
-  # own, is split between them. What `.config/nextest.toml` holds serial is
-  # serial per leg, which is all it needs to be: each leg is a machine of its
-  # own, with a session account of its own.
+  # so each leg gets its share of each suite rather than whole binaries. What
+  # `.config/nextest.toml` holds serial is serial per leg, which is all it needs
+  # to be: each leg is a machine of its own, with a session account of its own.
   windows:
     name: Windows (${{ matrix.partition }}/2)
     runs-on: windows-2025
@@ -623,8 +641,13 @@ jobs:
 
       # No `web/dist` here either — the embed is `allow_missing`, so the crates
       # compile without the viewer.
+      #
+      # What the run uses and nothing beside it: the test binaries, and the
+      # `verkstead.exe` the sessions suite looks for beside its own. Not
+      # `--all-targets`, which builds the server crate's two `examples/` as
+      # well — developer probes that no test runs.
       - name: Build
-        run: cargo build --workspace --all-targets
+        run: cargo build --workspace --tests --bins
 
       # **The session account, which no suite here can make for itself.** A
       # Windows session runs as a local account of Verkstead's own (ADR-0014,

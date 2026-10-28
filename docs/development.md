@@ -1289,7 +1289,7 @@ side of the boundary by `verkstead session-launcher`, so the image a description
 names has to be a real `verkstead.exe` rather than the test harness's own —
 and a server-crate test has no `CARGO_BIN_EXE_verkstead` to read. It looks for
 one beside its own binary, in `target/debug`, and says so where there is none.
-`cargo build --workspace --all-targets` puts it there, which is what the
+`cargo build --workspace --tests --bins` puts it there, which is what the
 `windows-2025` job does before it runs anything.
 
 
