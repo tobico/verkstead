@@ -216,6 +216,11 @@ pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> R
         return Ok(());
     }
 
+    // The one Author the file held, where it held one: what a Repo recording
+    // none has been working as, which the old Author mirrors written down as
+    // records are about to make one of several — see [`held_over`].
+    let mut only = None;
+
     if !replicated::taken_up::<Authors>(pool).await? {
         let settings_ = settings.clone();
         let read = tokio::task::spawn_blocking(move || {
@@ -235,6 +240,10 @@ pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> R
         .await?;
 
         if let Some(kept) = read {
+            if let [(id, _)] = kept.as_slice() {
+                only = Some(id.clone());
+            }
+
             replicated::take_up::<Authors>(pool, device, &kept)
                 .await
                 .context("taking the Authors up out of config.yaml")?;
@@ -253,7 +262,7 @@ pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> R
         }
     }
 
-    held(pool, settings, device).await
+    held_over(pool, settings, only).await
 }
 
 /// Hand the table's live Authors on to the settings, which is what every
@@ -261,7 +270,27 @@ pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> R
 /// token is held for it, which is awaited here until this device's
 /// `secrets.yaml` holds a copy.
 pub async fn held(pool: &SqlitePool, settings: &Settings, _device: &str) -> Result<()> {
-    let authors = replicated::live_records::<Authors>(pool)
+    let only = match settings.holds_authors() {
+        true => match settings.config().authors() {
+            [only] => Some(only.id().to_owned()),
+            _ => None,
+        },
+        false => None,
+    };
+
+    held_over(pool, settings, only).await
+}
+
+/// And the same where the list held until now was `only`, its one Author.
+///
+/// **A Repo recording none keeps working as that one** when the list grows
+/// past it — a member's Author pulled, or the old Author mirrors written down
+/// as records at the first start — the promise ADR-0025 makes of adding a
+/// second Author, which the settings save keeps by recording it first. So
+/// every Repo recording none is recorded as it here, before the settings are
+/// handed the longer list and a Start could read it.
+async fn held_over(pool: &SqlitePool, settings: &Settings, only: Option<String>) -> Result<()> {
+    let authors: Vec<Recorded> = replicated::live_records::<Authors>(pool)
         .await?
         .into_iter()
         .map(|record| {
@@ -271,6 +300,15 @@ pub async fn held(pool: &SqlitePool, settings: &Settings, _device: &str) -> Resu
             )
         })
         .collect();
+
+    if let Some(only) = only
+        && authors.len() > 1
+        && authors.iter().any(|recorded| recorded.id() == only)
+    {
+        crate::store::record_the_repo_authors(pool, &only)
+            .await
+            .context("recording the Repos as the one Author before a second arrived")?;
+    }
 
     settings.holding_authors(authors);
 
@@ -767,6 +805,99 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(absent, Written::Absent);
+    }
+
+    /// A Repo registered with no Author on the list, recording none.
+    async fn recording_none(pool: &SqlitePool) -> i64 {
+        crate::store::register_repo(
+            pool,
+            std::path::Path::new("/watched/widgets"),
+            "widgets",
+            "main",
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .id
+    }
+
+    async fn recorded(pool: &SqlitePool, repo: i64) -> Option<String> {
+        crate::store::registered_repo(pool, repo)
+            .await
+            .unwrap()
+            .unwrap()
+            .author
+    }
+
+    /// A member's Author merged beside the one Author this device held: a
+    /// Repo recording none is recorded as the one it was working as before
+    /// the list is two, so it is not left with nobody picked (ADR-0025).
+    #[tokio::test]
+    async fn a_second_author_pulled_keeps_a_repo_recording_none_on_the_one() {
+        let (_dir, pool, settings) = fresh().await;
+
+        written(
+            &pool,
+            &settings,
+            "this-device",
+            &author("work", "Ada"),
+            false,
+        )
+        .await
+        .unwrap();
+        let repo = recording_none(&pool).await;
+        assert_eq!(recorded(&pool, repo).await, None);
+
+        replicated::merge::<Authors>(
+            &pool,
+            &[replicated::Record {
+                uuid: "theirs".into(),
+                updated_at: 1,
+                deleted_at: None,
+                written_by: "other-device".into(),
+                fields: Fields::of(&author("theirs", "Grace"), None),
+            }],
+        )
+        .await
+        .unwrap();
+        held(&pool, &settings, "this-device").await.unwrap();
+
+        assert_eq!(ids(&settings), ["work", "theirs"]);
+        assert_eq!(recorded(&pool, repo).await.as_deref(), Some("work"));
+        assert_eq!(
+            settings.config().author_missing(None),
+            Some(crate::settings::Unauthored::Unpicked),
+            "a Repo registered from now on still picks",
+        );
+    }
+
+    /// The first start of this release on a device whose file held one
+    /// Author, beside the old mirrors written down as records: a Repo
+    /// recording none is recorded as the file's one.
+    #[tokio::test]
+    async fn the_mirrors_taken_up_beside_the_one_author_keep_a_repo_recording_none_on_it() {
+        let (_dir, pool, settings) = fresh().await;
+
+        std::fs::write(
+            settings.config_path(),
+            "authors:\n  - id: work\n    name: Ada\n",
+        )
+        .unwrap();
+        let repo = recording_none(&pool).await;
+
+        // A mirror written down as a record, the way the migration writes one.
+        sqlx::query(
+            "INSERT INTO replicated (kind, uuid, updated_at, deleted_at, written_by, body)
+             VALUES ('authors', 'theirs', 0, NULL, 'other-device', '{\"name\":\"Grace\"}')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        taken_up(&pool, &settings, "this-device").await.unwrap();
+
+        assert_eq!(ids(&settings).len(), 2);
+        assert_eq!(recorded(&pool, repo).await.as_deref(), Some("work"));
     }
 
     /// A removal is a deletion stamp on a record that is kept, with the token

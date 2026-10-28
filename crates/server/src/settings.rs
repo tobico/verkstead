@@ -2145,6 +2145,11 @@ impl Recorded {
             holds_token,
         }
     }
+
+    /// The uuid of the Author it is.
+    pub(crate) fn id(&self) -> &str {
+        self.author.id()
+    }
 }
 
 /// Who a Repo's work is committed and pushed as: a git name, an email and —
