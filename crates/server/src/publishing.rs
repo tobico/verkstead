@@ -145,8 +145,8 @@ pub(crate) fn publish_as(
 
     // An Author whose token's copy has not arrived is refused by that name
     // rather than as an Author with no token, which it is not.
-    if let Some(device) = author.and_then(|author| config.token_awaited(author.id())) {
-        return (Publishing::Refused(crate::github::awaited(device)), None);
+    if author.is_some_and(|author| config.token_awaited(author.id())) {
+        return (Publishing::Refused(crate::github::awaited()), None);
     }
 
     let token = author.and_then(|author| config.token_of(author, &secrets));

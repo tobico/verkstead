@@ -1530,18 +1530,24 @@ async fn a_repo_pointed_at_a_tokenless_author_made_elsewhere_runs_its_sessions_a
     fixture.configure_github_token("author_tokens:\n  work: ghp_theworkone\n");
 
     fixture.settings.holding_authors(vec![
-        Recorded::of(Author::of(
-            "work".to_owned(),
-            None,
-            Some("Tobias Cohen".to_owned()),
-            Some("tobi@tobico.net".to_owned()),
-        )),
-        Recorded::of(Author::of(
-            "away".to_owned(),
-            Some("Away".to_owned()),
-            Some("Ada Lovelace".to_owned()),
-            Some("ada@away.example".to_owned()),
-        )),
+        Recorded::of(
+            Author::of(
+                "work".to_owned(),
+                None,
+                Some("Tobias Cohen".to_owned()),
+                Some("tobi@tobico.net".to_owned()),
+            ),
+            false,
+        ),
+        Recorded::of(
+            Author::of(
+                "away".to_owned(),
+                Some("Away".to_owned()),
+                Some("Ada Lovelace".to_owned()),
+                Some("ada@away.example".to_owned()),
+            ),
+            false,
+        ),
     ]);
 
     fixture.recorded_as("away").await;
@@ -1574,14 +1580,14 @@ async fn a_repo_pointed_at_an_author_made_elsewhere_runs_its_sessions_from_the_c
     );
 
     let mirror = |id: &str, email: &str| {
-        Recorded::with_token_at(
+        Recorded::of(
             Author::of(
                 id.to_owned(),
                 None,
                 Some("Ada Lovelace".to_owned()),
                 Some(email.to_owned()),
             ),
-            "the-workstation".to_owned(),
+            true,
         )
     };
 

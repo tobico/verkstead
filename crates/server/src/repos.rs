@@ -310,10 +310,10 @@ pub(crate) async fn create(
             // account nobody picked. Made here only, and said why — the shape a
             // GitHub that would not finish already has. An Author whose token's
             // copy has not arrived says that instead.
-            let awaited = picked.and_then(|author| config.token_awaited(author.id()));
+            let awaited = picked.is_some_and(|author| config.token_awaited(author.id()));
 
-            if let Some(device) = awaited {
-                Some(crate::github::awaited(device))
+            if awaited {
+                Some(crate::github::awaited())
             } else if gh.tokened() {
                 tokio::task::spawn_blocking(move || {
                     crate::github::create_repository(&gh, &dir, &called)
@@ -557,8 +557,8 @@ pub(crate) async fn clone(
         Err(refusal) => return Ok(refusal.into()),
     };
 
-    if let Some(device) = picked.and_then(|author| config.token_awaited(author.id())) {
-        return Ok(Cloned::Refused(crate::github::awaited(device)));
+    if picked.is_some_and(|author| config.token_awaited(author.id())) {
+        return Ok(Cloned::Refused(crate::github::awaited()));
     }
 
     let credential = gh.as_author(picked.map(Author::id)).credential();

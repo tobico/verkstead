@@ -1378,12 +1378,17 @@ async fn edit_author(
         }
 
         // The token into `secrets.yaml` first, so that the record written
-        // after it says whether the file holds one.
+        // after it says whether the file holds one — the two together, so the
+        // copying never reads one without the other.
+        let _writing = crate::replicating::authors::writing_held().await;
+
         let token = match &edit.github_token {
             TokenEdit::Keep => None,
             TokenEdit::Set { token } => Some(Some(token.clone())),
             TokenEdit::Clear => Some(None),
         };
+
+        let token_moved = token.is_some();
 
         if let Some(token) = token {
             let settings = settings.clone();
@@ -1393,9 +1398,16 @@ async fn edit_author(
                 .await??;
         }
 
-        let written =
-            crate::replicating::authors::edited(&state.pool, &settings, &state.device, &author)
-                .await?;
+        let written = crate::replicating::authors::edited(
+            &state.pool,
+            &settings,
+            &state.device,
+            &author,
+            token_moved,
+        )
+        .await?;
+
+        drop(_writing);
 
         if matches!(written, Written::Absent | Written::Removed) {
             return Ok(AuthorEdited::NoSuchAuthor);
@@ -6916,6 +6928,11 @@ async fn save_settings(
         // Once for both of them rather than a write apiece: what the file holds
         // afterwards is one thing, and two writes would be a window in which it
         // held half of it.
+        // And the Author's token and record written together, so the copying
+        // of the members' tokens never reads one without the other — see
+        // [`crate::replicating::authors::copied`].
+        let _authors_writing = crate::replicating::authors::writing_held_blocking();
+
         let mut secrets = settings.secrets();
         let mut writing = false;
 
@@ -6957,16 +6974,22 @@ async fn save_settings(
         }
 
         // And the Author's record, after the token so that it says whether
-        // `secrets.yaml` holds one — a write stamped past whatever this device
-        // held of it, and nothing written where nothing the section drew
-        // changed (ADR-0028).
+        // `secrets.yaml` holds one where the save set or cleared it — a write
+        // stamped past whatever this device held of it, and nothing written
+        // where nothing the section drew changed (ADR-0028).
         if let Some(author) = &author {
             runtime
                 .block_on(crate::replicating::authors::written(
-                    &pool, &settings, &device, author,
+                    &pool,
+                    &settings,
+                    &device,
+                    author,
+                    token_moved,
                 ))
                 .map_err(std::io::Error::other)?;
         }
+
+        drop(_authors_writing);
 
         // What GitHub made of it: whose it is, and what it may do. The second
         // half is here because a token that authenticates perfectly and cannot

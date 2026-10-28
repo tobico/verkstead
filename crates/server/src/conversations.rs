@@ -1477,9 +1477,7 @@ fn unauthored_start(why: Unauthored, repo: &str) -> GrillingStarted {
     match why {
         Unauthored::Gone => GrillingStarted::RepoAuthorGone { repo },
         Unauthored::Unpicked => GrillingStarted::RepoAuthorUnpicked { repo },
-        Unauthored::TokenAwaited { device } => {
-            GrillingStarted::RepoAuthorTokenAwaited { repo, device }
-        }
+        Unauthored::TokenAwaited => GrillingStarted::RepoAuthorTokenAwaited { repo },
     }
 }
 
@@ -1492,11 +1490,8 @@ fn unauthored_take_up(config: &Config, conversation: &store::Conversation) -> Op
     match config.author_missing(conversation.repo.author.as_deref()) {
         Some(Unauthored::Gone) => return Some(TakenUp::RepoAuthorGone { repo: repo() }),
         Some(Unauthored::Unpicked) => return Some(TakenUp::RepoAuthorUnpicked { repo: repo() }),
-        Some(Unauthored::TokenAwaited { device }) => {
-            return Some(TakenUp::RepoAuthorTokenAwaited {
-                repo: repo(),
-                device,
-            });
+        Some(Unauthored::TokenAwaited) => {
+            return Some(TakenUp::RepoAuthorTokenAwaited { repo: repo() });
         }
         None => {}
     }
@@ -2571,11 +2566,8 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     match config.author_missing(conversation.repo.author.as_deref()) {
         Some(Unauthored::Gone) => return Ok(Adopted::RepoAuthorGone { repo: repo() }),
         Some(Unauthored::Unpicked) => return Ok(Adopted::RepoAuthorUnpicked { repo: repo() }),
-        Some(Unauthored::TokenAwaited { device }) => {
-            return Ok(Adopted::RepoAuthorTokenAwaited {
-                repo: repo(),
-                device,
-            });
+        Some(Unauthored::TokenAwaited) => {
+            return Ok(Adopted::RepoAuthorTokenAwaited { repo: repo() });
         }
         None => {}
     }

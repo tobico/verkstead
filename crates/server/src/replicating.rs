@@ -72,6 +72,14 @@ where
     /// Hand what a merge moved on to whatever reads the kind in memory, and
     /// tell this device's pages.
     fn merged(state: &AppState) -> impl Future<Output = anyhow::Result<()>> + Send;
+
+    /// What else a member's records being read says to do, whether or not the
+    /// merge moved anything — fetching what the records name and this device
+    /// lacks, which a member not answering last time may have now. Nothing,
+    /// for a kind with nothing beside its records.
+    fn pulled(_state: &AppState) -> impl Future<Output = anyhow::Result<()>> + Send {
+        async { Ok(()) }
+    }
 }
 
 /// `GET /api/peer/v1/records/{kind}` — every record of the kind this device
@@ -262,15 +270,19 @@ where
         }
     };
 
-    if !merged {
-        return;
-    }
-
-    if let Err(error) = K::merged(state).await {
+    if merged && let Err(error) = K::merged(state).await {
         tracing::error!(
             error = ?error,
             kind = K::NAME,
             "a member's records were merged and could not be handed on",
+        );
+    }
+
+    if let Err(error) = K::pulled(state).await {
+        tracing::error!(
+            error = ?error,
+            kind = K::NAME,
+            "a member's records were pulled and what they name could not be fetched",
         );
     }
 }

@@ -163,7 +163,7 @@
 //! both Data Directories — and never drawn on the settings page, which keeps it
 //! through a save the way it keeps `session_path`. See [`KeptBy`].
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -329,9 +329,9 @@ impl Settings {
     ///
     /// **With the table's Authors in place of the file's**, once they are held,
     /// which is the one list a Repo's Author is resolved out of — see
-    /// [`Config::author_of`]. Where one was last written on a device that holds
-    /// its token, the other file is read too, for whether the copy is here
-    /// yet — see [`Config::token_awaited`].
+    /// [`Config::author_of`]. Where one holds a token, the other file is read
+    /// too, for whether this device's copy is here yet — see
+    /// [`Config::token_awaited`].
     pub fn config(&self) -> Config {
         let path = self.config_path();
 
@@ -368,20 +368,18 @@ impl Settings {
 
         let secrets = authors
             .iter()
-            .any(|recorded| recorded.token_at.is_some())
+            .any(|recorded| recorded.holds_token)
             .then(|| self.secrets());
 
         config.awaited = authors
             .iter()
-            .filter_map(|recorded| {
-                let device = recorded.token_at.as_ref()?;
-                let secrets = secrets.as_ref()?;
-
+            .filter(|recorded| recorded.holds_token)
+            .filter(|recorded| {
                 secrets
-                    .author_token(recorded.author.id())
-                    .is_none()
-                    .then(|| (recorded.author.id().to_owned(), device.clone()))
+                    .as_ref()
+                    .is_some_and(|secrets| secrets.author_token(recorded.author.id()).is_none())
             })
+            .map(|recorded| recorded.author.id().to_owned())
             .collect();
 
         config.authors = authors
@@ -1071,12 +1069,11 @@ pub struct Config {
     )]
     authors: Vec<Author>,
 
-    /// The Authors whose token is awaited here, by uuid, each with the name of
-    /// the device that last wrote it and holds the token — never read from
+    /// The Authors whose token is awaited here, by uuid — never read from
     /// this file nor written to it, but laid beside it by
     /// [`Settings::config`]. See [`Config::token_awaited`].
     #[serde(skip)]
-    awaited: BTreeMap<String, String>,
+    awaited: BTreeSet<String>,
 
     /// And how the shared Rust build cache is set: whether sessions get one at
     /// all, and how big its compiled half may grow — see [`crate::build_cache`].
@@ -1319,7 +1316,7 @@ impl Config {
             // With the blanks taken out of each and the ones with no uuid
             // dropped — see [`authors_kept`].
             authors: authors_kept(config.authors),
-            awaited: BTreeMap::new(),
+            awaited: BTreeSet::new(),
             rust_build_cache: RustBuildCache {
                 enabled: config.rust_build_cache.enabled,
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
@@ -1376,7 +1373,7 @@ impl Config {
             // [`Config::keeping_what_the_page_never_drew`], the way an
             // installer's descriptor keys are.
             authors: author.into_iter().collect(),
-            awaited: BTreeMap::new(),
+            awaited: BTreeSet::new(),
             // And nothing for the key the map replaced: the two keys the page
             // draws of Rust are in `languages` below now, so writing this one
             // as well would leave a second opinion about them in the file. A
@@ -1452,14 +1449,13 @@ impl Config {
         self.authors.iter().find(|author| author.id == id)
     }
 
-    /// The name of the device the token of the Author whose uuid is `id` is
-    /// awaited from, where it is: the device that last wrote its record holds
-    /// a token for it, that device is not this one, and the copy has not
-    /// reached this device's `secrets.yaml`. Working as that Author without
-    /// it was turned down, and so was the host's own login in its place
-    /// (ADR-0025).
-    pub(crate) fn token_awaited(&self, id: &str) -> Option<&str> {
-        self.awaited.get(id).map(String::as_str)
+    /// Whether the token of the Author whose uuid is `id` is awaited here: its
+    /// record says a token is held for it, and no copy has reached this
+    /// device's `secrets.yaml` yet — it travels from whichever member holds
+    /// one (ADR-0028). Working as that Author without it was turned down, and
+    /// so was the host's own login in its place (ADR-0025).
+    pub(crate) fn token_awaited(&self, id: &str) -> bool {
+        self.awaited.contains(id)
     }
 
     /// The Author a Repo recorded as `recorded` is committed and pushed as:
@@ -1498,11 +1494,7 @@ impl Config {
         match recorded {
             Some(_) if self.authors.is_empty() => None,
             Some(id) if self.author(id).is_none() => Some(Unauthored::Gone),
-            Some(id) => self
-                .token_awaited(id)
-                .map(|device| Unauthored::TokenAwaited {
-                    device: device.to_owned(),
-                }),
+            Some(id) => self.token_awaited(id).then_some(Unauthored::TokenAwaited),
             None if self.authors.len() > 1 => Some(Unauthored::Unpicked),
             None => None,
         }
@@ -2133,36 +2125,24 @@ pub enum Unauthored {
     /// It records an Author whose token is held on another device, and the
     /// copy of it has not reached this one: working as that Author without it
     /// was turned down, and so was the host's own login in its place
-    /// (ADR-0025). `device` is the name of the device that last wrote the
-    /// Author, which is where it has to come from.
-    TokenAwaited { device: String },
+    /// (ADR-0025). It comes from whichever member holds one (ADR-0028).
+    TokenAwaited,
 }
 
 /// An Author as this device holds its record, for [`Settings::holding_authors`]
-/// (ADR-0028): the Author, and — where the record was last written on another
-/// device that holds a token for it — that device's name, which is where the
-/// token's copy is awaited from until this device's `secrets.yaml` holds one.
+/// (ADR-0028): the Author, and whether its record says a token is held for it,
+/// which is awaited here until this device's `secrets.yaml` holds a copy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recorded {
     author: Author,
-    token_at: Option<String>,
+    holds_token: bool,
 }
 
 impl Recorded {
-    /// An Author no other device's token is awaited for.
-    pub fn of(author: Author) -> Recorded {
+    pub fn of(author: Author, holds_token: bool) -> Recorded {
         Recorded {
             author,
-            token_at: None,
-        }
-    }
-
-    /// And one last written on the device called `device`, which holds a token
-    /// for it.
-    pub fn with_token_at(author: Author, device: String) -> Recorded {
-        Recorded {
-            author,
-            token_at: Some(device),
+            holds_token,
         }
     }
 }
@@ -3401,9 +3381,9 @@ mod tests {
             |id: &str, name: &str| Author::of(id.to_owned(), None, Some(name.to_owned()), None);
 
         settings.holding_authors(vec![
-            Recorded::of(author("work", "Tobias Cohen")),
-            Recorded::with_token_at(author("tokened", "Ada"), "the-workstation".to_owned()),
-            Recorded::of(author("tokenless", "Grace")),
+            Recorded::of(author("work", "Tobias Cohen"), false),
+            Recorded::of(author("tokened", "Ada"), true),
+            Recorded::of(author("tokenless", "Grace"), false),
         ]);
 
         let config = settings.config();
@@ -3421,9 +3401,7 @@ mod tests {
         assert_eq!(config.author_missing(Some("tokenless")), None);
         assert_eq!(
             config.author_missing(Some("tokened")),
-            Some(Unauthored::TokenAwaited {
-                device: "the-workstation".to_owned()
-            }),
+            Some(Unauthored::TokenAwaited),
         );
         assert_eq!(config.author_missing(Some("gone")), Some(Unauthored::Gone));
 
@@ -3446,7 +3424,7 @@ mod tests {
             Some("ghp_thecopy"),
         );
 
-        settings.holding_authors(vec![Recorded::of(author("work", "Tobias Cohen"))]);
+        settings.holding_authors(vec![Recorded::of(author("work", "Tobias Cohen"), false)]);
 
         assert_eq!(
             settings.config().author_missing(Some("tokened")),
@@ -3469,12 +3447,10 @@ mod tests {
         )
         .unwrap();
 
-        settings.holding_authors(vec![Recorded::of(Author::of(
-            "work".into(),
-            None,
-            Some("Tobias Cohen".into()),
-            None,
-        ))]);
+        settings.holding_authors(vec![Recorded::of(
+            Author::of("work".into(), None, Some("Tobias Cohen".into()), None),
+            false,
+        )]);
 
         let config = settings.config();
         let ids: Vec<_> = config.authors().iter().map(Author::id).collect();

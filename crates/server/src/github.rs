@@ -85,11 +85,11 @@ enum AsWhom {
     /// This token and no other.
     Token(String),
 
-    /// Nobody: the Repo's Author is a mirror whose home holds a token and whose
-    /// copy has not arrived, called by the name of that home. The host's login
+    /// Nobody: the Repo's Author's record says a token is held for it, and
+    /// this device's copy has not arrived. The host's login
     /// in its place is the mistake an Author per Repo exists to stop
     /// (ADR-0025), so a git asks as nobody and a `gh` is not run.
-    Awaited(String),
+    Awaited,
 }
 
 impl Credential {
@@ -139,7 +139,7 @@ impl Credential {
                     .arg(format!("credential.helper={HELPER}"))
                     .env("GH_TOKEN", token);
             }
-            AsWhom::Awaited(_) => {
+            AsWhom::Awaited => {
                 command
                     .args(["-c", "credential.helper="])
                     .env_remove("GH_TOKEN");
@@ -157,7 +157,7 @@ impl std::fmt::Debug for Credential {
         match self.0 {
             AsWhom::Token(_) => f.write_str("Credential(an Author's token)"),
             AsWhom::Host => f.write_str("Credential(the host's)"),
-            AsWhom::Awaited(_) => f.write_str("Credential(nobody's, a token awaited)"),
+            AsWhom::Awaited => f.write_str("Credential(nobody's, a token awaited)"),
         }
     }
 }
@@ -283,8 +283,8 @@ impl Gh {
             return AsWhom::Host;
         };
 
-        if let Some(device) = config.token_awaited(author.id()) {
-            return AsWhom::Awaited(device.to_owned());
+        if config.token_awaited(author.id()) {
+            return AsWhom::Awaited;
         }
 
         match config.token_of(author, &settings.secrets()) {
@@ -299,7 +299,7 @@ impl Gh {
         match self.whom() {
             AsWhom::Host => Ok(None),
             AsWhom::Token(token) => Ok(Some(token)),
-            AsWhom::Awaited(device) => Err(Trouble::Ours(awaited(&device))),
+            AsWhom::Awaited => Err(Trouble::Ours(awaited())),
         }
     }
 
@@ -549,12 +549,11 @@ impl Gh {
 }
 
 /// What a `gh` or a git about a Repo says in place of running, where the
-/// Repo's Author is at home on `device` and the copy of its token has not
+/// Repo's Author holds a token on another device and the copy of it has not
 /// reached this one.
-pub(crate) fn awaited(device: &str) -> String {
-    format!(
-        "This repo's author is at home on {device}, and its token hasn't reached this device yet."
-    )
+pub(crate) fn awaited() -> String {
+    "This repo's author has a token on another device, and it hasn't reached this one yet."
+        .to_owned()
 }
 
 /// Why `gh` could not answer.
@@ -2704,16 +2703,16 @@ printf '%s' '{"number":41,"title":"Rate limiting","url":"https://github.com/tobi
         let (_data_dir, settings) = configured(None);
         let gh = gh.authenticated_by(settings.clone());
 
-        settings.holding_authors(vec![Recorded::with_token_at(
+        settings.holding_authors(vec![Recorded::of(
             Author::of("tokened".to_owned(), None, Some("Ada".to_owned()), None),
-            "the-workstation".to_owned(),
+            true,
         )]);
 
         let tokened = gh.as_author(Some("tokened"));
 
         assert_eq!(
             pull_request(&tokened, repo.path(), "rate-limiting"),
-            Err(Trouble::Ours(awaited("the-workstation"))),
+            Err(Trouble::Ours(awaited())),
             "refused while the copy is awaited, rather than asked as the host",
         );
         assert!(!tokened.tokened());

@@ -2100,13 +2100,13 @@ fn unsigned(config: &Config, recorded: Option<&str>, repo: &str) -> (String, Str
                 "Pick one under Repos in settings".to_owned(),
             );
         }
-        Some(Unauthored::TokenAwaited { device }) => {
+        Some(Unauthored::TokenAwaited) => {
             return (
                 format!(
-                    "the `{repo}` repo's author is at home on {device} and its token hasn't \
-                     reached this device yet"
+                    "the `{repo}` repo's author has a token on another device and it hasn't \
+                     reached this one yet"
                 ),
-                format!("Once {device} is reachable again"),
+                "Once a device holding it is reachable again".to_owned(),
             );
         }
         None => {}
@@ -2193,32 +2193,32 @@ mod tests {
     }
 
     /// A halt over a Repo pointed at an Author whose token's copy has not
-    /// arrived names the device it is held on, and sends the human there
-    /// rather than to settings.
+    /// arrived says so, and sends the human to a device holding it rather than
+    /// to settings.
     #[test]
-    fn a_halt_over_an_author_awaiting_its_token_names_its_device() {
+    fn a_halt_over_an_author_awaiting_its_token_says_it_is_on_its_way() {
         use crate::settings::{Recorded, Settings};
 
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
-        settings.holding_authors(vec![Recorded::with_token_at(
+        settings.holding_authors(vec![Recorded::of(
             Author::of(
                 "away".to_owned(),
                 None,
                 Some("Ada Lovelace".to_owned()),
                 Some("ada@away.example".to_owned()),
             ),
-            "the-workstation".to_owned(),
+            true,
         )]);
 
         assert_eq!(
             unsigned(&settings.config(), Some("away"), "verkstead"),
             (
-                "the `verkstead` repo's author is at home on the-workstation and its token \
-                 hasn't reached this device yet"
+                "the `verkstead` repo's author has a token on another device and it hasn't \
+                 reached this one yet"
                     .to_owned(),
-                "Once the-workstation is reachable again".to_owned(),
+                "Once a device holding it is reachable again".to_owned(),
             )
         );
     }

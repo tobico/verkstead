@@ -3599,7 +3599,7 @@ async fn starting_on_a_repo_with_no_author_picked_among_two_is_refused_naming_it
 
 /// Hold `away` beside this device's Authors as an Author made on another —
 /// what the puller hands the settings once it has merged a member's records —
-/// last written on `the-workstation`, which holds a token for it or not.
+/// whose record says a token is held for it or not.
 fn mirroring(dir: &tempfile::TempDir, holds_token: bool) {
     let away = Author::of(
         "away".to_owned(),
@@ -3608,13 +3608,7 @@ fn mirroring(dir: &tempfile::TempDir, holds_token: bool) {
         Some("ada@away.example".to_owned()),
     );
 
-    holding_beside(
-        dir,
-        Some(match holds_token {
-            true => Recorded::with_token_at(away, "the-workstation".to_owned()),
-            false => Recorded::of(away),
-        }),
-    );
+    holding_beside(dir, Some(Recorded::of(away, holds_token)));
 }
 
 /// Hold this device's Authors as they read now, and `beside` after them.
@@ -3627,7 +3621,7 @@ fn holding_beside(dir: &tempfile::TempDir, beside: Option<Recorded>) {
         .iter()
         .filter(|author| author.id() != "away")
         .cloned()
-        .map(Recorded::of)
+        .map(|author| Recorded::of(author, false))
         .collect();
     held.extend(beside);
 
@@ -3707,17 +3701,13 @@ async fn a_repo_pointed_at_a_mirror_awaiting_its_token_refuses_naming_its_home()
     repoint(&app, repo_id, "away").await;
 
     let repo_name = || "verkstead".to_owned();
-    let device = || "the-workstation".to_owned();
 
     let id = ready(&app, elsewhere.path(), repo_id).await;
     let branch = opened(&app, id).await.branch;
 
     assert_eq!(
         grill(&app, id).await,
-        GrillingStarted::RepoAuthorTokenAwaited {
-            repo: repo_name(),
-            device: device(),
-        }
+        GrillingStarted::RepoAuthorTokenAwaited { repo: repo_name() }
     );
     assert_eq!(opened(&app, id).await.worktree, None);
     assert!(!has_branch(&repo, &branch));
@@ -3725,10 +3715,7 @@ async fn a_repo_pointed_at_a_mirror_awaiting_its_token_refuses_naming_its_home()
     let adopting = ready_to_adopt_again(&app, repo_id, "mvp").await;
     assert_eq!(
         press_adopt(&app, adopting).await,
-        Adopted::RepoAuthorTokenAwaited {
-            repo: repo_name(),
-            device: device(),
-        }
+        Adopted::RepoAuthorTokenAwaited { repo: repo_name() }
     );
     assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
 
@@ -11083,7 +11070,6 @@ async fn a_take_up_is_refused_over_the_repos_author_as_a_start_is() {
             "",
             TakenUp::RepoAuthorTokenAwaited {
                 repo: "verkstead".to_owned(),
-                device: "the-workstation".to_owned(),
             },
         ),
     ] {
@@ -11095,9 +11081,9 @@ async fn a_take_up_is_refused_over_the_repos_author_as_a_start_is() {
         std::fs::write(dir.path().join(CONFIG), config).unwrap();
 
         if let TakenUp::RepoAuthorTokenAwaited { .. } = refusal {
-            Settings::in_data_dir(dir.path()).holding_authors(vec![Recorded::with_token_at(
+            Settings::in_data_dir(dir.path()).holding_authors(vec![Recorded::of(
                 Author::of("work".to_owned(), None, Some("Ada".to_owned()), None),
-                "the-workstation".to_owned(),
+                true,
             )]);
         }
 

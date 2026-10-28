@@ -1737,12 +1737,15 @@ async fn a_repo_registered_with_only_an_author_made_elsewhere_is_recorded_as_it(
     let src = tempfile::tempdir().unwrap();
     let (dir, app) = workbench().await;
 
-    Settings::in_data_dir(dir.path()).holding_authors(vec![Recorded::of(Author::of(
-        "keepers".to_owned(),
-        None,
-        Some("Ada Lovelace".to_owned()),
-        Some("ada@work.example".to_owned()),
-    ))]);
+    Settings::in_data_dir(dir.path()).holding_authors(vec![Recorded::of(
+        Author::of(
+            "keepers".to_owned(),
+            None,
+            Some("Ada Lovelace".to_owned()),
+            Some("ada@work.example".to_owned()),
+        ),
+        false,
+    )]);
 
     let repo = repository(src.path().join("verkstead"));
 

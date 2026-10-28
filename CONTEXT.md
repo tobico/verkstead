@@ -123,15 +123,19 @@ off catches up when it comes back, an edit made after a removal stays removed,
 and an Author whose writer is off or unlinked still reaches a newcomer through
 whoever holds it. A member too old to serve them has its Devices row say so,
 naming both releases, and its Authors are absent until it updates. The token
-stays in `secrets.yaml` under the uuid, copied from whoever holds one, and a
-session carries its own Repo's Author's token and none of the others this
-device holds.
+stays in `secrets.yaml` under the uuid and travels from whoever holds one: a
+token set or cleared is a write to the record — whether one is held, and a
+digest saying which — and after every pull a device without a copy of the
+token the record names asks its members for it, the record's writer first; a
+token cleared, or an Author removed, takes every copy away, and a member not
+answering leaves a copy as it stands. A session carries its own Repo's
+Author's token and none of the others this device holds.
 A Repo is pointed at an Author made on another device the way it is at one made
 here, and everything that reads a Repo's Author reads its name and email and
 the token this device holds. Removal checks this device's Repos, a member's
 Repo left pointing at an Author removed refusing its start under the rule
-above. An Author last written on a device holding its token, whose copy has not
-arrived refuses a **Start** by name, naming that device, and halts a
+above. An Author whose record says a token is held, and whose copy has not
+arrived here, refuses a **Start** by name and halts a
 pipeline step with a Notice, and nothing Verkstead does on its Repo falls back
 to the host's own login meanwhile; a **Transfer** whose far Repo points at another
 Author is refused by the **Preflight**, naming both; and **Create repo** on a

@@ -58,6 +58,9 @@ const AUTHORS: &str = "/api/ui/authors";
 /// And where a member's records are pulled from.
 const RECORDS: &str = "/api/peer/v1/records/authors";
 
+/// And where an Author's token is copied from.
+const TOKENS: &str = "/api/peer/v1/authors/";
+
 const WORK: &str = "6f1c2a52-7d0e-4c55-9a43-0d6b8f3e2a11";
 
 const PATIENCE: std::time::Duration = std::time::Duration::from_millis(300);
@@ -83,6 +86,9 @@ struct Verkstead {
     /// set: `404`, a member too old to have the route, or `503`, a device the
     /// test holds apart from the others. `0` answers.
     answering: Arc<AtomicU16>,
+
+    /// And what its token route answers in place of a token, the same way.
+    tokens_answering: Arc<AtomicU16>,
 
     /// The Peer Listener, stopped when the device is switched off.
     serving: tokio::task::JoinHandle<anyhow::Result<()>>,
@@ -147,15 +153,19 @@ impl Verkstead {
         );
 
         let answering = Arc::new(AtomicU16::new(0));
+        let tokens_answering = Arc::new(AtomicU16::new(0));
         let asked_in_process = over_the_link.clone();
 
         let over_the_link = over_the_link.layer(axum::middleware::from_fn({
             let answering = answering.clone();
+            let tokens_answering = tokens_answering.clone();
 
             move |asked: Request<Body>, next: axum::middleware::Next| {
-                let instead = match asked.uri().path() == RECORDS {
-                    true => answering.load(Ordering::SeqCst),
-                    false => 0,
+                let path = asked.uri().path();
+                let instead = match path {
+                    RECORDS => answering.load(Ordering::SeqCst),
+                    _ if path.starts_with(TOKENS) => tokens_answering.load(Ordering::SeqCst),
+                    _ => 0,
                 };
 
                 async move {
@@ -186,6 +196,7 @@ impl Verkstead {
             over_the_link: asked_in_process,
             address,
             answering,
+            tokens_answering,
             serving,
             dir,
         }
@@ -246,6 +257,13 @@ impl Verkstead {
             .store(status.map_or(0, |status| status.as_u16()), Ordering::SeqCst);
     }
 
+    /// Answer the token route with `status` in place of a token, or answer it
+    /// again with `None`.
+    fn tokens_answer(&self, status: Option<StatusCode>) {
+        self.tokens_answering
+            .store(status.map_or(0, |status| status.as_u16()), Ordering::SeqCst);
+    }
+
     /// An Author saved the way the Git section saves one.
     async fn saves_author(&self, id: &str, name: &str, email: &str) {
         let (status, said) = pressing(
@@ -300,6 +318,71 @@ impl Verkstead {
 
         assert!(status.is_success(), "editing {id}: {status} {said}");
         assert!(said.contains("Saved"), "editing {id}: {said}");
+    }
+
+    /// And one Author's token set or cleared alone, the way the Git section
+    /// sends `github_token`, its fields as they are.
+    async fn tokens_author(&self, id: &str, token: serde_json::Value) {
+        let row = with(&self.authors().await, id)
+            .cloned()
+            .expect("the Author is in the list");
+
+        let (status, said) = pressing(
+            &self.workbench,
+            &format!("/api/ui/authors/{id}"),
+            Some(
+                &serde_json::json!({
+                    "display_name": row.display_name,
+                    "name": row.name,
+                    "email": row.email,
+                    "github_token": token,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert!(status.is_success(), "tokening {id}: {status} {said}");
+        assert!(said.contains("Saved"), "tokening {id}: {said}");
+    }
+
+    async fn sets_token(&self, id: &str, token: &str) {
+        self.tokens_author(id, serde_json::json!({ "Set": { "token": token } }))
+            .await;
+    }
+
+    async fn clears_token(&self, id: &str) {
+        self.tokens_author(id, serde_json::json!("Clear")).await;
+    }
+
+    fn settings(&self) -> Settings {
+        Settings::in_data_dir(self.dir.path())
+    }
+
+    /// The token this device's `secrets.yaml` holds for the Author `id`.
+    fn token_here(&self, id: &str) -> Option<String> {
+        self.settings()
+            .secrets()
+            .author_token(id)
+            .map(str::to_owned)
+    }
+
+    /// Wait for this device's `secrets.yaml` to hold `token` for the Author
+    /// `id` — or none, where `token` is `None`.
+    async fn token_saying(&self, id: &str, token: Option<&str>) {
+        let waited = tokio::time::timeout(WAITING, async {
+            while self.token_here(id).as_deref() != token {
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| {
+            panic!(
+                "the token never said {token:?}: it said {:?}",
+                self.token_here(id)
+            )
+        });
     }
 
     async fn removes_author(&self, id: &str) {
@@ -725,4 +808,145 @@ async fn the_route_serves_removed_records_and_no_token() {
     let records: Vec<serde_json::Value> = serde_json::from_str(&said).unwrap();
     assert_eq!(records.len(), 2, "{said}");
     assert!(records[1]["deleted_at"].is_i64(), "{said}");
+}
+
+/// A token set on B for an Author C made reaches A's `secrets.yaml` with C
+/// switched off: it travels from whoever holds one. And once the copy has
+/// landed, a Repo on A pointed at that Author is no longer awaiting it — its
+/// sessions are handed the copy.
+#[tokio::test]
+async fn a_token_set_on_one_device_reaches_another_with_the_authors_maker_off() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    let c = Verkstead::answering(C).await;
+    linked(&a, &b).await;
+    linked(&a, &c).await;
+    linked(&b, &c).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    c.saves_author(WORK, "Ada Lovelace", "ada@work.example")
+        .await;
+    c.nudges.announce(Nudge::Devices);
+    a.authors_saying(|rows| with(rows, WORK).is_some()).await;
+    b.authors_saying(|rows| with(rows, WORK).is_some()).await;
+
+    let _off = c.switched_off().await;
+
+    b.sets_token(WORK, "ghp_setonb").await;
+
+    a.token_saying(WORK, Some("ghp_setonb")).await;
+
+    assert_eq!(
+        a.settings().config().author_missing(Some(WORK)),
+        None,
+        "a Repo pointed at it starts, handed the copy",
+    );
+
+    // And a rotation, which the copy follows.
+    b.sets_token(WORK, "ghp_rotatedonb").await;
+    a.token_saying(WORK, Some("ghp_rotatedonb")).await;
+}
+
+/// A token's record saying one is held, before any copy has reached a device,
+/// is a token awaited there — and nothing else is.
+#[tokio::test]
+async fn a_token_held_elsewhere_is_awaited_until_its_copy_lands() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _b_holding = b.holding();
+
+    a.saves_author(WORK, "Ada Lovelace", "ada@work.example")
+        .await;
+    b.authors_saying(|rows| with(rows, WORK).is_some()).await;
+    assert_eq!(b.settings().config().author_missing(Some(WORK)), None);
+
+    // A's token route held back, so the record arrives and its token does not.
+    a.tokens_answer(Some(StatusCode::SERVICE_UNAVAILABLE));
+    a.sets_token(WORK, "ghp_seton_a").await;
+
+    tokio::time::timeout(WAITING, async {
+        while b.settings().config().author_missing(Some(WORK)).is_none() {
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await
+    .expect("the token is awaited on B");
+    assert_eq!(b.token_here(WORK), None);
+
+    // And once A answers, the next pull fetches it.
+    a.tokens_answer(None);
+    a.nudges.announce(Nudge::Authors);
+
+    b.token_saying(WORK, Some("ghp_seton_a")).await;
+    assert_eq!(b.settings().config().author_missing(Some(WORK)), None);
+}
+
+/// A token cleared on one device is taken out of every other device's
+/// `secrets.yaml`, the device it was set on included; and an Author removed
+/// takes every copy of its token with it.
+#[tokio::test]
+async fn a_token_cleared_or_its_author_removed_takes_every_copy_away() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    a.saves_author(WORK, "Ada Lovelace", "ada@work.example")
+        .await;
+    a.sets_token(WORK, "ghp_seton_a").await;
+    b.token_saying(WORK, Some("ghp_seton_a")).await;
+
+    // Cleared on B, where it is a copy.
+    b.clears_token(WORK).await;
+    a.token_saying(WORK, None).await;
+    assert_eq!(b.token_here(WORK), None);
+
+    // An edit on a device holding no copy says nothing about the token.
+    a.sets_token(WORK, "ghp_again").await;
+    b.token_saying(WORK, Some("ghp_again")).await;
+    std::fs::write(b.dir.path().join("secrets.yaml"), "").unwrap();
+    b.edits_author(WORK, "Ada Lovelace", "ada@edited.example")
+        .await;
+    a.authors_saying(|rows| emailed(rows, WORK, "ada@edited.example"))
+        .await;
+    assert_eq!(a.token_here(WORK).as_deref(), Some("ghp_again"));
+
+    // And removed on A.
+    a.removes_author(WORK).await;
+    b.token_saying(WORK, None).await;
+    assert_eq!(a.token_here(WORK), None);
+}
+
+/// The token route answers for any Author this device holds a record of — a
+/// copy it fetched included — `null` where it holds no token, and `404` for a
+/// uuid it holds no live record of.
+#[tokio::test]
+async fn the_token_route_answers_from_whoever_holds_one() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    let c = Verkstead::answering(C).await;
+    linked(&a, &b).await;
+    linked(&b, &c).await;
+    let _b_holding = b.holding();
+
+    a.saves_author(WORK, "Ada Lovelace", "ada@work.example")
+        .await;
+    a.saves_author("other", "Grace Hopper", "grace@work.example")
+        .await;
+    a.sets_token(WORK, "ghp_seton_a").await;
+    b.token_saying(WORK, Some("ghp_seton_a")).await;
+
+    let asked = |id: &'static str| replicating::authors::token_at(Some(&c.cluster), B, id);
+
+    assert_eq!(
+        asked(WORK).await.unwrap().as_deref(),
+        Some("ghp_seton_a"),
+        "B's copy"
+    );
+    assert_eq!(asked("other").await.unwrap(), None, "no token held");
+    let refused = asked("no-such-uuid").await.unwrap_err();
+    assert!(refused.saying.contains("404"), "{}", refused.saying);
 }

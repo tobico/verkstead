@@ -4503,14 +4503,12 @@ pub enum GrillingStarted {
         repo: String,
     },
 
-    /// Or it records a member's Author whose home holds a token, and the copy
-    /// of that token has not reached this device yet. Named with the home
-    /// device, the way a Profile whose home is not answering is: working as
-    /// that Author without it, or as the host's own login, was turned down
-    /// (ADR-0025).
+    /// Or it records an Author whose record says a token is held for it, and
+    /// the copy of that token has not reached this device yet from whichever
+    /// member holds one (ADR-0028): working as that Author without it, or as
+    /// the host's own login, was turned down (ADR-0025).
     RepoAuthorTokenAwaited {
         repo: String,
-        device: String,
     },
 
     /// A companion is under another Author than the Repo, which it can only
@@ -5385,7 +5383,6 @@ pub enum Adopted {
     },
     RepoAuthorTokenAwaited {
         repo: String,
-        device: String,
     },
 
     /// A companion is under another Author than the Repo — see
@@ -5622,7 +5619,6 @@ pub enum TakenUp {
     },
     RepoAuthorTokenAwaited {
         repo: String,
-        device: String,
     },
 
     /// A companion is under another Author than the Repo — see
