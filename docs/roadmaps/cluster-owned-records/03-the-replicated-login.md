@@ -10,7 +10,8 @@ with every bound device switched off. *Use this machine's own account* on the
 card binds this device. The brokenness readings are rewritten for a Profile
 with no home: no login anywhere in the cluster, or the harness absent here. The
 fetch-from-a-bound-device of 02 and the account mirror's home fetch go.
-Demonstrable with two Verksteads: log in on A, start on B with A off.
+Demonstrable with two Verksteads: log in on A, start on B with A off; then
+bind B with the press, and the card reads one record with two bindings.
 
 ## Decisions in force
 

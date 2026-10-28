@@ -11,8 +11,10 @@ a device the first time it links, so the four Claude rows — and the two of
 every cluster formed after this release — read apart in every picker. A session on a device the Profile is
 bound on runs exactly as today; one on an unbound device fetches the login from
 a reachable bound device, the way it fetched from the home before, until 03
-replaces that. Demonstrable with two Verksteads: one record, two bindings, a
-Pairing on each naming the uuid, and the old mirror rows gone.
+replaces that. Demonstrable with two Verksteads: one record bound on A, a
+session on B under it starting with the login fetched from A, a Pairing on each
+naming the uuid, and the old mirror rows gone. A second binding of one record
+takes the press, which is 03's.
 
 ## Decisions in force
 
