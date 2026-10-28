@@ -2388,6 +2388,27 @@ above carry each device's own news alone.
 _Avoid_: proxy, forwarding (a **Forward** is something else), tunnel, the bridge
 (which is the socket half of it alone), remote mode
 
+**Replicated record**:
+A record that is the cluster's rather than any one device's, held whole by every
+device of it ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a
+**uuid**, the same everywhere; an `updated_at`, the stamp of its last write; a
+**deletion stamp**, set where it has been removed; and the Device Id that wrote
+it last — with the kind's own fields beside them. One facility with kinds on
+it, rather than a copy of the pattern per table: **Authors** first, then the
+**Agent Profiles** and their bindings, the **Instructions** text and the
+declared MCP servers. Kept in the database, never in `config.yaml`, which holds
+what Verkstead is told rather than what it finds.
+**Two rules, each one function.** *The merge*: per record the newest
+`updated_at` wins, the writer's Device Id breaking a tie, and a removal is final
+— a record carrying a deletion stamp is never overwritten by an edit, and a
+deletion stamp arriving beats any edit. *The stamping*: a write is stamped with
+the later of this device's now and one past the stamp it holds for the record,
+so a device whose clock runs behind never has its own edit reverted by the next
+pull. Removed records are kept, never pruned: the deletion stamp is what tells a
+device that was off when the removal happened that its edit stays removed.
+_Avoid_: mirror (the home-device model this replaces), synced row, tombstone
+(which is a Conversation that moved away; this is a deletion stamp)
+
 **Forward**:
 A server started in a **Terminal** on another **Member**, reachable on this
 device's own `localhost` at the same port from the moment this device's browser

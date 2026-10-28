@@ -904,12 +904,18 @@ impl Verkstead {
     }
 }
 
-/// What `config.yaml` in `dir` holds, as text.
+/// The Authors the device whose Data Directory is `dir` holds of its own, as
+/// text: the records of its table, which is where they are kept (ADR-0028).
 fn config_in(dir: &Path) -> String {
-    std::fs::read_to_string(dir.join("config.yaml")).unwrap_or_default()
+    format!(
+        "{:?}",
+        verkstead_server::settings::Settings::in_data_dir(dir)
+            .config()
+            .authors()
+    )
 }
 
-/// An edit of a mirror's email made on B lands in A's own `config.yaml`, and
+/// An edit of a mirror's email made on B lands in A's own records, and
 /// B's list says it the moment the press answers, off the row A gave back.
 #[tokio::test]
 async fn an_edit_of_a_mirror_is_made_at_home() {

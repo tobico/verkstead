@@ -921,21 +921,24 @@ pub(crate) async fn repoint(
     })
 }
 
-/// Take the Author with the uuid `id` out of the settings, from the Git
-/// section's switcher, if no registered Repo points at it.
+/// Remove the Author with the uuid `id` — a deletion stamp on its record —
+/// from the Git section's switcher, if no registered Repo points at it.
 ///
 /// **Points at** as [`crate::settings::Config::author_of`] reads it, so a Repo
 /// recording nothing is the only Author's and blocks removing it. An
 /// unregistered Repo keeps its association as history and blocks nothing: it
 /// is not on [`store::registered_repos`]. The look and the write are not one
-/// transaction — the files are not the store's — so a Repo registered as this
-/// Author in the instant between is the vanished Author a hand edit makes,
-/// refused by name at its next start.
+/// transaction — the Repos are read before the record is stamped — so a Repo
+/// registered as this Author in the instant between is the vanished Author a
+/// hand edit makes, refused by name at its next start.
 pub(crate) async fn remove_author(
     pool: &SqlitePool,
     settings: &crate::settings::Settings,
+    device: &str,
     id: &str,
 ) -> Result<AuthorRemoved> {
+    crate::replicating::authors::taken_up(pool, settings, device).await?;
+
     let config = settings.config();
 
     if config.author(id).is_none() {
@@ -953,11 +956,8 @@ pub(crate) async fn remove_author(
         return Ok(AuthorRemoved::InUse { repos });
     }
 
-    let settings = settings.clone();
-    let id = id.to_owned();
-
     Ok(
-        match tokio::task::spawn_blocking(move || settings.removing_author(&id)).await?? {
+        match crate::replicating::authors::removed(pool, settings, device, id).await? {
             true => AuthorRemoved::Removed,
             false => AuthorRemoved::NoSuchAuthor,
         },

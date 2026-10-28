@@ -275,6 +275,7 @@ pub mod remote;
 /// Following a Conversation's branch to the name a session renamed it to,
 /// rather than repairing a checkout that has not come adrift after all.
 mod renames;
+pub mod replicating;
 mod reply;
 mod repos;
 /// Speaking to a session that has gone idle without asking anything.
@@ -2485,6 +2486,16 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     if let Some(id) = moving_the_single_author(&settings, &pool).await? {
         tracing::info!(author = %id, "the one git author and GitHub token are now an Author");
     }
+
+    // And then the list of Authors taken up out of `config.yaml` into the
+    // database, once, under the uuids the file carried — so nothing a Repo
+    // records changes — and the table's live records held for the settings to
+    // resolve out of from here on (ADR-0028). After the move above, whose
+    // Author is one of the list's; and before anything reads an Author. See
+    // [`replicating::authors::taken_up`].
+    replicating::authors::taken_up(&pool, &settings, device.id())
+        .await
+        .context("taking the Authors up out of config.yaml into the database")?;
 
     // And the shared build cache, which is resolved for the reason the binds
     // above are and *made* here, which they never are — see

@@ -601,9 +601,11 @@ itself, behind `~/.local/bin` and ahead of Homebrew's prefixes — and with
 `rustup` found there, the rustup home is granted as it is on Windows.
 
 A session's GitHub auth and the author of its commits are two of those settings
-rather than anything found in a home directory. Who you are is an **Author** in
-`config.yaml`, keyed by a uuid, and its token is in `secrets.yaml` beside the
-database under that uuid:
+rather than anything found in a home directory. Who you are is an **Author**,
+keyed by a uuid and kept in the database as a **Replicated record**
+([ADR-0028](adr/0028-records-are-the-clusters.md)) — added, edited and removed
+on the settings page rather than in a file — and its token is in `secrets.yaml`
+beside the database under that uuid:
 
 ```yaml
 # secrets.yaml
@@ -613,10 +615,6 @@ author_tokens:
 
 ```yaml
 # config.yaml
-authors:
-  - id: 3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01
-    name: Tobias Cohen
-    email: tobi@tobico.net
 languages:
   rust:
     enabled: true
@@ -663,7 +661,11 @@ into the map and leaves the old key out of the file.
 A Data Directory from before the list said `git_author:` in `config.yaml` and
 `github_token:` in `secrets.yaml`. The first start moves the two into the list
 as one Author under a fresh uuid, and neither key is in either file afterwards
-([ADR-0025](adr/0025-a-repo-has-an-author.md)).
+([ADR-0025](adr/0025-a-repo-has-an-author.md)). One from before the records
+said its Authors as `authors:` in `config.yaml`: the first start takes them up
+into the database under the uuids they carried, so every Repo still resolves
+its Author, and takes the key out of the file. An `authors:` key written back
+in by hand afterwards is ignored, and the log says so.
 
 `sandbox_binds` at the foot is the other place the Sandbox Configuration binds
 are said. A bind is one absolute path, every session gets every one of them, and

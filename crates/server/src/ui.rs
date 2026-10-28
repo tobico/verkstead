@@ -64,6 +64,7 @@ use crate::device::Unlinkable;
 use crate::onboarding::Refusal;
 use crate::peer::workbench::OverTheLink;
 use crate::settings::{AtOnce, Cleanup, CleanupStep, Config, RuleTrouble};
+use crate::store::replicated::Written;
 use crate::updating::members::Untold;
 use crate::{AppState, store};
 
@@ -1388,40 +1389,70 @@ async fn edit_author(
     let settings = state.settings.clone();
     let gh = state.github.clone();
 
-    let saved = tokio::task::spawn_blocking(move || {
+    let saved = async {
+        let author = crate::settings::Author::of(
+            id.clone(),
+            Some(edit.display_name.clone()),
+            Some(edit.name.clone()),
+            Some(edit.email.clone()),
+        );
+
+        // Nothing written for an Author there is no record of — the token
+        // included, which would otherwise sit under a uuid nobody holds.
+        crate::replicating::authors::taken_up(&state.pool, &settings, &state.device).await?;
+
+        if settings.config().author(&id).is_none() {
+            return Ok::<_, anyhow::Error>(AuthorEdited::NoSuchAuthor);
+        }
+
+        // The token into `secrets.yaml` first, so that the record written
+        // after it says whether the file holds one.
         let token = match &edit.github_token {
             TokenEdit::Keep => None,
             TokenEdit::Set { token } => Some(Some(token.clone())),
             TokenEdit::Clear => Some(None),
         };
 
-        let author = crate::settings::Author::of(
-            id.clone(),
-            Some(edit.display_name),
-            Some(edit.name),
-            Some(edit.email),
-        );
+        if let Some(token) = token {
+            let settings = settings.clone();
+            let id = id.clone();
 
-        if !settings.editing_author(author, token)? {
-            return Ok::<_, std::io::Error>(AuthorEdited::NoSuchAuthor);
+            tokio::task::spawn_blocking(move || settings.setting_author_token(&id, token))
+                .await??;
+        }
+
+        let written =
+            crate::replicating::authors::edited(&state.pool, &settings, &state.device, &author)
+                .await?;
+
+        if matches!(written, Written::Absent | Written::Removed) {
+            return Ok(AuthorEdited::NoSuchAuthor);
         }
 
         // Read back off the file rather than taken from the request, for the
         // settings save's reason: a token of whitespace is nothing configured.
         let verified = match &edit.github_token {
-            TokenEdit::Set { .. } => settings
-                .secrets()
-                .author_token(&id)
-                .map(|token| verifying(&gh, token)),
+            TokenEdit::Set { .. } => {
+                let settings = settings.clone();
+                let id = id.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    settings
+                        .secrets()
+                        .author_token(&id)
+                        .map(|token| verifying(&gh, token))
+                })
+                .await?
+            }
             TokenEdit::Keep | TokenEdit::Clear => None,
         };
 
         Ok(AuthorEdited::Saved { verified })
-    })
+    }
     .await;
 
     match saved {
-        Ok(Ok(outcome)) => {
+        Ok(outcome) => {
             // Every member's mirror of it, and its copy of the token, redrawn
             // on the read this sets going.
             if matches!(outcome, AuthorEdited::Saved { .. }) {
@@ -1429,10 +1460,6 @@ async fn edit_author(
             }
 
             Json(outcome).into_response()
-        }
-        Ok(Err(error)) => {
-            tracing::error!(error = ?error, "writing an Author into the settings files failed");
-            unavailable("The author couldn't be saved.")
         }
         Err(error) => {
             tracing::error!(error = ?error, "saving an Author failed");
@@ -1472,7 +1499,7 @@ async fn remove_author(State(state): State<AppState>, Path(id): Path<String>) ->
         }
     }
 
-    match crate::repos::remove_author(&state.pool, &state.settings, &id).await {
+    match crate::repos::remove_author(&state.pool, &state.settings, &state.device, &id).await {
         Ok(outcome) => {
             // Every member's mirror of it goes on the read this sets going.
             if outcome == verkstead_render::AuthorRemoved::Removed {
@@ -6676,6 +6703,16 @@ async fn save_settings(
     State(state): State<AppState>,
     Json(edit): Json<SettingsEdit>,
 ) -> HttpResponse {
+    // The Authors taken up out of `config.yaml` where they have not been yet —
+    // which a serve has done already — since what the Git section sends is a
+    // write to their table. See [`crate::replicating::authors::taken_up`].
+    if let Err(error) =
+        crate::replicating::authors::taken_up(&state.pool, &state.settings, &state.device).await
+    {
+        tracing::error!(error = ?error, "taking the Authors up into the database failed");
+        return unavailable("The settings couldn't be saved.");
+    }
+
     // A save that adds an Author beside the only one there is ends the one
     // Author's standing for every Repo that records none, so they are recorded
     // as it first — see [`recording_the_only_author`].
@@ -6720,6 +6757,13 @@ async fn save_settings(
 
     // And what is running, which a Clear is refused over — the same.
     let running = running(&state);
+
+    // And the table the Git section's Author is written into, which is the
+    // store's: written from the blocking hop below through the runtime, after
+    // the files and before the view that rides back reads them.
+    let runtime = tokio::runtime::Handle::current();
+    let pool = state.pool.clone();
+    let device = state.device.clone();
 
     let saved = tokio::task::spawn_blocking(move || {
         // What the rules are to be afterwards, and what is wrong with them —
@@ -6831,16 +6875,22 @@ async fn save_settings(
             None => None,
         };
 
+        // The Author the section drew, which is a write to its record once
+        // the token beside it is in `secrets.yaml` — see below. Handed to the
+        // file's save too, where it is never written: the Authors are the
+        // table's — see [`crate::settings::Settings::save_config`].
+        let author = id.clone().map(|id| {
+            crate::settings::Author::of(
+                id,
+                Some(drawn.display_name),
+                Some(drawn.name),
+                Some(drawn.email),
+            )
+        });
+
         settings.save_config(
             &Config::of(
-                id.clone().map(|id| {
-                    crate::settings::Author::of(
-                        id,
-                        Some(drawn.display_name),
-                        Some(drawn.name),
-                        Some(drawn.email),
-                    )
-                }),
+                author.clone(),
                 // The two keys the page writes, per language it drew: the
                 // switch as it stands, and the size as it was typed with an
                 // empty field meaning nothing configured — clearing it is how
@@ -6955,6 +7005,18 @@ async fn save_settings(
 
         if writing {
             settings.save_secrets(&secrets)?;
+        }
+
+        // And the Author's record, after the token so that it says whether
+        // `secrets.yaml` holds one — a write stamped past whatever this device
+        // held of it, and nothing written where nothing the section drew
+        // changed (ADR-0028).
+        if let Some(author) = &author {
+            runtime
+                .block_on(crate::replicating::authors::written(
+                    &pool, &settings, &device, author,
+                ))
+                .map_err(std::io::Error::other)?;
         }
 
         // What GitHub made of it: whose it is, and what it may do. The second

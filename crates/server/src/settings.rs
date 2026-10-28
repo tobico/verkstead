@@ -22,11 +22,6 @@
 //! and `config.yaml` is the one that could be read over anybody's shoulder:
 //!
 //! ```yaml
-//! authors:
-//!   - id: 3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01
-//!     display_name: Work
-//!     name: Tobias Cohen
-//!     email: tobi@tobico.net
 //! rust_build_cache:
 //!   enabled: true
 //!   size: 30G
@@ -80,12 +75,21 @@
 //! anything saved through the settings page applies to the next session without
 //! a restart, and a running session keeps what it started with.
 //!
-//! **There may be more than one of them**, which is what `authors` is: a list
-//! of [`Author`]s, each keyed by a uuid, with its token in the other file under
-//! that uuid (ADR-0025). The uuid is what a Repo records, so the display name is
-//! free to change. An installation from before the list wrote one `git_author`
-//! and one `github_token`, and the first start moves them into it as one Author
-//! — see [`Settings::moving_the_single_author`] — so the files have one shape.
+//! **There may be more than one of them**: a list of [`Author`]s, each keyed by
+//! a uuid, with its token in the other file under that uuid (ADR-0025). The
+//! uuid is what a Repo records, so the display name is free to change. An
+//! installation from before the list wrote one `git_author` and one
+//! `github_token`, and the first start moves them into it as one Author — see
+//! [`Settings::moving_the_single_author`] — so the files have one shape.
+//!
+//! **And the list is not in `config.yaml` any more.** An Author is a
+//! **Replicated record** in the database, the cluster's rather than this
+//! device's (ADR-0028): the `authors:` key a file from before held is taken up
+//! into the table once, under the uuids it carried, and gone from the file
+//! after — see [`crate::replicating::authors`]. The records are held in memory
+//! for these files' readers — see [`Settings::holding_authors`] — and a key
+//! written back into the file by hand is ignored, the log saying so. The
+//! token stays here, under the uuid.
 //!
 //! **Nothing here is ever an error.** A file that is not there, one that is
 //! empty, and one nothing can parse all come back as nothing configured: the
@@ -162,6 +166,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 
 use regex::Regex;
@@ -203,22 +208,37 @@ pub(crate) const ORDINARY_MODE: u32 = 0o644;
 pub struct Settings {
     dir: PathBuf,
 
-    /// The members' Authors this device holds mirrors of, as the refresher
-    /// last wrote them down — see [`Settings::holding_mirrors`].
-    mirrors: Held,
+    /// What this device holds in memory beside the files: the Authors' records
+    /// and the members' mirrors — see [`Held`].
+    held: Arc<Held>,
 }
 
-/// The mirrors one Data Directory's handles share.
-type Held = Arc<RwLock<Vec<Mirrored>>>;
+/// What one Data Directory's handles hold in memory between them.
+#[derive(Debug, Default)]
+struct Held {
+    /// The live Author records out of the database, as last laid down — see
+    /// [`Settings::holding_authors`]. `None` until they first are, which is a
+    /// start before the Authors were taken up into the database, and the one
+    /// moment `config.yaml`'s `authors:` is still read.
+    authors: RwLock<Option<Vec<Author>>>,
 
-/// Every Data Directory's held mirrors, so that every handle on one directory
+    /// Whether the log has been told that `config.yaml` holds an `authors:`
+    /// key nothing reads any more — once per run, rather than at every read.
+    ignoring_said: AtomicBool,
+
+    /// The members' Authors this device holds mirrors of, as the refresher
+    /// last wrote them down — see [`Settings::holding_mirrors`].
+    mirrors: RwLock<Vec<Mirrored>>,
+}
+
+/// Every Data Directory's held lists, so that every handle on one directory
 /// reads the same — see [`Settings::holding_mirrors`].
-static MIRRORS: LazyLock<Mutex<HashMap<PathBuf, Held>>> = LazyLock::new(Mutex::default);
+static HELD: LazyLock<Mutex<HashMap<PathBuf, Arc<Held>>>> = LazyLock::new(Mutex::default);
 
 impl Settings {
     /// The settings files kept in `data_dir`, beside the database.
     pub fn in_data_dir(data_dir: &Path) -> Settings {
-        let mirrors = MIRRORS
+        let held = HELD
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(data_dir.to_owned())
@@ -227,8 +247,49 @@ impl Settings {
 
         Settings {
             dir: data_dir.to_owned(),
-            mirrors,
+            held,
         }
+    }
+
+    /// Hold `authors` as every Author there is: the live records of the
+    /// database's table, in the order they were first written down, for
+    /// [`Settings::config`] to lay over whatever `config.yaml` says.
+    ///
+    /// **Held in memory rather than read off the store**, for the mirrors'
+    /// reason below: an Author is resolved on blocking threads, out of these
+    /// files alone. What writes the table is what hands the records on here,
+    /// after every write — see [`crate::replicating::authors`].
+    ///
+    /// **And from then on `config.yaml` is not read for Authors**: the table is
+    /// the whole of them, and an `authors:` key written into the file by hand
+    /// is ignored, the log saying so once.
+    pub fn holding_authors(&self, authors: Vec<Author>) {
+        *self
+            .held
+            .authors
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(authors);
+    }
+
+    /// Forget the Authors held, as a new start of the server would find them.
+    #[cfg(test)]
+    pub(crate) fn forgetting_the_authors(&self) {
+        *self
+            .held
+            .authors
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        self.held.ignoring_said.store(false, Ordering::Relaxed);
+    }
+
+    /// Whether the Authors are held off the database's table yet — see
+    /// [`Settings::holding_authors`].
+    pub fn holds_authors(&self) -> bool {
+        self.held
+            .authors
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
     }
 
     /// Hold `mirrors` as every member's Authors this device knows of, for
@@ -248,6 +309,7 @@ impl Settings {
     /// three.
     pub fn holding_mirrors(&self, mirrors: Vec<Mirrored>) {
         *self
+            .held
             .mirrors
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = mirrors;
@@ -292,7 +354,7 @@ impl Settings {
     pub fn config(&self) -> Config {
         let path = self.config_path();
 
-        let config = match text_of(&path) {
+        let mut config = match text_of(&path) {
             None => Config::default(),
             Some(text) => Config::read(&text).unwrap_or_else(|error| {
                 unreadable(&path, &error);
@@ -300,7 +362,32 @@ impl Settings {
             }),
         };
 
+        // The table's Authors over the file's, once there are any held: the
+        // file was emptied of them as they were taken up, so an `authors:` key
+        // in it now is a hand-edit nothing reads.
+        let authors = self
+            .held
+            .authors
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+
+        if let Some(authors) = authors {
+            if !config.authors.is_empty() && !self.held.ignoring_said.swap(true, Ordering::Relaxed)
+            {
+                tracing::warn!(
+                    path = %path.display(),
+                    "config.yaml holds an `authors:` key, which is ignored: the Authors are \
+                     kept in the database now, and are added, edited and removed on the \
+                     settings page",
+                );
+            }
+
+            config.authors = authors;
+        }
+
         let mut mirrors = self
+            .held
             .mirrors
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -362,7 +449,21 @@ impl Settings {
     /// And write `config.yaml`, the same way but readable: there is nothing in
     /// it that is anybody's secret, and a name and an address the machine's
     /// owner cannot read back would be an odd thing to insist on.
+    ///
+    /// **Never with an Author in it once they are held off the database**:
+    /// whatever `config` says of them is the table's, read back by
+    /// [`Settings::config`], and writing it into the file would be a second
+    /// copy nothing reads.
     pub fn save_config(&self, config: &Config) -> std::io::Result<()> {
+        if self.holds_authors() && !config.authors.is_empty() {
+            let config = Config {
+                authors: Vec::new(),
+                ..config.clone()
+            };
+
+            return write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE);
+        }
+
         write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE)
     }
 
@@ -431,70 +532,54 @@ impl Settings {
         Ok(minted)
     }
 
-    /// Take the Author whose uuid is `id` out of `config.yaml`, and its token
-    /// out of `secrets.yaml` — `false` where the file holds no such Author and
-    /// nothing was written.
-    ///
-    /// Whether anything still points at it is the caller's to ask first — see
-    /// [`crate::repos::remove_author`]: these two files know nothing of the
-    /// Repos. `config.yaml` first, so that stopping between the writes leaves
-    /// a token under a uuid nobody holds, which nothing reads, rather than an
-    /// Author whose token has gone. **A file nothing can parse is an error**
-    /// rather than an Author missing from it: written back from nothing, it
-    /// would lose whatever the human meant by it.
-    pub fn removing_author(&self, id: &str) -> std::io::Result<bool> {
-        let unparsed = || std::io::Error::other("a settings file won't parse");
-
-        let config = Self::parsed(&self.config_path(), Config::read).ok_or_else(unparsed)?;
-        let secrets = Self::parsed(&self.secrets_path(), Secrets::read).ok_or_else(unparsed)?;
-
-        if config.author(id).is_none() {
-            return Ok(false);
-        }
-
-        self.save_config(&config.without_author(id))?;
-
-        if secrets.author_token(id).is_some() {
-            self.save_secrets(&secrets.with_author_token(id, None))?;
-        }
-
-        Ok(true)
+    /// The Authors `config.yaml` holds as written, for taking them up into the
+    /// database — or `None` where the file will not parse, which is the
+    /// human's to fix rather than a list of nobody to take up.
+    pub(crate) fn authors_as_written(&self) -> Option<Vec<Author>> {
+        Self::parsed(&self.config_path(), Config::read).map(|config| config.authors)
     }
 
-    /// Write `author` over the Author `config.yaml` holds under its uuid, and
-    /// — where `token` is `Some` — that Author's token into `secrets.yaml`, a
-    /// `None` inside it taking the token away. `false` where the file holds no
-    /// such Author and nothing was written.
+    /// Take the `authors:` key out of `config.yaml`, every other key as it
+    /// stands, once its Authors are records — see
+    /// [`crate::replicating::authors`]. Nothing is written where the file holds
+    /// none, and a file that will not parse is left for the human, the way
+    /// [`Settings::moving_the_single_author`] leaves one.
+    pub(crate) fn dropping_the_authors(&self) -> std::io::Result<()> {
+        let Some(config) = Self::parsed(&self.config_path(), Config::read) else {
+            return Ok(());
+        };
+
+        if config.authors.is_empty() {
+            return Ok(());
+        }
+
+        let config = Config {
+            authors: Vec::new(),
+            ..config
+        };
+
+        write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE)
+    }
+
+    /// Set the token of the Author whose uuid is `id` in `secrets.yaml`, or
+    /// take it away with `None`, every other secret as it stands.
     ///
-    /// One Author and nothing else of either file, which is what an edit put
-    /// here from a member is: that device holds none of this one's other
-    /// settings, so it sends none — see [`crate::mirroring::authors::edited`].
-    /// A file nothing can parse is an error, for [`Settings::removing_author`]'s
-    /// reason.
-    pub fn editing_author(
+    /// **A file nothing can parse is an error** rather than a file of nothing
+    /// to write the token into: written back from nothing, it would lose
+    /// whatever else the human kept in it.
+    pub(crate) fn setting_author_token(
         &self,
-        author: Author,
-        token: Option<Option<String>>,
-    ) -> std::io::Result<bool> {
-        let unparsed = || std::io::Error::other("a settings file won't parse");
+        id: &str,
+        token: Option<String>,
+    ) -> std::io::Result<()> {
+        let secrets = Self::parsed(&self.secrets_path(), Secrets::read)
+            .ok_or_else(|| std::io::Error::other("secrets.yaml won't parse"))?;
 
-        let config = Self::parsed(&self.config_path(), Config::read).ok_or_else(unparsed)?;
-
-        if config.author(author.id()).is_none() {
-            return Ok(false);
+        if token.is_none() && secrets.author_token(id).is_none() {
+            return Ok(());
         }
 
-        let id = author.id().to_owned();
-
-        self.save_config(&config.with_author(author))?;
-
-        if let Some(token) = token {
-            let secrets = Self::parsed(&self.secrets_path(), Secrets::read).ok_or_else(unparsed)?;
-
-            self.save_secrets(&secrets.with_author_token(&id, token))?;
-        }
-
-        Ok(true)
+        self.save_secrets(&secrets.with_author_token(id, token))
     }
 
     /// What `secrets.yaml` holds, nothing written counting as empty — or `None`
@@ -992,6 +1077,13 @@ pub struct Config {
     /// in the order they were written down, each keyed by a uuid — and their
     /// tokens in the other file under it.
     ///
+    /// **The database's records, once they are held** — which a serve has
+    /// done before anything reads one: [`Settings::config`] lays them over
+    /// whatever the file says, and [`Settings::save_config`] never writes them
+    /// into it (ADR-0028). Read out of the file only where they are not held
+    /// yet, which is the start that takes them up — see
+    /// [`crate::replicating::authors::taken_up`].
+    ///
     /// Read the way the declared servers below are: an absent key, an absent
     /// file and one nothing can parse all mean no Authors, which is a session
     /// with no `user.name` and git's own "tell me who you are". An entry with
@@ -1472,23 +1564,6 @@ impl Config {
             Some(mirror) if !mirror.holds_token => None,
             _ => secrets.author_token(author.id()),
         }
-    }
-
-    /// And the same config with `author` written over the entry under its
-    /// uuid, every other key as it was — see [`Settings::editing_author`].
-    pub fn with_author(mut self, author: Author) -> Config {
-        if let Some(kept) = self.authors.iter_mut().find(|kept| kept.id == author.id) {
-            *kept = author;
-        }
-
-        self
-    }
-
-    /// And the same config with the Author whose uuid is `id` taken out, every
-    /// other key as it was — see [`Settings::removing_author`].
-    pub fn without_author(mut self, id: &str) -> Config {
-        self.authors.retain(|author| author.id != id);
-        self
     }
 
     /// The config a **Keeper** writes for its **Annex** before the Annex first
@@ -3469,58 +3544,89 @@ mod tests {
         );
     }
 
-    /// Removing an Author takes its entry and its token and nothing else out
-    /// of either file, and one the file does not hold writes nothing.
+    /// Once the Authors are held off the database, they are the whole of the
+    /// list: an `authors:` key in the file is ignored, and a save never
+    /// writes the held ones back into it.
     #[test]
-    fn removing_an_author_takes_its_entry_and_its_token() {
+    fn held_authors_are_the_list_and_never_written_into_the_file() {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
         std::fs::write(
             settings.config_path(),
-            concat!(
-                "authors:\n",
-                "  - id: work\n",
-                "    name: Tobias Cohen\n",
-                "  - id: home\n",
-                "    name: Tobi\n",
-                "share_on_done: true\n",
-            ),
-        )
-        .unwrap();
-        std::fs::write(
-            settings.secrets_path(),
-            "author_tokens:\n  work: ghp_work\n  home: ghp_home\n",
+            "authors:\n  - id: by-hand\n    name: By Hand\nshare_on_done: true\n",
         )
         .unwrap();
 
-        assert!(settings.removing_author("home").unwrap());
+        settings.holding_authors(vec![Author::of(
+            "work".into(),
+            None,
+            Some("Tobias Cohen".into()),
+            None,
+        )]);
 
         let config = settings.config();
         let ids: Vec<_> = config.authors().iter().map(Author::id).collect();
-        assert_eq!(ids, ["work"]);
+        assert_eq!(ids, ["work"], "the hand-edited key is ignored");
         assert!(config.share_on_done(), "the rest of the file stands");
 
-        let secrets = settings.secrets();
-        assert_eq!(secrets.author_token("home"), None);
-        assert_eq!(secrets.author_token("work"), Some("ghp_work"));
+        settings.save_config(&config).unwrap();
 
-        assert!(!settings.removing_author("home").unwrap(), "already gone");
+        let written = std::fs::read_to_string(settings.config_path()).unwrap();
+        assert!(!written.contains("authors"), "{written}");
+        assert!(written.contains("share_on_done: true"), "{written}");
     }
 
-    /// A `config.yaml` nothing can parse is not written over by a removal.
+    /// Taking the key out of the file leaves every other key, and a file
+    /// nothing can parse is left as it was.
     #[test]
-    fn removing_an_author_from_a_file_nothing_can_parse_is_an_error() {
+    fn dropping_the_authors_leaves_the_rest_of_the_file() {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
-        std::fs::write(settings.config_path(), "authors: [oh\n").unwrap();
+        std::fs::write(
+            settings.config_path(),
+            "authors:\n  - id: work\n    name: Tobias Cohen\nshare_on_done: true\n",
+        )
+        .unwrap();
 
-        assert!(settings.removing_author("work").is_err());
+        settings.dropping_the_authors().unwrap();
+
+        let written = std::fs::read_to_string(settings.config_path()).unwrap();
+        assert!(!written.contains("authors"), "{written}");
+        assert!(Config::read(&written).unwrap().share_on_done());
+
+        std::fs::write(settings.config_path(), "authors: [oh\n").unwrap();
+        settings.dropping_the_authors().unwrap();
         assert_eq!(
             std::fs::read_to_string(settings.config_path()).unwrap(),
             "authors: [oh\n"
         );
+    }
+
+    /// An Author's token set and taken away, every other secret where it was.
+    #[test]
+    fn an_authors_token_is_set_and_taken_away_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: ghp_work\n",
+        )
+        .unwrap();
+
+        settings
+            .setting_author_token("home", Some("ghp_home".into()))
+            .unwrap();
+        assert_eq!(settings.secrets().author_token("home"), Some("ghp_home"));
+
+        settings.setting_author_token("home", None).unwrap();
+        assert_eq!(settings.secrets().author_token("home"), None);
+        assert_eq!(settings.secrets().author_token("work"), Some("ghp_work"));
+
+        std::fs::write(settings.secrets_path(), "author_tokens: [oh\n").unwrap();
+        assert!(settings.setting_author_token("work", None).is_err());
     }
 
     #[test]

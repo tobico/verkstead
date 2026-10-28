@@ -65,6 +65,10 @@ mod push;
 /// hands the answer to whichever device owns the row that moved — see
 /// `server::ranking`. What is written down here is the key and nothing else.
 pub mod ranks;
+/// The **Replicated records**: a record held by every device of the cluster,
+/// the newest write winning and a removal final (ADR-0028). Public as a module
+/// because a kind is declared by whoever owns it — see [`replicated::Kind`].
+pub mod replicated;
 mod repos;
 mod session_endings;
 mod session_names;
@@ -973,6 +977,12 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // the uuid that is the same everywhere — see [`author_mirrors`]. Hanging off
     // nothing, the membership it is pruned against coming and going on its own.
     author_mirrors::apply_schema(pool).await?;
+
+    // And the records every device of a cluster holds — Authors first — with
+    // which kinds have been taken up out of where they were kept before. See
+    // [`replicated`]. Hanging off nothing, a record being nobody's to cascade
+    // from.
+    replicated::apply_schema(pool).await?;
 
     // And last of all, whatever a database written by an older Verkstead
     // still needs done to it. After every table above, because what a rewrite

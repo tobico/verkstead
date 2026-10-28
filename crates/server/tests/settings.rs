@@ -431,8 +431,17 @@ async fn the_first_save_makes_the_one_author_and_every_save_after_is_about_it() 
     assert_eq!(saved.settings.git_author.name, "Tobias Cohen");
     assert!(saved.settings.github_token.is_some(), "under the same uuid");
 
+    let authors = Settings::in_data_dir(dir.path())
+        .config()
+        .authors()
+        .to_vec();
+    assert_eq!(authors.len(), 1, "one Author: {authors:?}");
+
     let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-    assert_eq!(config.matches("- id:").count(), 1, "one Author: {config}");
+    assert!(
+        !config.contains("authors"),
+        "the Authors are records: {config}"
+    );
 
     let secrets = std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap();
     assert!(
@@ -482,9 +491,9 @@ async fn a_save_about_one_author_leaves_the_others_as_they_were() {
         saved.verified
     );
 
-    let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-    assert!(config.contains("name: Home"), "{config}");
-    assert!(config.contains("name: Tobias Cohen"), "{config}");
+    let config = Settings::in_data_dir(dir.path()).config();
+    assert_eq!(config.author("home").unwrap().name(), Some("Home"));
+    assert_eq!(config.author("work").unwrap().name(), Some("Tobias Cohen"));
 
     let secrets = std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap();
     assert!(secrets.contains("work: ghp_anewone"), "{secrets}");
@@ -777,19 +786,26 @@ async fn the_secrets_file_lands_readable_by_nobody_else() {
     assert_eq!(mode & 0o777, 0o600);
 }
 
-/// The files are the source of truth, so the endpoint reads them rather than
-/// remembering what it last wrote.
+/// The files are the source of truth for what is still in them, so the
+/// endpoint reads them rather than remembering what it last wrote — and the
+/// Authors are not in them any more: an `authors:` key written in by hand is
+/// ignored, the records being the database's (ADR-0028).
 #[tokio::test]
 async fn a_hand_edit_to_either_file_is_what_the_next_read_says() {
     let (dir, app) = app().await;
 
-    save_token(&app, "ghp_thefirsttoken").await;
+    let made = save_token(&app, "ghp_thefirsttoken").await;
+    let id = made
+        .settings
+        .git_author
+        .id
+        .expect("the token made an Author");
     save_author(&app, "Tobias Cohen", "tobi@tobico.net").await;
 
     hand_edit(
         dir.path(),
         "secrets.yaml",
-        "author_tokens:\n  by-hand: by-hand-abcd\n",
+        &format!("author_tokens:\n  {id}: by-hand-abcd\n"),
     );
     hand_edit(
         dir.path(),
@@ -806,8 +822,12 @@ async fn a_hand_edit_to_either_file_is_what_the_next_read_says() {
             .last_four,
         "abcd",
     );
-    assert_eq!(settings.git_author.name, "By Hand");
-    assert_eq!(settings.git_author.email, "hand@tobico.net");
+    assert_eq!(settings.git_author.id.as_deref(), Some(id.as_str()));
+    assert_eq!(
+        settings.git_author.name, "Tobias Cohen",
+        "the key is ignored"
+    );
+    assert_eq!(settings.git_author.email, "tobi@tobico.net");
 }
 
 /// The binds are values now, so a save carrying them as they stand is what
@@ -2146,7 +2166,11 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
 
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
 
-    assert!(written.contains("Ada"), "what the page sent is in the file");
+    assert_eq!(
+        Settings::in_data_dir(dir.path()).config().authors()[0].name(),
+        Some("Ada"),
+        "what the page sent is the Author's record",
+    );
 
     for key in [
         "gleam",
