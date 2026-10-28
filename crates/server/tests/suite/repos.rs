@@ -28,7 +28,7 @@
 //! read is somewhere a Repo can be registered from, whatever the installation
 //! was started with.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use axum::Router;
@@ -43,6 +43,8 @@ use verkstead_render::{
 };
 use verkstead_server::settings::{Author, Mirrored, Settings};
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
+
+use crate::fixture_repositories::repository;
 
 /// The device every Conversation started here is ranked by, named the way a
 /// cluster names one (ADR-0020, *Ranks*).
@@ -67,20 +69,6 @@ async fn workbench_and_pool() -> (tempfile::TempDir, SqlitePool, Router) {
     let data_dir = dir.path().to_owned();
 
     (dir, pool.clone(), router_keeping(pool, data_dir))
-}
-
-/// A git repository at `path`, with one commit on `main` so it has a branch to
-/// call its default.
-fn repository(path: PathBuf) -> PathBuf {
-    std::fs::create_dir_all(&path).unwrap();
-    git(&path, &["init", "--initial-branch", "main"]);
-    git(&path, &["config", "user.email", "test@verkstead.invalid"]);
-    git(&path, &["config", "user.name", "Verkstead Test"]);
-    std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
-    git(&path, &["add", "README.md"]);
-    git(&path, &["commit", "-m", "first"]);
-
-    path
 }
 
 fn git(dir: &Path, args: &[&str]) {

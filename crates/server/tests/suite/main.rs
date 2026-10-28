@@ -14,6 +14,9 @@
 //! only test in its process, which a module of this one would not be — every
 //! file here runs on threads of the one process under `cargo test`, beside
 //! every other.
+//!
+//! One module is not a suite: `fixture_repositories` is the git repository a
+//! test copies rather than makes, for the suites that can reach it.
 
 mod account_windows;
 mod accounts;
@@ -34,6 +37,7 @@ mod dialling;
 mod discovering;
 mod exchange;
 mod files;
+mod fixture_repositories;
 mod freshness;
 mod installing;
 mod joining;

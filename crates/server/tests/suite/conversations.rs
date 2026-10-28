@@ -34,6 +34,8 @@ use verkstead_render::{
 use verkstead_server::settings::{Author, Mirrored, Settings};
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
+use crate::fixture_repositories::{repository, repository_and_clone};
+
 /// A router, plus the directory holding its database and its data directory
 /// alive.
 ///
@@ -91,20 +93,6 @@ fn at_once(dir: &tempfile::TempDir, stages: usize) {
 /// machine that skipped the settings page is.
 fn no_author(dir: &tempfile::TempDir) {
     std::fs::remove_file(dir.path().join(CONFIG)).unwrap();
-}
-
-/// A git repository at `path`, with one commit on `main` so it has a branch to
-/// call its default.
-fn repository(path: PathBuf) -> PathBuf {
-    std::fs::create_dir_all(&path).unwrap();
-    git(&path, &["init", "--initial-branch", "main"]);
-    git(&path, &["config", "user.email", "test@verkstead.invalid"]);
-    git(&path, &["config", "user.name", "Verkstead Test"]);
-    std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
-    git(&path, &["add", "README.md"]);
-    git(&path, &["commit", "-m", "first"]);
-
-    path
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -219,23 +207,12 @@ async fn cloned_workbench(
     std::fs::write(dir.path().join(CONFIG), THE_AUTHOR).unwrap();
     let app = router_asking_github(pool, dir.path().to_owned(), gh);
 
-    let upstream = repository(dir.path().join("upstream"));
-    let repo = elsewhere.path().join("verkstead");
-    git(
-        elsewhere.path(),
-        &[
-            "clone",
-            &upstream.to_string_lossy(),
-            &repo.to_string_lossy(),
-        ],
+    // With an identity configured in the clone, rather than in whichever test
+    // commits first, because being able to commit is what a repository is for.
+    let (upstream, repo) = repository_and_clone(
+        dir.path().join("upstream"),
+        elsewhere.path().join("verkstead"),
     );
-
-    // A clone inherits no identity, and a machine that has no global one — which
-    // is every machine the checks run on — cannot commit in it. Set here rather
-    // than in whichever test commits first, because being able to commit is what
-    // a repository is for.
-    git(&repo, &["config", "user.email", "test@verkstead.invalid"]);
-    git(&repo, &["config", "user.name", "Verkstead Test"]);
 
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
