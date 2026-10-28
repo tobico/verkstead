@@ -119,7 +119,7 @@ pub struct Swept {
 /// **Blocks**, on a walk of every unit in every store; the loop hands it to a
 /// blocking thread.
 ///
-/// Public for the proofs' sake: `tests/package_stores.rs` sweeps a store a real
+/// Public for the proofs' sake: `tests/suite/package_stores.rs` sweeps a store a real
 /// tool filled, and then has the tool install out of what is left.
 pub fn swept(cache: &BuildCache, descriptor: &Descriptor, size: u64) -> Swept {
     let Some(machine) = cache.machine() else {

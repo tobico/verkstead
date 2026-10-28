@@ -20,7 +20,7 @@
 //! now: the list a drop lands on is merged from the whole cluster, so the two
 //! neighbours may belong to two machines and only the device the browser opened
 //! has both in hand. See the server's `ranking` module and its
-//! `tests/merging.rs`. What is left here is what this database does with the
+//! `tests/suite/merging.rs`. What is left here is what this database does with the
 //! answer it is handed.
 //!
 //! The places themselves go once they have become ranks, which is the rest of

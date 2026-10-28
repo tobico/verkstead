@@ -94,7 +94,7 @@ jobs:
       - name: Test
         run: cargo test --workspace
         env:
-          # Twice the suite's own clock for `crates/server/tests/sessions.rs`,
+          # Twice the suite's own clock for `crates/server/tests/suite/sessions.rs`,
           # which stands real servers up and runs real sessions in real
           # sandboxes and judges them on wall clock. This runner has two cores
           # and is building the workspace alongside the run, so a session gets
@@ -122,7 +122,7 @@ jobs:
           fi
 
   # The package stores, proved by really installing something inside a Sandbox
-  # — `crates/server/tests/package_stores.rs`, which is where the reasoning is.
+  # — `crates/server/tests/suite/package_stores.rs`, which is where the reasoning is.
   #
   # A job of its own rather than more steps in `Rust`, for two reasons. The
   # tools are this suite's alone and installing them would slow every other
@@ -244,7 +244,7 @@ jobs:
           # Classic reads `YARN_CACHE_FOLDER` and Berry reads
           # `YARN_GLOBAL_FOLDER`, so a runner carrying one of them is a runner
           # where half of that is never proved — the name here is the one
-          # `tests/package_stores.rs` looks for and the one the dev shell links
+          # `tests/suite/package_stores.rs` looks for and the one the dev shell links
           # it in under.
           sudo /usr/local/node/bin/npm install -g --prefix /usr/local/yarn-berry \
             @yarnpkg/cli-dist@4.14.1
@@ -451,9 +451,10 @@ jobs:
 
       # `--nocapture` so that a proof's own account of itself is in the log:
       # what an install printed is the whole of what explains a failure, and a
-      # captured one is a line about an exit status.
+      # captured one is a line about an exit status. Quoted, because the module's
+      # name ends in a colon and YAML would read the line as a key.
       - name: The proofs
-        run: cargo test -p verkstead-server --test package_stores -- --nocapture
+        run: 'cargo test -p verkstead-server --test suite -- --nocapture package_stores::'
         env:
           # What makes a skipped proof a failure here. Any value does; this one
           # says what it is for.
@@ -466,8 +467,10 @@ jobs:
   # settles bubblewrap's. Nothing but a Mac can answer it, which is what this
   # job is for.
   #
-  # Two targets rather than the workspace: everything else in it stands on
-  # bubblewrap and a Linux kernel, and a Mac has neither. The rest of what this
+  # One suite rather than the workspace: everything else in it stands on
+  # bubblewrap and a Linux kernel, and a Mac has neither. The suite is a module
+  # of the server's one test binary, so the binary is built whole here and the
+  # module's name is what picks the suite out of it. The rest of what this
   # stage's code says — the policy a description renders to, read as text — is
   # unit-tested in the Rust job above, which is where a mistake in it shows up
   # in seconds rather than on a runner that has to be waited for.
@@ -490,8 +493,9 @@ jobs:
       # No `web/dist` is fetched and none is needed: the embed is
       # `allow_missing`, so the server compiles without the viewer — and what
       # this suite probes is a filesystem boundary rather than anything served.
+      # Quoted for the same colon.
       - name: The boundary suite
-        run: cargo test -p verkstead-server --test sandbox_macos
+        run: 'cargo test -p verkstead-server --test suite -- sandbox_macos::'
 
       # And the onboarding module's own unit tests, which is where the wizard's
       # two questions for a real Mac are: whether `hw.optional.arm64` is a
@@ -625,7 +629,7 @@ jobs:
       # and where what is left to do about it is said. A runner with no sccache
       # would start no Compile Server for want of a binary and would prove
       # nothing — so the two tests about it in
-      # `crates/server/tests/sessions_windows.rs` insist on one being installed
+      # `crates/server/tests/suite/sessions_windows.rs` insist on one being installed
       # and say so by failing rather than by quietly passing.
 
       #
@@ -702,13 +706,13 @@ jobs:
       # for itself.
       #
       # **And a session end to end is in it**, which is this machine's alone to
-      # answer: `crates/server/tests/sessions_windows.rs` runs a real grilling
+      # answer: `crates/server/tests/suite/sessions_windows.rs` runs a real grilling
       # on a real pseudoconsole with a PowerShell stand-in where the agent goes,
-      # and `tests/sessions.rs` stays the Unix arm of the same questions.
+      # and `tests/suite/sessions.rs` stays the Unix arm of the same questions.
       #
       # **And the boundary suite is in it**, which is what this job is to
       # Windows that the `macOS sandbox` job above is to a Mac:
-      # `crates/server/tests/sandbox_windows.rs` has the description's entries
+      # `crates/server/tests/suite/sandbox_windows.rs` has the description's entries
       # written on real directories for the session account, and runs a probe as
       # that account which attempts each access and says what the machine said.
       # It runs here rather than in a step of its own because this job already

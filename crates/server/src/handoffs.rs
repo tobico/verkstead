@@ -499,7 +499,7 @@ mod tests {
         // Linux composes the same characters whichever tool is used and cannot
         // tell one spelling from the other. That the line a Windows session
         // really gets is spelled one way throughout is asserted where a Windows
-        // machine runs it — see `tests/sessions_windows.rs`.
+        // machine runs it — see `tests/suite/sessions_windows.rs`.
         assert!(
             started_on.contains(&inside.join(PROMPT).display().to_string()),
             "{started_on:?} does not name the file the session will open",

@@ -226,7 +226,7 @@ impl Server {
     /// CLI's own suite. What a session on such a backend would have left behind
     /// is a Set stored with somebody idling on it, which is exactly this; that
     /// the server marks one so when a session of that type asks is
-    /// `crates/server/tests/sessions.rs`'s to prove.
+    /// `crates/server/tests/suite/sessions.rs`'s to prove.
     pub fn store_and_nudge(&self, yaml: &str) -> i64 {
         let set = QuestionSet::from_yaml(yaml).expect("the fixture Set parses");
 

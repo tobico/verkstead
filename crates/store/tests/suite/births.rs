@@ -17,7 +17,7 @@
 //!
 //! The mark beside it is the other half: where the live record went, kept on the
 //! copy that is no longer it. What the sidebar does with the pair is the server's
-//! — see its `tests/merging.rs`, where two devices really hold two copies of one
+//! — see its `tests/suite/merging.rs`, where two devices really hold two copies of one
 //! key — and what a URL does with it is the viewer's. What is here is the
 //! database.
 

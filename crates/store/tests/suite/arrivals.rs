@@ -30,7 +30,7 @@
 //! The sweep is the other half of a failure being safe. A copy that reached here
 //! and whose move then fell over was never the human's to look at, so the device
 //! that sent it takes it back — which the archive does not authorise and does
-//! not need to. What the server makes of both is its `tests/transfer.rs`, where
+//! not need to. What the server makes of both is its `tests/suite/transfer.rs`, where
 //! two devices really move work between them; what is here is the database.
 
 use std::path::Path;

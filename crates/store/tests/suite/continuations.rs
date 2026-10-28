@@ -16,7 +16,7 @@
 //! under it has a log no other backend could read.
 //!
 //! What the launch then does with the answer is the server's — see its
-//! `tests/transfer.rs`, where a grilling really carries on across two machines.
+//! `tests/suite/transfer.rs`, where a grilling really carries on across two machines.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

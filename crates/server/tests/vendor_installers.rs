@@ -13,7 +13,7 @@
 //! other thread to race.
 //!
 //! Everything else about the run — the elevated batch, a dismissed dialog, a
-//! cancel, an installer that exited non-zero — is `tests/installing.rs`, where a
+//! cancel, an installer that exited non-zero — is `tests/suite/installing.rs`, where a
 //! machine is stated and its `PATH` stands still.
 //!
 //! **Nothing here reaches the network and nothing installs anything.** What a
@@ -287,7 +287,7 @@ fn found(program: &str) -> PathBuf {
 /// A stub `apt-get` in `bin`, which installs what it was named by putting a
 /// program where a session would look for it.
 ///
-/// **It really installs**, for `tests/installing.rs`'s reason: a row goes
+/// **It really installs**, for `tests/suite/installing.rs`'s reason: a row goes
 /// present because a `PATH` walk finds a program, so a package manager that
 /// installed nothing would be a run reporting success over rows that stayed
 /// absent.

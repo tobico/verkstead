@@ -466,7 +466,7 @@ fn standing(granting: bool) -> Grilling {
 /// password both.
 ///
 /// **A suite cannot make one and says so rather than passing** — the rule
-/// `crates/server/tests/account_windows.rs` follows, and for its reason:
+/// `crates/server/tests/suite/account_windows.rs` follows, and for its reason:
 /// creating a local account is an administrator's call, so a machine where the
 /// elevated verb has never been run fails here with the line that names it.
 ///

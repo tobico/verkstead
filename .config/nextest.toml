@@ -26,7 +26,7 @@ session-account = { max-threads = 1 }
 #   what waits a collision out is a two-second retry: see `ONE_AT_A_TIME` in
 #   `crates/server/src/sandbox/starting.rs`.
 # - The two tests that count sccache servers do it by diffing the machine's
-#   process list: see `COUNTING` in `crates/server/tests/sessions_windows.rs`.
+#   process list: see `COUNTING` in `crates/server/tests/suite/sessions_windows.rs`.
 #
 # Serial rather than a small number, because the first of those goes wrong
 # rather than slow: a session behind a narrower boundary than its description
@@ -35,10 +35,7 @@ session-account = { max-threads = 1 }
 # identities without logging on as one.
 [[profile.default.overrides]]
 filter = '''
-    binary_id(verkstead-server::sessions_windows)
-  | binary_id(verkstead-server::logins_windows)
-  | binary_id(verkstead-server::sandbox_windows)
-  | binary_id(verkstead-server::account_windows)
+    (binary_id(verkstead-server::suite) & test(/^(sessions_windows|logins_windows|sandbox_windows|account_windows)::/))
   | (binary_id(verkstead-cli::suite) & test(/^(sandbox_windows|launcher_windows)::/))
   | (binary_id(verkstead-server) & test(/^sandbox::granting::writing::tests::/))
 '''
@@ -52,5 +49,5 @@ test-group = 'session-account'
 # printed, every time. It shares nothing with another test, so it is not a
 # group: what it needs is the machine rather than a turn.
 [[profile.default.overrides]]
-filter = 'binary_id(verkstead-server::terminal_windows) & test(=a_child_that_is_dropped_takes_what_it_started_with_it)'
+filter = 'binary_id(verkstead-server::suite) & test(=terminal_windows::a_child_that_is_dropped_takes_what_it_started_with_it)'
 threads-required = 'num-test-threads'

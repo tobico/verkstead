@@ -103,7 +103,7 @@ impl Serve {
             // three desks away would hear is a device with a fresh id and a
             // hostname, gone again when the test ends. The switch rather than a
             // port of its own, because mDNS is spoken on 5353 wherever it is
-            // spoken at all — see `crates/server/tests/advertising.rs`, which is
+            // spoken at all — see `crates/server/tests/suite/advertising.rs`, which is
             // where the advertisement is read back off a port nobody else is on.
             .env("VERKSTEAD_NO_ADVERTISING", "1")
             .stdin(Stdio::null())

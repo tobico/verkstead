@@ -15,7 +15,7 @@
 //! failing test here until somebody has decided which it is.
 //!
 //! What the two ends make of this over a real link is the server's
-//! `tests/transfer.rs`. What is here is the record.
+//! `tests/suite/transfer.rs`. What is here is the record.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -190,7 +190,7 @@ async fn the_record_lands_on_the_far_end_reading_as_it_read_here() {
 /// A slice taken while the work is still committing reads the record at one
 /// moment: every commit in it comes with the Event it hangs off.
 ///
-/// **What the round trips of the server's `tests/transfer.rs` kept tripping
+/// **What the round trips of the server's `tests/suite/transfer.rs` kept tripping
 /// over.** A slice is a table at a time, and the session behind the work can
 /// still be recording a commit while one is read — an Event and its commit
 /// written together between the read of the Events and the read of the
@@ -379,7 +379,7 @@ async fn a_record_landing_again_takes_the_one_that_was_here_with_it() {
 /// The Timeline read while the record lands again reads one record or the
 /// other, never the Events of the first with the Captures of the second.
 ///
-/// **What the round trips of the server's `tests/transfer.rs` tripped over once
+/// **What the round trips of the server's `tests/suite/transfer.rs` tripped over once
 /// the slice was read at one moment.** A return lands against the record
 /// already there, taking it away and writing every Event under a new id in one
 /// transaction — and the Timeline is a query for the Events and one more for
@@ -557,7 +557,7 @@ async fn a_set_left_open_is_answerable_where_the_work_now_is() {
 /// at a Set has to be renumbered against it, and the record lands in a leg of its
 /// own — one before the session that resumes is started — so a map dropped at the
 /// commit would be a note that could not say which question was which. See
-/// `continuations::sets_as_they_landed`, and the server's own `tests/transfer.rs`
+/// `continuations::sets_as_they_landed`, and the server's own `tests/suite/transfer.rs`
 /// for the note it turns into.
 ///
 /// **And a second landing writes its own over it.** A Conversation that has come

@@ -11,7 +11,7 @@
 //!
 //! **What it needs of the machine, and what it says when it has not got it.**
 //! The session account, which is an elevated verb's to create — see
-//! `crates/server/tests/account_windows.rs`, whose refusal this one repeats. And
+//! `crates/server/tests/suite/account_windows.rs`, whose refusal this one repeats. And
 //! a copy of the binary somewhere the account can read: the entries a Surface
 //! comes to are a later task's, so this file puts one under `C:\Users\Public`,
 //! whose own access-control entries grant an interactive logon what it needs and
@@ -20,7 +20,7 @@
 //! **What is asserted is the console.** A `mode con` on the far side reports a
 //! width, and the width is the one Verkstead asked for rather than whatever
 //! console the tests were started from — which is the same probe
-//! `crates/server/tests/terminal_windows.rs` puts to a console made on *this*
+//! `crates/server/tests/suite/terminal_windows.rs` puts to a console made on *this*
 //! side, asked of one made on the other. Beside it: that the exit code coming
 //! back is the *session's* rather than the launcher's, and that the Job holds
 //! both.

@@ -23,8 +23,8 @@ $ nix develop
 Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 `git`, the `node` and `pnpm` the viewer is built with, and the Electron the
 desktop app runs on — and every tool the language descriptors' proofs in
-`crates/server/tests/package_stores.rs` install or build with, a JDK, Maven
-and Gradle among them.
+`crates/server/tests/suite/package_stores.rs` install or build with, a JDK,
+Maven and Gradle among them.
 
 ### 2. Build the viewer and start the server (terminal 1)
 
@@ -1066,6 +1066,7 @@ at the machine to ask, where a `serve` started in a terminal has not.
 
 ```console
 $ cargo test              # unit, schema and end-to-end tests
+$ cargo test -p verkstead-server --test suite -- conversations::   # one suite
 $ cargo clippy --all-targets
 $ cargo fmt
 $ nix fmt                 # the Nix files
@@ -1076,6 +1077,13 @@ $ blender -b tools/hammer/verkstead-hammer.blend \
 $ tools/generate-icons.sh     # the favicon and PWA icons, after re-rendering the artwork
 $ tools/generate-packaging.sh # the launcher icons, the menu bar template, the icns and the ico
 ```
+
+A crate's integration tests are one test binary, `suite`, and each file under
+its `tests/suite/` is a module of it — so a suite is run by hand by its
+module's name, as the second line does for the server's conversations suite
+and nothing else. The server keeps seven files beside `suite` as test binaries
+of their own, because what makes each safe is being the only test in its
+process: those are run by their own names, `--test servers_path` and the like.
 
 None of the three desktop artifacts a release ships is a script here. All
 three are the packed Electron app, which is `pnpm run pack` in `desktop/` —
@@ -1213,10 +1221,10 @@ its suite evaluates the written flake with a real `nix` where one is on
 
 ### The sessions suite, and the machine under it
 
-`crates/server/tests/sessions.rs` is the one suite that is really a hundred and
-forty small servers, each running a real session in a real sandbox and judged on
-wall clock. That makes it the one suite whose result depends on what else the
-machine is doing, so it has two knobs of its own.
+`crates/server/tests/suite/sessions.rs` is the one suite that is really a
+hundred and forty small servers, each running a real session in a real sandbox
+and judged on wall clock. That makes it the one suite whose result depends on
+what else the machine is doing, so it has two knobs of its own.
 
 `VERKSTEAD_TEST_PACE` is a multiplier over everything time-shaped in it — the
 budgets a session is judged idle, rescued and ended by, how long a wait gives
@@ -1242,12 +1250,12 @@ for you.
 
 **Windows runs an arm of its own**, because that suite is `cfg(unix)`: it
 stands on a mount namespace, a `/bin/sh` probe and a `stty`, and a Windows
-session has none of the three. `crates/server/tests/sessions_windows.rs` asks a
-dozen of the same questions of the other machine — a grilling started by
-pressing the button, run on a pseudoconsole in a profile of the Conversation's
-own, with a PowerShell script where claude goes — and
-`crates/server/tests/terminal_windows.rs` is the console's own pair beside
-`terminal.rs`, asking `mode con` what `stty` is asked there. Both are
+session has none of the three.
+`crates/server/tests/suite/sessions_windows.rs` asks a dozen of the same
+questions of the other machine — a grilling started by pressing the button, run
+on a pseudoconsole in a profile of the Conversation's own, with a PowerShell
+script where claude goes — and `crates/server/tests/suite/terminal_windows.rs`
+is the console's own pair beside `terminal.rs`, asking `mode con` what `stty` is asked there. Both are
 `cfg(windows)`, so a Linux or a Mac checkout compiles neither: the
 `windows-2025` job is where they run, and it installs an `sccache` on the
 runner for the three of them that are about the build cache — a Compile Server
