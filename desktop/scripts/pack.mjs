@@ -518,7 +518,10 @@ function pack(attempt) {
     if (status === 0 && MAC) {
       signed();
     }
-    process.exit(status);
+    // Ended by running out of work rather than by `process.exit`, which drops
+    // whatever of the piped output is still queued — and on a Mac a pipe is
+    // written asynchronously, so that is the tail of a failing pack's log.
+    process.exitCode = status;
   });
 }
 
