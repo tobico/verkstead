@@ -782,6 +782,18 @@ pub struct AuthorToken {
     pub token: Option<String>,
 }
 
+/// One MCP server declaration's **header values**, as a member holding a copy
+/// hands them to another for the copy kept in its own `secrets.yaml`
+/// (ADR-0028), by header name.
+///
+/// A member's own call on the Peer Listener and never the viewer's, as
+/// [`AuthorToken`] is. Empty is a declaration the device asked holds no values
+/// for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpHeaderValues {
+    pub headers: std::collections::BTreeMap<String, String>,
+}
+
 /// One Author's fields and its token, edited alone, on the device it is
 /// pressed on: a write to the Author's record there, which every member pulls.
 ///

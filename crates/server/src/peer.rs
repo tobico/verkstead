@@ -83,6 +83,7 @@ pub mod dialling;
 pub mod exchange;
 pub mod harnesses;
 pub mod joining;
+pub mod mcp_servers;
 pub mod memory;
 pub mod news;
 pub mod renewing;

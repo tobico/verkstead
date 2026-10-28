@@ -80,9 +80,11 @@ impl Replicating for Authors {
 const MOST_A_TOKEN_IS: usize = 64 * 1024;
 
 /// What is held while an Author's token and its record are written together,
-/// so that the copying never reads one written and the other not — a token
+/// so that the copying never reads one written and the other not: a token
 /// just set here, read before its record says so, would be taken for a copy
-/// whose token was cleared.
+/// whose token was cleared. And while an MCP server's header values and its
+/// record are, which are copied the same way — see
+/// [`super::mcp_servers::copied`].
 ///
 /// One for the process rather than one per Data Directory: it is held for two
 /// file writes and a row, never across a call to a member, and two servers in

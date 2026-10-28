@@ -1041,7 +1041,7 @@ launched, so a corrected URL fixes every Conversation that attached that
 server. **Removing one is a deletion stamp, and declaring a removed name again
 is a new record** under a new uuid; names are unique among the live
 declarations, refused at the press against every one this device holds.
-**Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a replicated record in the database rather than `config.yaml`, carrying a uuid — the name still what the agent and the chips see, unique among the live declarations across the cluster, and declaring a deleted name again a new record — with the header values copied to every device's `secrets.yaml` under the uuid, and a name two live declarations share launching neither. The `cluster-owned-records` roadmap lands it.
+**Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a name two live declarations share launching neither. The `cluster-owned-records` roadmap lands it.
 **Except the header values, which are in `secrets.yaml`** under the
 declaration's uuid, where the GitHub token is: the names are part of the declaration and are
 written with it, and what goes in each of them is a secret. So a header is
@@ -1050,6 +1050,14 @@ clear it — and a value box left blank keeps what is there, the way the token's
 does. A header the declaration names with nothing kept for it is one nothing is
 sent in, and removing a declaration takes its values with it, so the same name
 declared again — a new uuid — starts with none.
+**The values reach every device's `secrets.yaml`**, as an **Author**'s token
+does: the record carries a digest of each, never the value, so setting,
+rotating or clearing one is a write to it, and after every pull a device whose
+copy is not the one the record names asks its members for it, the writer
+first, and keeps what matches. There is no home; they travel from whoever
+holds them, and a member not answering leaves the copy as it stands. A removed
+declaration's copy goes everywhere with its deletion stamp, and being under
+the uuid, the old removal never takes a redeclared name's new values.
 The section saves as an action rather than a value, the way the **Ignore rule**s
 do and for the same reason: it is one of the two things on that page a save can
 be *refused* over, so a section that is not about the declarations says nothing
@@ -2253,12 +2261,13 @@ Keeper's start, terminated at its stop, never waited on — a workbench opens
 on the Keeper while the Annex is still coming up, and its rows read
 *unreachable* until it answers. It is reached through the **Annex Forward**,
 and it has no settings of its own: what is about the work rather than the
-machine — the MCP servers' header values, the at-once limit, Cleanup, the
-ignored comments, the conflict resolution and sharing on Done — is copied in
-from its Keeper at every boot. **Its Authors, the Instructions and the MCP
-servers' declarations are not copied**: it holds none of its own, and the
-Keeper's reach it as records, the way they reach any member — so with one Author, a Repo there is
-that one's.
+machine — the at-once limit, Cleanup, the ignored comments, the conflict
+resolution and sharing on Done — is copied in from its Keeper at every boot.
+**Its Authors, the Instructions and the MCP servers are not copied**, nor
+anything of its `secrets.yaml`: it holds none of its own, and the Keeper's
+reach it as records, the way they reach any member, the tokens and the header
+values fetched as any member fetches them — so with one Author, a Repo there
+is that one's.
 **And it never enters Onboarding Mode**: a kept Annex is told so in its
 config and skips the verdict, its objective being met by its Keeper's
 Profiles, which arrive as records it runs from a copy of.

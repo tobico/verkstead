@@ -6994,6 +6994,17 @@ async fn save_settings(
             settings.save_secrets(&secrets)?;
         }
 
+        // And onto each declaration's record, which values the file now holds
+        // for it, where the save set or cleared one: what tells every member
+        // to fetch them (ADR-0028).
+        if let Some(headers) = &headers {
+            servers_moved |= runtime
+                .block_on(crate::replicating::mcp_servers::valued(
+                    &pool, &settings, &device, headers,
+                ))
+                .map_err(std::io::Error::other)?;
+        }
+
         // And the Author's record, after the token so that it says whether
         // `secrets.yaml` holds one where the save set or cleared it — a write
         // stamped past whatever this device held of it, and nothing written

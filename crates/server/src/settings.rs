@@ -822,6 +822,25 @@ impl Settings {
         self.save_secrets(&secrets.with_author_token(id, token))
     }
 
+    /// Set the header values of the declaration whose uuid is `server` in
+    /// `secrets.yaml`, or take them away with `None`, every other secret as it
+    /// stands — and an error where the file will not parse, for the token's
+    /// reason — see [`Settings::setting_author_token`].
+    pub(crate) fn setting_mcp_headers(
+        &self,
+        server: &str,
+        values: Option<BTreeMap<String, String>>,
+    ) -> std::io::Result<()> {
+        let secrets = Self::parsed(&self.secrets_path(), Secrets::read)
+            .ok_or_else(|| std::io::Error::other("secrets.yaml won't parse"))?;
+
+        if values.is_none() && secrets.mcp_headers_of(server).is_none() {
+            return Ok(());
+        }
+
+        self.save_secrets(&secrets.with_mcp_headers_of(server, values))
+    }
+
     /// What the settings file at `path` says read by `read`, nothing written
     /// counting as the empty file — or `None` where it will not parse.
     fn parsed<T: Default>(
@@ -1224,15 +1243,30 @@ impl Secrets {
         }
     }
 
-    /// And these secrets with every MCP server's header values as `keeper`'s
-    /// are — the half of [`Config::working_as`] that is secret, handed to an
-    /// Annex at every start. A server's values arrive with its declaration,
-    /// which without them is one its far end refuses. The session account's
-    /// password stands, being the machine's own, and so do the Authors'
-    /// tokens: the copies of the Keeper's arrive with its mirrors (ADR-0025).
-    pub fn working_as(&self, keeper: &Secrets) -> Secrets {
+    /// And these secrets with the header values of the one declaration whose
+    /// uuid is `server` replaced: `values` as a member handed them, or `None`
+    /// where its values were cleared or it was removed — every other
+    /// declaration's as it stands. What the copying of the members' values
+    /// writes — see [`crate::replicating::mcp_servers::copied`].
+    pub fn with_mcp_headers_of(
+        &self,
+        server: &str,
+        values: Option<BTreeMap<String, String>>,
+    ) -> Secrets {
+        let mut mcp_headers = self.mcp_headers.clone();
+
+        match values.map(|values| {
+            values
+                .into_iter()
+                .filter_map(|(header, value)| Some((header, blank_is_nothing(value)?)))
+                .collect::<BTreeMap<_, _>>()
+        }) {
+            Some(values) if !values.is_empty() => mcp_headers.insert(server.to_owned(), values),
+            _ => mcp_headers.remove(server),
+        };
+
         Secrets {
-            mcp_headers: keeper.mcp_headers.clone(),
+            mcp_headers,
             ..self.clone()
         }
     }
@@ -1273,6 +1307,12 @@ impl Secrets {
             .get(server)?
             .get(header)
             .map(String::as_str)
+    }
+
+    /// And every header value kept for the declaration whose uuid is `server`,
+    /// by header name, or `None` where nothing is kept for it.
+    pub fn mcp_headers_of(&self, server: &str) -> Option<&BTreeMap<String, String>> {
+        self.mcp_headers.get(server)
     }
 
     /// Whether anything at all is configured here, which is what says a save

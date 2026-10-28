@@ -2517,16 +2517,15 @@ fn keepers_config(instructions: &str, second: &str) -> String {
 }
 
 /// The Annex has no settings of its own: everything in the Keeper's files
-/// about the work is handed in at every start — the MCP servers' header
-/// values, how much runs at once, the Cleanup, the comments ignored, how a
-/// conflict is resolved and whether the record is shared on Done. Not its
-/// Authors or their tokens, nor the Instructions or the MCP servers'
-/// declarations, which reach the Annex as records pulled like any member's
-/// (ADR-0028): the Keeper no longer writes an `instructions:` or
-/// `mcp_servers:` key in, and the Annex's own old copy is left for its start
-/// to drop. A change on the Keeper reaches the Annex the next time the two
-/// start together, a server the Keeper no longer holds values for has none in
-/// the Annex's `secrets.yaml` either, and the Annex's own keys stand.
+/// about the work is handed in at every start — how much runs at once, the
+/// Cleanup, the comments ignored, how a conflict is resolved and whether the
+/// record is shared on Done. Not its Authors or their tokens, nor the
+/// Instructions or the MCP servers and their header values, which reach the
+/// Annex as records pulled and copies fetched like any member's (ADR-0028):
+/// the Keeper no longer writes an `instructions:` or `mcp_servers:` key in,
+/// nor anything into the Annex's `secrets.yaml`, and the Annex's own old copy
+/// is left for its start to drop. A change on the Keeper reaches the Annex the
+/// next time the two start together, and the Annex's own keys stand.
 #[tokio::test]
 async fn a_keepers_start_hands_its_annex_its_settings_about_the_work() {
     let annex = made_annex().await;
@@ -2594,9 +2593,10 @@ async fn a_keepers_start_hands_its_annex_its_settings_about_the_work() {
     assert_eq!(secrets.author_token("work"), None, "and so do their tokens");
     assert_eq!(
         secrets.mcp_header("docs", "Authorization"),
-        Some("Bearer abc")
+        None,
+        "and the header values, which it fetches as a member"
     );
-    assert_eq!(secrets.mcp_header("tracker", "X-Api-Key"), Some("k1"));
+    assert_eq!(secrets.mcp_header("tracker", "X-Api-Key"), None);
 
     // And the Keeper's changed — new Instructions, the tracker gone — which
     // the next start carries across.
@@ -2621,11 +2621,7 @@ async fn a_keepers_start_hands_its_annex_its_settings_about_the_work() {
 
     let secrets = kept.secrets();
     assert_eq!(secrets.author_token("work"), None);
-    assert_eq!(secrets.mcp_header("tracker", "X-Api-Key"), None);
-    assert_eq!(
-        secrets.mcp_header("docs", "Authorization"),
-        Some("Bearer abc")
-    );
+    assert_eq!(secrets.mcp_header("docs", "Authorization"), None);
 
     // And a start with nothing changed since writes neither file.
     boxed.ran.lock().unwrap().clear();

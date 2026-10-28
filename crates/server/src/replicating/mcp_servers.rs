@@ -35,18 +35,30 @@
 //! **Held in memory for the settings**, as the Authors and the Instructions
 //! are: every write here and every merge hands the live declarations on to
 //! [`Settings::holding_mcp_servers`].
+//!
+//! **The header values travel from whoever holds them**, as an Author's token
+//! does — see [`copied`]. The record carries a digest of each value, never the
+//! value, so setting, rotating or clearing one is a write to the record, which
+//! is what tells the other devices to fetch. Keyed by the uuid on every device,
+//! so deleting `docs` and declaring it again never has the old removal take
+//! the new values away, whichever order a device pulls the two in.
+
+use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use sqlx::SqlitePool;
 
+use verkstead_render::McpHeaderValues;
 use verkstead_schema::Nudge;
 
 use super::Replicating;
+use super::authors::{digest, writing_held};
 use crate::AppState;
-use crate::relaying::Read;
-use crate::settings::{McpServer, ServerTrouble, Settings, trouble};
+use crate::peer::mcp_servers::HEADERS;
+use crate::relaying::{Read, asking, word_from};
+use crate::settings::{HeaderValue, McpServer, ServerTrouble, Settings, trouble};
 use crate::store::replicated::{self, Kind, Written};
 
 /// The declared MCP servers, as a kind of record.
@@ -71,7 +83,18 @@ impl Replicating for McpServers {
 
         Ok(())
     }
+
+    /// Every declaration's values the records say are held and this device
+    /// holds no current copy of fetched, and every copy of values cleared or
+    /// of a declaration removed taken away.
+    async fn pulled(state: &AppState) -> Result<()> {
+        copied(state).await
+    }
 }
+
+/// The most a member's answer about one declaration's values may be: the
+/// token's bound, **sixty-four kilobytes**.
+const MOST_THE_VALUES_ARE: usize = 64 * 1024;
 
 /// What a declaration's record holds besides its own stamps: the name, the URL
 /// and the names of the headers it is spoken to with, in the order they are
@@ -82,6 +105,14 @@ pub struct Fields {
     pub url: String,
     #[serde(default)]
     pub headers: Vec<String>,
+
+    /// Which value is held for each header, by its name: a digest of the value
+    /// — see [`digest`] — so a device can tell whether its copy is the one the
+    /// record names without the value crossing on the record. A header with no
+    /// value held anywhere is not here, and neither is any header of a
+    /// declaration with none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub values: BTreeMap<String, String>,
 }
 
 impl Fields {
@@ -90,8 +121,36 @@ impl Fields {
             name: server.name()?.to_owned(),
             url: server.url()?.to_owned(),
             headers: server.headers().to_vec(),
+            values: BTreeMap::new(),
         })
     }
+
+    /// And with the values `held` says are held, for the headers these fields
+    /// still declare: an edit that said nothing about a value says what the
+    /// record said, which a device holding no copy of it can make.
+    fn keeping_the_values_of(self, held: &Fields) -> Fields {
+        let values = held
+            .values
+            .iter()
+            .filter(|(header, _)| self.headers.contains(header))
+            .map(|(header, digest)| (header.clone(), digest.clone()))
+            .collect();
+
+        Fields { values, ..self }
+    }
+
+    /// Whether `copy`, values this device holds for it, are the ones it names.
+    fn names(&self, copy: &BTreeMap<String, String>) -> bool {
+        digests(copy) == self.values
+    }
+}
+
+/// Which values `values` are, header by header — see [`Fields::values`].
+fn digests(values: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    values
+        .iter()
+        .map(|(header, value)| (header.clone(), digest(value)))
+        .collect()
 }
 
 /// The namespace the uuids taken up at the move are derived in, the same
@@ -188,6 +247,26 @@ pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> R
             tokio::task::spawn_blocking(move || settings_.rekeying_the_mcp_headers(&moved))
                 .await?
                 .context("keeping the MCP servers' header values under their uuids")?;
+
+            // Each record saying which values the file holds for it, now they
+            // are under its uuid.
+            let settings_ = settings.clone();
+            let kept = tokio::task::spawn_blocking(move || {
+                let secrets = settings_.secrets();
+
+                kept.into_iter()
+                    .map(|(uuid, fields)| {
+                        let values = secrets.mcp_headers_of(&uuid).map(digests);
+                        let fields = Fields {
+                            values: values.unwrap_or_default(),
+                            ..fields
+                        };
+
+                        (uuid, fields)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .await?;
 
             replicated::take_up_as_the_oldest::<McpServers>(pool, device, &kept)
                 .await
@@ -307,7 +386,7 @@ pub async fn saved(
 ) -> Result<(Vec<Option<String>>, bool)> {
     taken_up(pool, settings, device).await?;
 
-    let live = declared(pool).await?;
+    let live = replicated::live_records::<McpServers>(pool).await?;
     let mut moved = false;
     let mut written = Vec::with_capacity(rows.len());
 
@@ -315,19 +394,22 @@ pub async fn saved(
         let record = row
             .id
             .as_deref()
-            .and_then(|id| live.iter().find(|server| server.id() == Some(id)));
+            .and_then(|id| live.iter().find(|record| record.uuid == id));
 
         let uuid = match (&row.id, record) {
             // Its URL and headers as sent, and its name as the record has it:
-            // a server is never renamed.
+            // a server is never renamed. And its values as the record says
+            // until [`valued`] says otherwise.
             (Some(id), Some(record)) => {
                 let standing = McpServer::of(
-                    record.name().map(str::to_owned),
+                    Some(record.fields.name.clone()),
                     row.server.url().map(str::to_owned),
                     row.server.headers().to_vec(),
                 );
 
-                if let Some(fields) = Fields::of(&standing) {
+                if let Some(fields) =
+                    Fields::of(&standing).map(|fields| fields.keeping_the_values_of(&record.fields))
+                {
                     moved |= replicated::rewrite::<McpServers>(pool, device, id, &fields).await?
                         == Written::Written;
                 }
@@ -361,6 +443,282 @@ pub async fn saved(
     held(pool, settings).await?;
 
     Ok((written, moved))
+}
+
+/// Write onto each declaration's record which values `secrets.yaml` now holds
+/// for it, once a save has written the values `touched` says — by uuid, each
+/// header's action as [`crate::settings::Secrets::with_mcp_headers`] applied
+/// it. Whether anything was written.
+///
+/// **A header set or cleared says what the file holds now**, and one the save
+/// left alone keeps what the record said: a device holding no copy of a value
+/// is no word about it. So a declaration nothing was set or cleared on is not
+/// written at all.
+///
+/// The caller holds the lock the copying writes under across the file and
+/// this — see [`super::authors::writing_held`] — so the copying never reads
+/// one written and the other not.
+pub async fn valued(
+    pool: &SqlitePool,
+    settings: &Settings,
+    device: &str,
+    touched: &[(String, Vec<(String, HeaderValue)>)],
+) -> Result<bool> {
+    let live = replicated::live_records::<McpServers>(pool).await?;
+    let secrets = {
+        let settings = settings.clone();
+        tokio::task::spawn_blocking(move || settings.secrets()).await?
+    };
+
+    let mut moved = false;
+
+    for (uuid, actions) in touched {
+        if actions
+            .iter()
+            .all(|(_, action)| matches!(action, HeaderValue::Keep))
+        {
+            continue;
+        }
+
+        let Some(record) = live.iter().find(|record| &record.uuid == uuid) else {
+            continue;
+        };
+
+        let values = record
+            .fields
+            .headers
+            .iter()
+            .filter_map(|header| {
+                let action = actions
+                    .iter()
+                    .find(|(named, _)| named == header)
+                    .map(|(_, action)| action);
+
+                let digest = match action {
+                    None | Some(HeaderValue::Keep) => record.fields.values.get(header).cloned(),
+                    Some(HeaderValue::Set(_) | HeaderValue::Clear) => {
+                        secrets.mcp_header(uuid, header).map(digest)
+                    }
+                };
+
+                Some((header.clone(), digest?))
+            })
+            .collect();
+
+        let fields = Fields {
+            values,
+            ..record.fields.clone()
+        };
+
+        moved |= replicated::rewrite::<McpServers>(pool, device, uuid, &fields).await?
+            == Written::Written;
+    }
+
+    if moved {
+        held(pool, settings).await?;
+    }
+
+    Ok(moved)
+}
+
+/// Bring this device's `secrets.yaml` into line with the records: a copy
+/// fetched of the values of every live declaration whose record names values
+/// this device holds no copy of, or another copy than the one it names; and
+/// the copy taken away where the record's values were cleared or the record
+/// removed. Run after every pull, whatever it merged, so values that could not
+/// be fetched last time are asked for again — an Author's token's way, said
+/// at [`super::authors::copied`].
+///
+/// **Asked of the members in turn**, the record's writer first, and put
+/// together header by header: each value whose digest is the record's is
+/// taken, from this device's own copy first, and the copy is written once
+/// every header the record names has one. **A member not answering leaves the
+/// copy as it stands**, and it is used.
+///
+/// **The asking outside the lock the save writes under and the writing inside
+/// it** — see [`super::authors::writing_held`] — each copy decided again against the record and the file as they
+/// stand then: values set here between the two are this device's own, and
+/// nothing fetched or cleared before it lands over them.
+pub(crate) async fn copied(state: &AppState) -> Result<()> {
+    let wanted = wanted(state).await?;
+
+    if wanted.is_empty() {
+        return Ok(());
+    }
+
+    let mut copies = Vec::new();
+
+    for (record, held) in wanted {
+        let copy = match record.removed() || record.fields.values.is_empty() {
+            true => None,
+            false => match fetched(state, &record, held).await {
+                Some(values) => Some(values),
+                None => continue,
+            },
+        };
+
+        copies.push((record.uuid, copy));
+    }
+
+    if copies.is_empty() {
+        return Ok(());
+    }
+
+    let _writing = writing_held().await;
+
+    let records = replicated::records::<McpServers>(&state.pool).await?;
+    let settings = state.settings.clone();
+
+    let moved = tokio::task::spawn_blocking(move || {
+        let secrets = settings.secrets();
+        let mut moved = false;
+
+        for (uuid, copy) in copies {
+            let Some(record) = records.iter().find(|record| record.uuid == uuid) else {
+                continue;
+            };
+            let held = secrets.mcp_headers_of(&uuid);
+            let named = !record.removed() && !record.fields.values.is_empty();
+
+            let values = match (copy, named) {
+                (None, false) if held.is_some() => None,
+                (Some(values), true) if record.fields.names(&values) && held != Some(&values) => {
+                    Some(values)
+                }
+                _ => continue,
+            };
+
+            settings.setting_mcp_headers(&uuid, values)?;
+            moved = true;
+        }
+
+        Ok::<_, std::io::Error>(moved)
+    })
+    .await?
+    .context("writing the copies of the MCP servers' header values into secrets.yaml")?;
+
+    if moved {
+        state.nudges.announce_here(Nudge::McpServers);
+    }
+
+    Ok(())
+}
+
+/// The records whose values this device's copy is out of line with, each with
+/// the copy it holds — removed ones included, whose copy goes.
+async fn wanted(
+    state: &AppState,
+) -> Result<Vec<(replicated::Record<Fields>, Option<BTreeMap<String, String>>)>> {
+    let records = replicated::records::<McpServers>(&state.pool).await?;
+    let settings = state.settings.clone();
+
+    let wanted = tokio::task::spawn_blocking(move || {
+        let secrets = settings.secrets();
+
+        records
+            .into_iter()
+            .filter_map(|record| {
+                let held = secrets.mcp_headers_of(&record.uuid).cloned();
+
+                let out_of_line = match record.removed() || record.fields.values.is_empty() {
+                    true => held.is_some(),
+                    false => held.as_ref().is_none_or(|copy| !record.fields.names(copy)),
+                };
+
+                out_of_line.then_some((record, held))
+            })
+            .collect()
+    })
+    .await?;
+
+    Ok(wanted)
+}
+
+/// The values `record` names, put together from `held` — this device's own
+/// copy — and the members, its writer first, or `None` where the members
+/// answering do not between them hold every one.
+async fn fetched(
+    state: &AppState,
+    record: &replicated::Record<Fields>,
+    held: Option<BTreeMap<String, String>>,
+) -> Option<BTreeMap<String, String>> {
+    let named = &record.fields.values;
+
+    let mut values: BTreeMap<String, String> = held
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(header, value)| named.get(header) == Some(&digest(value)))
+        .collect();
+
+    let complete = |values: &BTreeMap<String, String>| values.len() == named.len();
+
+    if complete(&values) {
+        return Some(values);
+    }
+
+    let devices = state.devices.as_ref()?;
+
+    let mut members: Vec<String> = match devices.membership().rows().await {
+        Ok(members) => members.into_iter().map(|member| member.device).collect(),
+        Err(why) => {
+            tracing::error!(
+                error = ?why,
+                "the devices this one is linked to could not be read, so no MCP server's \
+                 header values were copied",
+            );
+            return None;
+        }
+    };
+
+    members.sort_by_key(|member| *member != record.written_by);
+
+    for member in members {
+        match values_at(Some(devices), &member, &record.uuid).await {
+            Ok(answered) => {
+                for (header, value) in answered {
+                    if !values.contains_key(&header) && named.get(&header) == Some(&digest(&value))
+                    {
+                        values.insert(header, value);
+                    }
+                }
+
+                if complete(&values) {
+                    return Some(values);
+                }
+            }
+
+            Err(why) => tracing::debug!(
+                device = member,
+                server = record.uuid,
+                "a member's copy of an MCP server's header values could not be read: {}",
+                why.saying,
+            ),
+        }
+    }
+
+    None
+}
+
+/// The header values the member at `device` holds for the declaration `id`, by
+/// header name and empty where it holds none — or the refusal naming the
+/// machine, which is a member not answering, a caller it holds no membership
+/// for, or a uuid it holds no live record of.
+///
+/// Public for the suite that stands devices up and asks it.
+pub async fn values_at(
+    devices: Option<&crate::device::Devices>,
+    device: &str,
+    id: &str,
+) -> Result<BTreeMap<String, String>, crate::Refusal> {
+    let said: McpHeaderValues = word_from(
+        devices,
+        device,
+        asking(HEADERS.replace("{server}", id)),
+        MOST_THE_VALUES_ARE,
+    )
+    .await?;
+
+    Ok(said.headers)
 }
 
 #[cfg(test)]
@@ -425,6 +783,11 @@ mod tests {
         assert_eq!(
             (records[0].updated_at, records[0].written_by.as_str()),
             (0, "this-device")
+        );
+        assert_eq!(
+            records[0].fields.values.get("Authorization"),
+            Some(&digest("Bearer abc")),
+            "the record says which value the file holds, and not the value"
         );
 
         let config = settings.config();

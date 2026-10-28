@@ -420,10 +420,37 @@ impl Verkstead {
         rows: &[(Option<&str>, &str, &str)],
         removed: &[&str],
     ) -> verkstead_render::SettingsSaved {
+        let rows: Vec<_> = rows
+            .iter()
+            .map(|(id, name, url)| (*id, *name, *url, &[][..]))
+            .collect();
+
+        self.declares_headed(&rows, removed).await
+    }
+
+    /// And with headers: each row's `(header, value)`s, a value set where it
+    /// is `Some` and kept where it is `None`.
+    async fn declares_headed(
+        &self,
+        rows: &[Declared<'_>],
+        removed: &[&str],
+    ) -> verkstead_render::SettingsSaved {
         let servers: Vec<_> = rows
             .iter()
-            .map(|(id, name, url)| {
-                serde_json::json!({ "id": id, "name": name, "url": url, "headers": [] })
+            .map(|(id, name, url, headers)| {
+                let headers: Vec<_> = headers
+                    .iter()
+                    .map(|(header, value)| {
+                        let value = match value {
+                            Some(value) => serde_json::json!({ "Set": { "value": value } }),
+                            None => serde_json::json!("Keep"),
+                        };
+
+                        serde_json::json!({ "name": header, "value": value })
+                    })
+                    .collect();
+
+                serde_json::json!({ "id": id, "name": name, "url": url, "headers": headers })
             })
             .collect();
 
@@ -455,6 +482,53 @@ impl Verkstead {
         assert!(status.is_success(), "declaring: {status} {said}");
 
         serde_json::from_str(&said).unwrap()
+    }
+
+    /// The header values this device's `secrets.yaml` holds for the
+    /// declaration `id`.
+    fn values_here(&self, id: &str) -> Option<Vec<(String, String)>> {
+        self.settings()
+            .secrets()
+            .mcp_headers_of(id)
+            .map(|values| values.clone().into_iter().collect())
+    }
+
+    /// Wait for this device's `secrets.yaml` to hold `values` for the
+    /// declaration `id` — or none, where `values` is `None`.
+    async fn values_saying(&self, id: &str, values: Option<&[(&str, &str)]>) {
+        let wanted = values.map(|values| {
+            values
+                .iter()
+                .map(|(header, value)| ((*header).to_owned(), (*value).to_owned()))
+                .collect::<Vec<_>>()
+        });
+
+        let waited = tokio::time::timeout(WAITING, async {
+            while self.values_here(id) != wanted {
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| {
+            panic!(
+                "the values never said {wanted:?}: they said {:?}",
+                self.values_here(id)
+            )
+        });
+    }
+
+    /// What a session attached to `name` here is handed: its URL and the
+    /// headers it is spoken to with.
+    fn launched_with(&self, name: &str) -> Vec<(String, Vec<(String, String)>)> {
+        let settings = self.settings();
+
+        settings
+            .config()
+            .attached_among(&[name.to_owned()], &settings.secrets())
+            .into_iter()
+            .map(|server| (server.url().to_owned(), server.headers().to_vec()))
+            .collect()
     }
 
     /// The declarations this device's settings page and Attach menu draw, by
@@ -717,6 +791,16 @@ impl Verkstead {
         waited.unwrap_or_else(|_| panic!("the row never said {what:?}: it said {last:?}"));
     }
 }
+
+/// One row of the MCP servers section: its uuid or `None` for a row added,
+/// its name, its URL, and each header with the value set in it, or `None` to
+/// keep what is there.
+type Declared<'a> = (
+    Option<&'a str>,
+    &'a str,
+    &'a str,
+    &'a [(&'a str, Option<&'a str>)],
+);
 
 struct Holding(tokio::task::JoinHandle<()>);
 
@@ -1569,4 +1653,256 @@ async fn a_name_another_device_declared_is_refused_at_the_press() {
     );
     assert_eq!(saved.refused_servers[0].server, 0);
     assert_eq!(b.server_records().await.len(), 1, "nothing written");
+}
+
+const DOCS_URL: &str = "https://docs.example.com/mcp";
+
+/// The demonstration: a header set on A for a server declared on A reaches
+/// B's `secrets.yaml`, and a session on B attached to it is handed it; the
+/// value rotated on B, where it is a copy, reaches A's, and A's next session
+/// sends the new one.
+#[tokio::test]
+async fn a_header_set_on_one_device_reaches_a_session_on_the_other_and_a_rotation_comes_back() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    a.declares_headed(
+        &[(
+            None,
+            "docs",
+            DOCS_URL,
+            &[("Authorization", Some("Bearer seton-a"))],
+        )],
+        &[],
+    )
+    .await;
+    let docs = b
+        .servers_saying(|servers| servers.iter().any(|(_, name)| name == "docs"))
+        .await[0]
+        .0
+        .clone();
+
+    b.values_saying(&docs, Some(&[("Authorization", "Bearer seton-a")]))
+        .await;
+    assert_eq!(
+        b.launched_with("docs"),
+        [(
+            DOCS_URL.to_owned(),
+            vec![("Authorization".to_owned(), "Bearer seton-a".to_owned())]
+        )],
+        "what a session on B is handed",
+    );
+
+    b.declares_headed(
+        &[(
+            Some(&docs),
+            "docs",
+            DOCS_URL,
+            &[("Authorization", Some("Bearer rotated-on-b"))],
+        )],
+        &[],
+    )
+    .await;
+
+    a.values_saying(&docs, Some(&[("Authorization", "Bearer rotated-on-b")]))
+        .await;
+    assert_eq!(
+        a.launched_with("docs"),
+        [(
+            DOCS_URL.to_owned(),
+            vec![("Authorization".to_owned(), "Bearer rotated-on-b".to_owned())]
+        )],
+        "what A's next session sends",
+    );
+}
+
+/// `docs` deleted on A and declared again with a new header, B pulling both
+/// at once: B keeps the new value under the new uuid, and the old uuid's copy
+/// is gone — keyed by uuid, the old removal never wipes the new value.
+#[tokio::test]
+async fn a_name_deleted_and_declared_again_keeps_the_new_value_pulled_at_once() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let b_holding = b.holding();
+
+    a.declares_headed(
+        &[(
+            None,
+            "docs",
+            DOCS_URL,
+            &[("Authorization", Some("Bearer old"))],
+        )],
+        &[],
+    )
+    .await;
+    let first = b
+        .servers_saying(|servers| servers.iter().any(|(_, name)| name == "docs"))
+        .await[0]
+        .0
+        .clone();
+    b.values_saying(&first, Some(&[("Authorization", "Bearer old")]))
+        .await;
+
+    // B hears nothing of what follows until it pulls.
+    drop(b_holding);
+
+    a.declares(&[], &[&first]).await;
+    let saved = a
+        .declares_headed(
+            &[(
+                None,
+                "docs",
+                DOCS_URL,
+                &[("Authorization", Some("Bearer new"))],
+            )],
+            &[],
+        )
+        .await;
+    let second = saved.settings.mcp_servers[0].id.clone();
+    assert_ne!(first, second);
+
+    b.nudges.announce(Nudge::Devices);
+
+    b.values_saying(&second, Some(&[("Authorization", "Bearer new")]))
+        .await;
+    b.values_saying(&first, None).await;
+    assert_eq!(
+        b.launched_with("docs"),
+        [(
+            DOCS_URL.to_owned(),
+            vec![("Authorization".to_owned(), "Bearer new".to_owned())]
+        )],
+    );
+}
+
+/// A declaration removed on B, where its values are a copy, takes them out of
+/// every device's `secrets.yaml`, the one they were set on included.
+#[tokio::test]
+async fn a_removed_declarations_values_are_gone_from_every_device() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    a.declares_headed(
+        &[(
+            None,
+            "docs",
+            DOCS_URL,
+            &[("Authorization", Some("Bearer seton-a"))],
+        )],
+        &[],
+    )
+    .await;
+    let docs = b
+        .servers_saying(|servers| servers.iter().any(|(_, name)| name == "docs"))
+        .await[0]
+        .0
+        .clone();
+    b.values_saying(&docs, Some(&[("Authorization", "Bearer seton-a")]))
+        .await;
+
+    b.declares(&[], &[&docs]).await;
+
+    a.values_saying(&docs, None).await;
+    assert_eq!(b.values_here(&docs), None);
+}
+
+/// Values set on A reach C through B once A is off: they travel from whoever
+/// holds them.
+#[tokio::test]
+async fn the_values_reach_a_third_device_through_another_with_their_setter_off() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    let c = Verkstead::answering(C).await;
+    linked(&a, &b).await;
+    linked(&a, &c).await;
+    linked(&b, &c).await;
+    let _b_holding = b.holding();
+
+    a.declares_headed(
+        &[(
+            None,
+            "docs",
+            DOCS_URL,
+            &[("Authorization", Some("Bearer seton-a"))],
+        )],
+        &[],
+    )
+    .await;
+    let docs = b
+        .servers_saying(|servers| servers.iter().any(|(_, name)| name == "docs"))
+        .await[0]
+        .0
+        .clone();
+    b.values_saying(&docs, Some(&[("Authorization", "Bearer seton-a")]))
+        .await;
+
+    let _off = a.switched_off().await;
+
+    c.nudges.announce(Nudge::Devices);
+
+    c.values_saying(&docs, Some(&[("Authorization", "Bearer seton-a")]))
+        .await;
+}
+
+/// The values route answers for any declaration this device holds a live
+/// record of — a copy it fetched included — nothing where it holds no values,
+/// and `404` for a uuid it holds no live record of.
+#[tokio::test]
+async fn the_values_route_answers_from_whoever_holds_them() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    let c = Verkstead::answering(C).await;
+    linked(&a, &b).await;
+    linked(&b, &c).await;
+    let _b_holding = b.holding();
+
+    a.declares_headed(
+        &[
+            (
+                None,
+                "docs",
+                DOCS_URL,
+                &[("Authorization", Some("Bearer seton-a"))],
+            ),
+            (None, "tracker", "https://tracker.example.com/mcp", &[]),
+        ],
+        &[],
+    )
+    .await;
+    let servers = b.servers_saying(|servers| servers.len() == 2).await;
+    let id = |name: &str| {
+        servers
+            .iter()
+            .find(|(_, named)| named == name)
+            .unwrap()
+            .0
+            .clone()
+    };
+    b.values_saying(&id("docs"), Some(&[("Authorization", "Bearer seton-a")]))
+        .await;
+
+    let cluster = &c.cluster;
+    let asked = |id: String| async move {
+        replicating::mcp_servers::values_at(Some(cluster), B, &id).await
+    };
+
+    assert_eq!(
+        asked(id("docs"))
+            .await
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        [("Authorization".to_owned(), "Bearer seton-a".to_owned())],
+        "B's copy"
+    );
+    assert!(asked(id("tracker")).await.unwrap().is_empty(), "none held");
+    let refused = asked("no-such-uuid".to_owned()).await.unwrap_err();
+    assert!(refused.saying.contains("404"), "{}", refused.saying);
 }
