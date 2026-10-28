@@ -2413,14 +2413,15 @@ pub(crate) async fn conversation_view(
     let resets = stopped.as_ref().and_then(|stopped| stopped.resets.clone());
 
     // And the login a signed-out stop's Notice offers: on that Notice alone,
-    // only while the stop stands, and only for an account at home here. A
-    // mirror's login is made on its own device, and its Notice says which
-    // (ADR-0022). A Profile that has gone since offers nothing.
+    // only while the stop stands, and only for an account bound here. One
+    // bound elsewhere is logged in to on a device it is bound on, and its
+    // Notice says which (ADR-0022). A Profile that has gone since offers
+    // nothing.
     let log_in = match marked
         .and_then(|stopped| Some((stopped.notice, stopped.signed_out.clone()?)))
     {
         Some((notice, profile)) => match store::load_profile(&state.pool, &profile).await {
-            Ok(Some(profile)) if profile.mirror.is_none() => Some((
+            Ok(Some(profile)) if profile.unbound.is_none() => Some((
                 notice,
                 verkstead_render::NoticeLogIn {
                     profile: profile.id,
@@ -5988,43 +5989,15 @@ async fn create_profile(
 
 /// `POST /api/ui/profiles/{id}` — rewrite one, whole.
 ///
-/// **Reached for a mirror too, and relayed home when it is one** (ADR-0020,
-/// *Shared Profiles*). Every device's Profiles section lists every member's
-/// accounts, so the form over one of those saves like any other — and the save is
-/// put to the device that Profile is at home on, as the ordinary edit of its own
-/// Profile it is. What comes back is that device's own word, so a name already
-/// taken there is said in the words a local clash is said in; a home that did not
-/// take it is named in the refusal and nothing here has moved. See
-/// [`crate::mirroring::edited`].
+/// **A local write on whichever device it is pressed**, every device holding
+/// the one record (ADR-0028): what this device saves replicates, and there is
+/// no home to put it to. A Profile this device holds no binding of is
+/// rewritten as a record alone — see [`crate::profiles::edit`].
 async fn edit_profile(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(edit): Json<ProfileEdit>,
 ) -> HttpResponse {
-    match crate::mirroring::edited(&state, &id, &edit).await {
-        // One of this device's own rows, which is every row where there is no
-        // cluster: the press falls through to the half below.
-        Ok(crate::mirroring::Pressed::Here) => {}
-
-        Ok(crate::mirroring::Pressed::Away(outcome)) => {
-            return Json(outcome).into_response();
-        }
-
-        Ok(crate::mirroring::Pressed::Refused(why)) => {
-            tracing::warn!("an Agent Profile was not saved at home: {}", why.saying);
-            return refused(why.status, ApiError::new(why.saying));
-        }
-
-        Err(error) => {
-            tracing::error!(
-                error = ?error,
-                profile_id = %id,
-                "reading which device an Agent Profile is at home on failed",
-            );
-            return unavailable("The agent profile couldn't be saved.");
-        }
-    }
-
     match crate::profiles::edit(&state.pool, &id, &edit).await {
         Ok(outcome) => {
             moved_profiles(&state, outcome == verkstead_render::ProfileSaved::Saved);
@@ -6037,17 +6010,10 @@ async fn edit_profile(
     }
 }
 
-/// `POST /api/ui/profiles/{id}/delete` — remove one, whoever had chosen it.
-///
-/// **The same hop for a mirror**: the removal is put to the device the Profile is
-/// at home on and takes it off that machine, and every device's mirror of it goes
-/// on its next refresh — so a Conversation on a third device that had picked it is
-/// left with an empty picker, exactly as a local removal leaves one. See
-/// [`crate::mirroring::removed`].
 /// A device opening a Profile's login modal: the login already running for it,
 /// or a new one — see [`crate::logins::Logins::opened`].
 ///
-/// Refused for anything but a Claude Profile at home on this device — see
+/// Refused for anything but a Claude Profile bound on this device — see
 /// [`crate::sandbox::Sandbox::for_login`].
 async fn login_opened(
     State(state): State<AppState>,
@@ -6070,10 +6036,10 @@ async fn login_opened(
         );
     }
 
-    if profile.mirror.is_some() {
+    if profile.unbound.is_some() {
         return refused(
             StatusCode::CONFLICT,
-            ApiError::new("Log in on the device this profile is at home on."),
+            ApiError::new("Log in on a device this profile is bound on."),
         );
     }
 
@@ -6130,29 +6096,13 @@ async fn login_closed(
     StatusCode::NO_CONTENT.into_response()
 }
 
+/// `POST /api/ui/profiles/{id}/delete` — remove one, whoever had chosen it.
+///
+/// **A deletion stamp on the record**, on whichever device it is pressed: it
+/// replicates, and every device that pulls it nulls the Pairings that named
+/// it, so a Conversation on another device that had picked it is left with an
+/// empty picker, exactly as a removal pressed there leaves one.
 async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
-    match crate::mirroring::removed(&state, &id).await {
-        Ok(crate::mirroring::Pressed::Here) => {}
-
-        Ok(crate::mirroring::Pressed::Away(outcome)) => {
-            return Json(outcome).into_response();
-        }
-
-        Ok(crate::mirroring::Pressed::Refused(why)) => {
-            tracing::warn!("an Agent Profile was not removed at home: {}", why.saying);
-            return refused(why.status, ApiError::new(why.saying));
-        }
-
-        Err(error) => {
-            tracing::error!(
-                error = ?error,
-                profile_id = %id,
-                "reading which device an Agent Profile is at home on failed",
-            );
-            return unavailable("The agent profile couldn't be removed.");
-        }
-    }
-
     match crate::profiles::remove(&state.pool, &id).await {
         Ok(outcome) => {
             moved_profiles(&state, outcome == verkstead_render::ProfileDeleted::Removed);
@@ -6168,11 +6118,11 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
 /// Say that the Agent Profiles moved, where the press that just answered moved
 /// them.
 ///
-/// **This is what a member watches.** Every device in a cluster lists every
-/// member's Profiles as mirror rows of its own, refreshed off the news that
-/// member sends (ADR-0020, *Shared Profiles*) — so a save, a rewrite or a
-/// removal pressed here is what tells the rest of the cluster to read this
-/// device's list again. See [`crate::mirroring`], which is the other end of it.
+/// **This is what a member watches.** Every device in a cluster holds the one
+/// table of Profile records and pulls a member's off the news that member
+/// sends (ADR-0028) — so a save, a rewrite or a removal pressed here is what
+/// tells the rest of the cluster to pull this device's records again. See
+/// [`crate::replicating`], which is the other end of it.
 ///
 /// Ordinary news rather than [`crate::nudge::Nudges::announce_here`]: this is
 /// about the accounts this device holds, which is precisely what a member has a

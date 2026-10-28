@@ -113,29 +113,21 @@ export function shown(
   );
 }
 
-/// One reading with the machine the account is at home on after it, where that
-/// is not this device.
+/// One reading with why it cannot be run after it, where it cannot.
 ///
 /// Said once here rather than at each of the four places a pairing is read,
-/// because it is one rule: which machine an account sits on is a fact on the
-/// row, and a row that said it in one list and not in the next would be two
-/// answers to *whose account is this*.
+/// because it is one rule. A profile nothing can be launched under stays in
+/// every picker — a row saying why is something to go and put right, and a row
+/// quietly missing is a human looking for a profile they know they saved — so
+/// the row has to carry the why. The words are
+/// [`brokenBriefly`](./broken.ts), which is the short form of the sentence the
+/// card and the chosen row say in full.
 ///
-/// A middle dot rather than the em dash the profile's own name hangs off, so
-/// that "Claude Code Fable 5 — Work · the-laptop" reads as an account and then
-/// a machine rather than as a name with a machine in it.
-///
-/// **And why it cannot be run, where it cannot.** A profile nothing can be
-/// launched under stays in every picker — a row saying why is something to go
-/// and put right, and a row quietly missing is a human looking for a profile
-/// they know they saved — so the row has to carry the why, and it carries it
-/// after the machine because that is what most of the findings are about. The
-/// words are [`brokenBriefly`](./broken.ts), which is the short form of the
-/// sentence the card and the chosen row say in full.
+/// **No machine is said**: a profile is the cluster's, and has no home to name.
+/// Two alike that arrived by replication read alike.
 function on(words: string, profile: ProfileEntry): string {
   return [
     words,
-    profile.device?.name ?? null,
     profile.broken === null ? null : brokenBriefly(profile.broken),
   ]
     .filter((part) => part !== null)

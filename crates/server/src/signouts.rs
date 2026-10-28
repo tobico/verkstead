@@ -104,21 +104,22 @@ fn says_so(line: &str, phrase: &str) -> bool {
         && line[..reason].ends_with(char::is_whitespace)
 }
 
-/// Where the Profile a session runs under is at home, which decides what the
+/// Where the Profile a session runs under is bound, which decides what the
 /// Notice offers: a Log in press here, or the name of the device to log in on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Home {
-    /// At home on this device, so its login is made here.
+    /// Bound on this device, so its login is made here.
     Here,
 
-    /// A mirror, at home on the device with this Device Id.
+    /// Not bound here: its account was fetched from the device with this
+    /// Device Id, which is where its login is made.
     Away(String),
 }
 
 /// The account's login file as it was when a session's root was built, so that
 /// a sign-out can tell a login replaced since from the one it was given.
 ///
-/// Only a Claude account at home here: a mirror's file is a copy refreshed
+/// Only a Claude account bound here: one bound elsewhere is a copy refreshed
 /// before each launch, and the other harnesses are never stopped here at all.
 #[derive(Debug, Clone)]
 pub(crate) struct Login {
@@ -132,7 +133,7 @@ impl Login {
     /// Read the login of `profile`'s account now, just before its root is
     /// built — or `None` where a sign-out on it cannot resume by itself.
     pub(crate) fn before_building(profile: &store::Profile) -> Option<Login> {
-        if profile.mirror.is_some() || signed_out_phrase(profile.agent_type()).is_none() {
+        if profile.unbound.is_some() || signed_out_phrase(profile.agent_type()).is_none() {
             return None;
         }
 
@@ -551,7 +552,7 @@ async fn home_named(pool: &SqlitePool, device: &str) -> String {
             None
         }
     }
-    .unwrap_or_else(|| "the device it is at home on".to_owned())
+    .unwrap_or_else(|| "the device it is bound on".to_owned())
 }
 
 #[cfg(test)]

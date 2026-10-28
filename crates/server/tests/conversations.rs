@@ -7214,14 +7214,10 @@ async fn a_signed_out_stop_offers_the_login_only_for_an_account_at_home_here() {
 
     let mirror = "4e0f1d2c-0000-4000-8000-000000000004";
 
-    store::record_mirror(
+    store::profile_arrived(
         &pool,
         mirror,
-        &store::Mirror {
-            device: "aa00bb11cc22dd33ee44ff5566778899".to_owned(),
-            was: None,
-            login: true,
-        },
+        "aa00bb11cc22dd33ee44ff5566778899",
         &store::ProfileFacts {
             name: Some("theirs".to_owned()),
             account: store::Account::Claude {

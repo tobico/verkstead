@@ -73,15 +73,12 @@ const FABLE = SAVED[0]!;
 /// says everything it can launch, and the card is where that is read.
 const OPUS = SAVED[1]!;
 
-/// And the same list answered by a device that is in a cluster: two of its own,
-/// and a **mirror** of a member's account.
+/// And the same list answered by a device that is in a cluster: two bound
+/// here, and one bound on a member alone.
 const CLUSTER = shared as ProfileEntry[];
 
-/// The mirror among them, and the machine it is at home on — which is the
-/// device's own reading of its membership rather than anything the far end sent
-/// with the Profile.
+/// The one not bound here.
 const MIRROR = CLUSTER[2]!;
-const MACHINE = MIRROR.device!;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -501,51 +498,27 @@ describe("the cards", () => {
   });
 });
 
-/// Every device's Profiles section lists every member's accounts beside its own
-/// (ADR-0020, *Shared Profiles*), which is one list rather than a section per
-/// machine: a profile is a profile, and which machine its account sits on is a
-/// fact on the row.
+/// A profile bound on a member alone is listed with the rest (ADR-0028): one
+/// list, with no machine drawn on any card, a profile being the cluster's.
 ///
 /// `tests/fixtures/profiles-shared.json` is that list as the server really
-/// answers it — two of this device's own and one mirror of a member's, with the
-/// membership row behind it saying what the machine is called and which mark it
-/// wears.
+/// answers it — two bound here and one bound on a member alone.
 describe("a member's accounts", () => {
-  it("says which machine one is on, under the reading", async () => {
+  it("says no machine on any card", async () => {
     serving(whenever("/api/ui/profiles", json(CLUSTER)));
     mountCards();
 
     await waitFor(() => screen.getByText(reads(MIRROR)));
 
-    const card = theCard(reads(MIRROR));
-
-    expect(card.querySelector(`.${styles.device}`)!.textContent).toBe(
-      MACHINE.name,
-    );
-    // The mark for its operating system, drawn the way a sidebar row of that
-    // machine's work draws it — a Mac here, which is what the fixture holds.
-    expect(card.querySelector(`.${styles.os}`)).toBeTruthy();
+    // The reading and nothing after it: no machine, and no login to offer on
+    // an account this device runs from a copy of.
+    expect(theCard(reads(MIRROR)).textContent).toBe(reads(MIRROR));
   });
 
-  /// And nothing at all on this device's own, which is every row where there is
-  /// no cluster: a machine's own name on every card would be a column of one
-  /// answer repeated.
-  it("says nothing about a machine on this device's own", async () => {
-    serving(whenever("/api/ui/profiles", json(CLUSTER)));
-    mountCards();
-
-    await waitFor(() => screen.getByText(reads(MIRROR)));
-
-    expect(
-      theCard(reads(CLUSTER[0]!)).querySelector(`.${styles.device}`),
-    ).toBeNull();
-  });
-
-  /// And nothing is wrong with it: the paths on the row are that machine's and
-  /// are judged against nothing here — what a session on this device is given is
-  /// a mirror of the account, fetched from the machine it is on before the launch
-  /// (ADR-0020, *Shared Profiles*). So the card says which machine, and says no
-  /// trouble.
+  /// And nothing is wrong with it: the paths on the row are another machine's
+  /// and are judged against nothing here — what a session on this device is
+  /// given is the account fetched from a device it is bound on, before the
+  /// launch.
   it("says no trouble about one, its account being fetched before a launch", async () => {
     serving(whenever("/api/ui/profiles", json(CLUSTER)));
     mountCards();
@@ -556,37 +529,34 @@ describe("a member's accounts", () => {
     expect(marks(theCard(reads(MIRROR)))).toEqual([]);
   });
 
-  /// And the pane over one of them is the same form, which saves: every device's
-  /// Profiles section lists everyone's, and an edit or a removal is put to the
-  /// machine the account is on (ADR-0020, *Shared Profiles*). Said over the form
-  /// because the paths under it are that machine's rather than this one's.
-  it("says in the pane that a save over one goes to that machine", async () => {
+  /// And the pane over one of them is the same form, which saves here: the
+  /// save is a write of the one record. Said over the form because the paths
+  /// under it are another device's, which the save leaves alone.
+  it("says in the pane that a save over one leaves its paths alone", async () => {
     serving(whenever("/api/ui/profiles", json(CLUSTER)));
     mountPane(MIRROR.id);
 
     await waitFor(() => screen.getByLabelText("Name"));
 
     expect(document.body.textContent).toContain(
-      `This account is on ${MACHINE.name}.`,
+      "This profile isn't bound on this device.",
     );
   });
 
-  /// And nothing at all over one of this device's own accounts, which is every
-  /// row where there is no cluster.
-  it("says nothing of the sort over one of this device's own", async () => {
+  /// And nothing at all over one bound here, which is every row where there
+  /// is no cluster.
+  it("says nothing of the sort over one bound here", async () => {
     serving(whenever("/api/ui/profiles", json(CLUSTER)));
     mountPane(CLUSTER[0]!.id);
 
     await waitFor(() => screen.getByLabelText("Name"));
 
-    expect(document.body.textContent).not.toContain("This account is on");
+    expect(document.body.textContent).not.toContain("isn't bound");
   });
 
   /// The save goes to the Profile's own endpoint on the device the browser
-  /// opened, exactly as a save over one of this device's own rows does: the hop
-  /// is the server's, and nothing here knows there is one. A mirror keeps a
-  /// **local** id, which is what that endpoint is addressed by.
-  it("saves a mirror at its own local id, the hop being the server's", async () => {
+  /// opened, by its uuid, exactly as a save over one bound here does.
+  it("saves one at its uuid", async () => {
     const fetching = serving(
       whenever("/api/ui/profiles", json(CLUSTER)),
       whenever(`/api/ui/profiles/${MIRROR.id}`, json("Saved"), "POST"),
@@ -602,9 +572,6 @@ describe("a member's accounts", () => {
 
     await waitFor(() => expect(done).toHaveBeenCalled());
 
-    // The account as the row carries it — the home machine's paths — with the
-    // name changed: what is judged against that filesystem is judged on that
-    // machine.
     expect(sent(fetching, `/api/ui/profiles/${MIRROR.id}`)).toEqual({
       name: "weekend",
       account: MIRROR.account,
@@ -614,15 +581,15 @@ describe("a member's accounts", () => {
   });
 });
 
-/// The three ways a **mirror** is not usable on this device (ADR-0020, *Shared
-/// Profiles*), each named on the row where the human is looking.
+/// The three ways a profile bound elsewhere is not usable on this device, each
+/// named on the row where the human is looking.
 ///
 /// **Refused rather than hidden**: every one of them stays on the list and in
 /// the pickers, because a row saying why it cannot be run is something to go
 /// and put right and a row quietly missing is a human looking for a Profile
 /// they know they saved. What the server decides is which of the three it is —
-/// `crates/server/tests/mirroring.rs` is where that is asked — and what is
-/// asked here is that the card says it.
+/// `crates/server/tests/replicated_profiles.rs` is where that is asked — and
+/// what is asked here is that the card says it.
 describe("a member's account that cannot be run from here", () => {
   /// One mirror reading the way the server would answer it.
   const troubled = (broken: ProfileEntry["broken"]): ProfileEntry[] => [
@@ -630,27 +597,16 @@ describe("a member's account that cannot be run from here", () => {
     { ...MIRROR, broken },
   ];
 
-  it("names the machine where the home has stopped answering", async () => {
-    serving(
-      whenever(
-        "/api/ui/profiles",
-        json([
-          CLUSTER[0]!,
-          {
-            ...MIRROR,
-            broken: "HomeUnreachable",
-            device: { ...MACHINE, reachable: false },
-          },
-        ]),
-      ),
-    );
+  it("says the device it is bound on has stopped answering", async () => {
+    serving(whenever("/api/ui/profiles", json(troubled("HomeUnreachable"))));
     mountCards();
 
     await waitFor(() => screen.getByText(reads(MIRROR)));
 
     // The word the sidebar wears for the same finding: one dial worked down
     // that machine's addresses and reached none of them.
-    const said = `Its account can't be fetched, because ${MACHINE.name} is unreachable. No session here can run under it.`;
+    const said =
+      "Its account can't be fetched, because the device it's bound on is unreachable. No session here can run under it.";
     const card = theCard(reads(MIRROR));
 
     expect(marks(card)).toEqual([{ label: said, red: true }]);
@@ -658,9 +614,9 @@ describe("a member's account that cannot be run from here", () => {
   });
 
   /// A login kept in the macOS Keychain leaves no file for another device to
-  /// mirror, and neither does a sign-out. The fix is a login on the machine the
-  /// account is on, which is why the row names it.
-  it("names the machine to log in on where the account has no login file", async () => {
+  /// copy, and neither does a sign-out. The fix is a login on the machine the
+  /// account is on.
+  it("says to log in where the account has no login file", async () => {
     serving(
       whenever(
         "/api/ui/profiles",
@@ -671,7 +627,8 @@ describe("a member's account that cannot be run from here", () => {
 
     await waitFor(() => screen.getByText(reads(MIRROR)));
 
-    const said = `Its account on ${MACHINE.name} has no login file, so there's nothing to mirror here. Log in on that machine.`;
+    const said =
+      "Its account on the device it's bound on has no login file, so there's nothing to copy here. Log in on that machine.";
     const card = theCard(reads(MIRROR));
 
     expect(marks(card)).toEqual([{ label: said, red: true }]);
@@ -786,7 +743,7 @@ describe("logging an account in", () => {
     return JSON.parse(String(calls.at(-1)![1]!.body)) as unknown;
   };
 
-  it("offers a login on a Claude account at home here with none", async () => {
+  it("offers a login on a Claude account bound here with none", async () => {
     serving(
       whenever(
         "/api/ui/profiles",
@@ -870,10 +827,10 @@ describe("logging an account in", () => {
     await waitFor(() => screen.getByText(ADDRESS));
   });
 
-  /// A mirror's account is a copy: its login is made on the machine it is at
-  /// home on, and a login written into the copy is one the next refresh from
-  /// there writes over.
-  it("offers none on a member's account", async () => {
+  /// An account bound elsewhere runs from a copy: its login is made on a
+  /// machine it is bound on, and a login written into the copy is one the
+  /// next fetch from there writes over.
+  it("offers none on an account not bound here", async () => {
     serving(whenever("/api/ui/profiles", json(CLUSTER)));
     mountCards();
 
@@ -1082,7 +1039,7 @@ describe("the pane a card opens", () => {
         red: line.querySelector(`svg.${styles.trouble}`) !== null,
       }));
 
-    it("says why a mirror cannot be run, at the top", async () => {
+    it("says why one bound elsewhere cannot be run, at the top", async () => {
       serving(
         whenever(
           "/api/ui/profiles",
@@ -1110,7 +1067,7 @@ describe("the pane a card opens", () => {
           document.querySelector(`.${styles.athome}`)!,
         ) & Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
-      // A mirror's login is made where it is at home: nothing to press here.
+      // Its login is made where it is bound: nothing to press here.
       expect(finding.querySelector("button")).toBeNull();
     });
 

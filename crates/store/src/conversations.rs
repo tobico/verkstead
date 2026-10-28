@@ -3352,8 +3352,8 @@ async fn choose(
 /// because a Pairing is both halves and either alone is not something to launch
 /// a session with. See [`steer_conversation`].
 ///
-/// The Profile is looked for inside the transaction that writes it — a live
-/// record or a mirror, see `profiles::pickable` — there being no foreign key
+/// The Profile is looked for inside the transaction that writes it — a
+/// live record, see `profiles::pickable` — there being no foreign key
 /// behind the column: a column naming a Profile that is not there is a session
 /// that fails to start with nobody watching.
 pub(crate) async fn settle(

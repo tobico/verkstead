@@ -1322,14 +1322,10 @@ async fn a_home_that_is_not_answering_refuses_the_launch_by_name() {
 
     // What it last gave, which on a running server is what the last refresh
     // wrote down.
-    store::record_mirror(
+    store::profile_arrived(
         &b.pool,
         "7a1d0c2e-0000-4000-8000-000000000007",
-        &verkstead_store::Mirror {
-            device: A.to_owned(),
-            was: None,
-            login: true,
-        },
+        A,
         &store::ProfileFacts {
             name: Some("work".to_owned()),
             account: store::Account::Claude {

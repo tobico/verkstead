@@ -30,8 +30,9 @@ const profile = (
   memory: true,
   broken: null,
   login: true,
-  /// This device's own, which is every account on a Verkstead linked to nothing.
-  device: null,
+  /// Bound on this device, which is every account on a Verkstead linked to
+  /// nothing.
+  bound: true,
 });
 
 /// A list with two Claude Code accounts on it, which is what makes the account's

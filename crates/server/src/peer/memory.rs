@@ -76,7 +76,7 @@ pub(crate) async fn held(
     let Some((account, parts)) = named(&state, &profile, &wanted).await else {
         return (
             StatusCode::NOT_FOUND,
-            "this device holds no Agent Profile of its own under that id\n",
+            "this device holds no binding of an Agent Profile under that id\n",
         )
             .into_response();
     };
@@ -135,7 +135,7 @@ pub(crate) async fn written(
     let Some((account, parts)) = named(&state, &profile, &wanted).await else {
         return (
             StatusCode::NOT_FOUND,
-            "this device holds no Agent Profile of its own under that id\n",
+            "this device holds no binding of an Agent Profile under that id\n",
         )
             .into_response();
     };
@@ -217,10 +217,10 @@ async fn named(
         }
     };
 
-    // Its own rows and nothing it is itself mirroring, which is the reading
-    // [`super::account`] makes: the store of a Profile at home on a third machine
-    // is that machine's to hand over.
-    let held = held.filter(|held| held.mirror.is_none())?;
+    // A Profile bound here and nothing it runs from a copy of, which is the
+    // reading [`super::account`] makes: the store of a Profile bound on a third
+    // machine is that machine's to hand over.
+    let held = held.filter(|held| held.unbound.is_none())?;
 
     // Nothing at all where the switch is off. Answered rather than refused: a
     // Profile whose sessions are given no store has none to lend, which is not

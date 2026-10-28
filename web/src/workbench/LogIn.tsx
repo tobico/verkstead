@@ -3,7 +3,7 @@
 //! Profile's card does.
 //!
 //! Only on a Notice the server put a press on, which is a stop that still
-//! stands on an account at home on this device. A mirrored Profile's Notice
+//! stands on an account bound on this device. Another Profile's Notice
 //! names the device to log in on instead.
 
 import { Show, createSignal, type JSX } from "solid-js";

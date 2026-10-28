@@ -639,7 +639,7 @@ pub(crate) fn signed_out(profile: &str, said: &str, home: Option<&str>) -> Strin
     let login = match home {
         None => "Log in, and the run carries on by itself.".to_owned(),
         Some(home) => format!(
-            "The account is at home on **{home}**, so log in there, then press **Resume** here."
+            "The account is bound on **{home}**, so log in there, then press **Resume** here."
         ),
     };
 
@@ -861,7 +861,7 @@ mod tests {
             ),
             "The **theirs** account has signed out. The session said: Login expired · Please run \
              /login.\n\n\
-             The account is at home on **laptop**, so log in there, then press **Resume** here.",
+             The account is bound on **laptop**, so log in there, then press **Resume** here.",
         );
     }
 

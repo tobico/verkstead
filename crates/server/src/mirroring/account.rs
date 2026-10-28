@@ -100,8 +100,8 @@ pub struct Mirrored {
 /// [`Closing`]: crate::sandbox::Closing
 #[derive(Debug, Clone)]
 pub struct Lent {
-    /// The device the account is at home on.
-    at: store::Mirror,
+    /// The device the account was fetched from: one the Profile is bound on.
+    at: String,
 
     /// And the Profile's uuid, which is the one it has there too — what the
     /// write-back is addressed by, the way every press over a mirror is.
@@ -148,13 +148,21 @@ pub async fn fetched(
     homes: &Homes,
     profile: &store::Profile,
 ) -> Result<Option<Mirrored>, Refusal> {
-    let Some(at) = profile.mirror.clone() else {
+    let Some(unbound) = &profile.unbound else {
         return Ok(None);
+    };
+
+    let Some(at) = unbound.device().map(str::to_owned) else {
+        return Err(Refusal::ours(
+            "This profile isn't bound on any device linked here, so there's no account to run \
+             it from."
+                .to_owned(),
+        ));
     };
 
     let said: Vec<AccountFile> = relaying::word_from(
         devices,
-        &at.device,
+        &at,
         relaying::asking(ACCOUNT.replace("{profile}", &profile.id)),
         MOST_AN_ACCOUNT_IS,
     )
@@ -267,7 +275,7 @@ pub(crate) async fn renumbered(pool: &SqlitePool, data_dir: &Path) -> anyhow::Re
 }
 
 /// Move the account mirror kept under a bridged mirror's provisional uuid to
-/// the uuid its home publishes — see [`store::bridge_mirror`].
+/// the uuid its home publishes — see [`store::settle`].
 ///
 /// For [`renumbered`]'s reason: the row that names a mirror is what takes it
 /// away, and a directory left under the provisional uuid is a member's login
@@ -312,6 +320,44 @@ pub(crate) async fn bridged(data_dir: &Path, from: &str, to: &str) {
             "the mirror of a member's account could not be moved to the uuid its home names the \
              Profile by",
         ),
+    }
+}
+
+/// Take away the copy of each removed Profile's account kept under the Data
+/// Directory.
+///
+/// **The record is the last thing on this device that says whose login that
+/// was**, and a removed one is in no list: a directory left behind would be a
+/// member's login on this disk with nothing pointing at it. Asked of every
+/// removed record at every pull, so a directory that would not go is tried
+/// again, and a line in the log meanwhile rather than anything louder.
+pub(crate) async fn swept(data_dir: &Path, removed: &[String]) {
+    // A router with no Data Directory has nowhere to have kept a copy.
+    if data_dir.as_os_str().is_empty() {
+        return;
+    }
+
+    let accounts = crate::sandbox::accounts(data_dir);
+
+    for uuid in removed {
+        let under = accounts.join(uuid);
+
+        match tokio::fs::remove_dir_all(&under).await {
+            Ok(()) => tracing::info!(
+                copy = %under.display(),
+                "the copy of a removed Profile's account is gone with its record",
+            ),
+
+            // Never fetched, which is a Profile nothing was launched under here.
+            Err(why) if why.kind() == std::io::ErrorKind::NotFound => {}
+
+            Err(why) => tracing::warn!(
+                error = ?why,
+                copy = %under.display(),
+                "the copy of a removed Profile's account could not be taken away, so a login \
+                 of it is still on this device",
+            ),
+        }
     }
 }
 
@@ -422,10 +468,10 @@ impl Lending {
             body: Streamed::saying(body),
         };
 
-        match relaying::put_to(devices, &at.device, call).await {
+        match relaying::put_to(devices, &at, call).await {
             Ok(_) => tracing::debug!(
                 conversation_id,
-                device = %at.device,
+                device = %at,
                 "the login this session left was written into the account on the device it is at \
                  home on",
             ),
@@ -433,7 +479,7 @@ impl Lending {
             Err(why) => {
                 tracing::warn!(
                     conversation_id,
-                    device = %at.device,
+                    device = %at,
                     "the login this session left could not be written back: {}",
                     why.saying,
                 );

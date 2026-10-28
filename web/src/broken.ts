@@ -7,13 +7,12 @@
 //! finding and the facts around it — see `Broken` and `ProfileTrouble` — and
 //! what is here is the sentence.
 //!
-//! **Three of the findings are about a mirror**, which is a Profile whose
-//! account is on another machine: its home not answering, its account holding
-//! no login there is anything to mirror, and the harness it runs not being on
-//! *this* box. Each is something to go and put right somewhere, which is why
-//! every one of them names the somewhere — the machine, or this one.
+//! **Three of the findings are about a Profile not bound here**, whose account
+//! is on another machine: the device it is bound on not answering, its account
+//! there holding no login to copy, and the harness it runs not being on *this*
+//! box. Each is something to go and put right somewhere.
 //!
-//! **And one is about an account at home here: it has signed out.** A press
+//! **And one is about an account bound here: it has signed out.** A press
 //! found it with no login, and the card's Log in button is the fix.
 //!
 //! **And the harness one is the onboarding probe's own sentence**, because it
@@ -70,15 +69,15 @@ export function brokenReading(profile: ProfileEntry): string | null {
     : troubleReading({
         broken: profile.broken,
         agent_type: profile.account.agent_type,
-        device: profile.device?.name ?? null,
+        device: null,
       });
 }
 
 /// The same sentence out of what a refused press carries, which is the same
 /// three facts a row holds: the finding, the harness, and the machine the
-/// account is at home on.
+/// account would be fetched from, where one is named.
 export function troubleReading(said: ProfileTrouble): string {
-  const where = said.device ?? "the device it's at home on";
+  const where = said.device ?? "the device it's bound on";
 
   switch (said.broken) {
     case "DirMissing":
@@ -90,7 +89,7 @@ export function troubleReading(said: ProfileTrouble): string {
     case "HomeUnreachable":
       return `Its account can't be fetched, because ${where} is ${UNREACHABLE}. No session here can run under it.`;
     case "NoLoginAtHome":
-      return `Its account on ${where} has no login file, so there's nothing to mirror here. Log in on that machine.`;
+      return `Its account on ${where} has no login file, so there's nothing to copy here. Log in on that machine.`;
     case "HarnessMissing":
       return harnessAbsent(said.agent_type);
     case "SignedOut":

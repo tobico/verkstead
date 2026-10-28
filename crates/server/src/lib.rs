@@ -1788,17 +1788,11 @@ fn standing(
     // one that needs the state.
     merging::refreshing(&state);
 
-    // And the mirror rows of every member's Agent Profiles, beside it and on the
-    // same channel: read once now, and again whenever a member says its Profiles
-    // moved or the membership itself does (ADR-0020, *Shared Profiles*) — see
-    // [`mirroring`]. A sweep of its own rather than a second thing the one above
-    // does, because what it keeps is rows in this store rather than a list in
-    // this device's memory, and the two are refreshed by different news.
-    mirroring::refreshing(&state);
-
     // And every member's Replicated records pulled and merged into this
-    // device's, on the Profiles' schedule and beside them, so every device
-    // holds the cluster's Authors (ADR-0028) — see [`replicating`].
+    // device's, beside it and on the same channel: read once now, and again
+    // whenever a member says its records moved or the membership itself does,
+    // so every device holds the cluster's Authors and Agent Profiles
+    // (ADR-0028) — see [`replicating`].
     replicating::pulling(&state);
 
     // And what this device forwards, on the same channel again: a member's

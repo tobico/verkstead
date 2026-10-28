@@ -862,7 +862,7 @@ pub(crate) async fn asked<'a>(
     let mut seen = HashSet::new();
 
     for profile in profiles {
-        if profile.mirror.is_some()
+        if profile.unbound.is_some()
             || profile.agent_type() != store::AgentType::Claude
             || !seen.insert(profile.id.clone())
         {

@@ -107,17 +107,17 @@ pub(crate) async fn held(State(state): State<AppState>, Path(profile): Path<Stri
         }
     };
 
-    // Its own rows and nothing it is itself mirroring: the files of a Profile at
-    // home on a third machine are that machine's to hand over, and a device that
-    // relayed them on would be two hops from the account it is about to launch
-    // under.
+    // A Profile bound here and nothing it runs from a copy of: the files of a
+    // Profile bound on a third machine are that machine's to hand over, and a
+    // device that relayed them on would be two hops from the account it is
+    // about to launch under.
     let Some(account) = held
-        .filter(|held| held.mirror.is_none())
+        .filter(|held| held.unbound.is_none())
         .map(|held| held.account)
     else {
         return (
             StatusCode::NOT_FOUND,
-            "this device holds no Agent Profile of its own under that id\n",
+            "this device holds no binding of an Agent Profile under that id\n",
         )
             .into_response();
     };
@@ -209,12 +209,12 @@ pub(crate) async fn written(
     };
 
     let Some(account) = held
-        .filter(|held| held.mirror.is_none())
+        .filter(|held| held.unbound.is_none())
         .map(|held| held.account)
     else {
         return (
             StatusCode::NOT_FOUND,
-            "this device holds no Agent Profile of its own under that id\n",
+            "this device holds no binding of an Agent Profile under that id\n",
         )
             .into_response();
     };

@@ -9,14 +9,14 @@
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
-use verkstead_store::replicated::records;
+use verkstead_store::replicated::{Record, merge, records};
 use verkstead_store::{
-    Account, AgentType, Bindings, Chosen, Clash, Deleting, Event, Lifecycle, Mirror, Pairing,
-    PendingForm, PendingPairing, Picked, Profile, ProfileFacts, Profiles, Saving, binding_uuid,
-    bridge_mirror, create_profile, delete_profile, forget_mirrors_except, load_conversation,
-    load_profile, open_database, open_pending_steer, profiles, record_mirror, register_repo,
-    save_pending_steer, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
-    skip_review, stamp_the_profiles, start_capture, start_conversation, start_grilling, timeline,
+    Account, AgentType, Binding, Bindings, Chosen, Clash, Deleting, Event, Lifecycle, Pairing,
+    PendingForm, PendingPairing, Picked, Profile, ProfileFacts, ProfileRecord, Profiles, Saving,
+    Settled, Unbound, binding_uuid, create_profile, delete_profile, load_conversation,
+    load_profile, open_database, open_pending_steer, profiles, register_repo, save_pending_steer,
+    set_grilling_pairing, set_implementation_pairing, set_review_pairing, settle, skip_review,
+    stamp_the_profiles, start_capture, start_conversation, start_grilling, timeline,
     update_profile,
 };
 
@@ -868,28 +868,6 @@ async fn a_profile_is_a_record_and_this_devices_binding() {
             .account,
         claude("before"),
     );
-}
-
-/// A record this device holds no binding of is no Profile it can run, and is
-/// not listed here.
-#[tokio::test]
-async fn a_record_bound_on_another_device_alone_is_not_listed() {
-    let (_dir, pool) = fresh_pool().await;
-    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
-
-    let profile = saved(&pool, "work").await;
-
-    sqlx::query("UPDATE replicated SET uuid = ? WHERE kind = 'profile_bindings'")
-        .bind(binding_uuid(
-            &profile.id,
-            "ff00ee11dd22cc33bb44aa5566778899",
-        ))
-        .execute(&pool)
-        .await
-        .unwrap();
-
-    assert!(profiles(&pool).await.unwrap().is_empty());
-    assert_eq!(load_profile(&pool, &profile.id).await.unwrap(), None);
 }
 
 /// Taken away rather than refused, and the Conversation that had chosen it is
@@ -1783,19 +1761,6 @@ async fn no_review_cannot_be_picked_once_grilling_has_started() {
     );
 }
 
-/// The member the mirrors below are at home on.
-const A_MEMBER: &str = "0011223344556677889900aabbccddee";
-
-/// Where a mirror made since the uuids is at home: the member, and no integer
-/// from before.
-fn at_a_member() -> Mirror {
-    Mirror {
-        device: A_MEMBER.to_owned(),
-        was: None,
-        login: true,
-    }
-}
-
 /// A Profile saved here is minted a uuid of its own, and two are never alike.
 #[tokio::test]
 async fn a_profile_saved_here_is_named_by_a_uuid_of_its_own() {
@@ -1811,143 +1776,234 @@ async fn a_profile_saved_here_is_named_by_a_uuid_of_its_own() {
     assert_eq!(load_profile(&pool, &work.id).await.unwrap(), Some(work));
 }
 
-/// A mirror is held under the uuid its home knows the Profile by, so one
-/// Profile is one uuid on both ends, and a refresh rewrites that row rather
-/// than writing another beside it.
-#[tokio::test]
-async fn a_mirror_is_held_under_its_homes_uuid() {
-    let (_dir, pool) = fresh_pool().await;
-    let theirs = "5e1f0a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b";
-
-    record_mirror(&pool, theirs, &at_a_member(), &facts("work"))
-        .await
-        .unwrap();
-    record_mirror(&pool, theirs, &at_a_member(), &facts("renamed"))
-        .await
-        .unwrap();
-
-    let held = profiles(&pool).await.unwrap();
-    assert_eq!(held.len(), 1, "one row, rewritten");
-    assert_eq!(held[0].id, theirs);
-    assert_eq!(held[0].name.as_deref(), Some("renamed"));
-    assert_eq!(held[0].mirror, Some(at_a_member()));
-}
-
-/// A member saying it holds a Profile under one of this device's own uuids is
-/// refused, and this device's row is left as it was: a row of this device's
-/// own turned into a mirror of itself would be an account nobody here could
-/// launch.
-#[tokio::test]
-async fn a_member_cannot_write_over_one_of_this_devices_own() {
-    let (_dir, pool) = fresh_pool().await;
-    let ours = saved(&pool, "work").await;
-
-    assert!(
-        record_mirror(&pool, &ours.id, &at_a_member(), &facts("theirs"))
-            .await
-            .is_err()
-    );
-    assert_eq!(load_profile(&pool, &ours.id).await.unwrap(), Some(ours));
-}
-
-/// A mirror held from before the uuids, under a provisional uuid of this
-/// device's minting, is one the member never names — so a member read on this
-/// release forgets it, out of every Pairing that named it.
-#[tokio::test]
-async fn a_mirror_from_before_the_uuids_is_forgotten_by_a_member_that_never_names_it() {
-    let (_dir, pool) = fresh_pool().await;
-    let provisional = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
-    let theirs = "5e1f0a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b";
-
-    record_mirror(
-        &pool,
-        provisional,
-        &Mirror {
-            was: Some(5),
-            ..at_a_member()
-        },
-        &facts("old"),
-    )
-    .await
-    .unwrap();
-    record_mirror(&pool, theirs, &at_a_member(), &facts("new"))
-        .await
-        .unwrap();
-
-    let id = conversation(&pool).await;
-    set_grilling_pairing(&pool, id, provisional, Some("claude-opus-5"))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        forget_mirrors_except(&pool, A_MEMBER, &[theirs.to_owned()])
-            .await
-            .unwrap(),
-        vec![provisional.to_owned()],
-    );
-    assert_eq!(
-        load_conversation(&pool, id)
-            .await
-            .unwrap()
-            .unwrap()
-            .grilling_pairing,
-        None,
-        "the Pairing that named it goes with it",
-    );
-    assert!(load_profile(&pool, theirs).await.unwrap().is_some());
-}
-
-/// The member a mirror in these tests is at home on.
+/// The member the records below arrive from.
 const HOME: &str = "ff11223344556677889900aabbccddee";
 
-/// The uuid that member publishes for its Profile once it is on the uuids.
+/// The uuid that member's Profile is a record under.
 const AT_HOME: &str = "5a1e0c3d-7b2f-4e8a-9c6d-1f0e2d3c4b5a";
 
+/// A member's Profile record arriving, written by [`HOME`] at `updated_at`:
+/// named `name`, Claude, and where it was minted where that is said. Removed
+/// where `removed` says so.
+async fn arrived(
+    pool: &SqlitePool,
+    name: &str,
+    minted: Option<i64>,
+    updated_at: i64,
+    removed: bool,
+) {
+    merge::<Profiles>(
+        pool,
+        &[Record {
+            uuid: AT_HOME.to_owned(),
+            updated_at,
+            deleted_at: removed.then_some(updated_at),
+            written_by: HOME.to_owned(),
+            fields: ProfileRecord {
+                name: Some(name.to_owned()),
+                harness: "claude".to_owned(),
+                models: vec![MODEL.to_owned()],
+                memory: true,
+                minted_on: minted.map(|_| HOME.to_owned()),
+                minted_id: minted,
+            },
+        }],
+    )
+    .await
+    .unwrap();
+}
+
+/// And that member's binding of it, its paths for `name`'s account.
+async fn bound_at_home(pool: &SqlitePool, name: &str) {
+    let Account::Claude {
+        claude_dir,
+        config_file,
+    } = claude(name)
+    else {
+        unreachable!()
+    };
+
+    merge::<Bindings>(
+        pool,
+        &[Record {
+            uuid: binding_uuid(AT_HOME, HOME),
+            updated_at: 1,
+            deleted_at: None,
+            written_by: HOME.to_owned(),
+            fields: Binding {
+                claude_dir: Some(claude_dir.to_string_lossy().into_owned()),
+                config_file: Some(config_file.to_string_lossy().into_owned()),
+                home: None,
+            },
+        }],
+    )
+    .await
+    .unwrap();
+}
+
+/// A Profile arriving from a member is listed and picked here like one saved
+/// here, with no binding of this device's: bound on the member, and its paths
+/// the member's.
+#[tokio::test]
+async fn a_members_profile_is_listed_with_no_binding_here() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    arrived(&pool, "theirs", None, 1, false).await;
+
+    let listed = profiles(&pool).await.unwrap();
+    assert_eq!(
+        listed.len(),
+        1,
+        "listed before any binding of it has arrived"
+    );
+    assert_eq!(
+        listed[0].unbound,
+        Some(Unbound { bound_on: vec![] }),
+        "bound nowhere this device has heard of",
+    );
+
+    bound_at_home(&pool, "theirs").await;
+
+    let held = load_profile(&pool, AT_HOME).await.unwrap().unwrap();
+    assert_eq!(held.name.as_deref(), Some("theirs"));
+    assert_eq!(
+        held.unbound,
+        Some(Unbound {
+            bound_on: vec![HOME.to_owned()],
+        }),
+    );
+    assert_eq!(held.account, claude("theirs"), "the member's paths");
+
+    let id = conversation(&pool).await;
+    assert_eq!(
+        set_grilling_pairing(&pool, id, AT_HOME, Some(MODEL))
+            .await
+            .unwrap(),
+        Chosen::Chosen,
+        "and it is picked like any other",
+    );
+}
+
+/// A Profile this device holds no binding of is rewritten as a record alone:
+/// its harness is kept and no binding of this device's is written, whatever
+/// account the save carried.
+#[tokio::test]
+async fn editing_a_profile_not_bound_here_writes_the_record_alone() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    arrived(&pool, "theirs", None, 1, false).await;
+    bound_at_home(&pool, "theirs").await;
+
+    assert_eq!(
+        update_profile(&pool, AT_HOME, &facts_for("renamed", codex("mine")))
+            .await
+            .unwrap(),
+        Saving::Saved,
+    );
+
+    let held = load_profile(&pool, AT_HOME).await.unwrap().unwrap();
+    assert_eq!(held.name.as_deref(), Some("renamed"));
+    assert_eq!(held.agent_type(), AgentType::Claude, "its harness kept");
+    assert_eq!(held.account, claude("theirs"), "and the member's paths");
+    assert!(held.unbound.is_some(), "and still no binding here");
+
+    let bindings = records::<Bindings>(&pool).await.unwrap();
+    assert_eq!(bindings.len(), 1, "the member's alone");
+
+    let record = records::<Profiles>(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|record| record.uuid == AT_HOME)
+        .unwrap();
+    assert_eq!(
+        record.written_by, THIS_DEVICE,
+        "a write of this device's own"
+    );
+}
+
+/// A record arriving removed nulls every Pairing on this device that named it,
+/// as removing one here does, and the Profile is in no list after it.
+#[tokio::test]
+async fn a_record_arriving_removed_nulls_every_pairing_that_named_it() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    arrived(&pool, "theirs", None, 1, false).await;
+    bound_at_home(&pool, "theirs").await;
+
+    let id = conversation(&pool).await;
+    set_grilling_pairing(&pool, id, AT_HOME, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(&pool, id, AT_HOME, Some(MODEL))
+        .await
+        .unwrap();
+
+    arrived(&pool, "theirs", None, 2, true).await;
+
+    let settled = settle(&pool).await.unwrap();
+    assert_eq!(settled.removed, vec![AT_HOME.to_owned()]);
+
+    for (table, column) in names_a_profile(&pool).await {
+        assert_eq!(
+            naming_rows(&pool, &table, &column, AT_HOME).await,
+            0,
+            "{table}.{column} still names the removed Profile",
+        );
+    }
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.grilling_pairing, None);
+    assert_eq!(conversation.implementation_pairing, None);
+    assert!(profiles(&pool).await.unwrap().is_empty());
+}
+
 /// A mirror held from before the uuids: the member's Profile once numbered 7
-/// there, under a provisional uuid of this device's minting.
-async fn provisional(pool: &SqlitePool, account: Account) -> String {
+/// there, under a provisional uuid of this device's minting — a row of the old
+/// table, which is in no list.
+///
+/// Every Pairing is made against it while it is a record, which is the only
+/// thing a Pairing can be made against now, and then the record is turned into
+/// the row a database from before this release holds.
+async fn provisional(pool: &SqlitePool, id: i64) -> String {
     let provisional = "0d0e0f10-1112-4314-9516-171819202122".to_owned();
 
-    record_mirror(
+    merge::<Profiles>(
         pool,
-        &provisional,
-        &Mirror {
-            device: HOME.to_owned(),
-            was: Some(7),
-            login: true,
-        },
-        &facts_for("work", account),
+        &[Record {
+            uuid: provisional.clone(),
+            updated_at: 1,
+            deleted_at: None,
+            written_by: HOME.to_owned(),
+            fields: ProfileRecord {
+                name: Some("work".to_owned()),
+                harness: "claude".to_owned(),
+                models: vec![MODEL.to_owned()],
+                memory: true,
+                minted_on: None,
+                minted_id: None,
+            },
+        }],
     )
     .await
     .unwrap();
 
-    provisional
-}
-
-/// A mirror from before the uuids, bridged, is the same mirror under its home's
-/// uuid — and every row that named the provisional one names the real one, with
-/// nothing nulled on the way.
-#[tokio::test]
-async fn a_bridged_mirror_takes_every_reference_to_its_homes_uuid() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
-
-    // A type that keeps a home, so `profile_homes` has a row to carry.
-    let provisional = provisional(&pool, codex("work")).await;
-
-    set_grilling_pairing(&pool, id, &provisional, Some(MODEL))
+    set_grilling_pairing(pool, id, &provisional, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, &provisional, Some(MODEL))
+    set_implementation_pairing(pool, id, &provisional, Some(MODEL))
         .await
         .unwrap();
-    set_review_pairing(&pool, id, &provisional, Some(MODEL))
+    set_review_pairing(pool, id, &provisional, Some(MODEL))
         .await
         .unwrap();
 
-    open_pending_steer(&pool, id).await.unwrap();
+    open_pending_steer(pool, id).await.unwrap();
     save_pending_steer(
-        &pool,
+        pool,
         id,
         &PendingForm {
             pairing: Some(PendingPairing {
@@ -1960,6 +2016,39 @@ async fn a_bridged_mirror_takes_every_reference_to_its_homes_uuid() {
     .await
     .unwrap();
 
+    sqlx::query("DELETE FROM replicated WHERE uuid = ?")
+        .bind(&provisional)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "INSERT INTO profiles
+             (id, name, claude_dir, config_file, model, agent_type, memory, home_device, home_id)
+         VALUES (?, 'work', '/theirs/.claude', '/theirs/.claude.json', ?, 'claude', 1, ?, 7)",
+    )
+    .bind(&provisional)
+    .bind(MODEL)
+    .bind(HOME)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    provisional
+}
+
+/// A mirror from before the uuids is in no list while it is provisional, its
+/// Pairings kept; and once its home's record arrives carrying where it was
+/// minted, every row that named the provisional uuid names the record's, with
+/// nothing nulled on the way, and the row is gone.
+#[tokio::test]
+async fn a_provisional_mirror_is_bridged_onto_the_record_its_home_published() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+    let id = conversation(&pool).await;
+
+    let provisional = provisional(&pool, id).await;
+
     start_grilling(
         &pool,
         id,
@@ -1970,7 +2059,7 @@ async fn a_bridged_mirror_takes_every_reference_to_its_homes_uuid() {
     .await
     .unwrap();
 
-    // And the two columns no foreign key points through: the Profile a
+    // And the two columns that name one beyond the pickers: the Profile a
     // signed-out stop waits on, and a recorded steer's.
     sqlx::query("UPDATE conversations SET stopped_signed_out = ? WHERE id = ?")
         .bind(&provisional)
@@ -1990,10 +2079,21 @@ async fn a_bridged_mirror_takes_every_reference_to_its_homes_uuid() {
         );
     }
 
+    assert!(
+        profiles(&pool).await.unwrap().is_empty(),
+        "a provisional mirror is in no list",
+    );
     assert_eq!(
-        bridge_mirror(&pool, HOME, 7, AT_HOME).await.unwrap(),
-        Some(provisional.clone()),
-        "the provisional uuid is what was rewritten",
+        settle(&pool).await.unwrap(),
+        Settled::default(),
+        "and nothing bridges it before its home's record arrives",
+    );
+
+    arrived(&pool, "work", Some(7), 1, false).await;
+
+    assert_eq!(
+        settle(&pool).await.unwrap().bridged,
+        vec![(provisional.clone(), AT_HOME.to_owned())],
     );
 
     for (table, column) in &naming {
@@ -2008,63 +2108,26 @@ async fn a_bridged_mirror_takes_every_reference_to_its_homes_uuid() {
         );
     }
 
-    let bridged = load_profile(&pool, AT_HOME)
-        .await
-        .unwrap()
-        .expect("the mirror is held under its home's uuid");
-
-    assert_eq!(bridged.name.as_deref(), Some("work"));
-    assert_eq!(bridged.account, codex("work"), "with its home");
-    assert_eq!(bridged.models, vec![MODEL.to_owned()], "and its models");
-    assert_eq!(bridged.mirror.unwrap().device, HOME);
-
-    assert_eq!(
-        bridge_mirror(&pool, HOME, 7, AT_HOME).await.unwrap(),
-        None,
-        "and a second read of that member finds nothing left to bridge",
-    );
-}
-
-/// A mirror already held under its home's uuid beside the provisional one takes
-/// the provisional one's Pairings, and the provisional row goes.
-#[tokio::test]
-async fn a_provisional_mirror_beside_the_real_one_hands_its_pairings_over() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
-
-    let provisional = provisional(&pool, claude("work")).await;
-
-    record_mirror(
-        &pool,
-        AT_HOME,
-        &Mirror {
-            device: HOME.to_owned(),
-            was: None,
-            login: true,
-        },
-        &facts("work"),
-    )
-    .await
-    .unwrap();
-
-    set_grilling_pairing(&pool, id, &provisional, Some(MODEL))
+    let (rows,): (i64,) = sqlx::query_as("SELECT count(*) FROM profiles")
+        .fetch_one(&pool)
         .await
         .unwrap();
+    assert_eq!(rows, 0, "no mirror row is left");
 
     assert_eq!(
-        bridge_mirror(&pool, HOME, 7, AT_HOME).await.unwrap(),
-        Some(provisional.clone()),
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .grilling_pairing
+            .map(|pairing| pairing.profile.id),
+        Some(AT_HOME.to_owned()),
+        "the Pairing draws the record",
     );
 
-    assert_eq!(load_profile(&pool, &provisional).await.unwrap(), None);
-    assert_eq!(
-        profiles(&pool).await.unwrap().len(),
-        1,
-        "one row for the one Profile"
-    );
-    assert_eq!(
-        naming_rows(&pool, "conversations", "grilling_profile_id", AT_HOME).await,
-        1
+    assert!(
+        settle(&pool).await.unwrap().bridged.is_empty(),
+        "and a second settling finds nothing left to bridge",
     );
 }
 
@@ -2073,14 +2136,16 @@ async fn a_provisional_mirror_beside_the_real_one_hands_its_pairings_over() {
 #[tokio::test]
 async fn a_pair_that_matches_no_mirror_bridges_nothing() {
     let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
 
-    let provisional = provisional(&pool, claude("work")).await;
+    let provisional = provisional(&pool, id).await;
 
-    assert_eq!(bridge_mirror(&pool, HOME, 8, AT_HOME).await.unwrap(), None);
+    arrived(&pool, "work", Some(8), 1, false).await;
+    assert!(settle(&pool).await.unwrap().bridged.is_empty());
+
     assert_eq!(
-        bridge_mirror(&pool, THIS_DEVICE, 7, AT_HOME).await.unwrap(),
-        None
+        naming_rows(&pool, "conversations", "grilling_profile_id", &provisional).await,
+        1,
+        "the Pairing still names the mirror",
     );
-
-    assert!(load_profile(&pool, &provisional).await.unwrap().is_some());
 }

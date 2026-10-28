@@ -51,7 +51,7 @@ use verkstead_render::{
 use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
 use verkstead_server::platform::{Environment, Platform};
-use verkstead_server::store::{Account, AgentType, Mirror, ProfileFacts};
+use verkstead_server::store::{Account, AgentType, ProfileFacts};
 use verkstead_server::{open_database, router_onboarding_asking_github, store};
 
 /// A program that is there and does nothing, which is the whole of what a row
@@ -320,14 +320,10 @@ async fn a_profile(pool: &SqlitePool, dir: &Path) -> String {
 /// what a session away from home is given is fetched from that device before the
 /// launch.
 async fn a_mirror(pool: &SqlitePool) {
-    store::record_mirror(
+    store::profile_arrived(
         pool,
         "4e0f1d2c-0000-4000-8000-000000000004",
-        &Mirror {
-            device: "aa00bb11cc22dd33ee44ff5566778899".to_owned(),
-            was: None,
-            login: true,
-        },
+        "aa00bb11cc22dd33ee44ff5566778899",
         &ProfileFacts {
             name: Some("Theirs".to_owned()),
             account: Account::Claude {

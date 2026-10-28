@@ -337,7 +337,7 @@ describe("a shared conversation", () => {
                       },
                       models: ["claude-fable-5"],
                       memory: true,
-                      device: null,
+                      bound: true,
                     },
                     model: "claude-fable-5",
                   },

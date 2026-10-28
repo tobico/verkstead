@@ -4907,28 +4907,21 @@ login: boolean,
  */
 memory: boolean, 
 /**
- * Which device this Profile is at home on, and `null` for this one's own —
- * which is every Profile on a Verkstead that is linked to nothing.
+ * Whether this device holds a **binding** of it: its own account's paths,
+ * which [`Self::account`] then is and a session here is run as. `false`
+ * is a Profile bound on other devices alone, whose paths on the row are
+ * one of theirs and belong to no filesystem here.
  *
- * The same shape a Conversation's row carries whose work it is, and for the
- * same reason: the name and the mark for the operating system are this
- * device's own reading of its membership rather than anything the far end
- * said, and one shape means one way of drawing a device wherever a list has
- * several machines' rows in it. See [`crate::RowDevice`].
- *
- * One list rather than a section per device: a Profile is a Profile, and
- * which machine its account sits on is a fact on the row.
+ * No device is drawn on the row either way: a Profile is the cluster's,
+ * and has no home to mark.
  */
-device: RowDevice | null, 
+bound: boolean, 
 /**
- * Where this Profile was minted and the id it had there, for one of the
- * answering device's own that was numbered before Profiles had uuids —
- * absent for every other row.
+ * Where this Profile was minted and the id it had there, for one that was
+ * numbered before Profiles had uuids — absent for every other row.
  *
- * What a member's mirror of it from before the uuids is bridged by: that
- * mirror kept the device it was at home on and the id it had there, under
- * a provisional uuid of the member's own minting, and this pair matching
- * it is what rewrites the provisional uuid to this one (ADR-0028).
+ * What a member's mirror of it from before the uuids is bridged by — see
+ * the record's own pair, which is what crosses between devices (ADR-0028).
  */
 minted?: ProfileMinted, };
 
@@ -4967,8 +4960,9 @@ broken: Broken,
  */
 agent_type: AgentType, 
 /**
- * And the machine the account is at home on, where that is not this one —
- * which is what the two troubles about a home name.
+ * And the machine the account would be fetched from, where the trouble
+ * names one. None does since a Profile has no home to mark: the row is
+ * the cluster's, and so is the sentence.
  */
 device: string | null, };
 

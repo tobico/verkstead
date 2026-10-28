@@ -4344,14 +4344,10 @@ async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
     // Held under the uuid the member knows it by, which is what everything
     // here names it by too: one Profile is one uuid on every device holding it.
     // The third of the stated ones, after this device's own two.
-    verkstead_store::record_mirror(
+    verkstead_store::profile_arrived(
         &pool,
         &stated_uuid(3),
-        &verkstead_store::Mirror {
-            device: A_MEMBER.to_owned(),
-            was: None,
-            login: true,
-        },
+        A_MEMBER,
         &store::ProfileFacts {
             name: Some("personal".to_owned()),
             account: store::Account::Claude {

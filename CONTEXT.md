@@ -511,8 +511,8 @@ answerable on the far end, its Answers reaching a wait opened *there*. Two
 ids are not the record's to renumber and are settled by the devices instead: the
 Repos, by the same match that settled the Conversation's own, refused by name
 where one has nowhere to land; and the Agent Profiles, named across the cluster
-by the device each is at home on, the column landing empty where the far end has
-never heard of the account — which is a Steer whose account was deleted a year
+by the uuid each is the same record under, the column landing empty where the
+far end holds no record of it — which is a Steer whose account was deleted a year
 later rather than a Pairing anything is about to run under. A record is prose
 and binary and can be large, so it crosses under a bound of its own and is
 refused whole rather than in part, naming the Conversation that was too big to
@@ -2542,9 +2542,9 @@ _Avoid_: the cluster list, the global sidebar, syncing
 The state a Verkstead that cannot do anything yet is in, and while it is on the
 wizard at `/setup` is the only page there is: every other URL redirects there.
 What it is about is the **objective** — a sandbox, `git` and at least one of the
-four harnesses present; at least one **Agent Profile**, a **mirror** of a
-member's counting as one, its account being fetched from the device it is at
-home on before every launch; an **Author**. Present
+four harnesses present; at least one **Agent Profile**, one bound on a
+member alone counting, its account being fetched from a device it is bound on
+before every launch; an **Author**. Present
 means a session would find it, so every probe resolves on the `PATH` inside the
 **Sandbox** rather than the server's own: a harness on the server's `PATH` and
 nowhere a session looks is a row that ticks and a session that cannot start. The
@@ -3751,65 +3751,56 @@ Profile anything falls back to: there is no default Profile, exactly as there is
 no default model. And a session run under one writes no name into its record, so
 a finished run draws as the harness and the model alone — which is how a record
 from before Verkstead wrote the name down already drew.
-**A Profile is a Replicated record** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): its name, its harness, its models and its memory switch, under the uuid every reference to it names, with an `updated_at` and a deletion stamp — so **a removal is a deletion stamp**, kept, and nulls every Pairing that named the uuid on its way. **The account's paths are a binding**, a record of their own per Profile per device, keyed `<uuid>/<device>` and written only by the device it names: this device's binding is what a session here is run as, and a record this device holds no binding of is not one it can run yet. At the switch every device's own Profiles became records under the uuids they already carried, and each device's paths its binding. **Becoming the cluster's**: the records and the bindings replicating, the card carrying a line per device, and a device with no binding running from a copy built from the replicated login; in a cluster, an unnamed Profile is named after its device at the switch, and as its device first links. The `cluster-owned-records` roadmap lands it; until its stage does, the mirror below is how a Profile crosses the cluster.
-**A cluster's Profiles are one list on every device of it.** A device linked to
-another keeps a **mirror** per Profile that other device holds: a row of its own
-`profiles` table carrying what a row is drawn and picked by — the name, the
-harness, the account as the far end holds it, the models and the memory switch —
-marked with the **Device Id** it is at home on (ADR-0020). **Every Profile is
+**A Profile is a Replicated record** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): its name, its harness, its models and its memory switch, under the uuid every reference to it names, with an `updated_at` and a deletion stamp — so **a removal is a deletion stamp**, kept, and nulls every Pairing that named the uuid on its way. **The account's paths are a binding**, a record of their own per Profile per device, keyed `<uuid>/<device>` and written only by the device it names: this device's binding is what a session here is run as, and a record this device holds no binding of is run from a copy of the account fetched from a device it is bound on. At the switch every device's own Profiles became records under the uuids they already carried, and each device's paths its binding. **Becoming the cluster's**: the card carrying a line per device, and a device with no binding running from a copy built from the replicated login; in a cluster, an unnamed Profile is named after its device at the switch, and as its device first links. The `cluster-owned-records` roadmap lands it.
+**A cluster's Profiles are one list on every device of it.** The records and
+the bindings **replicate** like every Replicated record: each device serves its
+whole table of both on the records route behind the **Member Gate**, and pulls
+each member's at the start, whenever a member says its Profiles moved, and
+whenever the membership moves — so a Profile made on one device is in every
+device's Profiles section and pickers, bound there or not. **Every Profile is
 named by its uuid** (ADR-0028): a Pairing, a Repo's memory of what it was last
 grilled with, a steer, a Transfer, the peer routes and every Conversation name
-one by it, and a mirror is held under the uuid its home knows the Profile by —
-so one Profile is one uuid on both ends, and a mirror keeps it across every
-refresh. A mirror held from before the uuids carries a provisional uuid of this
-device's minting, with the id it had at home beside it, until that home's own
-uuid is matched to it; and this device's own Profiles numbered before the uuids
-keep where they were minted and the id they had, which is the same pair said
-from the home's side. **The pair is the bridge**: the home publishes it on each
-such row of its list, and the first read of it that matches rewrites the
-provisional uuid to the home's in everything that named it, the account mirror
-under the Data Directory included — so every Pairing survives the switch,
-whichever device updates first. A home a release behind cannot be read, which
-is a line on its Devices row naming both releases, and its mirrors stay
-provisional, Pairings and all, until it updates. A mirror is in neither
-uniqueness rule above: two machines may each hold a `work`, and each the one
-unnamed Claude account, which is what nearly every installation holds.
-**Which machine an account sits on is a fact on the row**, drawn with the mark
-its operating system wears wherever a device is drawn — on the settings card and
-on every pairing picker, one list rather than a section per device. And nothing
-at all on this device's own rows, a machine's own name on every one of them being
-a column of one answer repeated.
-**They are fetched device to device rather than through the browser**: each
-device reads its members' own `/api/ui/profiles` over the **Relay**, at the
-start, whenever a member says its Profiles moved, and whenever the membership
-itself moves. A member that is not answering keeps the rows it last gave, exactly
-as its Conversations are kept; a Profile removed at home is gone from what that
-device answers, so the mirror goes with it on the next refresh — nulled out of
-every Pairing that named it, exactly as a removal pressed here is. A device that
-has been unlinked takes its mirrors with it, the membership being what prunes
-those.
-**And a session runs under a mirror wherever it is drawn**, the account being
-fetched from the machine it is on before each launch — see **Account mirror**.
-Nothing about the home machine's paths is judged here: they belong to that
-filesystem, and what a session is given is the mirror.
-**Which does not make a mirror unbreakable; it makes it break over other
-things.** Brokenness is answered per read for every Profile — a local one
-against its own paths — and for a mirror the question is the three that would
-stop a launch away from home, asked **in the order a launch would meet them**.
-**The home is not answering**, which is this device's own reading of its
-membership and reads the way that machine reads in the sidebar: nothing can be
-fetched, so nothing can be built. **The account at home holds no login file**,
-which the home device answers as the mirrors refresh and which is what a Claude
-login in the macOS Keychain comes to, and a sign-out at home with it — there is
-nothing to mirror, the fix is a login on that machine, and the Profile is
-meanwhile perfectly runnable there. **Or the harness is not on this machine**,
+one by it, and it is the same uuid on every device. A member that is not
+answering keeps every record this device holds of it, and a device unlinked
+takes nothing with it, a record being the cluster's. A member too old to serve
+the route is a line on its Devices row naming both releases, and its Profiles
+are absent here until it updates.
+**The mirrors retired into records.** A member's Profile that a device held as
+a **mirror** — a row of its own `profiles` table marked with the device it was
+at home on — was written down at the switch as that Profile's record and its
+home's binding, stamped older than anything, so the home's own record wins the
+first pull. A mirror held from before the uuids carries a provisional uuid of
+this device's minting, with the device and the id it had at home beside it, and
+this device's own Profiles numbered before the uuids keep where they were minted
+and the id they had, which is the same pair said from the home's side. **The
+pair is the bridge**: until the home's record arrives carrying it, the
+provisional mirror is in no list and its Pairings hold; once it arrives, the
+provisional uuid is rewritten to the record's in everything that named it, the
+account copy under the Data Directory included — so every Pairing survives the
+switch, whichever device updates first.
+**No device is drawn on a Profile's row**, on the settings card or on any pairing
+picker: a Profile has no home to mark, and two alike that arrived by
+replication are drawn two alike.
+**And a session runs under a Profile not bound here wherever it is drawn**, the
+account being fetched from a device it is bound on before each launch — see
+**Account mirror**. Nothing about that machine's paths is judged here: they
+belong to that filesystem, and what a session is given is the copy.
+**Which does not make such a Profile unbreakable; it makes it break over other
+things.** Brokenness is answered per read for every Profile — one bound here
+against its own paths — and for one bound elsewhere the question is the three
+that would stop a launch here, asked **in the order a launch would meet them**.
+**The device it is bound on is not answering**, which is this device's own
+reading of its membership and reads the way that machine reads in the sidebar:
+nothing can be fetched, so nothing can be built. **The account there holds no
+login file**, which is what a Claude login in the macOS Keychain comes to, and
+a sign-out there with it — there is nothing to copy, the fix is a login on that
+machine, and the Profile is meanwhile perfectly runnable there. **Or the harness is not on this machine**,
 which is the onboarding probe's own question answered in the onboarding probe's
 own word, rather than a second vocabulary for one fact.
-**Whether an account holds a login file is a fact on every row**, answered by
-the device the account is on: one of this device's own says *it cannot be used
-away from here*, which is a note rather than a trouble, and the same account
-read as a mirror elsewhere is broken there. Which is the difference the two
-readings are for.
+**Whether an account holds a login file is a fact on a row bound here**: one
+with none says *it cannot be used from another device*, which is a note rather
+than a trouble. A binding does not carry it to the other devices, so one not
+bound on the Profile finds a missing login at the fetch.
 **Refused rather than hidden.** None of the three takes the row out of a picker
 or out of the Profiles section, and a Conversation paired with one reads as
 paired with a **broken** Profile rather than as one nothing was picked for: a
@@ -3819,25 +3810,17 @@ do refuse is the **Start**, **by name and before anything starts** — the refus
 carries what the row carries, so the sentence at the press is the sentence
 already on the row, and a Start refused over a machine that is not answering
 names that machine.
-**And a mirror is edited and removed from wherever it is drawn too**, and the
-press is relayed to the device the account is on: every device's Profiles
-section lists everyone's, and the form over a mirror saves. A save is put to the
-home device as
-the ordinary edit of *its own* Profile, addressed by the id the row records for
-it there, and what comes back is that device's own answer rather than a second
-opinion composed here — a name already taken at home is a name already taken,
-said in the words a local clash is said in, the two uniqueness rules staying that
-device's to hold. The mirror then redraws off the refreshed row rather than off
-what was typed, and the pane says which machine the press goes to, the paths on
-the form being that machine's. A removal is the same hop and takes the Profile
-off its home device, so every device's mirror of it goes on that device's next
-refresh — a Profile removed from one device leaves a Conversation on a third
-reading as one nothing has been picked for. **A home that is not answering
-refuses the press by name** and writes nothing here: a mirror edited against a
-machine that is not there would be a row disagreeing with the account it stands
-for. And **nothing is relayed twice** — a device puts the edit to the Profile's
-home and nowhere else, a third device learning of it by refreshing its own
-mirror, which is the rule every announcement in a cluster is held under.
+**An edit or a removal is a local write on whichever device it is pressed**,
+which replicates — there is no home to relay it to, and a device that is not
+answering stops nobody saving. Both uniqueness rules are checked at the press
+against the whole table, so a name taken on another device is refused here in
+the words any clash is. **A save over a Profile not bound here writes the
+record alone**: its paths are other devices', so the pane says the paths under
+the form are another device's and the save leaves them alone, and binding this
+device is a press of its own. A removal is a deletion stamp, and every device
+that pulls it nulls the Pairings on it that named the uuid — a Profile removed
+on one device leaves a Conversation on another reading as one nothing has been
+picked for.
 **Removing one is always allowed**, and it is a delete rather than an
 unregistering: a Profile is a way in to an account, so one the human is finished
 with is one Verkstead should stop holding. Every Conversation that had chosen it
@@ -3951,10 +3934,10 @@ would sign a session out for no reason anybody could see. What the home device
 sends is written over what is there — beside and renamed, so a session already
 running keeps the file it started with — and every file of the allowlist it did
 *not* send is taken away, a sign-out at home being a mirror with no login in it.
-**And it goes when the mirror row does**, which is the last thing on this device
-that says whose login it holds: a Profile the human removed at home, or a device
-unlinked, takes the directory with the row rather than leaving a member's login
-here with nothing pointing at it.
+**And it goes when the record is removed**, which is the last thing on this
+device that says whose login it holds: a Profile the human removed anywhere
+takes the directory with it rather than leaving a member's login here with
+nothing pointing at it.
 **Only the allowlist travels.** The login as the harness wrote it, and the
 configuration composed the way a root's is: Claude's `settings.json` filtered to
 what reaches a model, its `.claude.json` without the MCP servers *or* the
@@ -3966,8 +3949,9 @@ on the list: it is joined rather than composed, and is carried entry by entry on
 its own terms — see **Memory sync**.
 **A member's own call rather than the viewer's**: the home device answers it at
 `/api/peer/v1/profiles/<uuid>/account` on the **Peer Listener** behind the
-**Member Gate**, by the uuid the Profile has on both devices, and only for a Profile of
-its own — a row that is itself a mirror is an account on a third machine.
+**Member Gate**, by the uuid the Profile has on every device, and only for a
+Profile bound there — one it runs from a copy of is an account on a third
+machine.
 **A home that is not answering starts no session**, and says which machine: a
 session launched under an account nothing fetched is one that comes up logged out
 with nothing on the Timeline saying why, so the refusal goes in the session's

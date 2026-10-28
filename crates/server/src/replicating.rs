@@ -6,7 +6,8 @@
 //! wrote it — and the two rules a record is merged and stamped by are the
 //! store's, said once for every kind — see [`store::replicated`]. What lives
 //! here is each kind's own: what its fields are, where it was kept before it
-//! was a record, and who holds it in memory. Authors are the first.
+//! was a record, and who holds it in memory. Authors are the first, and the
+//! Agent Profiles with their bindings the second.
 //!
 //! **Every device serves its whole table** of a kind on [`RECORDS`], behind
 //! the Member Gate — live records and removed ones, whoever wrote them — so a
@@ -28,6 +29,7 @@
 //! reader's.
 
 pub mod authors;
+pub mod profiles;
 
 use std::future::Future;
 
@@ -44,7 +46,8 @@ use crate::relaying::{FailedReads, Read, Unread, answer_of};
 use crate::store::replicated::{self, Kind, Record};
 
 /// Where a member asks for this device's whole table of one kind, by the
-/// kind's name — `authors` for the Authors.
+/// kind's name — `authors` for the Authors, `profiles` for the Agent Profiles
+/// and `profile_bindings` for their bindings.
 ///
 /// **Not under `/api/ui/`**, which is the viewer's namespace and is drawn by a
 /// browser: what crosses here is records, removed ones included, which no
@@ -88,6 +91,8 @@ where
 async fn served(State(state): State<AppState>, Path(kind): Path<String>) -> Response {
     match kind.as_str() {
         authors::Authors::NAME => table::<authors::Authors>(&state).await,
+        crate::store::Profiles::NAME => table::<crate::store::Profiles>(&state).await,
+        crate::store::Bindings::NAME => table::<crate::store::Bindings>(&state).await,
         _ => (
             StatusCode::NOT_FOUND,
             "this device keeps no records of that kind\n",
@@ -126,8 +131,10 @@ pub(crate) fn route() -> Router<AppState> {
 
 /// Pull every member's records of every kind, for as long as this server runs.
 ///
-/// Spawned beside the mirrors' refreshers and for their reason. Nothing at
-/// all on a router with no identity, which is linked to nothing.
+/// Spawned beside the merged list's refresher and for its reason: what it does
+/// first is read every member, some of which are laptops that are shut, and it
+/// never returns. Nothing at all on a router with no identity, which is linked
+/// to nothing.
 pub(crate) fn pulling(state: &AppState) {
     if state.devices.is_none() {
         return;
@@ -135,7 +142,24 @@ pub(crate) fn pulling(state: &AppState) {
 
     let state = state.clone();
 
-    tokio::spawn(async move { pulled::<authors::Authors>(state).await });
+    tokio::spawn(async move {
+        // Which device this is, said to the Profiles before any is served or
+        // pulled — a binding is keyed by the device it is of, and one written
+        // before that was said is keyed by none. The serve says it before
+        // anything else and this finds nothing to do; a router stood up
+        // without one, which is a suite's, is said it here.
+        if let Err(error) = crate::store::stamp_the_profiles(&state.pool, &state.device).await {
+            tracing::error!(
+                error = ?error,
+                "which device this is could not be said to the Profiles, so none were pulled",
+            );
+            return;
+        }
+
+        tokio::spawn(pulled::<authors::Authors>(state.clone()));
+        tokio::spawn(pulled::<crate::store::Profiles>(state.clone()));
+        tokio::spawn(pulled::<crate::store::Bindings>(state));
+    });
 }
 
 /// Every member pulled once, and then whatever a Nudge says to pull again —

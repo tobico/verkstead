@@ -2891,7 +2891,12 @@ impl Sessions {
         // carry.
         let (launching_under, lending, syncing) = match mirrored {
             Some(crate::mirroring::account::Mirrored { profile, lent }) => {
-                let syncing = match pairing.profile.mirror.as_ref() {
+                let syncing = match pairing
+                    .profile
+                    .unbound
+                    .as_ref()
+                    .and_then(|unbound| unbound.device())
+                {
                     Some(at) => {
                         crate::mirroring::memory::pulled(pool, devices, conversation, at, &profile)
                             .await
@@ -3268,9 +3273,14 @@ impl Sessions {
             event_id,
             pairing.profile.id.clone(),
             crate::profiles::shown(pairing.profile.name.as_deref()).to_owned(),
-            match &pairing.profile.mirror {
+            match pairing
+                .profile
+                .unbound
+                .as_ref()
+                .and_then(|unbound| unbound.device())
+            {
                 None => crate::signouts::Home::Here,
-                Some(mirror) => crate::signouts::Home::Away(mirror.device.clone()),
+                Some(device) => crate::signouts::Home::Away(device.to_owned()),
             },
             pairing.profile.agent_type(),
             login,
@@ -4644,7 +4654,7 @@ mod tests {
             },
             models: vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()],
             memory: true,
-            mirror: None,
+            unbound: None,
             minted: None,
         }
     }
@@ -4670,7 +4680,7 @@ mod tests {
                 },
                 models: vec!["gpt-5-codex".to_owned()],
                 memory: true,
-                mirror: None,
+                unbound: None,
                 minted: None,
             },
             model: Some("gpt-5-codex".to_owned()),
@@ -4688,7 +4698,7 @@ mod tests {
                 },
                 models: vec!["grok-4.6".to_owned()],
                 memory: true,
-                mirror: None,
+                unbound: None,
                 minted: None,
             },
             model: Some("grok-4.6".to_owned()),
@@ -4708,7 +4718,7 @@ mod tests {
                 },
                 models: vec!["opencode/big-pickle".to_owned()],
                 memory: true,
-                mirror: None,
+                unbound: None,
                 minted: None,
             },
             model: Some("opencode/big-pickle".to_owned()),

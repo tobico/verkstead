@@ -672,20 +672,16 @@ async fn a_login_left_past_its_limit_is_killed() {
 }
 
 #[tokio::test]
-async fn a_mirrored_profile_is_not_logged_in_here() {
+async fn a_profile_bound_on_another_device_is_not_logged_in_here() {
     let workbench = Workbench::new(Duration::from_secs(600)).await;
     let (claude_dir, config_file) = workbench.pair("mirror");
 
     let id = "4e0f1d2c-0000-4000-8000-000000000004";
 
-    store::record_mirror(
+    store::profile_arrived(
         &workbench.pool,
         id,
-        &store::Mirror {
-            device: "0011223344556677889900aabbccddee".to_owned(),
-            was: None,
-            login: true,
-        },
+        "0011223344556677889900aabbccddee",
         &store::ProfileFacts {
             name: Some("away".to_owned()),
             account: store::Account::Claude {
@@ -707,7 +703,7 @@ async fn a_mirrored_profile_is_not_logged_in_here() {
         .await;
 
     assert_eq!(status, StatusCode::CONFLICT, "{said}");
-    assert!(said.contains("at home on"), "{said}");
+    assert!(said.contains("bound on"), "{said}");
     assert_eq!(workbench.running(), 0);
 }
 

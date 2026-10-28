@@ -104,8 +104,8 @@ pub struct Syncing {
     pool: SqlitePool,
     devices: Option<Devices>,
 
-    /// The device the account is at home on.
-    at: store::Mirror,
+    /// The device the store was pulled from: one the Profile is bound on.
+    at: String,
 
     /// And the Profile's uuid, which is the one it has there too — what the
     /// write-back is addressed by, the way every press over a mirror is.
@@ -149,7 +149,7 @@ pub async fn pulled(
     pool: &SqlitePool,
     devices: Option<&Devices>,
     conversation: &store::Conversation,
-    at: &store::Mirror,
+    at: &str,
     profile: &store::Profile,
 ) -> Option<Syncing> {
     // Off, and nothing of the account's store is made, joined or carried — which
@@ -182,7 +182,7 @@ pub async fn pulled(
     // and **no match is an answer**: the Worktree's half still travels, and the
     // Timeline says the Repo's did not.
     let matched = match devices {
-        Some(devices) => crate::matching::across(devices, &at.device, &conversation.repo).await,
+        Some(devices) => crate::matching::across(devices, at, &conversation.repo).await,
 
         // A Verkstead linked to nothing has no mirror to launch under either, so
         // this is a shape rather than a case.
@@ -257,25 +257,25 @@ pub async fn pulled(
         None => return None,
     };
 
-    let said: Vec<MemoryFile> =
-        match relaying::word_from(devices, &at.device, call, MOST_A_STORE_IS).await {
-            Ok(said) => said,
+    let said: Vec<MemoryFile> = match relaying::word_from(devices, at, call, MOST_A_STORE_IS).await
+    {
+        Ok(said) => said,
 
-            Err(why) => {
-                noted(
-                    pool,
-                    conversation.id,
-                    &format!(
-                        "Verkstead didn't fetch what this profile's account remembers of this \
+        Err(why) => {
+            noted(
+                pool,
+                conversation.id,
+                &format!(
+                    "Verkstead didn't fetch what this profile's account remembers of this \
                          repository. {} This session started on an empty memory store.",
-                        why.saying,
-                    ),
-                )
-                .await;
+                    why.saying,
+                ),
+            )
+            .await;
 
-                return None;
-            }
-        };
+            return None;
+        }
+    };
 
     let written = tokio::task::spawn_blocking({
         let account = account.clone();
@@ -317,7 +317,7 @@ pub async fn pulled(
     Some(Syncing {
         pool: pool.clone(),
         devices: devices.cloned(),
-        at: at.clone(),
+        at: at.to_owned(),
         profile: profile.id.clone(),
         account,
         parts,
@@ -416,10 +416,10 @@ impl Syncing {
             body: Streamed::saying(body),
         };
 
-        match relaying::put_to(devices.as_ref(), &at.device, call).await {
+        match relaying::put_to(devices.as_ref(), &at, call).await {
             Ok(_) => tracing::debug!(
                 conversation_id,
-                device = %at.device,
+                device = %at,
                 carrying,
                 "what this session wrote to its memory store was written into the account on the \
                  device it is at home on",
@@ -428,7 +428,7 @@ impl Syncing {
             Err(why) => {
                 tracing::warn!(
                     conversation_id,
-                    device = %at.device,
+                    device = %at,
                     "what this session wrote to its memory store could not be written back: {}",
                     why.saying,
                 );

@@ -5117,7 +5117,7 @@ mod tests {
                 },
                 models: vec![model.to_owned()],
                 memory: true,
-                mirror: None,
+                unbound: None,
                 minted: None,
             },
             model: Some(model.to_owned()),

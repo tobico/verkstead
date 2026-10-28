@@ -290,10 +290,9 @@ const ANNEXED: DevicesView = {
   ),
 };
 
-/// And the Agent Profiles a device in a cluster answers: two of its own, and a
-/// mirror of a member's account with the machine it is at home on.
+/// And the Agent Profiles a device in a cluster answers: two bound here, and
+/// one bound on a member alone.
 const SHARED = shared as ProfileEntry[];
-const SHARED_MACHINE = SHARED[2]!.device!;
 
 /// Where a call for that member stands. The prefix takes the place of
 /// `/api/ui`, so the far end sees the path the browser would have written
@@ -1176,16 +1175,11 @@ describe("the device the compose page is drafting onto", () => {
     }
   });
 
-  /// And the pairing pickers are cluster-wide, which is the other list a
-  /// membership changes the shape of: every device offers every member's
-  /// accounts beside its own, with the machine on the row (ADR-0020, *Shared
-  /// Profiles*). Two accounts called `work` are two machines', and the name
-  /// alone would not say which.
-  ///
-  /// `tests/fixtures/profiles-shared.json` is that list as the server really
-  /// answers it — the mirror row carries the machine, and this device's own
-  /// carry none.
-  it("offers a member's accounts on the pairing pickers, with the machine", async () => {
+  /// A profile bound on a member alone is offered on the pairing pickers like
+  /// any other, with no machine said on its row: a profile is the cluster's,
+  /// and has no home to mark (ADR-0028). `tests/fixtures/profiles-shared.json`
+  /// is that list as the server really answers it.
+  it("offers a member's accounts on the pairing pickers, with no machine", async () => {
     theCluster(whenever("/api/ui/profiles", json(SHARED)));
     const { container } = mount("/compose");
 
@@ -1194,41 +1188,21 @@ describe("the device the compose page is drafting onto", () => {
     await openAgent(container);
 
     // All three, because a member's account is offered for whichever role the
-    // human would run it in — and the two that can run nothing offer that row
-    // above the accounts, which is on no machine at all.
+    // human would run it in.
     await waitFor(() =>
-      expect(rows("Implementation")).toContain(
-        `Claude Code Opus 5 · personal · ${SHARED_MACHINE.name}`,
-      ),
+      expect(rows("Implementation")).toContain("Claude Code Opus 5 · personal"),
     );
 
     for (const role of ["Grilling", "Review"]) {
-      expect(rows(role)).toContain(
-        `Claude Code Opus 5 · personal · ${SHARED_MACHINE.name}`,
-      );
+      expect(rows(role)).toContain("Claude Code Opus 5 · personal");
     }
 
-    // This device's own say nothing about a machine: a name on every row would
-    // be a column of one answer repeated.
     expect(rows("Implementation")).toContain("Claude Code Fable 5 · fable");
-
-    // And the member's row wears its machine's mark after the harness's, which
-    // is what a list of several devices' accounts is scanned by.
-    const theirs = offered("Implementation").find((row) =>
-      row.textContent!.includes(SHARED_MACHINE.name),
-    )!;
-
-    expect(
-      [...theirs.querySelectorAll("svg path")].map((drawn) =>
-        drawn.getAttribute("d"),
-      ),
-    ).toContain(mark(SHARED_MACHINE.os!));
   });
 
-  /// And a member's account that cannot be run from here stays on the picker
-  /// and says why (ADR-0020, *Shared Profiles*): a row saying what is in the
-  /// way is something to go and put right, and a row quietly missing is a human
-  /// looking for a profile they know they saved.
+  /// And one that cannot be run from here stays on the picker and says why: a
+  /// row saying what is in the way is something to go and put right, and a row
+  /// quietly missing is a human looking for a profile they know they saved.
   ///
   /// Three findings and one word apiece — the short form of the sentence the
   /// card in the Profiles section says in full, see `src/broken.ts`.
@@ -1240,7 +1214,7 @@ describe("the device the compose page is drafting onto", () => {
     theCluster(
       whenever(
         "/api/ui/profiles",
-        json(SHARED.map((row) => (row.device ? { ...row, broken } : row))),
+        json(SHARED.map((row) => (row.bound ? row : { ...row, broken }))),
       ),
     );
     const { container } = mount("/compose");
@@ -1251,11 +1225,11 @@ describe("the device the compose page is drafting onto", () => {
 
     await waitFor(() =>
       expect(rows("Implementation")).toContain(
-        `Claude Code Opus 5 · personal · ${SHARED_MACHINE.name} · ${said}`,
+        `Claude Code Opus 5 · personal · ${said}`,
       ),
     );
 
-    // And this device's own, which nothing is in the way of, read as they
+    // And the ones bound here, which nothing is in the way of, read as they
     // always did.
     expect(rows("Implementation")).toContain("Claude Code Fable 5 · fable");
   });

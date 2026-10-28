@@ -119,7 +119,8 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     profiles_whose_name_was_unique_everywhere(pool).await?;
     author_mirrors_that_are_records_now(pool).await?;
     profiles_that_were_numbered_here(pool).await?;
-    profiles_that_are_records_now(pool).await
+    profiles_that_are_records_now(pool).await?;
+    profile_mirrors_that_are_records_now(pool).await
 }
 
 /// Make every Agent Profile of this device's own a **Replicated record**, its
@@ -137,7 +138,8 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
 ///
 /// **The take-up** is `profiles::take_up`, once — what says it has been is
 /// the facility's own `replicated_taken_up`. The mirrors stay rows of
-/// `profiles`.
+/// `profiles` for the step after — see
+/// [`profile_mirrors_that_are_records_now`].
 ///
 /// Foreign keys off on the one connection, for the reason the rebuilds above
 /// say. Safe to run twice: what says whether there is anything to do is a
@@ -164,6 +166,24 @@ async fn profiles_that_are_records_now(pool: &SqlitePool) -> Result<()> {
     restored?;
 
     Ok(())
+}
+
+/// Write every **Profile mirror** held under its home's uuid down as a record
+/// of that uuid and its home's binding, stamped older than anything, and take
+/// the row away (ADR-0028) — see `profiles::mirrors_written_down`. A mirror
+/// held from before the uuids stays a row, provisional, until its home's
+/// records arrive to bridge it by.
+///
+/// Safe to run twice: what says whether there is anything to do is such a row
+/// being there, and after the first run none is.
+async fn profile_mirrors_that_are_records_now(pool: &SqlitePool) -> Result<()> {
+    let mut tx = super::writing(pool, "writing the Profile mirrors down as records").await?;
+
+    super::profiles::mirrors_written_down(&mut tx).await?;
+
+    tx.commit()
+        .await
+        .context("writing the Profile mirrors down as records")
 }
 
 /// That rewrite, in one transaction on the connection whose foreign keys are

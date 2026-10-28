@@ -5198,13 +5198,14 @@ fn chosen(conversation: &store::Conversation) -> impl Iterator<Item = &store::Pr
 /// on the Profile's row before anybody presses anything, and a refusal that
 /// said only *a chosen profile is broken* would be a second, vaguer account of
 /// it — so what goes back is what the row carries, and the viewer composes the
-/// one sentence for both. Which is what makes a Start refused over a Profile
-/// whose home has stopped answering name that machine.
+/// one sentence for both.
+///
+/// No device is named: the row names none, a Profile having no home to mark.
 fn trouble(profile: &ProfileEntry) -> Option<ProfileTrouble> {
     Some(ProfileTrouble {
         broken: profile.broken?,
         agent_type: profile.account.agent_type(),
-        device: profile.device.as_ref().map(|device| device.name.clone()),
+        device: None,
     })
 }
 
