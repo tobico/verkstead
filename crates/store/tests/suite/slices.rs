@@ -30,9 +30,7 @@ use verkstead_store::{
     standing_previews, start_conversation, submit_response, timeline, transcript,
 };
 
-mod owning;
-
-use owning::{Worked, a_conversations_tables, fresh_pool, owning, rows};
+use super::owning::{Worked, a_conversations_tables, fresh_pool, owning, rows};
 
 /// The device the work was born and worked on, which is neither of the two
 /// databases here — a Conversation that has moved twice still answers to the key
@@ -201,7 +199,7 @@ async fn the_record_lands_on_the_far_end_reading_as_it_read_here() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_slice_taken_while_commits_land_carries_the_event_of_every_commit_in_it() {
     let (_dir, pool) = fresh_pool().await;
-    let repo = owning::repo(&pool).await;
+    let repo = super::owning::repo(&pool).await;
     let id = start_conversation(&pool, repo, "rate-limiting", BORN_ON, None)
         .await
         .unwrap()
@@ -742,10 +740,15 @@ async fn moved(branch: &str) -> Moved {
     // And a Set nobody has answered, which is what a move has to leave
     // answerable on the far end — the fixture's own were all settled by the
     // close.
-    ask(&here.pool, worked.id, &owning::asked(), Ask::Blocking)
-        .await
-        .unwrap()
-        .expect("the Conversation is there to ask from");
+    ask(
+        &here.pool,
+        worked.id,
+        &super::owning::asked(),
+        Ask::Blocking,
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation is there to ask from");
 
     let events = landed(&here.pool).await;
     let read = slice(&here.pool, worked.id).await.unwrap();

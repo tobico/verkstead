@@ -8,13 +8,11 @@
 //! words on stderr and nothing on stdout, and a memo the server takes being its
 //! id on stdout, sent as the title and the markdown.
 
-mod support;
-
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::process::{Command, Output, Stdio};
 
-use support::server::{Server, finished, stderr, stdout};
+use super::support::server::{Server, finished, stderr, stdout};
 
 /// A server nothing listens at, so a memo that reached for one would fail
 /// saying so rather than with the refusal under test.

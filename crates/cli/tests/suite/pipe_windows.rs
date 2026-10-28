@@ -17,14 +17,12 @@
 
 #![cfg(windows)]
 
-mod support;
-
 use std::io::Write;
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::Duration;
 
-use support::server::{Server, finished, stderr, stdout};
+use super::support::server::{Server, finished, stderr, stdout};
 
 /// One Question, because what is under test is the transport rather than the
 /// grammar — `ask.rs` is where a Set's shape is proved.

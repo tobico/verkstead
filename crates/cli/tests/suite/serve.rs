@@ -3,15 +3,13 @@
 //! answers the agent API, hands over the viewer, and is pointed at its socket
 //! and its data directory exactly as the server binary this verb replaced was.
 
-mod support;
-
 use std::io::Write;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use support::repo_with_a_commit;
+use super::support::repo_with_a_commit;
 use verkstead_schema::Response;
 
 /// A Set small enough to be answered by the Response below, and legal without a

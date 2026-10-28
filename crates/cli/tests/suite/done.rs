@@ -6,11 +6,9 @@
 //! own words on stderr, and nothing on stdout for an agent to mistake for an
 //! acceptance.
 
-mod support;
-
 use std::process::{Command, Stdio};
 
-use support::server::{Server, finished, stderr, stdout};
+use super::support::server::{Server, finished, stderr, stdout};
 
 /// A Conversation with no session running is the one refusal a server with no
 /// agents can give, and it has to say so rather than fail obscurely.

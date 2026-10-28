@@ -17,15 +17,13 @@
 //! sandbox, and a Windows Verkstead has none — see the server's `sandbox`.
 #![cfg(unix)]
 
-mod support;
-
 use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use support::repo_with_a_commit;
+use super::support::repo_with_a_commit;
 use verkstead_schema::{Direction, QuestionSet, Response};
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
@@ -266,7 +264,7 @@ fn grilling() -> Grilling {
     let worktree = state.path().join("worktrees/rate-limiting");
     std::fs::create_dir_all(worktree.parent().unwrap()).unwrap();
     let commit = head(&repo);
-    support::git(
+    super::support::git(
         &repo,
         &[
             "worktree",
@@ -282,7 +280,7 @@ fn grilling() -> Grilling {
     let (listening, conversation, profile) = runtime.block_on(async {
         let pool = verkstead_server::open_database(&database).await.unwrap();
 
-        let repo_row = store::register_repo(&pool, &repo, support::REPO_NAME, "main")
+        let repo_row = store::register_repo(&pool, &repo, super::support::REPO_NAME, "main")
             .await
             .unwrap()
             .expect("nothing is registered at that path yet");

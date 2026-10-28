@@ -22,8 +22,6 @@
 //! that reading, because a **transfer's slice** has to be held against the same
 //! set of tables from the other end — see the `slices` suite.
 
-mod owning;
-
 use std::collections::BTreeSet;
 
 use sqlx::SqlitePool;
@@ -34,7 +32,7 @@ use verkstead_store::{
     timeline, transcript, trim_conversation, trimmable, trimmed, unarchive_conversation,
 };
 
-use owning::{a_conversations_tables, fresh_pool, owning, printed, rows, worked};
+use super::owning::{a_conversations_tables, fresh_pool, owning, printed, rows, worked};
 
 /// Put an archiving back in time, which is the only way a test gets to be days
 /// old.

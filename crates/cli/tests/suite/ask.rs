@@ -4,15 +4,13 @@
 //! The last test here is the quickstart in `docs/development.md`, run against
 //! the very files that guide tells the reader to run.
 
-mod support;
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use support::server::{Server, finished, stderr, stdout};
-use support::{REPO_NAME, linked_worktree, repo_with_a_commit};
+use super::support::server::{Server, finished, stderr, stdout};
+use super::support::{REPO_NAME, linked_worktree, repo_with_a_commit};
 use verkstead_schema::{Response, SetCreated};
 
 /// Two Questions, one with a Sub-question, so a Response has to cover `Q1`,

@@ -1493,7 +1493,7 @@ committed downscales, so every platform draws the same pixels.
 
 The tests run the real server in-process, so the round trip they check is the
 one an agent gets — including the quickstart above, whose example files
-[`crates/cli/tests/ask.rs`](../crates/cli/tests/ask.rs) drives end to end, taking
+[`crates/cli/tests/suite/ask.rs`](../crates/cli/tests/suite/ask.rs) drives end to end, taking
 the human's part over the API the viewer's **Submit** posts through.
 
 `verkstead-render` is everything the server does to what an agent wrote before

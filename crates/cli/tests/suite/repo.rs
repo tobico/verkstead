@@ -4,9 +4,7 @@
 //! The Diff is no longer among them — the server reads it off the Worktree the
 //! Set was asked from, and it is tested there.
 
-mod support;
-
-use support::{REPO_NAME, linked_worktree, repo_with_a_commit};
+use super::support::{REPO_NAME, linked_worktree, repo_with_a_commit};
 use verkstead_cli::repo;
 
 #[test]

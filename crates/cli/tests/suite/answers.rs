@@ -10,13 +10,11 @@
 //! rather than served — see
 //! [`a_deferred_ask_is_refused_because_its_answers_are_the_next_prompts`].
 
-mod support;
-
 use std::io::Write;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
-use support::server::{ASKING_FROM, Server, finished, stderr, stdout};
+use super::support::server::{ASKING_FROM, Server, finished, stderr, stdout};
 use verkstead_schema::{Response, SetCreated};
 
 /// One Question with Options, which is the whole of what a Response needs to

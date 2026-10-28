@@ -1011,7 +1011,7 @@ impl Verkstead {
     /// Made the way the CLI makes it, over the agent API, for the reason every
     /// stand-in for a verb here is: the router is driven by `oneshot` and has no
     /// socket a session inside a sandbox could reach. The CLI's own end of it is
-    /// `crates/cli/tests/transfer.rs`.
+    /// `crates/cli/tests/suite/transfer.rs`.
     async fn calls(&self, conversation: i64, device: &str) -> (StatusCode, String) {
         let answered = self
             .workbench

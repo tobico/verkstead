@@ -935,7 +935,7 @@ mod tests {
     #[test]
     fn this_repositorys_own_fixtures_do_not_pause_the_session_reading_them() {
         for line in [
-            // `crates/store/tests/pauses.rs`, and every other test that stands a
+            // `crates/store/tests/suite/pauses.rs`, and every other test that stands a
             // sentence up to be recognised.
             r#"            "Usage limit reached · continuing shortly","#,
             r#"        "Usage limit reached · continuing automatically at 3pm · esc to cancel","#,

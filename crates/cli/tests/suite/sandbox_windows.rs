@@ -1,7 +1,7 @@
 //! The CLI put to work where a Windows session actually runs it: inside its
 //! Conversation's own rendering, against a server it can reach one way only.
 //!
-//! `tests/sandbox.rs` is this file's Unix sibling and asks the same thing of the
+//! `tests/suite/sandbox.rs` is this file's Unix sibling and asks the same thing of the
 //! other machine — that a session runs the executable the server equipped it
 //! with, and that the ask it makes with it goes through. What is different here
 //! is the transport. A Windows session is told the **named pipe** the server
@@ -55,17 +55,15 @@
 //! `windows-2025` job runs the whole workspace.
 #![cfg(windows)]
 
-mod support;
-
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
+use super::support::repo_with_a_commit;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use support::repo_with_a_commit;
 use tower::ServiceExt;
 use verkstead_schema::{QuestionSet, Response};
 use verkstead_server::attachments::Attachments;
@@ -366,7 +364,7 @@ fn standing(granting: bool) -> Grilling {
     let worktree = state.path().join("worktrees/rate-limiting");
     std::fs::create_dir_all(worktree.parent().unwrap()).unwrap();
     let commit = head(&repo);
-    support::git(
+    super::support::git(
         &repo,
         &[
             "worktree",
@@ -382,7 +380,7 @@ fn standing(granting: bool) -> Grilling {
     let (pipe, app, conversation, profile) = runtime.block_on(async {
         let pool = verkstead_server::open_database(&database).await.unwrap();
 
-        let repo_row = store::register_repo(&pool, &repo, support::REPO_NAME, "main")
+        let repo_row = store::register_repo(&pool, &repo, super::support::REPO_NAME, "main")
             .await
             .unwrap()
             .expect("nothing is registered at that path yet");

@@ -7,12 +7,10 @@
 //! refusal being a non-zero exit with the words on stderr and nothing on
 //! stdout.
 
-mod support;
-
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
-use support::server::{Server, finished, stderr, stdout};
+use super::support::server::{Server, finished, stderr, stdout};
 
 /// A server nothing listens at, so a preview that reached for one would fail
 /// saying so rather than with the refusal under test.

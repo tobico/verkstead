@@ -5,11 +5,9 @@
 //! this end of it: that a refusal is a non-zero exit with the server's own words
 //! on stderr, naming the maximum where the length is the trouble.
 
-mod support;
-
 use std::process::{Command, Output, Stdio};
 
-use support::server::{Server, finished, stderr, stdout};
+use super::support::server::{Server, finished, stderr, stdout};
 
 /// Run `verkstead waiting` with `args` against `server`.
 fn waiting(server: &Server, args: &[&str]) -> Output {

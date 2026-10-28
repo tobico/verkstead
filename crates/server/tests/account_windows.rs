@@ -4,7 +4,7 @@
 //! The first half of what stage 04 turns on: a Windows session runs as a local
 //! account of Verkstead's own rather than as the human (ADR-0014, *Amended: the
 //! Sandbox is an account*), and this is that account being somebody a process
-//! can be. The console half is `crates/cli/tests/launcher_windows.rs`, which is
+//! can be. The console half is `crates/cli/tests/suite/launcher_windows.rs`, which is
 //! where the binary a launcher is a verb of gets built.
 //!
 //! **It needs the account, and says so rather than passing.** Creating a local

@@ -91,7 +91,7 @@ const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 /// what a session inside is told to put its Question Sets to.
 ///
 /// Nothing listens on it and nothing here asks: what a Windows session really
-/// asks through is the named pipe, and `crates/cli/tests/sandbox_windows.rs` is
+/// asks through is the named pipe, and `crates/cli/tests/suite/sandbox_windows.rs` is
 /// where that is proved end to end.
 const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8422);
 
@@ -165,7 +165,7 @@ const ANOTHER_REPOSITORY: &str = "C--somewhere-else";
 /// is the whole of what [`Executable::at`] asks of one.
 ///
 /// Never run — what a session does with the binary it asks with is
-/// `crates/cli/tests/sandbox_windows.rs`'s to prove, that being the crate with
+/// `crates/cli/tests/suite/sandbox_windows.rs`'s to prove, that being the crate with
 /// a real one to hand. What it is here is a path the description grants
 /// read-only, and the one file in a directory it grants nothing else of.
 const SAYS_WHICH_BUILD: &str = "the server's own image would be here\n";

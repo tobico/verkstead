@@ -6,7 +6,7 @@
 //! `verkstead` binary, and the server crate builds no binary at all — its test
 //! harness is the only executable a test there could point at, and there is no
 //! launcher verb in one. This crate builds the real thing, and the
-//! `windows-2025` job runs the whole workspace. `crates/cli/tests/sandbox_windows.rs`
+//! `windows-2025` job runs the whole workspace. `crates/cli/tests/suite/sandbox_windows.rs`
 //! is here for the same reason.
 //!
 //! **What it needs of the machine, and what it says when it has not got it.**
