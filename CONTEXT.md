@@ -3719,7 +3719,7 @@ Profile anything falls back to: there is no default Profile, exactly as there is
 no default model. And a session run under one writes no name into its record, so
 a finished run draws as the harness and the model alone — which is how a record
 from before Verkstead wrote the name down already drew.
-**Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a record every device holds under a uuid that every reference to a Profile becomes, with an `updated_at` and a deletion stamp; the account paths become a **binding** of one device, a row per device so the card carries a line apiece, and a device with no binding runs from a copy built from the replicated login. In a cluster, an unnamed Profile is named after its device at the switch. The `cluster-owned-records` roadmap lands it; until its stage does, the mirror below is how a Profile crosses the cluster.
+**Becoming the cluster's** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a record every device holds under a uuid that every reference to a Profile becomes, with an `updated_at` and a deletion stamp; the account paths become a **binding** of one device, a row per device so the card carries a line apiece, and a device with no binding runs from a copy built from the replicated login. In a cluster, an unnamed Profile is named after its device at the switch, and as its device first links. The `cluster-owned-records` roadmap lands it; until its stage does, the mirror below is how a Profile crosses the cluster.
 **A cluster's Profiles are one list on every device of it.** A device linked to
 another keeps a **mirror** per Profile that other device holds: a row of its own
 `profiles` table carrying what a row is drawn and picked by — the name, the

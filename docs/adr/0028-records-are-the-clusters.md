@@ -74,8 +74,11 @@ turned down.
   pairs the page thinks are one, were both turned down: the human chose to
   clean up by hand. Two things make that bearable. **At the switch, a device
   that has members names each of its own unnamed Profiles after its hostname**,
-  so four rows do not read *Claude — Default* four times over in a picker; a
-  device in no cluster leaves its unnamed Profiles as they are. And **Remove on
+  so four rows do not read *Claude — Default* four times over in a picker,
+  **and so does a device the first time it links**, so two Verksteads that
+  each had an unnamed Claude Profile and then form a cluster do not bring the
+  problem back; a device in no cluster leaves its unnamed Profiles as they
+  are. And **Remove on
   an Author that Repos point at names each Repo with its device and offers
   *Repoint them all to…*** over an Author picker, a Repo with a live
   Conversation refusing it by name as a repoint does today.

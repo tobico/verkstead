@@ -6,8 +6,9 @@ An Agent Profile is one record on every device, and everything that names one
 names its uuid. The account paths are a **binding** of one device, itself a
 replicated row per device, so the Profile card carries a line per device —
 bound with its path, or *runs from a copy*. At the switch, a device that has
-members names each of its own unnamed Profiles after its hostname, so the four
-Claude rows read apart in every picker. A session on a device the Profile is
+members names each of its own unnamed Profiles after its hostname, and so does
+a device the first time it links, so the four Claude rows — and the two of
+every cluster formed after this release — read apart in every picker. A session on a device the Profile is
 bound on runs exactly as today; one on an unbound device fetches the login from
 a reachable bound device, the way it fetched from the home before, until 03
 replaces that. Demonstrable with two Verksteads: one record, two bindings, a
@@ -36,7 +37,9 @@ mirror**.
   with the copy; here every device's existing paths become its binding at the
   switch.
 - **Unnamed Profiles are named after their device at the switch**, on a
-  device that has members only; a device in no cluster leaves them unnamed.
+  device that has members only, **and when a device first links**, once —
+  otherwise every cluster formed after this release starts with two unnamed
+  Profiles of one harness; a device in no cluster leaves them unnamed.
   Nothing merges — the human removes the extras by hand and may clear the
   keeper's name.
 - **The uniqueness rules hold at the press** against the whole table: one
@@ -77,11 +80,15 @@ mirror**.
 3. **Bridging the mirrors and naming the unnamed.** The record carries where it
    was minted and the id it had; a device bridges its mirror by that pair,
    rewriting the provisional uuid; a device with members names its own unnamed
-   Profiles after its hostname once, at the switch.
+   Profiles after its hostname once, at the switch, and a device that first
+   links does the same as it links.
    - Two devices updated in either order end with one record per Profile, each
      device's Pairings intact.
    - Four unnamed Claude Profiles read as four hostnames in a picker; a
      Verkstead in no cluster still shows one unnamed Claude.
+   - Two Verksteads on this release, each with an unnamed Claude Profile,
+     linked: each picker reads the two hostnames, not *Claude — Default*
+     twice.
 
 4. **The card's line per device and brokenness.** A line per device — bound
    with its path, or *runs from a copy*; brokenness answered per device.
