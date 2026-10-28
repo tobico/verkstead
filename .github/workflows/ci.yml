@@ -553,21 +553,42 @@ jobs:
   # on an unlucky runner. Free four-core runners only: the repository is public,
   # so a leg costs nothing but its own cached build.
   #
-  # **The ledger.** Each lever lands as a commit of its own on one pull request,
-  # and its row is the run of that commit — every leg's build and test time,
-  # read off the run's job timings, as `build + test = job`. A lever that did
-  # not pay keeps its row, saying so.
+  # **The budget is not met yet, so the timeout is fifteen rather than ten.**
+  # No run has had every leg under seven minutes. On the last one measured (run
+  # 40709146514) the slowest leg took 12m23, 5m23 over seven and 2m23 over ten,
+  # and even the fastest took 8m22. A hard ten would have failed nine legs of
+  # the ten. So `timeout-minutes` stands at fifteen, 2m12 above the slowest leg
+  # in any run in the ledger. It catches a hang rather than a slow leg, and it
+  # comes down to ten once a run's legs fit under that.
   #
-  # | Lever                               | Leg 1                 | Leg 2                 |
-  # | ----------------------------------- | --------------------- | --------------------- |
-  # | Baseline (`main`, run 40633314366)  | 10m04 + 20m26 = 31m35 | 8m20 + 17m00 = 26m05  |
-  # | Line tables, no examples built      | 7m04 + 19m52 = 28m04  | 7m08 + 17m04 = 25m02  |
-  # | One test binary: store, schema, cli | 6m07 + 18m04 = 25m14  | 6m32 + 15m56 = 23m19  |
-  # | One test binary: the server         | 4m48 + 17m27 = 23m23  | 5m12 + 17m39 = 23m50  |
-  # | Defender exclusions                 | 5m10 + 17m49 = 24m09  | 4m54 + 19m13 = 25m21  |
-  # | The legs (ten; leg 9 the slowest)   | 3m44 + 5m03 = 9m51    | 5m07 + 4m36 = 10m43   |
-  # | rust-lld (reverted)                 | 5m20 + 4m37 = 11m26   | 5m09 + 4m50 = 11m21   |
-  # | Template repositories               | 5m17 + 4m14 = 10m43   | 5m11 + 3m51 = 9m57    |
+  # **What is left** is about six minutes that every leg pays: one of setup and
+  # 3m18 to 5m34 of build. On top of that, a leg's test time is set by one slow
+  # test from the session-account suites, which run one at a time
+  # (`.config/nextest.toml`). These come late on their leg, so one long one is
+  # the leg's tail: a `logins_windows` test of 120 to 250 seconds, or a
+  # `sandbox_windows` one of 60 to 160. They are the next lever, fixed in the
+  # tests themselves.
+  #
+  # **The ledger.** Each lever lands as a commit of its own on one pull request,
+  # and its row is the run of that commit. A row gives the slowest and the
+  # fastest leg, read off the run's job timings as `build + test = job`; the job
+  # time includes a minute or so of setup. A lever that did not pay keeps its
+  # row, saying so. Until the legs, there were two, so the two columns are the
+  # whole of those runs.
+  #
+  # | Lever                               | Run         | Slowest leg           | Fastest leg           |
+  # | ----------------------------------- | ----------- | --------------------- | --------------------- |
+  # | Baseline (`main`)                   | 40633314366 | 10m04 + 20m26 = 31m35 | 8m20 + 17m00 = 26m05  |
+  # | Line tables, no examples built      | 40649541515 | 7m04 + 19m52 = 28m04  | 7m08 + 17m04 = 25m02  |
+  # | One test binary: store, schema, cli | 40659022110 | 6m07 + 18m04 = 25m14  | 6m32 + 15m56 = 23m19  |
+  # | One test binary: the server         | 40671281679 | 5m12 + 17m39 = 23m50  | 4m48 + 17m27 = 23m23  |
+  # | Defender exclusions                 | 40678349026 | 4m54 + 19m13 = 25m21  | 5m10 + 17m49 = 24m09  |
+  # | The legs, ten of them               | 40689227811 | 4m19 + 8m23 = 13m59   | 3m29 + 4m18 = 8m45    |
+  # | rust-lld (reverted)                 | 40694314360 | 4m25 + 6m46 = 12m23   | 3m51 + 3m31 = 8m39    |
+  # | Template repositories               | 40702569526 | 5m34 + 5m47 = 12m48   | 3m30 + 3m33 = 7m55    |
+  # | The same, measured again            | 40709146514 | 4m58 + 6m26 = 12m23   | 3m18 + 4m10 = 8m22    |
+  #
+  # What each lever came to, row by row:
   #
   # The baseline is the last green run on `main` before this work, 2026-10-28.
   # Its build is the 129 test binaries, each compiled and linked by MSVC with
@@ -654,6 +675,12 @@ jobs:
   # 7, a `sandbox_windows` one of 156 on leg 4, and three `joining` tests of
   # 70 to 80 seconds together on leg 10.
   #
+  # The last row is the run of the ledger's own commit, on the same code. Its
+  # slowest leg was leg 7, where `logins_windows::a_login_left_past_its_limit_is_killed`
+  # took 227 seconds as the last test to run, and its fastest was leg 8.
+  # The count stays at ten: no leg tested in under four minutes, so none was a
+  # runner doing too little to be worth having.
+  #
   # `slice` partitioning deals the tests out one at a time across every binary,
   # so each leg gets its share of each suite rather than whole binaries. What
   # `.config/nextest.toml` holds serial is serial per leg, which is all it needs
@@ -661,6 +688,8 @@ jobs:
   windows:
     name: Windows (${{ matrix.partition }}/10)
     runs-on: windows-2025
+    # Fifteen until a run's legs all fit under ten — the ledger above says why.
+    timeout-minutes: 15
     strategy:
       # A red leg does not cancel the others: what the rest of the suite says
       # is worth having from the same run.

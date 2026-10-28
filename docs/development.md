@@ -1300,6 +1300,25 @@ one beside its own binary, in `target/debug`, and says so where there is none.
 `cargo build --workspace --tests --bins` puts it there, which is what the
 `windows-2025` job does before it runs anything.
 
+**The `windows-2025` job runs the suite through nextest, over ten legs.** Each
+leg builds the workspace for itself and runs a tenth of the tests, dealt out
+one at a time across every binary by `--partition slice:N/10`. nextest runs
+every test in a process of its own and tests from every binary at once, so a
+lock in a `static` keeps nothing in order there. What has to stay serial (the
+suites that start processes as the session account, and the registry tests) is
+held serial by `.config/nextest.toml`, which says why. The doc-tests, which
+nextest does not run, go through `cargo test --doc` on the first leg. To run
+the suite the way a leg does, install `cargo-nextest` and run:
+
+```console
+$ cargo build --workspace --tests --bins
+$ cargo nextest run --workspace --no-fail-fast
+```
+
+The legs are working toward a budget of ten minutes each. The job's comment in
+`.github/workflows/ci.yml` keeps the ledger of what each lever came to and says
+what is left. Until the budget is met, the job's `timeout-minutes` is fifteen.
+
 
 And in `web/`, which is the Solid viewer
 ([ADR 0003](adr/0003-solid-spa-viewer.md)):
