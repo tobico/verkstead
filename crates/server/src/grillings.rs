@@ -593,6 +593,41 @@ comment: none of this is settled about the burst allowance
         );
     }
 
+    /// A file put at the Set's comment box is named after the comment, and
+    /// under no Question: it answers none (ADR-0028).
+    #[test]
+    fn a_file_on_the_set_as_a_whole_is_named_after_the_comment() {
+        let set = QuestionSet::from_yaml(ASKED).unwrap();
+        let response = Response::from_yaml(ANSWERED).unwrap();
+
+        let files = OnAnswers::holding(
+            vec![store::Attachment {
+                origin: store::Origin::Set { set: 11 },
+                ..attached(11, "Q1", "limits.csv")
+            }],
+            PathBuf::from(crate::attachments::INSIDE),
+        );
+
+        let digest = exchange(&set, &response, files.on(11));
+
+        assert!(
+            digest.ends_with(
+                "none of this is settled about the burst allowance\n\n\
+                 _Attached:_ `/verkstead/attachments/limits.csv`\n\n"
+            ),
+            "{digest}"
+        );
+        assert_eq!(
+            digest.matches("limits.csv").count(),
+            1,
+            "and it is under no Question: {digest}"
+        );
+        assert!(
+            !exchange(&set, &response, files.on(12)).contains("limits.csv"),
+            "nor on another Set's exchange"
+        );
+    }
+
     /// And a question the file *is* the Answer to says so, rather than reading
     /// as one the human passed over.
     ///

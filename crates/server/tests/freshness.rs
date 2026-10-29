@@ -655,6 +655,7 @@ fn answered(comment: &str) -> serde_json::Value {
         direction: None,
         nothing_else: false,
         added: Vec::new(),
+        attachments: Vec::new(),
     })
     .unwrap()
 }

@@ -886,6 +886,7 @@ mod tests {
                 direction: None,
                 nothing_else: false,
                 added: Vec::new(),
+                attachments: Vec::new(),
             },
         )
         .await

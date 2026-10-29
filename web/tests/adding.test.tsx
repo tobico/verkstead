@@ -170,12 +170,13 @@ describe("the Attach menu on a waiting set", () => {
     ]);
   });
 
-  /// The comment box takes no file of its own, so its menu has the server
-  /// rows alone.
-  it("offers no file at the comment box", async () => {
+  /// The comment box's menu is the whole menu, file included: a file put
+  /// there is on the Set as a whole.
+  it("offers a file at the comment box too", async () => {
     await answering(WAITING, SETTINGS_READ);
 
     expect(rows(await open(menuOf(COMMENT)))).toEqual([
+      "Attach file…",
       "docs",
       "tickets",
       "alerts",

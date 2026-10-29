@@ -21,8 +21,8 @@
 //! the one thing that differs: where a chosen file goes.
 //!
 //! **And the control is the composer's plus-menu**, at every Question and at
-//! the comment box alike: *Attach file…* first — the comment box takes no file
-//! — then the declared MCP servers the Conversation does not have yet, and *Add
+//! the comment box alike: *Attach file…* first — at the comment box a file is
+//! on the Set as a whole, answering nothing — then the declared MCP servers the Conversation does not have yet, and *Add
 //! a server…*. A server picked there is recorded on the Set the moment it is
 //! picked, under the Question it was picked at or under none at the comment
 //! box, and drawn as a chip beside that Answer's files — read back off the Set
@@ -53,6 +53,7 @@ import { Modal } from "../Modal";
 import {
   addToSet,
   attachToAnswer,
+  attachToSet,
   removeAnswerAttachment,
   removeFromSet,
   submitResponse,
@@ -273,13 +274,11 @@ export function Answering(props: {
     </>
   );
 
-  // The comment box's own piece: no file, no drop, and the chips of what was
-  // picked at its menu.
+  // The comment box's own piece: the files put on the Set as a whole, which
+  // answer no Question, and the chips of what was picked at its menu.
   const comment = attaching({
-    shown: () => [],
-    add: () => {},
-    offered: () => false,
-    filing: false,
+    shown: () => files.shown(null),
+    add: (chosen) => files.send(null, chosen),
     onto: "the question set",
     chips: () => additions.chips(null),
     offering: offering(null),
@@ -453,7 +452,11 @@ export function Answering(props: {
           without one still draws the card, so the box is in the same place
           either way. */}
       <Postscript html={props.postscript}>
-        <section class={page.setComment}>
+        <section
+          class={page.setComment}
+          classList={{ [styles.taking!]: comment.over() }}
+          {...comment.dropping}
+        >
           <div class={styles.writing}>
             <div
               class={`${app.grow} ${styles.field}`}
@@ -474,6 +477,16 @@ export function Answering(props: {
             <comment.Clip class={styles.attach} />
           </div>
           <comment.Pills class={styles.attachments} />
+          <For each={files.refusals(null)}>
+            {(said) => (
+              <ErrorLine class={styles.attachFailure}>{said}</ErrorLine>
+            )}
+          </For>
+          <Show when={files.refusedRemoval(null)}>
+            {(said) => (
+              <ErrorLine class={styles.attachFailure}>{said()}</ErrorLine>
+            )}
+          </Show>
           <Show when={additions.refused(null)}>
             {(said) => (
               <ErrorLine class={styles.attachFailure}>{said()}</ErrorLine>
@@ -1052,31 +1065,34 @@ export const ANSWER_ATTACHMENT_REMOVAL_REFUSAL: Record<
 /// Its own key rather than its name, because two files chosen together may
 /// share one — and what the key is for is taking the right one out of the row
 /// when the right request lands.
-type Landing = { key: number; label: string; name: string };
+/// Each keyed by the label of the Question it is under, or `null` at the
+/// comment box, where a file is on the Set as a whole.
+type Landing = { key: number; label: string | null; name: string };
 
-/// Something said about one Answer's files.
-type Said = { label: string; said: string };
+/// Something said about one Answer's files, or the comment box's.
+type Said = { label: string | null; said: string };
 
 /// What the sheet does about the files on its Answers, held once for the page:
 /// the row of pills each question hands the attaching piece, the requests a
 /// choice and a × make, and what came back refused from either of them.
 type Putting = {
-  /// The row under one question: what the record holds for it, and what this
-  /// device is still sending after that.
-  shown: (label: string) => Array<Shown>;
+  /// The row under one question, or under the comment box where `null`: what
+  /// the record holds for it, and what this device is still sending after
+  /// that.
+  shown: (label: string | null) => Array<Shown>;
 
   /// Every question the record says a file was put on, which is what makes an
   /// entry carrying nothing else an Answer rather than a question left open.
   answered: () => string[];
 
   /// What could not be attached under one question, one line per file.
-  refusals: (label: string) => string[];
+  refusals: (label: string | null) => string[];
 
   /// And what could not be taken off again, one line for its row.
-  refusedRemoval: (label: string) => string | null;
+  refusedRemoval: (label: string | null) => string | null;
 
   /// Send every file chosen under one question, each on a request of its own.
-  send: (label: string, files: Array<File>) => void;
+  send: (label: string | null, files: Array<File>) => void;
 };
 
 /// The whole of that, made once by the sheet.
@@ -1106,11 +1122,12 @@ function putting(what: {
 
   let keys = 0;
 
-  /// The record's own files under one label, in the order they were attached.
-  const on = (label: string) =>
+  /// The record's own files under one label, in the order they were attached —
+  /// the comment box's being the ones under none.
+  const on = (label: string | null) =>
     what.attached().filter((attachment) => attachment.label === label);
 
-  const send = (label: string, files: Array<File>) => {
+  const send = (label: string | null, files: Array<File>) => {
     // A fresh choice clears what the last one under this question had to say:
     // the lines are about files the human has moved on from.
     setRefusals((said) => said.filter((one) => one.label !== label));
@@ -1119,7 +1136,11 @@ function putting(what: {
       const key = (keys += 1);
       setLanding((held) => [...held, { key, label, name: file.name }]);
 
-      void attachToAnswer(device(), what.set(), label, file)
+      void (
+        label === null
+          ? attachToSet(device(), what.set(), file)
+          : attachToAnswer(device(), what.set(), label, file)
+      )
         .then(async (outcome: AnswerAttached) => {
           if (typeof outcome === "string") {
             setRefusals((said) => [
@@ -1160,7 +1181,7 @@ function putting(what: {
 
   /// And taking one off the record, which is the × on a pill.
   const forget = (attachment: AttachmentView) => {
-    const label = attachment.label ?? "";
+    const label = attachment.label;
     setRemoving((was) => [...was, attachment.id]);
 
     void removeAnswerAttachment(device(), what.set(), attachment.id)
@@ -1193,7 +1214,7 @@ function putting(what: {
       );
   };
 
-  const shown = (label: string): Array<Shown> => [
+  const shown = (label: string | null): Array<Shown> => [
     ...on(label).map((attachment) => ({
       name: attachment.name,
       remove: () => forget(attachment),
@@ -1214,7 +1235,7 @@ function putting(what: {
       .map((attachment) => attachment.label)
       .filter((label): label is string => label !== null);
 
-  const said = (held: Array<Said>, label: string) =>
+  const said = (held: Array<Said>, label: string | null) =>
     held.filter((one) => one.label === label).map((one) => one.said);
 
   return {

@@ -95,6 +95,7 @@ fn answering() -> Response {
         direction: None,
         nothing_else: false,
         added: Vec::new(),
+        attachments: Vec::new(),
     }
 }
 

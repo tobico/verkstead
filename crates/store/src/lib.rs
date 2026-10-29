@@ -573,7 +573,9 @@ pub async fn unresolved(
         .into_iter()
         .filter_map(|attachment| match attachment.origin {
             Origin::Answer { label, .. } => Some(label),
-            Origin::Brief => None,
+            // The comment box's files answer nothing: a Set with one and no
+            // Answers is as unanswered as it was (ADR-0028).
+            Origin::Brief | Origin::Set { .. } => None,
         })
         .collect();
 

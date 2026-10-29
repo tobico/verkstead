@@ -273,6 +273,7 @@ fn confirmed_with_three_left_open() -> Response {
         direction: None,
         nothing_else: false,
         added: Vec::new(),
+        attachments: Vec::new(),
     }
 }
 
@@ -285,6 +286,7 @@ fn decided() -> Response {
         direction: None,
         nothing_else: false,
         added: Vec::new(),
+        attachments: Vec::new(),
     }
 }
 
@@ -665,6 +667,7 @@ async fn a_response_that_misses_a_question_comes_back_naming_it() {
         direction: None,
         nothing_else: false,
         added: Vec::new(),
+        attachments: Vec::new(),
     };
 
     let outcome: Submitted = post(

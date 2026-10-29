@@ -1079,6 +1079,118 @@ async fn a_question_with_a_file_on_it_is_answered() {
     );
 }
 
+/// Put a file at the Set's comment box: on the Set as a whole, the name in the
+/// path and no label.
+async fn put_on_the_set(app: &Router, set: i64, name: &str, body: &[u8]) -> AnswerAttached {
+    let (status, said) = fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/ui/sets/{set}/attachments/{}",
+                urlencoding(name)
+            ))
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from(body.to_vec()))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "putting {name:?} on the Set failed: {said}"
+    );
+    read(&said)
+}
+
+/// A file at the comment box lands in the one directory, on the Set under no
+/// label, and comes off again with the same × an Answer's file does.
+#[tokio::test]
+async fn a_file_on_the_set_as_a_whole_is_kept_under_no_question() {
+    let (_elsewhere, dir, app, pool, id) = drafting().await;
+    let set = asked(&pool, id).await;
+
+    let put = on_the_answer(put_on_the_set(&app, set, "limits.csv", b"a,b").await);
+
+    assert_eq!(put.origin, AttachmentOrigin::Set);
+    assert_eq!(put.label, None);
+    assert_eq!(on_disk(&dir, id), ["limits.csv"]);
+    assert_eq!(on_the_set(&app, set).await, std::slice::from_ref(&put));
+
+    assert_eq!(
+        take_off(&app, set, put.id).await,
+        AnswerAttachmentRemoved::Removed
+    );
+    assert!(on_the_set(&app, set).await.is_empty());
+    assert_eq!(on_disk(&dir, id), Vec::<String>::new());
+}
+
+/// Once the Set is settled the comment box takes nothing and gives nothing up,
+/// as every Answer's does.
+#[tokio::test]
+async fn an_answered_set_takes_no_file_at_its_comment_box_and_gives_none_up() {
+    let (_elsewhere, _dir, app, pool, id) = drafting().await;
+    let set = asked(&pool, id).await;
+
+    let put = on_the_answer(put_on_the_set(&app, set, "limits.csv", b"a,b").await);
+    answer(&app, set).await;
+
+    assert_eq!(
+        put_on_the_set(&app, set, "late.csv", b"too late").await,
+        AnswerAttached::Answered,
+    );
+    assert_eq!(
+        take_off(&app, set, put.id).await,
+        AnswerAttachmentRemoved::Answered,
+    );
+}
+
+/// A file at the comment box answers nothing: a Response that leaves `Q1`
+/// carrying nothing is refused as it would be without the file — and once it
+/// is answered, the agent is handed the file on the Response itself, under no
+/// Answer.
+#[tokio::test]
+async fn a_file_on_the_set_alone_answers_nothing_and_rides_on_the_response() {
+    let (_elsewhere, _dir, app, pool, id) = drafting().await;
+    let set = asked(&pool, id).await;
+
+    on_the_answer(put_on_the_set(&app, set, "limits.csv", b"a,b").await);
+
+    assert!(
+        matches!(
+            submit(&app, set).await,
+            serde_json::Value::Object(refused) if refused.contains_key("Rejected"),
+        ),
+        "Q1 is still a question left open without saying so",
+    );
+
+    answer(&app, set).await;
+
+    let (status, body) = fetch(
+        &app,
+        Request::builder()
+            .uri(format!(
+                "/conversations/{id}/api/v1/sets/{set}/response?hold=0"
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let response = verkstead_schema::Response::from_yaml(&body).unwrap();
+    assert_eq!(response.attachments.len(), 1, "{body}");
+    assert!(response.attachments[0].ends_with("limits.csv"), "{body}");
+    assert!(
+        response
+            .answers
+            .iter()
+            .all(|answer| answer.attachments.is_empty()),
+        "{body}"
+    );
+}
+
 /// A Response answering `Q2a` in words and leaving `Q1` carrying nothing at
 /// all, which is an Answer to it only where a file was put on it.
 async fn submit(app: &Router, set: i64) -> serde_json::Value {

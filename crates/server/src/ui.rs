@@ -83,8 +83,8 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Under the Set rather than under its Conversation, because the sheet
         // is a page about one Set: which Conversation's directory the file
         // lands in is read off the Set, the way everything else on that page
-        // is. The Answer is in the path too, there being one paperclip per
-        // Question and nothing set-wide to put a file on.
+        // is. The Answer is in the path too, there being one Attach menu per
+        // Question — and the comment box's file, below, has none.
         //
         // One request per file, the raw bytes as the body and the name in the
         // path — and a body limit of its own over the router's default, exactly
@@ -97,6 +97,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // its label: two files on one Answer may share a name, and neither of
         // them is a key. Under the Set rather than under the Answer for that
         // reason as well — the id is the whole of what says which file this is.
+        // And one put at the comment box, on the Set as a whole: no label in
+        // the path, because it answers no Question (ADR-0028).
+        .route(
+            "/api/ui/sets/{id}/attachments/{name}",
+            post(attach_to_set).layer(DefaultBodyLimit::max(crate::attachments::MAX_BYTES + 1)),
+        )
         .route(
             "/api/ui/sets/{id}/attachments/{attachment}/remove",
             post(detach_from_answer),
@@ -5097,10 +5103,30 @@ async fn attach_to_answer(
         return Json(AnswerAttached::NoSuchSet).into_response();
     };
 
-    match crate::answer_files::attach(&state, id, &label, &name, &body).await {
+    match crate::answer_files::attach(&state, id, Some(&label), &name, &body).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, label = %label, name = %name, "putting a file on an Answer failed");
+            unavailable("The file couldn't be attached.")
+        }
+    }
+}
+
+/// `POST /api/ui/sets/{id}/attachments/{name}` — put a file on a Set as a
+/// whole, at its comment box: the same upload under no Question (ADR-0028).
+async fn attach_to_set(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+    body: axum::body::Bytes,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(AnswerAttached::NoSuchSet).into_response();
+    };
+
+    match crate::answer_files::attach(&state, id, None, &name, &body).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, name = %name, "putting a file on a Question Set failed");
             unavailable("The file couldn't be attached.")
         }
     }

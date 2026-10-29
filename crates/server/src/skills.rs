@@ -1335,17 +1335,24 @@ pub(crate) fn tools_named(agent: store::AgentType) -> &'static str {
 /// said on its own rather than the line being dropped: what the session needs is
 /// the file, and half a heading over it beats none.
 fn attached_to(origin: &store::Origin, sets: &[(i64, String)]) -> String {
-    let store::Origin::Answer { set, label } = origin else {
-        return "Attached to the Brief:".to_owned();
+    let titled = |set: &i64| {
+        sets.iter()
+            .find_map(|(id, title)| (id == set).then_some(title.trim()))
+            .filter(|title| !title.is_empty())
     };
 
-    match sets
-        .iter()
-        .find_map(|(id, title)| (id == set).then_some(title.trim()))
-        .filter(|title| !title.is_empty())
-    {
-        Some(title) => format!("Attached to the Answer to {label} of \"{title}\":"),
-        None => format!("Attached to the Answer to {label}:"),
+    match origin {
+        store::Origin::Brief => "Attached to the Brief:".to_owned(),
+        store::Origin::Answer { set, label } => match titled(set) {
+            Some(title) => format!("Attached to the Answer to {label} of \"{title}\":"),
+            None => format!("Attached to the Answer to {label}:"),
+        },
+        // The comment box's: under the Set's title and no Question, because it
+        // answers none (ADR-0028).
+        store::Origin::Set { set } => match titled(set) {
+            Some(title) => format!("Attached to the Question Set \"{title}\" as a whole:"),
+            None => "Attached to a Question Set as a whole:".to_owned(),
+        },
     }
 }
 
@@ -5434,6 +5441,29 @@ mod tests {
         assert!(
             listed.contains("Attached to the Answer to Q9a of \"The wording of the error\":"),
             "and a Sub-question's Answer is one like any other: {listed:?}"
+        );
+    }
+
+    /// A file put at a Set's comment box is listed under the Set's title and no
+    /// Question: it answers none.
+    #[test]
+    fn a_file_on_the_set_as_a_whole_is_listed_under_its_title_alone() {
+        let prompt = attached(
+            "# The work\n",
+            &[store::Attachment {
+                origin: store::Origin::Set { set: 11 },
+                ..attachment("trace.txt", 512)
+            }],
+            &[(11, "How the limiter counts".to_owned())],
+            &attachments_inside(),
+        );
+
+        assert!(
+            prompt.contains(
+                "Attached to the Question Set \"How the limiter counts\" as a whole:\n\n\
+                 - `/verkstead/attachments/trace.txt`, 512 bytes.\n"
+            ),
+            "{prompt:?}"
         );
     }
 

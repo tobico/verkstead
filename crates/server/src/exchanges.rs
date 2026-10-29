@@ -95,6 +95,10 @@ pub(crate) fn exchange(set: &QuestionSet, response: &Response, files: OnSet<'_>)
         said.push_str(&format!("**About the Set as a whole** {comment}\n\n"));
     }
 
+    // And what was put at the comment box, which answers no Question: named
+    // after whatever the human said about the whole, the way the box draws it.
+    said.push_str(&attached(&files.on_the_set()));
+
     said
 }
 

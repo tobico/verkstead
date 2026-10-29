@@ -1124,6 +1124,106 @@ describe("the files on an answer", () => {
     expect(page.querySelector('input[type="file"]')).toBeNull();
   });
 
+  /// The comment box takes a file too, keyed by the Set alone: up under no
+  /// label, and drawn under the box from the record.
+  it("puts a file chosen at the comment box on the set under no question", async () => {
+    const path = `/api/ui/sets/${WAITING.id}/attachments/limits.csv`;
+    const onTheSet: SetView = {
+      ...WAITING,
+      attachments: [
+        { id: 11, name: "limits.csv", bytes: 4, origin: "Set", label: null },
+      ],
+    };
+    const { page, fetching, settles } = await answering(
+      WAITING,
+      whenever(
+        path,
+        json({
+          Attached: {
+            attachment: onTheSet.attachments[0],
+          },
+        }),
+        "POST",
+      ),
+    );
+
+    settles(onTheSet);
+
+    choose(
+      page.querySelector(`.${sheet.setComment}`)!,
+      new File(["a,b"], "limits.csv"),
+    );
+
+    await waitFor(() => expect(writes(fetching, path)).toHaveLength(1));
+    await waitFor(() =>
+      expect(attachedTo("the question set")).toEqual(["limits.csv"]),
+    );
+    expect(attachedTo("Q1"), "and under no question").toEqual([]);
+  });
+
+  /// Not an Answer to anything: with only a set-level file, every question
+  /// still goes back open.
+  it("submits a set-level file alone as nothing answered", async () => {
+    const { page, fetching } = await answering(
+      {
+        ...WAITING,
+        attachments: [
+          { id: 11, name: "limits.csv", bytes: 4, origin: "Set", label: null },
+        ],
+      },
+      whenever(`/api/ui/sets/${WAITING.id}/response`, json("Accepted"), "POST"),
+    );
+
+    press(page, "Submit");
+    press(page, "Send anyway");
+
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/sets/${WAITING.id}/response`),
+      ).toHaveLength(1),
+    );
+
+    const response = JSON.parse(
+      String(writes(fetching, `/api/ui/sets/${WAITING.id}/response`)[0]!.body),
+    ) as Decided;
+
+    expect(response.answers.every((one) => one.unanswered === true)).toBe(true);
+  });
+
+  /// And the record draws it under the comment, as the sheet drew it under
+  /// the box, beside an Answer's file drawn as before.
+  it("draws a set-level file under the comment once the set is answered", async () => {
+    await answering({
+      ...WAITING,
+      attachments: [
+        { id: 9, name: "counter.png", bytes: 4, origin: "Answer", label: "Q1" },
+        { id: 11, name: "limits.csv", bytes: 4, origin: "Set", label: null },
+      ],
+      standing: {
+        Answered: {
+          submitted_at: "2026-08-03T09:07:11.000Z",
+          response: {
+            answers: [
+              { label: "Q1" },
+              { label: "Q2", unanswered: true },
+              { label: "Q2a", unanswered: true },
+              { label: "Q2b", unanswered: true },
+              { label: "Q3", unanswered: true },
+            ],
+            comment: "the limits we run today",
+          },
+        },
+      },
+    });
+
+    expect(
+      names(screen.getByRole("list", { name: "Files attached to the question set" })),
+    ).toEqual(["limits.csv"]);
+    expect(
+      names(screen.getByRole("list", { name: "Files attached to Q1" })),
+    ).toEqual(["counter.png"]);
+  });
+
   /// And the warning before the submit is about what is still open, so a
   /// question carrying a file is not among them.
   it("does not warn about a question a file was put on", async () => {

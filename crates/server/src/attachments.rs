@@ -439,6 +439,7 @@ pub(crate) fn view(attachment: store::Attachment) -> verkstead_render::Attachmen
     let (origin, label) = match attachment.origin {
         store::Origin::Brief => (AttachmentOrigin::Brief, None),
         store::Origin::Answer { label, .. } => (AttachmentOrigin::Answer, Some(label)),
+        store::Origin::Set { .. } => (AttachmentOrigin::Set, None),
     };
 
     AttachmentView {

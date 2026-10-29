@@ -2915,12 +2915,18 @@ session already reads, and the Response names it there. Nothing is said about
 an empty one — the listing is of the files there are, so a Conversation with
 none is told nothing at all.
 
-**What a file is attached to is its origin, and there are two of them.** The
-Brief, and an Answer to a Question Set — a second value on the same record
-rather than a second kind of thing, the upload being the Conversation's and
-not the Brief's. **An Answer's file is keyed by the Set it was put on and the
+**What a file is attached to is its origin, and there are three of them.** The
+Brief, an Answer to a Question Set, and the Set as a whole — further values on
+the same record rather than further kinds of thing, the upload being the
+Conversation's and not the Brief's. **An Answer's file is keyed by the Set it was put on and the
 label of the Question it answers**, which is what its pills are drawn under
 and what a later session finds it named by; the Brief's are keyed by neither.
+**A set-level file is keyed by the Set alone** (ADR-0028): put at the comment
+box, it is **not an Answer to anything** — a Set with one and no Answers is as
+unanswered as it was — so the Response carries it in a set-level
+`attachments` list beside the Answers, the prompt lists it under the Set's
+title with no Question, the digest names it after the comment, and the
+settled Set draws it under the comment.
 The two share the one directory, so a file named like one already there is
 renamed whichever origin either of them has.
 
@@ -2937,7 +2943,8 @@ answer.
 **One is put on an Answer from the answer sheet**, where every Question and
 Sub-question's free-text field carries a paperclip of its own and the whole of
 the question takes a drop; a Heading has neither, asking nothing, and the
-set-level comment box has neither either. A chosen file goes up the moment it
+set-level comment box has both, its file being the Set's rather than an
+Answer's. A chosen file goes up the moment it
 is chosen rather than waiting for Submit — so its pill comes back from the
 record and survives a reload, a × takes it off again, and a Set the agent locks
 unanswered keeps what was attached as record.

@@ -77,6 +77,16 @@ pub struct Response {
     /// what came with one Answer, and is filled the same way.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub added: Vec<String>,
+
+    /// The files the human put at the set-level comment box, each by the path
+    /// the session reads it at, in the order they were attached (ADR-0028).
+    ///
+    /// **Filled on the way out**, exactly as [`Answer::attachments`] is. Not an
+    /// Answer to anything, which is why they ride here rather than on any
+    /// Answer: a Set with one of these and no Answers is as unanswered as it
+    /// was.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<String>,
 }
 
 /// One question's slot in a Response: either an Answer — a selected Option

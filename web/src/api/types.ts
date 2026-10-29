@@ -700,7 +700,7 @@ declared: boolean, };
  * Question are that Answer's, and a page can only know which it is holding by
  * being told.
  */
-export type AttachmentOrigin = "Brief" | "Answer";
+export type AttachmentOrigin = "Brief" | "Answer" | "Set";
 
 /**
  * And of taking one off again.
@@ -753,7 +753,7 @@ origin: AttachmentOrigin,
 /**
  * The label of the Question this file was put under, on a file put on an
  * Answer — `Q7` for a Question, `Q7a` for a Sub-question — and `null` on
- * every one of the Brief's.
+ * every one of the Brief's and on one put at a Set's comment box.
  *
  * Beside the origin rather than inside it, because that is how the record
  * holds it: the origin is a word, and this is what the word is read with.
@@ -5706,7 +5706,17 @@ nothing_else?: boolean,
  * each named in words — see [`Answer::added`], which is the same list for
  * what came with one Answer, and is filled the same way.
  */
-added?: Array<string>, };
+added?: Array<string>, 
+/**
+ * The files the human put at the set-level comment box, each by the path
+ * the session reads it at, in the order they were attached (ADR-0028).
+ *
+ * **Filled on the way out**, exactly as [`Answer::attachments`] is. Not an
+ * Answer to anything, which is why they ride here rather than on any
+ * Answer: a Set with one of these and no Answers is as unanswered as it
+ * was.
+ */
+attachments?: Array<string>, };
 
 /**
  * What became of pressing Resume.

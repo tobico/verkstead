@@ -369,6 +369,7 @@ fn decided_every_way() -> Response {
         direction: None,
         nothing_else: false,
         added: Vec::new(),
+        attachments: Vec::new(),
     }
 }
 
@@ -1733,6 +1734,7 @@ fn accepting_the_proposal() -> Response {
         direction: Some(verkstead_schema::Direction::Inline),
         nothing_else: false,
         added: Vec::new(),
+        attachments: Vec::new(),
     }
 }
 

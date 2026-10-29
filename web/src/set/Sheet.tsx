@@ -373,6 +373,11 @@ function Questions(props: {
       : nothingAnswered(response, props.attachments);
   };
 
+  /// The files put at the comment box: on the Set as a whole, under no
+  /// Question.
+  const onTheSet = () =>
+    props.attachments.filter((file) => file.label === null);
+
   /// Shown only when there is one, exactly as the submit only ever sends one that
   /// has something in it.
   const comment = () => {
@@ -446,17 +451,16 @@ function Questions(props: {
           </Show>
         </Postscript>
       </Show>
-      {/* And what was added at the comment box, under where the comment is
-          drawn, as the sheet drew it under the box. */}
-      <Show when={chipsOn(props.additions, null)}>
-        {(chips) => (
-          <Attachments
-            files={[]}
-            chips={chips()}
-            onto="the question set"
-            class={styles.attachments}
-          />
-        )}
+      {/* And what was put and added at the comment box, under where the
+          comment is drawn, as the sheet drew it under the box: the files on the
+          Set as a whole, which answer no Question, and the chips after them. */}
+      <Show when={onTheSet().length > 0 || chipsOn(props.additions, null)}>
+        <Attachments
+          files={onTheSet()}
+          chips={chipsOn(props.additions, null)}
+          onto="the question set"
+          class={styles.attachments}
+        />
       </Show>
     </>
   );

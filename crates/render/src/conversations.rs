@@ -1288,7 +1288,7 @@ pub struct AttachmentView {
 
     /// The label of the Question this file was put under, on a file put on an
     /// Answer — `Q7` for a Question, `Q7a` for a Sub-question — and `null` on
-    /// every one of the Brief's.
+    /// every one of the Brief's and on one put at a Set's comment box.
     ///
     /// Beside the origin rather than inside it, because that is how the record
     /// holds it: the origin is a word, and this is what the word is read with.
@@ -1315,6 +1315,10 @@ pub enum AttachmentOrigin {
     /// Put on the answer sheet, under one Question of one Question Set —
     /// [`AttachmentView::label`] says which.
     Answer,
+
+    /// Put at the answer sheet's comment box: on the Set as a whole, under no
+    /// Question and with no label, and an Answer to nothing (ADR-0028).
+    Set,
 }
 
 /// One MCP server a Conversation has attached, as the composer draws it: the

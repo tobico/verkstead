@@ -1,5 +1,7 @@
 //! The files the human puts on an Answer: the upload the answer sheet's
-//! paperclip makes, and the removal its × makes.
+//! *Attach file…* makes, and the removal its × makes — and the same pair at the
+//! comment box, where a file is on the Set as a whole and answers nothing
+//! (ADR-0028).
 //!
 //! The Brief's own pair said again from the other page — see
 //! [`crate::conversations::attach`], which is where the same two acts are made
@@ -41,7 +43,8 @@ use crate::attachments::{self, Attachments};
 use crate::platform::Platform;
 use crate::{AppState, store};
 
-/// Put a file on one of a Set's Answers.
+/// Put a file on one of a Set's Answers — or, where `label` is `None`, on the
+/// Set as a whole, the file put at its comment box.
 ///
 /// The two writes [`crate::conversations::attach`] makes, in the order it makes
 /// them: the bytes into the Conversation's own directory, and then the row that
@@ -55,7 +58,7 @@ use crate::{AppState, store};
 pub(crate) async fn attach(
     state: &AppState,
     set_id: i64,
-    label: &str,
+    label: Option<&str>,
     name: &str,
     body: &[u8],
 ) -> Result<AnswerAttached> {
@@ -72,7 +75,9 @@ pub(crate) async fn attach(
         Standing::Fixed(refusal) => return Ok(refusal.attaching()),
     };
 
-    if !asks(&state.pool, set_id, label).await? {
+    if let Some(label) = label
+        && !asks(&state.pool, set_id, label).await?
+    {
         return Ok(AnswerAttached::NoSuchLabel);
     }
 
@@ -89,9 +94,12 @@ pub(crate) async fn attach(
     let attachment = store::attach(
         &state.pool,
         conversation,
-        store::Origin::Answer {
-            set: set_id,
-            label: label.trim().to_owned(),
+        match label {
+            Some(label) => store::Origin::Answer {
+                set: set_id,
+                label: label.trim().to_owned(),
+            },
+            None => store::Origin::Set { set: set_id },
         },
         &kept,
         body.len() as i64,
@@ -182,6 +190,12 @@ pub(crate) async fn onto(
 
     let inside = Attachments::under(&state.data_dir).inside(Platform::HERE, conversation_id);
 
+    let path = |file: &store::Attachment| {
+        crate::sandbox::under(&inside, &file.name)
+            .display()
+            .to_string()
+    };
+
     for answer in &mut response.answers {
         let label = answer.label.trim();
 
@@ -189,15 +203,19 @@ pub(crate) async fn onto(
             .iter()
             .filter(|file| match &file.origin {
                 store::Origin::Answer { label: on, .. } => on == label,
-                store::Origin::Brief => false,
+                store::Origin::Brief | store::Origin::Set { .. } => false,
             })
-            .map(|file| {
-                crate::sandbox::under(&inside, &file.name)
-                    .display()
-                    .to_string()
-            })
+            .map(path)
             .collect();
     }
+
+    // And the comment box's, on the Response itself: they answer nothing, so
+    // no Answer carries them.
+    response.attachments = files
+        .iter()
+        .filter(|file| matches!(file.origin, store::Origin::Set { .. }))
+        .map(path)
+        .collect();
 
     Ok(())
 }
@@ -376,13 +394,26 @@ impl OnSet<'_> {
             .iter()
             .filter(|file| match &file.origin {
                 store::Origin::Answer { set, label: on } => *set == self.set_id && on == label,
-                store::Origin::Brief => false,
+                store::Origin::Brief | store::Origin::Set { .. } => false,
             })
-            .map(|file| {
-                crate::sandbox::under(&self.answers.inside, &file.name)
-                    .display()
-                    .to_string()
-            })
+            .map(|file| self.path(file))
             .collect()
+    }
+
+    /// And the paths the files put at the Set's comment box are read at: on the
+    /// Set as a whole, under no Question.
+    pub(crate) fn on_the_set(&self) -> Vec<String> {
+        self.answers
+            .files
+            .iter()
+            .filter(|file| file.origin == store::Origin::Set { set: self.set_id })
+            .map(|file| self.path(file))
+            .collect()
+    }
+
+    fn path(&self, file: &store::Attachment) -> String {
+        crate::sandbox::under(&self.answers.inside, &file.name)
+            .display()
+            .to_string()
     }
 }

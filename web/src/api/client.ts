@@ -1332,6 +1332,34 @@ export async function attachToAnswer(
   return taken<AnswerAttached>(at, response);
 }
 
+/// And put one on a Set as a whole, at its comment box: the same upload under
+/// no Question, which answers nothing (ADR-0028).
+export async function attachToSet(
+  device: Device,
+  set: number,
+  file: File,
+): Promise<AnswerAttached> {
+  const at = on(
+    device,
+    `/api/ui/sets/${set}/attachments/${encodeURIComponent(file.name)}`,
+  );
+
+  const response = await fetch(at, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/octet-stream",
+    },
+    body: file,
+  });
+
+  if (response.status === 413) {
+    return "TooLarge";
+  }
+
+  return taken<AnswerAttached>(at, response);
+}
+
 /// And take one off an Answer again, by the row's own id — which is what the
 /// path names it by, under the Set it was put on: two files on one Set may
 /// share a name, and neither of them is a key.
