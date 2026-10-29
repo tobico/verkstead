@@ -854,9 +854,17 @@ jobs:
       # A key of its own, as the macOS job has: this is a third dependency tree,
       # and one shared with either of the others would have them evicting each
       # other. Every leg shares it, because they all build the same tree.
+      #
+      # **The workspace's own crates are kept as well as its dependencies**, so
+      # that a commit rebuilds only what it touched. The key says so, because
+      # the action saves only when its key misses: under the old one, a cache
+      # already holding the dependencies alone would never be saved again.
+      # Ten legs racing to save one key is harmless — the first wins, and the
+      # rest warn that it already exists.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          key: windows
+          key: windows-workspace
+          cache-workspace-crates: true
 
       # The one thing the sessions suite needs that the runner image has not
       # got, and it is here to prove a *negative*: no session on this platform
