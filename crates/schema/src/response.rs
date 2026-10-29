@@ -71,6 +71,22 @@ pub struct Response {
     /// the system's.
     #[serde(default, skip_serializing_if = "is_false")]
     pub nothing_else: bool,
+
+    /// What the human added to the Conversation at the set-level comment box,
+    /// each named in words — see [`Answer::added`], which is the same list for
+    /// what came with one Answer, and is filled the same way.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub added: Vec<String>,
+
+    /// The files the human put at the set-level comment box, each by the path
+    /// the session reads it at, in the order they were attached (ADR-0028).
+    ///
+    /// **Filled on the way out**, exactly as [`Answer::attachments`] is. Not an
+    /// Answer to anything, which is why they ride here rather than on any
+    /// Answer: a Set with one of these and no Answers is as unanswered as it
+    /// was.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<String>,
 }
 
 /// One question's slot in a Response: either an Answer — a selected Option
@@ -110,6 +126,18 @@ pub struct Answer {
     /// the field existed reads as it always did.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<String>,
+
+    /// What the human added to the Conversation with this Answer — an MCP
+    /// server, a device the work may be moved to — each named in words and
+    /// where it is, in the order they were picked (ADR-0028).
+    ///
+    /// **Filled on the way out**, exactly as [`Answer::attachments`] is: the
+    /// sheet records each pick on the Set as it is made, the Submit applies
+    /// them, and the rows are what say which Answer each came with. A Response
+    /// is stored as it was sent, and one stored before the field existed reads
+    /// as it always did.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub added: Vec<String>,
 }
 
 impl Response {

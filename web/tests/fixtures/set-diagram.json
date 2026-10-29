@@ -1,5 +1,12 @@
 {
   "Set": {
+    "addable": {
+      "branch": "solid-viewer",
+      "devices": [],
+      "read_only": [],
+      "repos": []
+    },
+    "additions": [],
     "attachments": [],
     "branch": "solid-viewer",
     "conversation": 1,
@@ -98,6 +105,7 @@
         "subquestions": []
       }
     ],
+    "servers": [],
     "standing": {
       "Waiting": "waiting"
     },

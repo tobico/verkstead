@@ -1053,6 +1053,18 @@
   opacity: 0.6;
 }
 
+/* What answering the Set added to the work, under the interview: a line in the
+   steer's own weight and ink, because it says the same kind of thing — the
+   human deciding what the work goes on with. A block, the card being a button
+   that holds spans. */
+.questionSet .added {
+  display: block;
+  padding-top: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
 /* A Set whose stored body this build cannot read. Dashed rather than coloured:
    nothing has gone wrong with the work and there is nothing here to answer — the
    record is intact and this build cannot render it, which is a gap in the

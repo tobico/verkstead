@@ -646,6 +646,10 @@ with the record as it stands: an id names the same machine from every device of
 the cluster, so the far end reads the same list, and the drafting device is still
 implicit there because the birth key crossed too. A device that leaves the
 cluster is taken off every Conversation's list by the unlink itself.
+**A tick can also come with an answer**: an **Addition** picked under *May be
+transferred to* on a waiting Question Set's Attach menu ticks the device when
+the Set is answered, and restarts nothing, `verkstead transfer` reading the
+list live (ADR-0028).
 _Avoid_: allowed device, whitelist, target list
 
 **Carried Conversation**:
@@ -800,6 +804,15 @@ read, and a **Deferred Ask** never had anybody waiting on it.
 own session's words, and the resumed session appends to the same file — so the
 following of it starts at the end of what crossed, rather than drawing the whole of
 the conversation on the sending device onto the new Event.
+**And an answer that widens the sandbox is the second occasion** (ADR-0028). Where
+the human's answer to a Question Set adds a **Companion Repo** or an MCP server and
+the session that asked is idling on that very Set, the session is ended before the
+Response is stored and carried on the same way on the device it never left: the row
+names the Set, the note says the sandbox changed and gives the `verkstead answers`
+line, and the Notice names the Set rather than a move. The memory switch is no
+reason here — the Conversation's own home holds the log either way — and the other
+four still are. What the answer added is an **Addition**; see there for which of
+them restart the agent.
 _Avoid_: resumed session (that is ambiguous with Verkstead's **Resume**),
 rehydrate, replay, continuation
 
@@ -1007,7 +1020,8 @@ _Avoid_: global CLAUDE.md, system prompt, preamble, rules
 **MCP server**:
 A tool server an agent may call, **declared** once for the installation on the
 settings page and **attached** to a Conversation from the Attach button where
-its Brief is written. The one deliberate way an MCP server reaches a session at
+its Brief is written, or from an Answer as an **Addition** once the work has
+started (ADR-0028). The one deliberate way an MCP server reaches a session at
 all: a **Built Root** has the account's own taken out for every harness, so a
 session has none until a Conversation asks for one — see
 [ADR-0021](docs/adr/0021-declared-mcp-servers.md), which amends ADR-0011 for
@@ -1066,9 +1080,11 @@ so the card stays up saying so, with *Attach anyway* and *Try again*.
 **With nothing declared the control is still a menu**: *Attach file*, and *Add a
 server…*. A control that fell back to a plain button would be one the human had
 to learn twice. The menu is at both
-places a Brief is written — the draft's composer and the compose page — and the
-**Answer** to a Question Set is where it is not: that one attaches files and
-nothing else.
+places a Brief is written — the draft's composer and the compose page — and,
+since ADR-0028, on every **Answer** field of a waiting Question Set and its
+set-level comment box, where a server picked is an **Addition** to the
+Conversation rather than a chip on a draft: attached at Submit, past the freeze
+this entry describes.
 **On the compose page a pick is held rather than attached**, there being no
 Conversation to attach it to: the chip is drawn at once and its × takes it off,
 nothing is recorded on the server, and **Start work** or **Save as draft** puts
@@ -2665,7 +2681,8 @@ one, what its branch is to be called. Empty is not a branch called nothing but
 until a name is typed and stands on its own.
 
 **Frozen only means it stops narrowing.** A **Steer** may put another
-registered Repo in and open a read-only one up to read-write, on every target
+registered Repo in and open a read-only one up to read-write — and so may an
+answer to a Question Set, as an **Addition** (ADR-0028) — on every target
 the work goes on in, because what that settles is the sandbox the sessions to
 come run in rather than a property of one state. Never the other way: nothing
 removes a companion and nothing puts one back to read-only, so what a session
@@ -2939,12 +2956,18 @@ session already reads, and the Response names it there. Nothing is said about
 an empty one — the listing is of the files there are, so a Conversation with
 none is told nothing at all.
 
-**What a file is attached to is its origin, and there are two of them.** The
-Brief, and an Answer to a Question Set — a second value on the same record
-rather than a second kind of thing, the upload being the Conversation's and
-not the Brief's. **An Answer's file is keyed by the Set it was put on and the
+**What a file is attached to is its origin, and there are three of them.** The
+Brief, an Answer to a Question Set, and the Set as a whole — further values on
+the same record rather than further kinds of thing, the upload being the
+Conversation's and not the Brief's. **An Answer's file is keyed by the Set it was put on and the
 label of the Question it answers**, which is what its pills are drawn under
 and what a later session finds it named by; the Brief's are keyed by neither.
+**A set-level file is keyed by the Set alone** (ADR-0028) — a **Set-level
+Attachment**: put at the comment box, it is **not an Answer to anything** — a Set with one and no Answers is as
+unanswered as it was — so the Response carries it in a set-level
+`attachments` list beside the Answers, the prompt lists it under the Set's
+title with no Question, the digest names it after the comment, and the
+settled Set draws it under the comment.
 The two share the one directory, so a file named like one already there is
 renamed whichever origin either of them has.
 
@@ -2959,9 +2982,11 @@ decision it came with, because a file handed over with an Answer is part of the
 answer.
 
 **One is put on an Answer from the answer sheet**, where every Question and
-Sub-question's free-text field carries a paperclip of its own and the whole of
+Sub-question's free-text field carries an Attach menu of its own — *Attach file*
+first, and below it the **Addition**s the work can be given — and the whole of
 the question takes a drop; a Heading has neither, asking nothing, and the
-set-level comment box has neither either. A chosen file goes up the moment it
+set-level comment box has both, its file being the Set's rather than an
+Answer's. A chosen file goes up the moment it
 is chosen rather than waiting for Submit — so its pill comes back from the
 record and survives a reload, a × takes it off again, and a Set the agent locks
 unanswered keeps what was attached as record.
@@ -5753,7 +5778,9 @@ _Avoid_: sync/async ask, hard/soft question, urgent question
 A batch of Questions submitted together by one agent, with a Preface and a
 title. The unit that lands on a Conversation's Timeline, gets answered, and is
 locked. Reached through the Conversation it was asked from and nowhere else:
-a second way in would be a second thing to keep true.
+a second way in would be a second thing to keep true. While it waits, its sheet
+is also where the work is widened: an **Addition** picked at any Answer, or a
+**Set-level Attachment** put at the comment box (ADR-0028).
 _Avoid_: request, batch, ticket
 
 **Unreadable**:
@@ -5845,7 +5872,48 @@ the path that session reads the file at — filled in from the record on the way
 out rather than sent in, so what is stored is what the human submitted and one
 Response shape comes back from a held wait and a fetch alike. An Answer with
 no files carries no list.
+**And what came with it as an `added` list**, beside `attachments` and filled
+the same way: each **Addition** the Submit applied, in words and with where it
+is — under the Answer it was picked at, or on the Response itself for the
+comment box's.
 _Avoid_: submission, result
+
+**Addition**:
+Something picked on a waiting Question Set's sheet to give the work more than it
+was started with (ADR-0028): a declared **MCP server**, a registered Repo as a
+**Companion Repo**, a read-only Companion opened up to read-write, or a device
+ticked as a **Permitted Device**. Picked from the Attach menu on an **Answer**
+field, under that Question's label, or on the set-level comment box, under none.
+One Set adds each thing once.
+**Recorded the moment it is picked, applied at Submit.** It is a row on the Set,
+so it survives a reload and shows on another device, and its × takes it off;
+nothing reaches the Conversation until the transaction that stores the Response.
+Its state says where it has got to: **pending** while the Set waits, **applied**
+once the Submit has put it on the Conversation, **struck** where it never will
+be — a lock or a Close settled the Set without it, or a **Transfer** carried the
+Set to a device holding no Repo it matches, which the chip says in words.
+**Every question before anything is made.** A server whose declaration has gone,
+a Repo unregistered since, a fetch that fails or a branch already taken refuses
+the Submit by name, with the Answers kept on the sheet.
+**Only what changes the sandbox restarts the agent**: a companion, an opened-up
+companion or a server, where the session that asked is idling on that very Set,
+is ended and carried on in a wider one — the second occasion of a **Carried
+Conversation**. A device tick and a file restart nothing, and a Deferred Ask's
+additions reach the next launch.
+**Pending ones cross with the record on a Transfer**: a companion is matched on
+the far end by the rule the Companion rows use and struck where it matches
+nothing, a server crosses by name and meets the far end's own declarations at
+Submit, and a tick crosses as it is.
+_Avoid_: grant, extra, request, attachment (that is a file), upgrade (the Steer's
+word for one kind)
+
+**Set-level Attachment**:
+A file put at a Question Set's set-level comment box rather than on an Answer
+(ADR-0028). Keyed by the Set alone, it answers nothing: a Set with one and no
+Answers is as unanswered as it was. The Response carries it in a set-level
+`attachments` list, the prompt lists it under the Set's title with no Question,
+and the settled Set draws it under the comment. See **Attachment**.
+_Avoid_: comment attachment, Set file, general attachment
 
 **Diff**:
 The uncommitted changes (including untracked files) of the Worktrees a Question

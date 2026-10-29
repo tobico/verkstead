@@ -128,6 +128,38 @@ pub(crate) async fn pair_session(
     Ok(())
 }
 
+/// Which harness the newest session of a Conversation ran, or `None` where
+/// none of its sessions had theirs written down.
+///
+/// What a Response handed to a waiting agent names an MCP server's tools by:
+/// the agent waiting is the newest session's, and the prefix in front of a
+/// tool is its harness's.
+pub async fn newest_agent(
+    pool: &sqlx::SqlitePool,
+    conversation_id: i64,
+) -> Result<Option<super::AgentType>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT a.agent_type
+         FROM session_agents a
+         JOIN timeline_events e ON e.id = a.event_id
+         WHERE e.conversation_id = ?
+         ORDER BY a.event_id DESC
+         LIMIT 1",
+    )
+    .bind(conversation_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("reading which agent ran the newest session of Conversation {conversation_id}")
+    })?;
+
+    row.map(|(word,)| super::AgentType::read(&word))
+        .transpose()
+        .with_context(|| {
+            format!("reading which agent ran the newest session of Conversation {conversation_id}")
+        })
+}
+
 /// One row of the join below: the Event, the Profile's name, the model, and the
 /// word the agent was written down as — every one of them nullable but the
 /// Event, each for a reason [`RanUnder`]'s own fields give.

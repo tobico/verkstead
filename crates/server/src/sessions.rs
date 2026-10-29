@@ -2933,6 +2933,8 @@ impl Sessions {
         )
         .await;
 
+        let occasion = continuing.as_ref().map(|continuing| continuing.occasion);
+
         let (session, named, prompt, carried) = match continuing {
             Some(continuing) => {
                 // The Capture was opened under the name a fresh session would
@@ -3210,12 +3212,13 @@ impl Sessions {
         // The channel travels with it for [`Held`]'s reason: the Sets this launch
         // left open were left open for a reader that then never came back, and
         // shutting one takes the channel besides the store.
-        let resuming = match (named, session.as_deref()) {
-            (Named::Continuing, Some(carrying)) => Some(Resuming {
+        let resuming = match (named, session.as_deref(), occasion) {
+            (Named::Continuing, Some(carrying), Some(occasion)) => Some(Resuming {
                 why: crate::carrying::Instead::Refused {
                     harness: pairing.profile.agent_type(),
                     session: carrying.to_owned(),
                 },
+                occasion,
                 settlements: held.settlements.clone(),
             }),
 
@@ -3233,11 +3236,14 @@ impl Sessions {
         // launch earlier: everything between the two can still refuse a session,
         // and a Notice in front of them would claim a conversation picked up where
         // nothing ever ran.
-        if let (Named::Continuing, Some(carrying)) = (named, session.as_deref()) {
+        if let (Named::Continuing, Some(carrying), Some(occasion)) =
+            (named, session.as_deref(), occasion)
+        {
             crate::carrying::carried_on(
                 pool,
                 nudges,
                 conversation_id,
+                occasion,
                 pairing.profile.agent_type(),
                 carrying,
             )
@@ -3610,6 +3616,10 @@ struct Continuing {
     /// And the record it will go on adding to, with how much of it the session on
     /// the other machine wrote.
     carried: crate::transcript::Carried,
+
+    /// And what left it standing to be carried on: a move, or an answer that
+    /// widened the sandbox — which is what the Timeline says it with.
+    occasion: crate::carrying::Occasion,
 }
 
 /// Whether a launch for `conversation` under `pairing` carries on the conversation
@@ -3745,8 +3755,8 @@ async fn continuing(
             // apart. [`Carrying::Nothing`] is every ordinary launch and says
             // nothing: no Conversation arrived, so nothing about this session is
             // a fallback from anything.
-            if let Carrying::Instead(why) = carrying {
-                crate::carrying::instead(pool, nudges, conversation.id, &why).await;
+            if let Carrying::Instead(why, occasion) = carrying {
+                crate::carrying::instead(pool, nudges, conversation.id, occasion, &why).await;
             }
 
             None
@@ -3770,8 +3780,9 @@ enum Carrying {
     On(Continuing),
 
     /// One was standing and it cannot be, which is Verkstead's own Resume —
-    /// unchanged, and nothing lost — with the reason to put on the Timeline.
-    Instead(crate::carrying::Instead),
+    /// unchanged, and nothing lost — with the reason to put on the Timeline and
+    /// what left it standing.
+    Instead(crate::carrying::Instead, crate::carrying::Occasion),
 }
 
 /// The decision itself — [`continuing`]'s middle, with nothing to say about what a
@@ -3807,19 +3818,26 @@ async fn carried_on(
     };
 
     let running = pairing.profile.agent_type();
+    let occasion = crate::carrying::Occasion::of(&continued);
 
     if continued.agent_type != running {
-        return Carrying::Instead(crate::carrying::Instead::AnotherHarness {
-            ran: continued.agent_type,
-            running,
-        });
+        return Carrying::Instead(
+            crate::carrying::Instead::AnotherHarness {
+                ran: continued.agent_type,
+                running,
+            },
+            occasion,
+        );
     }
 
     if line(continued.agent_type, conversation.worktree.as_deref())
         .resume
         .is_none()
     {
-        return Carrying::Instead(crate::carrying::Instead::NoResumeLine(continued.agent_type));
+        return Carrying::Instead(
+            crate::carrying::Instead::NoResumeLine(continued.agent_type),
+            occasion,
+        );
     }
 
     // The switch, ahead of the looking rather than left to come out as a record
@@ -3827,8 +3845,15 @@ async fn carried_on(
     // store of its own and empty — which is the rule at home as much as away, so
     // an arrival under one is a session starting new exactly as the last one did,
     // and saying *the record is not here* about it would name the symptom.
-    if !pairing.profile.memory {
-        return Carrying::Instead(crate::carrying::Instead::MemoryOff(continued.agent_type));
+    //
+    // **A move's question alone.** A sandbox widened on this device keeps the
+    // Conversation's own home, so the log of the session it ended is exactly
+    // where the next one looks, shared memory or not.
+    if occasion == crate::carrying::Occasion::Arrived && !pairing.profile.memory {
+        return Carrying::Instead(
+            crate::carrying::Instead::MemoryOff(continued.agent_type),
+            occasion,
+        );
     }
 
     // The Worktree is what the note says has moved, and what the harness whose
@@ -3838,18 +3863,25 @@ async fn carried_on(
     // guessed at, and where it did happen it is a device with nowhere for the
     // record to be, which is what the reason beside it says.
     let Some(worktree) = conversation.worktree.as_deref() else {
-        return Carrying::Instead(crate::carrying::Instead::NoRecord(continued.agent_type));
+        return Carrying::Instead(
+            crate::carrying::Instead::NoRecord(continued.agent_type),
+            occasion,
+        );
     };
 
     let Some(carried) =
         crate::transcript::carried(&pairing.profile, &continued.session_id, worktree, home).await
     else {
-        return Carrying::Instead(crate::carrying::Instead::NoRecord(continued.agent_type));
+        return Carrying::Instead(
+            crate::carrying::Instead::NoRecord(continued.agent_type),
+            occasion,
+        );
     };
 
-    Carrying::On(Continuing {
-        session: continued.session_id,
-        note: skills::moved(
+    // What it is primed with is the occasion's: a move says where the work sits
+    // now, and an answer says the sandbox changed and where its Answers are.
+    let note = match occasion {
+        crate::carrying::Occasion::Arrived => skills::moved(
             &crate::platform::hostname(),
             worktree,
             attached(pool, conversation.id, attachments)
@@ -3857,7 +3889,18 @@ async fn carried_on(
                 .as_deref(),
             &idling_on(pool, conversation.id).await,
         ),
+        crate::carrying::Occasion::Widened(set_id) => {
+            let (title, added) = crate::answer_additions::widened_with(pool, set_id).await;
+
+            skills::widened(set_id, title.as_deref(), &added)
+        }
+    };
+
+    Carrying::On(Continuing {
+        session: continued.session_id,
+        note,
         carried,
+        occasion,
     })
 }
 
@@ -4358,6 +4401,10 @@ struct Resuming {
     /// write for itself.
     why: crate::carrying::Instead,
 
+    /// And what left the conversation standing to be carried on, which the
+    /// Notice is worded by.
+    occasion: crate::carrying::Occasion,
+
     /// And the channel a Set settled is announced on, so that a wait held on one
     /// of the Sets this launch left open ends rather than sitting out its window.
     /// [`Held`]'s own, carried this far for the same reason it was carried there.
@@ -4389,7 +4436,14 @@ struct Resuming {
 /// session started for this Conversation is a session of its own, primed from
 /// the record. Which is what the Notice says has happened.
 async fn refused(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, resuming: Resuming) {
-    crate::carrying::instead(pool, nudges, conversation_id, &resuming.why).await;
+    crate::carrying::instead(
+        pool,
+        nudges,
+        conversation_id,
+        resuming.occasion,
+        &resuming.why,
+    )
+    .await;
 
     let open = match store::timeline(pool, conversation_id).await {
         Ok(timeline) => crate::sets::open(&timeline, crate::sets::Open::Idled),
@@ -5239,7 +5293,7 @@ mod tests {
     /// suite running on Linux writes the same characters whichever tool the
     /// server used, and could not tell a line spelled one way from a line
     /// spelled two. That claim is asserted where a Windows machine runs it; see
-    /// `tests/sessions_windows.rs`.
+    /// `tests/suite/sessions_windows.rs`.
     fn opened_at(state: &std::path::Path) -> PathBuf {
         crate::handoffs::inside(
             Platform::Windows,

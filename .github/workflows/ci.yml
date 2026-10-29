@@ -41,7 +41,15 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      # Keyed on the root `Cargo.toml` as well as the action's own key, which
+      # hashes the lockfile and the members' manifests but not the root, where
+      # `[profile.dev]` is. Without it a profile change keeps the key, so every
+      # run restores dependencies built the old way, rebuilds them all, and
+      # never saves over them, because the action saves only when its key
+      # misses. Every job's cache below is keyed the same way.
       - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: ${{ hashFiles('Cargo.toml') }}
 
       # The sandbox suite runs a real `bwrap` rather than a stand-in — what it
       # checks is which paths come in writable, read-only and absent, and there
@@ -94,7 +102,7 @@ jobs:
       - name: Test
         run: cargo test --workspace
         env:
-          # Twice the suite's own clock for `crates/server/tests/sessions.rs`,
+          # Twice the suite's own clock for `crates/server/tests/suite/sessions.rs`,
           # which stands real servers up and runs real sessions in real
           # sandboxes and judges them on wall clock. This runner has two cores
           # and is building the workspace alongside the run, so a session gets
@@ -122,7 +130,7 @@ jobs:
           fi
 
   # The package stores, proved by really installing something inside a Sandbox
-  # — `crates/server/tests/package_stores.rs`, which is where the reasoning is.
+  # — `crates/server/tests/suite/package_stores.rs`, which is where the reasoning is.
   #
   # A job of its own rather than more steps in `Rust`, for two reasons. The
   # tools are this suite's alone and installing them would slow every other
@@ -174,10 +182,10 @@ jobs:
 
       # A key of its own: this job builds one test target of one crate, and a
       # cache shared with the `Rust` job would have the two evicting each
-      # other.
+      # other. And on the root `Cargo.toml`, as the `Rust` job's says why.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          key: package-stores
+          key: package-stores-${{ hashFiles('Cargo.toml') }}
 
       # The same bubblewrap the `Rust` job installs, and for the same reason —
       # see the comment there for why the sysctl goes off as well. Every proof
@@ -244,7 +252,7 @@ jobs:
           # Classic reads `YARN_CACHE_FOLDER` and Berry reads
           # `YARN_GLOBAL_FOLDER`, so a runner carrying one of them is a runner
           # where half of that is never proved — the name here is the one
-          # `tests/package_stores.rs` looks for and the one the dev shell links
+          # `tests/suite/package_stores.rs` looks for and the one the dev shell links
           # it in under.
           sudo /usr/local/node/bin/npm install -g --prefix /usr/local/yarn-berry \
             @yarnpkg/cli-dist@4.14.1
@@ -451,9 +459,10 @@ jobs:
 
       # `--nocapture` so that a proof's own account of itself is in the log:
       # what an install printed is the whole of what explains a failure, and a
-      # captured one is a line about an exit status.
+      # captured one is a line about an exit status. Quoted, because the module's
+      # name ends in a colon and YAML would read the line as a key.
       - name: The proofs
-        run: cargo test -p verkstead-server --test package_stores -- --nocapture
+        run: 'cargo test -p verkstead-server --test suite -- --nocapture package_stores::'
         env:
           # What makes a skipped proof a failure here. Any value does; this one
           # says what it is for.
@@ -466,8 +475,10 @@ jobs:
   # settles bubblewrap's. Nothing but a Mac can answer it, which is what this
   # job is for.
   #
-  # Two targets rather than the workspace: everything else in it stands on
-  # bubblewrap and a Linux kernel, and a Mac has neither. The rest of what this
+  # One suite rather than the workspace: everything else in it stands on
+  # bubblewrap and a Linux kernel, and a Mac has neither. The suite is a module
+  # of the server's one test binary, so the binary is built whole here and the
+  # module's name is what picks the suite out of it. The rest of what this
   # stage's code says — the policy a description renders to, read as text — is
   # unit-tested in the Rust job above, which is where a mistake in it shows up
   # in seconds rather than on a runner that has to be waited for.
@@ -482,16 +493,18 @@ jobs:
         uses: dtolnay/rust-toolchain@1.95.0
 
       # A key of its own: this is an Apple dependency tree, and one shared with
-      # the Linux job would have the two evicting each other.
+      # the Linux job would have the two evicting each other. And on the root
+      # `Cargo.toml`, as the `Rust` job's says why.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          key: macos-sandbox
+          key: macos-sandbox-${{ hashFiles('Cargo.toml') }}
 
       # No `web/dist` is fetched and none is needed: the embed is
       # `allow_missing`, so the server compiles without the viewer — and what
       # this suite probes is a filesystem boundary rather than anything served.
+      # Quoted for the same colon.
       - name: The boundary suite
-        run: cargo test -p verkstead-server --test sandbox_macos
+        run: 'cargo test -p verkstead-server --test suite -- sandbox_macos::'
 
       # And the onboarding module's own unit tests, which is where the wizard's
       # two questions for a real Mac are: whether `hw.optional.arm64` is a
@@ -543,31 +556,355 @@ jobs:
   # does. This job is the Windows machine this project has, and it is what will
   # say the port goes on holding.
   #
-  # **Two legs, each running half the suite**, because one was not enough to
-  # come near the `Rust` job's ten minutes or so. Measured on the pull request
-  # that brought nextest in: the job was 39–43 minutes before it, and with
-  # nextest it had passed 17 minutes (a 4½-minute build, then 11½ minutes of
-  # tests) with a quarter of the suite still to run. Those tests were using all
-  # four of the runner's cores the whole time, so there was nothing left to gain
-  # on one machine. A second leg costs a second cached build, and the repository
-  # is public, so the runner itself is free.
+  # **The budget: every leg under ten minutes, the typical run near seven.**
+  # Seven rather than nine and a half, because two legs of one run have differed
+  # by two minutes of build alone, and a typical run at the limit is a red check
+  # on an unlucky runner. Free four-core runners only: the repository is public,
+  # so a leg costs nothing but its own cached build.
+  #
+  # **The budget is all but met, and the timeout is fifteen rather than ten.**
+  # On the last run measured (run 40809146920) the legs took 6m03 to 10m08:
+  # the slowest missed ten by eight seconds, and a second leg came in at
+  # exactly ten. The legs average about eight and a third minutes, not seven.
+  # A hard ten would fail a leg that drew a slow runner every few runs, so
+  # `timeout-minutes` stands at fifteen, a minute above the slowest leg in any
+  # run in the ledger. It catches a hang rather than a slow leg. The
+  # maintainer settled beforehand that the work stops here if the last free
+  # lever left a leg over ten.
+  #
+  # **What is left is a larger runner, which is not free.** A leg builds for
+  # two to four minutes and tests for three to six, and the runner alone
+  # decides where in those ranges it falls. The build is line tables, eight
+  # test binaries, MSVC's own linker (rust-lld did not pay) and dependencies
+  # that really come out of the cache now. sccache and a shared archive were
+  # ruled out at the start. Ten legs is the cap. `cache-workspace-crates` was
+  # measured and did not pay, because the checkout makes every source file
+  # newer than anything a cache holds.
+  #
+  # **The ledger.** Each lever lands as a commit of its own on one pull request,
+  # and its row is the run of that commit. A row gives the slowest and the
+  # fastest leg, read off the run's job timings as `build + test = job`; the job
+  # time includes a minute or so of setup. A lever that did not pay keeps its
+  # row, saying so. Until the legs, there were two, so the two columns are the
+  # whole of those runs.
+  #
+  # | Lever                               | Run         | Slowest leg           | Fastest leg           |
+  # | ----------------------------------- | ----------- | --------------------- | --------------------- |
+  # | Baseline (`main`)                   | 40633314366 | 10m04 + 20m26 = 31m35 | 8m20 + 17m00 = 26m05  |
+  # | Line tables, no examples built      | 40649541515 | 7m04 + 19m52 = 28m04  | 7m08 + 17m04 = 25m02  |
+  # | One test binary: store, schema, cli | 40659022110 | 6m07 + 18m04 = 25m14  | 6m32 + 15m56 = 23m19  |
+  # | One test binary: the server         | 40671281679 | 5m12 + 17m39 = 23m50  | 4m48 + 17m27 = 23m23  |
+  # | Defender exclusions                 | 40678349026 | 4m54 + 19m13 = 25m21  | 5m10 + 17m49 = 24m09  |
+  # | The legs, ten of them               | 40689227811 | 4m19 + 8m23 = 13m59   | 3m29 + 4m18 = 8m45    |
+  # | rust-lld (reverted)                 | 40694314360 | 4m25 + 6m46 = 12m23   | 3m51 + 3m31 = 8m39    |
+  # | Template repositories               | 40702569526 | 5m34 + 5m47 = 12m48   | 3m30 + 3m33 = 7m55    |
+  # | The same, measured again            | 40709146514 | 4m58 + 6m26 = 12m23   | 3m18 + 4m10 = 8m22    |
+  # | The slow session-account tests      | 40795830677 | 4m18 + 8m11 = 13m48   | 3m01 + 4m25 = 8m12    |
+  # | The same, measured again            | 40798711420 | 5m00 + 4m39 = 10m34   | 3m02 + 3m24 = 7m11    |
+  # | Workspace crates cached: the fill   | 40801531180 | 5m22 + 4m58 = 11m20   | 3m37 + 3m05 = 7m30    |
+  # | The same, on a server commit        | 40804267131 | 3m35 + 4m45 = 9m23    | 2m10 + 3m14 = 6m13    |
+  # | Keyed by profile, no crates: fill   | 40806644844 | 4m22 + 6m43 = 12m09   | 3m11 + 3m09 = 7m10    |
+  # | The same, warm                      | 40809146920 | 3m00 + 6m05 = 10m08   | 2m27 + 2m54 = 6m03    |
+  #
+  # What each lever came to, row by row:
+  #
+  # The baseline is the last green run on `main` before this work, 2026-10-28.
+  # Its build is the 129 test binaries, each compiled and linked by MSVC with
+  # full debug info — on four cores the workspace's libraries and binaries take
+  # 4m39s, and the test binaries 11m38s on top. Its tests are about 4,200
+  # test-seconds a leg, spread thinly over the suites: `conversations` is 16%
+  # and nothing else is above 8%.
+  #
+  # Line tables took a leg's build from 8–10 minutes to 7, and the two legs'
+  # builds to within four seconds of each other (run 40649541515). The tests
+  # did not move, which is what the levers after it are for.
+  #
+  # One test binary each for the store, schema and cli took another minute off
+  # the build, three links where there were 53 (run 40659022110). The tests
+  # moved by the noise between runners, not by the merge.
+  #
+  # One test binary for the server, beside the seven that stay alone, took
+  # the build to about five minutes, eight links where there were 76 (run
+  # 40671281679), and the tests again moved by the noise alone. Leg 2 is its
+  # re-run: its first attempt built in 2m59 and failed one `author_mirrors`
+  # test that is a process of its own under nextest, so not the merge's —
+  # which says how far two runners' builds of one commit can still differ.
+  #
+  # Defender exclusions bought nothing, because there was nothing to buy: the
+  # windows-2025 image already runs with real-time protection off (run
+  # 40678349026, whose step says so as a notice). The builds and tests moved
+  # by the noise alone, and the step costs six seconds, so it stays — an image
+  # that turns protection back on would cost this job nothing.
+  #
+  # The legs: ten, the cap this budget set itself (run 40689227811). The count
+  # was chosen from the Defender row: 37 minutes of test between two legs, so
+  # with about five minutes of build and one of setup on every leg, seven
+  # minutes a leg wanted something over thirty legs, and ten was as near as
+  # the cap allowed. What each of the ten came to:
+  #
+  # | Leg | Build + test = job    |   | Leg | Build + test = job    |
+  # | --- | --------------------- | - | --- | --------------------- |
+  # | 1   | 3m44 + 5m03 = 9m51    |   | 6   | 3m29 + 4m18 = 8m45    |
+  # | 2   | 5m07 + 4m36 = 10m43   |   | 7   | 4m54 + 6m11 = 12m00   |
+  # | 3   | 5m01 + 4m04 = 10m03   |   | 8   | 4m04 + 6m59 = 12m06   |
+  # | 4   | 5m06 + 4m17 = 10m39   |   | 9   | 4m19 + 8m23 = 13m59   |
+  # | 5   | 5m43 + 5m08 = 11m49   |   | 10  | 5m35 + 4m24 = 11m03   |
+  #
+  # **No leg came in under seven, and the slowest is all but seven minutes over.** The
+  # test time did not divide by five: ten legs tested for 53 minutes between
+  # them where two had tested for 37, because a test runs slower beside
+  # three others on a leg than its share of the old figure says — most of the
+  # server's and the store's suite tests take ten seconds or more apiece here,
+  # making repositories, and a leg's test time is set by its slowest few
+  # rather than by its count. Leg 9's is four `conversations` tests that ran
+  # together and took 80 to 120 seconds each, where on the two legs before
+  # they took 4 to 10. More legs were not added because ten is the cap, and
+  # because what is left is the build — 3m29 to 5m43 by the runner alone —
+  # and the per-test cost of a repository, which are rust-lld's and the
+  # template repositories' to take down rather than an eleventh leg's.
+  #
+  # rust-lld did not stay. Linked with the LLD rustc ships rather than MSVC's
+  # `link.exe` (run 40694314360), the ten legs built in 3m51 to 5m23, a mean
+  # of 4m55, where the legs' row built in 3m29 to 5m43, a mean of 4m42 — the
+  # noise between runners and nothing else. With line tables only and eight
+  # test binaries, linking is no longer what a leg's build spends its time
+  # on. It linked the whole workspace and every leg was green with it — leg
+  # 7 on its re-run, past a CLI pipe test whose restarted server found its
+  # pipe still held — and the next commit took it back out.
+  #
+  # Template repositories: a `conversations` or `repos` test copies its git
+  # repository from one made once per leg rather than running five `git`
+  # processes for it, eight for a clone (run 40702569526). Those tests came
+  # to 4.6 seconds apiece on a leg, where they had been ten or more, and the
+  # ten legs tested for 48m45 between them where the legs' row had tested
+  # for 53m23; the slowest leg's test fell from 8m23 to 6m32. What each of
+  # the ten came to:
+  #
+  # | Leg | Build + test = job    |   | Leg | Build + test = job    |
+  # | --- | --------------------- | - | --- | --------------------- |
+  # | 1   | 5m17 + 4m14 = 10m43   |   | 6   | 4m52 + 6m16 = 12m08   |
+  # | 2   | 5m11 + 3m51 = 9m57    |   | 7   | 3m51 + 6m32 = 11m22   |
+  # | 3   | 3m30 + 3m33 = 7m55    |   | 8   | 4m53 + 4m38 = 10m30   |
+  # | 4   | 3m52 + 6m10 = 11m09   |   | 9   | 5m04 + 3m47 = 9m44    |
+  # | 5   | 3m31 + 3m57 = 8m19    |   | 10  | 5m34 + 5m47 = 12m48   |
+  #
+  # The legs over six minutes of test are now set by one test each rather
+  # than a crowd: a `logins_windows` test of 200 to 250 seconds on legs 6 and
+  # 7, a `sandbox_windows` one of 156 on leg 4, and three `joining` tests of
+  # 70 to 80 seconds together on leg 10.
+  #
+  # The last row is the run of the ledger's own commit, on the same code. Its
+  # slowest leg was leg 7, where `logins_windows::a_login_left_past_its_limit_is_killed`
+  # took 227 seconds as the last test to run, and its fastest was leg 8.
+  # The count stays at ten: no leg tested in under four minutes, so none was a
+  # runner doing too little to be worth having.
+  #
+  # The slow session-account tests: a probe run with the server's own log
+  # printed under each of them (run 40785712519) said where their minutes went,
+  # and it was two things, neither of them a fixed wait or a slow poll.
+  #
+  # - **A cmdlet.** The first one the session account looks up on a runner
+  #   sends PowerShell through its modules for two to seven minutes. The login
+  #   stub called six, so a login wrote its boundary in 21 ms and then printed
+  #   nothing for four minutes. Written with the framework alone, the way the
+  #   other suites' scripts already were, the login tests take 13 to 15
+  #   seconds. Two `sessions_windows` scripts broke the same rule, and had been
+  #   quick only because a login test before them had paid; with the stub
+  #   fixed, one of them ran out leg 6's fifteen minutes (run 40791770666). It
+  #   lost its cmdlets too.
+  # - **The runner's profile.** The first boundary on a leg writes a step on
+  #   the runner's own profile directory, and writing that list makes Windows
+  #   walk everything under it: 55 seconds and more, once a leg. That is the
+  #   machine's cost rather than a test's, so it cannot come out of the tests,
+  #   and `.config/nextest.toml` now starts the boundary and login tests first
+  #   on their leg (`priority = 100`), beside the rest of it rather than after
+  #   it. `sessions_windows` keeps its place at the end, where its sessions
+  #   have the machine to themselves.
+  #
+  # The run before this row (40794512146, the same tests with one line
+  # unformatted) tested for 2,438 test-seconds across the ten legs, where the
+  # last row's run had tested for 2,828, and its jobs took 6m53 to 10m57. The
+  # row's own run took 2,907, most of the difference being leg 1, a runner
+  # slow at everything: `conversations::steering_into_wrapping_fills_a_review_nobody_picked_an_account_for`
+  # took 115 seconds there, where it takes about five. What each of the ten
+  # came to:
+  #
+  # | Leg | Build + test = job    |   | Leg | Build + test = job    |
+  # | --- | --------------------- | - | --- | --------------------- |
+  # | 1   | 4m18 + 8m11 = 13m48   |   | 6   | 3m55 + 3m58 = 8m45    |
+  # | 2   | 5m18 + 5m34 = 11m56   |   | 7   | 3m01 + 4m25 = 8m12    |
+  # | 3   | 4m31 + 5m04 = 10m39   |   | 8   | 4m48 + 4m28 = 10m14   |
+  # | 4   | 4m50 + 4m54 = 10m46   |   | 9   | 5m41 + 2m58 = 9m32    |
+  # | 5   | 4m52 + 4m25 = 10m24   |   | 10  | 4m55 + 4m55 = 10m54   |
+  #
+  # **Four session-account tests still take over sixty seconds on a leg**, and
+  # why is the same for three of them: each was the first boundary written on
+  # its leg, so it paid the profile walk above.
+  # `sandbox_windows::a_live_conversations_worktree_is_reachable_and_a_stopped_ones_is_not`
+  # took 119 seconds on leg 4, `sandbox_windows::a_fresh_account_is_given_settings_that_skip_the_bypass_consent`
+  # 85 on leg 10, and `sandbox::granting::writing::tests::a_granted_path_is_read_as_the_account_and_a_refused_one_is_not`
+  # 61 on leg 5. Every boundary after the first on its leg came in under
+  # sixty. The fourth is `logins_windows::a_login_left_past_its_limit_is_killed`
+  # at 68 seconds, sixty of them the limit the test is there to see run out.
+  #
+  # The last row is the run of that row's own commit, on the same code, read
+  # to decide the timeout. No leg tested for five minutes, and four tested for
+  # under four. What each of the ten came to:
+  #
+  # | Leg | Build + test = job    |   | Leg | Build + test = job    |
+  # | --- | --------------------- | - | --- | --------------------- |
+  # | 1   | 4m52 + 4m15 = 10m15   |   | 6   | 5m00 + 4m39 = 10m34   |
+  # | 2   | 4m34 + 4m25 = 9m54    |   | 7   | 3m55 + 3m03 = 7m46    |
+  # | 3   | 5m17 + 4m16 = 10m30   |   | 8   | 3m42 + 4m35 = 9m08    |
+  # | 4   | 3m02 + 3m24 = 7m11    |   | 9   | 5m19 + 3m55 = 10m07   |
+  # | 5   | 3m13 + 3m31 = 7m29    |   | 10  | 5m04 + 4m30 = 10m28   |
+  #
+  # **The slowest leg missed ten by 34 seconds**, and what set it was its
+  # build: leg 6 tested for 4m39, but legs 8 and 10 tested for about as long
+  # and only the one that built in 3m42 came in under ten. The count stays at
+  # ten even with four legs testing under four minutes. Nine would put each
+  # remaining leg's share of the 40 test-minutes up by about 25 seconds, on
+  # legs already over ten. The timeout stays at fifteen: the head of this
+  # comment says what is left.
+  #
+  # Workspace crates cached: `rust-cache`'s `cache-workspace-crates`, the free
+  # lever the maintainer chose. It needed a new key, because the action saves
+  # only when its key misses. The first run filled that key with nothing to
+  # restore, so it built cold (run 40801531180). It built in 3m37 to 5m52,
+  # no slower than the warm runs before it. That was the first sign that
+  # those runs had not been warm at all.
+  #
+  # The second run, on a commit that touched the server crate, built in 2m10
+  # to 3m57 (run 40804267131). Every leg came in under ten, the slowest at
+  # 9m23, and the typical leg was about eight minutes. Leg 9's first attempt
+  # failed one `announcing` test that passed on its re-run, and took 10m11.
+  # The row is the re-run. What each of the ten came to:
+  #
+  # | Leg | Build + test = job    |   | Leg | Build + test = job    |
+  # | --- | --------------------- | - | --- | --------------------- |
+  # | 1   | 3m34 + 3m28 = 8m11    |   | 6   | 2m10 + 3m14 = 6m13    |
+  # | 2   | 3m34 + 3m16 = 7m42    |   | 7   | 3m35 + 4m45 = 9m23    |
+  # | 3   | 2m19 + 4m03 = 7m12    |   | 8   | 3m23 + 3m53 = 8m22    |
+  # | 4   | 2m49 + 3m45 = 7m25    |   | 9   | 3m49 + 3m42 = 8m31    |
+  # | 5   | 3m32 + 4m07 = 8m37    |   | 10  | 3m57 + 3m25 = 8m15    |
+  #
+  # **But the workspace's crates were not what paid.** Every leg compiled all
+  # five of them again, because the checkout gives every source file a new
+  # mtime and cargo rebuilds a crate whose sources are newer than its
+  # artifacts. What paid was the new key. The action hashes the lockfile and
+  # the members' manifests into its key, but not the workspace's root
+  # `Cargo.toml`, where `[profile.dev]` is. So when line tables came in, the
+  # key stayed the same. Every leg since then has restored dependencies built
+  # with full debug info and rebuilt all 302 of them; run 40798711420
+  # compiled 302 crates on a full match. And none of them saved, because a
+  # full match saves nothing. Under the new key a leg compiles six.
+  #
+  # So the next commit took `cache-workspace-crates` back out, and renamed the
+  # key `windows-line-tables` for what it is really there for. Its own run
+  # filled that key and built cold again, in 3m11 to 5m32 (run 40806644844).
+  #
+  # The last row is the run after that, warm under the new key, and it is the
+  # one the timeout was decided on (run 40809146920). The legs built in 2m07
+  # to 4m11, where the row before the cache work built in 3m02 to 5m19.
+  # Leg 5's first attempt failed a `terminal_windows` test whose PowerShell
+  # printed nothing in sixty seconds, the first cmdlet lookup on a slow
+  # runner. It passed on its re-run, and the table has the re-run. What each
+  # of the ten came to:
+  #
+  # | Leg | Build + test = job    |   | Leg | Build + test = job    |
+  # | --- | --------------------- | - | --- | --------------------- |
+  # | 1   | 3m20 + 5m28 = 10m00   |   | 6   | 2m07 + 4m01 = 6m50    |
+  # | 2   | 2m49 + 3m46 = 7m27    |   | 7   | 3m40 + 4m16 = 8m51    |
+  # | 3   | 3m41 + 4m33 = 9m09    |   | 8   | 3m00 + 6m05 = 10m08   |
+  # | 4   | 2m27 + 2m54 = 6m03    |   | 9   | 4m11 + 3m08 = 8m12    |
+  # | 5   | 3m52 + 4m06 = 8m55    |   | 10  | 2m48 + 4m05 = 7m45    |
+  #
+  # **The slowest leg missed ten by eight seconds, so the timeout stays at
+  # fifteen and this work stops here**, as the maintainer settled beforehand.
+  # The legs averaged 8m20, about a minute and a half over the seven the
+  # budget aims for. What set the slow two was their tests, not their builds:
+  # leg 8 tested for 6m05 and leg 1 for 5m28, where
+  # `conversations::steering_into_wrapping_fills_a_review_nobody_picked_an_account_for`
+  # took 98 seconds instead of its usual five. That is the runner, not the
+  # test. The run before it, on a server commit, had every leg under ten but
+  # one first attempt at 10m11, so a hard ten would fail a leg now and then
+  # for no fault of the code.
   #
   # `slice` partitioning deals the tests out one at a time across every binary,
-  # so each leg gets half of each suite rather than whole binaries, and
-  # `crates/server/tests/conversations.rs`, a third of the test time on its
-  # own, is split between them. What `.config/nextest.toml` holds serial is
-  # serial per leg, which is all it needs to be: each leg is a machine of its
-  # own, with a session account of its own.
+  # so each leg gets its share of each suite rather than whole binaries. What
+  # `.config/nextest.toml` holds serial is serial per leg, which is all it needs
+  # to be: each leg is a machine of its own, with a session account of its own.
   windows:
-    name: Windows (${{ matrix.partition }}/2)
+    name: Windows (${{ matrix.partition }}/10)
     runs-on: windows-2025
+    # Fifteen rather than ten: the last run's slowest leg missed ten by eight
+    # seconds, on a slow runner's tests. The ledger above has the figures.
+    timeout-minutes: 15
     strategy:
-      # A red leg does not cancel its sibling: what the other half of the suite
-      # says is worth having from the same run.
+      # A red leg does not cancel the others: what the rest of the suite says
+      # is worth having from the same run.
       fail-fast: false
+      # Ten legs, the most this budget allows itself — the ledger above says
+      # why that many. The count is said three times, and the three move
+      # together: this list, the job's name, and the `slice:` of the test step.
       matrix:
-        partition: [1, 2]
+        partition: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
+      # **Defender looks away from what the run writes.** The image scans every
+      # file written with real-time protection on, which taxes a build that
+      # writes object files by the thousand and a suite that spawns processes
+      # and makes temporary directories by the hundred. Safe here and nowhere
+      # else: the runner is a throwaway VM whose only purpose is this run, and
+      # what lands in these directories is this repository's own source, the
+      # pinned toolchain and what they build — the same reasoning as the `Rust`
+      # job relaxing AppArmor for the sandbox suite. Never on a machine anybody
+      # keeps.
+      #
+      # First, before the checkout writes anything. A runner with no Defender,
+      # or refusing the preference, fails here aloud rather than passing
+      # quietly: a measurement against a step that did nothing is no
+      # measurement.
+      #
+      # **The windows-2025 image already has real-time protection off** (run
+      # 40678176057), so today these exclusions have nothing to work against —
+      # the ledger above says what that came to. The step stays so that an
+      # image which turns it back on costs this job nothing, and it says on
+      # the run which of the two it found.
+      - name: Exclude the build and the tests from Defender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $status = Get-MpComputerStatus
+          if ($status.RealTimeProtectionEnabled) {
+            Write-Output 'Defender real-time protection is on: excluding what the run writes.'
+          } else {
+            Write-Output '::notice title=Defender::Real-time protection is already off on this image, so the exclusions change nothing today.'
+          }
+
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
+          $rustupHome = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $env:USERPROFILE '.rustup' }
+          $paths = @(
+            $env:GITHUB_WORKSPACE,
+            (Join-Path $env:GITHUB_WORKSPACE 'target'),
+            $env:RUNNER_TEMP,
+            $env:TEMP,
+            $cargoHome,
+            $rustupHome
+          )
+
+          foreach ($path in $paths) {
+            Add-MpPreference -ExclusionPath $path
+          }
+
+          $excluded = (Get-MpPreference).ExclusionPath
+          foreach ($path in $paths) {
+            if ($excluded -notcontains $path) {
+              throw "Defender did not take the exclusion for $path."
+            }
+            Write-Output "Excluded from real-time scanning: $path"
+          }
+
       # Before the checkout, because it is the checkout this is about. Git for
       # Windows converts line endings on the way out of the repository by
       # default, and half of what this suite asserts is text: a fixture, a
@@ -587,10 +924,26 @@ jobs:
 
       # A key of its own, as the macOS job has: this is a third dependency tree,
       # and one shared with either of the others would have them evicting each
-      # other. The two legs share it, because they build the same tree.
+      # other. Every leg shares it, because they all build the same tree.
+      #
+      # **Keyed on the root `Cargo.toml`, because the action's own key is
+      # not.** It hashes the lockfile and the members' manifests, but not the
+      # workspace's root `Cargo.toml`, where `[profile.dev]` is. So when the
+      # build went to line tables, the key stayed the same, and every leg
+      # restored dependencies built with full debug info and rebuilt all 302
+      # of them. It never saved over them either, because the action saves only
+      # when its key misses. With the root's hash in the key, a change to
+      # `[profile.dev]` is a new key of its own accord. Ten legs racing to save
+      # one key is harmless: the first wins, and the rest warn that it already
+      # exists.
+      #
+      # Only the dependencies are kept. The workspace's own crates were kept as
+      # well for one run, but did not pay: the checkout gives every source file
+      # a new mtime, so cargo rebuilds them all whatever the cache holds. The
+      # ledger above has the figures.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          key: windows
+          key: windows-${{ hashFiles('Cargo.toml') }}
 
       # The one thing the sessions suite needs that the runner image has not
       # got, and it is here to prove a *negative*: no session on this platform
@@ -599,7 +952,7 @@ jobs:
       # and where what is left to do about it is said. A runner with no sccache
       # would start no Compile Server for want of a binary and would prove
       # nothing — so the two tests about it in
-      # `crates/server/tests/sessions_windows.rs` insist on one being installed
+      # `crates/server/tests/suite/sessions_windows.rs` insist on one being installed
       # and say so by failing rather than by quietly passing.
 
       #
@@ -623,8 +976,13 @@ jobs:
 
       # No `web/dist` here either — the embed is `allow_missing`, so the crates
       # compile without the viewer.
+      #
+      # What the run uses and nothing beside it: the test binaries, and the
+      # `verkstead.exe` the sessions suite looks for beside its own. Not
+      # `--all-targets`, which builds the server crate's two `examples/` as
+      # well — developer probes that no test runs.
       - name: Build
-        run: cargo build --workspace --all-targets
+        run: cargo build --workspace --tests --bins
 
       # **The session account, which no suite here can make for itself.** A
       # Windows session runs as a local account of Verkstead's own (ADR-0014,
@@ -671,13 +1029,13 @@ jobs:
       # for itself.
       #
       # **And a session end to end is in it**, which is this machine's alone to
-      # answer: `crates/server/tests/sessions_windows.rs` runs a real grilling
+      # answer: `crates/server/tests/suite/sessions_windows.rs` runs a real grilling
       # on a real pseudoconsole with a PowerShell stand-in where the agent goes,
-      # and `tests/sessions.rs` stays the Unix arm of the same questions.
+      # and `tests/suite/sessions.rs` stays the Unix arm of the same questions.
       #
       # **And the boundary suite is in it**, which is what this job is to
       # Windows that the `macOS sandbox` job above is to a Mac:
-      # `crates/server/tests/sandbox_windows.rs` has the description's entries
+      # `crates/server/tests/suite/sandbox_windows.rs` has the description's entries
       # written on real directories for the session account, and runs a probe as
       # that account which attempts each access and says what the machine said.
       # It runs here rather than in a step of its own because this job already
@@ -687,17 +1045,17 @@ jobs:
       # **To the end, whatever fails on the way.** nextest stops at its first
       # failure by default and leaves the rest of the leg unrun, which is a red
       # check saying nothing about the tests it cancelled — the same reason the
-      # matrix above lets a red leg's sibling finish.
+      # matrix above lets the other legs finish beside a red one.
       - name: Test
         run: >
           cargo nextest run --workspace
-          --partition slice:${{ matrix.partition }}/2 --no-fail-fast
+          --partition slice:${{ matrix.partition }}/10 --no-fail-fast
 
       # **And the doc-tests, which nextest does not run.** The workspace has
       # none today, so this step costs little. It is here so that the first one
       # somebody writes runs on this machine too, rather than being skipped
       # without a word — the Linux job's `cargo test` runs them already. On the
-      # first leg alone: they are not partitioned, so both would run all of them.
+      # first leg alone: they are not partitioned, so every leg would run all of them.
       - name: Doc-tests
         if: matrix.partition == 1
         run: cargo test --doc --workspace

@@ -30,7 +30,7 @@ set -u
 runs=${1:-10}
 
 # The factor CI puts on the suite's own clock — see `VERKSTEAD_TEST_PACE` in
-# `crates/server/tests/sessions.rs`. Soaking at anything else is soaking a
+# `crates/server/tests/suite/sessions.rs`. Soaking at anything else is soaking a
 # configuration nobody runs.
 export VERKSTEAD_TEST_PACE=${2:-2}
 
@@ -91,7 +91,7 @@ logs=$(mktemp -d)
 for run in $(seq 1 "$runs"); do
     started=$SECONDS
 
-    if taskset -c "$cores" cargo test -p verkstead-server --test sessions \
+    if taskset -c "$cores" cargo test -p verkstead-server --test suite -- sessions:: \
         >"$logs/$run.log" 2>&1; then
         green=$((green + 1))
         echo "soak: run $run/$runs green in $((SECONDS - started))s"

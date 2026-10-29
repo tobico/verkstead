@@ -35,7 +35,7 @@
 //! machine this is, exactly one of them runs and there is no second thread to
 //! race. Both are compiled on both Unixes all the same — a test nobody compiles
 //! is one that rots against the types it is written for, which is the rule
-//! `tests/sandbox_macos.rs` is written by.
+//! `tests/suite/sandbox_macos.rs` is written by.
 //!
 //! **The two halves ask what their own boundary can answer.** Linux hides what
 //! it was not given, so the question is whether the program runs and whether

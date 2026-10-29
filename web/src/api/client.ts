@@ -15,6 +15,8 @@
 
 import type {
   AbandonedRepo,
+  AdditionMade,
+  AdditionRemoved,
   Adopted,
   AnswerAttached,
   AnswerAttachmentRemoved,
@@ -132,6 +134,7 @@ import type {
   TranscriptView,
   Transferring,
   Permitting,
+  Picking,
   UpdateNotice,
 } from "./types";
 import type { Device } from "../reaching";
@@ -1327,6 +1330,34 @@ export async function attachToAnswer(
   return taken<AnswerAttached>(at, response);
 }
 
+/// And put one on a Set as a whole, at its comment box: the same upload under
+/// no Question, which answers nothing (ADR-0028).
+export async function attachToSet(
+  device: Device,
+  set: number,
+  file: File,
+): Promise<AnswerAttached> {
+  const at = on(
+    device,
+    `/api/ui/sets/${set}/attachments/${encodeURIComponent(file.name)}`,
+  );
+
+  const response = await fetch(at, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/octet-stream",
+    },
+    body: file,
+  });
+
+  if (response.status === 413) {
+    return "TooLarge";
+  }
+
+  return taken<AnswerAttached>(at, response);
+}
+
 /// And take one off an Answer again, by the row's own id — which is what the
 /// path names it by, under the Set it was put on: two files on one Set may
 /// share a name, and neither of them is a key.
@@ -1337,6 +1368,27 @@ export function removeAnswerAttachment(
 ): Promise<AnswerAttachmentRemoved> {
   return post<AnswerAttachmentRemoved>(
     on(device, `/api/ui/sets/${set}/attachments/${attachment}/remove`),
+  );
+}
+
+/// Record a pick from one of a waiting Set's Attach menus, pending — under the
+/// Question it was picked at, or under none at the comment box (ADR-0028).
+export function addToSet(
+  device: Device,
+  set: number,
+  picking: Picking,
+): Promise<AdditionMade> {
+  return post<AdditionMade>(on(device, `/api/ui/sets/${set}/additions`), picking);
+}
+
+/// And take one off again, by the row's own id.
+export function removeFromSet(
+  device: Device,
+  set: number,
+  addition: number,
+): Promise<AdditionRemoved> {
+  return post<AdditionRemoved>(
+    on(device, `/api/ui/sets/${set}/additions/${addition}/remove`),
   );
 }
 

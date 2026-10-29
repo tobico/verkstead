@@ -2,7 +2,7 @@
 //! rather than something a session started.
 //!
 //! A session's network is the host's own — see [`crate::sandbox`], and the
-//! probe in `tests/sandbox.rs` that proves it — so the loopback address the
+//! probe in `tests/suite/sandbox.rs` that proves it — so the loopback address the
 //! agent contract is served on is the same address the workbench is served on.
 //! Nothing about the socket can tell the two apart. What can is a secret the
 //! browser holds and no sandbox mounts: the Data Directory is not bound into
