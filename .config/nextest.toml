@@ -47,10 +47,10 @@ session-account = { max-threads = 1 }
 # of its own still passes.
 #
 # `sessions_windows` keeps the default and its place near the end. Its sessions
-# compile Rust and drive live terminals, and up front, beside three busy
-# threads, two of them took 177 and 390 seconds where they take about thirty on
-# a quiet leg (run 40788694567). The first override to set a priority is the
-# one a test takes, so this one goes ahead of the group's.
+# compile Rust and drive live terminals, the heaviest work in the group, and
+# the end of a leg is where they have the machine to themselves: about thirty
+# seconds each there. The first override to set a priority is the one a test
+# takes, so this one goes ahead of the group's.
 [[profile.default.overrides]]
 filter = 'binary_id(verkstead-server::suite) & test(/^sessions_windows::/)'
 priority = 0

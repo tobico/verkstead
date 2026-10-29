@@ -168,6 +168,12 @@ const POWERSHELL: [&str; 4] = ["powershell.exe", "-NoProfile", "-ExecutionPolicy
 /// `Start-Sleep` — which is what a program has in there whatever the shell
 /// managed to load.
 ///
+/// **And a cmdlet that does load costs minutes rather than milliseconds.** The
+/// first one the session account looks up on a runner sends PowerShell through
+/// its modules for two to six minutes, and whichever test asked first is the
+/// one that pays it (runs 40785712519 to 40791770666): a script typed into a
+/// test's terminal is held to the same rule as a stand-in.
+///
 /// And `Reading` is how the boundary is asked anything: a file read, or the
 /// name of what stopped it. **The name and not a word of the test's own**,
 /// because the two answers that matter here look identical to anything coarser
@@ -1934,7 +1940,7 @@ async fn a_press_on_a_preview_with_a_live_terminal_only_refocuses_it() {
         &pool,
         fixture.id,
         "Build and test",
-        "Write-Output ('the preview ' + 'ran')",
+        "[Console]::Out.WriteLine('the preview ' + 'ran')",
         None,
         "a test",
     )
@@ -1960,7 +1966,7 @@ async fn a_press_on_a_preview_with_a_live_terminal_only_refocuses_it() {
 
     assert_eq!(press().await, TerminalOpened::Refocused { number });
 
-    watcher.types("Write-Output ('still ' + 'here')\r").await;
+    watcher.types("[Console]::Out.WriteLine('still ' + 'here')\r").await;
     let showing = watcher.until(|grid| grid.contains("still here")).await;
 
     assert_eq!(
@@ -2310,8 +2316,8 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         Note 'wrapper' $env:RUSTC_WRAPPER
         Note 'c-launcher' $env:CMAKE_C_COMPILER_LAUNCHER
         Note 'cxx-launcher' $env:CMAKE_CXX_COMPILER_LAUNCHER
-        Note 'cc' ($(if (Test-Path Env:CC) { $env:CC } else { 'unset' }))
-        Note 'cxx' ($(if (Test-Path Env:CXX) { $env:CXX } else { 'unset' }))
+        Note 'cc' ($(if ($null -ne $env:CC) { $env:CC } else { 'unset' }))
+        Note 'cxx' ($(if ($null -ne $env:CXX) { $env:CXX } else { 'unset' }))
         Note 'cargo-home' $env:CARGO_HOME
         Note 'sccache-dir' $env:SCCACHE_DIR
         Note 'gomodcache' $env:GOMODCACHE
@@ -2338,7 +2344,7 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
 
         # Run the thing it was pointed at, which is the only way to ask whether
         # the boundary really lets a session open it.
-        $said = & $env:RUSTC_WRAPPER --version 2>&1 | Out-String
+        $said = (& $env:RUSTC_WRAPPER --version 2>&1) -join "`n"
         Note 'ran' "$LASTEXITCODE $said"
 
         [void][System.IO.Directory]::CreateDirectory($env:CARGO_HOME)
@@ -2597,22 +2603,22 @@ async fn a_rust_session_compiles_through_the_compile_server() {
 
     let fixture = grilling_building(
         r#"
-        $probe = Under (Get-Location).Path 'probe.rs'
+        $probe = Under (Here) 'probe.rs'
         [System.IO.File]::WriteAllText($probe, 'pub fn probe() -> u32 { 41 + 1 }')
 
         # The toolchain itself first, because everything after it stands on one:
         # a rustup shim finds its install through RUSTUP_HOME, and a sandbox has
         # a profile of its own for it to look in.
-        try { $plain = & rustc --version 2>&1 | Out-String } catch { $plain = "$_" }
+        try { $plain = (& rustc --version 2>&1) -join "`n" } catch { $plain = "$_" }
         Note 'toolchain' "$LASTEXITCODE $plain"
 
         try {
-            $said = & $env:RUSTC_WRAPPER rustc --crate-name probe `
-                --crate-type lib --emit=link --out-dir . $probe 2>&1 | Out-String
+            $said = (& $env:RUSTC_WRAPPER rustc --crate-name probe `
+                --crate-type lib --emit=link --out-dir . $probe 2>&1) -join "`n"
         } catch { $said = "$_" }
         Note 'built' "$LASTEXITCODE $said"
 
-        try { $stats = & $env:RUSTC_WRAPPER --show-stats 2>&1 | Out-String } catch { $stats = "$_" }
+        try { $stats = (& $env:RUSTC_WRAPPER --show-stats 2>&1) -join "`n" } catch { $stats = "$_" }
         Note 'stats' $stats
         "#,
         Some(cache.path()),
