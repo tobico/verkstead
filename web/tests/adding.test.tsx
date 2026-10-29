@@ -53,6 +53,7 @@ function declaring(...names: string[]): SettingsView {
   return {
     ...SETTINGS,
     mcp_servers: names.map((name) => ({
+      id: `uuid-of-${name}`,
       name,
       url: `https://mcp.example.com/${name}`,
       headers: [],
