@@ -491,8 +491,14 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     // The declared MCP servers moved: one declared, edited or removed on this
     // device, or a record of one pulled off a member. The settings page draws
     // them, and so does the Attach menu, off the same read.
+    //
+    // **And every Conversation of that device**, whose chips say whether their
+    // names are still declared and whether two declarations clash over one —
+    // read with the Conversation rather than off the settings. A declaration
+    // replicated in or removed on another device moves those with nothing
+    // else here moving.
     case "mcp_servers":
-      return [keyOf(device, "settings")];
+      return [keyOf(device, "settings"), keyOf(device, "conversation")];
 
     // Where a Profile's login has got to moved — which is what shows a second
     // device's modal the address the first one's login printed. This device's
