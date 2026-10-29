@@ -38,4 +38,4 @@ cost wall clock rather than save it), and the Linux job inside this work.
 - [x] 08: The hard timeout, the final ledger and the Linux issue — [details](08-timeout-ledger-linux-issue.md)
 - [x] 09: The slow session-account tests — [details](09-slow-session-account-tests.md)
 - [x] 10: The timeout down to ten — [details](10-timeout-down-to-ten.md)
-- [ ] 11: Cache the workspace's own crates — [details](11-cache-workspace-crates.md)
+- [x] 11: Cache the workspace's own crates — [details](11-cache-workspace-crates.md)
