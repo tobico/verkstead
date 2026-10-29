@@ -726,7 +726,7 @@ $ curl -X POST -H 'Content-Type: application/json' \
          "conflict_resolution":"Merge",
          "share_on_done":false,
          "sandbox_binds":["/var/cache/verkstead-node"],
-         "ignored_comments":"Keep","instructions":""}' \
+         "ignored_comments":"Keep","instructions":"Keep"}' \
     http://127.0.0.1:8422/api/ui/settings
 {"settings":{"git_author":{"id":"3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01",
     "display_name":"","name":"Tobias Cohen","email":"tobi@tobico.net"},

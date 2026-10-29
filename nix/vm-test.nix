@@ -869,7 +869,7 @@ testers.runNixOSTest {
                     ],
                     "ignored_comments": "Keep",
                     "mcp_servers": "Keep",
-                    "instructions": stood["instructions"],
+                    "instructions": "Keep",
                 },
             )
         )
