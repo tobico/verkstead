@@ -3026,17 +3026,6 @@ pub enum HeaderValue {
     Clear,
 }
 
-/// One attached server as a launch needs it: a name, a URL, and every header it
-/// is spoken to with, value and all.
-///
-/// The two files put together, which is the one place they are — see
-/// [`Config::attached_among`], which is the only thing that makes one. A
-/// declaration says which headers there are and in what order, and the secrets
-/// say what goes in each; what comes out is what is written into a Built Root.
-///
-/// **The values are here in the clear**, and that is the limit of the secrecy:
-/// they are kept from the page and the wire rather than from the agent, which
-/// reads its own configuration — see ADR-0021.
 /// What the live declarations say behind one name — see
 /// [`Config::declaration_of`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3052,6 +3041,17 @@ pub enum Declaration<'a> {
     Clash,
 }
 
+/// One attached server as a launch needs it: a name, a URL, and every header it
+/// is spoken to with, value and all.
+///
+/// The two files put together, which is the one place they are — see
+/// [`Config::attached_among`], which is the only thing that makes one. A
+/// declaration says which headers there are and in what order, and the secrets
+/// say what goes in each; what comes out is what is written into a Built Root.
+///
+/// **The values are here in the clear**, and that is the limit of the secrecy:
+/// they are kept from the page and the wire rather than from the agent, which
+/// reads its own configuration — see ADR-0021.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachedServer {
     name: String,

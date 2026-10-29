@@ -1,10 +1,10 @@
 //! The **Replicated records**: a record that is the cluster's rather than a
 //! device's, held by every device of it (ADR-0028).
 //!
-//! **One thing with record kinds on it.** Authors were the first kind and the
-//! Instructions text the second; Agent Profiles and their bindings and the
-//! declared MCP servers follow onto the same table, so what a record *is* is
-//! said here once. Every one of them is:
+//! **One thing with record kinds on it.** Authors were the first kind, the
+//! Agent Profiles with their bindings the second, the Instructions text the
+//! third and the declared MCP servers the fourth, all on the same table, so
+//! what a record *is* is said here once. Every one of them is:
 //!
 //! ```text
 //! kind        the kind it is, "authors" and so on
