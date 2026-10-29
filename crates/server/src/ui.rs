@@ -8920,7 +8920,7 @@ mod tests {
     /// Here rather than over a real attachment, because such a name is a file
     /// that never lands on every platform this runs on: Windows reserves `"`
     /// among nine others, so the upload refuses it there and the integration
-    /// test in `tests/attaching.rs` keeps to a name every filesystem can hold.
+    /// test in `tests/suite/attaching.rs` keeps to a name every filesystem can hold.
     /// What the header does with one is this function's own business either way.
     #[test]
     fn a_name_a_quoted_string_cannot_hold_goes_over_both_ways() {

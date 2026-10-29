@@ -48,7 +48,7 @@ mod browsing;
 /// lasts is part of the product's own promise rather than an implementation
 /// detail of an endpoint, and what proves a boundary has really been taken back
 /// is a suite standing where the close and the sweep do — see
-/// `crates/server/tests/sandbox_windows.rs`.
+/// `crates/server/tests/suite/sandbox_windows.rs`.
 pub mod boundaries;
 pub mod build_cache;
 mod capture;

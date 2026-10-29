@@ -365,7 +365,7 @@ mod tests {
     /// In-memory pipes rather than sockets, because what [`crossing`] promises
     /// is about the two streams it was handed and nothing about how they were
     /// got: bytes across and an end that crosses. That the streams come off a
-    /// real upgrade and a real dial is `tests/bridging.rs`'s subject, over a
+    /// real upgrade and a real dial is `tests/suite/bridging.rs`'s subject, over a
     /// real member.
     fn joined() -> (DuplexStream, DuplexStream) {
         let (browser, near) = tokio::io::duplex(PIPE);

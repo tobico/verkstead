@@ -1403,7 +1403,7 @@ fn separated(written: &str) -> String {
 /// what makes it the right place is what is *next to* it, so one function says
 /// where it is and the descriptors point at it by placeholder.
 ///
-/// Public for the proofs' sake as much as the server's: `tests/package_stores.rs`
+/// Public for the proofs' sake as much as the server's: `tests/suite/package_stores.rs`
 /// really installs out of a store under it, and a suite that spelled the
 /// directory out itself would be a suite agreeing with a second copy of this.
 pub fn stores(data: &Path) -> PathBuf {

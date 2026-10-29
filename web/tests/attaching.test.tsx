@@ -1063,7 +1063,7 @@ describe("the files on an answer", () => {
   /// the same file, drawn as the pill the frozen Brief pane draws — the name
   /// with its size — and no way of changing any of it. The endpoints refuse
   /// both presses from that moment too; see `an_answered_set_takes_no_more_files`
-  /// in `crates/server/tests/attaching.rs`.
+  /// in `crates/server/tests/suite/attaching.rs`.
   it("draws no paperclip and no × once the set has been answered", async () => {
     const settled: SetView = {
       ...holding("counter.png", "Q1"),
