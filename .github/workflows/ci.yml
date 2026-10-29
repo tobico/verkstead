@@ -554,18 +554,28 @@ jobs:
   # so a leg costs nothing but its own cached build.
   #
   # **The budget is not met yet, so the timeout is fifteen rather than ten.**
-  # No run has had every leg under seven minutes. On the last one measured (run
-  # 40795830677) the slowest leg took 13m48, 6m48 over seven and 3m48 over ten,
-  # and even the fastest took 8m12. A hard ten would have failed seven legs of
-  # the ten. So `timeout-minutes` stands at fifteen, 1m12 above the slowest leg
-  # in any run in the ledger. It catches a hang rather than a slow leg, and it
-  # comes down to ten once a run's legs fit under that.
+  # No run has had every leg under ten minutes, let alone under seven. On the
+  # last one measured (run 40798711420) the slowest leg took 10m34, 34 seconds
+  # over ten and 3m34 over seven, and five legs of the ten ran over ten by 7 to
+  # 34 seconds. The typical leg is about nine and a half minutes, not seven.
+  # A hard ten would have failed those five. So `timeout-minutes` stands at
+  # fifteen, 1m12 above the slowest leg in any run in the ledger. It catches a
+  # hang rather than a slow leg, and it comes down to ten once a run's legs fit
+  # under that.
   #
-  # **What is left** is about six minutes that every leg pays: one of setup and
-  # 3m01 to 5m41 of build. On top of that a leg tests for three to five minutes,
-  # and no longer has one slow session-account test as its tail: the slowest
-  # leg of the last row was set by a runner slow at everything, its
-  # `conversations` tests among them.
+  # **What is left is the build.** A leg now tests for three to under five
+  # minutes, and builds for 3m02 to 5m19 on the same commit — the runner alone
+  # decides which. Every leg over ten in the last row built for 4m52 or more;
+  # every leg under it but one built for under four. With setup that is 3m43 to
+  # 6m09 before a leg runs its first test. The build is already line tables,
+  # eight test binaries and MSVC's own linker (rust-lld did not pay); sccache
+  # and a shared archive were ruled out at the start; and more legs only divide
+  # the test time, which is now the smaller half, and ten is the cap. Two
+  # levers are left, and which to pull is a question for the maintainer:
+  # `rust-cache`'s `cache-workspace-crates`, which is free and unmeasured and
+  # keeps the workspace's own crates between runs as well as its dependencies,
+  # so a commit rebuilds only what it touched and what depends on it; and a
+  # larger runner, which is not free.
   #
   # **The ledger.** Each lever lands as a commit of its own on one pull request,
   # and its row is the run of that commit. A row gives the slowest and the
@@ -586,6 +596,7 @@ jobs:
   # | Template repositories               | 40702569526 | 5m34 + 5m47 = 12m48   | 3m30 + 3m33 = 7m55    |
   # | The same, measured again            | 40709146514 | 4m58 + 6m26 = 12m23   | 3m18 + 4m10 = 8m22    |
   # | The slow session-account tests      | 40795830677 | 4m18 + 8m11 = 13m48   | 3m01 + 4m25 = 8m12    |
+  # | The same, measured again            | 40798711420 | 5m00 + 4m39 = 10m34   | 3m02 + 3m24 = 7m11    |
   #
   # What each lever came to, row by row:
   #
@@ -728,6 +739,26 @@ jobs:
   # sixty. The fourth is `logins_windows::a_login_left_past_its_limit_is_killed`
   # at 68 seconds, sixty of them the limit the test is there to see run out.
   #
+  # The last row is the run of that row's own commit, on the same code, read
+  # to decide the timeout. No leg tested for five minutes, and four tested for
+  # under four. What each of the ten came to:
+  #
+  # | Leg | Build + test = job    |   | Leg | Build + test = job    |
+  # | --- | --------------------- | - | --- | --------------------- |
+  # | 1   | 4m52 + 4m15 = 10m15   |   | 6   | 5m00 + 4m39 = 10m34   |
+  # | 2   | 4m34 + 4m25 = 9m54    |   | 7   | 3m55 + 3m03 = 7m46    |
+  # | 3   | 5m17 + 4m16 = 10m30   |   | 8   | 3m42 + 4m35 = 9m08    |
+  # | 4   | 3m02 + 3m24 = 7m11    |   | 9   | 5m19 + 3m55 = 10m07   |
+  # | 5   | 3m13 + 3m31 = 7m29    |   | 10  | 5m04 + 4m30 = 10m28   |
+  #
+  # **The slowest leg missed ten by 34 seconds**, and what set it was its
+  # build: leg 6 tested for 4m39, but legs 8 and 10 tested for about as long
+  # and only the one that built in 3m42 came in under ten. The count stays at
+  # ten even with four legs testing under four minutes. Nine would put each
+  # remaining leg's share of the 40 test-minutes up by about 25 seconds, on
+  # legs already over ten. The timeout stays at fifteen: the head of this
+  # comment says what is left.
+  #
   # `slice` partitioning deals the tests out one at a time across every binary,
   # so each leg gets its share of each suite rather than whole binaries. What
   # `.config/nextest.toml` holds serial is serial per leg, which is all it needs
@@ -735,7 +766,8 @@ jobs:
   windows:
     name: Windows (${{ matrix.partition }}/10)
     runs-on: windows-2025
-    # Fifteen until a run's legs all fit under ten — the ledger above says why.
+    # Fifteen until a run's legs all fit under ten. None has yet: the last
+    # missed by 34 seconds, on its build. The ledger above says what is left.
     timeout-minutes: 15
     strategy:
       # A red leg does not cancel the others: what the rest of the suite says

@@ -1317,7 +1317,10 @@ $ cargo nextest run --workspace --no-fail-fast
 
 The legs are working toward a budget of ten minutes each. The job's comment in
 `.github/workflows/ci.yml` keeps the ledger of what each lever came to and says
-what is left. Until the budget is met, the job's `timeout-minutes` is fifteen.
+what is left. The job's `timeout-minutes` is fifteen, not ten, because no run
+has had every leg under ten yet: the last one measured ran 7m11 to 10m34, five
+legs over ten by under a minute, each of them set by a slow build. Fifteen
+catches a hang without failing a leg that drew a slow runner.
 
 
 And in `web/`, which is the Solid viewer
