@@ -1379,7 +1379,10 @@ mod servers {
 /// until the Submit — refused by everything that refuses a file on an Answer.
 mod additions {
     use super::*;
-    use verkstead_render::{Added, AdditionMade, AdditionRemoved, AdditionState, AdditionView};
+    use verkstead_render::{
+        AddableView, Added, AdditionMade, AdditionRemoved, AdditionState, AdditionView,
+        CompanionMode,
+    };
 
     fn declaring(dir: &tempfile::TempDir, names: &[&str]) {
         let mut yaml = String::from("mcp_servers:\n");
@@ -1644,5 +1647,392 @@ mod additions {
             AdditionMade::NoSuchSet,
         );
         assert_eq!(unpick(&app, 9_999, 1).await, AdditionRemoved::NoSuchSet);
+    }
+
+    /// Pick anything at all, as the menu's other rows send it.
+    async fn picking(
+        app: &Router,
+        set: i64,
+        label: Option<&str>,
+        pick: serde_json::Value,
+    ) -> AdditionMade {
+        post(
+            app,
+            &format!("/api/ui/sets/{set}/additions"),
+            &serde_json::json!({ "label": label, "pick": pick }),
+        )
+        .await
+    }
+
+    /// And what the Set says its menus offer past the servers.
+    async fn addable(app: &Router, set: i64) -> AddableView {
+        let reading: SetReading = get(app, &format!("/api/ui/sets/{set}")).await;
+
+        match reading {
+            SetReading::Set(view) => view.addable,
+            SetReading::Unreadable(unreadable) => {
+                panic!("this build wrote that Set and cannot read it: {unreadable:?}")
+            }
+        }
+    }
+
+    /// Another repository registered beside the Conversation's own.
+    async fn registering(app: &Router, elsewhere: &tempfile::TempDir, name: &str) -> i64 {
+        let repo = repository(elsewhere.path().join(name));
+        let registered: Registered =
+            post(app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
+
+        match registered {
+            Registered::Added(entry) => entry.id,
+            other => panic!("expected {name} registered, got {other:?}"),
+        }
+    }
+
+    fn companion(
+        repo_id: i64,
+        mode: &str,
+        base: Option<&str>,
+        branch: Option<&str>,
+    ) -> serde_json::Value {
+        serde_json::json!({ "Companion": {
+            "repo_id": repo_id, "mode": mode, "base_ref": base, "branch": branch,
+        } })
+    }
+
+    /// A Repo picked from the card is recorded with everything the card said,
+    /// and the chip is told its name; a read-only one keeps no branch name.
+    #[tokio::test]
+    async fn a_repo_picked_is_recorded_with_its_mode_base_and_branch() {
+        let (elsewhere, _dir, app, pool, id) = drafting().await;
+        let docs = registering(&app, &elsewhere, "docs").await;
+        let infra = registering(&app, &elsewhere, "infra").await;
+        let set = asked(&pool, id).await;
+
+        let offered: Vec<i64> = addable(&app, set)
+            .await
+            .repos
+            .iter()
+            .map(|repo| repo.id)
+            .collect();
+        assert_eq!(
+            offered,
+            [docs, infra],
+            "every registered Repo but the work's own"
+        );
+
+        let put = picked(
+            picking(
+                &app,
+                set,
+                Some("Q1"),
+                companion(docs, "ReadWrite", Some("main"), Some("adding")),
+            )
+            .await,
+        );
+        assert_eq!(
+            put.added,
+            Added::Companion {
+                repo_id: docs,
+                name: Some("docs".to_owned()),
+                mode: CompanionMode::ReadWrite,
+                base_ref: Some("main".to_owned()),
+                branch: Some("adding".to_owned()),
+            },
+        );
+
+        let put = picked(
+            picking(
+                &app,
+                set,
+                None,
+                companion(infra, "ReadOnly", Some(""), Some("stray")),
+            )
+            .await,
+        );
+        assert_eq!(
+            put.added,
+            Added::Companion {
+                repo_id: infra,
+                name: Some("infra".to_owned()),
+                mode: CompanionMode::ReadOnly,
+                base_ref: None,
+                branch: None,
+            },
+            "the empty base is the default branch, and read-only takes no branch",
+        );
+
+        assert_eq!(on_the_set(&app, set).await.0.len(), 2, "and both read back");
+        assert!(
+            store::companions(&pool, id).await.unwrap().is_empty(),
+            "nothing is put on the Conversation",
+        );
+    }
+
+    /// The work's own Repo and one alongside it already are neither offered nor
+    /// taken, and a Repo nobody registered is said so.
+    #[tokio::test]
+    async fn a_repo_on_the_conversation_already_is_not_offered_or_taken() {
+        let (elsewhere, _dir, app, pool, id) = drafting().await;
+        let docs = registering(&app, &elsewhere, "docs").await;
+        store::add_companion(&pool, id, docs).await.unwrap();
+        let own = store::load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .repo
+            .id;
+        let set = asked(&pool, id).await;
+
+        assert!(addable(&app, set).await.repos.is_empty());
+
+        for repo in [own, docs] {
+            assert_eq!(
+                picking(
+                    &app,
+                    set,
+                    Some("Q1"),
+                    companion(repo, "ReadOnly", None, None)
+                )
+                .await,
+                AdditionMade::AlreadyOn,
+            );
+        }
+        assert_eq!(
+            picking(
+                &app,
+                set,
+                Some("Q1"),
+                companion(9_999, "ReadOnly", None, None)
+            )
+            .await,
+            AdditionMade::NoSuchRepo,
+        );
+    }
+
+    /// A read-only Companion is offered to open up, and picking it records the
+    /// base and branch the card asked; a Repo that is not alongside has
+    /// nothing to open.
+    #[tokio::test]
+    async fn a_read_only_companion_is_offered_to_open_up() {
+        let (elsewhere, _dir, app, pool, id) = drafting().await;
+        let docs = registering(&app, &elsewhere, "docs").await;
+        let infra = registering(&app, &elsewhere, "infra").await;
+        store::add_companion(&pool, id, docs).await.unwrap();
+        let set = asked(&pool, id).await;
+
+        let read_only: Vec<i64> = addable(&app, set)
+            .await
+            .read_only
+            .iter()
+            .map(|companion| companion.repo.id)
+            .collect();
+        assert_eq!(read_only, [docs]);
+
+        let opening = |repo: i64| {
+            serde_json::json!({ "OpenedUp": {
+                "repo_id": repo, "base_ref": null, "branch": "adding",
+            } })
+        };
+
+        let put = picked(picking(&app, set, Some("Q2a"), opening(docs)).await);
+        assert_eq!(
+            put.added,
+            Added::OpenedUp {
+                repo_id: docs,
+                name: Some("docs".to_owned()),
+                base_ref: None,
+                branch: Some("adding".to_owned()),
+            },
+        );
+        assert_eq!(
+            picking(&app, set, Some("Q1"), opening(infra)).await,
+            AdditionMade::NotACompanion,
+        );
+
+        assert_eq!(
+            store::companions(&pool, id).await.unwrap()[0].mode,
+            store::CompanionMode::ReadOnly,
+            "and it is still read-only on the Conversation",
+        );
+    }
+
+    /// A settled Set refuses every kind the way it refuses a server.
+    #[tokio::test]
+    async fn an_answered_set_refuses_a_repo() {
+        let (elsewhere, _dir, app, pool, id) = drafting().await;
+        let docs = registering(&app, &elsewhere, "docs").await;
+        let set = asked(&pool, id).await;
+
+        answer(&app, set).await;
+
+        assert_eq!(
+            picking(
+                &app,
+                set,
+                Some("Q1"),
+                companion(docs, "ReadOnly", None, None)
+            )
+            .await,
+            AdditionMade::Answered,
+        );
+    }
+
+    /// With no cluster there is nowhere to permit, and nothing is offered.
+    #[tokio::test]
+    async fn with_no_cluster_no_device_is_offered_or_taken() {
+        let (_elsewhere, _dir, app, pool, id) = drafting().await;
+        let set = asked(&pool, id).await;
+
+        assert!(addable(&app, set).await.devices.is_empty());
+        assert_eq!(
+            picking(
+                &app,
+                set,
+                Some("Q1"),
+                serde_json::json!({ "Device": { "device": LAPTOP } })
+            )
+            .await,
+            AdditionMade::NotAMember,
+        );
+    }
+
+    const LAPTOP: &str = "11111111111111111111111111111111";
+    const VM: &str = "22222222222222222222222222222222";
+
+    /// A device of the cluster, this one, holding two members — a laptop and a
+    /// VM — and a Conversation drafted here with a Set asked on it.
+    #[cfg(unix)]
+    async fn clustered() -> (tempfile::TempDir, Router, SqlitePool, i64, i64) {
+        use verkstead_server::device::reading::Reading;
+        use verkstead_server::device::{Device, Devices};
+        use verkstead_server::discovery::{Browse, Probe};
+        use verkstead_server::peer::Members;
+        use verkstead_server::peer::joining::Joins;
+        use verkstead_server::platform::Platform;
+        use verkstead_server::remote::Tailscale;
+
+        let dir = tempfile::tempdir().unwrap();
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let devices = Devices::of(
+            Device::stated(dir.path(), THIS_DEVICE).unwrap(),
+            Reading::stated(
+                Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422),
+                Platform::Linux,
+                None,
+                Vec::new(),
+            ),
+            Members::recorded(pool.clone()),
+            Joins::recorded(pool.clone()),
+        )
+        .browsing(Browse::heard_nothing())
+        .probing(Probe::asked_nothing());
+
+        for (device, name) in [(LAPTOP, "the-laptop"), (VM, "the-vm")] {
+            store::record_member(
+                &pool,
+                &store::Linking {
+                    device: device.to_owned(),
+                    name: name.to_owned(),
+                    os: "Linux".to_owned(),
+                    addresses: vec!["192.168.1.31".to_owned()],
+                    fingerprint: format!("AA:BB:CC:DD:{device}"),
+                    kept_by: None,
+                    version: None,
+                    install: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+            .await
+            .unwrap()
+            .unwrap();
+        let id = store::start_conversation(&pool, repo.id, "adding", THIS_DEVICE, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let set = asked(&pool, id).await;
+
+        (
+            dir,
+            verkstead_server::router_answering_devices(pool.clone(), devices),
+            pool,
+            id,
+            set,
+        )
+    }
+
+    fn device(id: &str) -> serde_json::Value {
+        serde_json::json!({ "Device": { "device": id } })
+    }
+
+    /// Every other device not already permitted is offered, and a tick is
+    /// recorded with the name the chip says — and nothing is permitted yet.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_device_is_offered_and_ticked_with_its_name() {
+        let (_dir, app, pool, id, set) = clustered().await;
+        store::permit_device(&pool, id, VM).await.unwrap();
+
+        let offered: Vec<String> = addable(&app, set)
+            .await
+            .devices
+            .into_iter()
+            .map(|device| device.device)
+            .collect();
+        assert_eq!(
+            offered,
+            [LAPTOP],
+            "not this one, and not one ticked already"
+        );
+
+        let put = picked(picking(&app, set, Some("Q1"), device(LAPTOP)).await);
+        assert_eq!(
+            put.added,
+            Added::Device {
+                device: LAPTOP.to_owned(),
+                name: Some("the-laptop".to_owned()),
+            },
+        );
+        assert_eq!(on_the_set(&app, set).await.0, vec![put]);
+
+        assert_eq!(
+            store::permitted_devices(&pool, id).await.unwrap(),
+            [VM],
+            "the tick is the Set's until it is answered",
+        );
+    }
+
+    /// What could not be a tick is refused by the Transfer dialog's reasons.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_device_that_could_not_be_ticked_is_refused() {
+        let (_dir, app, pool, id, set) = clustered().await;
+        store::permit_device(&pool, id, VM).await.unwrap();
+
+        assert_eq!(
+            picking(&app, set, Some("Q1"), device(VM)).await,
+            AdditionMade::AlreadyOn,
+        );
+        assert_eq!(
+            picking(&app, set, Some("Q1"), device(THIS_DEVICE)).await,
+            AdditionMade::AlreadyOn,
+            "the device it was drafted on is always permitted",
+        );
+        assert_eq!(
+            picking(
+                &app,
+                set,
+                Some("Q1"),
+                device("ffffffffffffffffffffffffffffffff")
+            )
+            .await,
+            AdditionMade::NotAMember,
+        );
     }
 }

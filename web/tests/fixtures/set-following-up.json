@@ -1,5 +1,11 @@
 {
   "Set": {
+    "addable": {
+      "branch": "solid-viewer",
+      "devices": [],
+      "read_only": [],
+      "repos": []
+    },
     "additions": [],
     "attachments": [],
     "branch": "rate-limiting",

@@ -66,7 +66,13 @@
 
 import { For, Show, createSignal, type JSX } from "solid-js";
 
-import { faPaperclip, faPlug, faPlus } from "@fortawesome/free-solid-svg-icons";
+import {
+  faCodeBranch,
+  faDesktop,
+  faPaperclip,
+  faPlug,
+  faPlus,
+} from "@fortawesome/free-solid-svg-icons";
 
 import styles from "./Attaching.module.css";
 import { Icon } from "./Icon";
@@ -126,8 +132,17 @@ export type Chip = {
   /// What it is called, which is the whole of what the Conversation holds.
   name: string;
 
-  /// Whether nothing is declared by that name any more, which is what the chip
-  /// says under it.
+  /// What kind of thing it is: an MCP server where nothing says otherwise, and
+  /// on a question set's sheet a repo or a device as well (ADR-0028). What
+  /// draws the mark in front of the name, and what a gone one says.
+  kind?: ChipKind;
+
+  /// What else the chip says after the name, where there is more to it than a
+  /// name: how far into a repo the work reaches, and on which branch.
+  detail?: string;
+
+  /// Whether nothing answers to that name any more — no declaration, no
+  /// registered repo, no linked device — which is what the chip says under it.
   gone?: boolean;
 
   /// Taking it off, where that is something that can be done at all — nothing
@@ -136,6 +151,19 @@ export type Chip = {
 
   /// And whether that press is already in flight.
   removing?: boolean;
+};
+
+export type ChipKind = "server" | "repo" | "device";
+
+/// Each kind's mark, the words that name the mark to a screen reader, and what
+/// a chip of it says once nothing answers to its name.
+const KINDS: Record<
+  ChipKind,
+  { icon: typeof faPlug; label: string; gone: string }
+> = {
+  server: { icon: faPlug, label: "MCP server", gone: "no longer declared" },
+  repo: { icon: faCodeBranch, label: "Repo", gone: "no longer registered" },
+  device: { icon: faDesktop, label: "Device", gone: "no longer linked" },
 };
 
 /// What a box spreads onto itself to take a drop.
@@ -557,6 +585,8 @@ function AttachMenu(props: {
 /// way a file's is: a declaration's name is a handful of lowercase letters by
 /// the rules the settings page enforces, and there is nothing in it to lose.
 function ServerChip(props: { chip: Chip }): JSX.Element {
+  const kind = () => KINDS[props.chip.kind ?? "server"];
+
   return (
     <li
       class={`${styles.attachment} ${styles.server}`}
@@ -565,15 +595,19 @@ function ServerChip(props: { chip: Chip }): JSX.Element {
       {/* What kind of thing it is, said as a shape rather than as a word: the
           row is read across, and a chip that spelled out what it was would be
           longer than the name it is about. */}
-      <Icon of={faPlug} class={styles.plug} label="MCP server" />
+      <Icon of={kind().icon} class={styles.plug} label={kind().label} />
 
       <span class={styles.serverName}>{props.chip.name}</span>
+
+      <Show when={props.chip.detail}>
+        {(detail) => <span class={styles.attachmentSize}>{detail()}</span>}
+      </Show>
 
       {/* And the reference with nothing on the end of it, said in words: a
           chip drawn differently and left to be noticed would be a difference
           nobody could look up. */}
       <Show when={props.chip.gone}>
-        <span class={styles.attachmentSize}>no longer declared</span>
+        <span class={styles.attachmentSize}>{kind().gone}</span>
       </Show>
 
       <Show when={props.chip.remove !== undefined}>

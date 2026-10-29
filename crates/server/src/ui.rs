@@ -1001,8 +1001,7 @@ pub(crate) async fn set_reading(
     // chips beside those files and the record draws under its Answers — read
     // here for the files' reason. With the servers the Conversation has
     // already, which the sheet's menus leave out.
-    let declared = crate::conversations::declared_servers(state);
-    let additions = match crate::answer_additions::picked(&state.pool, &declared, id).await {
+    let additions = match crate::answer_additions::picked(state, id).await {
         Ok(additions) => additions,
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "reading what was picked on a Set failed");
@@ -1013,6 +1012,13 @@ pub(crate) async fn set_reading(
         Ok(servers) => servers,
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "reading a Set's Conversation's servers failed");
+            return Err(unavailable("The question set couldn't be read."));
+        }
+    };
+    let addable = match crate::answer_additions::addable(state, conversation).await {
+        Ok(addable) => addable,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading what a Set's sheet could add failed");
             return Err(unavailable("The question set couldn't be read."));
         }
     };
@@ -1034,6 +1040,7 @@ pub(crate) async fn set_reading(
             attachments,
             additions,
             servers,
+            addable,
             inlining
                 .as_ref()
                 .map(|inlining| inlining as &dyn verkstead_render::PictureReader),
@@ -6261,7 +6268,7 @@ fn moved_profiles(state: &AppState, moved: bool) {
 /// there is not something a database knows, and a companion deleted by hand
 /// should read as a Conversation with a problem rather than as an obscure
 /// failure from whatever next works in it.
-async fn companion(
+pub(crate) async fn companion(
     companion: store::Companion,
     authors: &[crate::settings::Author],
 ) -> Result<CompanionView, anyhow::Error> {

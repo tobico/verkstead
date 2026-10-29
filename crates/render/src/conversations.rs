@@ -4376,23 +4376,35 @@ pub enum Added {
     Server { name: String, declared: bool },
 
     /// A registered Repo to become a Companion, in this mode, off this base —
-    /// `null` being its default branch — on this branch where it is read-write.
+    /// `null` being its default branch — on this branch where it is read-write,
+    /// `null` there being *mirroring*: the Conversation's own branch name.
+    ///
+    /// With the Repo's name as it is registered now, which is what the chip
+    /// says; `null` where the Repo has been unregistered since the pick.
     Companion {
         repo_id: i64,
+        name: Option<String>,
         mode: CompanionMode,
         base_ref: Option<String>,
         branch: Option<String>,
     },
 
-    /// A read-only Companion opened up to read-write.
+    /// A read-only Companion opened up to read-write, its new branch cut from
+    /// this base on this branch, named as [`Self::Companion`]'s are.
     OpenedUp {
         repo_id: i64,
+        name: Option<String>,
         base_ref: Option<String>,
         branch: Option<String>,
     },
 
-    /// Another device of the cluster the work may be moved to, by Device Id.
-    Device { device: String },
+    /// Another device of the cluster the work may be moved to, by Device Id,
+    /// with the name the cluster shows it under — `null` where the cluster no
+    /// longer holds it.
+    Device {
+        device: String,
+        name: Option<String>,
+    },
 }
 
 /// Where an addition has got to: pending while the Set waits, applied by the
@@ -4421,6 +4433,27 @@ pub struct Picking {
 pub enum Pick {
     /// A declared MCP server, by name.
     Server { name: String },
+
+    /// A registered Repo to work alongside, from the card the row opens: the
+    /// mode, the base — `null` being its default branch — and, read-write, the
+    /// branch name, `null` being *mirroring*.
+    Companion {
+        repo_id: i64,
+        mode: CompanionMode,
+        base_ref: Option<String>,
+        branch: Option<String>,
+    },
+
+    /// A read-only Companion of the work to open up to read-write, from the
+    /// same card with the mode fixed.
+    OpenedUp {
+        repo_id: i64,
+        base_ref: Option<String>,
+        branch: Option<String>,
+    },
+
+    /// A device of the cluster to tick under *May be transferred to*.
+    Device { device: String },
 }
 
 /// What became of a pick.
@@ -4444,8 +4477,48 @@ pub enum AdditionMade {
     /// Nothing is declared by that name.
     NoSuchServer,
 
-    /// The Conversation has that server already.
+    /// The Conversation has that already: the server, the Repo — its own, or
+    /// a Companion — the Companion opened up, or the device permitted.
     AlreadyOn,
+
+    /// No Repo of that id is registered.
+    NoSuchRepo,
+
+    /// The Repo to open up is not a Companion of the Conversation.
+    NotACompanion,
+
+    /// No device of that id is in the cluster.
+    NotAMember,
+
+    /// It is the device the work is on now, which is not a place to move it
+    /// to.
+    WorkIsHere,
+}
+
+/// What a Question Set's sheet offers to add past the MCP servers, as the
+/// Conversation stands while the Set waits (ADR-0028).
+///
+/// What is on the Conversation already is left out here, by the server, which
+/// is what knows; what has been picked on the Set and is still pending is the
+/// sheet's to leave out, off the Set's own additions.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AddableView {
+    /// Every registered Repo that is neither the Conversation's own nor a
+    /// Companion of it already, in the order the Repo list draws them.
+    pub repos: Vec<RepoEntry>,
+
+    /// The Companions it holds read-only, each of which may be opened up.
+    pub read_only: Vec<CompanionView>,
+
+    /// The cluster's other devices the work may be moved to that are not
+    /// permitted already: not the device it is on, not the one it was drafted
+    /// on, and not one ticked. Empty with no cluster.
+    pub devices: Vec<crate::DeviceIdentity>,
+
+    /// What a read-write branch left blank comes to: the Conversation's own
+    /// branch, which is what the card's branch field is filled in with.
+    pub branch: String,
 }
 
 /// And of taking a pick off again, refused by the same freezes.

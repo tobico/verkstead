@@ -283,6 +283,7 @@ export function Sheet(props: {
             attachments={props.set.attachments}
             additions={props.set.additions}
             servers={props.set.servers}
+            addable={props.set.addable}
             answered={props.answered}
           />
         }

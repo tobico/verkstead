@@ -117,9 +117,39 @@ account: ProfileAccount,
 harness: boolean, };
 
 /**
+ * What a Question Set's sheet offers to add past the MCP servers, as the
+ * Conversation stands while the Set waits (ADR-0028).
+ *
+ * What is on the Conversation already is left out here, by the server, which
+ * is what knows; what has been picked on the Set and is still pending is the
+ * sheet's to leave out, off the Set's own additions.
+ */
+export type AddableView = { 
+/**
+ * Every registered Repo that is neither the Conversation's own nor a
+ * Companion of it already, in the order the Repo list draws them.
+ */
+repos: Array<RepoEntry>, 
+/**
+ * The Companions it holds read-only, each of which may be opened up.
+ */
+read_only: Array<CompanionView>, 
+/**
+ * The cluster's other devices the work may be moved to that are not
+ * permitted already: not the device it is on, not the one it was drafted
+ * on, and not one ticked. Empty with no cluster.
+ */
+devices: Array<DeviceIdentity>, 
+/**
+ * What a read-write branch left blank comes to: the Conversation's own
+ * branch, which is what the card's branch field is filled in with.
+ */
+branch: string, };
+
+/**
  * What was picked.
  */
-export type Added = { "Server": { name: string, declared: boolean, } } | { "Companion": { repo_id: number, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, } };
+export type Added = { "Server": { name: string, declared: boolean, } } | { "Companion": { repo_id: number, name: string | null, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, name: string | null, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, name: string | null, } };
 
 /**
  * What became of a pick.
@@ -127,7 +157,7 @@ export type Added = { "Server": { name: string, declared: boolean, } } | { "Comp
  * The refusals a file on an Answer meets, for the same reasons — see
  * [`AnswerAttached`] — and the two only a server can.
  */
-export type AdditionMade = { "Added": { addition: AdditionView, } } | "NoSuchSet" | "Answered" | "Locked" | "Closed" | "NoSuchLabel" | "NoSuchServer" | "AlreadyOn";
+export type AdditionMade = { "Added": { addition: AdditionView, } } | "NoSuchSet" | "Answered" | "Locked" | "Closed" | "NoSuchLabel" | "NoSuchServer" | "AlreadyOn" | "NoSuchRepo" | "NotACompanion" | "NotAMember" | "WorkIsHere";
 
 /**
  * And of taking a pick off again, refused by the same freezes.
@@ -4624,7 +4654,7 @@ export type Permitting = "Recorded" | "NotAMember" | "DraftedThere" | "WorkIsHer
 /**
  * What a row of the menu picks.
  */
-export type Pick = { "Server": { name: string, } };
+export type Pick = { "Server": { name: string, } } | { "Companion": { repo_id: number, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, } };
 
 /**
  * What a Conversation has settled about one of its roles, as the page shows
@@ -6170,7 +6200,12 @@ additions: Array<AdditionView>,
  * The MCP servers the Conversation has already, by name, which the sheet's
  * Attach menus leave out: what is on already is nothing to add.
  */
-servers: Array<string>, };
+servers: Array<string>, 
+/**
+ * And the rest of what those menus offer: Repos to work alongside,
+ * read-only Companions to open up, and devices to permit.
+ */
+addable: AddableView, };
 
 /**
  * The settings as the human has just written them.

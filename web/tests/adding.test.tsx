@@ -10,7 +10,14 @@ import { faPaperclip, faPlus } from "@fortawesome/free-solid-svg-icons";
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AdditionView, SetView, SettingsView } from "../src/api/types";
+import type {
+  AddableView,
+  AdditionView,
+  DeviceIdentity,
+  RepoEntry,
+  SetView,
+  SettingsView,
+} from "../src/api/types";
 import pill from "../src/Attaching.module.css";
 import { ADDITION_REFUSAL } from "../src/set/Answering";
 import sheet from "../src/set/Sheet.module.css";
@@ -332,5 +339,361 @@ describe("a settled set", () => {
     expect(screen.queryByRole("button", { name: menuOf("Q1") })).toBeNull();
     expect(screen.queryByRole("button", { name: menuOf(COMMENT) })).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove tickets" })).toBeNull();
+  });
+});
+
+/// A registered repo, as the Repo list and the set's offer carry one.
+function repo(id: number, name: string): RepoEntry {
+  return {
+    id,
+    name,
+    path: `/srv/${name}`,
+    default_branch: "main",
+    author: "work",
+    author_unpicked: false,
+  };
+}
+
+function device(id: string, name: string): DeviceIdentity {
+  return {
+    device: id,
+    fingerprint: "AA:BB",
+    name,
+    os: "Linux",
+    addresses: [],
+    kept_by: null,
+    version: null,
+    install: null,
+  };
+}
+
+const DOCS = repo(7, "docs");
+const INFRA = repo(8, "infra");
+const LAPTOP = device("11111111111111111111111111111111", "the-laptop");
+const VM = device("22222222222222222222222222222222", "the-vm");
+
+/// What the server offers past the servers: two repos to add, one read-only
+/// companion to open up, and two devices.
+const ADDABLE: AddableView = {
+  repos: [DOCS],
+  read_only: [
+    {
+      repo: INFRA,
+      mode: "ReadOnly",
+      base_ref: null,
+      branch: "",
+      worktree: null,
+      base_commit: null,
+    },
+  ],
+  devices: [LAPTOP, VM],
+  branch: "rate-limiter",
+};
+
+const OFFERING: SetView = { ...WAITING, addable: ADDABLE };
+
+/// Each repo's branches, which the card's base picker reads.
+const BRANCHES = [DOCS, INFRA].map((one) =>
+  whenever(`/api/ui/repos/${one.id}/branches`, json(["main", "develop"])),
+);
+
+describe("the repos and devices on the Attach menu", () => {
+  /// The repo rows open a card, so they carry the ellipsis; the devices act at
+  /// once. Every waiting set's menu, the comment box's included.
+  it("offers each repo to add, each read-only companion to open up, and each device", async () => {
+    await answering(OFFERING, SETTINGS_READ);
+
+    for (const name of [menuOf("Q1"), menuOf(COMMENT)]) {
+      const menu = await open(name);
+
+      expect(rows(menu).slice(-4)).toEqual([
+        "docs…",
+        "Open up infra…",
+        "the-laptop",
+        "the-vm",
+      ]);
+      expect(
+        within(menu).getByRole("group", { name: "May be transferred to" }),
+      ).toBeTruthy();
+
+      fireEvent.keyDown(menu, { key: "Escape" });
+    }
+  });
+
+  /// Neither the server's leaving-out nor the sheet's: a repo or a device
+  /// picked on the set already is not offered again.
+  it("leaves out a repo and a device already picked on the set", async () => {
+    await answering(
+      {
+        ...OFFERING,
+        additions: [
+          {
+            id: 4,
+            label: "Q3",
+            added: {
+              OpenedUp: {
+                repo_id: INFRA.id,
+                name: "infra",
+                base_ref: null,
+                branch: null,
+              },
+            },
+            state: "Pending",
+          },
+          {
+            id: 5,
+            label: null,
+            added: { Device: { device: VM.device, name: "the-vm" } },
+            state: "Pending",
+          },
+        ],
+      },
+      SETTINGS_READ,
+    );
+
+    const menu = await open(menuOf("Q1"));
+    expect(rows(menu)).not.toContain("Open up infra…");
+    expect(rows(menu)).not.toContain("the-vm");
+    expect(rows(menu)).toContain("the-laptop");
+  });
+
+  /// No cluster, or nobody in it the work could go to: no group at all.
+  it("draws no device group where there is no other device", async () => {
+    await answering(
+      { ...OFFERING, addable: { ...ADDABLE, devices: [] } },
+      SETTINGS_READ,
+    );
+
+    const menu = await open(menuOf("Q1"));
+    expect(
+      within(menu).queryByRole("group", { name: "May be transferred to" }),
+    ).toBeNull();
+  });
+});
+
+describe("a repo added from an answer", () => {
+  const path = `/api/ui/sets/${WAITING.id}/additions`;
+
+  /// The card opens read-only off the default branch, and says nothing about a
+  /// branch until the switch makes it read-write.
+  it("opens a card prefilled read-only off the default branch", async () => {
+    await answering(OFFERING, SETTINGS_READ, ...BRANCHES);
+
+    fireEvent.click(within(await open(menuOf("Q1"))).getByText("docs…"));
+
+    const card = await waitFor(() => screen.getByRole("dialog"));
+    expect(within(card).getByRole("heading").textContent).toBe("Add docs");
+    expect(
+      (within(card).getByRole("switch") as HTMLInputElement).checked,
+    ).toBe(false);
+    expect(within(card).getByLabelText("Base for docs").textContent).toContain(
+      "Default branch (main)",
+    );
+    expect(within(card).queryByLabelText("Branch in docs")).toBeNull();
+  });
+
+  /// What the card says is what the record is asked to hold.
+  it("records the repo with its mode, base and branch under the question", async () => {
+    const { fetching } = await answering(
+      OFFERING,
+      SETTINGS_READ,
+      ...BRANCHES,
+      whenever(path, json("Answered"), "POST"),
+    );
+
+    fireEvent.click(within(await open(menuOf("Q1"))).getByText("docs…"));
+    const card = await waitFor(() => screen.getByRole("dialog"));
+
+    fireEvent.click(within(card).getByRole("switch"));
+    const base = within(card).getByLabelText(
+      "Base for docs",
+    ) as HTMLSelectElement;
+    await waitFor(() => expect(base.options).toHaveLength(3));
+    fireEvent.change(base, { target: { value: "develop" } });
+
+    const branch = within(card).getByLabelText(
+      "Branch in docs",
+    ) as HTMLInputElement;
+    expect(branch.value, "filled in with what mirroring comes to").toBe(
+      "rate-limiter",
+    );
+    fireEvent.input(branch, { target: { value: "docs-for-limits" } });
+
+    fireEvent.click(within(card).getByRole("button", { name: "Add repo" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, path)).toEqual([
+        {
+          label: "Q1",
+          pick: {
+            Companion: {
+              repo_id: DOCS.id,
+              mode: "ReadWrite",
+              base_ref: "develop",
+              branch: "docs-for-limits",
+            },
+          },
+        },
+      ]),
+    );
+    expect(screen.queryByRole("dialog"), "and the card goes").toBeNull();
+  });
+
+  /// Opening one up is the same card with the mode fixed.
+  it("opens a read-only companion up through the card with no switch", async () => {
+    const { fetching } = await answering(
+      OFFERING,
+      SETTINGS_READ,
+      ...BRANCHES,
+      whenever(path, json("Answered"), "POST"),
+    );
+
+    fireEvent.click(
+      within(await open(menuOf(COMMENT))).getByText("Open up infra…"),
+    );
+    const card = await waitFor(() => screen.getByRole("dialog"));
+
+    expect(within(card).queryByRole("switch")).toBeNull();
+    expect(
+      (within(card).getByLabelText("Branch in infra") as HTMLInputElement).value,
+    ).toBe("rate-limiter");
+
+    fireEvent.click(within(card).getByRole("button", { name: "Open up" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, path)).toEqual([
+        {
+          label: null,
+          pick: {
+            OpenedUp: { repo_id: INFRA.id, base_ref: null, branch: null },
+          },
+        },
+      ]),
+    );
+  });
+});
+
+describe("a device ticked from an answer", () => {
+  /// No card: the row is the tick.
+  it("is recorded at once under the question", async () => {
+    const path = `/api/ui/sets/${WAITING.id}/additions`;
+    const { fetching } = await answering(
+      OFFERING,
+      SETTINGS_READ,
+      whenever(path, json("Answered"), "POST"),
+    );
+
+    fireEvent.click(within(await open(menuOf("Q1"))).getByText("the-laptop"));
+
+    await waitFor(() =>
+      expect(writes(fetching, path)).toEqual([
+        { label: "Q1", pick: { Device: { device: LAPTOP.device } } },
+      ]),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("the chips of what was picked", () => {
+  /// Each says what was picked in words: a repo's name with its mode and, for
+  /// read-write, its branch — mirroring's where none was named — and a
+  /// device's name.
+  it("names the repo with its mode and branch, and the device", async () => {
+    await answering({
+      ...OFFERING,
+      additions: [
+        {
+          id: 4,
+          label: "Q1",
+          added: {
+            Companion: {
+              repo_id: DOCS.id,
+              name: "docs",
+              mode: "ReadWrite",
+              base_ref: null,
+              branch: "docs-for-limits",
+            },
+          },
+          state: "Pending",
+        },
+        {
+          id: 5,
+          label: "Q1",
+          added: {
+            Companion: {
+              repo_id: 9,
+              name: "website",
+              mode: "ReadOnly",
+              base_ref: null,
+              branch: null,
+            },
+          },
+          state: "Pending",
+        },
+        {
+          id: 6,
+          label: "Q1",
+          added: {
+            OpenedUp: {
+              repo_id: INFRA.id,
+              name: "infra",
+              base_ref: null,
+              branch: null,
+            },
+          },
+          state: "Pending",
+        },
+        {
+          id: 7,
+          label: "Q1",
+          added: { Device: { device: LAPTOP.device, name: "the-laptop" } },
+          state: "Pending",
+        },
+      ],
+    });
+
+    expect(chipsOn("Q1")).toEqual(["docs", "website", "infra", "the-laptop"]);
+
+    const row = screen.getByRole("list", { name: "Attached to Q1" });
+    const said = [...row.querySelectorAll(`.${pill.server}`)].map((chip) =>
+      chip.textContent!.replace("×", "").trim(),
+    );
+    expect(said).toEqual([
+      "docsread-write on docs-for-limits",
+      "websiteread-only",
+      "infraopened up on rate-limiter",
+      "the-laptop",
+    ]);
+
+    expect(
+      screen.getByRole("button", { name: "Remove the-laptop" }),
+      "and each comes off with its ×",
+    ).toBeTruthy();
+  });
+
+  /// A repo unregistered since says so, as a server undeclared does.
+  it("says so where the repo has gone", async () => {
+    await answering({
+      ...OFFERING,
+      additions: [
+        {
+          id: 4,
+          label: "Q1",
+          added: {
+            Companion: {
+              repo_id: DOCS.id,
+              name: null,
+              mode: "ReadOnly",
+              base_ref: null,
+              branch: null,
+            },
+          },
+          state: "Pending",
+        },
+      ],
+    });
+
+    const row = screen.getByRole("list", { name: "Attached to Q1" });
+    expect(row.textContent).toContain("no longer registered");
   });
 });

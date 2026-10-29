@@ -28,10 +28,23 @@
 //! box, and drawn as a chip beside that Answer's files — read back off the Set
 //! like them, so it survives a reload and shows on another device. Nothing
 //! reaches the Conversation until the Set is answered (ADR-0028).
+//!
+//! **And past the servers, the repos and the devices**: each registered repo
+//! the work could have alongside it, through the steer's own fields on a card,
+//! each read-only companion to open up through the same card, and each device
+//! of the cluster the work could be permitted to move to, picked at once.
+//! Recorded and drawn exactly as a server is.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  createUniqueId,
+} from "solid-js";
 import { createStore } from "solid-js/store";
 
 import app from "../App.module.css";
@@ -45,6 +58,7 @@ import {
   submitResponse,
 } from "../api/client";
 import type {
+  AddableView,
   AdditionMade,
   AdditionRemoved,
   AdditionView,
@@ -55,8 +69,10 @@ import type {
   Direction,
   Ending,
   OptionView,
+  Pick as Picked,
   ProposalView,
   QuestionView,
+  RepoEntry,
   Response as Decided,
   Submitted,
 } from "../api/types";
@@ -69,6 +85,7 @@ import {
 import { ErrorLine, Note } from "../notices";
 import { keyOf, useDevice } from "../reaching";
 import { addingServer } from "../workbench/AddServer";
+import { addingRepo } from "./AddingRepo";
 import { ServerRows } from "../workbench/Composer";
 import { rowPress } from "../rows";
 import styles from "./Answering.module.css";
@@ -137,6 +154,10 @@ export function Answering(props: {
   /// The MCP servers the Conversation has already, which the menus leave out.
   servers: string[];
 
+  /// And the rest of what the menus offer: Repos to add alongside, read-only
+  /// companions to open up, and devices the work may be transferred to.
+  addable: AddableView;
+
   /// What the page around the sheet does once an answer is sent, where it does
   /// anything: the workbench puts its Timeline back into advancing, so the
   /// next landing carries the selection on from the Set just answered. The
@@ -199,30 +220,55 @@ export function Answering(props: {
   const additions = picking({
     set: () => props.id,
     picked: () => props.additions,
+    mirroring: () => props.addable.branch,
   });
 
-  // The card *Add a server…* opens, one for the whole sheet and drawn beside
-  // it — the menu's rows go with the press that opened it. Which menu it was
-  // opened from is held here, so the server it declares is picked there.
-  let declaringAt: string | null = null;
-  const declaring = addingServer((name) => additions.pick(declaringAt, name));
+  // The cards *Add a server…* and a repo's row open, one each for the whole
+  // sheet and drawn beside it — the menu's rows go with the press that opened
+  // it. Which menu one was opened from is held here, so what it confirms is
+  // picked there.
+  let openedAt: string | null = null;
+  const declaring = addingServer((name) =>
+    additions.pick(openedAt, { Server: { name } }, name),
+  );
+  const joining = addingRepo(
+    (pick) => additions.pick(openedAt, pick, "That repo"),
+    () => props.addable.branch,
+  );
 
   /// The rows an Attach menu holds under *Attach file…*, at `label` or at the
   /// comment box where `null`: the servers the Conversation does not have and
-  /// this Set has not had picked, and *Add a server…*.
+  /// this Set has not had picked, and *Add a server…*; then the repos and the
+  /// devices, past what this Set has had picked already.
   const offering = (label: string | null) => (shut: () => void) => (
-    <ServerRows
-      attached={[...props.servers, ...additions.servers()]}
-      attach={(name) => {
-        shut();
-        additions.pick(label, name);
-      }}
-      add={() => {
-        shut();
-        declaringAt = label;
-        declaring.open();
-      }}
-    />
+    <>
+      <ServerRows
+        attached={[...props.servers, ...additions.servers()]}
+        attach={(name) => {
+          shut();
+          additions.pick(label, { Server: { name } }, name);
+        }}
+        add={() => {
+          shut();
+          openedAt = label;
+          declaring.open();
+        }}
+      />
+      <AddableRows
+        addable={props.addable}
+        repos={additions.repos()}
+        devices={additions.devices()}
+        join={(repo, opening) => {
+          shut();
+          openedAt = label;
+          joining.open(repo, opening);
+        }}
+        permit={(device, name) => {
+          shut();
+          additions.pick(label, { Device: { device } }, name);
+        }}
+      />
+    </>
   );
 
   // The comment box's own piece: no file, no drop, and the chips of what was
@@ -446,6 +492,7 @@ export function Answering(props: {
         </Show>
       </Postscript>
       {declaring.modal()}
+      {joining.modal()}
       <section class={styles.submit}>
         <button type="button" onClick={start} disabled={submit.isPending}>
           {submit.isPending ? "Sending…" : "Submit"}
@@ -1188,7 +1235,11 @@ export const ADDITION_REFUSAL: Record<
   Closed: "This conversation is closed.",
   NoSuchLabel: "This question set doesn't ask that question.",
   NoSuchServer: "That server is no longer declared in the settings.",
-  AlreadyOn: "This conversation has that server already.",
+  AlreadyOn: "This conversation has that already.",
+  NoSuchRepo: "That repo is no longer registered.",
+  NotACompanion: "That repo isn't alongside this conversation, so there's nothing to open up.",
+  NotAMember: "That device isn't linked to this one any more.",
+  WorkIsHere: "The work is on that device already.",
 };
 
 /// What the sheet does about what is picked at its menus, held once for the
@@ -1202,8 +1253,13 @@ type Picking = {
   /// leave out: a Set adds a server once.
   servers: () => string[];
 
-  /// Pick a server at one question's menu, or at the comment box's.
-  pick: (label: string | null, name: string) => void;
+  /// And every repo, added or opened up, and every device, for the same reason.
+  repos: () => number[];
+  devices: () => string[];
+
+  /// Pick something at one question's menu, or at the comment box's, with
+  /// what a failure to reach the server calls it.
+  pick: (label: string | null, pick: Picked, called: string) => void;
 
   /// And what could not be done there.
   refused: (label: string | null) => string | null;
@@ -1219,6 +1275,9 @@ function picking(what: {
 
   /// What the Set says has been picked on it.
   picked: () => AdditionView[];
+
+  /// What a read-write branch picked with no name comes to.
+  mirroring: () => string;
 }): Picking {
   const queries = useQueryClient();
   const device = useDevice();
@@ -1227,7 +1286,7 @@ function picking(what: {
     Array<{ label: string | null; said: string }>
   >([]);
 
-  // Which picks have a press in flight, by the server's name for a pick and by
+  // Which picks have a press in flight, by what was picked for a pick and by
   // the row's id for a ×: the one thing either can be truly disabled for.
   const [working, setWorking] = createSignal<Array<string | number>>([]);
 
@@ -1265,12 +1324,12 @@ function picking(what: {
       .finally(() => setWorking((was) => was.filter((one) => one !== key)));
   };
 
-  const pick = (label: string | null, name: string) =>
+  const pick = (label: string | null, picked: Picked, called: string) =>
     settle(
       label,
-      name,
-      addToSet(device(), what.set(), { label, pick: { Server: { name } } }),
-      `${name} couldn't be added.`,
+      JSON.stringify(picked),
+      addToSet(device(), what.set(), { label, pick: picked }),
+      `${called} couldn't be added.`,
     );
 
   const forget = (addition: AdditionView) =>
@@ -1285,18 +1344,11 @@ function picking(what: {
     what
       .picked()
       .filter((addition) => addition.label === label)
-      .flatMap((addition) =>
-        "Server" in addition.added
-          ? [
-              {
-                name: addition.added.Server.name,
-                gone: !addition.added.Server.declared,
-                remove: () => forget(addition),
-                removing: working().includes(addition.id),
-              },
-            ]
-          : [],
-      );
+      .map((addition) => ({
+        ...chipped(addition, what.mirroring()),
+        remove: () => forget(addition),
+        removing: working().includes(addition.id),
+      }));
 
   const servers = () =>
     what
@@ -1305,13 +1357,167 @@ function picking(what: {
         "Server" in addition.added ? [addition.added.Server.name] : [],
       );
 
+  const repos = () =>
+    what.picked().flatMap((addition) => {
+      if ("Companion" in addition.added) return [addition.added.Companion.repo_id];
+      if ("OpenedUp" in addition.added) return [addition.added.OpenedUp.repo_id];
+      return [];
+    });
+
+  const devices = () =>
+    what
+      .picked()
+      .flatMap((addition) =>
+        "Device" in addition.added ? [addition.added.Device.device] : [],
+      );
+
   return {
     chips,
     servers,
+    repos,
+    devices,
     pick,
     refused: (label) =>
       refusals().find((one) => one.label === label)?.said ?? null,
   };
+}
+
+/// What one addition's chip says, whatever kind it is: the name, and for a repo
+/// how far in the work reaches and on which branch — `mirroring` being what a
+/// branch picked with no name comes to.
+///
+/// A name the record could not put to it any more — a repo unregistered, a
+/// device unlinked since the pick — reads as gone, under the id it was picked
+/// by, which is the whole of what is left to say about it.
+export function chipped(
+  addition: AdditionView,
+  mirroring: string,
+): Pick<Chip, "name" | "kind" | "detail" | "gone"> {
+  const added = addition.added;
+
+  if ("Server" in added) {
+    return { name: added.Server.name, gone: !added.Server.declared };
+  }
+
+  if ("Companion" in added) {
+    const { name, repo_id, mode, branch } = added.Companion;
+
+    return {
+      kind: "repo",
+      name: name ?? `repo ${repo_id}`,
+      detail:
+        mode === "ReadOnly"
+          ? "read-only"
+          : `read-write on ${branch ?? mirroring}`,
+      gone: name === null,
+    };
+  }
+
+  if ("OpenedUp" in added) {
+    const { name, repo_id, branch } = added.OpenedUp;
+
+    return {
+      kind: "repo",
+      name: name ?? `repo ${repo_id}`,
+      detail: `opened up on ${branch ?? mirroring}`,
+      gone: name === null,
+    };
+  }
+
+  return {
+    kind: "device",
+    name: added.Device.name ?? added.Device.device.slice(0, 8),
+    gone: added.Device.name === null,
+  };
+}
+
+/// The rows of an Attach menu past the servers (ADR-0028): each registered
+/// repo the work could have alongside it and each read-only companion it
+/// could open up, under *Repos alongside*; then each device of the cluster the
+/// work could be permitted to move to, under *May be transferred to*.
+///
+/// What the conversation has already is left out by the server, and what this
+/// set has had picked is left out here: a set adds each once. A group with
+/// nothing to offer is not drawn, which is every sheet with no cluster under
+/// the second.
+///
+/// A repo's row opens a card, so it carries the ellipsis; a device's acts at
+/// once. Only registered repos: registering is done at a desk, so the repo
+/// dropdown's *Open repo…* and *Create repo…* are not here.
+function AddableRows(props: {
+  addable: AddableView;
+  /// The repos and devices picked on the set already.
+  repos: number[];
+  devices: string[];
+  join: (repo: RepoEntry, opening: boolean) => void;
+  permit: (device: string, name: string) => void;
+}): JSX.Element {
+  const adding = () =>
+    props.addable.repos.filter((repo) => !props.repos.includes(repo.id));
+  const opening = () =>
+    props.addable.read_only.filter(
+      (companion) => !props.repos.includes(companion.repo.id),
+    );
+  const devices = () =>
+    props.addable.devices.filter(
+      (device) => !props.devices.includes(device.device),
+    );
+
+  const repos = createUniqueId();
+  const moving = createUniqueId();
+
+  return (
+    <>
+      <Show when={adding().length + opening().length > 0}>
+        <div role="group" aria-labelledby={repos} class={styles.adding}>
+          <div id={repos} role="presentation" class={styles.addingHead}>
+            Repos alongside
+          </div>
+          <For each={adding()}>
+            {(repo) => (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => props.join(repo, false)}
+              >
+                {repo.name}…
+              </button>
+            )}
+          </For>
+          <For each={opening()}>
+            {(companion) => (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => props.join(companion.repo, true)}
+              >
+                Open up {companion.repo.name}…
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
+
+      <Show when={devices().length > 0}>
+        <div role="group" aria-labelledby={moving} class={styles.adding}>
+          <div id={moving} role="presentation" class={styles.addingHead}>
+            May be transferred to
+          </div>
+          <For each={devices()}>
+            {(device) => (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => props.permit(device.device, device.name)}
+              >
+                {device.name}
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
+    </>
+  );
 }
 
 /// Every question of the Set in the order it was asked, Sub-questions under the

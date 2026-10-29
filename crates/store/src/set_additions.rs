@@ -128,7 +128,8 @@ pub struct SetAddition {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddingToSet {
     /// Recorded, and this is the row — or the row already there, where the same
-    /// server was picked on this Set before: one Set adds a server once.
+    /// server, Repo or device was picked on this Set before: one Set adds each
+    /// once.
     Added(SetAddition),
 
     /// The Set has been answered.
@@ -229,6 +230,12 @@ fn made(row: Row) -> Result<SetAddition> {
     })
 }
 
+/// What a pick is told apart from the others on its Set by.
+enum Key<'a> {
+    Text(&'a str),
+    Id(i64),
+}
+
 /// Whether a Set has settled, asked inside the write it guards.
 async fn settled(tx: &mut sqlx::SqliteConnection, set_id: i64) -> Result<Option<bool>> {
     let (answered, locked): (bool, bool) = sqlx::query_as(
@@ -267,23 +274,34 @@ pub async fn add_to_set(
         None => {}
     }
 
-    // One Set puts a server on once, whichever Question it was picked at: the
-    // second pick is the first one's row rather than a second chip saying the
-    // same thing.
-    if let Addition::Server { name } = addition {
-        let there: Option<Row> = sqlx::query_as(&format!(
-            "SELECT {COLUMNS} FROM set_additions
-             WHERE set_id = ? AND kind = 'server' AND server = ?"
-        ))
-        .bind(set_id)
-        .bind(name)
+    // One Set adds a thing once, whichever Question it was picked at: a server
+    // by its name, a Repo — added or opened up — by its id, a device by its
+    // Device Id. The second pick is the first one's row rather than a second
+    // chip saying the same thing, or two saying different things about the one
+    // Repo.
+    let (same, key): (&str, Key) = match addition {
+        Addition::Server { name } => ("kind = 'server' AND server = ?", Key::Text(name)),
+        Addition::Companion { repo_id, .. } | Addition::OpenedUp { repo_id, .. } => (
+            "kind IN ('companion', 'opened-up') AND repo_id = ?",
+            Key::Id(*repo_id),
+        ),
+        Addition::Device { device } => ("kind = 'device' AND device = ?", Key::Text(device)),
+    };
+
+    let query = format!("SELECT {COLUMNS} FROM set_additions WHERE set_id = ? AND {same}");
+    let query = sqlx::query_as::<_, Row>(&query).bind(set_id);
+    let query = match key {
+        Key::Text(text) => query.bind(text),
+        Key::Id(id) => query.bind(id),
+    };
+
+    let there = query
         .fetch_optional(&mut *tx)
         .await
-        .with_context(|| format!("looking for {name:?} on Question Set {set_id}"))?;
+        .with_context(|| format!("looking for {addition:?} on Question Set {set_id}"))?;
 
-        if let Some(there) = there {
-            return Ok(AddingToSet::Added(made(there)?));
-        }
+    if let Some(there) = there {
+        return Ok(AddingToSet::Added(made(there)?));
     }
 
     let (server, repo_id, mode, base, branch, device) = match addition {
@@ -478,22 +496,35 @@ mod tests {
     async fn every_kind_reads_back_as_it_was_written() {
         let (_dir, pool, conversation, set) = waiting().await;
 
+        // A Repo apiece, one Set adding each Repo once.
+        let mut repos = Vec::new();
+        for name in ["docs", "infra", "website"] {
+            let path = std::path::PathBuf::from(format!("/srv/{name}"));
+            repos.push(
+                crate::register_repo(&pool, &path, name, "main")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .id,
+            );
+        }
+
         let kinds = [
             server("docs"),
             Addition::Companion {
-                repo_id: 1,
+                repo_id: repos[0],
                 mode: CompanionMode::ReadWrite,
                 base: Some("develop".to_owned()),
                 branch: Some("adding".to_owned()),
             },
             Addition::Companion {
-                repo_id: 1,
+                repo_id: repos[1],
                 mode: CompanionMode::ReadOnly,
                 base: None,
                 branch: None,
             },
             Addition::OpenedUp {
-                repo_id: 1,
+                repo_id: repos[2],
                 base: None,
                 branch: Some("adding".to_owned()),
             },
@@ -536,6 +567,64 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(set_additions(&pool, set).await.unwrap().len(), 1);
+    }
+
+    /// And a Repo once, whether it was picked to add or to open up, and a
+    /// device once: the one Repo with two chips would be two things said about
+    /// it.
+    #[tokio::test]
+    async fn the_same_repo_or_device_twice_is_one_row() {
+        let (_dir, pool, conversation, set) = waiting().await;
+
+        let first = added(
+            add_to_set(
+                &pool,
+                conversation,
+                set,
+                Some("Q1"),
+                &Addition::Companion {
+                    repo_id: 1,
+                    mode: CompanionMode::ReadOnly,
+                    base: None,
+                    branch: None,
+                },
+            )
+            .await
+            .unwrap(),
+        );
+        let second = added(
+            add_to_set(
+                &pool,
+                conversation,
+                set,
+                None,
+                &Addition::OpenedUp {
+                    repo_id: 1,
+                    base: None,
+                    branch: None,
+                },
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(first, second);
+
+        let device = Addition::Device {
+            device: "22222222222222222222222222222222".to_owned(),
+        };
+        let ticked = added(
+            add_to_set(&pool, conversation, set, Some("Q1"), &device)
+                .await
+                .unwrap(),
+        );
+        let again = added(
+            add_to_set(&pool, conversation, set, None, &device)
+                .await
+                .unwrap(),
+        );
+        assert_eq!(ticked, again);
+
+        assert_eq!(set_additions(&pool, set).await.unwrap().len(), 2);
     }
 
     #[tokio::test]

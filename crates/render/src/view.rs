@@ -161,6 +161,10 @@ pub struct SetView {
     /// The MCP servers the Conversation has already, by name, which the sheet's
     /// Attach menus leave out: what is on already is nothing to add.
     pub servers: Vec<String>,
+
+    /// And the rest of what those menus offer: Repos to work alongside,
+    /// read-only Companions to open up, and devices to permit.
+    pub addable: crate::conversations::AddableView,
 }
 
 /// The Diff as the browser receives it: the HTML the server rendered, and the
@@ -364,6 +368,7 @@ pub fn set_view(
     attachments: Vec<crate::conversations::AttachmentView>,
     additions: Vec<crate::conversations::AdditionView>,
     servers: Vec<String>,
+    addable: crate::conversations::AddableView,
     pictures: Option<&dyn crate::diff::PictureReader>,
 ) -> SetView {
     // An empty Preface is the same as none at all: no point drawing the section
@@ -406,6 +411,7 @@ pub fn set_view(
         attachments,
         additions,
         servers,
+        addable,
     }
 }
 
