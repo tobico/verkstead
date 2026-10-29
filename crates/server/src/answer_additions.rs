@@ -11,18 +11,21 @@
 //! own servers are as they were, and a launch after a pick is written with the
 //! same Built Root. What a pick is for is the Submit, which applies the Set's
 //! pending additions in the transaction that stores the Response — see
-//! `verkstead_store`'s `set_additions::apply` — once [`undeclared`] has asked
-//! the one question the store cannot.
+//! `verkstead_store`'s `set_additions::apply` — once [`undeclared`] and
+//! [`readied`] have asked every question the store cannot, and [`submit`] has
+//! made the companions' checkouts.
 
 use std::collections::HashMap;
 
 use anyhow::Result;
 use verkstead_render::{
-    AddableView, Added, AdditionMade, AdditionRemoved, AdditionView, CompanionMode, Pick,
+    AddableView, Added, AdditionMade, AdditionRemoved, AdditionView, CompanionAddition,
+    CompanionMode, CompanionUpgrade, ConversationSteered, Pick, SteerCompanionRefusal,
 };
 use verkstead_schema::Response;
 
 use crate::answer_files::{Fixed, Standing, asks, standing};
+use crate::steering::{Additions, Alongside, Upgrades};
 use crate::{AppState, store};
 
 /// Record a pick on a waiting Set, pending.
@@ -211,6 +214,207 @@ pub(crate) async fn undeclared(state: &AppState, set_id: i64) -> Result<Option<S
         }))
 }
 
+/// What asking git about a Set's pending companions came to, before anything
+/// is stored.
+pub(crate) enum Readied {
+    /// Every checkout planned and none made: [`submit`] makes them.
+    Ready(Alongside),
+
+    /// A Repo picked on the Set is no longer registered, by its name.
+    RepoGone(String),
+
+    /// A Repo cannot go in, or be opened up, as it was picked: by name, with
+    /// the Steer's own reason.
+    Refused {
+        repo: String,
+        why: SteerCompanionRefusal,
+    },
+}
+
+/// Every question the Set's pending companions and opened-up companions turn
+/// on, asked before the Response is stored: whether each Repo is still
+/// registered, the Steer's questions of the record — see
+/// [`crate::steering::joining`] and [`crate::steering::opening`] — and its
+/// questions of git, fetching, resolving the base and finding the read-write
+/// branch free — see [`Alongside::plan`]. Nothing is made (ADR-0028, *Every
+/// question before anything is ended*).
+///
+/// A Conversation with nothing checked out yet is asked the record's questions
+/// and none of git's: its grill start checks every companion out.
+pub(crate) async fn readied(state: &AppState, set_id: i64) -> Result<Readied> {
+    let conversation = match standing(&state.pool, set_id).await? {
+        Standing::Waiting(conversation) => conversation,
+        Standing::Fixed(_) => return Ok(Readied::Ready(Alongside::none())),
+    };
+
+    let mut joining = Vec::new();
+    let mut opening = Vec::new();
+
+    for added in store::set_additions(&state.pool, set_id).await? {
+        if added.state != store::AdditionState::Pending {
+            continue;
+        }
+
+        let repo_id = match &added.addition {
+            store::Addition::Companion { repo_id, .. }
+            | store::Addition::OpenedUp { repo_id, .. } => *repo_id,
+            store::Addition::Server { .. } | store::Addition::Device { .. } => continue,
+        };
+
+        if store::registered_repo(&state.pool, repo_id)
+            .await?
+            .is_none()
+        {
+            let name = store::load_repo(&state.pool, repo_id)
+                .await?
+                .map_or_else(|| format!("repo {repo_id}"), |repo| repo.name);
+
+            return Ok(Readied::RepoGone(name));
+        }
+
+        match added.addition {
+            store::Addition::Companion {
+                repo_id,
+                mode,
+                base,
+                branch,
+            } => joining.push(CompanionAddition {
+                repo_id,
+                mode: crate::steering::reaching(mode),
+                base_ref: base,
+                branch: branch.unwrap_or_default(),
+            }),
+            store::Addition::OpenedUp {
+                repo_id,
+                base,
+                branch,
+            } => opening.push((
+                CompanionUpgrade {
+                    repo_id,
+                    branch: branch.unwrap_or_default(),
+                },
+                base,
+            )),
+            store::Addition::Server { .. } | store::Addition::Device { .. } => {}
+        }
+    }
+
+    if joining.is_empty() && opening.is_empty() {
+        return Ok(Readied::Ready(Alongside::none()));
+    }
+
+    let Some(conversation) = store::load_conversation(&state.pool, conversation).await? else {
+        return Ok(Readied::Ready(Alongside::none()));
+    };
+
+    let added = match crate::steering::joining(state, &conversation, &joining).await? {
+        Additions::Ready(added) => added,
+        Additions::Refused(refusal) => return refused(refusal),
+    };
+
+    let upgrades: Vec<CompanionUpgrade> = opening.iter().map(|(up, _)| up.clone()).collect();
+    let mut opened = match crate::steering::opening(state, &conversation, &upgrades).await? {
+        Upgrades::Ready(opened) => opened,
+        Upgrades::Refused(refusal) => return refused(refusal),
+    };
+
+    // The base the card named, where it named one: the branch is cut from
+    // there rather than from the base the companion was first checked out off.
+    for companion in &mut opened {
+        if let Some((_, Some(base))) = opening
+            .iter()
+            .find(|(up, _)| up.repo_id == companion.repo.id)
+        {
+            companion.base_ref = Some(base.clone());
+        }
+    }
+
+    if conversation.worktree.is_none() {
+        return Ok(Readied::Ready(Alongside::none()));
+    }
+
+    match Alongside::plan(state, &conversation, added, opened).await? {
+        Ok(alongside) => Ok(Readied::Ready(alongside)),
+        Err(refusal) => refused(refusal),
+    }
+}
+
+/// A steer's refusal, said of an Answer.
+fn refused(refusal: ConversationSteered) -> Result<Readied> {
+    match refusal {
+        ConversationSteered::Companion { repo, why } => Ok(Readied::Refused { repo, why }),
+        // Asked of the registry above, so only a Repo unregistered in between.
+        ConversationSteered::NoSuchCompanionRepo => Ok(Readied::RepoGone("a repo".to_owned())),
+        other => anyhow::bail!("a companion check refused an Answer with {other:?}"),
+    }
+}
+
+/// What storing a Response with its companions came to.
+pub(crate) enum Answering {
+    /// The store's own answer; the checkouts are recorded where it is
+    /// [`store::Submission::Accepted`], and taken back where it is not.
+    Stored(store::Submission),
+
+    /// Git would not make a checkout: nothing was stored, and nothing is left
+    /// made.
+    Refused {
+        repo: String,
+        why: SteerCompanionRefusal,
+    },
+}
+
+/// Make the checkouts [`readied`] planned, then store the Response — which
+/// puts the companions on the Conversation and records where each went, in one
+/// transaction — and only then remove the detached checkouts the opened-up
+/// ones replace. A Response the store refuses takes the new checkouts back
+/// with it.
+///
+/// Nothing running is ended: a session keeps the binds it started with, and a
+/// companion reaches the next launch, as one a steer adds does. The detached
+/// directory an opened-up companion replaces goes from under a running session
+/// as the Steer's make removes it — see [`crate::steering`].
+pub(crate) async fn submit(
+    state: &AppState,
+    set_id: i64,
+    alongside: Alongside,
+    response: &Response,
+) -> Result<Answering> {
+    // From the making to the record naming it, as a steer holds it: a directory
+    // made and not yet recorded is one the orphan sweep would read as nobody's.
+    let _making = state.checkouts.lock().await;
+
+    let (alongside, checkouts) = match alongside.check_out().await? {
+        Ok(made) => made,
+        Err(ConversationSteered::Companion { repo, why }) => {
+            return Ok(Answering::Refused { repo, why });
+        }
+        Err(other) => anyhow::bail!("checking out an Answer's companions refused with {other:?}"),
+    };
+
+    let submission = match store::submit_response_with_checkouts(
+        &state.pool,
+        &state.settlements,
+        set_id,
+        response,
+        &checkouts,
+    )
+    .await
+    {
+        Ok(submission) => submission,
+        Err(error) => {
+            alongside.unmake().await?;
+            return Err(error);
+        }
+    };
+
+    match submission {
+        store::Submission::Accepted(_) => alongside.retire().await?,
+        _ => alongside.unmake().await?,
+    }
+
+    Ok(Answering::Stored(submission))
+}
+
 /// Put what came with the Answers on the Response as the agent reads it: each
 /// Answer's own under it, and what was added at the comment box on the
 /// Response itself — see [`verkstead_schema::Answer::added`].
@@ -236,9 +440,10 @@ pub(crate) async fn onto(
 
     let naming = Naming::read(state).await?;
     let agent = store::newest_agent(&state.pool, conversation_id).await?;
+    let companions = store::companions(&state.pool, conversation_id).await?;
 
     for added in applied {
-        let said = said(&added.addition, &naming, agent);
+        let said = said(&added.addition, &naming, agent, &companions);
 
         match added.label.as_deref() {
             None => response.added.push(said),
@@ -262,8 +467,16 @@ pub(crate) async fn onto(
 /// A server is named with the prefix its tools carry, as the prompt's own
 /// listing names them — see [`crate::skills::tools_named`] — and says that it
 /// reaches the next launch: a running session keeps the Built Root it started
-/// with. A device is named with its id and the command that uses it.
-fn said(addition: &store::Addition, naming: &Naming, agent: Option<store::AgentType>) -> String {
+/// with. A device is named with its id and the command that uses it. A
+/// companion is named with the directory it is checked out in and its mode, as
+/// the prompt's own listing names one — see [`crate::skills::alongside`] — and
+/// reaches the next launch for the same reason a server does.
+fn said(
+    addition: &store::Addition,
+    naming: &Naming,
+    agent: Option<store::AgentType>,
+    companions: &[store::Companion],
+) -> String {
     match addition {
         store::Addition::Server { name } => {
             let tools = agent.map_or_else(String::new, |agent| {
@@ -288,15 +501,61 @@ fn said(addition: &store::Addition, naming: &Naming, agent: Option<store::AgentT
                 name.as_deref().unwrap_or("with no name in the cluster now"),
             )
         }
-        store::Addition::Companion { repo_id, .. } | store::Addition::OpenedUp { repo_id, .. } => {
+        store::Addition::Companion {
+            repo_id,
+            mode,
+            branch,
+            ..
+        } => {
+            let reach = match (mode, branch) {
+                (store::CompanionMode::ReadWrite, Some(branch)) => {
+                    format!("read-write, on branch `{branch}`")
+                }
+                (store::CompanionMode::ReadWrite, None) => "read-write".to_owned(),
+                (store::CompanionMode::ReadOnly, _) => "read-only".to_owned(),
+            };
+
             format!(
-                "The repo {}.",
-                naming
-                    .repo(*repo_id)
-                    .unwrap_or_else(|| format!("registered as {repo_id}"))
+                "The repo `{}`{}, {reach}. It is bound from the next session launched; this \
+                 one was started without it.",
+                called(naming, *repo_id),
+                checked_out(companions, *repo_id),
+            )
+        }
+        store::Addition::OpenedUp {
+            repo_id, branch, ..
+        } => {
+            let on = branch
+                .as_deref()
+                .map_or_else(String::new, |branch| format!(", on branch `{branch}`"));
+
+            format!(
+                "The repo `{}`, opened up to read-write{on}{}. It is bound so from the next \
+                 session launched; this one was started with it read-only.",
+                called(naming, *repo_id),
+                checked_out(companions, *repo_id),
             )
         }
     }
+}
+
+/// A Repo by its registered name, or its id where it has none now.
+fn called(naming: &Naming, repo_id: i64) -> String {
+    naming
+        .repo(repo_id)
+        .unwrap_or_else(|| format!("registered as {repo_id}"))
+}
+
+/// Where a companion is checked out, said as a clause, or nothing where it is
+/// not yet.
+fn checked_out(companions: &[store::Companion], repo_id: i64) -> String {
+    companions
+        .iter()
+        .find(|companion| companion.repo.id == repo_id)
+        .and_then(|companion| companion.worktree.as_ref())
+        .map_or_else(String::new, |worktree| {
+            format!(", checked out at `{}`", worktree.display())
+        })
 }
 
 /// What each Set of a Conversation added to it, by Set, applied: the line the

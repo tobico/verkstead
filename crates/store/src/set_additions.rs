@@ -388,7 +388,7 @@ pub async fn take_off_set(pool: &SqlitePool, set_id: i64, id: i64) -> Result<Tak
     Ok(TakingOff::TakenOff)
 }
 
-/// Put a Set's pending servers and device ticks on its Conversation, inside the
+/// Put a Set's pending additions on its Conversation, inside the
 /// transaction that stores its Response — so the Answers and what came with
 /// them land together or not at all, and a Set is applied once because it is
 /// answered once.
@@ -401,9 +401,18 @@ pub async fn take_off_set(pool: &SqlitePool, set_id: i64, id: i64) -> Result<Tak
 /// have asked before this, the declarations being in a file this crate has
 /// never heard of.
 ///
-/// Companions are left pending: what they need is checkouts made, which is not
-/// a row.
-pub(crate) async fn apply(tx: &mut sqlx::SqliteConnection, set_id: i64) -> Result<()> {
+/// A companion joins the work and an opened-up one turns read-write, past
+/// drafting, as a steer's do — see [`super::companions::join`] — with the
+/// checkouts the server has already made for them recorded beside: `checkouts`
+/// is where each went, and is empty for a Conversation with nothing checked out
+/// yet, whose grill start makes them. Each applied row of a read-write
+/// companion keeps the branch it was cut, mirroring resolved, so the record
+/// says what the Timeline and the agent are told.
+pub(crate) async fn apply(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    set_id: i64,
+    checkouts: &[super::CompanionWorktree],
+) -> Result<()> {
     sqlx::query(
         "INSERT INTO conversation_mcp_servers (conversation_id, name, attached_at)
          SELECT conversation_id, server, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -413,7 +422,7 @@ pub(crate) async fn apply(tx: &mut sqlx::SqliteConnection, set_id: i64) -> Resul
          ON CONFLICT (conversation_id, name) DO NOTHING",
     )
     .bind(set_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .with_context(|| format!("attaching the servers added on Question Set {set_id}"))?;
 
@@ -426,16 +435,75 @@ pub(crate) async fn apply(tx: &mut sqlx::SqliteConnection, set_id: i64) -> Resul
          ON CONFLICT (conversation_id, device) DO NOTHING",
     )
     .bind(set_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .with_context(|| format!("permitting the devices added on Question Set {set_id}"))?;
 
     sqlx::query(
-        "UPDATE set_additions SET state = 'applied'
-         WHERE set_id = ? AND kind IN ('server', 'device') AND state = 'pending'",
+        "INSERT INTO companions (conversation_id, repo_id, mode, base_ref, branch)
+         SELECT conversation_id, repo_id, mode, base, COALESCE(branch, '')
+         FROM set_additions
+         WHERE set_id = ? AND kind = 'companion' AND state = 'pending'
+         ORDER BY id
+         ON CONFLICT (conversation_id, repo_id) DO NOTHING",
     )
     .bind(set_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
+    .await
+    .with_context(|| format!("putting the Repos added on Question Set {set_id} alongside"))?;
+
+    sqlx::query(
+        "UPDATE companions
+         SET mode = ?, branch = COALESCE((SELECT branch FROM set_additions
+                                          WHERE set_additions.set_id = ?
+                                            AND set_additions.kind = 'opened-up'
+                                            AND set_additions.state = 'pending'
+                                            AND set_additions.repo_id = companions.repo_id),
+                                         '')
+         WHERE (conversation_id, repo_id) IN
+               (SELECT conversation_id, repo_id FROM set_additions
+                WHERE set_id = ? AND kind = 'opened-up' AND state = 'pending')",
+    )
+    .bind(CompanionMode::ReadWrite.stored())
+    .bind(set_id)
+    .bind(set_id)
+    .execute(&mut **tx)
+    .await
+    .with_context(|| format!("opening up the Repos opened on Question Set {set_id}"))?;
+
+    // And mirroring resolved on the Set's own rows, the companions' keeping it
+    // as mirroring: a read-write companion with no branch of its own is cut
+    // the Conversation's.
+    sqlx::query(
+        "UPDATE set_additions
+         SET branch = (SELECT branch FROM conversations
+                       WHERE conversations.id = set_additions.conversation_id)
+         WHERE set_id = ? AND state = 'pending' AND branch IS NULL
+           AND (kind = 'opened-up' OR (kind = 'companion' AND mode = ?))",
+    )
+    .bind(set_id)
+    .bind(CompanionMode::ReadWrite.stored())
+    .execute(&mut **tx)
+    .await
+    .with_context(|| format!("naming the branches added on Question Set {set_id}"))?;
+
+    if let Some(conversation_id) = sqlx::query_scalar::<_, i64>(
+        "SELECT conversation_id FROM set_additions WHERE set_id = ? LIMIT 1",
+    )
+    .bind(set_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .with_context(|| format!("reading which Conversation Question Set {set_id} adds to"))?
+    {
+        super::companions::record_worktrees(tx, conversation_id, checkouts).await?;
+    }
+
+    sqlx::query(
+        "UPDATE set_additions SET state = 'applied'
+         WHERE set_id = ? AND state = 'pending'",
+    )
+    .bind(set_id)
+    .execute(&mut **tx)
     .await
     .with_context(|| format!("recording what Question Set {set_id} added as applied"))?;
 
@@ -841,12 +909,17 @@ mod tests {
         }
     }
 
-    /// Answering puts the servers and the ticks on the Conversation, in the
-    /// Response's own transaction, and leaves a companion for its checkouts.
+    /// Answering puts the servers, the ticks and the companions on the
+    /// Conversation, in the Response's own transaction.
     #[tokio::test]
-    async fn answering_applies_the_servers_and_the_ticks() {
+    async fn answering_applies_every_kind() {
         let (_dir, pool, conversation, set) = waiting().await;
         let laptop = "22222222222222222222222222222222";
+        let docs = crate::register_repo(&pool, std::path::Path::new("/srv/docs"), "docs", "main")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
 
         add_to_set(&pool, conversation, set, Some("Q1"), &server("docs"))
             .await
@@ -868,7 +941,7 @@ mod tests {
             set,
             Some("Q1"),
             &Addition::Companion {
-                repo_id: 1,
+                repo_id: docs,
                 mode: CompanionMode::ReadOnly,
                 base: None,
                 branch: None,
@@ -877,10 +950,25 @@ mod tests {
         .await
         .unwrap();
 
-        crate::insert_response(&pool, set, &answer())
+        let checkouts = [crate::CompanionWorktree {
+            repo_id: docs,
+            path: std::path::PathBuf::from("/srv/worktrees/docs-main"),
+            base_commit: Some("abc123".to_owned()),
+        }];
+        crate::insert_response_with_checkouts(&pool, set, &answer(), &checkouts)
             .await
             .unwrap()
             .unwrap();
+
+        let companions = crate::companions(&pool, conversation).await.unwrap();
+        assert_eq!(companions.len(), 1);
+        assert_eq!(companions[0].repo.id, docs);
+        assert_eq!(companions[0].mode, CompanionMode::ReadOnly);
+        assert_eq!(
+            companions[0].worktree.as_deref(),
+            Some(std::path::Path::new("/srv/worktrees/docs-main")),
+            "and where it was checked out is on the record beside it",
+        );
 
         assert_eq!(
             crate::mcp_servers(&pool, conversation).await.unwrap(),
@@ -902,9 +990,94 @@ mod tests {
             vec![
                 AdditionState::Applied,
                 AdditionState::Applied,
-                AdditionState::Pending
+                AdditionState::Applied
             ]
         );
+    }
+
+    /// A read-write companion left to mirror joins as mirroring, while the
+    /// Set's record names the branch it was cut; an opened-up one turns
+    /// read-write on the branch it was given.
+    #[tokio::test]
+    async fn answering_names_the_branches_and_opens_up() {
+        let (_dir, pool, conversation, set) = waiting().await;
+        let mut repos = Vec::new();
+        for name in ["docs", "infra"] {
+            let path = std::path::PathBuf::from(format!("/srv/{name}"));
+            repos.push(
+                crate::register_repo(&pool, &path, name, "main")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .id,
+            );
+        }
+        crate::add_companion(&pool, conversation, repos[1])
+            .await
+            .unwrap();
+
+        add_to_set(
+            &pool,
+            conversation,
+            set,
+            Some("Q1"),
+            &Addition::Companion {
+                repo_id: repos[0],
+                mode: CompanionMode::ReadWrite,
+                base: None,
+                branch: None,
+            },
+        )
+        .await
+        .unwrap();
+        add_to_set(
+            &pool,
+            conversation,
+            set,
+            None,
+            &Addition::OpenedUp {
+                repo_id: repos[1],
+                base: None,
+                branch: Some("infra-adding".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+
+        crate::insert_response(&pool, set, &answer())
+            .await
+            .unwrap()
+            .unwrap();
+
+        let companions = crate::companions(&pool, conversation).await.unwrap();
+        let docs = companions
+            .iter()
+            .find(|one| one.repo.id == repos[0])
+            .unwrap();
+        assert_eq!(docs.mode, CompanionMode::ReadWrite);
+        assert_eq!(
+            docs.branch, "",
+            "mirroring stays mirroring on the companion"
+        );
+        let infra = companions
+            .iter()
+            .find(|one| one.repo.id == repos[1])
+            .unwrap();
+        assert_eq!(infra.mode, CompanionMode::ReadWrite);
+        assert_eq!(infra.branch, "infra-adding");
+
+        let read = set_additions(&pool, set).await.unwrap();
+        assert_eq!(
+            read[0].addition,
+            Addition::Companion {
+                repo_id: repos[0],
+                mode: CompanionMode::ReadWrite,
+                base: None,
+                branch: Some("adding".to_owned()),
+            },
+            "the Set's record names the branch mirroring cut",
+        );
+        assert_eq!(read[1].state, AdditionState::Applied);
     }
 
     /// A server the Conversation holds already is the state the pick asked for.

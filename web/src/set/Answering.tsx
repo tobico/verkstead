@@ -74,6 +74,7 @@ import type {
   QuestionView,
   RepoEntry,
   Response as Decided,
+  SteerCompanionRefusal,
   Submitted,
 } from "../api/types";
 import {
@@ -85,6 +86,7 @@ import {
 import { ErrorLine, Note } from "../notices";
 import { keyOf, useDevice } from "../reaching";
 import { addingServer } from "../workbench/AddServer";
+import { otherAuthor } from "../workbench/Timeline";
 import { addingRepo } from "./AddingRepo";
 import { ServerRows } from "../workbench/Composer";
 import { rowPress } from "../rows";
@@ -1546,6 +1548,19 @@ function blank(ask: Asked): Filled {
   return { label: ask.label, selected: null, free_text: "" };
 }
 
+/// Why a repo picked on the set couldn't go in as it was picked, in the
+/// Steer's terms but not its words: nothing was steered here.
+const COMPANION_REFUSAL: Record<Extract<SteerCompanionRefusal, string>, string> = {
+  OwnRepo: "It's this conversation's own repo.",
+  AlreadyAdded: "It's already on this conversation.",
+  NotACompanion: "It isn't on this conversation, so there's nothing to open up.",
+  AlreadyReadWrite: "It's already read-write on this conversation.",
+  FetchFailed: "Git couldn't fetch from its remote. The server log says why.",
+  NoBaseCommit: "Its base has nothing to check out.",
+  BranchExists: "The branch already exists there, and Verkstead didn't make it.",
+  WorktreeRefused: "Git wouldn't make its worktree. The server log says why.",
+};
+
 /// Why the Response did not land, when it did not. A Response that was taken
 /// says nothing here — the page is already on its way back to the list.
 function refused(outcome: Submitted | undefined, error: Error | null): string | null {
@@ -1571,6 +1586,17 @@ function refused(outcome: Submitted | undefined, error: Error | null): string | 
 
   if ("ServerGone" in outcome) {
     return `The MCP server ${outcome.ServerGone} is no longer declared, so your response wasn't stored. Remove it, or declare it again in settings.`;
+  }
+  if ("RepoGone" in outcome) {
+    return `The ${outcome.RepoGone} repo is no longer registered, so your response wasn't stored. Remove it, or register it again.`;
+  }
+  if ("Companion" in outcome) {
+    const { repo, why } = outcome.Companion;
+    const reason =
+      typeof why === "object"
+        ? otherAuthor({ companion: repo, ...why.OtherAuthor })
+        : COMPANION_REFUSAL[why];
+    return `The ${repo} repo can't be added, so your response wasn't stored. ${reason} Remove it to send your answers without it.`;
   }
 
   return `This response doesn't resolve the question set: ${outcome.Rejected.join("; ")}`;

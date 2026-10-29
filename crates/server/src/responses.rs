@@ -71,7 +71,36 @@ pub(crate) async fn submit_response(
         }
     }
 
-    match store::submit_response(&state.pool, &state.settlements, id, &response).await {
+    // And every git question a picked companion turns on — see
+    // [`crate::answer_additions::readied`].
+    let alongside = match crate::answer_additions::readied(&state, id).await {
+        Ok(crate::answer_additions::Readied::Ready(alongside)) => alongside,
+        Ok(crate::answer_additions::Readied::RepoGone(name)) => {
+            return yaml(
+                StatusCode::CONFLICT,
+                &ApiError::new(format!(
+                    "the repo {name} added on Question Set {id} is no longer registered"
+                )),
+            );
+        }
+        Ok(crate::answer_additions::Readied::Refused { repo, why }) => {
+            return companion_refused(id, &repo, &why);
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "asking about a Set's companions failed");
+            return unavailable("the Response could not be taken");
+        }
+    };
+
+    let submission = match crate::answer_additions::submit(&state, id, alongside, &response).await {
+        Ok(crate::answer_additions::Answering::Stored(submission)) => Ok(submission),
+        Ok(crate::answer_additions::Answering::Refused { repo, why }) => {
+            return companion_refused(id, &repo, &why);
+        }
+        Err(error) => Err(error),
+    };
+
+    match submission {
         Ok(Submission::Accepted(taken)) => {
             crate::conversations::settle_a_proposal(&state, id, taken.proposed).await;
 
@@ -98,6 +127,21 @@ pub(crate) async fn submit_response(
             unavailable("the Response could not be taken")
         }
     }
+}
+
+/// A companion picked on the Set that cannot go in as it was picked: a 409
+/// naming the repo and the Steer's reason.
+fn companion_refused(
+    id: i64,
+    repo: &str,
+    why: &verkstead_render::SteerCompanionRefusal,
+) -> HttpResponse {
+    yaml(
+        StatusCode::CONFLICT,
+        &ApiError::new(format!(
+            "the repo {repo} added on Question Set {id} cannot be checked out: {why:?}"
+        )),
+    )
 }
 
 /// How long a wait is held open when the client does not say.

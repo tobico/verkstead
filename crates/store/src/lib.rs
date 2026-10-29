@@ -477,6 +477,21 @@ pub async fn submit_response(
     set_id: i64,
     response: &Response,
 ) -> Result<Submission> {
+    submit_response_with_checkouts(pool, settlements, set_id, response, &[]).await
+}
+
+/// [`submit_response`], with where the server checked out the companions the
+/// Set adds, made before it is called and recorded as the Response is stored —
+/// see [`insert_response_with_checkouts`]. Anything but
+/// [`Submission::Accepted`] recorded none of them, and they are the caller's
+/// to take back.
+pub async fn submit_response_with_checkouts(
+    pool: &SqlitePool,
+    settlements: &Settlements,
+    set_id: i64,
+    response: &Response,
+    checkouts: &[CompanionWorktree],
+) -> Result<Submission> {
     let Some(stored) = load_set(pool, set_id).await? else {
         return Ok(Submission::NoSuchSet);
     };
@@ -506,7 +521,8 @@ pub async fn submit_response(
         return Ok(Submission::Invalid(invalid));
     }
 
-    let Some(accepted) = insert_response(pool, set_id, response).await? else {
+    let Some(accepted) = insert_response_with_checkouts(pool, set_id, response, checkouts).await?
+    else {
         // The insert refuses both ways a Set can already be settled, so which of
         // the two it was is read back rather than assumed.
         return Ok(match load_lock(pool, set_id).await? {
@@ -1058,6 +1074,18 @@ pub async fn insert_response(
     set_id: i64,
     response: &Response,
 ) -> Result<Option<ResponseAccepted>> {
+    insert_response_with_checkouts(pool, set_id, response, &[]).await
+}
+
+/// [`insert_response`], with where the server checked out the companions the
+/// Set adds — recorded in the same transaction that puts them on the
+/// Conversation. See [`set_additions::apply`].
+pub async fn insert_response_with_checkouts(
+    pool: &SqlitePool,
+    set_id: i64,
+    response: &Response,
+    checkouts: &[CompanionWorktree],
+) -> Result<Option<ResponseAccepted>> {
     let ended = response.nothing_else;
     let body = serde_json::to_string(&Response {
         nothing_else: false,
@@ -1093,7 +1121,7 @@ pub async fn insert_response(
     // And what the human added with it, for the same reason: the Answers were
     // given on the strength of it. See [`set_additions::apply`].
     if row.is_some() {
-        set_additions::apply(&mut tx, set_id).await?;
+        set_additions::apply(&mut tx, set_id, checkouts).await?;
     }
 
     tx.commit()

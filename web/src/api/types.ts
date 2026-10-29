@@ -7412,7 +7412,7 @@ export type StoreView = { name: string, eviction: Eviction, };
 /**
  * What became of the human's Response.
  */
-export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Locked" | { "Rejected": Array<string> } | { "ServerGone": string };
+export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Locked" | { "Rejected": Array<string> } | { "ServerGone": string } | { "RepoGone": string } | { "Companion": { repo: string, why: SteerCompanionRefusal, } };
 
 /**
  * What became of a device asking to be notified.

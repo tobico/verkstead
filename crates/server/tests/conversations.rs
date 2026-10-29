@@ -15513,3 +15513,297 @@ async fn steering_into_investigating_with_nothing_to_find_out_is_refused_by_name
         "and nothing on the record says it was steered",
     );
 }
+
+/// Ask a one-Question Set on the Conversation, as a waiting agent would.
+async fn asking_once(pool: &SqlitePool, id: i64) -> i64 {
+    let set = verkstead_schema::QuestionSet::from_yaml(
+        "title: the counter\nquestions:\n  - label: Q1\n    text: where does it live?\n",
+    )
+    .expect("the Set parses");
+
+    store::ask(pool, id, &set, store::Ask::Blocking)
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from")
+        .id
+}
+
+/// Pick something on the Set's Q1 menu, as the sheet does.
+async fn adding_on(app: &Router, set: i64, pick: serde_json::Value) {
+    let made: verkstead_render::AdditionMade = post(
+        app,
+        &format!("/api/ui/sets/{set}/additions"),
+        &serde_json::json!({ "label": "Q1", "pick": pick }),
+    )
+    .await;
+
+    assert!(
+        matches!(made, verkstead_render::AdditionMade::Added { .. }),
+        "{made:?}"
+    );
+}
+
+/// A Repo picked to go in beside the work.
+fn joining(repo_id: i64, mode: &str, branch: Option<&str>) -> serde_json::Value {
+    serde_json::json!({ "Companion": {
+        "repo_id": repo_id, "mode": mode, "base_ref": null, "branch": branch,
+    } })
+}
+
+/// Answer Q1, and hand back what the Submit said.
+async fn answering(app: &Router, set: i64) -> verkstead_render::Submitted {
+    post(
+        app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({ "answers": [{ "label": "Q1", "free_text": "in Redis" }] }),
+    )
+    .await
+}
+
+/// The Response as the agent that asked is handed it.
+async fn handed(app: &Router, id: i64, set: i64) -> verkstead_schema::Response {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .uri(format!(
+                "/conversations/{id}/api/v1/sets/{set}/response?hold=0"
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    verkstead_schema::Response::from_yaml(&body).expect("the Response is YAML")
+}
+
+/// What the Timeline draws under the Set's Event.
+fn added_under(view: &ConversationView, set: i64) -> Vec<verkstead_render::Added> {
+    view.timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::QuestionSet(asked) if asked.set_id == set => Some(asked.added.clone()),
+            _ => None,
+        })
+        .expect("the Set is on the Timeline")
+}
+
+/// Answering a Set with Repos picked on it checks each out the way a steer
+/// does — detached where read-only, on a branch of its own where read-write —
+/// puts them on the Conversation with where they went, and says so on the
+/// Timeline and to the agent (ADR-0028).
+#[tokio::test]
+async fn an_answer_puts_a_companion_in_and_checks_it_out() {
+    let (elsewhere, dir, app, pool, repo_id) = workbench_and_pool().await;
+    let reading = second_repo(&app, elsewhere.path(), "askance").await;
+    let writing = second_repo(&app, elsewhere.path(), "granit").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let set = asking_once(&pool, id).await;
+    adding_on(&app, set, joining(reading, "ReadOnly", None)).await;
+    adding_on(&app, set, joining(writing, "ReadWrite", None)).await;
+
+    assert!(
+        companions(&app, id).await.is_empty(),
+        "nothing goes on before the Submit"
+    );
+    assert_eq!(
+        answering(&app, set).await,
+        verkstead_render::Submitted::Accepted
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(companions(&app, id).await, ["askance", "granit"]);
+
+    let askance = elsewhere.path().join("askance");
+    let detached = checked_out(&view, "askance");
+    assert_eq!(companion(&view, "askance").mode, CompanionMode::ReadOnly);
+    assert_eq!(
+        git(&detached, &["rev-parse", "HEAD"]).trim(),
+        git(&askance, &["rev-parse", "HEAD"]).trim(),
+    );
+
+    let granit = elsewhere.path().join("granit");
+    let worked = checked_out(&view, "granit");
+    assert_eq!(companion(&view, "granit").mode, CompanionMode::ReadWrite);
+    assert_eq!(
+        companion(&view, "granit").branch,
+        "",
+        "left to mirror on the record"
+    );
+    assert_eq!(
+        git(&worked, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        view.branch,
+    );
+
+    for path in [&detached, &worked] {
+        assert_eq!(
+            path.parent(),
+            Some(dir.path().join("worktrees").as_path()),
+            "{path:?}",
+        );
+    }
+    assert!(worktrees(&askance).contains(&detached.canonicalize().unwrap()));
+    assert!(worktrees(&granit).contains(&worked.canonicalize().unwrap()));
+
+    // The line under the Set's Event names each with its mode, and the
+    // read-write one with the branch mirroring cut.
+    assert_eq!(
+        added_under(&view, set),
+        [
+            verkstead_render::Added::Companion {
+                repo_id: reading,
+                name: Some("askance".to_owned()),
+                mode: CompanionMode::ReadOnly,
+                base_ref: None,
+                branch: None,
+            },
+            verkstead_render::Added::Companion {
+                repo_id: writing,
+                name: Some("granit".to_owned()),
+                mode: CompanionMode::ReadWrite,
+                base_ref: None,
+                branch: Some(view.branch.clone()),
+            },
+        ],
+    );
+
+    // And the agent is told where each is and how far in it may reach.
+    let response = handed(&app, id, set).await;
+    let said = &response.answers[0].added;
+    assert_eq!(said.len(), 2, "{said:?}");
+    assert!(
+        said[0].contains(&detached.display().to_string()) && said[0].contains("read-only"),
+        "{said:?}"
+    );
+    assert!(
+        said[1].contains(&worked.display().to_string())
+            && said[1].contains("read-write")
+            && said[1].contains(&view.branch),
+        "{said:?}"
+    );
+}
+
+/// Opening a read-only Companion up from an Answer cuts its branch off the
+/// base and replaces the detached checkout, as the Steer's upgrade does.
+#[tokio::test]
+async fn an_answer_opens_a_companion_up() {
+    let (elsewhere, _dir, app, pool, repo_id) = workbench_and_pool().await;
+    let reading = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    add_companion(&app, id, reading).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let detached = checked_out(&opened(&app, id).await, "askance");
+
+    let set = asking_once(&pool, id).await;
+    adding_on(
+        &app,
+        set,
+        serde_json::json!({ "OpenedUp": {
+            "repo_id": reading, "base_ref": null, "branch": "counting",
+        } }),
+    )
+    .await;
+
+    assert_eq!(
+        answering(&app, set).await,
+        verkstead_render::Submitted::Accepted
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(companion(&view, "askance").mode, CompanionMode::ReadWrite);
+    assert_eq!(companion(&view, "askance").branch, "counting");
+
+    let worked = checked_out(&view, "askance");
+    assert_ne!(worked, detached);
+    assert!(!detached.exists(), "the detached checkout is replaced");
+    assert_eq!(
+        git(&worked, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        "counting",
+    );
+
+    assert_eq!(
+        added_under(&view, set),
+        [verkstead_render::Added::OpenedUp {
+            repo_id: reading,
+            name: Some("askance".to_owned()),
+            base_ref: None,
+            branch: Some("counting".to_owned()),
+        }],
+    );
+
+    let said = &handed(&app, id, set).await.answers[0].added;
+    assert!(
+        said[0].contains("counting") && said[0].contains(&worked.display().to_string()),
+        "{said:?}"
+    );
+}
+
+/// A fetch that fails, a branch already there, or a Repo no longer registered
+/// refuses the Submit by name — nothing made, nothing stored, and the Set
+/// still waiting for the Answers.
+#[tokio::test]
+async fn a_companion_an_answer_cannot_deliver_refuses_the_submit_by_name() {
+    for why in [
+        Some(SteerCompanionRefusal::FetchFailed),
+        Some(SteerCompanionRefusal::BranchExists),
+        None,
+    ] {
+        let (elsewhere, dir, app, pool, repo_id) = workbench_and_pool().await;
+        let adding = second_repo(&app, elsewhere.path(), "askance").await;
+        let id = ready(&app, elsewhere.path(), repo_id).await;
+        assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+        let askance = elsewhere.path().join("askance");
+        let set = asking_once(&pool, id).await;
+        adding_on(&app, set, joining(adding, "ReadWrite", Some("counting"))).await;
+
+        let expected = match &why {
+            Some(SteerCompanionRefusal::FetchFailed) => {
+                let nowhere = dir.path().join("no-such-remote");
+                git(
+                    &askance,
+                    &["remote", "add", "origin", &nowhere.to_string_lossy()],
+                );
+                verkstead_render::Submitted::Companion {
+                    repo: "askance".to_owned(),
+                    why: SteerCompanionRefusal::FetchFailed,
+                }
+            }
+            Some(_) => {
+                git(&askance, &["branch", "counting"]);
+                verkstead_render::Submitted::Companion {
+                    repo: "askance".to_owned(),
+                    why: SteerCompanionRefusal::BranchExists,
+                }
+            }
+            None => {
+                let _: serde_json::Value = post(
+                    &app,
+                    &format!("/api/ui/repos/{adding}/remove"),
+                    &serde_json::json!({}),
+                )
+                .await;
+                verkstead_render::Submitted::RepoGone("askance".to_owned())
+            }
+        };
+
+        assert_eq!(answering(&app, set).await, expected, "{why:?}");
+
+        assert!(
+            store::settlement(&pool, set).await.unwrap().is_none(),
+            "nothing stored: {why:?}"
+        );
+        assert!(companions(&app, id).await.is_empty(), "{why:?}");
+        assert_eq!(
+            worktrees(&askance).len(),
+            1,
+            "only the repository itself: {why:?}"
+        );
+        if why.is_none() {
+            assert!(!has_branch(&askance, "counting"), "no branch cut");
+        }
+    }
+}

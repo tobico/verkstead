@@ -25,7 +25,7 @@ is the Deferred Ask's own rule and was accepted as the intermediate state.
 - [x] 01: The menu, and a pending MCP server — [details](01-menu-and-pending-server.md)
 - [x] 02: Pending companions and device ticks — [details](02-pending-companions-and-devices.md)
 - [x] 03: Submit applies servers and ticks, and writes the record — [details](03-submit-applies-servers-and-ticks.md)
-- [ ] 04: Submit applies companions — [details](04-submit-applies-companions.md)
+- [x] 04: Submit applies companions — [details](04-submit-applies-companions.md)
 - [ ] 05: The restart — [details](05-the-restart.md)
 - [ ] 06: A set-level file — [details](06-set-level-file.md)
 - [ ] 07: Crossing on transfer, and the words — [details](07-crossing-and-the-words.md)

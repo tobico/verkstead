@@ -1127,14 +1127,32 @@ async fn submit_response(
         }
     }
 
-    let submission =
-        match store::submit_response(&state.pool, &state.settlements, id, &response).await {
-            Ok(submission) => submission,
-            Err(error) => {
-                tracing::error!(error = ?error, set_id = id, "taking a Response failed");
-                return unavailable("The response couldn't be taken.");
-            }
-        };
+    // And every git question a picked companion turns on, still before
+    // anything is stored or made. See [`crate::answer_additions::readied`].
+    let alongside = match crate::answer_additions::readied(&state, id).await {
+        Ok(crate::answer_additions::Readied::Ready(alongside)) => alongside,
+        Ok(crate::answer_additions::Readied::RepoGone(name)) => {
+            return Json(Submitted::RepoGone(name)).into_response();
+        }
+        Ok(crate::answer_additions::Readied::Refused { repo, why }) => {
+            return Json(Submitted::Companion { repo, why }).into_response();
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "asking about a Set's companions failed");
+            return unavailable("The response couldn't be taken.");
+        }
+    };
+
+    let submission = match crate::answer_additions::submit(&state, id, alongside, &response).await {
+        Ok(crate::answer_additions::Answering::Stored(submission)) => submission,
+        Ok(crate::answer_additions::Answering::Refused { repo, why }) => {
+            return Json(Submitted::Companion { repo, why }).into_response();
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "taking a Response failed");
+            return unavailable("The response couldn't be taken.");
+        }
+    };
 
     Json(match submission {
         store::Submission::Accepted(taken) => {

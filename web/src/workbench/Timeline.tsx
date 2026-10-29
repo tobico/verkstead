@@ -2395,13 +2395,17 @@ export function addedWith(added: Added[]): string | null {
   );
   const repos = added.flatMap((one) => {
     if ("Companion" in one) {
-      const { name, repo_id, mode } = one.Companion;
+      const { name, repo_id, mode, branch } = one.Companion;
       const called = name ?? `repo ${repo_id}`;
-      return [mode === "ReadOnly" ? `${called} read-only` : `${called} read-write`];
+      if (mode === "ReadOnly") {
+        return [`${called} read-only`];
+      }
+      return [`${called} read-write${branch === null ? "" : ` on ${branch}`}`];
     }
     if ("OpenedUp" in one) {
-      const { name, repo_id } = one.OpenedUp;
-      return [`${name ?? `repo ${repo_id}`} opened up to read-write`];
+      const { name, repo_id, branch } = one.OpenedUp;
+      const on = branch === null ? "" : ` on ${branch}`;
+      return [`${name ?? `repo ${repo_id}`} opened up to read-write${on}`];
     }
     return [];
   });

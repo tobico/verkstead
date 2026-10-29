@@ -15991,6 +15991,109 @@ async fn a_companion_a_steer_opened_up_is_one_the_next_session_writes_in() {
     );
 }
 
+/// And a companion opened up from an Answer is one the next session launched
+/// may write in, and is told about as read-write: the same end to end as the
+/// steer's, with the upgrade made on a Question Set rather than on the form
+/// (ADR-0028). The grilling session keeps the read-only bind it started with;
+/// what the Answer changes is the record the next launch is built from.
+#[tokio::test]
+async fn a_companion_an_answer_opened_up_is_one_the_next_session_writes_in() {
+    let fixture = grilling_alongside(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'the grilling is running\n'
+            sleep 300
+            ;;
+        *)
+            printf 'prompt=%s\n' "$2"
+            cd ../askance-*
+            printf 'the other half\n' > halves.md
+            git add halves.md
+            git commit --quiet -m 'feat: the other half'
+            : > /tmp/verkstead/done
+            printf 'committed in the companion\n'
+            sleep 300
+            ;;
+        esac
+        "#,
+        "askance",
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let repo_id = fixture.view().await.companions[0].repo.id;
+
+    let set = fixture.ask(ASKED_ALREADY).await;
+    let made: verkstead_render::AdditionMade = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/additions"),
+        &serde_json::json!({
+            "label": "Q1",
+            "pick": { "OpenedUp": { "repo_id": repo_id, "base_ref": null, "branch": null } },
+        }),
+    )
+    .await;
+    assert!(
+        matches!(made, verkstead_render::AdditionMade::Added { .. }),
+        "{made:?}"
+    );
+
+    let answered: Submitted = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({ "answers": [{ "label": "Q1", "selected": 1 }] }),
+    )
+    .await;
+    assert_eq!(answered, Submitted::Accepted);
+    fixture.asked_nothing();
+
+    assert_eq!(
+        fixture.view().await.companions[0].mode,
+        CompanionMode::ReadWrite,
+        "the Answer opened it up",
+    );
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture.steer_instructed("write the other half").await,
+        ConversationSteered::Steered,
+    );
+
+    let landed = fixture
+        .until(|view| {
+            commits(view)
+                .into_iter()
+                .find(|commit| commit.subject == "feat: the other half")
+                .cloned()
+        })
+        .await;
+
+    assert_eq!(landed.repo, Some("askance".to_owned()));
+
+    let event = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("# Companion repositories") && said.contains("`askance` at `"),
+        "the next session is told it is there: {said:?}"
+    );
+    assert!(
+        said.contains("read-write"),
+        "and how far in it may reach: {said:?}"
+    );
+}
+
 /// A Conversation with a read-only companion has one branch being swept, not
 /// two: that checkout is detached and bound read-only, so there is nothing there
 /// for a commit to land on — and the Conversation's own commits draw exactly as

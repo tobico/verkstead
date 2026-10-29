@@ -393,6 +393,38 @@ describe("the timeline line under an answered set", () => {
   });
 });
 
+describe("the timeline line under a set that added repos", () => {
+  it("names each with its mode, and a read-write one with its branch", () => {
+    expect(
+      addedWith([
+        {
+          Companion: {
+            repo_id: 7,
+            name: "docs",
+            mode: "ReadWrite",
+            base_ref: null,
+            branch: "limits",
+          },
+        },
+        {
+          Companion: {
+            repo_id: 8,
+            name: "infra",
+            mode: "ReadOnly",
+            base_ref: null,
+            branch: null,
+          },
+        },
+        {
+          OpenedUp: { repo_id: 9, name: "website", base_ref: null, branch: "counting" },
+        },
+      ]),
+    ).toBe(
+      "You added docs read-write on limits, infra read-only and website opened up to read-write on counting.",
+    );
+  });
+});
+
 /// A registered repo, as the Repo list and the set's offer carry one.
 function repo(id: number, name: string): RepoEntry {
   return {

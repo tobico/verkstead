@@ -40,6 +40,18 @@ pub enum Submitted {
     /// by this name: nothing was stored, and the sheet keeps the Answers with
     /// the chip there to take off (ADR-0028).
     ServerGone(String),
+
+    /// A repo picked on the Set is no longer registered, by this name: refused
+    /// the way [`Self::ServerGone`] is.
+    RepoGone(String),
+
+    /// A repo picked on the Set can't be checked out, or opened up, as it was
+    /// picked — by name, with the Steer's own reason. Nothing was made and
+    /// nothing stored, and the sheet keeps the Answers (ADR-0028).
+    Companion {
+        repo: String,
+        why: crate::SteerCompanionRefusal,
+    },
 }
 
 /// What became of the human closing a Set unanswered.
