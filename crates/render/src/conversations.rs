@@ -2801,6 +2801,12 @@ pub struct QuestionSetEvent {
     /// The same verdict the Set's own sheet carries, from the same registry of
     /// held waits — this is a Timeline the human answers from.
     pub standing: Standing,
+
+    /// What answering it put on the Conversation, in the order it was picked:
+    /// the line under the Set's Event that says so, in the shape a steer's line
+    /// takes (ADR-0028). Empty for nearly every Set, and for any that has not
+    /// been answered.
+    pub added: Vec<Added>,
 }
 
 /// A Question Set the Timeline cannot draw a table for, because this build
@@ -3274,6 +3280,7 @@ pub fn question_set_event(
     set_id: i64,
     set: &verkstead_schema::QuestionSet,
     standing: Standing,
+    added: Vec<Added>,
 ) -> TimelineEvent {
     let response = match &standing {
         Standing::Answered(answered) => Some(&answered.response),
@@ -3287,6 +3294,7 @@ pub fn question_set_event(
         title: set.title.clone(),
         rows: asked(set, response),
         standing,
+        added,
     })
 }
 

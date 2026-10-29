@@ -35,6 +35,11 @@ pub enum Submitted {
     /// do, so this is a bug rather than something the human can fix — but it
     /// is carried back and shown rather than swallowed.
     Rejected(Vec<String>),
+
+    /// An MCP server picked on the Set is no longer declared in the settings,
+    /// by this name: nothing was stored, and the sheet keeps the Answers with
+    /// the chip there to take off (ADR-0028).
+    ServerGone(String),
 }
 
 /// What became of the human closing a Set unanswered.

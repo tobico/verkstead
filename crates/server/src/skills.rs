@@ -1311,7 +1311,7 @@ pub(crate) fn served(prompt: &str, servers: &[String], agent: store::AgentType) 
 /// - Grok Build (1.0.34) drops the prefix: `<server>__<tool>`, which is the
 ///   name its `use_tool` takes.
 /// - OpenCode (1.18.31) joins the two with one underscore: `<server>_<tool>`.
-fn tools_named(agent: store::AgentType) -> &'static str {
+pub(crate) fn tools_named(agent: store::AgentType) -> &'static str {
     match agent {
         store::AgentType::Claude | store::AgentType::Codex => "mcp__<server>__<tool>",
         store::AgentType::Grok => "<server>__<tool>",

@@ -1649,6 +1649,185 @@ mod additions {
         assert_eq!(unpick(&app, 9_999, 1).await, AdditionRemoved::NoSuchSet);
     }
 
+    /// Answer the Set the way the sheet does, and hand back what the Submit
+    /// said.
+    async fn submitting(app: &Router, set: i64) -> serde_json::Value {
+        post(
+            app,
+            &format!("/api/ui/sets/{set}/response"),
+            &serde_json::json!({
+                "answers": [
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2a", "free_text": "a minute" },
+                ],
+            }),
+        )
+        .await
+    }
+
+    /// The Response as the waiting agent is handed it, which is what
+    /// `verkstead ask` and `verkstead answers` both print.
+    async fn handed(app: &Router, id: i64, set: i64) -> verkstead_schema::Response {
+        let (status, body) = fetch(
+            app,
+            Request::builder()
+                .uri(format!(
+                    "/conversations/{id}/api/v1/sets/{set}/response?hold=0"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        verkstead_schema::Response::from_yaml(&body).expect("the Response is YAML")
+    }
+
+    /// What the Timeline draws under the Set's Event.
+    async fn under_the_event(app: &Router, id: i64, set: i64) -> Vec<Added> {
+        let view: ConversationView = get(app, &format!("/api/ui/conversations/{id}")).await;
+
+        view.timeline
+            .into_iter()
+            .find_map(|event| match event {
+                verkstead_render::TimelineEvent::QuestionSet(asked) if asked.set_id == set => {
+                    Some(asked.added)
+                }
+                _ => None,
+            })
+            .expect("the Set is on the Timeline")
+    }
+
+    /// The Submit puts the server on the Conversation, so the next launch is
+    /// written with it; the record says it was applied, the Timeline says it
+    /// under the Set, and the agent is told with its Answer.
+    #[tokio::test]
+    async fn submitting_attaches_a_picked_server() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs", "tickets"]);
+        store::set_state(&pool, id, store::Lifecycle::Implementing)
+            .await
+            .unwrap();
+        let set = asked(&pool, id).await;
+
+        picked(pick(&app, set, Some("Q1"), "docs").await);
+        picked(pick(&app, set, None, "tickets").await);
+
+        assert_eq!(submitting(&app, set).await, serde_json::json!("Accepted"));
+
+        assert_eq!(
+            store::load_conversation(&pool, id)
+                .await
+                .unwrap()
+                .unwrap()
+                .mcp_servers,
+            ["docs", "tickets"],
+            "the record a launch is written from holds both, though the work had started",
+        );
+
+        let states: Vec<AdditionState> = on_the_set(&app, set)
+            .await
+            .0
+            .into_iter()
+            .map(|addition| addition.state)
+            .collect();
+        assert_eq!(states, [AdditionState::Applied, AdditionState::Applied]);
+
+        assert_eq!(
+            under_the_event(&app, id, set).await,
+            [server("docs"), server("tickets")],
+        );
+
+        let response = handed(&app, id, set).await;
+        let q1 = &response.answers[0];
+        assert_eq!(q1.added.len(), 1, "{q1:?}");
+        assert!(q1.added[0].contains("`docs`"), "{q1:?}");
+        assert!(response.answers[1].added.is_empty());
+        assert_eq!(response.added.len(), 1, "{response:?}");
+        assert!(response.added[0].contains("`tickets`"), "{response:?}");
+    }
+
+    /// A server whose declaration went after it was picked refuses the Submit
+    /// by name, and nothing is stored or applied: the Set still waits, and the
+    /// chip is still the human's to take off.
+    #[tokio::test]
+    async fn a_server_no_longer_declared_refuses_the_submit() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+        let set = asked(&pool, id).await;
+
+        let put = picked(pick(&app, set, Some("Q1"), "docs").await);
+        declaring(&dir, &[]);
+
+        assert_eq!(
+            submitting(&app, set).await,
+            serde_json::json!({ "ServerGone": "docs" }),
+        );
+        assert!(store::settlement(&pool, set).await.unwrap().is_none());
+        assert!(
+            store::load_conversation(&pool, id)
+                .await
+                .unwrap()
+                .unwrap()
+                .mcp_servers
+                .is_empty()
+        );
+
+        assert_eq!(unpick(&app, set, put.id).await, AdditionRemoved::Removed);
+        assert_eq!(submitting(&app, set).await, serde_json::json!("Accepted"));
+    }
+
+    /// A Set locked unanswered applies nothing, and its record draws the pick
+    /// struck.
+    #[tokio::test]
+    async fn a_locked_set_leaves_its_picks_struck() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+        let set = asked(&pool, id).await;
+
+        picked(pick(&app, set, Some("Q1"), "docs").await);
+
+        let _: serde_json::Value = post(
+            &app,
+            &format!("/api/ui/sets/{set}/lock"),
+            &serde_json::json!({}),
+        )
+        .await;
+
+        assert_eq!(
+            on_the_set(&app, set).await.0[0].state,
+            AdditionState::Struck
+        );
+        assert!(
+            store::load_conversation(&pool, id)
+                .await
+                .unwrap()
+                .unwrap()
+                .mcp_servers
+                .is_empty()
+        );
+        assert!(under_the_event(&app, id, set).await.is_empty());
+    }
+
+    /// And one whose Conversation was closed before anybody answered it the
+    /// same way.
+    #[tokio::test]
+    async fn a_closed_conversations_waiting_set_draws_its_picks_struck() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+        let set = asked(&pool, id).await;
+
+        picked(pick(&app, set, Some("Q1"), "docs").await);
+        store::set_state(&pool, id, store::Lifecycle::Closed)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            on_the_set(&app, set).await.0[0].state,
+            AdditionState::Struck
+        );
+    }
+
     /// Pick anything at all, as the menu's other rows send it.
     async fn picking(
         app: &Router,
@@ -2033,6 +2212,36 @@ mod additions {
             )
             .await,
             AdditionMade::NotAMember,
+        );
+    }
+
+    /// A device ticked on the Set is permitted by the Submit, so `verkstead
+    /// transfer` may move the work there, and the agent is told so by name.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn submitting_permits_a_ticked_device() {
+        let (_dir, app, pool, id, set) = clustered().await;
+
+        picked(picking(&app, set, Some("Q1"), device(LAPTOP)).await);
+        assert_eq!(submitting(&app, set).await, serde_json::json!("Accepted"));
+
+        assert_eq!(store::permitted_devices(&pool, id).await.unwrap(), [LAPTOP]);
+        assert_eq!(
+            under_the_event(&app, id, set).await,
+            [Added::Device {
+                device: LAPTOP.to_owned(),
+                name: Some("the-laptop".to_owned()),
+            }],
+        );
+
+        let response = handed(&app, id, set).await;
+        let said = &response.answers[0].added;
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].contains("the-laptop"), "{said:?}");
+        assert!(said[0].contains(LAPTOP), "{said:?}");
+        assert!(
+            said[0].contains("verkstead transfer the-laptop"),
+            "{said:?}"
         );
     }
 }

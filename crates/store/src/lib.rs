@@ -188,10 +188,10 @@ pub use repos::{
 };
 pub use session_endings::{Ended, end_session, session_ending};
 pub use session_names::{continued_as, found_as, session_id, session_ids};
-pub use session_pairings::RanUnder;
+pub use session_pairings::{RanUnder, newest_agent};
 pub use set_additions::{
-    AddingToSet, Addition, AdditionState, SetAddition, TakingOff, add_to_set, set_additions,
-    take_off_set,
+    AddingToSet, Addition, AdditionState, SetAddition, TakingOff, add_to_set,
+    conversation_additions, set_additions, take_off_set,
 };
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
 pub use slices::{
@@ -1088,6 +1088,12 @@ pub async fn insert_response(
     // refused above, and their mark is refused with it.
     if row.is_some() && ended {
         endings::mark(&mut tx, set_id).await?;
+    }
+
+    // And what the human added with it, for the same reason: the Answers were
+    // given on the strength of it. See [`set_additions::apply`].
+    if row.is_some() {
+        set_additions::apply(&mut tx, set_id).await?;
     }
 
     tx.commit()

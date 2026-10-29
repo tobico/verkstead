@@ -305,9 +305,10 @@ export function Answering(props: {
       submitResponse(device(), props.id, sending),
     onSuccess: (outcome: Submitted) => {
       if (typeof outcome !== "string") {
-        // Rejected by the grammar. The page builds Responses that resolve the
-        // Set, so that is a bug here rather than anything the human did — and
-        // their draft stands, because it is the only copy of what they wrote.
+        // Rejected by the grammar, or for a server picked on it that has gone
+        // from the settings since. The first is a bug here and the second the
+        // human's to put right with the chip's × — either way their draft
+        // stands, because it is the only copy of what they wrote.
         return;
       }
 
@@ -1566,6 +1567,10 @@ function refused(outcome: Submitted | undefined, error: Error | null): string | 
   }
   if (outcome === "Locked") {
     return "This question set was locked unanswered, so your response wasn't stored.";
+  }
+
+  if ("ServerGone" in outcome) {
+    return `The MCP server ${outcome.ServerGone} is no longer declared, so your response wasn't stored. Remove it, or declare it again in settings.`;
   }
 
   return `This response doesn't resolve the question set: ${outcome.Rejected.join("; ")}`;

@@ -249,6 +249,7 @@ fn answered(label: &str, selected: Option<u32>) -> Answer {
         free_text: None,
         unanswered: false,
         attachments: Vec::new(),
+        added: Vec::new(),
     }
 }
 
@@ -259,6 +260,7 @@ fn left_open(label: &str) -> Answer {
         free_text: None,
         unanswered: true,
         attachments: Vec::new(),
+        added: Vec::new(),
     }
 }
 
@@ -270,6 +272,7 @@ fn confirmed_with_three_left_open() -> Response {
         comment: None,
         direction: None,
         nothing_else: false,
+        added: Vec::new(),
     }
 }
 
@@ -281,6 +284,7 @@ fn decided() -> Response {
         comment: Some("Neither — why is this not just a cache in front?".to_owned()),
         direction: None,
         nothing_else: false,
+        added: Vec::new(),
     }
 }
 
@@ -660,6 +664,7 @@ async fn a_response_that_misses_a_question_comes_back_naming_it() {
         comment: None,
         direction: None,
         nothing_else: false,
+        added: Vec::new(),
     };
 
     let outcome: Submitted = post(

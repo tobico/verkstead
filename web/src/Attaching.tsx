@@ -145,6 +145,11 @@ export type Chip = {
   /// registered repo, no linked device — which is what the chip says under it.
   gone?: boolean;
 
+  /// Whether it was picked and never put on: an addition on a question set
+  /// that was locked, or whose conversation was closed, before anybody
+  /// answered it (ADR-0028). Drawn struck through and said in words.
+  struck?: boolean;
+
   /// Taking it off, where that is something that can be done at all — nothing
   /// past a freeze, exactly as a pill's.
   remove?: () => void;
@@ -590,7 +595,10 @@ function ServerChip(props: { chip: Chip }): JSX.Element {
   return (
     <li
       class={`${styles.attachment} ${styles.server}`}
-      classList={{ [styles.missing!]: props.chip.gone }}
+      classList={{
+        [styles.missing!]: props.chip.gone,
+        [styles.struck!]: props.chip.struck,
+      }}
     >
       {/* What kind of thing it is, said as a shape rather than as a word: the
           row is read across, and a chip that spelled out what it was would be
@@ -608,6 +616,12 @@ function ServerChip(props: { chip: Chip }): JSX.Element {
           nobody could look up. */}
       <Show when={props.chip.gone}>
         <span class={styles.attachmentSize}>{kind().gone}</span>
+      </Show>
+
+      {/* And one that was never put on, said in words as well as struck: a
+          line through a name is a mark somebody has to know how to read. */}
+      <Show when={props.chip.struck}>
+        <span class={styles.attachmentSize}>not added</span>
       </Show>
 
       <Show when={props.chip.remove !== undefined}>

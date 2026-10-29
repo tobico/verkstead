@@ -791,6 +791,14 @@ describe("a submit that did not land", () => {
     );
   });
 
+  it("names a server picked on the set that is no longer declared", async () => {
+    const page = await refused({ ServerGone: "docs" });
+
+    expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
+      "The MCP server docs is no longer declared",
+    );
+  });
+
   it("carries back what the server said the Response failed to resolve", async () => {
     const page = await refused({ Rejected: ["Q2b is unaccounted for"] });
 

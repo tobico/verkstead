@@ -388,6 +388,60 @@ pub async fn take_off_set(pool: &SqlitePool, set_id: i64, id: i64) -> Result<Tak
     Ok(TakingOff::TakenOff)
 }
 
+/// Put a Set's pending servers and device ticks on its Conversation, inside the
+/// transaction that stores its Response — so the Answers and what came with
+/// them land together or not at all, and a Set is applied once because it is
+/// answered once.
+///
+/// A server is attached by name although the round is no longer drafting,
+/// which is the second moment ADR-0028 adds beside ADR-0021's; a device is
+/// ticked exactly as *May be transferred to* ticks one. Either may be on the
+/// Conversation already — the Steer, another Set — and that is the state the
+/// pick asked for. Whether the server is still declared is the server's to
+/// have asked before this, the declarations being in a file this crate has
+/// never heard of.
+///
+/// Companions are left pending: what they need is checkouts made, which is not
+/// a row.
+pub(crate) async fn apply(tx: &mut sqlx::SqliteConnection, set_id: i64) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO conversation_mcp_servers (conversation_id, name, attached_at)
+         SELECT conversation_id, server, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         FROM set_additions
+         WHERE set_id = ? AND kind = 'server' AND state = 'pending'
+         ORDER BY id
+         ON CONFLICT (conversation_id, name) DO NOTHING",
+    )
+    .bind(set_id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("attaching the servers added on Question Set {set_id}"))?;
+
+    sqlx::query(
+        "INSERT INTO permitted_devices (conversation_id, device)
+         SELECT conversation_id, device
+         FROM set_additions
+         WHERE set_id = ? AND kind = 'device' AND state = 'pending'
+         ORDER BY id
+         ON CONFLICT (conversation_id, device) DO NOTHING",
+    )
+    .bind(set_id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("permitting the devices added on Question Set {set_id}"))?;
+
+    sqlx::query(
+        "UPDATE set_additions SET state = 'applied'
+         WHERE set_id = ? AND kind IN ('server', 'device') AND state = 'pending'",
+    )
+    .bind(set_id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording what Question Set {set_id} added as applied"))?;
+
+    Ok(())
+}
+
 /// Every addition picked on one Set, in the order they were picked.
 pub async fn set_additions(pool: &SqlitePool, set_id: i64) -> Result<Vec<SetAddition>> {
     let rows: Vec<Row> = sqlx::query_as(&format!(
@@ -397,6 +451,27 @@ pub async fn set_additions(pool: &SqlitePool, set_id: i64) -> Result<Vec<SetAddi
     .fetch_all(pool)
     .await
     .with_context(|| format!("reading the additions picked on Question Set {set_id}"))?;
+
+    rows.into_iter().map(made).collect()
+}
+
+/// Every addition picked on any Set of one Conversation, in the order they were
+/// picked: what the Timeline reads once for all of its Sets.
+pub async fn conversation_additions(
+    pool: &SqlitePool,
+    conversation_id: i64,
+) -> Result<Vec<SetAddition>> {
+    let rows: Vec<Row> = sqlx::query_as(&format!(
+        "SELECT {COLUMNS} FROM set_additions WHERE conversation_id = ? ORDER BY id"
+    ))
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "reading the additions picked on the Question Sets of Conversation {conversation_id}"
+        )
+    })?;
 
     rows.into_iter().map(made).collect()
 }
@@ -675,10 +750,12 @@ mod tests {
                     free_text: Some("in Redis".to_owned()),
                     unanswered: false,
                     attachments: Vec::new(),
+                    added: Vec::new(),
                 }],
                 comment: None,
                 direction: None,
                 nothing_else: false,
+                added: Vec::new(),
             },
         )
         .await
@@ -694,7 +771,14 @@ mod tests {
             take_off_set(&pool, set, docs.id).await.unwrap(),
             TakingOff::Answered
         );
-        assert_eq!(set_additions(&pool, set).await.unwrap(), vec![docs]);
+        // Kept, and applied by the answer that settled the Set.
+        assert_eq!(
+            set_additions(&pool, set).await.unwrap(),
+            vec![SetAddition {
+                state: AdditionState::Applied,
+                ..docs
+            }]
+        );
     }
 
     /// And a locked one the same way, said as the lock.
@@ -739,6 +823,139 @@ mod tests {
                 .await
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    /// The Response a one-Question Set is answered with.
+    fn answer() -> verkstead_schema::Response {
+        verkstead_schema::Response {
+            answers: vec![verkstead_schema::Answer {
+                label: "Q1".to_owned(),
+                selected: None,
+                free_text: Some("in Redis".to_owned()),
+                unanswered: false,
+                attachments: Vec::new(),
+                added: Vec::new(),
+            }],
+            ..verkstead_schema::Response::default()
+        }
+    }
+
+    /// Answering puts the servers and the ticks on the Conversation, in the
+    /// Response's own transaction, and leaves a companion for its checkouts.
+    #[tokio::test]
+    async fn answering_applies_the_servers_and_the_ticks() {
+        let (_dir, pool, conversation, set) = waiting().await;
+        let laptop = "22222222222222222222222222222222";
+
+        add_to_set(&pool, conversation, set, Some("Q1"), &server("docs"))
+            .await
+            .unwrap();
+        add_to_set(
+            &pool,
+            conversation,
+            set,
+            None,
+            &Addition::Device {
+                device: laptop.to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+        add_to_set(
+            &pool,
+            conversation,
+            set,
+            Some("Q1"),
+            &Addition::Companion {
+                repo_id: 1,
+                mode: CompanionMode::ReadOnly,
+                base: None,
+                branch: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        crate::insert_response(&pool, set, &answer())
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            crate::mcp_servers(&pool, conversation).await.unwrap(),
+            vec!["docs".to_owned()]
+        );
+        assert_eq!(
+            crate::permitted_devices(&pool, conversation).await.unwrap(),
+            vec![laptop.to_owned()]
+        );
+
+        let states: Vec<AdditionState> = set_additions(&pool, set)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|one| one.state)
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                AdditionState::Applied,
+                AdditionState::Applied,
+                AdditionState::Pending
+            ]
+        );
+    }
+
+    /// A server the Conversation holds already is the state the pick asked for.
+    #[tokio::test]
+    async fn a_server_on_already_is_applied_all_the_same() {
+        let (_dir, pool, conversation, set) = waiting().await;
+
+        add_to_set(&pool, conversation, set, Some("Q1"), &server("docs"))
+            .await
+            .unwrap();
+        crate::attach_mcp_server(&pool, conversation, "docs")
+            .await
+            .unwrap();
+
+        crate::insert_response(&pool, set, &answer())
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            crate::mcp_servers(&pool, conversation).await.unwrap(),
+            vec!["docs".to_owned()]
+        );
+        assert_eq!(
+            set_additions(&pool, set).await.unwrap()[0].state,
+            AdditionState::Applied
+        );
+    }
+
+    /// A lock puts nothing on: the picks stay as they were, unapplied.
+    #[tokio::test]
+    async fn a_lock_applies_nothing() {
+        let (_dir, pool, conversation, set) = waiting().await;
+
+        add_to_set(&pool, conversation, set, Some("Q1"), &server("docs"))
+            .await
+            .unwrap();
+
+        crate::lock_set(&pool, &crate::Settlements::new(4), set)
+            .await
+            .unwrap();
+
+        assert!(
+            crate::mcp_servers(&pool, conversation)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            set_additions(&pool, set).await.unwrap()[0].state,
+            AdditionState::Pending
         );
     }
 }

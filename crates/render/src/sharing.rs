@@ -771,6 +771,7 @@ mod tests {
             title: title.to_owned(),
             rows: Vec::new(),
             standing: Standing::LockedUnanswered("2026-08-29T11:00:00Z".to_owned()),
+            added: Vec::new(),
         })
     }
 

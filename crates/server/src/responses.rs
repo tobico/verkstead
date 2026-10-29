@@ -52,6 +52,25 @@ pub(crate) async fn submit_response(
         Err(refusal) => return refusal,
     }
 
+    // A server picked on the Set and gone from the settings since refuses the
+    // Response by name, before anything is stored — see
+    // [`crate::answer_additions::undeclared`].
+    match crate::answer_additions::undeclared(&state, id).await {
+        Ok(None) => {}
+        Ok(Some(name)) => {
+            return yaml(
+                StatusCode::CONFLICT,
+                &ApiError::new(format!(
+                    "the MCP server {name} added on Question Set {id} is no longer declared"
+                )),
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading what was picked on a Set failed");
+            return unavailable("the Response could not be taken");
+        }
+    }
+
     match store::submit_response(&state.pool, &state.settlements, id, &response).await {
         Ok(Submission::Accepted(taken)) => {
             crate::conversations::settle_a_proposal(&state, id, taken.proposed).await;
@@ -168,6 +187,19 @@ pub(crate) async fn wait_for_response(
                 // failed is answered as one and the client comes back, and a
                 // Set marked delivered on the way out of a failed read would be
                 // one whose Answers a later prompt then passed over.
+                // And what the human added with it, the same way and for the
+                // same reason. See [`crate::answer_additions::onto`].
+                if let Err(error) =
+                    crate::answer_additions::onto(&state, conversation_id, id, &mut response).await
+                {
+                    tracing::error!(
+                        error = ?error,
+                        set_id = id,
+                        "reading what was added with a Question Set's Answers failed",
+                    );
+                    return unavailable("the Response could not be read");
+                }
+
                 if let Err(error) =
                     crate::answer_files::onto(&state, conversation_id, id, &mut response).await
                 {

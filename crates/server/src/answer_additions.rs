@@ -10,12 +10,17 @@
 //! **Recorded rather than applied.** Nothing here touches the Conversation: its
 //! own servers are as they were, and a launch after a pick is written with the
 //! same Built Root. What a pick is for is the Submit, which applies the Set's
-//! pending additions in the transaction that stores the Response.
+//! pending additions in the transaction that stores the Response — see
+//! `verkstead_store`'s `set_additions::apply` — once [`undeclared`] has asked
+//! the one question the store cannot.
+
+use std::collections::HashMap;
 
 use anyhow::Result;
 use verkstead_render::{
     AddableView, Added, AdditionMade, AdditionRemoved, AdditionView, CompanionMode, Pick,
 };
+use verkstead_schema::Response;
 
 use crate::answer_files::{Fixed, Standing, asks, standing};
 use crate::{AppState, store};
@@ -177,6 +182,166 @@ pub(crate) async fn picked(state: &AppState, set_id: i64) -> Result<Vec<Addition
         .into_iter()
         .map(|added| viewed(added, &naming))
         .collect())
+}
+
+/// The first server picked on a waiting Set that the settings no longer
+/// declare, which refuses the Submit by name: the human answered on the
+/// strength of what they were adding, so the Answers are not stored without it
+/// (ADR-0028, *Every question before anything is ended*).
+///
+/// Only while the Set waits: one that has settled is the store's to refuse, and
+/// a lock leaves its picks pending without that being anything to say.
+pub(crate) async fn undeclared(state: &AppState, set_id: i64) -> Result<Option<String>> {
+    if store::settlement(&state.pool, set_id).await?.is_some() {
+        return Ok(None);
+    }
+
+    let declared = crate::conversations::declared_servers(state);
+
+    Ok(store::set_additions(&state.pool, set_id)
+        .await?
+        .into_iter()
+        .find_map(|added| match added.addition {
+            store::Addition::Server { name }
+                if added.state == store::AdditionState::Pending && !declared.contains(&name) =>
+            {
+                Some(name)
+            }
+            _ => None,
+        }))
+}
+
+/// Put what came with the Answers on the Response as the agent reads it: each
+/// Answer's own under it, and what was added at the comment box on the
+/// Response itself — see [`verkstead_schema::Answer::added`].
+///
+/// **On the way out rather than in**, for the files' reason — see
+/// [`crate::answer_files::onto`]. Only what was applied: a pick nothing put on
+/// the Conversation is nothing the agent has.
+pub(crate) async fn onto(
+    state: &AppState,
+    conversation_id: i64,
+    set_id: i64,
+    response: &mut Response,
+) -> Result<()> {
+    let applied: Vec<store::SetAddition> = store::set_additions(&state.pool, set_id)
+        .await?
+        .into_iter()
+        .filter(|added| added.state == store::AdditionState::Applied)
+        .collect();
+
+    if applied.is_empty() {
+        return Ok(());
+    }
+
+    let naming = Naming::read(state).await?;
+    let agent = store::newest_agent(&state.pool, conversation_id).await?;
+
+    for added in applied {
+        let said = said(&added.addition, &naming, agent);
+
+        match added.label.as_deref() {
+            None => response.added.push(said),
+            Some(label) => {
+                if let Some(answer) = response
+                    .answers
+                    .iter_mut()
+                    .find(|answer| answer.label.trim() == label)
+                {
+                    answer.added.push(said);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// One addition in words for the agent: what it is and where it is.
+///
+/// A server is named with the prefix its tools carry, as the prompt's own
+/// listing names them — see [`crate::skills::tools_named`] — and says that it
+/// reaches the next launch: a running session keeps the Built Root it started
+/// with. A device is named with its id and the command that uses it.
+fn said(addition: &store::Addition, naming: &Naming, agent: Option<store::AgentType>) -> String {
+    match addition {
+        store::Addition::Server { name } => {
+            let tools = agent.map_or_else(String::new, |agent| {
+                format!(
+                    ", whose tools are named `{}`",
+                    crate::skills::tools_named(agent).replace("<server>", name)
+                )
+            });
+
+            format!(
+                "The MCP server `{name}`{tools}. It is attached to this Conversation from the \
+                 next session launched; this one was started without it."
+            )
+        }
+        store::Addition::Device { device } => {
+            let name = naming.device(device);
+            let called = name.as_deref().unwrap_or(device);
+
+            format!(
+                "The device {} (`{device}`), which this work may now be moved to with \
+                 `verkstead transfer {called}`.",
+                name.as_deref().unwrap_or("with no name in the cluster now"),
+            )
+        }
+        store::Addition::Companion { repo_id, .. } | store::Addition::OpenedUp { repo_id, .. } => {
+            format!(
+                "The repo {}.",
+                naming
+                    .repo(*repo_id)
+                    .unwrap_or_else(|| format!("registered as {repo_id}"))
+            )
+        }
+    }
+}
+
+/// What each Set of a Conversation added to it, by Set, applied: the line the
+/// Timeline draws under a Set's Event.
+pub(crate) async fn on_timeline(
+    state: &AppState,
+    conversation_id: i64,
+) -> Result<HashMap<i64, Vec<Added>>> {
+    let applied: Vec<store::SetAddition> =
+        store::conversation_additions(&state.pool, conversation_id)
+            .await?
+            .into_iter()
+            .filter(|added| added.state == store::AdditionState::Applied)
+            .collect();
+
+    let mut by_set: HashMap<i64, Vec<Added>> = HashMap::new();
+    if applied.is_empty() {
+        return Ok(by_set);
+    }
+
+    let naming = Naming::read(state).await?;
+    for added in applied {
+        let set_id = added.set_id;
+        by_set
+            .entry(set_id)
+            .or_default()
+            .push(viewed(added, &naming).added);
+    }
+
+    Ok(by_set)
+}
+
+/// What a lock, or the Conversation closing, left unapplied on a Set nobody
+/// answered: struck, which is what its chips are drawn as on the record.
+pub(crate) fn unapplied(additions: Vec<AdditionView>) -> Vec<AdditionView> {
+    additions
+        .into_iter()
+        .map(|addition| match addition.state {
+            verkstead_render::AdditionState::Pending => AdditionView {
+                state: verkstead_render::AdditionState::Struck,
+                ..addition
+            },
+            _ => addition,
+        })
+        .collect()
 }
 
 /// What the menus offer past the servers, as the Conversation stands now: the

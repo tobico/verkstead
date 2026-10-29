@@ -467,7 +467,19 @@ unanswered?: boolean,
  * files leaves the field out altogether, and why a Response stored before
  * the field existed reads as it always did.
  */
-attachments?: Array<string>, };
+attachments?: Array<string>, 
+/**
+ * What the human added to the Conversation with this Answer — an MCP
+ * server, a device the work may be moved to — each named in words and
+ * where it is, in the order they were picked (ADR-0028).
+ *
+ * **Filled on the way out**, exactly as [`Answer::attachments`] is: the
+ * sheet records each pick on the Set as it is made, the Submit applies
+ * them, and the rows are what say which Answer each came with. A Response
+ * is stored as it was sent, and one stored before the field existed reads
+ * as it always did.
+ */
+added?: Array<string>, };
 
 /**
  * What became of putting a file on an Answer.
@@ -5256,7 +5268,14 @@ rows: Array<SetRow>,
  * The same verdict the Set's own sheet carries, from the same registry of
  * held waits — this is a Timeline the human answers from.
  */
-standing: Standing, };
+standing: Standing, 
+/**
+ * What answering it put on the Conversation, in the order it was picked:
+ * the line under the Set's Event that says so, in the shape a steer's line
+ * takes (ADR-0028). Empty for nearly every Set, and for any that has not
+ * been answered.
+ */
+added: Array<Added>, };
 
 /**
  * One Question as the page draws it, with its Sub-questions nested one level
@@ -5676,7 +5695,13 @@ direction?: Direction | null,
  * Postscript and reads an ordinary Response, and the ending is entirely
  * the system's.
  */
-nothing_else?: boolean, };
+nothing_else?: boolean, 
+/**
+ * What the human added to the Conversation at the set-level comment box,
+ * each named in words — see [`Answer::added`], which is the same list for
+ * what came with one Answer, and is filled the same way.
+ */
+added?: Array<string>, };
 
 /**
  * What became of pressing Resume.
@@ -7387,7 +7412,7 @@ export type StoreView = { name: string, eviction: Eviction, };
 /**
  * What became of the human's Response.
  */
-export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Locked" | { "Rejected": Array<string> };
+export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Locked" | { "Rejected": Array<string> } | { "ServerGone": string };
 
 /**
  * What became of a device asking to be notified.

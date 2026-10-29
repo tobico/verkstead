@@ -320,6 +320,7 @@ fn answered(comment: &str) -> Response {
         comment: Some(comment.to_owned()),
         direction: None,
         nothing_else: false,
+        added: Vec::new(),
     }
 }
 

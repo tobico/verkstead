@@ -968,12 +968,8 @@ pub(crate) async fn set_reading(
     // ordinary Sets, and what makes one either is where the work stands while it
     // is being answered. A Conversation that cannot be read draws no option,
     // which is what every state but those two gets anyway.
-    let ending = match store::state(&state.pool, conversation).await {
-        Ok(state) => match state {
-            Some(store::Lifecycle::FollowUp) => Some(verkstead_render::Ending::FollowUp),
-            Some(store::Lifecycle::Investigating) => Some(verkstead_render::Ending::Investigation),
-            _ => None,
-        },
+    let lifecycle = match store::state(&state.pool, conversation).await {
+        Ok(state) => state,
         Err(error) => {
             tracing::error!(
                 error = ?error,
@@ -982,6 +978,11 @@ pub(crate) async fn set_reading(
             );
             None
         }
+    };
+    let ending = match lifecycle {
+        Some(store::Lifecycle::FollowUp) => Some(verkstead_render::Ending::FollowUp),
+        Some(store::Lifecycle::Investigating) => Some(verkstead_render::Ending::Investigation),
+        _ => None,
     };
 
     // And the files the human put on its Answers, which the sheet draws under
@@ -1007,6 +1008,15 @@ pub(crate) async fn set_reading(
             tracing::error!(error = ?error, set_id = id, "reading what was picked on a Set failed");
             return Err(unavailable("The question set couldn't be read."));
         }
+    };
+    // What a lock, or the Conversation closing, left unapplied is struck on the
+    // record: nothing is ever going to put it on.
+    let additions = match (&standing, lifecycle) {
+        (verkstead_render::Standing::LockedUnanswered(_), _)
+        | (verkstead_render::Standing::Waiting(_), Some(store::Lifecycle::Closed)) => {
+            crate::answer_additions::unapplied(additions)
+        }
+        _ => additions,
     };
     let servers = match store::mcp_servers(&state.pool, conversation).await {
         Ok(servers) => servers,
@@ -1104,6 +1114,18 @@ async fn submit_response(
     let Ok(id) = id.parse::<i64>() else {
         return Json(Submitted::NoSuchSet).into_response();
     };
+
+    // Every question before anything is stored: a server gone from the settings
+    // since it was picked refuses the Submit by name. See
+    // [`crate::answer_additions::undeclared`].
+    match crate::answer_additions::undeclared(&state, id).await {
+        Ok(None) => {}
+        Ok(Some(name)) => return Json(Submitted::ServerGone(name)).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading what was picked on a Set failed");
+            return unavailable("The response couldn't be taken.");
+        }
+    }
 
     let submission =
         match store::submit_response(&state.pool, &state.settlements, id, &response).await {
@@ -2616,6 +2638,18 @@ pub(crate) async fn conversation_view(
     // A read that fails leaves the steers to draw without their Pairing rather
     // than taking the Conversation down with it: everything else about the
     // record is in hand, and a pane short one line is better than no pane.
+    // And what each Set's answer put on the Conversation, read once for the
+    // lot of them and drawn as a line under each Set's Event. A read that
+    // fails leaves the lines off rather than the Timeline, for the steers'
+    // reason below.
+    let mut set_added = match crate::answer_additions::on_timeline(state, id).await {
+        Ok(added) => added,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what a Set added failed");
+            HashMap::new()
+        }
+    };
+
     let steer_pairings = match crate::profiles::keyed(state, steered(&timeline)).await {
         Ok(pairings) => pairings,
         Err(error) => {
@@ -2766,6 +2800,7 @@ pub(crate) async fn conversation_view(
                                 asked.set_id,
                                 set,
                                 standing,
+                                set_added.remove(&asked.set_id).unwrap_or_default(),
                             )
                         }
                         // A row of its own rather than an omission: the ask

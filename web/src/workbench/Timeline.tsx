@@ -112,6 +112,7 @@ import { Dynamic } from "solid-js/web";
 import { ran, reading } from "../agents";
 import { listProfiles } from "../api/client";
 import type {
+  Added,
   AgentOutputEvent,
   BriefEvent,
   BriefSaved,
@@ -2375,8 +2376,60 @@ function QuestionSet(props: {
           )}
         </For>
       </span>
+
+      {/* And what answering it put on the work, said the way a steer is said:
+          a line, in the steer's shape, naming each thing. */}
+      <Show when={addedWith(props.asked.added)}>
+        {(said) => <span class={styles.added}>{said()}</span>}
+      </Show>
     </CardButton>
   );
+}
+
+/// What a question set's answer added to the work, in a sentence per kind: the
+/// MCP servers, the repos and the devices the agent may move it to (ADR-0028).
+/// `null` where it added nothing, which is nearly every set.
+export function addedWith(added: Added[]): string | null {
+  const servers = added.flatMap((one) =>
+    "Server" in one ? [one.Server.name] : [],
+  );
+  const repos = added.flatMap((one) => {
+    if ("Companion" in one) {
+      const { name, repo_id, mode } = one.Companion;
+      const called = name ?? `repo ${repo_id}`;
+      return [mode === "ReadOnly" ? `${called} read-only` : `${called} read-write`];
+    }
+    if ("OpenedUp" in one) {
+      const { name, repo_id } = one.OpenedUp;
+      return [`${name ?? `repo ${repo_id}`} opened up to read-write`];
+    }
+    return [];
+  });
+  const devices = added.flatMap((one) =>
+    "Device" in one
+      ? [one.Device.name ?? one.Device.device.slice(0, 8)]
+      : [],
+  );
+
+  const said = [
+    servers.length === 0
+      ? null
+      : `You added the ${listed(servers)} MCP server${servers.length === 1 ? "" : "s"}.`,
+    repos.length === 0 ? null : `You added ${listed(repos)}.`,
+    devices.length === 0
+      ? null
+      : `You let the agent move this to ${listed(devices)}.`,
+  ].filter((line) => line !== null);
+
+  return said.length === 0 ? null : said.join(" ");
+}
+
+/// Names run together the way a sentence runs them: `a`, `a and b`,
+/// `a, b and c`.
+function listed(names: string[]): string {
+  return names.length < 2
+    ? names.join("")
+    : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
 /// A Question Set whose stored body this build cannot read: a row saying so,

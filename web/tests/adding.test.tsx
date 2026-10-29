@@ -20,11 +20,13 @@ import type {
 } from "../src/api/types";
 import pill from "../src/Attaching.module.css";
 import { ADDITION_REFUSAL } from "../src/set/Answering";
+import { addedWith } from "../src/workbench/Timeline";
 import sheet from "../src/set/Sheet.module.css";
 import { SETTINGS } from "./bench";
 import { answering } from "./reading";
 import { json, readable, serving, whenever } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
+import locked from "./fixtures/set-locked.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
 import followingUp from "./fixtures/set-following-up.json" with { type: "json" };
 import investigating from "./fixtures/set-investigating.json" with { type: "json" };
@@ -339,6 +341,55 @@ describe("a settled set", () => {
     expect(screen.queryByRole("button", { name: menuOf("Q1") })).toBeNull();
     expect(screen.queryByRole("button", { name: menuOf(COMMENT) })).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove tickets" })).toBeNull();
+  });
+
+  /// What the Submit put on the work is drawn under the Answer it came with,
+  /// and what came at the comment box under the comment.
+  it("draws what was added as chips under each answer", async () => {
+    await answering({
+      ...readable(answered),
+      additions: [
+        { ...server(4, "tickets", "Q1"), state: "Applied" },
+        {
+          id: 5,
+          label: null,
+          added: { Device: { device: "1".repeat(32), name: "the-laptop" } },
+          state: "Applied",
+        },
+      ],
+    });
+
+    expect(chipsOn("Q1")).toEqual(["tickets"]);
+    expect(chipsOn(COMMENT)).toEqual(["the-laptop"]);
+  });
+
+  /// And on a set locked before anybody answered it, what was picked and
+  /// never put on is struck through and says so.
+  it("draws what a lock left unapplied struck through", async () => {
+    const { page } = await answering({
+      ...readable(locked),
+      additions: [{ ...server(4, "tickets", "Q1"), state: "Struck" }],
+    });
+
+    expect(chipsOn("Q1")).toEqual(["tickets"]);
+    const chip = page.querySelector(`.${pill.server}`)!;
+    expect(chip.classList.contains(pill.struck!)).toBe(true);
+    expect(chip.textContent).toContain("not added");
+  });
+});
+
+describe("the timeline line under an answered set", () => {
+  it("names what the answer added, a sentence per kind", () => {
+    expect(addedWith([])).toBeNull();
+    expect(
+      addedWith([
+        { Server: { name: "docs", declared: true } },
+        { Server: { name: "tickets", declared: true } },
+        { Device: { device: "1".repeat(32), name: "the-laptop" } },
+      ]),
+    ).toBe(
+      "You added the docs and tickets MCP servers. You let the agent move this to the-laptop.",
+    );
   });
 });
 
