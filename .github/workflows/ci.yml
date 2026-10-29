@@ -856,16 +856,23 @@ jobs:
       # and one shared with either of the others would have them evicting each
       # other. Every leg shares it, because they all build the same tree.
       #
-      # **The workspace's own crates are kept as well as its dependencies**, so
-      # that a commit rebuilds only what it touched. The key says so, because
-      # the action saves only when its key misses: under the old one, a cache
-      # already holding the dependencies alone would never be saved again.
-      # Ten legs racing to save one key is harmless — the first wins, and the
+      # **The key names the build profile, because the action's own key does
+      # not.** It hashes the lockfile and the members' manifests, but not the
+      # workspace's root `Cargo.toml`, where `[profile.dev]` is. So when the
+      # build went to line tables, the key stayed the same, and every leg
+      # restored dependencies built with full debug info and rebuilt all 302
+      # of them. It never saved over them either, because the action saves only
+      # when its key misses. A change to `[profile.dev]` changes this key too.
+      # Ten legs racing to save one key is harmless: the first wins, and the
       # rest warn that it already exists.
+      #
+      # Only the dependencies are kept. The workspace's own crates were kept as
+      # well for one run, but did not pay: the checkout gives every source file
+      # a new mtime, so cargo rebuilds them all whatever the cache holds. The
+      # ledger above has the figures.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          key: windows-workspace
-          cache-workspace-crates: true
+          key: windows-line-tables
 
       # The one thing the sessions suite needs that the runner image has not
       # got, and it is here to prove a *negative*: no session on this platform
