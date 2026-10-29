@@ -628,6 +628,58 @@ comment: none of this is settled about the burst allowance
         );
     }
 
+    /// What an answer added is named under the decision it came with, and what
+    /// was added at the comment box after the comment, and only on its own
+    /// Set's exchange (ADR-0028).
+    #[test]
+    fn what_an_answer_added_is_named_under_its_decision() {
+        let set = QuestionSet::from_yaml(ASKED).unwrap();
+        let response = Response::from_yaml(ANSWERED).unwrap();
+
+        let said = |label: Option<&str>, said: &str| crate::answer_additions::Said {
+            set_id: 11,
+            label: label.map(str::to_owned),
+            said: said.to_owned(),
+        };
+
+        let files = nothing_attached().adding(vec![
+            said(
+                Some("Q2"),
+                "The device laptop (`22222222222222222222222222222222`), which this work may now \
+                 be moved to with `verkstead transfer laptop`.",
+            ),
+            said(
+                Some("Q2"),
+                "The MCP server `docs`, whose tools are named `mcp__docs__<tool>`.",
+            ),
+            said(None, "The repo `infra`, read-only."),
+        ]);
+
+        let digest = exchange(&set, &response, files.on(11));
+
+        assert!(
+            digest.contains(
+                "until it needs to survive a restart\n\n\
+                 _Added:_\n\n\
+                 - The device laptop (`22222222222222222222222222222222`), which this work may \
+                 now be moved to with `verkstead transfer laptop`.\n\
+                 - The MCP server `docs`, whose tools are named `mcp__docs__<tool>`.\n\n"
+            ),
+            "{digest}"
+        );
+        assert!(
+            digest.ends_with(
+                "none of this is settled about the burst allowance\n\n\
+                 _Added:_ The repo `infra`, read-only.\n\n"
+            ),
+            "{digest}"
+        );
+        assert!(
+            !exchange(&set, &response, files.on(12)).contains("_Added:_"),
+            "nor on another Set's exchange"
+        );
+    }
+
     /// And a question the file *is* the Answer to says so, rather than reading
     /// as one the human passed over.
     ///

@@ -644,12 +644,16 @@ pub(crate) async fn onto(
     let naming = Naming::read(state).await?;
     let agent = store::newest_agent(&state.pool, conversation_id).await?;
     let companions = store::companions(&state.pool, conversation_id).await?;
-    let carried = store::carried_sets(&state.pool, conversation_id)
+    let reach = match store::carried_sets(&state.pool, conversation_id)
         .await?
-        .contains(&set_id);
+        .contains(&set_id)
+    {
+        true => Reach::Carried,
+        false => Reach::Waiting,
+    };
 
     for added in applied {
-        let said = said(&added.addition, &naming, agent, &companions, carried);
+        let said = said(&added.addition, &naming, agent, &companions, reach);
 
         match added.label.as_deref() {
             None => response.added.push(said),
@@ -668,6 +672,67 @@ pub(crate) async fn onto(
     Ok(())
 }
 
+/// One applied addition said in words, with the Set and the Question it came
+/// with — what a digest names under that Question's decision. See [`primed`].
+pub(crate) struct Said {
+    pub(crate) set_id: i64,
+
+    /// The label of the Question it was picked at, or `None` for the comment
+    /// box.
+    pub(crate) label: Option<String>,
+
+    pub(crate) said: String,
+}
+
+/// Everything an answer applied to Conversation `conversation_id`, in words,
+/// for an exchange a later session is primed with — a relaunched grilling's
+/// digest, or a Deferred Ask's folding — see [`crate::exchanges::exchange`].
+///
+/// **The digest's half of [`onto`].** The Response the Timeline holds is the one
+/// the human submitted, so what came with it is a record beside it, filled in
+/// here the way the wait fills it in: in the words the agent waiting on the Set
+/// would have been given, said of a session launched after them.
+pub(crate) async fn primed(state: &AppState, conversation_id: i64) -> Result<Vec<Said>> {
+    let applied: Vec<store::SetAddition> =
+        store::conversation_additions(&state.pool, conversation_id)
+            .await?
+            .into_iter()
+            .filter(|added| added.state == store::AdditionState::Applied)
+            .collect();
+
+    if applied.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let naming = Naming::read(state).await?;
+    let agent = store::newest_agent(&state.pool, conversation_id).await?;
+    let companions = store::companions(&state.pool, conversation_id).await?;
+
+    Ok(applied
+        .into_iter()
+        .map(|added| Said {
+            said: said(&added.addition, &naming, agent, &companions, Reach::Later),
+            set_id: added.set_id,
+            label: added.label,
+        })
+        .collect())
+}
+
+/// Which session is reading what an addition says, which is what the sentence
+/// about when it reaches one is worded by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reach {
+    /// The session that was waiting on the Set, started without it.
+    Waiting,
+
+    /// The session the answer carried on in a wider sandbox — see [`submit`].
+    Carried,
+
+    /// A session launched after the answer, primed with it in a digest, which
+    /// was started with it like every launch since.
+    Later,
+}
+
 /// One addition in words for the agent: what it is and where it is.
 ///
 /// A server is named with the prefix its tools carry, as the prompt's own
@@ -678,14 +743,17 @@ pub(crate) async fn onto(
 /// the prompt's own listing names one — see [`crate::skills::alongside`] — and
 /// reaches the next launch for the same reason a server does.
 ///
-/// **Unless the answer carried the session on** — `carried` — in which case the
-/// session reading this is the one launched with them, and says so.
+/// **Unless the answer carried the session on** — [`Reach::Carried`] — in
+/// which case the session reading this is the one launched with them, and says
+/// so; or the reader is a later session primed with the exchange —
+/// [`Reach::Later`] — which was launched with them and is told nothing about
+/// when.
 fn said(
     addition: &store::Addition,
     naming: &Naming,
     agent: Option<store::AgentType>,
     companions: &[store::Companion],
-    carried: bool,
+    reach: Reach,
 ) -> String {
     const CARRIED: &str =
         "Verkstead carried this conversation on in a session started with it, which is this one.";
@@ -704,15 +772,18 @@ fn said(
                 )
             });
 
-            let reach = match carried {
-                true => CARRIED,
-                false => {
+            let reach = match reach {
+                Reach::Carried => CARRIED,
+                Reach::Waiting => {
                     "It is attached to this Conversation from the next session launched; this \
                      one was started without it."
                 }
+                Reach::Later => "",
             };
 
             format!("The MCP server `{name}`{tools}. {reach}")
+                .trim_end()
+                .to_owned()
         }
         store::Addition::Device { device } => {
             let name = naming.device(device);
@@ -730,7 +801,7 @@ fn said(
             branch,
             ..
         } => {
-            let reach = match (mode, branch) {
+            let held = match (mode, branch) {
                 (store::CompanionMode::ReadWrite, Some(branch)) => {
                     format!("read-write, on branch `{branch}`")
                 }
@@ -739,17 +810,20 @@ fn said(
             };
 
             format!(
-                "The repo `{}`{}, {reach}. {}",
+                "The repo `{}`{}, {held}. {}",
                 called(naming, *repo_id),
                 checked_out(companions, *repo_id),
-                match carried {
-                    true => CARRIED,
-                    false => {
+                match reach {
+                    Reach::Carried => CARRIED,
+                    Reach::Waiting => {
                         "It is bound from the next session launched; this one was started \
                          without it."
                     }
+                    Reach::Later => "",
                 },
             )
+            .trim_end()
+            .to_owned()
         }
         store::Addition::OpenedUp {
             repo_id, branch, ..
@@ -762,14 +836,17 @@ fn said(
                 "The repo `{}`, opened up to read-write{on}{}. {}",
                 called(naming, *repo_id),
                 checked_out(companions, *repo_id),
-                match carried {
-                    true => CARRIED,
-                    false => {
+                match reach {
+                    Reach::Carried => CARRIED,
+                    Reach::Waiting => {
                         "It is bound so from the next session launched; this one was started \
                          with it read-only."
                     }
+                    Reach::Later => "",
                 },
             )
+            .trim_end()
+            .to_owned()
         }
     }
 }

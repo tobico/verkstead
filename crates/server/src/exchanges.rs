@@ -67,9 +67,10 @@ pub(crate) fn exchange(set: &QuestionSet, response: &Response, files: OnSet<'_>)
             let paths = files.under(question.name());
 
             said.push_str(&format!(
-                "{}\n\n{}",
+                "{}\n\n{}{}",
                 decided(response, question.name(), &question.options, &paths),
                 attached(&paths),
+                added(&files.added_under(question.name())),
             ));
         }
 
@@ -78,10 +79,11 @@ pub(crate) fn exchange(set: &QuestionSet, response: &Response, files: OnSet<'_>)
             let paths = files.under(&name);
 
             said.push_str(&format!(
-                "**{name}** {}\n\n{}\n\n{}",
+                "**{name}** {}\n\n{}\n\n{}{}",
                 subquestion.text.trim(),
                 decided(response, &name, &subquestion.options, &paths),
                 attached(&paths),
+                added(&files.added_under(&name)),
             ));
         }
     }
@@ -98,6 +100,7 @@ pub(crate) fn exchange(set: &QuestionSet, response: &Response, files: OnSet<'_>)
     // And what was put at the comment box, which answers no Question: named
     // after whatever the human said about the whole, the way the box draws it.
     said.push_str(&attached(&files.on_the_set()));
+    said.push_str(&added(&files.added_on_the_set()));
 
     said
 }
@@ -122,6 +125,28 @@ fn attached(paths: &[String]) -> String {
     let named: Vec<String> = paths.iter().map(|path| format!("`{path}`")).collect();
 
     format!("_Attached:_ {}\n\n", named.join(", "))
+}
+
+/// And what the human added to the work with that Answer (ADR-0028), each in the
+/// words the agent waiting on the Set is given it in — see
+/// [`crate::answer_additions::primed`] — under the files, because it came with
+/// the decision as they did.
+///
+/// **The one place a device tick is said at all** to a session that was not
+/// waiting: the prompt lists the companions and the servers a session has, and
+/// nothing lists the devices the work may be moved to.
+///
+/// Nothing where nothing was added, which is nearly every Answer.
+fn added(said: &[String]) -> String {
+    match said {
+        [] => String::new(),
+        [one] => format!("_Added:_ {one}\n\n"),
+        many => {
+            let listed: Vec<String> = many.iter().map(|one| format!("- {one}")).collect();
+
+            format!("_Added:_\n\n{}\n\n", listed.join("\n"))
+        }
+    }
 }
 
 /// What became of one question: the Option that was chosen, whatever the human

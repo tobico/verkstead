@@ -324,6 +324,11 @@ pub(crate) async fn asks(pool: &SqlitePool, set_id: i64, label: &str) -> Result<
 /// that use it walk several Sets: a relaunched grilling is primed with
 /// everything settled, and a folding carries every Deferred Ask answered since.
 /// One read, and the Sets are told apart inside it.
+///
+/// **And what was added with those Answers**, in the words a waiting agent is
+/// given them in — see [`crate::answer_additions::primed`]. The same record
+/// beside the Response for the same reason, so an exchange names it under the
+/// decision it came with (ADR-0028).
 pub(crate) struct OnAnswers {
     /// Every file the Conversation holds, in the order they were attached —
     /// the Brief's among them, which name no Answer and are therefore never
@@ -332,6 +337,10 @@ pub(crate) struct OnAnswers {
 
     /// Where the Conversation's directory is reached from inside the sandbox.
     inside: PathBuf,
+
+    /// Every addition an answer applied to the Conversation, already in words,
+    /// in the order they were picked.
+    added: Vec<crate::answer_additions::Said>,
 }
 
 impl OnAnswers {
@@ -350,17 +359,39 @@ impl OnAnswers {
             }
         };
 
-        OnAnswers::holding(
-            files,
-            Attachments::under(&state.data_dir).inside(Platform::HERE, conversation_id),
-        )
+        let added = match crate::answer_additions::primed(state, conversation_id).await {
+            Ok(added) => added,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, "reading what this Conversation's Answers added failed");
+                Vec::new()
+            }
+        };
+
+        OnAnswers {
+            added,
+            ..OnAnswers::holding(
+                files,
+                Attachments::under(&state.data_dir).inside(Platform::HERE, conversation_id),
+            )
+        }
     }
 
     /// Made of what the record holds and where the sandbox puts it, which is
     /// the pair every reading of these is: the rows say which file is on which
     /// Answer, and the directory says what to call it.
     pub(crate) fn holding(files: Vec<store::Attachment>, inside: PathBuf) -> OnAnswers {
-        OnAnswers { files, inside }
+        OnAnswers {
+            files,
+            inside,
+            added: Vec::new(),
+        }
+    }
+
+    /// And what the Answers added, already in words: what [`Self::of`] reads
+    /// beside the files.
+    #[cfg(test)]
+    pub(crate) fn adding(self, added: Vec<crate::answer_additions::Said>) -> OnAnswers {
+        OnAnswers { added, ..self }
     }
 
     /// The files put on one Set's Answers, which is what an exchange of that Set
@@ -408,6 +439,26 @@ impl OnSet<'_> {
             .iter()
             .filter(|file| file.origin == store::Origin::Set { set: self.set_id })
             .map(|file| self.path(file))
+            .collect()
+    }
+
+    /// What was added with one Question's Answer, in words, in the order it
+    /// was picked.
+    pub(crate) fn added_under(&self, label: &str) -> Vec<String> {
+        self.added(Some(label))
+    }
+
+    /// And what was added at the Set's comment box, under no Question.
+    pub(crate) fn added_on_the_set(&self) -> Vec<String> {
+        self.added(None)
+    }
+
+    fn added(&self, label: Option<&str>) -> Vec<String> {
+        self.answers
+            .added
+            .iter()
+            .filter(|said| said.set_id == self.set_id && said.label.as_deref() == label)
+            .map(|said| said.said.clone())
             .collect()
     }
 
