@@ -555,19 +555,17 @@ jobs:
   #
   # **The budget is not met yet, so the timeout is fifteen rather than ten.**
   # No run has had every leg under seven minutes. On the last one measured (run
-  # 40709146514) the slowest leg took 12m23, 5m23 over seven and 2m23 over ten,
-  # and even the fastest took 8m22. A hard ten would have failed nine legs of
-  # the ten. So `timeout-minutes` stands at fifteen, 2m12 above the slowest leg
+  # 40795830677) the slowest leg took 13m48, 6m48 over seven and 3m48 over ten,
+  # and even the fastest took 8m12. A hard ten would have failed seven legs of
+  # the ten. So `timeout-minutes` stands at fifteen, 1m12 above the slowest leg
   # in any run in the ledger. It catches a hang rather than a slow leg, and it
   # comes down to ten once a run's legs fit under that.
   #
   # **What is left** is about six minutes that every leg pays: one of setup and
-  # 3m18 to 5m34 of build. On top of that, a leg's test time is set by one slow
-  # test from the session-account suites, which run one at a time
-  # (`.config/nextest.toml`). These come late on their leg, so one long one is
-  # the leg's tail: a `logins_windows` test of 120 to 250 seconds, or a
-  # `sandbox_windows` one of 60 to 160. They are the next lever, fixed in the
-  # tests themselves.
+  # 3m01 to 5m41 of build. On top of that a leg tests for three to five minutes,
+  # and no longer has one slow session-account test as its tail: the slowest
+  # leg of the last row was set by a runner slow at everything, its
+  # `conversations` tests among them.
   #
   # **The ledger.** Each lever lands as a commit of its own on one pull request,
   # and its row is the run of that commit. A row gives the slowest and the
@@ -587,6 +585,7 @@ jobs:
   # | rust-lld (reverted)                 | 40694314360 | 4m25 + 6m46 = 12m23   | 3m51 + 3m31 = 8m39    |
   # | Template repositories               | 40702569526 | 5m34 + 5m47 = 12m48   | 3m30 + 3m33 = 7m55    |
   # | The same, measured again            | 40709146514 | 4m58 + 6m26 = 12m23   | 3m18 + 4m10 = 8m22    |
+  # | The slow session-account tests      | 40795830677 | 4m18 + 8m11 = 13m48   | 3m01 + 4m25 = 8m12    |
   #
   # What each lever came to, row by row:
   #
@@ -680,6 +679,54 @@ jobs:
   # took 227 seconds as the last test to run, and its fastest was leg 8.
   # The count stays at ten: no leg tested in under four minutes, so none was a
   # runner doing too little to be worth having.
+  #
+  # The slow session-account tests: a probe run with the server's own log
+  # printed under each of them (run 40785712519) said where their minutes went,
+  # and it was two things, neither of them a fixed wait or a slow poll.
+  #
+  # - **A cmdlet.** The first one the session account looks up on a runner
+  #   sends PowerShell through its modules for two to seven minutes. The login
+  #   stub called six, so a login wrote its boundary in 21 ms and then printed
+  #   nothing for four minutes. Written with the framework alone, the way the
+  #   other suites' scripts already were, the login tests take 13 to 15
+  #   seconds. Two `sessions_windows` scripts broke the same rule, and had been
+  #   quick only because a login test before them had paid; with the stub
+  #   fixed, one of them ran out leg 6's fifteen minutes (run 40791770666). It
+  #   lost its cmdlets too.
+  # - **The runner's profile.** The first boundary on a leg writes a step on
+  #   the runner's own profile directory, and writing that list makes Windows
+  #   walk everything under it: 55 seconds and more, once a leg. That is the
+  #   machine's cost rather than a test's, so it cannot come out of the tests,
+  #   and `.config/nextest.toml` now starts the boundary and login tests first
+  #   on their leg (`priority = 100`), beside the rest of it rather than after
+  #   it. `sessions_windows` keeps its place at the end, where its sessions
+  #   have the machine to themselves.
+  #
+  # The run before this row (40794512146, the same tests with one line
+  # unformatted) tested for 2,438 test-seconds across the ten legs, where the
+  # last row's run had tested for 2,828, and its jobs took 6m53 to 10m57. The
+  # row's own run took 2,907, most of the difference being leg 1, a runner
+  # slow at everything: `conversations::steering_into_wrapping_fills_a_review_nobody_picked_an_account_for`
+  # took 115 seconds there, where it takes about five. What each of the ten
+  # came to:
+  #
+  # | Leg | Build + test = job    |   | Leg | Build + test = job    |
+  # | --- | --------------------- | - | --- | --------------------- |
+  # | 1   | 4m18 + 8m11 = 13m48   |   | 6   | 3m55 + 3m58 = 8m45    |
+  # | 2   | 5m18 + 5m34 = 11m56   |   | 7   | 3m01 + 4m25 = 8m12    |
+  # | 3   | 4m31 + 5m04 = 10m39   |   | 8   | 4m48 + 4m28 = 10m14   |
+  # | 4   | 4m50 + 4m54 = 10m46   |   | 9   | 5m41 + 2m58 = 9m32    |
+  # | 5   | 4m52 + 4m25 = 10m24   |   | 10  | 4m55 + 4m55 = 10m54   |
+  #
+  # **Four session-account tests still take over sixty seconds on a leg**, and
+  # why is the same for three of them: each was the first boundary written on
+  # its leg, so it paid the profile walk above.
+  # `sandbox_windows::a_live_conversations_worktree_is_reachable_and_a_stopped_ones_is_not`
+  # took 119 seconds on leg 4, `sandbox_windows::a_fresh_account_is_given_settings_that_skip_the_bypass_consent`
+  # 85 on leg 10, and `sandbox::granting::writing::tests::a_granted_path_is_read_as_the_account_and_a_refused_one_is_not`
+  # 61 on leg 5. Every boundary after the first on its leg came in under
+  # sixty. The fourth is `logins_windows::a_login_left_past_its_limit_is_killed`
+  # at 68 seconds, sixty of them the limit the test is there to see run out.
   #
   # `slice` partitioning deals the tests out one at a time across every binary,
   # so each leg gets its share of each suite rather than whole binaries. What

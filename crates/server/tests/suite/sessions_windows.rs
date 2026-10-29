@@ -170,7 +170,7 @@ const POWERSHELL: [&str; 4] = ["powershell.exe", "-NoProfile", "-ExecutionPolicy
 ///
 /// **And a cmdlet that does load costs minutes rather than milliseconds.** The
 /// first one the session account looks up on a runner sends PowerShell through
-/// its modules for two to six minutes, and whichever test asked first is the
+/// its modules for two to seven minutes, and whichever test asked first is the
 /// one that pays it (runs 40785712519 to 40791770666): a script typed into a
 /// test's terminal is held to the same rule as a stand-in.
 ///
