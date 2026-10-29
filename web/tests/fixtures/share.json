@@ -230,6 +230,7 @@
   "exported_at": "2026-08-03T09:07:11.000Z",
   "sets": [
     {
+      "additions": [],
       "attachments": [
         {
           "bytes": 1902,
@@ -265,6 +266,7 @@
           "subquestions": []
         }
       ],
+      "servers": [],
       "standing": {
         "Answered": {
           "response": {

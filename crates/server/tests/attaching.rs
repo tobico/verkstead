@@ -1373,3 +1373,276 @@ mod servers {
         );
     }
 }
+
+/// What is picked on a Set's sheet to add to the work (ADR-0028): recorded on
+/// the Set under the Question it was picked at, pending, and put on nothing
+/// until the Submit — refused by everything that refuses a file on an Answer.
+mod additions {
+    use super::*;
+    use verkstead_render::{Added, AdditionMade, AdditionRemoved, AdditionState, AdditionView};
+
+    fn declaring(dir: &tempfile::TempDir, names: &[&str]) {
+        let mut yaml = String::from("mcp_servers:\n");
+        for name in names {
+            yaml.push_str(&format!(
+                "  - name: {name}\n    url: https://mcp.example.com/{name}\n"
+            ));
+        }
+
+        std::fs::write(dir.path().join("config.yaml"), yaml).unwrap();
+    }
+
+    /// Pick a server at `label`'s menu, or at the comment box's where `None`.
+    async fn pick(app: &Router, set: i64, label: Option<&str>, name: &str) -> AdditionMade {
+        post(
+            app,
+            &format!("/api/ui/sets/{set}/additions"),
+            &serde_json::json!({ "label": label, "pick": { "Server": { "name": name } } }),
+        )
+        .await
+    }
+
+    async fn unpick(app: &Router, set: i64, addition: i64) -> AdditionRemoved {
+        post(
+            app,
+            &format!("/api/ui/sets/{set}/additions/{addition}/remove"),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    fn picked(made: AdditionMade) -> AdditionView {
+        match made {
+            AdditionMade::Added { addition } => addition,
+            other => panic!("expected the pick recorded, got {other:?}"),
+        }
+    }
+
+    /// What the Set's page reads back, which is a reload and a second device
+    /// alike: the record, rather than anything a page was holding.
+    async fn on_the_set(app: &Router, set: i64) -> (Vec<AdditionView>, Vec<String>) {
+        let reading: SetReading = get(app, &format!("/api/ui/sets/{set}")).await;
+
+        match reading {
+            SetReading::Set(view) => (view.additions, view.servers),
+            SetReading::Unreadable(unreadable) => {
+                panic!("this build wrote that Set and cannot read it: {unreadable:?}")
+            }
+        }
+    }
+
+    fn server(name: &str) -> Added {
+        Added::Server {
+            name: name.to_owned(),
+            declared: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_server_picked_at_a_question_is_recorded_pending_under_it() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs", "tickets"]);
+        let set = asked(&pool, id).await;
+
+        let put = picked(pick(&app, set, Some("Q1"), "docs").await);
+
+        assert_eq!(put.label.as_deref(), Some("Q1"));
+        assert_eq!(put.added, server("docs"));
+        assert_eq!(put.state, AdditionState::Pending);
+
+        assert_eq!(
+            on_the_set(&app, set).await.0,
+            vec![put],
+            "and the Set reads it back, which is what a reload draws"
+        );
+    }
+
+    /// The comment box's menu picks under no Question.
+    #[tokio::test]
+    async fn a_server_picked_at_the_comment_box_names_no_question() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+        let set = asked(&pool, id).await;
+
+        let put = picked(pick(&app, set, None, "docs").await);
+
+        assert_eq!(put.label, None);
+    }
+
+    /// A pick is the Set's and nothing of the Conversation's: its servers are
+    /// what a launch writes the Built Root from, and they are as they were.
+    #[tokio::test]
+    async fn a_pick_puts_nothing_on_the_conversation() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+        let set = asked(&pool, id).await;
+
+        picked(pick(&app, set, Some("Q1"), "docs").await);
+
+        let view: ConversationView = get(&app, &format!("/api/ui/conversations/{id}")).await;
+        assert!(view.mcp_servers.is_empty());
+        assert!(
+            store::load_conversation(&pool, id)
+                .await
+                .unwrap()
+                .unwrap()
+                .mcp_servers
+                .is_empty(),
+            "the record a launch is written from holds no server",
+        );
+    }
+
+    #[tokio::test]
+    async fn the_cross_takes_a_pick_off() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+        let set = asked(&pool, id).await;
+
+        let put = picked(pick(&app, set, Some("Q1"), "docs").await);
+
+        assert_eq!(unpick(&app, set, put.id).await, AdditionRemoved::Removed);
+        assert!(on_the_set(&app, set).await.0.is_empty());
+    }
+
+    /// The menu is drawn from the declarations less what the Conversation has,
+    /// and the Set says which it has.
+    #[tokio::test]
+    async fn the_set_says_which_servers_the_conversation_has_already() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs", "tickets"]);
+        store::attach_mcp_server(&pool, id, "docs").await.unwrap();
+        let set = asked(&pool, id).await;
+
+        assert_eq!(on_the_set(&app, set).await.1, ["docs"]);
+        assert_eq!(
+            pick(&app, set, Some("Q1"), "docs").await,
+            AdditionMade::AlreadyOn,
+        );
+    }
+
+    #[tokio::test]
+    async fn a_name_nothing_declares_is_refused() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+        let set = asked(&pool, id).await;
+
+        assert_eq!(
+            pick(&app, set, Some("Q1"), "nowhere").await,
+            AdditionMade::NoSuchServer,
+        );
+        assert!(on_the_set(&app, set).await.0.is_empty());
+    }
+
+    /// A Heading asks nothing, and a label the Set does not carry is no
+    /// Question: both refused, as a file under either is.
+    #[tokio::test]
+    async fn a_label_the_set_does_not_ask_is_refused() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+        let set = asked(&pool, id).await;
+
+        for label in ["Q9", "Q2"] {
+            assert_eq!(
+                pick(&app, set, Some(label), "docs").await,
+                AdditionMade::NoSuchLabel,
+                "{label}",
+            );
+        }
+    }
+
+    /// A chip whose declaration has gone since says so, and is still the
+    /// human's to take off.
+    #[tokio::test]
+    async fn a_pick_whose_declaration_has_gone_says_so() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs"]);
+        let set = asked(&pool, id).await;
+
+        let put = picked(pick(&app, set, Some("Q1"), "docs").await);
+        declaring(&dir, &[]);
+
+        assert_eq!(
+            on_the_set(&app, set).await.0[0].added,
+            Added::Server {
+                name: "docs".to_owned(),
+                declared: false,
+            },
+        );
+        assert_eq!(unpick(&app, set, put.id).await, AdditionRemoved::Removed);
+    }
+
+    #[tokio::test]
+    async fn an_answered_set_refuses_adding_and_taking_off() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs", "tickets"]);
+        let set = asked(&pool, id).await;
+
+        let put = picked(pick(&app, set, Some("Q1"), "docs").await);
+        answer(&app, set).await;
+
+        assert_eq!(
+            pick(&app, set, Some("Q1"), "tickets").await,
+            AdditionMade::Answered,
+        );
+        assert_eq!(unpick(&app, set, put.id).await, AdditionRemoved::Answered);
+        assert_eq!(on_the_set(&app, set).await.0.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_locked_set_refuses_adding_and_taking_off() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs", "tickets"]);
+        let set = asked(&pool, id).await;
+
+        let put = picked(pick(&app, set, Some("Q1"), "docs").await);
+
+        let locked: serde_json::Value = post(
+            &app,
+            &format!("/api/ui/sets/{set}/lock"),
+            &serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(
+            locked,
+            serde_json::json!("Closed"),
+            "the Set was not locked"
+        );
+
+        assert_eq!(
+            pick(&app, set, Some("Q1"), "tickets").await,
+            AdditionMade::Locked,
+        );
+        assert_eq!(unpick(&app, set, put.id).await, AdditionRemoved::Locked);
+    }
+
+    #[tokio::test]
+    async fn a_set_of_a_closed_conversation_refuses_adding_and_taking_off() {
+        let (_elsewhere, dir, app, pool, id) = drafting().await;
+        declaring(&dir, &["docs", "tickets"]);
+        let set = asked(&pool, id).await;
+
+        let put = picked(pick(&app, set, Some("Q1"), "docs").await);
+
+        store::set_state(&pool, id, store::Lifecycle::Closed)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            pick(&app, set, Some("Q1"), "tickets").await,
+            AdditionMade::Closed,
+        );
+        assert_eq!(unpick(&app, set, put.id).await, AdditionRemoved::Closed);
+    }
+
+    #[tokio::test]
+    async fn a_pick_on_no_set_says_so() {
+        let (_elsewhere, dir, app, _pool, _id) = drafting().await;
+        declaring(&dir, &["docs"]);
+
+        assert_eq!(
+            pick(&app, 9_999, Some("Q1"), "docs").await,
+            AdditionMade::NoSuchSet,
+        );
+        assert_eq!(unpick(&app, 9_999, 1).await, AdditionRemoved::NoSuchSet);
+    }
+}

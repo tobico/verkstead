@@ -700,6 +700,18 @@ const CARRIED: &[Carried] = &[
             ("set_id", Holds::Set),
         ],
     },
+    // And what was picked on a Set to add to the work, which names the Set as a
+    // file on an Answer does and a Repo where it is a companion.
+    Carried {
+        table: "set_additions",
+        found: Found::ByConversation,
+        ids: &[
+            ("id", Holds::Mine(Remembered::Nothing)),
+            ("conversation_id", Holds::Conversation),
+            ("set_id", Holds::Set),
+            ("repo_id", Holds::Repo),
+        ],
+    },
 ];
 
 /// The tables a delete empties that a move leaves where they are, each with what

@@ -1,5 +1,6 @@
 {
   "Set": {
+    "additions": [],
     "attachments": [
       {
         "bytes": 2184,
@@ -113,6 +114,7 @@
         "subquestions": []
       }
     ],
+    "servers": [],
     "standing": {
       "Answered": {
         "response": {

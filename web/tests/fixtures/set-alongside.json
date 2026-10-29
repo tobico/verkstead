@@ -1,5 +1,6 @@
 {
   "Set": {
+    "additions": [],
     "attachments": [],
     "branch": "solid-viewer",
     "conversation": 1,
@@ -118,6 +119,7 @@
         "subquestions": []
       }
     ],
+    "servers": [],
     "standing": {
       "Waiting": "waiting"
     },

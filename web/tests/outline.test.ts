@@ -68,6 +68,8 @@ function everySection(): SetView {
     proposal: null,
     ending: null,
     attachments: [],
+    additions: [],
+    servers: [],
   };
 }
 

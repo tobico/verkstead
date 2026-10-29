@@ -281,6 +281,8 @@ export function Sheet(props: {
             proposal={props.set.proposal}
             ending={props.set.ending}
             attachments={props.set.attachments}
+            additions={props.set.additions}
+            servers={props.set.servers}
             answered={props.answered}
           />
         }

@@ -203,7 +203,7 @@ pub(crate) async fn onto(
 }
 
 /// Where a Set stands, as far as its files are concerned.
-enum Standing {
+pub(crate) enum Standing {
     /// Waiting on the human, with the Conversation whose directory its files
     /// land in — which is read here because the sheet is a page about a Set and
     /// the directory is a Conversation's.
@@ -220,7 +220,7 @@ enum Standing {
 /// what they closed, and a Closed Conversation is work nothing is going to pick
 /// up. The refusals of the two presses are the same list, so one reading
 /// answers both — see [`Fixed::attaching`] and [`Fixed::removing`].
-enum Fixed {
+pub(crate) enum Fixed {
     NoSuchSet,
     Answered,
     Locked,
@@ -258,7 +258,7 @@ impl Fixed {
 /// which directory its files would land in, and a Set that names no Conversation
 /// names no directory. It is the same answer a Set that is not there gets,
 /// because from the sheet's side there is no such Set to speak of.
-async fn standing(pool: &SqlitePool, set_id: i64) -> Result<Standing> {
+pub(crate) async fn standing(pool: &SqlitePool, set_id: i64) -> Result<Standing> {
     match store::settlement(pool, set_id).await? {
         Some(store::Settlement::Answered(_)) => return Ok(Standing::Fixed(Fixed::Answered)),
         Some(store::Settlement::LockedUnanswered(_)) => {
@@ -283,7 +283,7 @@ async fn standing(pool: &SqlitePool, set_id: i64) -> Result<Standing> {
 /// A Set this build cannot read asks nothing anybody here can name — the stored
 /// body is kept as it stands and rendered by nothing, so a file put under one of
 /// its labels would be a pill no page could ever draw.
-async fn asks(pool: &SqlitePool, set_id: i64, label: &str) -> Result<bool> {
+pub(crate) async fn asks(pool: &SqlitePool, set_id: i64, label: &str) -> Result<bool> {
     let Some(stored) = store::load_set(pool, set_id).await? else {
         return Ok(false);
     };

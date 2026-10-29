@@ -1,5 +1,6 @@
 {
   "Set": {
+    "additions": [],
     "attachments": [],
     "branch": "rate-limiting",
     "conversation": 1,
@@ -48,6 +49,7 @@
         "subquestions": []
       }
     ],
+    "servers": [],
     "standing": {
       "Waiting": "waiting"
     },

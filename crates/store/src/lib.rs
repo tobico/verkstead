@@ -69,6 +69,7 @@ mod repos;
 mod session_endings;
 mod session_names;
 mod session_pairings;
+mod set_additions;
 mod shares;
 mod slices;
 mod steers;
@@ -188,6 +189,10 @@ pub use repos::{
 pub use session_endings::{Ended, end_session, session_ending};
 pub use session_names::{continued_as, found_as, session_id, session_ids};
 pub use session_pairings::RanUnder;
+pub use set_additions::{
+    AddingToSet, Addition, AdditionState, SetAddition, TakingOff, add_to_set, set_additions,
+    take_off_set,
+};
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
 pub use slices::{
     Cell, MOST_A_SLICE_IS, Marks, Renaming, Rows, STAYS_BEHIND, Slice, carried_tables, land, slice,
@@ -942,6 +947,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // declared in `config.yaml`, which this crate has never heard of — see
     // [`mcp_servers`].
     mcp_servers::apply_schema(pool).await?;
+
+    // And what the human picked to add to the work from a Question Set's sheet,
+    // which hangs off the Set it was picked on as an Answer's file does — see
+    // [`set_additions`].
+    set_additions::apply_schema(pool).await?;
 
     // And the devices each of them may be moved to by the agent doing its work,
     // which hang off the Conversations beside those names: the human's consent,

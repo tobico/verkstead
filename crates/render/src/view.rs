@@ -152,6 +152,15 @@ pub struct SetView {
     /// and never the bytes, which is the whole of what a reader of one can know
     /// about the files.
     pub attachments: Vec<crate::conversations::AttachmentView>,
+
+    /// What the human picked on this Set to add to the work, in the order they
+    /// picked — each under the Question it was picked at, or under none for the
+    /// comment box (ADR-0028). Pending chips with a × while the Set waits.
+    pub additions: Vec<crate::conversations::AdditionView>,
+
+    /// The MCP servers the Conversation has already, by name, which the sheet's
+    /// Attach menus leave out: what is on already is nothing to add.
+    pub servers: Vec<String>,
 }
 
 /// The Diff as the browser receives it: the HTML the server rendered, and the
@@ -337,12 +346,15 @@ pub struct Answered {
 /// and the registry of held waits, neither of which is any of this crate's
 /// business. `ending` is the caller's for the same reason: it is where the
 /// Conversation stands, which this crate never asks about, and `attachments` is
-/// the record of what was put on the Set's Answers, which is the same. Everything
-/// else on the way out is rendering, which is all of it.
+/// the record of what was put on the Set's Answers, which is the same — as are
+/// `additions`, what was picked on it to add to the work, and `servers`, what
+/// the Conversation has already. Everything else on the way out is rendering,
+/// which is all of it.
 ///
 /// `pictures` fills the pictures in the Diff in, for a sheet that travels with
 /// no server behind it — see [`crate::diff::PictureReader`]. The workbench's
 /// sheet is handed none, and its pictures are fetched.
+#[allow(clippy::too_many_arguments)]
 pub fn set_view(
     id: i64,
     conversation: i64,
@@ -350,6 +362,8 @@ pub fn set_view(
     standing: Standing,
     ending: Option<Ending>,
     attachments: Vec<crate::conversations::AttachmentView>,
+    additions: Vec<crate::conversations::AdditionView>,
+    servers: Vec<String>,
     pictures: Option<&dyn crate::diff::PictureReader>,
 ) -> SetView {
     // An empty Preface is the same as none at all: no point drawing the section
@@ -390,6 +404,8 @@ pub fn set_view(
         proposal,
         ending,
         attachments,
+        additions,
+        servers,
     }
 }
 

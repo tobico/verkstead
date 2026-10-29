@@ -34,29 +34,30 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio_util::io::ReaderStream;
 use verkstead_render::{
-    Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, AtOnceView, Attached,
-    AttachmentRemoved, Author, AuthorEdit, AuthorEdited, AuthorSaved, BaseBranchChoice,
-    BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView, ClonableRepo, Cloning,
-    CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
-    ComponentsView, Confirming, ConflictResolution, ConversationArchived, ConversationClosed,
-    ConversationEntry, ConversationMove, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Creation, Cursor, DevicesView, DiskUse, DroppedRow,
-    Eviction, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
-    FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
-    LanguageCleared, LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer,
-    McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewAnnex, NewCompanion,
-    NewConversation, NewJoin, NewRank, OpenTerminal, PairingView, Parked, PendingSteerView,
-    Permitting, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
-    Resumed, RoleChoice, RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress,
-    ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    ShowArchived, ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
-    SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
-    TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
-    TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    AdditionMade, AdditionRemoved, Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice,
+    AtOnceView, Attached, AttachmentRemoved, Author, AuthorEdit, AuthorEdited, AuthorSaved,
+    BaseBranchChoice, BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView,
+    ClonableRepo, Cloning, CommentedOn, CompanionAdded, CompanionBaseRecorded,
+    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
+    CompanionView, CompileCaching, ComponentsView, Confirming, ConflictResolution,
+    ConversationArchived, ConversationClosed, ConversationEntry, ConversationMove,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
+    Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView,
+    FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
+    FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
+    IgnoredCommentsEdit, InstallPress, LanguageCleared, LanguageEdit, LanguageView, Lifecycle,
+    Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption,
+    NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank, OpenTerminal, PairingView, Parked,
+    PendingSteerView, Permitting, Picking, Process, ProcessChoice, ProcessPicked, ProfileChoice,
+    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, Running,
+    RunningOn, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, SizeRefused, Standing,
+    SteerCancelled, SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission,
+    StoreView, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
+    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo, Transferring, UnreadEntry,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -99,6 +100,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/sets/{id}/attachments/{attachment}/remove",
             post(detach_from_answer),
+        )
+        // And what the same menus pick to add to the work, recorded on the Set
+        // under the Question it was picked at — or none, at the comment box —
+        // and taken off again by the row's own id (ADR-0028).
+        .route("/api/ui/sets/{id}/additions", post(add_to_set))
+        .route(
+            "/api/ui/sets/{id}/additions/{addition}/remove",
+            post(remove_from_set),
         )
         .route("/api/ui/repos", get(repos).post(register_repo))
         // And making one, which is the other way a Repo arrives. Its own path
@@ -988,6 +997,26 @@ pub(crate) async fn set_reading(
         }
     };
 
+    // And what was picked on it to add to the work, which the sheet draws as
+    // chips beside those files and the record draws under its Answers — read
+    // here for the files' reason. With the servers the Conversation has
+    // already, which the sheet's menus leave out.
+    let declared = crate::conversations::declared_servers(state);
+    let additions = match crate::answer_additions::picked(&state.pool, &declared, id).await {
+        Ok(additions) => additions,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading what was picked on a Set failed");
+            return Err(unavailable("The question set couldn't be read."));
+        }
+    };
+    let servers = match store::mcp_servers(&state.pool, conversation).await {
+        Ok(servers) => servers,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading a Set's Conversation's servers failed");
+            return Err(unavailable("The question set couldn't be read."));
+        }
+    };
+
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
     //
@@ -1003,6 +1032,8 @@ pub(crate) async fn set_reading(
             standing,
             ending,
             attachments,
+            additions,
+            servers,
             inlining
                 .as_ref()
                 .map(|inlining| inlining as &dyn verkstead_render::PictureReader),
@@ -5027,6 +5058,51 @@ async fn detach_from_answer(
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, attachment, "removing a file from an Answer failed");
             unavailable("The file couldn't be removed.")
+        }
+    }
+}
+
+/// `POST /api/ui/sets/{id}/additions` — record a pick from one of the sheet's
+/// Attach menus on the Set, pending — see [`crate::answer_additions`].
+async fn add_to_set(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(picking): Json<Picking>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(AdditionMade::NoSuchSet).into_response();
+    };
+
+    match crate::answer_additions::add(&state, id, picking.label.as_deref(), &picking.pick).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "adding to a Question Set failed");
+            unavailable("That couldn't be added.")
+        }
+    }
+}
+
+/// `POST /api/ui/sets/{id}/additions/{addition}/remove` — and take one off
+/// again.
+async fn remove_from_set(
+    State(state): State<AppState>,
+    Path((id, addition)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(AdditionRemoved::NoSuchSet).into_response();
+    };
+
+    // An id that is not a number names nothing, which is the state the × asked
+    // for — the way a file's removal reads one.
+    let Ok(addition) = addition.parse::<i64>() else {
+        return Json(AdditionRemoved::Removed).into_response();
+    };
+
+    match crate::answer_additions::remove(&state, id, addition).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, addition, "taking an addition off a Question Set failed");
+            unavailable("That couldn't be removed.")
         }
     }
 }

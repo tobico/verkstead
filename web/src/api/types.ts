@@ -117,6 +117,45 @@ account: ProfileAccount,
 harness: boolean, };
 
 /**
+ * What was picked.
+ */
+export type Added = { "Server": { name: string, declared: boolean, } } | { "Companion": { repo_id: number, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, } };
+
+/**
+ * What became of a pick.
+ *
+ * The refusals a file on an Answer meets, for the same reasons — see
+ * [`AnswerAttached`] — and the two only a server can.
+ */
+export type AdditionMade = { "Added": { addition: AdditionView, } } | "NoSuchSet" | "Answered" | "Locked" | "Closed" | "NoSuchLabel" | "NoSuchServer" | "AlreadyOn";
+
+/**
+ * And of taking a pick off again, refused by the same freezes.
+ */
+export type AdditionRemoved = "Removed" | "NoSuchSet" | "Answered" | "Locked" | "Closed";
+
+/**
+ * Where an addition has got to: pending while the Set waits, applied by the
+ * Submit that answered it, struck where the Set settled without applying it.
+ */
+export type AdditionState = "Pending" | "Applied" | "Struck";
+
+/**
+ * One thing picked on a Question Set's sheet to add to the work, as the sheet
+ * and the Set's record draw it (ADR-0028).
+ *
+ * Picked at a Question's Attach menu, under its label, or at the set-level
+ * comment box's, under none — and recorded on the Set the moment it is picked,
+ * so a reload and a second device draw the same chip.
+ */
+export type AdditionView = { id: number, 
+/**
+ * The label of the Question it was picked at, or `null` for the comment
+ * box.
+ */
+label: string | null, added: Added, state: AdditionState, };
+
+/**
  * What became of pressing Adopt.
  *
  * Named the way [`GrillingStarted`]'s refusals are, and for the same reason: a
@@ -4583,6 +4622,11 @@ form: SteerForm, };
 export type Permitting = "Recorded" | "NotAMember" | "DraftedThere" | "WorkIsHere" | "Elsewhere" | "NoSuchConversation";
 
 /**
+ * What a row of the menu picks.
+ */
+export type Pick = { "Server": { name: string, } };
+
+/**
  * What a Conversation has settled about one of its roles, as the page shows
  * it: the Pairing its sessions run under, that the role runs none, or nothing
  * picked yet.
@@ -4600,6 +4644,15 @@ export type Permitting = "Recorded" | "NotAMember" | "DraftedThere" | "WorkIsHer
  * few bytes nobody is counting.
  */
 export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
+
+/**
+ * A pick made at an Attach menu on the sheet: where it was made, and what.
+ */
+export type Picking = { 
+/**
+ * The Question's label, or `null` for the set-level comment box.
+ */
+label: string | null, pick: Pick, };
 
 /**
  * An Event the Timeline keeps in view rather than letting scroll past.
@@ -6106,7 +6159,18 @@ ending: Ending | null,
  * and never the bytes, which is the whole of what a reader of one can know
  * about the files.
  */
-attachments: Array<AttachmentView>, };
+attachments: Array<AttachmentView>, 
+/**
+ * What the human picked on this Set to add to the work, in the order they
+ * picked — each under the Question it was picked at, or under none for the
+ * comment box (ADR-0028). Pending chips with a × while the Set waits.
+ */
+additions: Array<AdditionView>, 
+/**
+ * The MCP servers the Conversation has already, by name, which the sheet's
+ * Attach menus leave out: what is on already is nothing to add.
+ */
+servers: Array<string>, };
 
 /**
  * The settings as the human has just written them.

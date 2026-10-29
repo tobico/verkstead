@@ -4347,6 +4347,118 @@ pub enum AnswerAttachmentRemoved {
     Closed,
 }
 
+/// One thing picked on a Question Set's sheet to add to the work, as the sheet
+/// and the Set's record draw it (ADR-0028).
+///
+/// Picked at a Question's Attach menu, under its label, or at the set-level
+/// comment box's, under none — and recorded on the Set the moment it is picked,
+/// so a reload and a second device draw the same chip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AdditionView {
+    pub id: i64,
+
+    /// The label of the Question it was picked at, or `null` for the comment
+    /// box.
+    pub label: Option<String>,
+
+    pub added: Added,
+
+    pub state: AdditionState,
+}
+
+/// What was picked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Added {
+    /// A declared MCP server, by name, and whether the settings still declare
+    /// one by it — the chip says so where they do not, as the composer's does.
+    Server { name: String, declared: bool },
+
+    /// A registered Repo to become a Companion, in this mode, off this base —
+    /// `null` being its default branch — on this branch where it is read-write.
+    Companion {
+        repo_id: i64,
+        mode: CompanionMode,
+        base_ref: Option<String>,
+        branch: Option<String>,
+    },
+
+    /// A read-only Companion opened up to read-write.
+    OpenedUp {
+        repo_id: i64,
+        base_ref: Option<String>,
+        branch: Option<String>,
+    },
+
+    /// Another device of the cluster the work may be moved to, by Device Id.
+    Device { device: String },
+}
+
+/// Where an addition has got to: pending while the Set waits, applied by the
+/// Submit that answered it, struck where the Set settled without applying it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum AdditionState {
+    Pending,
+    Applied,
+    Struck,
+}
+
+/// A pick made at an Attach menu on the sheet: where it was made, and what.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Picking {
+    /// The Question's label, or `null` for the set-level comment box.
+    pub label: Option<String>,
+
+    pub pick: Pick,
+}
+
+/// What a row of the menu picks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Pick {
+    /// A declared MCP server, by name.
+    Server { name: String },
+}
+
+/// What became of a pick.
+///
+/// The refusals a file on an Answer meets, for the same reasons — see
+/// [`AnswerAttached`] — and the two only a server can.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum AdditionMade {
+    /// Recorded, pending, and this is the record.
+    Added {
+        addition: AdditionView,
+    },
+
+    NoSuchSet,
+    Answered,
+    Locked,
+    Closed,
+    NoSuchLabel,
+
+    /// Nothing is declared by that name.
+    NoSuchServer,
+
+    /// The Conversation has that server already.
+    AlreadyOn,
+}
+
+/// And of taking a pick off again, refused by the same freezes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum AdditionRemoved {
+    Removed,
+    NoSuchSet,
+    Answered,
+    Locked,
+    Closed,
+}
+
 /// What became of moving a Conversation onto another Repo.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]

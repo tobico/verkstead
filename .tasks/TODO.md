@@ -22,7 +22,7 @@ is the Deferred Ask's own rule and was accepted as the intermediate state.
 
 ## Tasks
 
-- [ ] 01: The menu, and a pending MCP server — [details](01-menu-and-pending-server.md)
+- [x] 01: The menu, and a pending MCP server — [details](01-menu-and-pending-server.md)
 - [ ] 02: Pending companions and device ticks — [details](02-pending-companions-and-devices.md)
 - [ ] 03: Submit applies servers and ticks, and writes the record — [details](03-submit-applies-servers-and-ticks.md)
 - [ ] 04: Submit applies companions — [details](04-submit-applies-companions.md)

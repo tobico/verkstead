@@ -44,10 +44,11 @@
 //! longer a picture of a file. The draft's composer offers the MCP servers
 //! declared in the settings, so its control is a menu whose first row is
 //! *Attach file* — the press this button always was — and whose others are the
-//! caller's. Where a caller offers
-//! nothing, which is the compose page and every answer sheet, it is the plain
-//! button it has always been. What the rows *are* is the caller's whole
-//! business: this knows there is a menu and not what is in it.
+//! caller's. The answer sheet offers the same rows at every Question and at its
+//! comment box, picks there being recorded on the Set until its Submit
+//! (ADR-0028). Where a caller offers nothing it is the plain button it has
+//! always been. What the rows *are* is the caller's whole business: this knows
+//! there is a menu and not what is in it.
 //!
 //! **What a menu's row attaches is drawn in this same row, as a chip.** An MCP
 //! server is not a file — it is a reference by name to something declared
@@ -189,24 +190,27 @@ export function attaching(what: {
 
   /// What else is attached here, drawn as chips after the pills — see [`Chip`].
   ///
-  /// Absent on every caller that has none, which is all of them but the draft's
-  /// composer. A caller that offers a menu passes this as well: what a row of
-  /// that menu attaches has to be drawn somewhere, and where it is drawn is
-  /// here.
+  /// Absent on every caller that has none. A caller that offers a menu passes
+  /// this as well: what a row of that menu attaches has to be drawn somewhere,
+  /// and where it is drawn is here.
   chips?: () => Array<Chip>;
 
   /// The rows the menu holds under *Attach file*, where this control is a menu
   /// at all.
   ///
-  /// Absent is the plain paperclip, which is what it has always been and what
-  /// every caller but the draft's composer still wants. A function rather than
-  /// a node, because the menu builds its rows when it opens and throws them
-  /// away when it closes — see `Menu.tsx`.
+  /// Absent is the plain paperclip, which is what it has always been. A
+  /// function rather than a node, because the menu builds its rows when it
+  /// opens and throws them away when it closes — see `Menu.tsx`.
   ///
   /// Handed the way to shut the menu, which a row that has done its work calls:
   /// which of them has is the caller's to know, and a card left hanging under
   /// the trigger after a press is a list the human has finished with.
   offering?: (shut: () => void) => JSX.Element;
+
+  /// Whether the menu's first row, *Attach file…*, is drawn at all. True unless
+  /// said otherwise: the one menu without it is the answer sheet's comment box,
+  /// which takes no file of its own.
+  filing?: boolean;
 }): Attaching {
   const offered = () => what.offered?.() ?? true;
 
@@ -275,6 +279,8 @@ export function attaching(what: {
         add={what.add}
         class={props.class}
         offering={what.offering}
+        filing={what.filing ?? true}
+        label={what.onto ? `Attach to ${what.onto}` : "Attach"}
       />
     );
 
@@ -341,7 +347,9 @@ export function Attachments(props: {
 /// a `<Row>` is built, so the two halves of the composer's row — the live one
 /// and the frozen one — cannot come to be called different things.
 function rowNamed(onto: string | undefined, chips: boolean): string {
-  if (onto !== undefined) return `Files attached to ${onto}`;
+  if (onto !== undefined) {
+    return chips ? `Attached to ${onto}` : `Files attached to ${onto}`;
+  }
 
   return chips ? "Attached files and MCP servers" : "Attached files";
 }
@@ -487,6 +495,13 @@ function AttachMenu(props: {
   add: (files: Array<File>) => void;
   offering: (shut: () => void) => JSX.Element;
   class?: string;
+
+  /// Whether *Attach file…* is drawn — see `filing` in [`attaching`].
+  filing: boolean;
+
+  /// What the trigger and its drop are called: *Attach* where there is one on
+  /// the page, and named for what it is under where there are several.
+  label: string;
 }): JSX.Element {
   let picker!: HTMLInputElement;
 
@@ -498,34 +513,38 @@ function AttachMenu(props: {
     <>
       <Menu
         class={[styles.clip, props.class].filter(Boolean).join(" ")}
-        label="Attach"
-        name="Attach"
+        label={props.label}
+        name={props.label}
         closer={(close) => (shut = close)}
         trigger={<Icon of={faPlus} />}
       >
         {() => (
           <>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                // The menu first: the picker is the platform's own window and
-                // what opens it is a press that has done its work, so the card
-                // it was pressed in has no business still hanging under the
-                // trigger behind it.
-                shut();
-                picker.click();
-              }}
-            >
-              Attach file…
-            </button>
+            <Show when={props.filing}>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  // The menu first: the picker is the platform's own window and
+                  // what opens it is a press that has done its work, so the
+                  // card it was pressed in has no business still hanging under
+                  // the trigger behind it.
+                  shut();
+                  picker.click();
+                }}
+              >
+                Attach file…
+              </button>
+            </Show>
 
             {props.offering(shut)}
           </>
         )}
       </Menu>
 
-      <Picker ref={(input) => (picker = input)} add={props.add} />
+      <Show when={props.filing}>
+        <Picker ref={(input) => (picker = input)} add={props.add} />
+      </Show>
     </>
   );
 }
