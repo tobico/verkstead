@@ -70,7 +70,6 @@ export function brokenReading(profile: ProfileEntry): string | null {
     : troubleReading({
         broken: profile.broken,
         agent_type: profile.account.agent_type,
-        device: null,
       });
 }
 

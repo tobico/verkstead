@@ -151,13 +151,14 @@ pub enum Broken {
 }
 
 /// Why a press that would have started a session was refused over a Profile:
-/// what is wrong with it, what it runs, and the machine it is at home on.
+/// what is wrong with it, and what it runs.
 ///
 /// **Enough to say the sentence the row says.** Every one of the readings above
 /// is drawn on the Profile's own row, and a refusal saying only *a chosen
 /// profile is broken* would be a second, vaguer account of something the human
-/// is already being told precisely. So what travels is the three facts that
-/// sentence is composed out of, and the viewer composes it once for both.
+/// is already being told precisely. So what travels is the two facts that
+/// sentence is composed out of, and the viewer composes it once for both. No
+/// device is among them: a Profile is the cluster's, and no finding names one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileTrouble {
@@ -166,11 +167,6 @@ pub struct ProfileTrouble {
 
     /// Which harness it runs, for the trouble that is about the harness.
     pub agent_type: AgentType,
-
-    /// And the machine the account would be fetched from, where the trouble
-    /// names one. None does since a Profile has no home to mark: the row is
-    /// the cluster's, and so is the sentence.
-    pub device: Option<String>,
 }
 
 /// One row of the Profile list.
@@ -243,15 +239,6 @@ pub struct ProfileEntry {
     /// not answering keeps its line, drawn from the last binding of it this
     /// device holds; one unlinked loses it, whatever binding it left behind.
     pub devices: Vec<ProfileDevice>,
-
-    /// Where this Profile was minted and the id it had there, for one that was
-    /// numbered before Profiles had uuids — absent for every other row.
-    ///
-    /// What a member's mirror of it from before the uuids is bridged by — see
-    /// the record's own pair, which is what crosses between devices (ADR-0028).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", ts(optional))]
-    pub minted: Option<ProfileMinted>,
 }
 
 /// One device's line on a Profile card: the device, and whether it holds a
@@ -272,15 +259,6 @@ pub struct ProfileDevice {
     /// for a device holding no binding — one that **runs from a copy** of the
     /// account under its own Data Directory.
     pub bound: Option<ProfileAccount>,
-}
-
-/// Where a Profile numbered before the uuids was minted: the **Device Id** of
-/// the machine it was made on, and the integer id it had there.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct ProfileMinted {
-    pub device: String,
-    pub id: i64,
 }
 
 /// One file of a Profile's account as a member across the link is handed it: a

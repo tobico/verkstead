@@ -2724,7 +2724,6 @@ async fn starting_is_refused_when_a_chosen_profiles_pair_has_gone() {
         GrillingStarted::ProfileBroken(ProfileTrouble {
             broken: Broken::DirMissing,
             agent_type: AgentType::Claude,
-            device: None,
         }),
     );
 }
@@ -10452,7 +10451,6 @@ async fn adopting_is_refused_when_a_chosen_profiles_pair_has_gone() {
         Adopted::ProfileBroken(ProfileTrouble {
             broken: Broken::DirMissing,
             agent_type: AgentType::Claude,
-            device: None,
         }),
     );
     nothing_adopted(&app, id, &repo).await;
@@ -12128,7 +12126,6 @@ async fn a_start_refused_for_its_profiles_or_its_target_closes_nothing() {
         TakenUp::ProfileBroken(ProfileTrouble {
             broken: Broken::DirMissing,
             agent_type: AgentType::Claude,
-            device: None,
         }),
     );
     assert_eq!(

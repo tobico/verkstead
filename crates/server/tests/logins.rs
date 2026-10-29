@@ -759,7 +759,6 @@ async fn a_press_under_a_signed_out_account_is_refused_until_it_logs_in() {
         GrillingStarted::ProfileBroken(ProfileTrouble {
             broken: Broken::SignedOut,
             agent_type: AgentType::Claude,
-            device: None,
         }),
     );
     assert_eq!(workbench.broken(&profile).await, Some(Broken::SignedOut));

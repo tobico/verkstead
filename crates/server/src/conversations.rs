@@ -5205,7 +5205,6 @@ fn trouble(profile: &ProfileEntry) -> Option<ProfileTrouble> {
     Some(ProfileTrouble {
         broken: profile.broken?,
         agent_type: profile.account.agent_type(),
-        device: None,
     })
 }
 

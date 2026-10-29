@@ -7995,7 +7995,6 @@ describe("starting the work", () => {
         ProfileBroken: {
           broken: "DirMissing",
           agent_type: "Claude",
-          device: null,
         },
       },
       /Its claude directory is gone/,
@@ -8008,7 +8007,6 @@ describe("starting the work", () => {
         ProfileBroken: {
           broken: "NoBoundDevice",
           agent_type: "Claude",
-          device: null,
         },
       },
       /No device it's bound on with a login is reachable/,

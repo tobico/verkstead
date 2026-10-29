@@ -4949,21 +4949,7 @@ bound: boolean,
  * not answering keeps its line, drawn from the last binding of it this
  * device holds; one unlinked loses it, whatever binding it left behind.
  */
-devices: Array<ProfileDevice>, 
-/**
- * Where this Profile was minted and the id it had there, for one that was
- * numbered before Profiles had uuids — absent for every other row.
- *
- * What a member's mirror of it from before the uuids is bridged by — see
- * the record's own pair, which is what crosses between devices (ADR-0028).
- */
-minted?: ProfileMinted, };
-
-/**
- * Where a Profile numbered before the uuids was minted: the **Device Id** of
- * the machine it was made on, and the integer id it had there.
- */
-export type ProfileMinted = { device: string, id: number, };
+devices: Array<ProfileDevice>, };
 
 /**
  * What became of saving a Profile.
@@ -4976,13 +4962,14 @@ export type ProfileSaved = "Saved" | "NoSuchProfile" | "Modelless" | "NameTaken"
 
 /**
  * Why a press that would have started a session was refused over a Profile:
- * what is wrong with it, what it runs, and the machine it is at home on.
+ * what is wrong with it, and what it runs.
  *
  * **Enough to say the sentence the row says.** Every one of the readings above
  * is drawn on the Profile's own row, and a refusal saying only *a chosen
  * profile is broken* would be a second, vaguer account of something the human
- * is already being told precisely. So what travels is the three facts that
- * sentence is composed out of, and the viewer composes it once for both.
+ * is already being told precisely. So what travels is the two facts that
+ * sentence is composed out of, and the viewer composes it once for both. No
+ * device is among them: a Profile is the cluster's, and no finding names one.
  */
 export type ProfileTrouble = { 
 /**
@@ -4992,13 +4979,7 @@ broken: Broken,
 /**
  * Which harness it runs, for the trouble that is about the harness.
  */
-agent_type: AgentType, 
-/**
- * And the machine the account would be fetched from, where the trouble
- * names one. None does since a Profile has no home to mark: the row is
- * the cluster's, and so is the sentence.
- */
-device: string | null, };
+agent_type: AgentType, };
 
 /**
  * The grilling's closing proposal as the Set it rides draws it: which direction
