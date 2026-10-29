@@ -1348,7 +1348,7 @@ mod tests {
     /// saying what to run.
     ///
     /// **Every test here that attempts an access needs it, and says so rather
-    /// than passing** — the rule `tests/account_windows.rs` follows, and for its
+    /// than passing** — the rule `tests/suite/account_windows.rs` follows, and for its
     /// reason: creating a local account is an administrator's call, so this
     /// suite cannot make one, and a machine where the elevated verb has never
     /// been run fails here with the line that names it.
@@ -1380,7 +1380,7 @@ mod tests {
     /// `SystemRoot` is one that will not start.
     ///
     /// Said outright rather than taken off this process, which is the one thing
-    /// `tests/account_windows.rs` is careful about too — the server's own
+    /// `tests/suite/account_windows.rs` is careful about too — the server's own
     /// environment is full of paths the account is refused, and its `TEMP` is
     /// under the human's own profile.
     const NEEDED: [(&str, &str); 6] = [
@@ -1775,7 +1775,7 @@ mod tests {
     /// read here where a session start reads it.
     ///
     /// Read as the list of entries rather than through `icacls`, which is what
-    /// `tests/sandbox_windows.rs` asks the same question with: in here the
+    /// `tests/suite/sandbox_windows.rs` asks the same question with: in here the
     /// bytes are what a mistake would show up in, and one entry of the
     /// directory's own turning into one it inherits is exactly such a mistake.
     #[test]
@@ -1836,7 +1836,7 @@ mod tests {
     /// attempted through them. The effective read is one account opening a file
     /// another made, which wants two logons and a real machine; Wine does not
     /// emulate inheritance at all, so a test that attempted it would be a test
-    /// that only ever ran in one place. `tests/sandbox_windows.rs` is where a
+    /// that only ever ran in one place. `tests/suite/sandbox_windows.rs` is where a
     /// boundary is attempted rather than read, and it says why nothing else
     /// here reads a list back.
     #[test]
@@ -2282,7 +2282,7 @@ mod tests {
     /// told to look for a program in is read from inside where it is the
     /// human's own, and is not where it is not.
     ///
-    /// **Asked here rather than in `crates/server/tests/sandbox_windows.rs`**,
+    /// **Asked here rather than in `crates/server/tests/suite/sandbox_windows.rs`**,
     /// which asks every other kind by attempting it, and for a reason of that
     /// suite's rather than of this rule's: what a session's `PATH` holds is the
     /// *server process's* own `PATH` with Verkstead's bin in front of it, so a
@@ -2441,7 +2441,7 @@ mod tests {
     /// would pass against an entry that granted the listing too.
     ///
     /// The environment is this test's own and small — see
-    /// `tests/account_windows.rs`, which says why: a rendering is the whole of
+    /// `tests/suite/account_windows.rs`, which says why: a rendering is the whole of
     /// what a process is handed, and the server's own environment is full of
     /// paths this account is refused.
     ///
@@ -2498,7 +2498,7 @@ mod tests {
     /// `name=word` lines it printed.
     ///
     /// The word is the name of what stopped the read rather than one of this
-    /// test's own, for the reason `tests/sessions_windows.rs` reads one:
+    /// test's own, for the reason `tests/suite/sessions_windows.rs` reads one:
     /// `UnauthorizedAccessException` is a boundary and `FileNotFoundException`
     /// is a path that was never there, and a test that could not tell them
     /// apart would pass against a description that named nothing at all.

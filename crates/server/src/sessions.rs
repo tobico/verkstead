@@ -5239,7 +5239,7 @@ mod tests {
     /// suite running on Linux writes the same characters whichever tool the
     /// server used, and could not tell a line spelled one way from a line
     /// spelled two. That claim is asserted where a Windows machine runs it; see
-    /// `tests/sessions_windows.rs`.
+    /// `tests/suite/sessions_windows.rs`.
     fn opened_at(state: &std::path::Path) -> PathBuf {
         crate::handoffs::inside(
             Platform::Windows,

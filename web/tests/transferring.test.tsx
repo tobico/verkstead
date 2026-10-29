@@ -197,7 +197,7 @@ const preflightOf = (device: string) =>
 /// Written here rather than read out of a fixture, for the reason the branch
 /// lists in `bench.tsx` are: a golden file of this endpoint would need two
 /// linked Verksteads behind it, and what keeps these honest is that they are
-/// typed — `crates/server/tests/preflight.rs` is where the shape is proved
+/// typed — `crates/server/tests/suite/preflight.rs` is where the shape is proved
 /// against real machines.
 const READY = { device: "laptop", lacks: [] } satisfies Preflight;
 

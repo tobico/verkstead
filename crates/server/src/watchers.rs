@@ -1072,14 +1072,14 @@ async fn attached(
 /// still listed, and still answers that it is a directory, while anything holds a
 /// handle on it — so a removal nobody heard about is a removal nothing on that
 /// platform can find. Everything else about this module is asked over a real
-/// watcher and a real socket in `tests/watching.rs`, which runs everywhere.
+/// watcher and a real socket in `tests/suite/watching.rs`, which runs everywhere.
 #[cfg(all(test, not(windows)))]
 mod tests {
     use super::*;
 
     /// The register a walk keeps, over a watcher that is asked about nothing:
     /// what is under test here is which directories are *believed* watched, and
-    /// the events are the socket's own tests' subject — see `tests/watching.rs`.
+    /// the events are the socket's own tests' subject — see `tests/suite/watching.rs`.
     fn register() -> Held {
         Held {
             conversation_id: 1,
@@ -1105,7 +1105,7 @@ mod tests {
     /// directory there to be found. Nothing is lost by that: the name is not free
     /// for anything to be made at either, so neither half of the cost above can
     /// arise until the watch goes. A removal somebody *did* hear about is
-    /// [`Held::forget`]'s, on every platform, and `tests/watching.rs` asks about
+    /// [`Held::forget`]'s, on every platform, and `tests/suite/watching.rs` asks about
     /// that one over a real watcher.
     #[test]
     fn a_whole_walk_forgets_a_directory_that_has_gone() {
