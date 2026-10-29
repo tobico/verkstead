@@ -1,0 +1,8 @@
+/* The card the Attach menu opens for a repo — see `AddingRepo.tsx`. The card,
+   its heading, note and buttons are the server card's; what is here is the
+   steer's companion fields laid out on it, a field to a line. */
+
+.fields {
+  display: grid;
+  gap: 0.85rem;
+}

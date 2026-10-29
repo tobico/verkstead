@@ -44,7 +44,8 @@ pub use answering::{Locked, Submitted};
 pub use browsing::{DirectoryEntry, DirectoryListing, EntryKind};
 pub use components::{AnnexComponent, AnnexState, ComponentsView};
 pub use conversations::{
-    AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
+    AbandonedRepo, AbandonedRoadmap, AddableView, Added, AdditionMade, AdditionRemoved,
+    AdditionState, AdditionView, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     AgentSession, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachedServerView,
     AttachmentOrigin, AttachmentRemoved, AttachmentView, BacklogPane, BaseBranchChoice,
     BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent, BriefSaved, Capture,
@@ -56,8 +57,8 @@ pub use conversations::{
     ConversationUnarchived, ConversationView, DroppedRow, GrillingStarted, HandoffEvent, InFront,
     Lifecycle, ManualTaskEvent, MemoEvent, MemoPressed, MemoRetirement, MergedRow, Merging,
     MovedEvent, NewAdoption, NewCompanion, NewConversation, NewRank, NoticeEvent, NoticeLogIn,
-    OfferedView, OpenTerminal, OtherAuthor, Parked, PendingSteerView, PinnedEvent, PortsView,
-    PreviewView, Process, ProcessChoice, ProcessPicked, ProposalView, PullRequestCheck,
+    OfferedView, OpenTerminal, OtherAuthor, Parked, PendingSteerView, Pick, Picking, PinnedEvent,
+    PortsView, PreviewView, Process, ProcessChoice, ProcessPicked, ProposalView, PullRequestCheck,
     PullRequestComment, PullRequestCommit, PullRequestDetails, PullRequestEvent,
     PullRequestSummary, QuestionSetEvent, RepoChoice, RepoSwitched, ResolveConflictsEvent,
     Resolved, Resumed, RoadmapPane, RowDevice, Screen, ServerAttached, ServerRemoved, SetRow,

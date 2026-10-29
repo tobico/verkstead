@@ -66,7 +66,7 @@ testers.runNixOSTest {
       # What a session's sandbox looks like from inside, reported one
       # `key=value` line at a time.
       #
-      # The same shape as the sandbox tests in `crates/server/tests/sandbox.rs`,
+      # The same shape as the sandbox tests in `crates/server/tests/suite/sandbox.rs`,
       # and for the same reason: a read-only bind and a directory nobody may
       # write look identical to `test -w`, so each path is attempted rather than
       # asked of its metadata.
@@ -1043,7 +1043,7 @@ testers.runNixOSTest {
         # The Diff is not among them, and nothing here asks for one: it is the
         # server's to compose now, off the Worktree of the Conversation the Set
         # was asked from — and this Conversation is a Draft, which has none.
-        # `crates/server/tests/sets.rs` is where that composition is proved,
+        # `crates/server/tests/suite/sets.rs` is where that composition is proved,
         # over a Conversation that has been checked out.
         detail = machine.succeed(f"curl -sf http://127.0.0.1:8422/api/ui/sets/{first}")
         assert "vm-project" in detail, "the CLI did not derive the project"

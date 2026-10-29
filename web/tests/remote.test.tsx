@@ -35,7 +35,7 @@
 //!
 //! The reads are fixtures the server's own tests wrote, so what the page is
 //! drawn from is the shape the endpoint really answers with — see
-//! `crates/server/tests/remote.rs` and `crates/server/tests/devices.rs`, whose
+//! `crates/server/tests/suite/remote.rs` and `crates/server/tests/suite/devices.rs`, whose
 //! subject those shapes are.
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";

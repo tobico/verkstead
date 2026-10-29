@@ -98,3 +98,13 @@ ts-rs = "12"
 two-face = { version = "0.5", default-features = false, features = [
     "syntect-fancy",
 ] }
+
+# Line tables and nothing more, for every dev and test build. Full debug info
+# is most of what a test binary weighs, and linking 129 of them is where the
+# Windows CI legs spend their build — MSVC writing a PDB of every variable of
+# every dependency, for a suite that only ever reads a panic's backtrace. A
+# backtrace keeps its files and lines; what goes is a debugger's view of
+# variables, and a developer who wants that back overrides `debug` in their own
+# cargo config. `test` inherits this.
+[profile.dev]
+debug = "line-tables-only"

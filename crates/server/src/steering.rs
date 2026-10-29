@@ -1661,9 +1661,19 @@ async fn additions(
         return Ok(Additions::Ready(Vec::new()));
     }
 
+    joining(state, conversation, &submission.added).await
+}
+
+/// [`additions`]' questions, asked of any list of companions joining the work:
+/// the steer's, and an Answer's (ADR-0028).
+pub(crate) async fn joining(
+    state: &AppState,
+    conversation: &Conversation,
+    joining: &[CompanionAddition],
+) -> anyhow::Result<Additions> {
     let mut added: Vec<store::Companion> = Vec::new();
 
-    for addition in &submission.added {
+    for addition in joining {
         let refused = |repo: &str, why| {
             Additions::Refused(ConversationSteered::Companion {
                 repo: repo.to_owned(),
@@ -1741,7 +1751,7 @@ async fn additions(
 }
 
 /// What reading the companions the form named came to.
-enum Additions {
+pub(crate) enum Additions {
     Ready(Vec<store::Companion>),
 
     /// One of them cannot go in, and the human is told which and why.
@@ -1814,9 +1824,19 @@ async fn upgrades(
         return Ok(Upgrades::Ready(Vec::new()));
     }
 
+    opening(state, conversation, &submission.upgraded).await
+}
+
+/// [`upgrades`]' questions, asked of any list of companions being opened up:
+/// the steer's, and an Answer's (ADR-0028).
+pub(crate) async fn opening(
+    state: &AppState,
+    conversation: &Conversation,
+    opening: &[CompanionUpgrade],
+) -> anyhow::Result<Upgrades> {
     let mut opened: Vec<store::Companion> = Vec::new();
 
-    for upgrade in &submission.upgraded {
+    for upgrade in opening {
         let refused = |repo: &str, why| {
             Upgrades::Refused(ConversationSteered::Companion {
                 repo: repo.to_owned(),
@@ -1886,7 +1906,7 @@ async fn upgrades(
 }
 
 /// What reading the companions the form opened up came to.
-enum Upgrades {
+pub(crate) enum Upgrades {
     Ready(Vec<store::Companion>),
 
     /// One of them cannot be opened, and the human is told which and why.
@@ -2270,6 +2290,108 @@ fn alongside(
     })
 }
 
+/// The companion half of [`plan`] and [`make`], for an Answer that adds to the
+/// work rather than a steer that moves it (ADR-0028): the same questions of
+/// git for each companion joining or being opened up, asked before the Response
+/// is stored, and the same making after them.
+///
+/// Three steps rather than [`make`]'s one, because a Response can still be
+/// refused between them — answered from another device, locked — and what is
+/// made has to be taken back then: [`Self::check_out`], then
+/// [`Self::retire`] once the record holds the new checkouts, or
+/// [`Self::unmake`] where it does not.
+pub(crate) struct Alongside(Vec<Checkout>);
+
+impl Alongside {
+    /// Nothing to check out, which is a Conversation nothing has been checked
+    /// out for yet: its grill start makes every companion it holds.
+    pub(crate) fn none() -> Self {
+        Self(Vec::new())
+    }
+
+    /// Ask git everything each checkout turns on, as [`alongside`] asks it for
+    /// a steer, and make none of it.
+    pub(crate) async fn plan(
+        state: &AppState,
+        conversation: &Conversation,
+        added: Vec<store::Companion>,
+        opened: Vec<store::Companion>,
+    ) -> anyhow::Result<Result<Self, ConversationSteered>> {
+        let data = state.data_dir.clone();
+        let gh = state.github.clone();
+        let id = conversation.id;
+        let branch = conversation.branch.clone();
+
+        // What this Conversation's checkouts already stand in, which a new one
+        // must not be put on top of.
+        let held: Vec<PathBuf> = conversation
+            .worktree
+            .iter()
+            .cloned()
+            .chain(
+                conversation
+                    .companions
+                    .iter()
+                    .filter_map(|companion| companion.worktree.clone()),
+            )
+            .collect();
+
+        let checking_out: Vec<(Joining, store::Companion)> = added
+            .into_iter()
+            .map(|companion| (Joining::Added, companion))
+            .chain(
+                opened
+                    .into_iter()
+                    .map(|companion| (Joining::Opened, companion)),
+            )
+            .collect();
+
+        Ok(tokio::task::spawn_blocking(move || {
+            let mut checkouts: Vec<Checkout> = Vec::new();
+
+            for (joining, companion) in checking_out {
+                let claimed: Vec<PathBuf> = held
+                    .iter()
+                    .cloned()
+                    .chain(checkouts.iter().map(|checkout| checkout.path.clone()))
+                    .collect();
+
+                checkouts.push(alongside(
+                    &data, &gh, id, &branch, joining, companion, &claimed,
+                )?);
+            }
+
+            Ok(Self(checkouts))
+        })
+        .await?)
+    }
+
+    /// Make every checkout planned, or none of them; and where each went, for
+    /// the record.
+    pub(crate) async fn check_out(
+        self,
+    ) -> anyhow::Result<Result<(Self, Vec<store::CompanionWorktree>), ConversationSteered>> {
+        Ok(tokio::task::spawn_blocking(move || {
+            check_out(&self.0)?;
+            let recorded = recorded(&self.0);
+
+            Ok((self, recorded))
+        })
+        .await?)
+    }
+
+    /// The record holds the new checkouts, so the detached ones they replace
+    /// go.
+    pub(crate) async fn retire(self) -> anyhow::Result<()> {
+        Ok(tokio::task::spawn_blocking(move || retire(&self.0)).await?)
+    }
+
+    /// The record never came to hold them, so they go again.
+    pub(crate) async fn unmake(self) -> anyhow::Result<()> {
+        Ok(tokio::task::spawn_blocking(move || unmake(&self.0)).await?)
+    }
+}
+
 /// Make every checkout the plan holds, or unmake the ones already made and say
 /// which one would not be.
 ///
@@ -2298,56 +2420,8 @@ async fn make(planned: Planned) -> anyhow::Result<Making> {
     } = planned;
 
     let made = tokio::task::spawn_blocking(move || {
-        for (nth, checkout) in checkouts.iter().enumerate() {
-            let made = match &checkout.holding {
-                Holding::Cut(branch, commit) => {
-                    crate::worktrees::add(&checkout.repo, &checkout.path, branch, commit)
-                }
-                Holding::Kept(branch) => {
-                    crate::worktrees::rebuild(&checkout.repo, &checkout.path, branch)
-                }
-                Holding::Detached(commit) => {
-                    crate::worktrees::add_detached(&checkout.repo, &checkout.path, commit)
-                }
-            };
-
-            if made {
-                continue;
-            }
-
-            // This one included, and first: an `add` that fell over may have
-            // made the directory, or the branch, or neither, and what is being
-            // unwound is whatever it did get as far as. The rest newest first,
-            // which is the order they were made in reversed.
-            for done in checkouts[..=nth].iter().rev() {
-                crate::worktrees::unmake(&done.repo, &done.path, done.holding.cut());
-            }
-
-            return Err(checkout.refused());
-        }
-
-        // And only now the directories the new ones take the place of: the
-        // detached checkout of every companion that was opened up. After the
-        // whole plan is made rather than beside each one, which is what leaves
-        // a companion the steer went on to refuse over read-only with its
-        // checkout exactly where it stood.
-        //
-        // Nothing is refused for a directory that will not go. The branch is
-        // cut, the new worktree is there and the record is about to name it, so
-        // what is left is a directory nothing points at — worth the log it gets
-        // and not worth undoing the steer for.
-        for checkout in &checkouts {
-            let Some(replacing) = &checkout.replacing else {
-                continue;
-            };
-
-            if !crate::worktrees::remove(&checkout.repo, replacing) {
-                tracing::error!(
-                    path = %replacing.display(),
-                    "the detached checkout of a companion a steer opened up could not be removed",
-                );
-            }
-        }
+        check_out(&checkouts)?;
+        retire(&checkouts);
 
         Ok(recorded(&checkouts))
     })
@@ -2365,6 +2439,73 @@ async fn make(planned: Planned) -> anyhow::Result<Making> {
         }),
         Err(refusal) => Making::Refused(refusal),
     })
+}
+
+/// Make each checkout in turn, or unmake the ones already made and say which
+/// one would not be: the first half of [`make`], blocking.
+fn check_out(checkouts: &[Checkout]) -> Result<(), ConversationSteered> {
+    for (nth, checkout) in checkouts.iter().enumerate() {
+        let made = match &checkout.holding {
+            Holding::Cut(branch, commit) => {
+                crate::worktrees::add(&checkout.repo, &checkout.path, branch, commit)
+            }
+            Holding::Kept(branch) => {
+                crate::worktrees::rebuild(&checkout.repo, &checkout.path, branch)
+            }
+            Holding::Detached(commit) => {
+                crate::worktrees::add_detached(&checkout.repo, &checkout.path, commit)
+            }
+        };
+
+        if made {
+            continue;
+        }
+
+        // This one included, and first: an `add` that fell over may have
+        // made the directory, or the branch, or neither, and what is being
+        // unwound is whatever it did get as far as.
+        unmake(&checkouts[..=nth]);
+
+        return Err(checkout.refused());
+    }
+
+    Ok(())
+}
+
+/// Take back checkouts [`check_out`] made, newest first, and the branches
+/// they cut with them. Blocking.
+///
+/// Newest first, which is the order they were made in reversed.
+fn unmake(checkouts: &[Checkout]) {
+    for done in checkouts.iter().rev() {
+        crate::worktrees::unmake(&done.repo, &done.path, done.holding.cut());
+    }
+}
+
+/// Remove the detached checkouts the made ones take the place of: the second
+/// half of [`make`], and only ever after the first has gone through. Blocking.
+///
+/// After the whole plan is made rather than beside each one, which is what
+/// leaves a companion a refusal went on to cover read-only with its checkout
+/// exactly where it stood.
+///
+/// Nothing is refused for a directory that will not go. The branch is cut, the
+/// new worktree is there and the record is about to name it, so what is left
+/// is a directory nothing points at — worth the log it gets and not worth
+/// undoing the work for.
+fn retire(checkouts: &[Checkout]) {
+    for checkout in checkouts {
+        let Some(replacing) = &checkout.replacing else {
+            continue;
+        };
+
+        if !crate::worktrees::remove(&checkout.repo, replacing) {
+            tracing::error!(
+                path = %replacing.display(),
+                "the detached checkout of a companion a steer opened up could not be removed",
+            );
+        }
+    }
 }
 
 /// Where each companion checkout of a steer went and what it came off, for the

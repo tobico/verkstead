@@ -165,7 +165,7 @@
               # network by reaching a listener the test itself is holding open,
               # which is the sharing proved without touching the internet.
               curl
-              # What `crates/server/tests/package_stores.rs` proves a shared
+              # What `crates/server/tests/suite/package_stores.rs` proves a shared
               # package store with. That suite really installs a package inside
               # a Sandbox, twice at once and then with the registry denied,
               # because a descriptor naming `GOMODCACHE` cannot say whether Go
@@ -184,7 +184,7 @@
               # shell carrying one of them is a shell where half of that is
               # never proved. Both packages install a program called `yarn`, so
               # Berry's is linked in under a name of its own — which is the
-              # name `tests/package_stores.rs` looks for, and the same name the
+              # name `tests/suite/package_stores.rs` looks for, and the same name the
               # CI job installs it as.
               yarn
               (pkgs.runCommand "yarn-berry-under-its-own-name" { } ''
@@ -246,7 +246,7 @@
               # Homebrew to install one with — see
               # `crates/server/src/onboarding/install.rs`'s `GH_RELEASE`. Both
               # halves: `unzip` is what that line runs, and `zip` is what
-              # `crates/server/tests/installing.rs` builds the release its stub
+              # `crates/server/tests/suite/installing.rs` builds the release its stub
               # `curl` answers with. Every Mac carries `unzip` already, and the
               # runner images carry both.
               zip

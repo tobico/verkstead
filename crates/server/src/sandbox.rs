@@ -146,7 +146,7 @@ pub(crate) mod outliving;
 //
 // Public, both of them, for the reason this module is: what a session may reach
 // is the product's own promise, and what proves a boundary is a process really
-// started behind one — see `crates/server/tests/account_windows.rs`.
+// started behind one — see `crates/server/tests/suite/account_windows.rs`.
 #[cfg(windows)]
 pub mod entries;
 #[cfg(windows)]
@@ -1385,7 +1385,7 @@ fn reachable(platform: Platform, path: &OsStr, home: Option<&Path>) -> bool {
 /// floor alone — [`reachable`] asked with no home, which is what a program
 /// installed on the machine rather than granted by Verkstead is reached by.
 ///
-/// **Public for the proofs' sake.** `tests/package_stores.rs` runs real package
+/// **Public for the proofs' sake.** `tests/suite/package_stores.rs` runs real package
 /// managers by their host path *inside* a Sandbox, and a tool on the `PATH`
 /// that resolves outside [`SYSTEM`] is one the shell in there reports as
 /// absent — so the proof fails on `not found` where it meant to skip. The CI
@@ -6613,7 +6613,7 @@ mod tests {
     /// answers turns on the environment the suite is running in — a `cargo
     /// test` is itself started by a rustup shim, which sets `RUSTUP_HOME` for
     /// everything under it — so the directory it lands on is asked of a real
-    /// session instead, in `tests/sessions_windows.rs`.
+    /// session instead, in `tests/suite/sessions_windows.rs`.
     #[test]
     fn a_path_with_no_rustup_on_it_is_granted_no_toolchains() {
         let home = tempfile::tempdir().unwrap();

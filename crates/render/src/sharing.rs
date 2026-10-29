@@ -214,9 +214,16 @@ pub fn shared(
         .collect();
 
     SharedConversation {
+        // And with nothing on offer to add: what the sheet's menus could add
+        // is the workbench's, and it names the registered Repos where they are
+        // on the disk and the cluster's devices where they can be reached.
         sets: sets
             .into_iter()
             .filter(|set| boarded.contains(&set.id))
+            .map(|set| SetView {
+                addable: Default::default(),
+                ..set
+            })
             .collect(),
         commits: commits
             .into_iter()
@@ -767,6 +774,8 @@ mod tests {
             title: title.to_owned(),
             rows: Vec::new(),
             standing: Standing::LockedUnanswered("2026-08-29T11:00:00Z".to_owned()),
+            added: Vec::new(),
+            carried_on: false,
         })
     }
 

@@ -72,6 +72,7 @@ mod repos;
 mod session_endings;
 mod session_names;
 mod session_pairings;
+mod set_additions;
 mod shares;
 mod slices;
 mod steers;
@@ -191,7 +192,11 @@ pub use repos::{
 };
 pub use session_endings::{Ended, end_session, session_ending};
 pub use session_names::{continued_as, found_as, session_id, session_ids};
-pub use session_pairings::RanUnder;
+pub use session_pairings::{RanUnder, newest_agent};
+pub use set_additions::{
+    AddingToSet, Addition, AdditionState, SetAddition, TakingOff, add_to_set, carried_on,
+    carried_sets, conversation_additions, set_additions, take_off_set,
+};
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
 pub use slices::{
     Cell, MOST_A_SLICE_IS, Marks, Renaming, Rows, STAYS_BEHIND, Slice, carried_tables, land, slice,
@@ -476,36 +481,33 @@ pub async fn submit_response(
     set_id: i64,
     response: &Response,
 ) -> Result<Submission> {
+    submit_response_with_checkouts(pool, settlements, set_id, response, &[]).await
+}
+
+/// [`submit_response`], with where the server checked out the companions the
+/// Set adds, made before it is called and recorded as the Response is stored —
+/// see [`insert_response_with_checkouts`]. Anything but
+/// [`Submission::Accepted`] recorded none of them, and they are the caller's
+/// to take back.
+pub async fn submit_response_with_checkouts(
+    pool: &SqlitePool,
+    settlements: &Settlements,
+    set_id: i64,
+    response: &Response,
+    checkouts: &[CompanionWorktree],
+) -> Result<Submission> {
     let Some(stored) = load_set(pool, set_id).await? else {
         return Ok(Submission::NoSuchSet);
     };
 
-    // A Response is checked against the Questions it resolves, so a Set this
-    // build cannot read cannot be answered: there is nothing to check it
-    // against. The failure is this Set's own — nothing else on its Timeline is
-    // touched by it — and the workbench offers no way to get here, since it
-    // draws an unreadable Set as a record rather than as a sheet.
-    let set = stored.set.readable(set_id)?;
-
-    // Checked against what the human handed over as well as what they wrote: a
-    // file put on a Question is an Answer to it, and the sheet sends one with a
-    // file and nothing else as answered. The rows are where that is written
-    // down — nothing about a file rides on the Response itself, which is stored
-    // exactly as it was sent.
-    let attached: Vec<String> = attachments::set_attachments(pool, set_id)
-        .await?
-        .into_iter()
-        .filter_map(|attachment| match attachment.origin {
-            Origin::Answer { label, .. } => Some(label),
-            Origin::Brief => None,
-        })
-        .collect();
-
-    if let Err(invalid) = response.validate_attached(set, &attached) {
-        return Ok(Submission::Invalid(invalid));
+    if let Some(refused) = unresolved(pool, set_id, response).await? {
+        return Ok(refused);
     }
 
-    let Some(accepted) = insert_response(pool, set_id, response).await? else {
+    let set = stored.set.readable(set_id)?;
+
+    let Some(accepted) = insert_response_with_checkouts(pool, set_id, response, checkouts).await?
+    else {
         // The insert refuses both ways a Set can already be settled, so which of
         // the two it was is read back rather than assumed.
         return Ok(match load_lock(pool, set_id).await? {
@@ -539,6 +541,52 @@ pub async fn submit_response(
     settlements.announce(settled_set(pool, set_id).await?);
 
     Ok(Submission::Accepted(Taken { accepted, proposed }))
+}
+
+/// Whether `response` would be refused as no answer to Set `set_id` —
+/// [`Submission::NoSuchSet`] or [`Submission::Invalid`] — asked without storing
+/// anything.
+///
+/// What [`submit_response_with_checkouts`] asks first, said on its own for the
+/// Submit that ends a session before the Response is stored: a Response that
+/// leaves a Question unanswered is refused before anything is ended, rather
+/// than after (ADR-0028, *Every question before anything is ended*).
+pub async fn unresolved(
+    pool: &SqlitePool,
+    set_id: i64,
+    response: &Response,
+) -> Result<Option<Submission>> {
+    let Some(stored) = load_set(pool, set_id).await? else {
+        return Ok(Some(Submission::NoSuchSet));
+    };
+
+    // A Response is checked against the Questions it resolves, so a Set this
+    // build cannot read cannot be answered: there is nothing to check it
+    // against. The failure is this Set's own — nothing else on its Timeline is
+    // touched by it — and the workbench offers no way to get here, since it
+    // draws an unreadable Set as a record rather than as a sheet.
+    let set = stored.set.readable(set_id)?;
+
+    // Checked against what the human handed over as well as what they wrote: a
+    // file put on a Question is an Answer to it, and the sheet sends one with a
+    // file and nothing else as answered. The rows are where that is written
+    // down — nothing about a file rides on the Response itself, which is stored
+    // exactly as it was sent.
+    let attached: Vec<String> = attachments::set_attachments(pool, set_id)
+        .await?
+        .into_iter()
+        .filter_map(|attachment| match attachment.origin {
+            Origin::Answer { label, .. } => Some(label),
+            // The comment box's files answer nothing: a Set with one and no
+            // Answers is as unanswered as it was (ADR-0028).
+            Origin::Brief | Origin::Set { .. } => None,
+        })
+        .collect();
+
+    Ok(response
+        .validate_attached(set, &attached)
+        .err()
+        .map(Submission::Invalid))
 }
 
 /// Act on the direction picked on an accepted proposal, for the Conversation the
@@ -947,6 +995,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // [`mcp_servers`].
     mcp_servers::apply_schema(pool).await?;
 
+    // And what the human picked to add to the work from a Question Set's sheet,
+    // which hangs off the Set it was picked on as an Answer's file does — see
+    // [`set_additions`].
+    set_additions::apply_schema(pool).await?;
+
     // And the devices each of them may be moved to by the agent doing its work,
     // which hang off the Conversations beside those names: the human's consent,
     // by Device Id — see [`permitted`].
@@ -1053,6 +1106,18 @@ pub async fn insert_response(
     set_id: i64,
     response: &Response,
 ) -> Result<Option<ResponseAccepted>> {
+    insert_response_with_checkouts(pool, set_id, response, &[]).await
+}
+
+/// [`insert_response`], with where the server checked out the companions the
+/// Set adds — recorded in the same transaction that puts them on the
+/// Conversation. See [`set_additions::apply`].
+pub async fn insert_response_with_checkouts(
+    pool: &SqlitePool,
+    set_id: i64,
+    response: &Response,
+    checkouts: &[CompanionWorktree],
+) -> Result<Option<ResponseAccepted>> {
     let ended = response.nothing_else;
     let body = serde_json::to_string(&Response {
         nothing_else: false,
@@ -1083,6 +1148,12 @@ pub async fn insert_response(
     // refused above, and their mark is refused with it.
     if row.is_some() && ended {
         endings::mark(&mut tx, set_id).await?;
+    }
+
+    // And what the human added with it, for the same reason: the Answers were
+    // given on the strength of it. See [`set_additions::apply`].
+    if row.is_some() {
+        set_additions::apply(&mut tx, set_id, checkouts).await?;
     }
 
     tx.commit()

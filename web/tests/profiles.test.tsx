@@ -629,7 +629,7 @@ describe("a member's accounts", () => {
 /// Under the card's own line, in a cluster, a line per device: this one first,
 /// then the members, each bound at the paths its binding holds or running from
 /// a copy. The fixture is the server's own answer — see
-/// `crates/server/tests/replicated_profiles.rs` for the two devices drawing it.
+/// `crates/server/tests/suite/replicated_profiles.rs` for the two devices drawing it.
 describe("the card's line per device", () => {
   /// What each line under a card reads, in order.
   function lines(card: HTMLElement): string[] {
@@ -725,7 +725,7 @@ describe("the card's line per device", () => {
 /// the pickers, because a row saying why it cannot be run is something to go
 /// and put right and a row quietly missing is a human looking for a Profile
 /// they know they saved. What the server decides is which of the two it is —
-/// `crates/server/tests/replicated_profiles.rs` is where that is asked — and
+/// `crates/server/tests/suite/replicated_profiles.rs` is where that is asked — and
 /// what is asked here is that the card says it.
 describe("a member's account that cannot be run from here", () => {
   /// One mirror reading the way the server would answer it.
@@ -1771,7 +1771,7 @@ describe("a profile whose account has gone", () => {
   /// said, because a list is scanned before it is read.
   ///
   /// Built from the real payload rather than served as one of its own: whether
-  /// the server reports it, and when, is `crates/server/tests/profiles.rs`'s
+  /// the server reports it, and when, is `crates/server/tests/suite/profiles.rs`'s
   /// subject — what is being read here is that the page says which part of the
   /// account it was.
   it.each([

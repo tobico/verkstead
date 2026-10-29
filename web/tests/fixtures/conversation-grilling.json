@@ -148,7 +148,9 @@
     },
     {
       "QuestionSet": {
+        "added": [],
         "at": "2026-08-03T09:07:11.000Z",
+        "carried_on": false,
         "id": 6,
         "rows": [
           {
@@ -219,7 +221,9 @@
     },
     {
       "QuestionSet": {
+        "added": [],
         "at": "2026-08-03T09:07:11.000Z",
+        "carried_on": false,
         "id": 7,
         "rows": [
           {
@@ -262,7 +266,9 @@
     },
     {
       "QuestionSet": {
+        "added": [],
         "at": "2026-08-03T09:07:11.000Z",
+        "carried_on": false,
         "id": 8,
         "rows": [
           {

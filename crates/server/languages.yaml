@@ -53,7 +53,7 @@
 #              So what a store here buys today is one download for the machine,
 #              the same as `{cache}` — the space a hardlink saves waits on one
 #              mount holding both, which is whoever changes what a session may
-#              reach. See `tests/package_stores.rs`, where both halves of that
+#              reach. See `tests/suite/package_stores.rs`, where both halves of that
 #              are proved.
 #
 #   {size}     how big this language's store may grow: this entry's own `size`
@@ -375,7 +375,7 @@ languages:
     # what the install proofs assert. What is gone is the disk space a hardlink
     # would have saved. Closing it means one mount holding both the Worktree and
     # the store, which is the sandbox's business rather than a descriptor's — so
-    # it is written down here, proved in `tests/package_stores.rs`, and left to
+    # it is written down here, proved in `tests/suite/package_stores.rs`, and left to
     # whoever changes what a session may reach. `{stores}` stays because it is
     # still the right side of that line, and because it is where the fix would
     # land.
@@ -403,7 +403,7 @@ languages:
     #
     # **The cache is shared anyway, and that is a decision rather than an
     # oversight.** What a collision damages is the install that hit it and not
-    # the store: measured, in `tests/package_stores.rs`, a third install with
+    # the store: measured, in `tests/suite/package_stores.rs`, a third install with
     # the registry gone still installs out of what is there and still runs what
     # it installed, whichever of the two lost. So what sharing costs Classic is
     # an install that fails and is run again, and what it buys is the download
@@ -438,7 +438,7 @@ languages:
     # `--store-dir` or `--cache-folder` where it installs. Nothing a descriptor
     # can do changes that: the grammar sets variables, and there is no rung
     # below the environment to set one on. Both halves are asserted in
-    # `tests/package_stores.rs`, because a silent loss is the worse of the two.
+    # `tests/suite/package_stores.rs`, because a silent loss is the worse of the two.
     # bun reads its cache out of `bunfig.toml`'s `install.cache.dir` and puts
     # the environment above that too; deno documents no config key for
     # `DENO_DIR` at all, so there is nothing for a Repo to lose.
@@ -564,7 +564,7 @@ languages:
     #                   information it resolved out of the index. An install
     #                   given the artifacts and not the repositories cache goes
     #                   to the network for the file's URL and fails — measured,
-    #                   in `tests/package_stores.rs`.
+    #                   in `tests/suite/package_stores.rs`.
     #
     #   PIPENV_CACHE_DIR
     #                   pipenv's, which its documentation calls the "custom
@@ -628,7 +628,7 @@ languages:
     # without a word. `UV_LINK_MODE=copy` would silence that warning and is
     # deliberately not set: the warning is true, it is the clearest account of
     # the thing this stage found, and it goes away when one mount holds both.
-    # See `tests/package_stores.rs`.
+    # See `tests/suite/package_stores.rs`.
     #
     # All four are safe for two installs at once, which is the other half of
     # what a shared store has to be: pip writes a cached response to a temporary
@@ -658,7 +658,7 @@ languages:
     # *name* cannot be resolved with the index unreachable however full the
     # cache is. What the cache serves offline is a distribution already asked
     # for by URL — which is what a pinned requirements file holds, and what
-    # `tests/package_stores.rs` installs. **pipenv inherits that**, its store
+    # `tests/suite/package_stores.rs` installs. **pipenv inherits that**, its store
     # being pip's, so what its proof pins by URL is a `Pipfile` entry. uv and
     # poetry have no such limit: uv resolves out of `simple-v21` under
     # `--offline`, and poetry out of `cache/repositories` with no flag at all —
@@ -753,7 +753,7 @@ languages:
     #                           can serve an install the other cannot: with the
     #                           packages folder emptied and nothing answering on
     #                           the source, a restore still finishes out of this
-    #                           one. Measured in `tests/package_stores.rs`,
+    #                           one. Measured in `tests/suite/package_stores.rs`,
     #                           which is what says both variables are read.
     #
     #   NUGET_SCRATCH           and NuGet's **temp** directory, which holds no
@@ -771,7 +771,7 @@ languages:
     # two different locks, extracted over each other, and one of them failed on
     # a temporary file the other had renamed away. Measured: with the two
     # directories above and not this one, the two-at-once proof in
-    # `tests/package_stores.rs` fails about three runs in five under load. A
+    # `tests/suite/package_stores.rs` fails about three runs in five under load. A
     # lock is only a lock where both parties can see it, so it goes where the
     # store it guards is.
     #

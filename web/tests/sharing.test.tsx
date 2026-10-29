@@ -113,7 +113,7 @@ describe("a shared conversation", () => {
     ).toBeTruthy();
   });
 
-  /// The curation is the server's — see `crates/server/tests/sharing.rs` — and
+  /// The curation is the server's — see `crates/server/tests/suite/sharing.rs` — and
   /// this is the half of it a reader sees: what the fixture carries is what the
   /// page has to draw, and the kinds that never board leave no trace.
   it("carries the asks and the commits, and nothing of the sessions", () => {
@@ -140,7 +140,7 @@ describe("a shared conversation", () => {
   /// there is nobody on the other end of this file to do it.
   ///
   /// Asked of a record that says every one of them applies. The server clears
-  /// those fields on the way out — `crates/server/tests/sharing.rs` is where
+  /// those fields on the way out — `crates/server/tests/suite/sharing.rs` is where
   /// that is proved — and this is the other half of the same guarantee: the
   /// page would not draw them even if a record arrived saying it could.
   it("offers nothing to press but the cards themselves", async () => {
@@ -386,7 +386,7 @@ describe("a shared conversation", () => {
   /// The bytes are what never travel. A share is emailed about and attached to
   /// pull requests, so what it carries of an attachment is the record of one —
   /// which is all the file has ever held, the attachments directory not being
-  /// read on the way out at all. See `crates/server/tests/sharing.rs`, which is
+  /// read on the way out at all. See `crates/server/tests/suite/sharing.rs`, which is
   /// where that is proved of a Conversation with real files on its disk.
   it("draws the files that were handed over, and carries none of them", async () => {
     const brief = SHARED.conversation.timeline.find(

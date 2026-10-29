@@ -1064,6 +1064,22 @@ pub(crate) async fn attached_servers(state: &AppState, id: i64) -> Result<Vec<At
         .collect())
 }
 
+/// What the live declarations name, as of this moment, a clashing name once per
+/// declaration.
+///
+/// Read rather than remembered, which is the declarations' own contract: one
+/// added, corrected, deleted or replicated in takes effect on the next thing
+/// that asks. A half-written entry is no declaration and never reaches here.
+pub(crate) fn declared_servers(state: &AppState) -> Vec<String> {
+    state
+        .settings
+        .config()
+        .mcp_servers()
+        .iter()
+        .filter_map(|server| server.name().map(str::to_owned))
+        .collect()
+}
+
 /// Why a Conversation's files are not the human's to change, or `None` where
 /// they are.
 ///

@@ -44,10 +44,11 @@
 //! longer a picture of a file. The draft's composer offers the MCP servers
 //! declared in the settings, so its control is a menu whose first row is
 //! *Attach file* — the press this button always was — and whose others are the
-//! caller's. Where a caller offers
-//! nothing, which is the compose page and every answer sheet, it is the plain
-//! button it has always been. What the rows *are* is the caller's whole
-//! business: this knows there is a menu and not what is in it.
+//! caller's. The answer sheet offers the same rows at every Question and at its
+//! comment box, picks there being recorded on the Set until its Submit
+//! (ADR-0028). Where a caller offers nothing it is the plain button it has
+//! always been. What the rows *are* is the caller's whole business: this knows
+//! there is a menu and not what is in it.
 //!
 //! **What a menu's row attaches is drawn in this same row, as a chip.** An MCP
 //! server is not a file — it is a reference by name to something declared
@@ -65,7 +66,13 @@
 
 import { For, Show, createSignal, type JSX } from "solid-js";
 
-import { faPaperclip, faPlug, faPlus } from "@fortawesome/free-solid-svg-icons";
+import {
+  faCodeBranch,
+  faDesktop,
+  faPaperclip,
+  faPlug,
+  faPlus,
+} from "@fortawesome/free-solid-svg-icons";
 
 import styles from "./Attaching.module.css";
 import { Icon } from "./Icon";
@@ -125,8 +132,17 @@ export type Chip = {
   /// What it is called, which is the whole of what the Conversation holds.
   name: string;
 
-  /// Whether nothing is declared by that name any more, which is what the chip
-  /// says under it.
+  /// What kind of thing it is: an MCP server where nothing says otherwise, and
+  /// on a question set's sheet a repo or a device as well (ADR-0028). What
+  /// draws the mark in front of the name, and what a gone one says.
+  kind?: ChipKind;
+
+  /// What else the chip says after the name, where there is more to it than a
+  /// name: how far into a repo the work reaches, and on which branch.
+  detail?: string;
+
+  /// Whether nothing answers to that name any more — no declaration, no
+  /// registered repo, no linked device — which is what the chip says under it.
   gone?: boolean;
 
   /// Whether two declarations share the name, which only two devices declaring
@@ -134,12 +150,30 @@ export type Chip = {
   /// and the chip says so.
   clashes?: boolean;
 
+  /// Whether it was picked and never put on: an addition on a question set
+  /// that was locked, or whose conversation was closed, before anybody
+  /// answered it (ADR-0028). Drawn struck through and said in words.
+  struck?: boolean;
+
   /// Taking it off, where that is something that can be done at all — nothing
   /// past a freeze, exactly as a pill's.
   remove?: () => void;
 
   /// And whether that press is already in flight.
   removing?: boolean;
+};
+
+export type ChipKind = "server" | "repo" | "device";
+
+/// Each kind's mark, the words that name the mark to a screen reader, and what
+/// a chip of it says once nothing answers to its name.
+const KINDS: Record<
+  ChipKind,
+  { icon: typeof faPlug; label: string; gone: string }
+> = {
+  server: { icon: faPlug, label: "MCP server", gone: "no longer declared" },
+  repo: { icon: faCodeBranch, label: "Repo", gone: "no longer registered" },
+  device: { icon: faDesktop, label: "Device", gone: "no longer linked" },
 };
 
 /// What a box spreads onto itself to take a drop.
@@ -194,19 +228,17 @@ export function attaching(what: {
 
   /// What else is attached here, drawn as chips after the pills — see [`Chip`].
   ///
-  /// Absent on every caller that has none, which is all of them but the draft's
-  /// composer. A caller that offers a menu passes this as well: what a row of
-  /// that menu attaches has to be drawn somewhere, and where it is drawn is
-  /// here.
+  /// Absent on every caller that has none. A caller that offers a menu passes
+  /// this as well: what a row of that menu attaches has to be drawn somewhere,
+  /// and where it is drawn is here.
   chips?: () => Array<Chip>;
 
   /// The rows the menu holds under *Attach file*, where this control is a menu
   /// at all.
   ///
-  /// Absent is the plain paperclip, which is what it has always been and what
-  /// every caller but the draft's composer still wants. A function rather than
-  /// a node, because the menu builds its rows when it opens and throws them
-  /// away when it closes — see `Menu.tsx`.
+  /// Absent is the plain paperclip, which is what it has always been. A
+  /// function rather than a node, because the menu builds its rows when it
+  /// opens and throws them away when it closes — see `Menu.tsx`.
   ///
   /// Handed the way to shut the menu, which a row that has done its work calls:
   /// which of them has is the caller's to know, and a card left hanging under
@@ -280,6 +312,7 @@ export function attaching(what: {
         add={what.add}
         class={props.class}
         offering={what.offering}
+        label={what.onto ? `Attach to ${what.onto}` : "Attach"}
       />
     );
 
@@ -346,7 +379,9 @@ export function Attachments(props: {
 /// a `<Row>` is built, so the two halves of the composer's row — the live one
 /// and the frozen one — cannot come to be called different things.
 function rowNamed(onto: string | undefined, chips: boolean): string {
-  if (onto !== undefined) return `Files attached to ${onto}`;
+  if (onto !== undefined) {
+    return chips ? `Attached to ${onto}` : `Files attached to ${onto}`;
+  }
 
   return chips ? "Attached files and MCP servers" : "Attached files";
 }
@@ -492,6 +527,10 @@ function AttachMenu(props: {
   add: (files: Array<File>) => void;
   offering: (shut: () => void) => JSX.Element;
   class?: string;
+
+  /// What the trigger and its drop are called: *Attach* where there is one on
+  /// the page, and named for what it is under where there are several.
+  label: string;
 }): JSX.Element {
   let picker!: HTMLInputElement;
 
@@ -503,8 +542,8 @@ function AttachMenu(props: {
     <>
       <Menu
         class={[styles.clip, props.class].filter(Boolean).join(" ")}
-        label="Attach"
-        name="Attach"
+        label={props.label}
+        name={props.label}
         closer={(close) => (shut = close)}
         trigger={<Icon of={faPlus} />}
       >
@@ -543,23 +582,38 @@ function AttachMenu(props: {
 /// way a file's is: a declaration's name is a handful of lowercase letters by
 /// the rules the settings page enforces, and there is nothing in it to lose.
 function ServerChip(props: { chip: Chip }): JSX.Element {
+  const kind = () => KINDS[props.chip.kind ?? "server"];
+
   return (
     <li
       class={`${styles.attachment} ${styles.server}`}
-      classList={{ [styles.missing!]: props.chip.gone || props.chip.clashes }}
+      classList={{
+        [styles.missing!]: props.chip.gone || props.chip.clashes,
+        [styles.struck!]: props.chip.struck,
+      }}
     >
       {/* What kind of thing it is, said as a shape rather than as a word: the
           row is read across, and a chip that spelled out what it was would be
           longer than the name it is about. */}
-      <Icon of={faPlug} class={styles.plug} label="MCP server" />
+      <Icon of={kind().icon} class={styles.plug} label={kind().label} />
 
       <span class={styles.serverName}>{props.chip.name}</span>
+
+      <Show when={props.chip.detail}>
+        {(detail) => <span class={styles.attachmentSize}>{detail()}</span>}
+      </Show>
 
       {/* And the reference with nothing on the end of it, said in words: a
           chip drawn differently and left to be noticed would be a difference
           nobody could look up. */}
       <Show when={props.chip.gone}>
-        <span class={styles.attachmentSize}>no longer declared</span>
+        <span class={styles.attachmentSize}>{kind().gone}</span>
+      </Show>
+
+      {/* And one that was never put on, said in words as well as struck: a
+          line through a name is a mark somebody has to know how to read. */}
+      <Show when={props.chip.struck}>
+        <span class={styles.attachmentSize}>not added</span>
       </Show>
       <Show when={props.chip.clashes}>
         <span class={styles.attachmentSize}>
