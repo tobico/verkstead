@@ -2333,7 +2333,7 @@ impl Sessions {
     ///
     /// What asks is the mover: a move that ran while a session was starting
     /// would carry the work away from under it, and away from the write-back
-    /// that session's ending owes the device its account is at home on. See
+    /// that session's ending owes the device its account was fetched from. See
     /// [`crate::transfers`].
     pub(crate) fn starting(&self, conversation_id: i64) -> bool {
         self.launching
@@ -2577,13 +2577,13 @@ impl Sessions {
     /// the boundary being written, and the reason where a launch fails, which
     /// used to reach the log and nowhere else.
     ///
-    /// **And where the Pairing's Profile is a member's, the account is mirrored
+    /// **And where the Pairing's Profile is not bound here, the account is mirrored
     /// here first.** `devices` is the cluster handle a launch fetches it over —
     /// `None` on a Verkstead that is linked to nothing, which has no mirror to
-    /// launch under either. An account that could not be fetched starts no
-    /// session, for the reason a sandbox that could not be built starts none: a
-    /// session under a Profile with no account is one that comes up logged out
-    /// with nothing saying why. See [`crate::mirroring::account`].
+    /// launch under either. An account that could not be fetched starts no session,
+    /// for the reason a sandbox that could not be built starts none: a session under
+    /// a Profile with no account is one that comes up logged out with nothing saying
+    /// why. See [`crate::mirroring::account`].
     ///
     /// **And `retiring` is whether the session may retire a Memo**, which is
     /// whether its prompt says how — see [`skills::left`]. The caller's to say,
@@ -2821,11 +2821,11 @@ impl Sessions {
             return Ok(None);
         }
 
-        // And where the Profile is a member's, the account it names is on that
-        // machine: the login and the configuration a root is made from are
-        // fetched into this device's own mirror of that account before anything
-        // is built out of it, fresh at every launch so that a login refreshed at
-        // home reaches this session. One of this device's own rows is the
+        // And where the Profile is not bound here, the account it names is on a
+        // machine it is bound on: the login and the configuration a root is made
+        // from are fetched into this device's own mirror of that account before
+        // anything is built out of it, fresh at every launch so that a login
+        // refreshed there reaches this session. A Profile bound here is the
         // ordinary case and answers nothing, the Pairing standing as it is.
         //
         // Refused rather than launched around, for the reason the desktop app
@@ -2867,26 +2867,26 @@ impl Sessions {
             }
         };
 
-        // Which the rest of the launch reads in the Profile's place: the same row
-        // by the same local id, naming the mirror as its account. So the root,
+        // Which the rest of the launch reads in the Profile's place: the same
+        // Profile by the same uuid, naming the mirror as its account. So the root,
         // the Tail that follows the session's log and everything the ending
         // writes back are what they are for an account on this machine.
         //
-        // And beside it what the *ending* writes back over the link: the login is
-        // the one file of a root a session genuinely changes, so what it leaves in
-        // the mirror's own goes into the account at home once the profile has been
-        // seen to. Carried into the relay below, which is the thing that knows when
-        // the session is over — with the store and the cluster handle it needs
+        // And beside it what the *ending* writes back over the link: the login is the
+        // one file of a root a session genuinely changes, so what it leaves in the
+        // mirror's own goes into the account it was fetched from once the profile has
+        // been seen to. Carried into the relay below, which is the thing that knows
+        // when the session is over — with the store and the cluster handle it needs
         // there, this call's own being borrowed. See
         // [`crate::mirroring::account::Lending`].
         //
-        // And the **memory store** with it, where the Profile's memory switch is
-        // on: what that account remembers of this Repo, and of this Conversation,
-        // comes over into the mirror before anything is built out of it and goes
-        // back as the session ends — the switch holding away from home exactly as
-        // it holds at home. Best effort rather than a gate, unlike the account: a
-        // session with no memory starts new, where a session with no login comes
-        // up logged out, and only the second is worth refusing a launch over. See
+        // And the **memory store** with it, where the Profile's memory switch is on:
+        // what that account remembers of this Repo, and of this Conversation, comes
+        // over into the mirror before anything is built out of it and goes back as the
+        // session ends — the switch holding on a copy exactly as it holds where the
+        // Profile is bound. Best effort rather than a gate, unlike the account: a
+        // session with no memory starts new, where a session with no login comes up
+        // logged out, and only the second is worth refusing a launch over. See
         // [`crate::mirroring::memory`], which says on the Timeline what it did not
         // carry.
         let (launching_under, lending, syncing) = match mirrored {
@@ -3262,7 +3262,7 @@ impl Sessions {
         // And watched beside it for the other thing a session says about its
         // account: that the account has signed out. The Profile's id as well as
         // its name, because the stop records which login it is waiting on, and
-        // where it is at home, because that decides whether the Notice offers
+        // where it is bound, because that decides whether the Notice offers
         // the login or names the device it is made on — see [`crate::signouts`].
         let signouts = crate::signouts::Watch::on(
             conversation_id,
@@ -3389,7 +3389,7 @@ impl Sessions {
                     }
 
                     // And where that account was a **mirror**, the login it now
-                    // holds goes into the account on the device it is at home on:
+                    // holds goes into the account on the device it was fetched from:
                     // a harness refreshes its OAuth pair as it works, and an
                     // account lent out and never written back would be one
                     // signing itself out a session at a time. After the close
@@ -3402,17 +3402,17 @@ impl Sessions {
                     // refreshed away from. See
                     // [`crate::mirroring::account::Lending::written_home`], which
                     // says nothing where the login is still what came down and
-                    // puts a sentence on the Timeline where the home has gone
+                    // puts a sentence on the Timeline where that device has gone
                     // away.
                     // What the session wrote to the account's **memory store**
                     // first: its memory of the Repo, and the transcript of this
-                    // session, put back under the entries the home device names
+                    // session, put back under the entries the bound device names
                     // for them — which is what makes a session run here readable
                     // there. Before the login, so that the login has the last word
                     // over the one file both of them can name: an OpenCode account
                     // keeps its login inside the data directory the memory sync
                     // carries whole. Only what the session changed travels, and
-                    // nothing at home is deleted — see
+                    // nothing on the bound device is deleted — see
                     // [`crate::mirroring::memory::Syncing::written_home`].
                     if let Some(syncing) = syncing {
                         syncing.written_home(conversation_id).await;
@@ -3641,10 +3641,10 @@ struct Continuing {
 ///   now every one of the four, and is still asked because a fifth backend lands
 ///   without one.
 /// - **The Profile shares its account's memory.** A session under one that does
-///   not gets a store of its own and empty, at home as much as away — so nothing
-///   of the conversation travelled and there is nothing here to resume against.
-///   Asked ahead of the looking so that the reason names the switch rather than
-///   the record it is the reason for.
+///   not gets a store of its own and empty, bound here or run from a copy — so
+///   nothing of the conversation travelled and there is nothing here to resume
+///   against. Asked ahead of the looking so that the reason names the switch
+///   rather than the record it is the reason for.
 /// - **And the record is really on this machine, where the harness will look for
 ///   it.**
 ///   Claude's store crosses with the memory sync as a labelled part each machine
@@ -3825,7 +3825,7 @@ async fn carried_on(
 
     // The switch, ahead of the looking rather than left to come out as a record
     // that is not there. A Profile that shares no memory gives every session a
-    // store of its own and empty — which is the rule at home as much as away, so
+    // store of its own and empty — which is the rule bound or from a copy, so
     // an arrival under one is a session starting new exactly as the last one did,
     // and saying *the record is not here* about it would name the symptom.
     if !pairing.profile.memory {
@@ -5651,7 +5651,7 @@ exit 1
     /// nothing *running* may still be one about to have an agent in its Worktree,
     /// and a move that ran in that window would carry the work away from under a
     /// session starting — and away from the write-back that session's ending owes
-    /// the device its account is at home on. From before the Capture is open,
+    /// the device its account was fetched from. From before the Capture is open,
     /// because that is where the window begins.
     #[test]
     fn a_launch_in_flight_is_a_session_on_its_way_up() {

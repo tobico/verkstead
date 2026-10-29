@@ -264,12 +264,13 @@ pub struct ProfileDevice {
 /// One file of a Profile's account as a member across the link is handed it: a
 /// file a **Built Root** is made out of, and what is in it.
 ///
-/// **The allowlist and nothing beside it.** A session away from home is given a
-/// root built out of a **mirror** of its account, so what travels is what a root
-/// is made from — the login, and what the written configuration is composed from
-/// — and nothing else of the account: no plugins, hooks, rules, skills, global
-/// instructions file, history, or any other repository's transcripts. The memory
-/// store travels on its own terms and is not on this list.
+/// **The allowlist and nothing beside it.** A session that runs from a copy is
+/// given a root built out of a **mirror** of its account, so what travels is
+/// what a root is made from — the login, and what the written configuration is
+/// composed from — and nothing else of the account: no plugins, hooks, rules,
+/// skills, global instructions file, history, or any other repository's
+/// transcripts. The memory store travels on its own terms and is not on this
+/// list.
 ///
 /// **Every path a mirror can hold is answered**, whether or not the account has
 /// that file: an account with no login says so with no text at all, which is what
@@ -285,9 +286,10 @@ pub struct AccountFile {
     /// in, with forward slashes: `.claude/.credentials.json`,
     /// `.codex/config.toml`, `.local/share/opencode/auth.json`.
     ///
-    /// The harness's own shape rather than wherever the home device's Profile
-    /// points at: a mirror is a home the device that fetched it made, and what a
-    /// root is built out of there is the account as that harness keeps one.
+    /// The harness's own shape rather than wherever the Profile's binding on the
+    /// answering device points at: a mirror is a home the device that fetched it
+    /// made, and what a root is built out of there is the account as that harness
+    /// keeps one.
     pub inside: String,
 
     /// What is in it, or nothing where the account has no such file — a Claude
@@ -296,18 +298,18 @@ pub struct AccountFile {
     pub text: Option<String>,
 }
 
-/// And the **login** going the other way: what a session away from home left in
-/// it, on its way into the account it belongs to.
+/// And the **login** going the other way: what a session that ran from a copy
+/// left in it, on its way into the account it belongs to.
 ///
 /// **The one file a session genuinely changes.** A harness refreshes its OAuth
 /// pair as it works, so an account lent to another device and never written back
 /// would be an account signing itself out a session at a time — and everything
 /// else a root holds is either Verkstead's own or the human's own and travels in
-/// one direction only. So this is the whole of what comes home: the login, whole,
-/// as the harness left it.
+/// one direction only. So this is the whole of what comes back: the login,
+/// whole, as the harness left it.
 ///
 /// **Sent only where it changed.** A login the session wrote through or replaced
-/// comes home; one that is still exactly what came down is not sent at all; and
+/// comes back; one that is still exactly what came down is not sent at all; and
 /// one made where the account had none is handed over. Which is the same three
 /// cases a local session's ending already tells apart, and the reason this is a
 /// press rather than a file kept in step.
@@ -459,11 +461,11 @@ pub struct PairingView {
 /// empty picker would draw the placeholder over a settled choice.
 ///
 /// One variant carries a Profile and the other two carry nothing, which is what
-/// the size lint is about — a Profile got bigger when it gained the device it is
-/// at home on. Left as it is: these are made one at a time on the way to being
-/// serialized, none of them is held in a collection, and a `Box` in a view type
-/// would be a pointer written into the shape the viewer is generated from for a
-/// few bytes nobody is counting.
+/// the size lint is about — a Profile's own fields, its account's paths and its
+/// list of models among them, are what make it big. Left as it is: these are
+/// made one at a time on the way to being serialized, none of them is held in a
+/// collection, and a `Box` in a view type would be a pointer written into the
+/// shape the viewer is generated from for a few bytes nobody is counting.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -572,8 +574,8 @@ pub enum ProfileChosen {
     NotDrafting,
 }
 
-/// What a device away from home asks the home device for, of a Profile's
-/// **memory store** (ADR-0020, *Shared Profiles*).
+/// What a device a Profile is not bound on asks a device it is bound on for, of
+/// that Profile's **memory store** (ADR-0020, *Shared Profiles*).
 ///
 /// **Facts about this device's side, rather than paths for that one to use.** A
 /// memory store is keyed by the path a session ran in wherever it is keyed by
@@ -636,18 +638,18 @@ pub struct MemoryFile {
     pub bytes: String,
 }
 
-/// And what a session away from home left in its memory store, on its way into
-/// the account it belongs to.
+/// And what a session that ran from a copy left in its memory store, on its way
+/// into the account it belongs to.
 ///
-/// **The question comes back with the answer.** The device at home names its own
-/// path for each part of the store, and it names them off exactly what it was
-/// asked the first time — which of its Repos this repository is, what this
-/// Worktree is called — so a write-back carrying a different question would be
-/// writing into a different part of the store than the one it read.
+/// **The question comes back with the answer.** The device it is bound on names
+/// its own path for each part of the store, and it names them off exactly what
+/// it was asked the first time — which of its Repos this repository is, what
+/// this Worktree is called — so a write-back carrying a different question would
+/// be writing into a different part of the store than the one it read.
 ///
 /// **Only what changed is in it.** A file still exactly as it came down is not
-/// here, and neither is one the session took away: nothing is deleted at home,
-/// the rest of that account's store being somebody else's work.
+/// here, and neither is one the session took away: nothing is deleted where it
+/// is bound, the rest of that account's store being somebody else's work.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryLeft {
     /// The same question the store was read with.

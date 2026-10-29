@@ -1,16 +1,16 @@
-//! The **memory sync**: what the home account remembers of this Repo carried to
-//! the device a session is running on, and what the session wrote carried back
-//! (ADR-0020, *Shared Profiles*).
+//! The **memory sync**: what the account remembers of this Repo on a device the
+//! Profile is bound on carried to the device a session is running on, and what
+//! the session wrote carried back (ADR-0020, *Shared Profiles*).
 //!
-//! **The memory switch holds away from home.** A Profile whose switch is on is
-//! given the account's memory store at home; away from home there is no account
-//! to join, so what stands in its place is this: before launch, the store's
-//! entries for *this* Repo and this Worktree come over the link into the account
-//! mirror the root is built from, and as the session ends what is in them goes
-//! back. That is what makes a session run on B readable on A afterwards, and what
-//! a harness's own resume stands on after a Transfer. **Switched off, nothing syncs** —
-//! the session starts on an empty store exactly as it would at home, and neither
-//! direction carries anything.
+//! **The memory switch holds on a Profile not bound here.** A Profile whose switch
+//! is on is given the account's memory store where it is bound; one that runs from a
+//! copy has no account here to join, so what stands in its place is this: before
+//! launch, the store's entries for *this* Repo and this Worktree come over the link
+//! into the account mirror the root is built from, and as the session ends what is
+//! in them goes back. That is what makes a session run on B readable on A
+//! afterwards, and what a harness's own resume stands on after a Transfer.
+//! **Switched off, nothing syncs** — the session starts on an empty store exactly as
+//! it would where it is bound, and neither direction carries anything.
 //!
 //! **A label apiece, and each machine names its own path.** A memory store is
 //! keyed by the path a session ran in wherever it is keyed by anything, and every
@@ -25,12 +25,12 @@
 //! parts per harness, and [`crate::peer::memory`], which is the answering half.
 //!
 //! **Which path each part is named off is two different answers.** The Repo's
-//! goes through the match across devices — which of the home device's Repos is
+//! goes through the match across devices — which of the bound device's Repos is
 //! this repository, asked of git on both ends (see [`crate::matching`]) — and
 //! **no match is an answer**: there is nothing of that Repo to pull, the session
 //! starts without it, and the Timeline says so rather than the launch being
 //! refused. The Worktree's is named off the Data Directory instead, because a
-//! Worktree lives under one rather than under the Repo: the home device joins
+//! Worktree lives under one rather than under the Repo: the bound device joins
 //! **its own** worktrees directory onto the same stem this Worktree was named
 //! with, which is the path it would have used for this work and is what leaves
 //! the transcript findable when the work comes home.
@@ -38,15 +38,15 @@
 //! **Only what changed travels back**, which is the account mirror's own rule for
 //! the login: what came down is remembered by a SHA-256 apiece, and a file still
 //! hashing to what arrived is not sent. So a session that read the Repo's memory
-//! and wrote none of it writes nothing home, and the rest of the account's store
-//! is left exactly as it was. Nothing is deleted at home either: a file the
-//! session took away is not a file it asked the account to lose.
+//! and wrote none of it writes nothing back, and the rest of the account's store
+//! is left exactly as it was. Nothing is deleted on the bound device either: a
+//! file the session took away is not a file it asked the account to lose.
 //!
-//! **Best effort rather than a gate.** A home that will not answer the memory is
-//! a session that starts without it and says so on the Timeline — unlike the
-//! account, which is refused, because a session with no login comes up logged out
-//! and a session with no memory comes up new. The same at the end: what could not
-//! be written home is a sentence rather than a retry.
+//! **Best effort rather than a gate.** A bound device that will not answer the
+//! memory is a session that starts without it and says so on the Timeline —
+//! unlike the account, which is refused, because a session with no login comes up
+//! logged out and a session with no memory comes up new. The same at the end:
+//! what could not be written back is a sentence rather than a retry.
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Read};
@@ -74,7 +74,7 @@ use crate::store;
 /// OpenCode's database, which holds a row per session rather than a directory
 /// per working directory — so this is also what stands in front of a store that
 /// has grown past what is worth carrying, and a human whose has starts their
-/// sessions away from home on an empty one with a line saying why. The mirrors'
+/// sessions from a copy on an empty one with a line saying why. The mirrors'
 /// own bound, for its reason — see [`super::MOST_THE_PROFILES_ARE`].
 pub(crate) const MOST_A_STORE_IS: usize = 64 * 1024 * 1024;
 
@@ -95,10 +95,11 @@ const FIRST_LINE: u64 = 256 * 1024;
 /// can miss a change.
 type Fingerprint = [u8; 32];
 
-/// A memory store synced here for a session away from home, and what its ending
-/// has to carry back: which machine the account is at home on, where the mirror
-/// is, which parts of the store this Conversation's sync is, what the home device
-/// has to be asked again to put them back, and what came down in each file.
+/// A memory store synced here for a session that runs from a copy, and what its
+/// ending has to carry back: which machine the account was fetched from, where
+/// the mirror is, which parts of the store this Conversation's sync is, what
+/// that device has to be asked again to put them back, and what came down in
+/// each file.
 #[derive(Debug, Clone)]
 pub struct Syncing {
     pool: SqlitePool,
@@ -118,7 +119,7 @@ pub struct Syncing {
     /// The parts as **this** machine names them.
     parts: Vec<Part>,
 
-    /// And what the home device is asked to name its own by, which is the same
+    /// And what the bound device is asked to name its own by, which is the same
     /// question the pull was made with: a write-back that asked differently would
     /// be writing into a different part of the store.
     wanted: MemoryWanted,
@@ -128,19 +129,20 @@ pub struct Syncing {
     came_down: HashMap<(String, String), Fingerprint>,
 }
 
-/// What the home account remembers of this Repo, pulled into the mirror a session
-/// away from home is about to be launched out of.
+/// What the account remembers of this Repo on the device it was fetched from,
+/// pulled into the mirror a session that runs from a copy is about to be
+/// launched out of.
 ///
-/// `profile` is the Profile as the launch reads it — the mirror row with this
+/// `profile` is the Profile as the launch reads it — the record with this
 /// device's own mirror named as its account, which is what
-/// [`super::account::fetched`] answers — and `at` is where that account is at
-/// home. `conversation` is what the two paths are named off: its Repo, which the
-/// match across devices settles, and its Worktree, whose stem the home device
-/// joins onto its own worktrees directory.
+/// [`super::account::fetched`] answers — and `at` is the device that account was
+/// fetched from. `conversation` is what the two paths are named off: its Repo,
+/// which the match across devices settles, and its Worktree, whose stem that
+/// device joins onto its own worktrees directory.
 ///
 /// `None` is *nothing was pulled and nothing is to be written back*: a Profile
 /// whose memory switch is off, a Conversation with no Worktree to run in, or a
-/// home that would not answer — which is said on the Timeline rather than
+/// bound device that would not answer — which is said on the Timeline rather than
 /// refused. **The session starts either way.** A session with no memory is a
 /// session that starts new, where a session with no login is one that comes up
 /// logged out with nothing saying why; only the second is worth refusing a launch
@@ -177,7 +179,7 @@ pub async fn pulled(
         }
     };
 
-    // Which of the home device's Repos is this repository, which is what the
+    // Which of the bound device's Repos is this repository, which is what the
     // Repo's half of the store is named off there. Asked of git on both ends,
     // and **no match is an answer**: the Worktree's half still travels, and the
     // Timeline says the Repo's did not.
@@ -339,13 +341,13 @@ impl Syncing {
     ///
     /// **Only what changed travels.** Every file is held against what came down in
     /// it, and one that still hashes the same is not sent: a session that read the
-    /// Repo's memory and wrote none of it writes nothing home. A file the session
-    /// took away is not sent either, and nothing is deleted at home — the rest of
-    /// that account's store is somebody else's work, and this is not the place it
-    /// would be taken from.
+    /// Repo's memory and wrote none of it writes nothing back. A file the session
+    /// took away is not sent either, and nothing is deleted on the bound device —
+    /// the rest of that account's store is somebody else's work, and this is not the
+    /// place it would be taken from.
     ///
-    /// **A home that has gone away by then is said rather than swallowed**, as the
-    /// login's is: the mirror is left where it is, nothing retries, and the
+    /// **A bound device that has gone away by then is said rather than swallowed**,
+    /// as the login's is: the mirror is left where it is, nothing retries, and the
     /// Conversation's Timeline carries a Notice naming the machine. What is lost is
     /// a transcript that stayed on this device, which is worth a line.
     pub async fn written_home(self, conversation_id: i64) {
@@ -374,7 +376,7 @@ impl Syncing {
             Ok(Err(why)) => {
                 tracing::error!(
                     conversation_id,
-                    "what a session away from home left in its memory store could not be read, \
+                    "what a session run from a copy left in its memory store could not be read, \
                      so the account it belongs to was not written: {why:#}",
                 );
 
@@ -385,7 +387,7 @@ impl Syncing {
                 tracing::error!(
                     error = ?why,
                     conversation_id,
-                    "reading what a session away from home left in its memory store ended badly",
+                    "reading what a session run from a copy left in its memory store ended badly",
                 );
 
                 return;
@@ -401,8 +403,8 @@ impl Syncing {
                 tracing::error!(
                     error = ?why,
                     conversation_id,
-                    "what a session away from home left in its memory store could not be composed \
-                     for the device its account is on",
+                    "what a session run from a copy left in its memory store could not be \
+                     composed for the device its account was fetched from",
                 );
 
                 return;
@@ -422,7 +424,7 @@ impl Syncing {
                 device = %at,
                 carrying,
                 "what this session wrote to its memory store was written into the account on the \
-                 device it is at home on",
+                 device it was fetched from",
             ),
 
             Err(why) => {
@@ -450,7 +452,8 @@ impl Syncing {
 }
 
 /// The parts of the store on **this** machine, and the account directory they are
-/// said from — the mirror's own, or the account's where this is the home device.
+/// said from — the mirror's own, or the account's where the Profile is bound
+/// here.
 ///
 /// `account` is the Profile's account as this device holds it, `worktree` the
 /// directory the session runs in, and `wanted` the question both ends name their
@@ -628,15 +631,16 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
     Ok(files)
 }
 
-/// And what the session left that the account at home has not got: [`gathered`]
-/// with every file that still hashes to what came down in it taken out.
+/// And what the session left that the account it was fetched from has not got:
+/// [`gathered`] with every file that still hashes to what came down in it taken
+/// out.
 ///
 /// The account mirror's reading of the login over a store — see
 /// [`super::account`]. A file that is no longer what arrived is one the session
 /// wrote, and one that was never there at all is one it made; both go back. A
-/// file the session took away is not here to send, and nothing is deleted at
-/// home: a session that removed what it was given is not a session asking the
-/// account to lose it.
+/// file the session took away is not here to send, and nothing is deleted on the
+/// bound device: a session that removed what it was given is not a session
+/// asking the account to lose it.
 ///
 /// Blocking.
 pub(crate) fn left_behind(
@@ -1224,8 +1228,8 @@ mod tests {
         assert_eq!(directory, "/srv/worktrees/verkstead-rate-limiting");
     }
 
-    /// Switched off, nothing syncs: the session starts on an empty store away from
-    /// home exactly as it does at home, and neither direction carries anything.
+    /// Switched off, nothing syncs: the session starts on an empty store from a copy
+    /// exactly as it does where it is bound, and neither direction carries anything.
     #[test]
     fn a_profile_that_shares_no_memory_carries_nothing() {
         let account = store(&[("memories/MEMORY.md", b"what it remembers\n")]);
@@ -1322,9 +1326,9 @@ mod tests {
         );
     }
 
-    /// Only what the session changed goes home: a file still exactly as it came
+    /// Only what the session changed goes back: a file still exactly as it came
     /// down is not sent, one it wrote is, one it made is — and one it took away is
-    /// nothing to send, nothing at home being deleted from here.
+    /// nothing to send, nothing on the bound device being deleted from here.
     #[test]
     fn only_what_the_session_changed_goes_home() {
         let account = store(&[

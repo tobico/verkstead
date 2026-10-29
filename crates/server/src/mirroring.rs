@@ -9,7 +9,7 @@
 //! `/api/ui/profiles`, are retired: every device holds the one record, an edit
 //! or a removal made on any device is a local write that replicates, and there
 //! is no home to relay a press to. What is left here is the account a session
-//! away from it is given.
+//! on a device the Profile is not bound on is given.
 
 pub mod account;
 pub mod memory;

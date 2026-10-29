@@ -652,7 +652,7 @@ pub(crate) enum Carried {
 /// whose store did not come across gets. Claude's store crosses as a labelled part
 /// that each machine names its own path for, so it should land under this device's
 /// own encoding of this device's Worktree path with nothing further to do — and
-/// the part the home device named it off is that device's worktrees directory
+/// the part the bound device named it off is that device's worktrees directory
 /// joined onto the stem this Worktree carries, so a stem that came out differently
 /// here is a part that was asked for under a name the sending device never used.
 /// Proved rather than assumed, which is what this call is. Grok's answer is the

@@ -1,10 +1,10 @@
 //! One of this device's Agent Profiles as a member is handed the **memory store**
 //! of its account — what it remembers of one repository, and what one
-//! Conversation wrote — and is given back what a session away from home left in
+//! Conversation wrote — and is given back what a session run from a copy left in
 //! it (ADR-0020, *Shared Profiles*).
 //!
 //! **The answering half of the memory sync.** A device launching under a Profile
-//! whose account lives here syncs this Repo's entries into its own mirror of that
+//! bound here and not there syncs this Repo's entries into its own mirror of that
 //! account before launch and back after, so this is what they are read from and
 //! written into. [`crate::mirroring::memory`] is the end that asks, and the whole
 //! of the reasoning is there.
@@ -22,15 +22,16 @@
 //! body is the question and whose answer is the files.
 //!
 //! **A member's own call rather than the viewer's**, gated to members with
-//! everything else on this listener, and **only this device's own Profiles**: a
-//! row that is itself a mirror is an account on a third machine, and this device
-//! has no store of it to hand over. Beside [`super::account`], which carries the
-//! same account's login and configuration, for that module's reasons.
+//! everything else on this listener, and **only the Profiles bound here**: a
+//! Profile this device runs from a copy of is an account bound on a third
+//! machine, and this device has no store of it to hand over. Beside
+//! [`super::account`], which carries the same account's login and configuration,
+//! for that module's reasons.
 //!
 //! **And only where the Profile's memory switch is on.** Off, the account's store
-//! is not a session's at home either, so there is nothing here to lend and nothing
-//! to take back — answered as an empty store rather than refused, which is what a
-//! Profile with the switch off *has*.
+//! is not a session's where it is bound either, so there is nothing here to lend
+//! and nothing to take back — answered as an empty store rather than refused,
+//! which is what a Profile with the switch off *has*.
 
 use axum::Json;
 use axum::Router;
@@ -45,16 +46,16 @@ use crate::mirroring::memory::{MOST_A_STORE_IS, carried, gathered, written_down}
 use crate::sandbox::root::{Part, Root};
 use crate::{AppState, store};
 
-/// Where a member asks after the memory store of one of this device's Profiles,
-/// by the id it has **here** — which is the id the mirror row records for it.
+/// Where a member asks after the memory store of a Profile bound on this device,
+/// by its uuid — which is the one it has on every device.
 ///
 /// Under the Profile beside its account rather than inside it: what an account
 /// hands over is what a root is *made* from, composed fresh each launch, and a
 /// memory store is joined rather than composed and is synced on its own terms.
 pub const MEMORY: &str = "/api/peer/v1/profiles/{profile}/memory";
 
-/// And where a device away from home puts what its session **left** in that
-/// store.
+/// And where a device the Profile is not bound on puts what its session **left**
+/// in that store.
 pub const LEFT: &str = "/api/peer/v1/profiles/{profile}/memory/left";
 
 /// `POST /api/peer/v1/profiles/{profile}/memory` — every file of that Profile's
@@ -62,12 +63,12 @@ pub const LEFT: &str = "/api/peer/v1/profiles/{profile}/memory/left";
 /// names, each under the part of the store it is in.
 ///
 /// **Read at the moment it is asked for**, as the account beside it is: a memory
-/// written here since the last session away is the one the next session away has
-/// to be given.
+/// written here since the last session run from a copy is the one the next such
+/// session has to be given.
 ///
-/// **A Profile that is not one of this device's own is `404`**, and so is one that
-/// is not there at all — a row removed between a mirror's last refresh and this
-/// call.
+/// **A Profile that is not bound here is `404`**, and so is one that is not
+/// there at all — a record removed between the asking device's last pull and
+/// this call.
 pub(crate) async fn held(
     State(state): State<AppState>,
     At(profile): At<String>,
@@ -113,8 +114,8 @@ pub(crate) async fn held(
     }
 }
 
-/// `POST /api/peer/v1/profiles/{profile}/memory/left` — what a session away from
-/// home wrote to that store, written into it here.
+/// `POST /api/peer/v1/profiles/{profile}/memory/left` — what a session run from
+/// a copy wrote to that store, written into it here.
 ///
 /// **Written into the parts this device names**, out of the same question the read
 /// was made with: a file under a label this device holds no part for is dropped,
@@ -184,12 +185,13 @@ pub(crate) async fn written(
     }
 }
 
-/// The account of this device's own Profile `profile`, and the parts of its
-/// memory store that `wanted` names — each at a path of **this** machine's own.
+/// The account of the Profile `profile` as it is bound here, and the parts of
+/// its memory store that `wanted` names — each at a path of **this** machine's
+/// own.
 ///
-/// `None` is a Profile that is not this device's own, or not there at all. A
-/// Profile whose memory switch is off is no parts rather than no Profile: the
-/// switch says its store is nobody's session's, here or away, and an empty
+/// `None` is a Profile that is not bound here, or not there at all. A Profile
+/// whose memory switch is off is no parts rather than no Profile: the switch
+/// says its store is nobody's session's, bound or from a copy, and an empty
 /// answer is what that is.
 ///
 /// Where a Repo is named it is this device's registry that says where it is, and
@@ -376,8 +378,8 @@ mod tests {
         }
     }
 
-    /// And each names the Profile by the id it has on the device that answers,
-    /// which is what a mirror row records for it there.
+    /// And each names the Profile by its uuid, which is the one it has on every
+    /// device, the one that answers among them.
     #[test]
     fn the_memory_names_the_profile() {
         for path in [MEMORY, LEFT] {

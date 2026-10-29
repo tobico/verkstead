@@ -24,11 +24,11 @@
 //! far end.
 //!
 //! **And it runs after the session's ending has finished happening.** A session
-//! away from home writes its account's login and this Repo's memory entries back
-//! to the device they are at home on as it ends, and the word that it is over is
-//! the last thing that ending sends — so a mover waiting on that word is waiting
-//! on the write-back too, which is the order a transfer needs and gets for
-//! nothing. See [`crate::sessions::Session::ended`].
+//! that runs from a copy writes its account's login and this Repo's memory
+//! entries back to the device they were fetched from as it ends, and the word
+//! that it is over is the last thing that ending sends — so a mover waiting on
+//! that word is waiting on the write-back too, which is the order a transfer
+//! needs and gets for nothing. See [`crate::sessions::Session::ended`].
 //!
 //! **The far end's answer is the commit point.** The move asks that device to
 //! take the Conversation, it writes a row of its own and answers with the id it
@@ -723,11 +723,11 @@ pub(crate) async fn moving(state: &AppState, conversation_id: i64) -> bool {
 /// [`going`] refuses a launch that is *decided* after the request lands, and
 /// between one being decided and the session being on the register there is a
 /// sandbox to build — on one platform, minutes of it. Nothing hands out a handle
-/// on a session that does not exist yet, so the one thing left is to look again
-/// — see [`A_LAUNCH_IS_LOOKED_FOR_EVERY`]. What it is protecting is the
-/// **ordering**: a session away from home writes its account's login and this
-/// Repo's memory entries back as it ends, and a move that overtook a launch would
-/// leave the far end starting under a login this machine had not returned.
+/// on a session that does not exist yet, so the one thing left is to look again —
+/// see [`A_LAUNCH_IS_LOOKED_FOR_EVERY`]. What it is protecting is the
+/// **ordering**: a session that runs from a copy writes its account's login and
+/// this Repo's memory entries back as it ends, and a move that overtook a launch
+/// would leave the far end starting under a login this machine had not returned.
 ///
 /// **And the same session is never waited on twice.** What tells one from
 /// another is the Timeline Event it is printing into; a register still naming
@@ -791,9 +791,9 @@ fn see_out(state: AppState, conversation_id: i64, device: String) {
             // sandbox in front of that is minutes on one platform — so this is
             // the one thing the mover looks for rather than awaits.
             //
-            // **And it must look, rather than move.** What a session away from
-            // home does as it ends is write its account's login and this Repo's
-            // memory entries back to the device they are at home on, and a move
+            // **And it must look, rather than move.** What a session that runs
+            // from a copy does as it ends is write its account's login and this
+            // Repo's memory entries back to the device they were fetched from, and a move
             // that overtook a launch would be a slice and a bundle leaving
             // while a session here was still to do that — the far end launching
             // under a login this machine had not finished returning, which is
@@ -1306,8 +1306,8 @@ async fn noted(state: &AppState, conversation_id: i64, line: &str) {
 ///
 /// **The two ids the store cannot renumber for itself are settled here**: which
 /// of the far end's Repos each of ours is, by the match the whole cluster runs
-/// on, and what each Agent Profile is called across a cluster, which is the
-/// device it is at home on and its id there. A repository with nowhere to land
+/// on, and what each Agent Profile is called across a cluster, which is its
+/// uuid, the same on every device. A repository with nowhere to land
 /// refuses the move by name; an account the far end has never heard of leaves
 /// its column empty over there, that being history rather than a Pairing
 /// anything is going to be launched under.
@@ -1640,9 +1640,8 @@ fn pairing_across(pairing: &store::Pairing) -> PairingAcross {
     }
 }
 
-/// One Agent Profile, named the way a cluster names one: by its uuid, which
-/// a mirror is held under on the far end too, and which is the far end's own
-/// row where the account is at home there.
+/// One Agent Profile, named the way a cluster names one: by its uuid, which is
+/// the one it has on every device, bound there or not.
 fn profile_across(profile: &store::Profile) -> ProfileAcross {
     ProfileAcross {
         id: profile.id.clone(),

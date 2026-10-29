@@ -256,9 +256,9 @@ async fn back(state: &AppState, id: i64, arrival: &store::Arrival) -> Result<i64
 /// comes out pointing at the Event it actually landed as. What the store cannot
 /// work out for itself is the two ids that are not this Conversation's: the
 /// Repos, which the sending device matched against this registry before it sent
-/// anything, and the Agent Profiles, which are named across a cluster by the
-/// device each is at home on — see [`resolved`], which is the same reading one
-/// call along.
+/// anything, and the Agent Profiles, which are named across a cluster by their
+/// uuids, the same on every device — see [`resolved`], which is the same reading
+/// one call along.
 ///
 /// **The files first, then the rows.** An attachment is a row and bytes both,
 /// and the row is what names the file: written the other way round there would
@@ -818,9 +818,9 @@ async fn resolved(
 /// Which row of this device's `profiles` is the Profile a transfer names, where
 /// one is.
 ///
-/// The row held under its uuid, which is one Profile's on every device: one
-/// of this device's own where the account is at home here, and its **mirror**
-/// where it is at home on some other machine — see [`crate::mirroring`].
+/// The record held under its uuid, which is one Profile's on every device:
+/// bound here, or run from a copy here where it is bound on some other machine
+/// — see [`crate::mirroring`].
 fn here(profiles: &[store::Profile], named: &ProfileAcross) -> Option<String> {
     profiles
         .iter()

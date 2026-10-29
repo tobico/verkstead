@@ -12,10 +12,11 @@
 //! [`super::births`], and [`super::ranks`].
 //!
 //! **The Pairings arrive as local ids.** A Profile is named across a cluster by
-//! the device it is at home on and its id there, and the device sending the work
-//! resolves that pair against this device's own rows before it sends — a mirror
-//! being a local id here like any other. So what lands here is three ids of this
-//! database's own, exactly as a composer's presses would have left them.
+//! its uuid, which is the one it has on every device, and the device sending the
+//! work resolves each against this device's own records before it sends — a
+//! Profile not bound here being held under the same uuid as one that is. So what
+//! lands here is three ids of this database's own, exactly as a composer's
+//! presses would have left them.
 //!
 //! **And the row is the first of three legs rather than the whole of a move.** A
 //! Conversation lands in the state it was in, under the repository the matching

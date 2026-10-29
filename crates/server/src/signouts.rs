@@ -119,7 +119,7 @@ pub(crate) enum Home {
 /// The account's login file as it was when a session's root was built, so that
 /// a sign-out can tell a login replaced since from the one it was given.
 ///
-/// Only a Claude account bound here: one bound elsewhere is a copy refreshed
+/// Only a Claude account bound here: one not bound here runs from a copy fetched
 /// before each launch, and the other harnesses are never stopped here at all.
 #[derive(Debug, Clone)]
 pub(crate) struct Login {
@@ -220,7 +220,7 @@ pub(crate) struct Watch {
     /// And what it is called, which is what the Notice and the push name.
     profile: String,
 
-    /// And where it is at home.
+    /// And where it is bound — here, or the device its account was fetched from.
     home: Home,
 
     /// The phrase, off the agent the Profile runs — see [`signed_out_phrase`].
@@ -548,7 +548,7 @@ async fn home_named(pool: &SqlitePool, device: &str) -> String {
             .find(|member| member.device == device)
             .map(|member| member.name),
         Err(error) => {
-            tracing::error!(error = ?error, device, "reading the device a Profile is at home on failed");
+            tracing::error!(error = ?error, device, "reading the device a Profile is bound on failed");
             None
         }
     }

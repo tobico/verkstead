@@ -34,9 +34,9 @@
 //!
 //! **The two ids that are not the store's to renumber** are the Repo and the
 //! Agent Profile, because neither is this Conversation's: a Repo is one
-//! directory on one machine and an account is at home on one, so both are
+//! directory on one machine and an account is bound per device, so both are
 //! settled outside — the Repos by the match the whole cluster runs on and the
-//! Profiles by the device each is at home on — and arrive here as a
+//! Profiles by their uuids — and arrive here as a
 //! [`Renaming`].
 //!
 //! **And a slice is bounded.** A Transcript is megabytes of a session talking,
@@ -171,9 +171,9 @@ pub struct Marks {
 /// **Neither is this Conversation's.** A Repo is one directory on one machine
 /// and the same repository is another on the next, so which of the far end's
 /// Repos each of these rows means is the cluster's own match — see
-/// `server::matching`. An Agent Profile is at home on one device and is a mirror
-/// on every other, so which row means it there is that pairing read back — see
-/// `server::peer::transfers`.
+/// `server::matching`. An Agent Profile is one record under one uuid on every
+/// device, bound on some and run from a copy on the rest, so which row means it
+/// there is that uuid read back — see `server::peer::transfers`.
 ///
 /// Both are settled by the devices rather than by the store, and arrive here
 /// already answered.

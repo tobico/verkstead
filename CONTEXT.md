@@ -616,13 +616,13 @@ the word that the move is over. From there the direction is simply reversed — 
 device the work left keeps the copy, its URL redirects, and the merged list draws
 one row — and a third leg lands on the same two ids and the same two checkouts
 again.
-**Before any of it, the account goes home.** A session away from home keeps a
-mirror of its account's login and of this Repo's memory entries and writes both
-back to the device they are at home on as it ends — and the move runs at the turn's
+**Before any of it, the account goes back.** A session under a Profile not bound
+on its device runs from a mirror of its account's login and of this Repo's memory
+entries and writes both back to the device they were fetched from as it ends — and the move runs at the turn's
 end, which is exactly when that happens. So the ordering is the thing: the write-back
 is the last thing a session's ending does before the word that it is over, the mover
 waits for that word, and a launch that has been decided but has not reached the
-register yet is waited for too. The account is home before the slice and the bundle
+register yet is waited for too. The account is written back before the slice and the bundle
 leave, or the far end would launch under a login the source had not finished
 returning.
 _Avoid_: migrate, hand off, sync, failover
@@ -736,7 +736,7 @@ spawn that fails each refuse a session there — so a Notice in front of them wo
 say a conversation had been picked up where nothing ever ran.
 **The Profile's memory switch off** is the first: nothing of the harness's store
 travelled, because a session under a Profile that shares no memory gets a store of
-its own and empty, away from home exactly as at home. **No session on the record**
+its own and empty, from a copy exactly as where the Profile is bound. **No session on the record**
 is the second — a Conversation that moved before it had ever run one, and one whose
 sessions were on a backend that names none and whose own id was never written down —
 and it is the one known at the arrival rather than at the launch. **A Pairing on a
@@ -2250,8 +2250,8 @@ are not copied**: it holds none of its own, and the Keeper's reach it as
 records, the way they reach any member — so with one, a Repo there is that
 one's.
 **And it never enters Onboarding Mode**: a kept Annex is told so in its
-config and skips the verdict, its objective being met by the mirrors its
-Keeper's Profiles arrive as.
+config and skips the verdict, its objective being met by its Keeper's
+Profiles, which arrive as records it runs from a copy of.
 **On Windows it is a NixOS-WSL distro named `Verkstead`**, disk under
 `%LOCALAPPDATA%\Verkstead\wsl`, built from a flake its Keeper writes and
 pinned to the Keeper's own release; the wizard row that makes it reads
@@ -3281,8 +3281,8 @@ place, that a roadmap has no Stage left to run, that the roadmap on the record
 is not on the branch to read, that a branch wrote no single roadmap so no Stage
 was started, that the roadmap declares badly so nothing of it was started, that
 a Stage predates the record of which roadmap it belongs to and is the human's to
-continue, that a wrap-up is down to its checks, that a session away from home
-could not write its Profile's login back to the device the account is on — see
+continue, that a wrap-up is down to its checks, that a session that ran from a
+copy could not write its Profile's login back to the device the account was fetched from — see
 **Account mirror** — that a Conversation moved onto this device was taken up
 with the harness's own resume of the conversation it arrived part way through,
 or with Verkstead's own Resume and which reason it was — see **Carried
@@ -3723,9 +3723,9 @@ the transcript it leaves are the account's, and the next session reads them.
 **Off**, the store is the root's own and empty as each session starts: fresh
 memory, none of the human's transcripts in reach, and the session's own
 transcript written into the root, where Verkstead reads it from. The login and
-the written configuration are the same either way. **And the switch holds away
-from home**: a session on one device under a Profile whose account is on another
-is given what that account remembers of this Repo, and what it writes goes back
+the written configuration are the same either way. **And the switch holds on a
+device the Profile is not bound on**: a session there, running from a copy, is
+given what the account remembers of this Repo on a device it is bound on, and what it writes goes back
 — see **Memory sync**. On the Profile form it is one
 checkbox, drawn for every agent type; the cards and the pickers do not show it.
 **A Profile need not be named.** The harness's mark and the model already say
@@ -3927,27 +3927,28 @@ a Built Root is what a session is *given*.
 _Avoid_: account home, joined account, claude home, mounted account
 
 **Account mirror**:
-What a device holds of a **member's** account so that a session can run here
-under a Profile whose account is on that machine: the files a **Built Root** is
-made of, and nothing else of it (ADR-0020). The row travels and the account does
-not — so the login, and whatever the written configuration is composed from, are
-fetched from the home device into a directory of this device's own and the root is
-built out of that, exactly as it is built out of an account on this machine.
+What a device holds of the account of a Profile **not bound** on it, so that a
+session can run here under that Profile — one that *runs from a copy*: the files a
+**Built Root** is made of, and nothing else of it (ADR-0020). The record replicates
+and the account does not — so the login, and whatever the written configuration is
+composed from, are fetched from a device the Profile is bound on into a directory of
+this device's own and the root is built out of that, exactly as it is built out of
+an account on this machine.
 Nothing downstream of the launch knows the difference: the four parts, the trust
 seeded into the copied `.claude.json`, the launch line and the model are what they
 already were.
-**Becoming the copy under a cluster-owned Profile** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): the login is replicated, newest write wins, published by every device the Profile is bound on at launch, at ending and on the refresh schedule, so a quiet device blocks no start and nothing is fetched from a home. The `cluster-owned-records` roadmap lands it; what follows is the mirror as it stands.
+**Becoming the copy under a cluster-owned Profile** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): the login is replicated, newest write wins, published by every device the Profile is bound on at launch, at ending and on the refresh schedule, so a quiet device blocks no start and nothing is fetched from another device. The `cluster-owned-records` roadmap lands it; what follows is the mirror as it stands.
 **Per Profile, under the Data Directory**, named by the Profile's uuid —
 which is what makes the Windows rule hold by construction: a session's profile is
 under that same directory, so the hard link that joins the login in never crosses
 a volume, and the refusal for an account on another volume cannot fire for a
 mirror.
-**Fetched before each launch**, never kept: a login refreshed at home since the
-last session is the one this session has to be given, and a mirror gone stale
-would sign a session out for no reason anybody could see. What the home device
-sends is written over what is there — beside and renamed, so a session already
-running keeps the file it started with — and every file of the allowlist it did
-*not* send is taken away, a sign-out at home being a mirror with no login in it.
+**Fetched before each launch**, never kept: a login refreshed on the device it is
+bound on since the last session is the one this session has to be given, and a
+mirror gone stale would sign a session out for no reason anybody could see. What
+that device sends is written over what is there — beside and renamed, so a session
+already running keeps the file it started with — and every file of the allowlist
+it did *not* send is taken away, a sign-out there being a mirror with no login in it.
 **And it goes when the record is removed**, which is the last thing on this
 device that says whose login it holds: a Profile the human removed anywhere
 takes the directory with it rather than leaving a member's login here with
@@ -3961,7 +3962,7 @@ their paths and their history — and each other harness's `config.toml` or
 instructions file, or any other repository's transcripts. The memory store is not
 on the list: it is joined rather than composed, and is carried entry by entry on
 its own terms — see **Memory sync**.
-**A member's own call rather than the viewer's**: the home device answers it at
+**A member's own call rather than the viewer's**: a bound device answers it at
 `/api/peer/v1/profiles/<uuid>/account` on the **Peer Listener** behind the
 **Member Gate**, by the uuid the Profile has on every device, and only for a
 Profile bound there — one it runs from a copy of is an account on a third
@@ -3981,10 +3982,10 @@ gate. It is the one file of a root a session genuinely changes — the harness
 refreshes its OAuth pair as it works — so an account lent out and never written
 back would be one signing itself out a session at a time. What the session left is
 read off the mirror once the ending has written everything back into it, and the
-home device writes it **in place over the account's own file**, which is how a
+device it was fetched from writes it **in place over the account's own file**, which is how a
 local session's ending writes one: whatever else is a name for that file — a
 session running there has it linked into its root — is a name for what arrived.
-Nothing else of a root comes home, the rest being Verkstead's own or the human's
+Nothing else of a root goes back, the rest being Verkstead's own or the human's
 and no session's to change. A **Terminal**'s ending goes the same way, a human who
 logged in at that shell having logged in to somebody else's account.
 **Only what changed travels**: a login the session replaced, or made where the
@@ -3994,29 +3995,30 @@ all. Which is the three cases a local ending already tells apart.
 them out; that is accepted rather than locked against — nothing is merged and
 nothing is held, and the write that arrives later is the one the account keeps. A
 sign-out that results reads as the Profile being broken there, and the fix is a
-login on its home device. Lending a Profile out exclusively was rejected as a lock
+login on a device it is bound on. Lending a Profile out exclusively was rejected as a lock
 nobody asked for.
-**And a home that has gone away by then is said rather than swallowed**: the
+**And a device that has gone away by then is said rather than swallowed**: the
 mirror is left exactly where it is, nothing retries, and the Conversation's
 Timeline carries a **Notice** saying the account was not written and naming the
-machine. The next session at home may find itself signed out, which is worth a
+machine. The next session on that device may find itself signed out, which is worth a
 line rather than a silent loss.
 _Avoid_: account copy, cached account, synced login, borrowed account
 
 **Memory sync**:
 What carries an **Agent Profile**'s memory store to the device a session is
-running on and back again, where that Profile's account is at home on another
-one (ADR-0020). The **Account mirror** carries what a **Built Root** is *made*
+running on and back again, where that Profile is not bound on it and runs from a
+copy (ADR-0020). The **Account mirror** carries what a **Built Root** is *made*
 from; this carries what it *joins*, and the two together are what makes a
-session away from home the session it would have been at home. Before launch,
-what the home account remembers of this Repo and of this Conversation is
-written into the mirror; as the session ends, what the session wrote goes back.
+session run from a copy the session it would have been where the Profile is bound.
+Before launch, what the account remembers of this Repo and of this Conversation on
+the device it was fetched from is written into the mirror; as the session ends,
+what the session wrote goes back to that same device.
 That is what makes a session run on B readable on A afterwards, and what a
 harness's own resume stands on after a **Transfer**.
 **Becoming union in and fan out** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): this Repo's and this Worktree's entries pulled from every reachable device before launch, the newer file winning, and what the session wrote pushed to every reachable device after, nothing deleted anywhere, OpenCode's one database taken newest whole. The `cluster-owned-records` roadmap lands it; what follows is the sync as it stands.
-**The memory switch holds away from home.** Switched off, nothing syncs in
-either direction and the session starts on an empty store, exactly as it does
-at home.
+**The memory switch holds on a copy.** Switched off, nothing syncs in either
+direction and the session starts on an empty store, exactly as it does where the
+Profile is bound.
 **A label apiece, and each machine names its own path.** A memory store is keyed
 by the path a session ran in wherever it is keyed by anything, and every one of
 those paths is a different string on every machine. So nothing crosses the link
@@ -4059,11 +4061,11 @@ through the match across devices — see **Repo**, where origin then name is the
 rule — and **no match is an answer**: there is nothing of that Repo to pull, the
 session starts without it, and the Timeline says so rather than the launch being
 refused. The Worktree's is named off the Data Directory instead, a Worktree
-living under one rather than under the Repo: the home device joins **its own**
+living under one rather than under the Repo: the bound device joins **its own**
 worktrees directory onto the same stem this Worktree carries, which is the path
 it would have used for this work and is what leaves the transcript findable when
 the work comes home.
-**A member's own call rather than the viewer's**, beside the account's: the home
+**A member's own call rather than the viewer's**, beside the account's: the bound
 device answers at `/api/peer/v1/profiles/<uuid>/memory` on the **Peer Listener**
 behind the **Member Gate**, and takes what the session left at
 `/api/peer/v1/profiles/<uuid>/memory/left`. A press rather than a path each way,
@@ -4071,14 +4073,14 @@ the question being three facts about the asking device's side and one of them a
 list.
 **Only what changed travels back**, which is the account mirror's rule for the
 login: what came down is remembered by a fingerprint apiece, and a file still
-exactly as it arrived is not sent. **Nothing at home is deleted** — a file the
+exactly as it arrived is not sent. **Nothing on the bound device is deleted** — a file the
 session took away is not a file it asked the account to lose, and the rest of
 that store is the human's own work in other repositories.
-**Best effort rather than a gate.** A home that will not answer is a session
-that starts on an empty store with a **Notice** saying so, where a home that
+**Best effort rather than a gate.** A bound device that will not answer is a session
+that starts on an empty store with a **Notice** saying so, where one that
 will not answer for the *account* starts no session at all: a session with no
 memory comes up new, and a session with no login comes up logged out with
-nothing saying why. The same at the end — what could not be written home is a
+nothing saying why. The same at the end — what could not be written back is a
 line on the Timeline rather than a retry.
 _Avoid_: memory mirror, transcript sync, store copy
 

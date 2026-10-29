@@ -182,14 +182,16 @@ mod merges;
 /// One sidebar for the cluster: every member's Conversations held in memory and
 /// merged with this device's own by Rank (ADR-0020, *The opened device relays*).
 mod merging;
-/// One list of accounts for the cluster: a mirror row per member Agent Profile,
-/// fetched over the link and kept beside this device's own (ADR-0020, *Shared
-/// Profiles*).
+/// What a device holds of an Agent Profile not bound on it: a copy of the
+/// account, fetched before each launch from a device it is bound on, and the
+/// memory store synced with that same device (ADR-0020, *Shared Profiles*;
+/// ADR-0028).
 ///
-/// Public for the reason [`matching`] is: what a session away from home is given
-/// of an account is the product's own boundary rather than an implementation
-/// detail of a launch, and what proves it is a suite standing where the device
-/// about to launch stands — see [`mirroring::account::fetched`].
+/// Public for the reason [`matching`] is: what a session that runs from a copy
+/// is given of an account is the product's own boundary rather than an
+/// implementation detail of a launch, and what proves it is a suite standing
+/// where the device about to launch stands — see
+/// [`mirroring::account::fetched`].
 pub mod mirroring;
 /// Telling the open viewer pages that the pending world moved (ADR-0009).
 ///
@@ -1316,10 +1318,10 @@ pub fn router_answering_devices_telling_checking_updates(
 /// The peer half is handed to [`peer::router`] the way [`router_over_the_link`]'s
 /// is, which is what puts the Member Gate in front of it.
 ///
-/// **And `machine` is what the mirrors are judged on**, which is the one thing
-/// a clustered router probes that a lone one never does: a **mirror** of a
-/// member's Profile whose harness is not on this box reads broken in the
-/// onboarding probe's own word, so a suite about mirrors has to say what this
+/// **And `machine` is what the Profiles not bound here are judged on**, which is
+/// the one thing a clustered router probes that a lone one never does: a Profile
+/// not bound here whose harness is not on this box reads broken in the
+/// onboarding probe's own word, so a suite about them has to say what this
 /// box has rather than take whatever the runner happens to hold — see
 /// [`profiles::broken`]. A served Verkstead passes [`onboarding::Machine::here`],
 /// as every other constructor does.
@@ -1390,17 +1392,17 @@ pub fn routers_keeping_answering_devices_telling(
 /// in `data_dir` and reaching GitHub through `gh`.
 ///
 /// What a served Verkstead in a cluster is, and what a suite asking whether a
-/// session away from home comes up logged in has to stand up: the mirrors are
-/// refreshed off the membership behind the state (see [`mirroring`]), the account
-/// of a member's Profile is fetched over the cluster handle as each session
+/// session that runs from a copy comes up logged in has to stand up: the Profile
+/// records are pulled off the membership behind the state, the account of a
+/// Profile not bound here is fetched over the cluster handle as each session
 /// starts (see [`mirroring::account`]), and the agent that runs is `agents`'.
 /// Every other clustered constructor here runs no session at all, which is every
 /// question about a cluster but that one.
 ///
-/// And `machine` is what its mirrors are judged on, for the reason
-/// [`routers_answering_devices_telling`] takes one: a session away from home is
-/// refused where the harness it would run is not on this box, and what a suite
-/// stubs the agent with is not what the probe walks a `PATH` for.
+/// And `machine` is what its Profiles not bound here are judged on, for the
+/// reason [`routers_answering_devices_telling`] takes one: a session that runs
+/// from a copy is refused where the harness it would run is not on this box, and
+/// what a suite stubs the agent with is not what the probe walks a `PATH` for.
 pub fn routers_running_sessions_answering_devices(
     pool: SqlitePool,
     data_dir: PathBuf,

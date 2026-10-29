@@ -2446,11 +2446,10 @@ pub struct NoticeEvent {
     /// markdown on this wire is.
     pub html: String,
 
-    /// The login this Notice offers, where it is the stop of a run whose
-    /// account signed out and the account is at home on this device
-    /// (ADR-0022). `None` everywhere else — a mirrored Profile's Notice names
-    /// the device to log in on instead, and a stop that has been resumed offers
-    /// nothing.
+    /// The login this Notice offers, where it is the stop of a run whose account
+    /// signed out and the Profile is bound on this device (ADR-0022). `None`
+    /// everywhere else — the Notice of a Profile not bound here names the device to
+    /// log in on instead, and a stop that has been resumed offers nothing.
     pub log_in: Option<NoticeLogIn>,
 }
 

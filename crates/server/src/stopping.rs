@@ -632,9 +632,10 @@ pub(crate) fn out_of_window(profile: &str, said: &str) -> String {
 /// Why a run stopped when the account it was spending signed out: which
 /// account, the line the session printed, and where the login is made.
 ///
-/// `home` is the device a mirrored Profile is at home on, by the name it is
-/// shown under — the one place its login can be made (ADR-0022). `None` is a
-/// Profile at home here, whose Notice carries the Log in press instead.
+/// `home` is the device the account of a Profile not bound here was fetched
+/// from, by the name it is shown under — a device it is bound on, where its
+/// login can be made (ADR-0022). `None` is a Profile bound here, whose Notice
+/// carries the Log in press instead.
 pub(crate) fn signed_out(profile: &str, said: &str, home: Option<&str>) -> String {
     let login = match home {
         None => "Log in, and the run carries on by itself.".to_owned(),
@@ -842,9 +843,9 @@ mod tests {
 
     use super::*;
 
-    /// A signed-out stop at home here says to log in, the press being on the
-    /// Notice; a mirror's names the device it is at home on and says to log in
-    /// there, there being no press (ADR-0022).
+    /// A signed-out stop under a Profile bound here says to log in, the press
+    /// being on the Notice; one not bound here names the device it is bound on
+    /// and says to log in there, there being no press (ADR-0022).
     #[test]
     fn a_signed_out_stop_says_where_the_login_is_made() {
         assert_eq!(

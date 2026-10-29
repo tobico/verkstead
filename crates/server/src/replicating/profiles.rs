@@ -56,7 +56,8 @@ async fn settled(state: &AppState) -> Result<()> {
         tracing::info!(
             provisional = %provisional,
             profile = %uuid,
-            "a mirror held from before the uuids is bridged onto the record its home published",
+            "a mirror held from before the uuids is bridged onto the record the device it was \
+             minted on published",
         );
 
         crate::mirroring::account::bridged(&state.data_dir, provisional, uuid).await;

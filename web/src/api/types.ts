@@ -4155,11 +4155,10 @@ at: string,
  */
 html: string, 
 /**
- * The login this Notice offers, where it is the stop of a run whose
- * account signed out and the account is at home on this device
- * (ADR-0022). `None` everywhere else — a mirrored Profile's Notice names
- * the device to log in on instead, and a stop that has been resumed offers
- * nothing.
+ * The login this Notice offers, where it is the stop of a run whose account
+ * signed out and the Profile is bound on this device (ADR-0022). `None`
+ * everywhere else — the Notice of a Profile not bound here names the device to
+ * log in on instead, and a stop that has been resumed offers nothing.
  */
 log_in: NoticeLogIn | null, };
 
@@ -4587,11 +4586,11 @@ export type Permitting = "Recorded" | "NotAMember" | "DraftedThere" | "WorkIsHer
  * empty picker would draw the placeholder over a settled choice.
  *
  * One variant carries a Profile and the other two carry nothing, which is what
- * the size lint is about — a Profile got bigger when it gained the device it is
- * at home on. Left as it is: these are made one at a time on the way to being
- * serialized, none of them is held in a collection, and a `Box` in a view type
- * would be a pointer written into the shape the viewer is generated from for a
- * few bytes nobody is counting.
+ * the size lint is about — a Profile's own fields, its account's paths and its
+ * list of models among them, are what make it big. Left as it is: these are
+ * made one at a time on the way to being serialized, none of them is held in a
+ * collection, and a `Box` in a view type would be a pointer written into the
+ * shape the viewer is generated from for a few bytes nobody is counting.
  */
 export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
 

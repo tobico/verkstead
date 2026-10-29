@@ -3,7 +3,7 @@
 //! *Shared Profiles*).
 //!
 //! **The answering half of the account mirror.** A device launching under a
-//! Profile whose account lives here keeps a mirror of that account under its own
+//! Profile bound here and not there keeps a mirror of that account under its own
 //! Data Directory and builds the session's root out of it exactly as it builds
 //! one out of a local account — so this is what the mirror is written from, and
 //! [`crate::mirroring::account`] is the end that asks and writes it down.
@@ -24,19 +24,19 @@
 //! global instructions file, history, or any other repository's transcripts; and
 //! the memory store is not on it, being synced entry by entry on its own terms.
 //!
-//! **And only this device's own Profiles.** A mirror is written from a member's
-//! own rows, so a row that is itself a mirror is an account on a third machine
-//! and this device has no files of it to hand over: it answers as it answers a
-//! Profile that is not there at all, and the asking device is one hop from the
-//! machine the account is on either way.
+//! **And only the Profiles bound here.** A mirror is written from a binding, so
+//! a Profile this device itself runs from a copy of is an account bound on a
+//! third machine and this device has no files of it to hand over: it answers as
+//! it answers a Profile that is not there at all, and the asking device is one
+//! hop from the machine the account is on either way.
 //!
 //! **And one thing comes back.** A login is the one file of a root a session
 //! genuinely changes — the harness refreshes its OAuth pair as it works — so an
 //! account lent out and never written back would be an account signing itself out
-//! a session at a time. As a session away from home ends, that device puts what it
-//! left into the account here, on [`LOGIN`] beside the read. Nothing else comes
-//! home: everything else in a root is either Verkstead's own, written fresh each
-//! launch, or the human's own and never a session's to change.
+//! a session at a time. As a session run from a copy ends, that device puts what
+//! it left into the account here, on [`LOGIN`] beside the read. Nothing else
+//! comes back: everything else in a root is either Verkstead's own, written fresh
+//! each launch, or the human's own and never a session's to change.
 
 use axum::Json;
 use axum::Router;
@@ -48,15 +48,15 @@ use verkstead_render::{AccountFile, AccountLogin};
 
 use crate::{AppState, store};
 
-/// Where a member asks after the account of one of this device's Profiles, by
-/// the id it has **here** — which is the id the mirror row records for it.
+/// Where a member asks after the account of a Profile bound on this device, by
+/// its uuid — which is the one it has on every device.
 ///
 /// **Not under `/api/ui/`**, which is the viewer's namespace and is drawn by a
 /// browser. The same shape the news, the renewal and the Repos beside it take.
 pub const ACCOUNT: &str = "/api/peer/v1/profiles/{profile}/account";
 
-/// And where a device away from home puts the **login** its session left, for the
-/// same Profile by the same id.
+/// And where a device the Profile is not bound on puts the **login** its session
+/// left, for the same Profile by the same uuid.
 ///
 /// Under the account rather than beside it, because that is what it is one file
 /// of: the read hands over what a root is made from and this hands one of those
@@ -77,12 +77,12 @@ const MOST_A_LOGIN_IS: usize = 64 * 1024;
 /// nothing where the account has no such file.
 ///
 /// **Read at the moment it is asked for.** A login refreshed here since the last
-/// session away is the one the next session away has to be given, so nothing is
-/// held: the answer is the account as it is now, and a mirror is written from it
-/// before each launch.
+/// session run from a copy is the one the next such session has to be given, so
+/// nothing is held: the answer is the account as it is now, and a mirror is
+/// written from it before each launch.
 ///
-/// **A Profile that is not one of this device's own is `404`**, and so is one
-/// that is not there at all — a row removed between a mirror's last refresh and
+/// **A Profile that is not bound here is `404`**, and so is one that is not
+/// there at all — a record removed between the asking device's last pull and
 /// this call, which is the ordinary way this answers nothing.
 ///
 /// The reads go in one blocking task: they are a handful of small files, and a
@@ -159,14 +159,14 @@ pub(crate) async fn held(State(state): State<AppState>, Path(profile): Path<Stri
     }
 }
 
-/// `POST /api/peer/v1/profiles/{profile}/account/login` — the login a session away
-/// from home left, written into that Profile's account.
+/// `POST /api/peer/v1/profiles/{profile}/account/login` — the login a session
+/// run from a copy left, written into that Profile's account.
 ///
 /// **The answering half of the write-back**, and the one direction anything of an
 /// account travels in on its way *back*: a harness refreshes its OAuth pair as it
 /// works, so a login lent out and never returned is an account signing itself out
 /// a session at a time. Everything else a root holds is Verkstead's own or the
-/// human's own and never comes home — see
+/// human's own and never comes back — see
 /// [`crate::mirroring::account::Lending::written_home`], which is the end that
 /// reads what the session left and puts it here.
 ///
@@ -181,9 +181,10 @@ pub(crate) async fn held(State(state): State<AppState>, Path(profile): Path<Stri
 /// that arrives later is the one the account keeps (ADR-0020, *Shared Profiles*).
 /// So nothing here reads what is already at the path, and nothing is held.
 ///
-/// **A Profile that is not one of this device's own is `404`**, as the read beside
-/// it answers one: a row that is itself a mirror is an account on a third machine,
-/// and a row that has gone is a Profile removed while a session ran under it.
+/// **A Profile that is not bound here is `404`**, as the read beside it answers
+/// one: a Profile this device runs from a copy of is an account bound on a third
+/// machine, and a record that has gone is a Profile removed while a session ran
+/// under it.
 pub(crate) async fn written(
     State(state): State<AppState>,
     Path(profile): Path<String>,
@@ -314,8 +315,8 @@ mod tests {
         }
     }
 
-    /// And each names the Profile by the id it has on the device that answers,
-    /// which is what a mirror row records for it there.
+    /// And each names the Profile by its uuid, which is the one it has on every
+    /// device, the one that answers among them.
     #[test]
     fn the_account_names_the_profile() {
         for path in [ACCOUNT, LOGIN] {

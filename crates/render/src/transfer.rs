@@ -222,9 +222,9 @@ pub enum Permitting {
 ///
 /// Ids are each device's own and collide by construction, so nothing here is one
 /// of the sender's: the Repo is the one *this* device's registry answered for the
-/// match, and each Pairing's Profile is named by the device it is at home on
-/// rather than by a row number. What does travel unchanged is the pair that is
-/// cluster-wide by construction — the **Rank**, which carries the device that
+/// match. What does travel unchanged is what is cluster-wide by construction —
+/// each Pairing's Profile, named by its uuid, the same on every device — and the
+/// pair beside it: the **Rank**, which carries the device that
 /// issued it, and the **birth key**, which says where the work was born.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationAcross {
@@ -290,8 +290,8 @@ pub struct PairingAcross {
 /// An Agent Profile named the way a cluster names one: by its **uuid**, which
 /// is the same on every device that holds it (ADR-0028).
 ///
-/// The receiving device finds the row it holds under that uuid, which is its
-/// own where the account is at home there and its mirror where it is not.
+/// The receiving device finds the record it holds under that uuid, whether the
+/// Profile is bound there or runs from a copy there.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProfileAcross {
     pub id: String,

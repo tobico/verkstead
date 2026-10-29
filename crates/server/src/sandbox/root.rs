@@ -877,7 +877,7 @@ impl Root {
         }
     }
 
-    /// The **parts of the memory store** a session away from home syncs, each
+    /// The **parts of the memory store** a session that runs from a copy syncs, each
     /// said from the account's directory as *this* machine names it — see
     /// [`Part`] and [`crate::mirroring::memory`].
     ///
@@ -903,7 +903,7 @@ impl Root {
     ///   named them with, which is what its store files a session's directory
     ///   under. Not `session_search.sqlite` at the top of it, which is the
     ///   human's index of the whole store: a copy of a mirror's partial one
-    ///   written over it at home would be a search that had lost the rest.
+    ///   written over it on the bound device would be a search that had lost the rest.
     /// - **OpenCode** — the one database Verkstead pins every session it runs
     ///   onto, and the two siblings SQLite keeps beside it: the store runs in
     ///   write-ahead-log mode, and a database carried without its `-wal` and
@@ -924,9 +924,9 @@ impl Root {
     ///   in front of a big one.
     ///
     /// **Nothing at all where the memory switch is off**, which is the reading
-    /// [`Root::joined_store`] makes of the same switch: a session away from home
-    /// starts on an empty store exactly as it does at home, and neither
-    /// direction carries anything.
+    /// [`Root::joined_store`] makes of the same switch: a session that runs from a
+    /// copy starts on an empty store exactly as it does where the Profile is bound,
+    /// and neither direction carries anything.
     ///
     /// `worktree` is the name this Conversation's Worktree directory carries —
     /// the stem both machines name theirs with — and `sessions` is every session
@@ -1016,9 +1016,9 @@ pub(crate) struct Part {
 /// Which files under a part of a store this Conversation's sync carries.
 ///
 /// **A rule rather than a list**, because the two ends apply it to two different
-/// stores: the home device picks out what this Conversation left there and the
-/// device away from home picks out what it is about to send back, and each of
-/// them is looking at files the other has never seen.
+/// stores: the device the Profile is bound on picks out what this Conversation
+/// left there and the device running from a copy picks out what it is about to
+/// send back, and each of them is looking at files the other has never seen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Whose {
     /// Every file under it. What a part keyed by this Repo or this Worktree
@@ -1061,10 +1061,11 @@ pub(crate) enum Whose {
 ///
 /// **The path rather than the file**, and asked of the account rather than of a
 /// root: the login is the one file of an account a session genuinely changes, so
-/// it is named in three places that are not a launch — the mirror a session away
-/// from home is given, the write-back that puts what the session left into the
-/// account at home, and the reading that says an account has no login to lend at
-/// all. See [`crate::mirroring::account`] and [`login_inside`].
+/// it is named in three places that are not a launch — the mirror a session that
+/// runs from a copy is given, the write-back that puts what the session left
+/// into the account on the device it was fetched from, and the reading that says
+/// an account has no login to lend at all. See [`crate::mirroring::account`] and
+/// [`login_inside`].
 ///
 /// [`Root::login_of`] is the same path where a session is given the file as one of
 /// its own, which is every root but an OpenCode one sharing its memory — there
@@ -1083,10 +1084,10 @@ pub(crate) fn login_at(account: &crate::store::Account) -> PathBuf {
 /// And where a **mirror** of an account of `agent_type` keeps its login, said from
 /// the home the mirror is — which is the first path of [`mirrored_of`].
 ///
-/// What both ends of the write-back hold to: the device away from home reads the
-/// login off its mirror at this path, and the home device writes what arrives into
-/// its own account's own — see [`login_at`], which is the same file said of a real
-/// account.
+/// What both ends of the write-back hold to: the device running from a copy reads
+/// the login off its mirror at this path, and the device it was fetched from
+/// writes what arrives into its own account's own — see [`login_at`], which is the
+/// same file said of a real account.
 pub(crate) fn login_inside(agent_type: crate::store::AgentType) -> PathBuf {
     login_at(&super::kept_in(agent_type, Path::new("")))
 }
@@ -1230,8 +1231,8 @@ pub(crate) fn mirrored(account: &crate::store::Account) -> Vec<(PathBuf, Option<
 /// human's own, and the same leak plugins would be — and the entries come out
 /// because they are every repository the human has run claude in. The trust a
 /// session needs is seeded into the root's copy afterwards, against the paths on
-/// the machine the session runs on, so nothing about the home device's
-/// directories is of any use to it.
+/// the machine the session runs on, so nothing about the directories of the
+/// device it is bound on is of any use to it.
 ///
 /// An account whose file is not there, or does not read as a JSON object, is a
 /// mirror holding an empty one — which is what a root built from it would be
@@ -3434,8 +3435,8 @@ mod tests {
     }
 
     /// And the login is the one path both ends of the write-back hold to: the
-    /// device away from home reads what its session left off the mirror there, and
-    /// the home device writes it into the account's own file.
+    /// device running from a copy reads what its session left off the mirror there,
+    /// and the device it was fetched from writes it into the account's own file.
     #[test]
     fn a_mirrors_login_is_that_accounts_login_under_the_mirror() {
         let under = Path::new("/var/lib/verkstead/accounts/7");

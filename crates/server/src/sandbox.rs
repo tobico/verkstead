@@ -348,8 +348,8 @@ pub(crate) fn under(directory: &Path, name: &str) -> PathBuf {
 const BIN: &str = "bin";
 const VERKSTEAD: &str = "verkstead";
 
-/// And where the mirrored accounts of members' Profiles are kept, one directory
-/// per Profile under it — see [`Homes::account_mirror`].
+/// And where the mirrored accounts of Profiles not bound here are kept, one
+/// directory per Profile under it — see [`Homes::account_mirror`].
 const ACCOUNTS: &str = "accounts";
 
 /// And the verb the server runs its own image with before it equips anybody
@@ -3137,11 +3137,11 @@ impl Homes {
     /// **Per Profile rather than per session**, because that is what it is a
     /// mirror *of*: two Conversations grilling under one member's account share
     /// the one copy of it, exactly as two sessions under a local Profile share
-    /// the one account. It is written fresh from the home device before each
-    /// launch — see [`crate::mirroring::account`].
+    /// the one account. It is written fresh from a device the Profile is bound
+    /// on before each launch — see [`crate::mirroring::account`].
     ///
-    /// Named by the Profile's **uuid**, which is the one a mirror is held
-    /// under across every refresh of the row.
+    /// Named by the Profile's **uuid**, which is the one it has on every
+    /// device.
     pub(crate) fn account_mirror(&self, profile_id: &str) -> PathBuf {
         accounts(&self.data).join(profile_id)
     }
@@ -7772,9 +7772,9 @@ mod tests {
         let data = Path::new(r"C:\ProgramData\Verkstead");
         let homes = Homes::on(Platform::Windows, PathBuf::from(r"C:\Users\someone"), data);
 
-        // Whatever the home device's own Profile names, which is a path on that
-        // machine and may be any drive at all — the thing a mirror exists so that
-        // this device never has to join in.
+        // Whatever the Profile's binding on the device it is bound on names, which is a
+        // path on that machine and may be any drive at all — the thing a mirror exists
+        // so that this device never has to join in.
         for elsewhere in [store::AgentType::Claude, store::AgentType::Codex] {
             let at_home = kept_in(elsewhere, Path::new(r"Z:\accounts\someone"));
 
@@ -7786,7 +7786,7 @@ mod tests {
                     true
                 )
                 .is_some(),
-                "the account as the home device keeps it is on another drive",
+                "the account as the device it is bound on keeps it is on another drive",
             );
 
             let mirrored = kept_in(

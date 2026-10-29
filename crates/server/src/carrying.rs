@@ -62,8 +62,9 @@ pub(crate) enum Instead {
     NoResumeLine(AgentType),
 
     /// The Profile's memory switch is off, so nothing of the harness's store
-    /// travelled with the work: a session away from home starts new exactly as
-    /// it does at home, and this is that rule reaching the arrival.
+    /// travelled with the work: a session that runs from a copy starts new exactly
+    /// as it does where the Profile is bound, and this is that rule reaching the
+    /// arrival.
     MemoryOff(AgentType),
 
     /// No record where the memory sync should have left one — the part came over

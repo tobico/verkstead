@@ -42,16 +42,17 @@
 //! stopped as Signed out — see [`crate::signouts::logged_in`].
 //!
 //! **And a press is checked before it starts anything.** A press that would
-//! start a session under a Claude Profile at home here asks `claude auth
+//! start a session under a Claude Profile bound here asks `claude auth
 //! status` of its account first — see [`asked`]. An account with no login is
 //! remembered as signed out, so the Profile reads as broken on its row and the
 //! press is refused naming it, before a session comes up with nothing to run
 //! on. A login from the card clears it; the press is then the human's to make
 //! again, there being no run to resume.
 //!
-//! Claude only, and only a Profile at home on this device: a mirror's account
-//! is a copy, and a login written into a copy is one the next refresh from its
-//! home device writes over.
+//! Claude only, and only a Profile bound on this device: one not bound here runs
+//! from a copy of its account fetched before every launch, and a login written
+//! into the copy is one the next fetch writes over — its login is made on a
+//! device it is bound on.
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -828,7 +829,7 @@ fn address_in(line: &str) -> Option<String> {
     url.starts_with("https://").then(|| url.to_owned())
 }
 
-/// Ask each of `profiles` that is a Claude account at home here whether it is
+/// Ask each of `profiles` that is a Claude account bound here whether it is
 /// logged in, before a press starts a session under it, and remember the
 /// answer for its row — see the module note.
 ///
