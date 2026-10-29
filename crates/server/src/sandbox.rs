@@ -595,8 +595,9 @@ fn separator(platform: Platform) -> &'static str {
 /// with the rest of the profile rather than here. See [`temporary_inside`].
 ///
 /// **And on Linux a handful of entries under `/etc` are bound wherever they
-/// lead** — the [`FOLLOWED`] ones: the resolver, the certificate store, and the
-/// files a user's name is read out of. `/etc` is on the floor, but what is in it
+/// lead** — the [`FOLLOWED`] ones: the resolver, the certificate store, the
+/// files a user's name is read out of, the hosts file and the name-service
+/// switch, and the time zone. `/etc` is on the floor, but what is in it
 /// is often a link out of it, and a link to somewhere the floor does not reach
 /// is a name that dangles inside. WSL's resolver points at a file it writes
 /// under `/mnt/wsl`, and systemd-resolved's into `/run`: a session behind either
@@ -606,8 +607,9 @@ fn separator(platform: Platform) -> &'static str {
 /// that is a tmpfs of links into `/.host-etc`, where the real one is: a session
 /// handed that `/etc` and nothing under `/.host-etc` has no certificates, so
 /// every `git push` and `curl` fails *unable to get local issuer certificate*,
-/// and no name for its own uid, so `whoami` fails and a prompt says *I have no
-/// name!*.
+/// no name for its own uid, so `whoami` fails and a prompt says *I have no
+/// name!*; and a network with no `localhost` on it, so a server listening on
+/// `localhost` and a client dialling it both fail *Name or service not known*.
 ///
 /// Each is followed link by link rather than to where it lands, and every hop
 /// off the floor is bound read-only at its own path — see [`off_the_floor_hops`],
@@ -646,7 +648,7 @@ pub(crate) fn on_the_machine(platform: Platform, chdir: PathBuf) -> Surface {
 /// follows the links on the path it is given and nothing beside it: under an
 /// FHS env `/etc/ssl` is a real directory and its `certs` is the link. One that
 /// is not on this machine is skipped, as a missing system directory is. Adding
-/// another — `/etc/hosts`, `/etc/localtime` — is a line here.
+/// another is a line here.
 const FOLLOWED: &[&str] = &[
     // Where a program looks for the name servers.
     "/etc/resolv.conf",
@@ -666,6 +668,12 @@ const FOLLOWED: &[&str] = &[
     // Where a uid's name is, and a gid's.
     "/etc/passwd",
     "/etc/group",
+    // Where `localhost` and the machine's own names are.
+    "/etc/hosts",
+    // Which sources a name is looked up in, and in what order.
+    "/etc/nsswitch.conf",
+    // The device's time zone.
+    "/etc/localtime",
 ];
 
 /// `real`, where it is somewhere none of `floor` reaches — a hop that
@@ -5791,6 +5799,66 @@ mod tests {
             ),
             [host.join("ssl/certs"), host.join("static")]
         );
+    }
+
+    /// An FHS env's hosts file and name-service switch: one link each into
+    /// `/.host-etc`, and both bound.
+    #[cfg(unix)]
+    #[test]
+    fn the_hosts_file_and_the_name_service_switch_are_bound() {
+        let (_dir, root, floor) = machine();
+        let etc = Path::new(&floor).join("etc");
+        let host = root.join("host-etc");
+
+        std::fs::create_dir_all(&host).unwrap();
+        std::fs::write(host.join("hosts"), "127.0.0.1 localhost\n").unwrap();
+        std::fs::write(host.join("nsswitch.conf"), "hosts: files dns\n").unwrap();
+        link(host.join("hosts"), etc.join("hosts"));
+        link(host.join("nsswitch.conf"), etc.join("nsswitch.conf"));
+
+        assert_eq!(
+            hops(&[etc.join("hosts"), etc.join("nsswitch.conf")], &floor),
+            [host.join("hosts"), host.join("nsswitch.conf")]
+        );
+    }
+
+    /// NixOS's time zone under an FHS env: `localtime` links into
+    /// `/.host-etc`, whose copy names a zone under `/etc/zoneinfo`, which is
+    /// itself a link into `/.host-etc` and from there into a store on the
+    /// floor. Both hops off the floor are bound, once each and in that order.
+    #[cfg(unix)]
+    #[test]
+    fn the_time_zone_is_followed_through_both_hops() {
+        let (_dir, root, floor) = machine();
+        let etc = Path::new(&floor).join("etc");
+        let host = root.join("host-etc");
+        let zoneinfo = Path::new(&floor).join("store/zoneinfo");
+
+        std::fs::create_dir_all(&host).unwrap();
+        std::fs::create_dir_all(zoneinfo.join("Australia")).unwrap();
+        std::fs::write(zoneinfo.join("Australia/Melbourne"), "TZif\n").unwrap();
+
+        link(host.join("localtime"), etc.join("localtime"));
+        link(
+            etc.join("zoneinfo/Australia/Melbourne"),
+            host.join("localtime"),
+        );
+        link(host.join("zoneinfo"), etc.join("zoneinfo"));
+        link(&zoneinfo, host.join("zoneinfo"));
+
+        assert_eq!(
+            hops(&[etc.join("localtime")], &floor),
+            [host.join("localtime"), host.join("zoneinfo")]
+        );
+    }
+
+    /// The entries an FHS env leaves dangling inside are on the list, so it
+    /// cannot lose one without a test saying so.
+    #[test]
+    fn the_hosts_file_the_switch_and_the_time_zone_are_followed() {
+        for entry in ["/etc/hosts", "/etc/nsswitch.conf", "/etc/localtime"] {
+            assert!(FOLLOWED.contains(&entry), "{entry}");
+        }
     }
 
     /// Today's resolver on WSL: one link, to a file off the floor.
