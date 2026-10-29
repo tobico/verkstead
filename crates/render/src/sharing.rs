@@ -772,6 +772,7 @@ mod tests {
             rows: Vec::new(),
             standing: Standing::LockedUnanswered("2026-08-29T11:00:00Z".to_owned()),
             added: Vec::new(),
+            carried_on: false,
         })
     }
 

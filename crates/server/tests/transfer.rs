@@ -4752,6 +4752,7 @@ async fn a_pairing_on_another_harness_than_the_record_says_so_where_the_work_arr
         &store::Continued {
             session_id: running.clone(),
             agent_type: store::AgentType::Grok,
+            widened_by: None,
         },
     )
     .await

@@ -37,6 +37,7 @@ function row(id: string): QuestionSetEvent {
     rows: [],
     standing: { Waiting: "waiting" },
     added: [],
+    carried_on: false,
   };
 }
 

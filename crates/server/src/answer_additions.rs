@@ -14,6 +14,10 @@
 //! `verkstead_store`'s `set_additions::apply` — once [`undeclared`] and
 //! [`readied`] have asked every question the store cannot, and [`submit`] has
 //! made the companions' checkouts.
+//!
+//! **And where the session that asked is waiting on the answer, it is carried
+//! on in the wider sandbox**: ended before the Response is stored, and resumed
+//! by its harness with a note naming the Set — see [`submit`].
 
 use std::collections::HashMap;
 
@@ -25,6 +29,7 @@ use verkstead_render::{
 use verkstead_schema::Response;
 
 use crate::answer_files::{Fixed, Standing, asks, standing};
+use crate::drivers::Driving;
 use crate::steering::{Additions, Alongside, Upgrades};
 use crate::{AppState, store};
 
@@ -369,19 +374,39 @@ pub(crate) enum Answering {
 /// ones replace. A Response the store refuses takes the new checkouts back
 /// with it.
 ///
-/// Nothing running is ended: a session keeps the binds it started with, and a
-/// companion reaches the next launch, as one a steer adds does. The detached
-/// directory an opened-up companion replaces goes from under a running session
-/// as the Steer's make removes it — see [`crate::steering`].
+/// **And where a session is waiting on this very Set and what it adds changes
+/// the sandbox, that session is carried on in a wider one** (ADR-0028) — see
+/// [`widening`], which is who and when. The order is the Steer's: the Response
+/// is asked whether it answers the Set before anything is ended, the checkouts
+/// are made while the session still runs, and then the session is ended where
+/// it stands, *before* the Response is stored, so the wait it is idling in
+/// never prints the Answers. What is launched after is the harness's own
+/// resume where it can be, primed to read them once — see [`carry_on`].
+///
+/// Everywhere else nothing running is ended: a session keeps the binds it
+/// started with, and a companion reaches the next launch, as one a steer adds
+/// does. The detached directory an opened-up companion replaces goes from
+/// under a running session as the Steer's make removes it — see
+/// [`crate::steering`].
 pub(crate) async fn submit(
     state: &AppState,
     set_id: i64,
     alongside: Alongside,
     response: &Response,
 ) -> Result<Answering> {
+    let widening = widening(state, set_id, response).await?;
+
+    // The last question before anything is ended: a Response that leaves a
+    // Question unanswered is refused with the session still waiting.
+    if widening.is_some()
+        && let Some(refused) = store::unresolved(&state.pool, set_id, response).await?
+    {
+        return Ok(Answering::Stored(refused));
+    }
+
     // From the making to the record naming it, as a steer holds it: a directory
     // made and not yet recorded is one the orphan sweep would read as nobody's.
-    let _making = state.checkouts.lock().await;
+    let making = state.checkouts.lock().await;
 
     let (alongside, checkouts) = match alongside.check_out().await? {
         Ok(made) => made,
@@ -391,28 +416,191 @@ pub(crate) async fn submit(
         Err(other) => anyhow::bail!("checking out an Answer's companions refused with {other:?}"),
     };
 
-    let submission = match store::submit_response_with_checkouts(
+    let driving = match widening {
+        Some(conversation_id) => Some((
+            conversation_id,
+            ending(state, conversation_id, set_id).await,
+        )),
+        None => None,
+    };
+
+    let stored = store::submit_response_with_checkouts(
         &state.pool,
         &state.settlements,
         set_id,
         response,
         &checkouts,
     )
-    .await
-    {
+    .await;
+
+    let submission = match stored {
         Ok(submission) => submission,
         Err(error) => {
             alongside.unmake().await?;
+            drop(making);
+            carry_on(state, driving, set_id);
             return Err(error);
         }
     };
 
     match submission {
-        store::Submission::Accepted(_) => alongside.retire().await?,
+        store::Submission::Accepted(_) => {
+            alongside.retire().await?;
+
+            if driving.is_some() {
+                store::carried_on(&state.pool, set_id).await?;
+            }
+        }
         _ => alongside.unmake().await?,
     }
 
+    drop(making);
+
+    // Whatever the store said: the session has been ended, and the one
+    // waiting on it is owed its carrying-on either way.
+    carry_on(state, driving, set_id);
+
     Ok(Answering::Stored(submission))
+}
+
+/// The Conversation whose session is waiting on Set `set_id` and is to be
+/// carried on in a wider sandbox when `response` is stored, or `None` where
+/// answering it ends nothing (ADR-0028, *Only what changes the sandbox
+/// restarts the agent*, *Only the session waiting on that Set*).
+///
+/// **What changes the sandbox**: a pending Companion, a Companion opened up, or
+/// an MCP server. A device tick is checked live by `verkstead transfer`, and a
+/// file already reaches the running session, so a Set adding only those ends
+/// nothing.
+///
+/// **And a session waiting on that very Set**: one asked the ordinary way —
+/// blocking or store-and-nudge, never a Deferred Ask, which nobody idles on —
+/// still open, with a session running that was already running when the Set
+/// was asked. A relaunch locks the Sets it orphans, so an open Set and a
+/// session older than it is that session's own question; a Set whose asker has
+/// gone with nothing started since has no session running at all.
+///
+/// **And a state whose relaunch is that same session again**: a grilling, a run,
+/// a follow-up or an investigation, each of which Resume starts again by
+/// launching a session. A wrap-up's watchers send sessions for reasons of their
+/// own, so a Set asked in one is left to the next launch. So is a Response that
+/// picks a direction on a proposal — the work moves on from there in a session
+/// of its own — and a Conversation that is stopped, which no launch passes.
+async fn widening(state: &AppState, set_id: i64, response: &Response) -> Result<Option<i64>> {
+    if response.direction.is_some() || store::settlement(&state.pool, set_id).await?.is_some() {
+        return Ok(None);
+    }
+
+    let restarts = store::set_additions(&state.pool, set_id)
+        .await?
+        .iter()
+        .any(|added| {
+            added.state == store::AdditionState::Pending
+                && !matches!(added.addition, store::Addition::Device { .. })
+        });
+
+    if !restarts || store::asked_as(&state.pool, set_id).await? == store::Ask::Deferred {
+        return Ok(None);
+    }
+
+    let Some((conversation_id, asked_at)) = store::opened_at(&state.pool, set_id).await? else {
+        return Ok(None);
+    };
+
+    let Some(session) = state.sessions.following(conversation_id) else {
+        return Ok(None);
+    };
+
+    if session.event_id > asked_at {
+        return Ok(None);
+    }
+
+    if store::stopped(&state.pool, conversation_id)
+        .await?
+        .is_some()
+    {
+        return Ok(None);
+    }
+
+    Ok(match store::state(&state.pool, conversation_id).await? {
+        Some(
+            store::Lifecycle::Grilling
+            | store::Lifecycle::Implementing
+            | store::Lifecycle::FollowUp
+            | store::Lifecycle::Investigating,
+        ) => Some(conversation_id),
+        _ => None,
+    })
+}
+
+/// End the session waiting on Set `set_id` where it stands, having written down
+/// that the next launch carries its conversation on.
+///
+/// The registration is taken first and handed to the launch, so there is no
+/// moment where the Conversation reads as undriven and a stall sweep stops it.
+/// Ended by Verkstead, so whatever was following the session reads the ending
+/// as deliberate — see [`crate::sessions::Ended::on_purpose`] — exactly as a
+/// steer's Interrupt is read.
+async fn ending(state: &AppState, conversation_id: i64, set_id: i64) -> Driving {
+    let driving = state.drivers.driving(conversation_id);
+
+    // The newest session is the one waiting, so it is the one to resume — the
+    // arrival's own reading, with the Set beside it to say why.
+    let written = match store::the_last_session(&state.pool, conversation_id).await {
+        Ok(Some(continued)) => {
+            let continued = store::Continued {
+                widened_by: Some(set_id),
+                ..continued
+            };
+
+            match store::continue_on_arrival(&state.pool, conversation_id, &continued).await {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id, "recording the conversation an answer is carrying on failed, so the session started for it will be re-primed instead");
+                    false
+                }
+            }
+        }
+        Ok(None) => false,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the session an answer is carrying on failed, so the session started for it will be re-primed instead");
+            false
+        }
+    };
+
+    if !written {
+        crate::carrying::instead(
+            &state.pool,
+            &state.nudges,
+            conversation_id,
+            crate::carrying::Occasion::Widened(set_id),
+            &crate::carrying::Instead::NoSession,
+        )
+        .await;
+    }
+
+    state.sessions.end(conversation_id).await;
+
+    tracing::info!(
+        conversation_id,
+        set_id,
+        "answering a Question Set added to the sandbox, so the session waiting on it was ended \
+         to be carried on in a wider one",
+    );
+
+    driving
+}
+
+/// Launch what carries on the session [`ending`] ended, where one was.
+fn carry_on(state: &AppState, driving: Option<(i64, Driving)>, set_id: i64) {
+    if let Some((conversation_id, driving)) = driving {
+        tokio::spawn(crate::resume::widened(
+            state.clone(),
+            conversation_id,
+            set_id,
+            driving,
+        ));
+    }
 }
 
 /// Put what came with the Answers on the Response as the agent reads it: each
@@ -441,9 +629,12 @@ pub(crate) async fn onto(
     let naming = Naming::read(state).await?;
     let agent = store::newest_agent(&state.pool, conversation_id).await?;
     let companions = store::companions(&state.pool, conversation_id).await?;
+    let carried = store::carried_sets(&state.pool, conversation_id)
+        .await?
+        .contains(&set_id);
 
     for added in applied {
-        let said = said(&added.addition, &naming, agent, &companions);
+        let said = said(&added.addition, &naming, agent, &companions, carried);
 
         match added.label.as_deref() {
             None => response.added.push(said),
@@ -471,12 +662,19 @@ pub(crate) async fn onto(
 /// companion is named with the directory it is checked out in and its mode, as
 /// the prompt's own listing names one — see [`crate::skills::alongside`] — and
 /// reaches the next launch for the same reason a server does.
+///
+/// **Unless the answer carried the session on** — `carried` — in which case the
+/// session reading this is the one launched with them, and says so.
 fn said(
     addition: &store::Addition,
     naming: &Naming,
     agent: Option<store::AgentType>,
     companions: &[store::Companion],
+    carried: bool,
 ) -> String {
+    const CARRIED: &str =
+        "Verkstead carried this conversation on in a session started with it, which is this one.";
+
     match addition {
         store::Addition::Server { name } => {
             let tools = agent.map_or_else(String::new, |agent| {
@@ -486,10 +684,15 @@ fn said(
                 )
             });
 
-            format!(
-                "The MCP server `{name}`{tools}. It is attached to this Conversation from the \
-                 next session launched; this one was started without it."
-            )
+            let reach = match carried {
+                true => CARRIED,
+                false => {
+                    "It is attached to this Conversation from the next session launched; this \
+                     one was started without it."
+                }
+            };
+
+            format!("The MCP server `{name}`{tools}. {reach}")
         }
         store::Addition::Device { device } => {
             let name = naming.device(device);
@@ -516,10 +719,16 @@ fn said(
             };
 
             format!(
-                "The repo `{}`{}, {reach}. It is bound from the next session launched; this \
-                 one was started without it.",
+                "The repo `{}`{}, {reach}. {}",
                 called(naming, *repo_id),
                 checked_out(companions, *repo_id),
+                match carried {
+                    true => CARRIED,
+                    false => {
+                        "It is bound from the next session launched; this one was started \
+                         without it."
+                    }
+                },
             )
         }
         store::Addition::OpenedUp {
@@ -530,13 +739,86 @@ fn said(
                 .map_or_else(String::new, |branch| format!(", on branch `{branch}`"));
 
             format!(
-                "The repo `{}`, opened up to read-write{on}{}. It is bound so from the next \
-                 session launched; this one was started with it read-only.",
+                "The repo `{}`, opened up to read-write{on}{}. {}",
                 called(naming, *repo_id),
                 checked_out(companions, *repo_id),
+                match carried {
+                    true => CARRIED,
+                    false => {
+                        "It is bound so from the next session launched; this one was started \
+                         with it read-only."
+                    }
+                },
             )
         }
     }
+}
+
+/// What the note a widened session is resumed with names: the Set's title,
+/// where its body can be read, and each thing its answer added, in a few words
+/// — the Answers themselves say the rest under `added`. See
+/// [`crate::skills::widened`].
+///
+/// Read with the pool alone, being asked from inside a launch. A read that
+/// fails costs the note a line rather than the resume: said in the log.
+pub(crate) async fn widened_with(
+    pool: &sqlx::SqlitePool,
+    set_id: i64,
+) -> (Option<String>, Vec<String>) {
+    let title = match store::load_set(pool, set_id).await {
+        Ok(Some(stored)) => stored
+            .set
+            .readable(set_id)
+            .ok()
+            .map(|set| set.title.clone()),
+        Ok(None) => None,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id, "reading the title of the Set a widened session is told about failed");
+            None
+        }
+    };
+
+    let (added, repos) = match tokio::try_join!(
+        store::set_additions(pool, set_id),
+        store::registered_repos(pool),
+    ) {
+        Ok(read) => read,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id, "reading what a Set added, for the session it widened, failed");
+            return (title, Vec::new());
+        }
+    };
+
+    let repo = |id: i64| {
+        repos
+            .iter()
+            .find(|repo| repo.id == id)
+            .map_or_else(|| format!("registered as {id}"), |repo| repo.name.clone())
+    };
+
+    let added = added
+        .into_iter()
+        .filter(|added| added.state == store::AdditionState::Applied)
+        .map(|added| match added.addition {
+            store::Addition::Server { name } => format!("the MCP server `{name}`"),
+            store::Addition::Companion { repo_id, mode, .. } => format!(
+                "the repo `{}`, {}",
+                repo(repo_id),
+                match mode {
+                    store::CompanionMode::ReadOnly => "read-only",
+                    store::CompanionMode::ReadWrite => "read-write",
+                },
+            ),
+            store::Addition::OpenedUp { repo_id, .. } => {
+                format!("the repo `{}`, opened up to read-write", repo(repo_id))
+            }
+            store::Addition::Device { device } => {
+                format!("leave to move the work to the device `{device}`")
+            }
+        })
+        .collect();
+
+    (title, added)
 }
 
 /// A Repo by its registered name, or its id where it has none now.

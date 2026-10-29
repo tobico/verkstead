@@ -2379,7 +2379,7 @@ function QuestionSet(props: {
 
       {/* And what answering it put on the work, said the way a steer is said:
           a line, in the steer's shape, naming each thing. */}
-      <Show when={addedWith(props.asked.added)}>
+      <Show when={addedWith(props.asked.added, props.asked.carried_on)}>
         {(said) => <span class={styles.added}>{said()}</span>}
       </Show>
     </CardButton>
@@ -2388,8 +2388,13 @@ function QuestionSet(props: {
 
 /// What a question set's answer added to the work, in a sentence per kind: the
 /// MCP servers, the repos and the devices the agent may move it to (ADR-0028).
-/// `null` where it added nothing, which is nearly every set.
-export function addedWith(added: Added[]): string | null {
+/// `null` where it added nothing, which is nearly every set. And where the
+/// session waiting on it was ended to be carried on with them, a last sentence
+/// saying so.
+export function addedWith(
+  added: Added[],
+  carriedOn: boolean = false,
+): string | null {
   const servers = added.flatMap((one) =>
     "Server" in one ? [one.Server.name] : [],
   );
@@ -2423,6 +2428,9 @@ export function addedWith(added: Added[]): string | null {
     devices.length === 0
       ? null
       : `You let the agent move this to ${listed(devices)}.`,
+    carriedOn
+      ? `The agent waiting on it carried on in a new session with ${added.length === 1 ? "it" : "them"}.`
+      : null,
   ].filter((line) => line !== null);
 
   return said.length === 0 ? null : said.join(" ");

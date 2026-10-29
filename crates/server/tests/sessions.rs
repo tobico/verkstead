@@ -16074,11 +16074,14 @@ async fn a_companion_an_answer_opened_up_is_one_the_next_session_writes_in() {
 
     assert_eq!(landed.repo, Some("askance".to_owned()));
 
+    // The last session, which is the steered one: the grilling that was
+    // waiting on the Set was carried on in between, the Answer having widened
+    // its sandbox.
     let event = fixture
         .until(|view| {
             outputs(view)
-                .get(1)
-                .filter(|output| output.lines > 0)
+                .last()
+                .filter(|output| output.lines > 0 && outputs(view).len() > 2)
                 .map(|output| output.id)
         })
         .await;
@@ -16092,6 +16095,295 @@ async fn a_companion_an_answer_opened_up_is_one_the_next_session_writes_in() {
         said.contains("read-write"),
         "and how far in it may reach: {said:?}"
     );
+}
+
+/// A grilling that writes the log claude keeps of its conversation and waits,
+/// and that says, when it is resumed, what it was resumed with: the shape of a
+/// session [`an_answer_that_adds_to_the_sandbox_carries_the_waiting_session_on`]
+/// can tell apart from a fresh one.
+///
+/// `$3` is where the line says `--session-id` or `--resume`, the model and the
+/// prompt coming first.
+const WAITS_AND_CARRIES_ON: &str = r#"
+entry=$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' '-')
+mkdir -p "$HOME/.claude/projects/$entry"
+case "$3" in
+--resume)
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the answers."}]}}' >> "$HOME/.claude/projects/$entry/$4.jsonl"
+    printf 'carried on\r\n'
+    printf 'prompt=%s\r\n' "$2"
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Per key or per address?"}]}}' > "$HOME/.claude/projects/$entry/$4.jsonl"
+    printf 'the grilling is running\r\n'
+    sleep 300
+    ;;
+esac
+"#;
+
+/// **An answer that adds to the sandbox carries the session waiting on it on**
+/// (ADR-0028): the grilling idling on the Set is ended before the Response is
+/// stored, and the harness is told to resume it with a note naming the Set and
+/// the line that fetches its Answers. The Timeline says the harness carried it
+/// on, and the line under the Set says the agent did.
+#[tokio::test]
+async fn an_answer_that_adds_to_the_sandbox_carries_the_waiting_session_on() {
+    let fixture = grilling_alongside(WAITS_AND_CARRIES_ON, "askance").await;
+
+    let first = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let repo_id = fixture.view().await.companions[0].repo.id;
+    let set = fixture.ask(ASKED_ALREADY).await;
+
+    let made: verkstead_render::AdditionMade = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/additions"),
+        &serde_json::json!({
+            "label": "Q1",
+            "pick": { "OpenedUp": { "repo_id": repo_id, "base_ref": null, "branch": null } },
+        }),
+    )
+    .await;
+    assert!(
+        matches!(made, verkstead_render::AdditionMade::Added { .. }),
+        "{made:?}"
+    );
+
+    let answered: Submitted = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({ "answers": [{ "label": "Q1", "selected": 1 }] }),
+    )
+    .await;
+    assert_eq!(answered, Submitted::Accepted);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let view = fixture.view().await;
+    let waiting = outputs(&view)
+        .into_iter()
+        .find(|output| output.id == first)
+        .unwrap();
+    assert!(!waiting.running, "the session that was waiting was ended");
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+    assert!(
+        said.contains("carried on"),
+        "the harness was told to resume it: {said:?}"
+    );
+    assert!(
+        said.contains(&format!("verkstead answers {set}"))
+            && said.contains("How the limiter counts"),
+        "and primed with the Set and the line that reads its Answers: {said:?}",
+    );
+    assert!(
+        said.contains("opened up to read-write"),
+        "naming what was added: {said:?}"
+    );
+
+    let notices = notices(&view);
+    assert!(
+        notices
+            .iter()
+            .any(|notice| notice.contains(&format!("question set {set}"))
+                && notice.contains("carries it on")),
+        "the Timeline says the harness carried it on: {notices:?}",
+    );
+
+    assert!(
+        sets(&view)
+            .iter()
+            .any(|asked| asked.set_id == set && asked.carried_on),
+        "and the line under the Set says so",
+    );
+}
+
+/// **And where the harness cannot resume, Verkstead's own Resume stands**,
+/// re-primed from the record: a session that kept no log has nothing to resume
+/// against, and the Timeline says which it was and why (ADR-0028).
+#[tokio::test]
+async fn an_answer_whose_session_cannot_be_resumed_is_re_primed_and_says_why() {
+    let fixture = grilling_alongside(
+        r#"
+        printf 'flag=%s\r\n' "$3"
+        sleep 300
+        "#,
+        "askance",
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let repo_id = fixture.view().await.companions[0].repo.id;
+    let set = fixture.ask(ASKED_ALREADY).await;
+
+    let _: verkstead_render::AdditionMade = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/additions"),
+        &serde_json::json!({
+            "label": "Q1",
+            "pick": { "OpenedUp": { "repo_id": repo_id, "base_ref": null, "branch": null } },
+        }),
+    )
+    .await;
+
+    let answered: Submitted = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({ "answers": [{ "label": "Q1", "selected": 1 }] }),
+    )
+    .await;
+    assert_eq!(answered, Submitted::Accepted);
+
+    let again = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(again).await;
+    assert!(
+        said.contains("flag=--session-id"),
+        "a session of its own rather than a resume: {said:?}"
+    );
+
+    let notices = notices(&fixture.view().await);
+    assert!(
+        notices
+            .iter()
+            .any(|notice| notice.contains(&format!("question set {set}"))
+                && notice.contains("Verkstead&#39;s own resume")
+                || notice.contains(&format!("question set {set}"))
+                    && notice.contains("Verkstead's own resume")),
+        "the Timeline says why it was not carried on: {notices:?}",
+    );
+}
+
+/// **An answer that adds nothing to the sandbox ends nothing**: the session
+/// waiting on it is still the one running once the Response is stored, and
+/// hears it through the wait it is idling in (ADR-0028).
+#[tokio::test]
+async fn an_answer_adding_nothing_to_the_sandbox_ends_nothing() {
+    let fixture = grilling_alongside(WAITS_AND_CARRIES_ON, "askance").await;
+
+    let first = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(ASKED_ALREADY).await;
+
+    let answered: Submitted = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({ "answers": [{ "label": "Q1", "selected": 1 }] }),
+    )
+    .await;
+    assert_eq!(answered, Submitted::Accepted);
+
+    let view = fixture.view().await;
+    assert_eq!(outputs(&view).len(), 1, "nothing was launched");
+    assert!(
+        outputs(&view)[0].id == first && outputs(&view)[0].running,
+        "and the session waiting on it is still running",
+    );
+}
+
+/// **A Deferred Ask answered with a companion restarts nothing**: nobody is
+/// idling on it, so the addition lands on the record and reaches the next
+/// launch, the deferred ask's own rule (ADR-0028).
+#[tokio::test]
+async fn a_deferred_ask_answered_with_a_companion_restarts_nothing() {
+    let fixture = grilling_alongside(WAITS_AND_CARRIES_ON, "askance").await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let repo_id = fixture.view().await.companions[0].repo.id;
+    let set = fixture.ask_deferred(ASKED_ALREADY).await;
+
+    let made: verkstead_render::AdditionMade = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/additions"),
+        &serde_json::json!({
+            "label": "Q1",
+            "pick": { "OpenedUp": { "repo_id": repo_id, "base_ref": null, "branch": null } },
+        }),
+    )
+    .await;
+    assert!(
+        matches!(made, verkstead_render::AdditionMade::Added { .. }),
+        "{made:?}"
+    );
+
+    let answered: Submitted = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({ "answers": [{ "label": "Q1", "selected": 1 }] }),
+    )
+    .await;
+    assert_eq!(answered, Submitted::Accepted);
+
+    let view = fixture.view().await;
+    assert_eq!(outputs(&view).len(), 1, "nothing was launched");
+    assert!(outputs(&view)[0].running, "and nothing was ended");
+    assert_eq!(
+        view.companions[0].mode,
+        CompanionMode::ReadWrite,
+        "the Answer opened it up all the same",
+    );
+}
+
+/// **A refusal ends nothing**: an answer that leaves a Question unanswered is
+/// refused with the session still waiting, though what it adds would have
+/// carried that session on.
+#[tokio::test]
+async fn an_answer_refused_ends_nothing() {
+    let fixture = grilling_alongside(WAITS_AND_CARRIES_ON, "askance").await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let repo_id = fixture.view().await.companions[0].repo.id;
+    let set = fixture.ask(ASKED_ALREADY).await;
+
+    let _: verkstead_render::AdditionMade = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/additions"),
+        &serde_json::json!({
+            "label": "Q1",
+            "pick": { "OpenedUp": { "repo_id": repo_id, "base_ref": null, "branch": null } },
+        }),
+    )
+    .await;
+
+    let answered: Submitted = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({ "answers": [] }),
+    )
+    .await;
+    assert!(matches!(answered, Submitted::Rejected(_)), "{answered:?}");
+
+    let view = fixture.view().await;
+    assert_eq!(outputs(&view).len(), 1, "nothing was launched");
+    assert!(outputs(&view)[0].running, "and nothing was ended");
 }
 
 /// A Conversation with a read-only companion has one branch being swept, not

@@ -2807,6 +2807,11 @@ pub struct QuestionSetEvent {
     /// takes (ADR-0028). Empty for nearly every Set, and for any that has not
     /// been answered.
     pub added: Vec<Added>,
+
+    /// Whether answering it ended the session waiting on it and carried it on in
+    /// a sandbox with what was added — said at the end of the same line.
+    #[serde(default)]
+    pub carried_on: bool,
 }
 
 /// A Question Set the Timeline cannot draw a table for, because this build
@@ -3281,6 +3286,7 @@ pub fn question_set_event(
     set: &verkstead_schema::QuestionSet,
     standing: Standing,
     added: Vec<Added>,
+    carried_on: bool,
 ) -> TimelineEvent {
     let response = match &standing {
         Standing::Answered(answered) => Some(&answered.response),
@@ -3295,6 +3301,7 @@ pub fn question_set_event(
         rows: asked(set, response),
         standing,
         added,
+        carried_on,
     })
 }
 

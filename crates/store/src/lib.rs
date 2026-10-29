@@ -190,8 +190,8 @@ pub use session_endings::{Ended, end_session, session_ending};
 pub use session_names::{continued_as, found_as, session_id, session_ids};
 pub use session_pairings::{RanUnder, newest_agent};
 pub use set_additions::{
-    AddingToSet, Addition, AdditionState, SetAddition, TakingOff, add_to_set,
-    conversation_additions, set_additions, take_off_set,
+    AddingToSet, Addition, AdditionState, SetAddition, TakingOff, add_to_set, carried_on,
+    carried_sets, conversation_additions, set_additions, take_off_set,
 };
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
 pub use slices::{
@@ -496,30 +496,11 @@ pub async fn submit_response_with_checkouts(
         return Ok(Submission::NoSuchSet);
     };
 
-    // A Response is checked against the Questions it resolves, so a Set this
-    // build cannot read cannot be answered: there is nothing to check it
-    // against. The failure is this Set's own — nothing else on its Timeline is
-    // touched by it — and the workbench offers no way to get here, since it
-    // draws an unreadable Set as a record rather than as a sheet.
-    let set = stored.set.readable(set_id)?;
-
-    // Checked against what the human handed over as well as what they wrote: a
-    // file put on a Question is an Answer to it, and the sheet sends one with a
-    // file and nothing else as answered. The rows are where that is written
-    // down — nothing about a file rides on the Response itself, which is stored
-    // exactly as it was sent.
-    let attached: Vec<String> = attachments::set_attachments(pool, set_id)
-        .await?
-        .into_iter()
-        .filter_map(|attachment| match attachment.origin {
-            Origin::Answer { label, .. } => Some(label),
-            Origin::Brief => None,
-        })
-        .collect();
-
-    if let Err(invalid) = response.validate_attached(set, &attached) {
-        return Ok(Submission::Invalid(invalid));
+    if let Some(refused) = unresolved(pool, set_id, response).await? {
+        return Ok(refused);
     }
+
+    let set = stored.set.readable(set_id)?;
 
     let Some(accepted) = insert_response_with_checkouts(pool, set_id, response, checkouts).await?
     else {
@@ -556,6 +537,50 @@ pub async fn submit_response_with_checkouts(
     settlements.announce(settled_set(pool, set_id).await?);
 
     Ok(Submission::Accepted(Taken { accepted, proposed }))
+}
+
+/// Whether `response` would be refused as no answer to Set `set_id` —
+/// [`Submission::NoSuchSet`] or [`Submission::Invalid`] — asked without storing
+/// anything.
+///
+/// What [`submit_response_with_checkouts`] asks first, said on its own for the
+/// Submit that ends a session before the Response is stored: a Response that
+/// leaves a Question unanswered is refused before anything is ended, rather
+/// than after (ADR-0028, *Every question before anything is ended*).
+pub async fn unresolved(
+    pool: &SqlitePool,
+    set_id: i64,
+    response: &Response,
+) -> Result<Option<Submission>> {
+    let Some(stored) = load_set(pool, set_id).await? else {
+        return Ok(Some(Submission::NoSuchSet));
+    };
+
+    // A Response is checked against the Questions it resolves, so a Set this
+    // build cannot read cannot be answered: there is nothing to check it
+    // against. The failure is this Set's own — nothing else on its Timeline is
+    // touched by it — and the workbench offers no way to get here, since it
+    // draws an unreadable Set as a record rather than as a sheet.
+    let set = stored.set.readable(set_id)?;
+
+    // Checked against what the human handed over as well as what they wrote: a
+    // file put on a Question is an Answer to it, and the sheet sends one with a
+    // file and nothing else as answered. The rows are where that is written
+    // down — nothing about a file rides on the Response itself, which is stored
+    // exactly as it was sent.
+    let attached: Vec<String> = attachments::set_attachments(pool, set_id)
+        .await?
+        .into_iter()
+        .filter_map(|attachment| match attachment.origin {
+            Origin::Answer { label, .. } => Some(label),
+            Origin::Brief => None,
+        })
+        .collect();
+
+    Ok(response
+        .validate_attached(set, &attached)
+        .err()
+        .map(Submission::Invalid))
 }
 
 /// Act on the direction picked on an accepted proposal, for the Conversation the

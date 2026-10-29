@@ -1565,6 +1565,49 @@ pub(crate) fn moved(
     note
 }
 
+/// The note a session is resumed with after the human's answer to a Question Set
+/// it was waiting on added to its sandbox: a repository beside the work, or an
+/// MCP server (ADR-0028, *The carrying-on is the Carried Conversation's, on
+/// this device*).
+///
+/// **The other occasion for the same resume**, and the note says the same three
+/// things [`moved`] does in the order the agent needs them: that it is the
+/// conversation above carried on, what changed, and what to do next — which here
+/// is one thing, reading the Answers it was waiting for. Its wait died with the
+/// session that was ended, before the Response was stored, so nothing has handed
+/// it the Answers yet and the line that fetches them is given whole.
+///
+/// `title` is the Set's own, where its body could be read; `added` is each thing
+/// that came with the Answers, already in words.
+pub(crate) fn widened(set_id: i64, title: Option<&str>, added: &[String]) -> String {
+    let set = match title {
+        Some(title) => format!("Question Set {set_id}, *{title}*"),
+        None => format!("Question Set {set_id}"),
+    };
+
+    let mut note = format!(
+        "The human answered {set}, and the answer added to your sandbox, so Verkstead ended \
+         the session that was waiting on it and started this one with it. Nothing else about \
+         the work has changed — this is the conversation above carried on rather than a new \
+         one.\n"
+    );
+
+    if !added.is_empty() {
+        note.push_str("\nWhat came with the answer, which this session has:\n\n");
+
+        for one in added {
+            note.push_str(&format!("- {one}\n"));
+        }
+    }
+
+    note.push_str(&format!(
+        "\nYour `verkstead ask` was ended with the session before the Answers were stored, so \
+         read them now, once, and carry on from there:\n\n    verkstead answers {set_id}\n"
+    ));
+
+    note
+}
+
 /// One Question Set a resumed session was idling on, said both ways round.
 ///
 /// **The id it has here is what a session does anything with**, and the id it had

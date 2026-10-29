@@ -537,6 +537,7 @@ async fn carries_on(state: &AppState, id: i64) {
             &state.pool,
             &state.nudges,
             id,
+            crate::carrying::Occasion::Arrived,
             &crate::carrying::Instead::NoSession,
         )
         .await;

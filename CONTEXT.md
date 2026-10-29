@@ -791,6 +791,14 @@ read, and a **Deferred Ask** never had anybody waiting on it.
 own session's words, and the resumed session appends to the same file — so the
 following of it starts at the end of what crossed, rather than drawing the whole of
 the conversation on the sending device onto the new Event.
+**And an answer that widens the sandbox is the second occasion** (ADR-0028). Where
+the human's answer to a Question Set adds a **Companion Repo** or an MCP server and
+the session that asked is idling on that very Set, the session is ended before the
+Response is stored and carried on the same way on the device it never left: the row
+names the Set, the note says the sandbox changed and gives the `verkstead answers`
+line, and the Notice names the Set rather than a move. The memory switch is no
+reason here — the Conversation's own home holds the log either way — and the other
+four still are.
 _Avoid_: resumed session (that is ambiguous with Verkstead's **Resume**),
 rehydrate, replay, continuation
 

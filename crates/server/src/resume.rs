@@ -126,6 +126,15 @@ pub(crate) enum Resuming {
     /// checks, it is the same go on another machine.
     Arrived,
 
+    /// Or an answer to a Question Set that added to the sandbox, whose waiting
+    /// session was ended to be carried on in a wider one (ADR-0028).
+    ///
+    /// An ending's landing in what it touches, which is nothing: nobody pressed
+    /// anything, so a stop somebody asked for while the agent waited is still
+    /// theirs and a steer half-written is still theirs to submit. And a restart
+    /// in what it counts: the run goes on rather than having another go.
+    Widened,
+
     /// Or a login on the Profile whose account had signed out (ADR-0022): the
     /// stop it unblocks is taken away and the work started again.
     ///
@@ -527,7 +536,10 @@ async fn recompute(
                 // the five taking a registration of its own as it is spawned,
                 // which is the handover the press makes by holding its across
                 // the spawn.
-                Resuming::Restarted | Resuming::Arrived | Resuming::LoggedIn => {
+                Resuming::Restarted
+                | Resuming::Arrived
+                | Resuming::LoggedIn
+                | Resuming::Widened => {
                     crate::wrapping::watching(
                         state,
                         conversation_id,
@@ -883,6 +895,56 @@ pub(crate) async fn on_arrival(state: &AppState, conversation_id: i64, from: &st
     }
 }
 
+/// Start the work again for a session an answer ended to widen its sandbox
+/// (ADR-0028, *The carrying-on is the Carried Conversation's, on this device*).
+///
+/// **An arrival's recompute on the machine the work never left.** What the
+/// session started is was written down before the old one was ended — see
+/// `answer_additions`, which ended it — so the launch this makes is the harness's
+/// own resume where it can be and Verkstead's own Resume where it cannot, exactly
+/// as for a Conversation that has just landed. The registration is handed in, so
+/// the Conversation never reads as undriven in between.
+///
+/// A refusal stops the Conversation with a Notice, the way an arrival's does:
+/// nobody is holding a request open for it, and the session that was waiting has
+/// gone.
+pub(crate) async fn widened(state: AppState, conversation_id: i64, set_id: i64, driving: Driving) {
+    let Some(conversation) = store::load_conversation(&state.pool, conversation_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        tracing::error!(
+            conversation_id,
+            "a Conversation whose sandbox an answer widened could not be read, so nothing was \
+             started for it",
+        );
+        return;
+    };
+
+    let resumed = match driven(conversation.state) {
+        true => recompute(&state, &conversation, driving, Resuming::Widened).await,
+        false => Ok(Resumed::NotDriven),
+    };
+
+    match resumed {
+        Ok(Resumed::Resumed) => {}
+        Ok(refusal) => {
+            refused(
+                &state,
+                conversation_id,
+                conversation.state,
+                refusal,
+                &format!("when the session was carried on for question set {set_id}"),
+            )
+            .await;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "carrying on a session an answer ended failed");
+        }
+    }
+}
+
 /// Stop a Conversation nothing could be started for, with the refusal as its
 /// Notice.
 ///
@@ -1049,7 +1111,7 @@ async fn starting(
     resuming: Resuming,
 ) -> anyhow::Result<()> {
     match resuming {
-        Resuming::Landed => Ok(()),
+        Resuming::Landed | Resuming::Widened => Ok(()),
         Resuming::Restarted | Resuming::Arrived | Resuming::LoggedIn => {
             clear(state, conversation_id).await
         }

@@ -168,12 +168,31 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              branch          TEXT,
              device          TEXT,
              state           TEXT NOT NULL,
-             added_at        TEXT NOT NULL
+             added_at        TEXT NOT NULL,
+             carried_on      INTEGER NOT NULL DEFAULT 0
          ) STRICT",
     )
     .execute(pool)
     .await
     .context("creating the set_additions table")?;
+
+    // Whether answering the Set carried the session waiting on it on in a
+    // wider sandbox — see [`carried_on`]. Through `ALTER TABLE` as well as in
+    // the declaration, so a database made before there was a restart takes
+    // the same path.
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('set_additions') WHERE name = ?")
+            .bind("carried_on")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the column saying a Set's answer carried a session on")?;
+
+    if there.is_none() {
+        sqlx::query("ALTER TABLE set_additions ADD COLUMN carried_on INTEGER NOT NULL DEFAULT 0")
+            .execute(pool)
+            .await
+            .context("adding the column saying a Set's answer carried a session on")?;
+    }
 
     Ok(())
 }
@@ -542,6 +561,49 @@ pub async fn conversation_additions(
     })?;
 
     rows.into_iter().map(made).collect()
+}
+
+/// Write down that answering `set_id` ended the session waiting on it and
+/// carried it on in a sandbox with the Set's additions in it (ADR-0028, *Only
+/// what changes the sandbox restarts the agent*).
+///
+/// On the Set's own rows rather than a table of its own, because it is a fact
+/// about what came with the answer: the line under the Set's Event says it, and
+/// the agent is told its additions are in the session reading them rather than
+/// waiting for the next one. A Set that added nothing restarts nothing, so
+/// there is always a row to write it on.
+pub async fn carried_on(pool: &SqlitePool, set_id: i64) -> Result<()> {
+    sqlx::query("UPDATE set_additions SET carried_on = 1 WHERE set_id = ?")
+        .bind(set_id)
+        .execute(pool)
+        .await
+        .with_context(|| {
+            format!("recording that answering Question Set {set_id} carried its session on")
+        })?;
+
+    Ok(())
+}
+
+/// Which of one Conversation's Sets carried the session waiting on them on —
+/// see [`carried_on`].
+pub async fn carried_sets(
+    pool: &SqlitePool,
+    conversation_id: i64,
+) -> Result<std::collections::HashSet<i64>> {
+    let rows: Vec<(i64,)> = sqlx::query_as(
+        "SELECT DISTINCT set_id FROM set_additions
+         WHERE conversation_id = ? AND carried_on = 1",
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "reading which Question Sets of Conversation {conversation_id} carried a session on"
+        )
+    })?;
+
+    Ok(rows.into_iter().map(|(set_id,)| set_id).collect())
 }
 
 #[cfg(test)]

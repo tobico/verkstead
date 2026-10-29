@@ -393,6 +393,16 @@ describe("the timeline line under an answered set", () => {
   });
 });
 
+describe("the timeline line under a set whose answer carried the session on", () => {
+  it("says the waiting session was carried on with them", () => {
+    expect(
+      addedWith([{ Server: { name: "docs", declared: true } }], true),
+    ).toBe(
+      "You added the docs MCP server. The agent waiting on it carried on in a new session with it.",
+    );
+  });
+});
+
 describe("the timeline line under a set that added repos", () => {
   it("names each with its mode, and a read-write one with its branch", () => {
     expect(

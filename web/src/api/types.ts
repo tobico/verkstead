@@ -5275,7 +5275,12 @@ standing: Standing,
  * takes (ADR-0028). Empty for nearly every Set, and for any that has not
  * been answered.
  */
-added: Array<Added>, };
+added: Array<Added>, 
+/**
+ * Whether answering it ended the session waiting on it and carried it on in
+ * a sandbox with what was added — said at the end of the same line.
+ */
+carried_on: boolean, };
 
 /**
  * One Question as the page draws it, with its Sub-questions nested one level

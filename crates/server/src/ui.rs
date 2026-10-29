@@ -2668,6 +2668,16 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And which of them carried the session waiting on them on, said at the end
+    // of the same line.
+    let carried = match store::carried_sets(&state.pool, id).await {
+        Ok(carried) => carried,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading which Sets carried a session on failed");
+            std::collections::HashSet::new()
+        }
+    };
+
     let steer_pairings = match crate::profiles::keyed(state, steered(&timeline)).await {
         Ok(pairings) => pairings,
         Err(error) => {
@@ -2819,6 +2829,7 @@ pub(crate) async fn conversation_view(
                                 set,
                                 standing,
                                 set_added.remove(&asked.set_id).unwrap_or_default(),
+                                carried.contains(&asked.set_id),
                             )
                         }
                         // A row of its own rather than an omission: the ask

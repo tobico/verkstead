@@ -120,6 +120,7 @@ async fn the_last_session_is_the_one_to_carry_on_from() {
         Some(Continued {
             session_id: "22222222-2222-4222-8222-222222222222".to_owned(),
             agent_type: AgentType::Claude,
+            widened_by: None,
         }),
         "the newest of them, rather than the first: an older one is a conversation \
          somebody had already left",
@@ -169,6 +170,7 @@ async fn taking_the_conversation_up_spends_it() {
     let continued = Continued {
         session_id: "44444444-4444-4444-8444-444444444444".to_owned(),
         agent_type: AgentType::Claude,
+        widened_by: None,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -208,6 +210,7 @@ async fn asking_whether_there_is_a_conversation_to_carry_on_does_not_spend_it() 
     let continued = Continued {
         session_id: "77777777-7777-4777-8777-777777777777".to_owned(),
         agent_type: AgentType::Claude,
+        widened_by: None,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -225,6 +228,30 @@ async fn asking_whether_there_is_a_conversation_to_carry_on_does_not_spend_it() 
         take_up_the_conversation(&pool, id).await.unwrap(),
         Some(continued),
         "and the launch after the peeking is still the one that takes it up",
+    );
+}
+
+/// **And a row an answer wrote names the Set that widened the sandbox**, which is
+/// what parts the note it primes from a move's (ADR-0028): the agent is told the
+/// sandbox changed and which Set to read the Answers of, rather than that it is
+/// on another machine.
+#[tokio::test]
+async fn a_conversation_carried_on_for_an_answer_names_its_set() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    let continued = Continued {
+        session_id: "88888888-8888-4888-8888-888888888888".to_owned(),
+        agent_type: AgentType::Claude,
+        widened_by: Some(12),
+    };
+
+    continue_on_arrival(&pool, id, &continued).await.unwrap();
+
+    assert_eq!(
+        take_up_the_conversation(&pool, id).await.unwrap(),
+        Some(continued),
+        "the Set comes back with the session it widened",
     );
 }
 
@@ -259,6 +286,7 @@ async fn coming_back_again_carries_on_from_the_newer_session() {
             &Continued {
                 session_id: session.to_owned(),
                 agent_type: AgentType::Claude,
+                widened_by: None,
             },
         )
         .await
