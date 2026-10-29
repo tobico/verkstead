@@ -892,7 +892,8 @@ directory and the Conversation's handoff directory writable, the Agent
 Profile's account as a **Built Root** — never the account whole, and for Claude
 a copy of its `~/.claude.json` beside it — the system (and on Linux, wherever
 a handful of named entries under `/etc` — the resolver, the certificate store,
-`passwd` and `group` — lead through any link off the system paths), the Skills,
+`passwd` and `group`, the hosts file, the name-service switch and the time
+zone — lead through any link off the system paths), the Skills,
 the Conversation's **Attachments** and the Verkstead executable read-only in a
 directory of Verkstead's own, and nothing else of the machine at all — not
 even the checkout the Worktree was made from. The directories a session's own
