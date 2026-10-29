@@ -33,6 +33,43 @@ use sqlx::SqlitePool;
 use crate::nudge::Nudges;
 use crate::store::{self, AgentType};
 
+/// What left a conversation standing to be carried on: the work arriving from
+/// another machine, or an answer that widened the sandbox the agent was waiting
+/// in (ADR-0028, *The carrying-on is the Carried Conversation's, on this
+/// device*).
+///
+/// The machinery is one and the occasion is what the human is told: an arrival
+/// says where the work came from, and an answer says which question set ended
+/// the session to add to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Occasion {
+    /// A Transfer landed the work here.
+    Arrived,
+
+    /// Answering this Set added to the sandbox, so the session waiting on it was
+    /// ended to be carried on in a wider one.
+    Widened(i64),
+}
+
+impl Occasion {
+    /// The occasion a row of the record names — see
+    /// [`store::Continued::widened_by`].
+    pub(crate) fn of(continued: &store::Continued) -> Self {
+        continued.widened_by.map_or(Self::Arrived, Self::Widened)
+    }
+
+    /// The opening clause both outcomes say it in.
+    fn opening(self) -> String {
+        match self {
+            Self::Arrived => "This conversation arrived part way through".to_owned(),
+            Self::Widened(set) => format!(
+                "Answering question set {set} added to the sandbox, so the session waiting on \
+                 it was ended part way through"
+            ),
+        }
+    }
+}
+
 /// Why the session started for an arriving Conversation is Verkstead's own
 /// Resume rather than the harness's resume of the conversation that crossed.
 ///
@@ -91,25 +128,34 @@ impl Instead {
     /// the frame around it is the same for all of them but the first — a
     /// Conversation with no session on its record arrived part way through
     /// nothing, so there is no conversation to name and no harness to name it by.
-    fn saying(&self) -> String {
+    fn saying(&self, occasion: Occasion) -> String {
         let Some(harness) = self.harness() else {
-            return "This conversation arrived with no session on its record to carry on from. \
-                    What starts here is Verkstead's own resume, primed from this timeline."
-                .to_owned();
+            return match occasion {
+                Occasion::Arrived => {
+                    "This conversation arrived with no session on its record to carry on from. \
+                     What starts here is Verkstead's own resume, primed from this timeline."
+                        .to_owned()
+                }
+                Occasion::Widened(set) => format!(
+                    "Answering question set {set} added to the sandbox, and there's no session on \
+                     the record to carry on from. What starts now is Verkstead's own resume, \
+                     primed from this timeline."
+                ),
+            };
         };
 
         format!(
-            "This conversation arrived part way through a conversation with {harness}. The \
-             session here is Verkstead's own resume, started again from this timeline, because \
-             {because}.",
+            "{opening} a conversation with {harness}. The session here is Verkstead's own resume, \
+             started again from this timeline, because {because}.",
+            opening = occasion.opening(),
             harness = harness.word(),
-            because = self.because(),
+            because = self.because(occasion),
         )
     }
 
     /// The clause that says which situation this was — in the middle of the
     /// sentence above, and the whole of what the log says.
-    fn because(&self) -> String {
+    fn because(&self, occasion: Occasion) -> String {
         match self {
             Self::NoSession => "there's no session on the record to carry on from".to_owned(),
 
@@ -128,6 +174,12 @@ impl Instead {
             Self::MemoryOff(harness) => format!(
                 "this agent profile doesn't share its account's memory, so {harness}'s record of \
                  that conversation didn't travel with the work",
+                harness = harness.word(),
+            ),
+
+            Self::NoRecord(harness) if matches!(occasion, Occasion::Widened(_)) => format!(
+                "{harness}'s record of that conversation isn't where {harness} looks for it under \
+                 this worktree's path",
                 harness = harness.word(),
             ),
 
@@ -162,8 +214,8 @@ impl Instead {
 
     /// And the same reason for the log, where every one of these is said too — a
     /// server's operator reads the log and the human reads the Timeline.
-    pub(crate) fn logged(&self) -> String {
-        self.because()
+    pub(crate) fn logged(&self, occasion: Occasion) -> String {
+        self.because(occasion)
     }
 }
 
@@ -183,16 +235,18 @@ pub(crate) async fn instead(
     pool: &SqlitePool,
     nudges: &Nudges,
     conversation_id: i64,
+    occasion: Occasion,
     why: &Instead,
 ) {
     tracing::info!(
         conversation_id,
-        "the conversation this Conversation arrived part way through is not being carried on, so \
+        ?occasion,
+        "the conversation this Conversation was part way through is not being carried on, so \
          what was started for it is Verkstead's own Resume: {}",
-        why.logged(),
+        why.logged(occasion),
     );
 
-    noted(pool, nudges, conversation_id, &why.saying()).await;
+    noted(pool, nudges, conversation_id, &why.saying(occasion)).await;
 }
 
 /// And the other outcome: the session started here *is* the harness's resume of
@@ -211,17 +265,23 @@ pub(crate) async fn carried_on(
     pool: &SqlitePool,
     nudges: &Nudges,
     conversation_id: i64,
+    occasion: Occasion,
     harness: AgentType,
     session: &str,
 ) {
+    let from = match occasion {
+        Occasion::Arrived => " from the record the memory sync brought over",
+        Occasion::Widened(_) => " in the wider sandbox",
+    };
+
     noted(
         pool,
         nudges,
         conversation_id,
         &format!(
-            "This conversation arrived part way through a conversation with {harness}, and the \
-             session started here carries it on. Verkstead told {harness} to resume session \
-             `{session}` from the record the memory sync brought over.",
+            "{opening} a conversation with {harness}, and the session started here carries it \
+             on. Verkstead told {harness} to resume session `{session}`{from}.",
+            opening = occasion.opening(),
             harness = harness.word(),
         ),
     )
@@ -255,7 +315,7 @@ mod tests {
     /// was mid-sentence on the other machine.
     #[test]
     fn every_reason_says_which_one_it_was() {
-        let said = Instead::MemoryOff(AgentType::Claude).saying();
+        let said = Instead::MemoryOff(AgentType::Claude).saying(Occasion::Arrived);
 
         assert!(
             said.contains("doesn't share its account's memory"),
@@ -270,14 +330,14 @@ mod tests {
             ran: AgentType::Claude,
             running: AgentType::Codex,
         }
-        .saying();
+        .saying(Occasion::Arrived);
 
         assert!(
             said.contains("claude") && said.contains("codex"),
             "both harnesses are named, the record's and the session's: {said:?}",
         );
 
-        let said = Instead::NoRecord(AgentType::Grok).saying();
+        let said = Instead::NoRecord(AgentType::Grok).saying(Occasion::Arrived);
 
         assert!(
             said.contains("grok") && said.contains("isn't on this device"),
@@ -288,7 +348,7 @@ mod tests {
             harness: AgentType::OpenCode,
             session: "ses_01".to_owned(),
         }
-        .saying();
+        .saying(Occasion::Arrived);
 
         assert!(
             said.contains("opencode wouldn't resume session `ses_01`"),
@@ -300,7 +360,7 @@ mod tests {
     /// harness that never ran.
     #[test]
     fn a_conversation_with_no_session_says_there_was_nothing_to_carry_on() {
-        let said = Instead::NoSession.saying();
+        let said = Instead::NoSession.saying(Occasion::Arrived);
 
         assert!(
             said.contains("no session on its record to carry on from"),
@@ -309,6 +369,37 @@ mod tests {
         assert!(
             !said.contains("claude") && !said.contains("an agent"),
             "and no harness is named, there being no conversation to have had one: {said:?}",
+        );
+    }
+
+    /// **An answer that widened the sandbox names its question set** rather than
+    /// a move: the human answered on this device and nothing arrived (ADR-0028).
+    #[test]
+    fn a_widened_sandbox_names_the_question_set_rather_than_a_move() {
+        let said = Instead::Refused {
+            harness: AgentType::Claude,
+            session: "ses_01".to_owned(),
+        }
+        .saying(Occasion::Widened(7));
+
+        assert!(
+            said.contains("Answering question set 7 added to the sandbox"),
+            "the question set is named: {said:?}",
+        );
+        assert!(
+            said.contains("claude wouldn't resume session `ses_01`"),
+            "and the reason as a move says it: {said:?}",
+        );
+        assert!(
+            !said.contains("arrived"),
+            "and no move is claimed: {said:?}"
+        );
+
+        let said = Instead::NoSession.saying(Occasion::Widened(7));
+
+        assert!(
+            said.contains("question set 7") && said.contains("no session on the record"),
+            "a widened sandbox with nothing to carry on says both: {said:?}",
         );
     }
 }

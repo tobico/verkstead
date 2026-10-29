@@ -2797,7 +2797,7 @@ mod tests {
     /// file because it is being used by another process* often enough to redden a
     /// suite over nothing. The same wait the launcher suite's own copy is removed
     /// under, for the same reason — see `Bound` in
-    /// `crates/cli/tests/launcher_windows.rs`.
+    /// `crates/cli/tests/suite/launcher_windows.rs`.
     fn gone(path: &Path) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
 

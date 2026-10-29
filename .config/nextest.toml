@@ -26,24 +26,43 @@ session-account = { max-threads = 1 }
 #   what waits a collision out is a two-second retry: see `ONE_AT_A_TIME` in
 #   `crates/server/src/sandbox/starting.rs`.
 # - The two tests that count sccache servers do it by diffing the machine's
-#   process list: see `COUNTING` in `crates/server/tests/sessions_windows.rs`.
+#   process list: see `COUNTING` in `crates/server/tests/suite/sessions_windows.rs`.
 #
 # Serial rather than a small number, because the first of those goes wrong
 # rather than slow: a session behind a narrower boundary than its description
 # is a test failing about the scheduler. The in-crate tests are the `writing`
 # module's alone — the rest of the server's own tests on this platform name
 # identities without logging on as one.
+#
+# **And first on their leg rather than last, bar the sessions.** The first
+# boundary on a runner writes a step on the runner's own profile directory, and
+# writing that list makes Windows walk everything under the profile: 55 seconds
+# of one test, once a leg, whichever test it falls to (run 40785712519). Every
+# boundary after it finds the step standing. That cost is the machine's and not
+# a test's, so it cannot come out of the tests — but at the default priority
+# this group sorts near the end of every leg, so one test was alone at the
+# tail. Started first, the boundary and login tests' one-at-a-time turns run
+# beside the rest of the leg on the other threads instead of after it. Nothing
+# here waits on another test having run first: a test of this group on a leg
+# of its own still passes.
+#
+# `sessions_windows` keeps the default and its place near the end. Its sessions
+# compile Rust and drive live terminals, the heaviest work in the group, and
+# the end of a leg is where they have the machine to themselves: about thirty
+# seconds each there. The first override to set a priority is the one a test
+# takes, so this one goes ahead of the group's.
+[[profile.default.overrides]]
+filter = 'binary_id(verkstead-server::suite) & test(/^sessions_windows::/)'
+priority = 0
+
 [[profile.default.overrides]]
 filter = '''
-    binary_id(verkstead-server::sessions_windows)
-  | binary_id(verkstead-server::logins_windows)
-  | binary_id(verkstead-server::sandbox_windows)
-  | binary_id(verkstead-server::account_windows)
-  | binary_id(verkstead-cli::sandbox_windows)
-  | binary_id(verkstead-cli::launcher_windows)
+    (binary_id(verkstead-server::suite) & test(/^(sessions_windows|logins_windows|sandbox_windows|account_windows)::/))
+  | (binary_id(verkstead-cli::suite) & test(/^(sandbox_windows|launcher_windows)::/))
   | (binary_id(verkstead-server) & test(/^sandbox::granting::writing::tests::/))
 '''
 test-group = 'session-account'
+priority = 100
 
 # **The one test that waits on a PowerShell to say something**, with nothing
 # else running beside it. A first `powershell.exe` on the runner is slow on its
@@ -53,5 +72,5 @@ test-group = 'session-account'
 # printed, every time. It shares nothing with another test, so it is not a
 # group: what it needs is the machine rather than a turn.
 [[profile.default.overrides]]
-filter = 'binary_id(verkstead-server::terminal_windows) & test(=a_child_that_is_dropped_takes_what_it_started_with_it)'
+filter = 'binary_id(verkstead-server::suite) & test(=terminal_windows::a_child_that_is_dropped_takes_what_it_started_with_it)'
 threads-required = 'num-test-threads'

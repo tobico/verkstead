@@ -15,6 +15,14 @@ servers; a Windows machine driving a WSL; a Linux desktop as the interface and
 main server, with a Windows VM and a Mac transferred to when the work is that
 platform's.
 
+Extended by [ADR-0028](0028-adding-from-an-answer.md) (2026-10-29): **a
+Carried Conversation has a second occasion, and a Transfer carries what was
+picked on an open Set.** An answer that widens the sandbox ends the session
+idling on that Set and carries it on, on the device it never left, by the
+*Transfer*'s own machinery. And a Set that crosses open brings its pending
+additions: each companion matched on the far end as the Companion rows are, and
+struck rather than refusing the move where nothing matches.
+
 ## A device is an id and a certificate
 
 Nothing on the wire said which install answered (ADR-0015). Now each server

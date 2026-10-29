@@ -10,7 +10,7 @@
 //!
 //! The other half of the arrangement is not on this side of the wire at all:
 //! the mark comes off the Response in the store, so the agent is handed the
-//! same bytes either way. `crates/store/tests/endings.rs` is where that is
+//! same bytes either way. `crates/store/tests/suite/endings.rs` is where that is
 //! asked.
 
 import { fireEvent, waitFor } from "@solidjs/testing-library";

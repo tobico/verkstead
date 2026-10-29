@@ -4,7 +4,7 @@
 //! the Keeper last pinned it to, and the disk its image takes.
 //!
 //! The reads are fixtures the server's own suite wrote off the real endpoint —
-//! see `crates/server/tests/ui_content.rs` — so the page is drawn from the shape
+//! see `crates/server/tests/suite/ui_content.rs` — so the page is drawn from the shape
 //! it really answers with. The states nobody stood a box up in are that same
 //! answer with its state changed, the way the Devices tests vary a member.
 

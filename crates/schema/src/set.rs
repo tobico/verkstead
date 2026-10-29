@@ -127,7 +127,7 @@ pub struct RepoDiff {
 ///
 /// **Every field of a Set appears here**, and a field added to one is added to
 /// both. Forgetting is loud rather than quiet — a field this does not name is
-/// refused as unknown, which every round trip in `tests/question_set.rs` fails
+/// refused as unknown, which every round trip in `tests/suite/question_set.rs` fails
 /// on — but it is two lists to keep in step, and that is what the one key costs.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

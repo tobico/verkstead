@@ -603,7 +603,7 @@ impl Machine {
     /// is the account a Data Directory's sessions run as, and the Data
     /// Directory a suite wants to ask about is the machine's real one — which
     /// is not a directory to stand a server over. See
-    /// `tests/account_windows.rs`.
+    /// `tests/suite/account_windows.rs`.
     pub fn rows(&self) -> Vec<DependencyView> {
         let mut rows = vec![row(Dependency::Sandbox, self.sandbox())];
 
@@ -2741,7 +2741,7 @@ echo {token}
     ///
     /// Whether the account is really there is the machine's answer, and this
     /// runner has no account database to give one: what the two arms come to on
-    /// a Windows box is `tests/account_windows.rs`.
+    /// a Windows box is `tests/suite/account_windows.rs`.
     #[test]
     fn the_sandbox_row_on_windows_is_the_session_account() {
         let dir = tempfile::tempdir().unwrap();

@@ -115,3 +115,20 @@
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
+
+/* The Attach menu's groups past the servers — the repos alongside, and the
+   devices the work may be transferred to — drawn as the composer's server
+   group is (`.servers` in `Composer.module.css`): a rule above, and the group's
+   name small at its head. */
+.adding {
+  margin-top: 0.3rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--edge);
+}
+
+.addingHead {
+  padding: 0.3rem 0.6rem 0.15rem;
+  text-align: start;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}

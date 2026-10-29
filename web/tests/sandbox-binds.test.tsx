@@ -31,7 +31,7 @@
 //!
 //! The read is a fixture the server's own tests wrote, so what the page is drawn
 //! from is the shape the endpoint really answers with. What resolution *means*
-//! is the server's — `crates/server/tests/settings.rs` is what says so — and the
+//! is the server's — `crates/server/tests/suite/settings.rs` is what says so — and the
 //! variants below only move an entry between the two sources, which no router
 //! behind a fixture has both of.
 

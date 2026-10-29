@@ -700,6 +700,18 @@ const CARRIED: &[Carried] = &[
             ("set_id", Holds::Set),
         ],
     },
+    // And what was picked on a Set to add to the work, which names the Set as a
+    // file on an Answer does and a Repo where it is a companion.
+    Carried {
+        table: "set_additions",
+        found: Found::ByConversation,
+        ids: &[
+            ("id", Holds::Mine(Remembered::Nothing)),
+            ("conversation_id", Holds::Conversation),
+            ("set_id", Holds::Set),
+            ("repo_id", Holds::Repo),
+        ],
+    },
 ];
 
 /// The tables a delete empties that a move leaves where they are, each with what
@@ -916,8 +928,59 @@ impl Slice {
     /// landing under the wrong repository is the one failure the whole matching
     /// rule exists to prevent, so a Repo with nowhere to land refuses the move
     /// rather than being guessed at.
+    ///
+    /// **Less the ones only a pending pick on a Question Set names**, which are
+    /// [`Self::picked_repos`]: those are a Repo the human asked for while the Set
+    /// waited, nothing yet has been done in it, and one with nowhere to land is
+    /// struck rather than refusing the move (ADR-0028).
     pub fn repos(&self) -> BTreeSet<i64> {
         self.named(Holds::Repo)
+    }
+
+    /// The Repos a pending pick on one of this record's Question Sets names and
+    /// nothing else in it does: what may be struck where the far end has no
+    /// match — see [`Self::strike`].
+    pub fn picked_repos(&self) -> BTreeSet<i64> {
+        let mut picked = BTreeSet::new();
+
+        for rows in &self.tables {
+            let Some((repo, _, _)) = picks(rows) else {
+                continue;
+            };
+
+            picked.extend(
+                rows.rows
+                    .iter()
+                    .filter(|row| pending(rows, row))
+                    .filter_map(|row| row.get(repo)?.id()),
+            );
+        }
+
+        &picked - &self.repos()
+    }
+
+    /// Strike every pending pick of Repo `repo_id` as it crosses, under the name
+    /// it is registered by here: the far end has no Repo it is, so the row lands
+    /// naming none, struck, with that name to say what it was — see
+    /// [`super::Addition::Unmatched`]. Its `carried_on` is left as it stands.
+    pub fn strike(&mut self, repo_id: i64, name: &str) {
+        for rows in &mut self.tables {
+            let Some((repo, state, named)) = picks(rows) else {
+                continue;
+            };
+
+            for row in &mut rows.rows {
+                if row.get(state) != Some(&Cell::Text("pending".to_owned()))
+                    || row.get(repo).and_then(Cell::id) != Some(repo_id)
+                {
+                    continue;
+                }
+
+                row[repo] = Cell::Null;
+                row[state] = Cell::Text("struck".to_owned());
+                row[named] = Cell::Text(name.to_owned());
+            }
+        }
     }
 
     /// And every Agent Profile it names.
@@ -946,6 +1009,9 @@ impl Slice {
                 named.extend(
                     rows.rows
                         .iter()
+                        // A pending pick's Repo, which crosses or is struck —
+                        // see [`Self::picked_repos`].
+                        .filter(|row| !(kind == Holds::Repo && pending(rows, row)))
                         .filter_map(|row| row.get(at)?.id())
                         // The Repo column that holds no repository, which is
                         // nothing to go and match — see [`NO_REPOSITORY`].
@@ -956,6 +1022,24 @@ impl Slice {
 
         named
     }
+}
+
+/// Where a table's rows are the picks on a Question Set, the columns of the
+/// Repo, the state, and the name a struck Repo keeps.
+fn picks(rows: &Rows) -> Option<(usize, usize, usize)> {
+    if rows.table != "set_additions" {
+        return None;
+    }
+
+    let at = |name: &str| rows.columns.iter().position(|column| column == name);
+
+    Some((at("repo_id")?, at("state")?, at("repo_name")?))
+}
+
+/// Whether a row is a pick still waiting on its Set.
+fn pending(rows: &Rows, row: &[Cell]) -> bool {
+    picks(rows)
+        .is_some_and(|(_, state, _)| row.get(state) == Some(&Cell::Text("pending".to_owned())))
 }
 
 /// Write a slice down against Conversation `conversation_id` of *this*

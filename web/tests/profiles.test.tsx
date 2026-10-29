@@ -621,7 +621,7 @@ describe("a member's accounts", () => {
 /// the pickers, because a row saying why it cannot be run is something to go
 /// and put right and a row quietly missing is a human looking for a Profile
 /// they know they saved. What the server decides is which of the three it is —
-/// `crates/server/tests/mirroring.rs` is where that is asked — and what is
+/// `crates/server/tests/suite/mirroring.rs` is where that is asked — and what is
 /// asked here is that the card says it.
 describe("a member's account that cannot be run from here", () => {
   /// One mirror reading the way the server would answer it.
@@ -1688,7 +1688,7 @@ describe("a profile whose account has gone", () => {
   /// said, because a list is scanned before it is read.
   ///
   /// Built from the real payload rather than served as one of its own: whether
-  /// the server reports it, and when, is `crates/server/tests/profiles.rs`'s
+  /// the server reports it, and when, is `crates/server/tests/suite/profiles.rs`'s
   /// subject — what is being read here is that the page says which part of the
   /// account it was.
   it.each([
