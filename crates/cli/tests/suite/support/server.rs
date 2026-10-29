@@ -271,6 +271,26 @@ impl Server {
         });
     }
 
+    /// And put one at a Set's comment box: on the Set as a whole, under no
+    /// Question, the same way round.
+    pub fn attach_to_set(&self, set_id: i64, name: &str, bytes: i64) {
+        self.block_on(async {
+            let pool = verkstead_server::open_database(&self.database)
+                .await
+                .unwrap();
+            store::attach(
+                &pool,
+                ASKING_FROM,
+                store::Origin::Set { set: set_id },
+                name,
+                bytes,
+            )
+            .await
+            .unwrap();
+            pool.close().await;
+        });
+    }
+
     /// Answer a Set the way the human's device does: YAML over HTTP.
     pub fn answer(&self, id: i64, yaml: &str) {
         let reply = ureq::post(format!("{}/api/v1/sets/{id}/response", self.url()))

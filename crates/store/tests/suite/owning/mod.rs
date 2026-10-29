@@ -22,11 +22,11 @@ use std::time::Duration;
 use sqlx::SqlitePool;
 use verkstead_schema::{QuestionSet, Response};
 use verkstead_store::{
-    Account, Adding, AgentType, Ask, AskedBy, Commit, CompanionMode, CompanionWorktree, Continued,
-    Decision, Edited, Lifecycle, Merging, Origin, Pairing, PendingAddition, PendingForm,
+    Account, Adding, Addition, AgentType, Ask, AskedBy, Commit, CompanionMode, CompanionWorktree,
+    Continued, Decision, Edited, Lifecycle, Merging, Origin, Pairing, PendingAddition, PendingForm,
     PendingUpgrade, Process, ProfileFacts, PullRequest, Rollup, Settlements, Standing, Summary,
-    WaitingOn, add_companion, append_capture, append_transcript, archive_conversation, ask,
-    ask_to_transfer, attach, attach_mcp_server, close_conversation, continue_on_arrival,
+    WaitingOn, add_companion, add_to_set, append_capture, append_transcript, archive_conversation,
+    ask, ask_to_transfer, attach, attach_mcp_server, close_conversation, continue_on_arrival,
     create_profile, end_session, leave_memo, lock_set, nothing_else, open_database,
     open_pending_steer, permit_device, pick_direction, record_addressed_comments, record_backlog,
     record_check_rollup, record_commit, record_conflict_fix_attempt, record_delivery,
@@ -319,6 +319,20 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
         .unwrap()
         .expect("the Conversation is there to ask from")
         .id;
+
+    // With a server picked on it to add to the work, while it still waits:
+    // the row names the Set as a file on its Answer does.
+    add_to_set(
+        pool,
+        id,
+        set,
+        Some("Q1"),
+        &Addition::Server {
+            name: "tickets".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
 
     // Answered with Nothing else, which is what writes the mark saying the round
     // is over.
@@ -682,6 +696,7 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
         &Continued {
             session_id: "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
             agent_type: AgentType::Claude,
+            widened_by: None,
         },
     )
     .await

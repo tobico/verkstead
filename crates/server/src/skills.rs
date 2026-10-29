@@ -1311,7 +1311,7 @@ pub(crate) fn served(prompt: &str, servers: &[String], agent: store::AgentType) 
 /// - Grok Build (1.0.34) drops the prefix: `<server>__<tool>`, which is the
 ///   name its `use_tool` takes.
 /// - OpenCode (1.18.31) joins the two with one underscore: `<server>_<tool>`.
-fn tools_named(agent: store::AgentType) -> &'static str {
+pub(crate) fn tools_named(agent: store::AgentType) -> &'static str {
     match agent {
         store::AgentType::Claude | store::AgentType::Codex => "mcp__<server>__<tool>",
         store::AgentType::Grok => "<server>__<tool>",
@@ -1335,17 +1335,24 @@ fn tools_named(agent: store::AgentType) -> &'static str {
 /// said on its own rather than the line being dropped: what the session needs is
 /// the file, and half a heading over it beats none.
 fn attached_to(origin: &store::Origin, sets: &[(i64, String)]) -> String {
-    let store::Origin::Answer { set, label } = origin else {
-        return "Attached to the Brief:".to_owned();
+    let titled = |set: &i64| {
+        sets.iter()
+            .find_map(|(id, title)| (id == set).then_some(title.trim()))
+            .filter(|title| !title.is_empty())
     };
 
-    match sets
-        .iter()
-        .find_map(|(id, title)| (id == set).then_some(title.trim()))
-        .filter(|title| !title.is_empty())
-    {
-        Some(title) => format!("Attached to the Answer to {label} of \"{title}\":"),
-        None => format!("Attached to the Answer to {label}:"),
+    match origin {
+        store::Origin::Brief => "Attached to the Brief:".to_owned(),
+        store::Origin::Answer { set, label } => match titled(set) {
+            Some(title) => format!("Attached to the Answer to {label} of \"{title}\":"),
+            None => format!("Attached to the Answer to {label}:"),
+        },
+        // The comment box's: under the Set's title and no Question, because it
+        // answers none (ADR-0028).
+        store::Origin::Set { set } => match titled(set) {
+            Some(title) => format!("Attached to the Question Set \"{title}\" as a whole:"),
+            None => "Attached to a Question Set as a whole:".to_owned(),
+        },
     }
 }
 
@@ -1561,6 +1568,49 @@ pub(crate) fn moved(
         "\nA Set nobody has answered yet refuses that command rather than waiting on the \
          door, so ask again when the nudge lands.\n",
     );
+
+    note
+}
+
+/// The note a session is resumed with after the human's answer to a Question Set
+/// it was waiting on added to its sandbox: a repository beside the work, or an
+/// MCP server (ADR-0028, *The carrying-on is the Carried Conversation's, on
+/// this device*).
+///
+/// **The other occasion for the same resume**, and the note says the same three
+/// things [`moved`] does in the order the agent needs them: that it is the
+/// conversation above carried on, what changed, and what to do next — which here
+/// is one thing, reading the Answers it was waiting for. Its wait died with the
+/// session that was ended, before the Response was stored, so nothing has handed
+/// it the Answers yet and the line that fetches them is given whole.
+///
+/// `title` is the Set's own, where its body could be read; `added` is each thing
+/// that came with the Answers, already in words.
+pub(crate) fn widened(set_id: i64, title: Option<&str>, added: &[String]) -> String {
+    let set = match title {
+        Some(title) => format!("Question Set {set_id}, *{title}*"),
+        None => format!("Question Set {set_id}"),
+    };
+
+    let mut note = format!(
+        "The human answered {set}, and the answer added to your sandbox, so Verkstead ended \
+         the session that was waiting on it and started this one with it. Nothing else about \
+         the work has changed — this is the conversation above carried on rather than a new \
+         one.\n"
+    );
+
+    if !added.is_empty() {
+        note.push_str("\nWhat came with the answer, which this session has:\n\n");
+
+        for one in added {
+            note.push_str(&format!("- {one}\n"));
+        }
+    }
+
+    note.push_str(&format!(
+        "\nYour `verkstead ask` was ended with the session before the Answers were stored, so \
+         read them now, once, and carry on from there:\n\n    verkstead answers {set_id}\n"
+    ));
 
     note
 }
@@ -5391,6 +5441,29 @@ mod tests {
         assert!(
             listed.contains("Attached to the Answer to Q9a of \"The wording of the error\":"),
             "and a Sub-question's Answer is one like any other: {listed:?}"
+        );
+    }
+
+    /// A file put at a Set's comment box is listed under the Set's title and no
+    /// Question: it answers none.
+    #[test]
+    fn a_file_on_the_set_as_a_whole_is_listed_under_its_title_alone() {
+        let prompt = attached(
+            "# The work\n",
+            &[store::Attachment {
+                origin: store::Origin::Set { set: 11 },
+                ..attachment("trace.txt", 512)
+            }],
+            &[(11, "How the limiter counts".to_owned())],
+            &attachments_inside(),
+        );
+
+        assert!(
+            prompt.contains(
+                "Attached to the Question Set \"How the limiter counts\" as a whole:\n\n\
+                 - `/verkstead/attachments/trace.txt`, 512 bytes.\n"
+            ),
+            "{prompt:?}"
         );
     }
 

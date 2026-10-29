@@ -1055,7 +1055,7 @@ pub(crate) async fn attached_servers(state: &AppState, id: i64) -> Result<Vec<At
 /// declaration added, corrected or deleted takes effect on the next thing that
 /// asks. A half-written entry is no declaration and never reaches here — see
 /// `servers_kept` in [`crate::settings`].
-fn declared_servers(state: &AppState) -> Vec<String> {
+pub(crate) fn declared_servers(state: &AppState) -> Vec<String> {
     state
         .settings
         .config()

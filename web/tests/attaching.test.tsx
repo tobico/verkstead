@@ -838,14 +838,14 @@ describe("the files on an answer", () => {
       },
     });
 
-  /// The paperclip of one question, which is named for it: five of them named
-  /// alike would be five controls nothing tells apart.
+  /// The Attach menu of one question, which is named for it: five of them
+  /// named alike would be five controls nothing tells apart.
   const clipOn = (label: string) =>
-    screen.getByRole("button", { name: `Attach a file to ${label}` });
+    screen.getByRole("button", { name: `Attach to ${label}` });
 
   /// And the pills under it, in the order the row has them.
   function attachedTo(label: string): string[] {
-    const row = screen.queryByRole("list", { name: `Files attached to ${label}` });
+    const row = screen.queryByRole("list", { name: `Attached to ${label}` });
     return row === null ? [] : names(row);
   }
 
@@ -871,38 +871,33 @@ describe("the files on an answer", () => {
 
   /// One per answerable question, Sub-questions included — and none on a
   /// Heading, which asks nothing and has no field to put one in.
-  it("draws a paperclip in every field and none on a heading", async () => {
+  it("draws the plus-menu in every field and none on a heading", async () => {
     const { page } = await answering(withHeading(WAITING));
 
     for (const label of ["Q1", "Q2a", "Q2b", "Q3"]) {
       const clip = clipOn(label);
       expect(clip, `${label} has one`).toBeTruthy();
 
-      // And a plain button rather than the menu the draft's composer opens:
-      // the MCP servers are offered where a Conversation is set up, and an
-      // Answer attaches files and nothing else.
-      expect(
-        clip.getAttribute("aria-haspopup"),
-        `${label}'s is the plain button`,
-      ).toBeNull();
-
-      // And still the paperclip: it attaches a file and nothing else, which
-      // is what the menu's plus stopped being a picture of.
+      // The composer's menu rather than a plain button, drawn as its plus:
+      // what it opens is a list of things to add, a file being one of them.
+      expect(clip.getAttribute("aria-haspopup"), `${label}'s is a menu`).toBe(
+        "menu",
+      );
       expect(clip.querySelector("path")!.getAttribute("d")).toBe(
-        faPaperclip.icon[4],
+        faPlus.icon[4],
       );
     }
 
     expect(
-      screen.queryByRole("button", { name: "Attach a file to Q2" }),
+      screen.queryByRole("button", { name: "Attach to Q2" }),
       "the Heading has none",
     ).toBeNull();
     expect(
-      page.querySelector("#set-comment")!.closest("section")!.querySelector(
-        'input[type="file"]',
+      [...page.querySelectorAll("path")].some(
+        (path) => path.getAttribute("d") === faPaperclip.icon[4],
       ),
-      "and neither has the comment box",
-    ).toBeNull();
+      "and no plain paperclip is left anywhere on the sheet",
+    ).toBe(false);
   });
 
   /// Inside the field it belongs to, at its bottom right — which is what puts
@@ -914,7 +909,27 @@ describe("the files on an answer", () => {
     const writing = clip.closest(`.${submitting.writing}`)!;
 
     expect(writing.querySelector('textarea[name="Q1-free-text"]')).toBeTruthy();
-    expect(clip.classList.contains(submitting.attach!)).toBe(true);
+    expect(clip.closest(`.${submitting.attach}`)).toBeTruthy();
+  });
+
+  /// *Attach file…* is the menu's first row, and it reaches the picker the
+  /// paperclip did.
+  it("opens the picker from the menu's first row", async () => {
+    const { page } = await answering(WAITING);
+
+    fireEvent.click(clipOn("Q1"));
+    const menu = screen.getByRole("menu", { name: "Attach to Q1" });
+    const first = within(menu).getAllByRole("menuitem")[0]!;
+    expect(first.textContent).toBe("Attach file…");
+
+    const picker = questionOf(page, "Q1").querySelector<HTMLInputElement>(
+      'input[type="file"]',
+    )!;
+    const opened = vi.spyOn(picker, "click");
+
+    fireEvent.click(first);
+
+    expect(opened).toHaveBeenCalledOnce();
   });
 
   /// A chosen file goes up at once, under the label of the question it was
@@ -1101,12 +1116,112 @@ describe("the files on an answer", () => {
     // Nothing to add one with and nothing to take this one off with.
     expect(row.querySelector("button")).toBeNull();
     expect(
-      screen.queryByRole("button", { name: "Attach a file to Q1" }),
+      screen.queryByRole("button", { name: "Attach to Q1" }),
     ).toBeNull();
     expect(
       screen.queryByRole("button", { name: "Remove counter.png" }),
     ).toBeNull();
     expect(page.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  /// The comment box takes a file too, keyed by the Set alone: up under no
+  /// label, and drawn under the box from the record.
+  it("puts a file chosen at the comment box on the set under no question", async () => {
+    const path = `/api/ui/sets/${WAITING.id}/attachments/limits.csv`;
+    const onTheSet: SetView = {
+      ...WAITING,
+      attachments: [
+        { id: 11, name: "limits.csv", bytes: 4, origin: "Set", label: null },
+      ],
+    };
+    const { page, fetching, settles } = await answering(
+      WAITING,
+      whenever(
+        path,
+        json({
+          Attached: {
+            attachment: onTheSet.attachments[0],
+          },
+        }),
+        "POST",
+      ),
+    );
+
+    settles(onTheSet);
+
+    choose(
+      page.querySelector(`.${sheet.setComment}`)!,
+      new File(["a,b"], "limits.csv"),
+    );
+
+    await waitFor(() => expect(writes(fetching, path)).toHaveLength(1));
+    await waitFor(() =>
+      expect(attachedTo("the question set")).toEqual(["limits.csv"]),
+    );
+    expect(attachedTo("Q1"), "and under no question").toEqual([]);
+  });
+
+  /// Not an Answer to anything: with only a set-level file, every question
+  /// still goes back open.
+  it("submits a set-level file alone as nothing answered", async () => {
+    const { page, fetching } = await answering(
+      {
+        ...WAITING,
+        attachments: [
+          { id: 11, name: "limits.csv", bytes: 4, origin: "Set", label: null },
+        ],
+      },
+      whenever(`/api/ui/sets/${WAITING.id}/response`, json("Accepted"), "POST"),
+    );
+
+    press(page, "Submit");
+    press(page, "Send anyway");
+
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/sets/${WAITING.id}/response`),
+      ).toHaveLength(1),
+    );
+
+    const response = JSON.parse(
+      String(writes(fetching, `/api/ui/sets/${WAITING.id}/response`)[0]!.body),
+    ) as Decided;
+
+    expect(response.answers.every((one) => one.unanswered === true)).toBe(true);
+  });
+
+  /// And the record draws it under the comment, as the sheet drew it under
+  /// the box, beside an Answer's file drawn as before.
+  it("draws a set-level file under the comment once the set is answered", async () => {
+    await answering({
+      ...WAITING,
+      attachments: [
+        { id: 9, name: "counter.png", bytes: 4, origin: "Answer", label: "Q1" },
+        { id: 11, name: "limits.csv", bytes: 4, origin: "Set", label: null },
+      ],
+      standing: {
+        Answered: {
+          submitted_at: "2026-08-03T09:07:11.000Z",
+          response: {
+            answers: [
+              { label: "Q1" },
+              { label: "Q2", unanswered: true },
+              { label: "Q2a", unanswered: true },
+              { label: "Q2b", unanswered: true },
+              { label: "Q3", unanswered: true },
+            ],
+            comment: "the limits we run today",
+          },
+        },
+      },
+    });
+
+    expect(
+      names(screen.getByRole("list", { name: "Files attached to the question set" })),
+    ).toEqual(["limits.csv"]);
+    expect(
+      names(screen.getByRole("list", { name: "Files attached to Q1" })),
+    ).toEqual(["counter.png"]);
   });
 
   /// And the warning before the submit is about what is still open, so a

@@ -159,6 +159,19 @@
   border-style: dashed;
 }
 
+/* And the chip of an addition nothing ever put on — a question set locked or
+   closed before it was answered. Out of the accent for the gone chip's reason,
+   and its name struck through: it is on the record as what was picked and not
+   as what the work was given. */
+.attachment.server.struck {
+  color: var(--ink-soft);
+  border-color: var(--edge);
+}
+
+.attachment.server.struck .serverName {
+  text-decoration: line-through;
+}
+
 /* The paperclip where it is the trigger of a menu rather than a button of its
    own — see `AttachMenu` in `Attaching.tsx`. The menu chrome is `Menu.module.css`
    and the trigger's paint is the caller's, which here is this: the pressable

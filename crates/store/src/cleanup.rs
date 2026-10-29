@@ -250,6 +250,7 @@ pub fn deleted_tables() -> Vec<&'static str> {
         .copied()
         .chain([
             "attachments",
+            "set_additions",
             "set_events",
             "question_sets",
             "timeline_events",
@@ -586,6 +587,10 @@ async fn walked(tx: &mut sqlx::SqliteConnection, id: i64, taking: Taking) -> Res
     // have minded either way.
     erase(tx, id, "attachments", "conversation_id = ?").await?;
 
+    // And what was picked on its Sets to add to it, for the same reason: each
+    // names the Set it was picked on.
+    erase(tx, id, "set_additions", "conversation_id = ?").await?;
+
     // Read before anything else is taken, because the pairing that says which
     // Sets are this Conversation's is itself one of the rows going: a Set found
     // after `set_events` had been emptied would be a Set nothing could find at
@@ -682,6 +687,7 @@ pub fn cleared_tables() -> Vec<&'static str> {
         .chain(Taking::TheRecord.conversation_keyed())
         .chain([
             "attachments",
+            "set_additions",
             "set_events",
             "question_sets",
             "timeline_events",

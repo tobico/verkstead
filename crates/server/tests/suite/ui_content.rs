@@ -337,6 +337,7 @@ fn answer(label: &str, selected: Option<u32>, free_text: Option<&str>) -> Answer
         free_text: free_text.map(str::to_owned),
         unanswered: false,
         attachments: Vec::new(),
+        added: Vec::new(),
     }
 }
 
@@ -347,6 +348,7 @@ fn unanswered(label: &str) -> Answer {
         free_text: None,
         unanswered: true,
         attachments: Vec::new(),
+        added: Vec::new(),
     }
 }
 
@@ -366,6 +368,8 @@ fn decided_every_way() -> Response {
         comment: Some("Do the in-process one first; we can move it later.".to_owned()),
         direction: None,
         nothing_else: false,
+        added: Vec::new(),
+        attachments: Vec::new(),
     }
 }
 
@@ -1724,10 +1728,13 @@ fn accepting_the_proposal() -> Response {
             free_text: None,
             unanswered: true,
             attachments: Vec::new(),
+            added: Vec::new(),
         }],
         comment: None,
         direction: Some(verkstead_schema::Direction::Inline),
         nothing_else: false,
+        added: Vec::new(),
+        attachments: Vec::new(),
     }
 }
 

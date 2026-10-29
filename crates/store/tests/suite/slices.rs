@@ -23,11 +23,12 @@ use std::path::PathBuf;
 use sqlx::SqlitePool;
 use verkstead_schema::Response;
 use verkstead_store::{
-    Account, Arrival, ArrivingPicked, Ask, Birth, Cell, Commit, Event, Lifecycle, Memo,
-    ProfileFacts, Renaming, STAYS_BEHIND, Settlements, Slice, Submission, arrive, ask, capture,
-    carried_tables, create_profile, deleted_tables, land, load_conversation, load_response,
-    queue_to_join, record_commit, register_repo, session_id, sets_as_they_landed, slice,
-    standing_previews, start_conversation, submit_response, timeline, transcript,
+    Account, Addition, AdditionState, Arrival, ArrivingPicked, Ask, Birth, Cell, Commit,
+    CompanionMode, Event, Lifecycle, Memo, ProfileFacts, Renaming, STAYS_BEHIND, Settlements,
+    Slice, Submission, add_to_set, arrive, ask, capture, carried_tables, companions,
+    create_profile, deleted_tables, insert_response, land, load_conversation, load_response,
+    queue_to_join, record_commit, register_repo, session_id, set_additions, sets_as_they_landed,
+    slice, standing_previews, start_conversation, submit_response, timeline, transcript,
 };
 
 use super::owning::{Worked, a_conversations_tables, fresh_pool, owning, rows};
@@ -622,6 +623,165 @@ async fn what_each_set_landed_as_is_written_down_against_the_conversation() {
             .collect(),
         "and the map is that landing's rather than the one before it: one row per \
          Set, each naming what this landing issued",
+    );
+}
+
+/// What was picked on a Set nobody has answered crosses with it (ADR-0028,
+/// *Pending additions cross with the record*): a companion of a repository the
+/// far end holds lands naming that end's Repo, still pending, and the Answer
+/// there puts it on the Conversation; one of a repository it holds none of
+/// lands struck, under the name it had, rather than refusing the move; and a
+/// device tick lands as it was.
+#[tokio::test]
+async fn a_sets_pending_picks_cross_and_a_repo_with_no_match_is_struck() {
+    let here = end().await;
+    let worked = owning(&here.pool, "rate-limiting").await;
+    let open = ask(
+        &here.pool,
+        worked.id,
+        &super::owning::asked(),
+        Ask::Blocking,
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation is there to ask from")
+    .id;
+
+    let ours = repos(&here.pool).await;
+    let shared = register_repo(
+        &here.pool,
+        &PathBuf::from("/watched/shared"),
+        "shared",
+        "main",
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .id;
+    let lonely = register_repo(
+        &here.pool,
+        &PathBuf::from("/watched/lonely"),
+        "lonely",
+        "main",
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .id;
+
+    for addition in [
+        Addition::Companion {
+            repo_id: shared,
+            mode: CompanionMode::ReadOnly,
+            base: None,
+            branch: None,
+        },
+        Addition::Companion {
+            repo_id: lonely,
+            mode: CompanionMode::ReadWrite,
+            base: None,
+            branch: Some("lonely-work".to_owned()),
+        },
+        Addition::Device {
+            device: BORN_ON.to_owned(),
+        },
+    ] {
+        add_to_set(&here.pool, worked.id, open, Some("Q1"), &addition)
+            .await
+            .unwrap();
+    }
+
+    let mut read = slice(&here.pool, worked.id).await.unwrap();
+
+    assert!(
+        !read.repos().contains(&shared) && !read.repos().contains(&lonely),
+        "a Repo only a pending pick names is not one the move needs",
+    );
+    assert_eq!(read.picked_repos(), BTreeSet::from([shared, lonely]));
+
+    // The far end holds the two the fixture works in and `shared`, and nothing
+    // that is `lonely`: the sending device strikes it, as `transfers` does.
+    read.strike(lonely, "lonely");
+
+    let there = end().await;
+    let theirs = repos(&there.pool).await;
+    let shared_there = register_repo(&there.pool, &PathBuf::from("/far/shared"), "shared", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    let to = arrived(&there.pool, theirs[0]).await;
+
+    let renaming = Renaming {
+        repos: ours
+            .into_iter()
+            .zip(theirs)
+            .chain([(shared, shared_there)])
+            .collect(),
+        ..Renaming::default()
+    };
+
+    land(&there.pool, to, &read, &renaming).await.unwrap();
+
+    let landed = *sets_as_they_landed(&there.pool, to)
+        .await
+        .unwrap()
+        .get(&open)
+        .expect("the open Set crossed");
+
+    let picked: Vec<(Addition, AdditionState)> = set_additions(&there.pool, landed)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|added| (added.addition, added.state))
+        .collect();
+
+    assert_eq!(
+        picked,
+        vec![
+            (
+                Addition::Companion {
+                    repo_id: shared_there,
+                    mode: CompanionMode::ReadOnly,
+                    base: None,
+                    branch: None,
+                },
+                AdditionState::Pending,
+            ),
+            (
+                Addition::Unmatched {
+                    name: "lonely".to_owned(),
+                },
+                AdditionState::Struck,
+            ),
+            (
+                Addition::Device {
+                    device: BORN_ON.to_owned(),
+                },
+                AdditionState::Pending,
+            ),
+        ],
+    );
+
+    // And answered there, what survived is put on the Conversation there.
+    insert_response(&there.pool, landed, &Response::default())
+        .await
+        .unwrap()
+        .expect("the Set is open there");
+
+    let companions = companions(&there.pool, to).await.unwrap();
+
+    assert!(
+        companions
+            .iter()
+            .any(|companion| companion.repo.id == shared_there),
+        "the companion picked before the move is the far end's now",
+    );
+    assert!(
+        companions
+            .iter()
+            .all(|companion| companion.repo.name != "lonely"),
+        "and the struck one is not",
     );
 }
 

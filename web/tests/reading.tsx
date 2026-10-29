@@ -36,6 +36,8 @@ function row(id: string): QuestionSetEvent {
     title: "A question set",
     rows: [],
     standing: { Waiting: "waiting" },
+    added: [],
+    carried_on: false,
   };
 }
 

@@ -25,10 +25,11 @@ import type { JSX } from "solid-js";
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 
 import app from "../App.module.css";
-import { Attachments } from "../Attaching";
+import { Attachments, type Chip } from "../Attaching";
 import { Card } from "../Card";
 import { PaneSticky } from "../Panes";
 import type {
+  AdditionView,
   Answer,
   AskView,
   AttachmentView,
@@ -45,7 +46,7 @@ import { useDevice } from "../reaching";
 import { setWrapping, wrapping } from "../remembered";
 import { DIRECTION, DIRECTION_LABEL, DIRECTIONS } from "../directions";
 import { PaneHead } from "../workbench/PaneHead";
-import { Answering } from "./Answering";
+import { Answering, chipped } from "./Answering";
 import { AskText } from "./AskText";
 import { Contents, navigation } from "./Contents";
 import { Diff } from "./Diff";
@@ -281,6 +282,9 @@ export function Sheet(props: {
             proposal={props.set.proposal}
             ending={props.set.ending}
             attachments={props.set.attachments}
+            additions={props.set.additions}
+            servers={props.set.servers}
+            addable={props.set.addable}
             answered={props.answered}
           />
         }
@@ -292,10 +296,39 @@ export function Sheet(props: {
           postscript={props.set.postscript_html}
           proposal={props.set.proposal}
           attachments={props.set.attachments}
+          additions={settledChips(props.set.additions, props.set.addable.branch)}
         />
       </Show>
     </>
   );
+}
+
+/// What was added with a settled Set's Answers, as the chips its record draws
+/// (ADR-0028): what the Submit put on the work, and struck through what a lock
+/// or a close left unapplied. Each keeps the label it was picked at, `null`
+/// being the comment box's.
+type Added = { label: string | null; chip: Chip };
+
+function settledChips(additions: AdditionView[], mirroring: string): Added[] {
+  return additions
+    .filter((addition) => addition.state !== "Pending")
+    .map((addition) => ({
+      label: addition.label,
+      chip: {
+        ...chipped(addition, mirroring),
+        struck: addition.state === "Struck",
+      },
+    }));
+}
+
+/// The chips one label's row draws, or none where it has none — so a row of
+/// files alone is named as one.
+function chipsOn(added: Added[], label: string | null): Chip[] | undefined {
+  const chips = added
+    .filter((addition) => addition.label === label)
+    .map((addition) => addition.chip);
+
+  return chips.length === 0 ? undefined : chips;
 }
 
 /// The questions of a settled Set, and what became of them.
@@ -322,6 +355,9 @@ function Questions(props: {
   /// was put under. Read here as the record of what was sent, which is what a
   /// settled Set's own row of pills is.
   attachments: AttachmentView[];
+
+  /// And what was added with them, drawn as chips after the files.
+  additions: Added[];
 }): JSX.Element {
   /// A Set that settled with no Response behind it, which is the one standing
   /// that was never answered by anybody.
@@ -336,6 +372,11 @@ function Questions(props: {
       ? null
       : nothingAnswered(response, props.attachments);
   };
+
+  /// The files put at the comment box: on the Set as a whole, under no
+  /// Question.
+  const onTheSet = () =>
+    props.attachments.filter((file) => file.label === null);
 
   /// Shown only when there is one, exactly as the submit only ever sends one that
   /// has something in it.
@@ -377,6 +418,7 @@ function Questions(props: {
               position={index() + 1}
               response={props.response}
               attachments={props.attachments}
+              additions={props.additions}
             />
           )}
         </For>
@@ -408,6 +450,17 @@ function Questions(props: {
             )}
           </Show>
         </Postscript>
+      </Show>
+      {/* And what was put and added at the comment box, under where the
+          comment is drawn, as the sheet drew it under the box: the files on the
+          Set as a whole, which answer no Question, and the chips after them. */}
+      <Show when={onTheSet().length > 0 || chipsOn(props.additions, null)}>
+        <Attachments
+          files={onTheSet()}
+          chips={chipsOn(props.additions, null)}
+          onto="the question set"
+          class={styles.attachments}
+        />
       </Show>
     </>
   );
@@ -481,6 +534,7 @@ function Question(props: {
   position: number;
   response: Response | null;
   attachments: AttachmentView[];
+  additions: Added[];
 }): JSX.Element {
   return (
     <li
@@ -507,6 +561,7 @@ function Question(props: {
           ask={props.question.ask}
           response={props.response}
           attachments={props.attachments}
+          additions={props.additions}
         />
       </Show>
       {/* Sub-questions get no anchor of their own: one scrolls into view with
@@ -520,6 +575,7 @@ function Question(props: {
                   ask={subquestion}
                   response={props.response}
                   attachments={props.attachments}
+                  additions={props.additions}
                 />
               </li>
             )}
@@ -550,6 +606,9 @@ function Ask(props: {
   /// record holds them: one list for the whole Set, each row naming the
   /// Question it was put under.
   attachments: AttachmentView[];
+
+  /// And every addition on the Set, filtered the same way.
+  additions: Added[];
 }): JSX.Element {
   const answer = () => {
     const response = props.response;
@@ -627,6 +686,7 @@ function Ask(props: {
           what was attached before it was locked is still on the record. */}
       <Attachments
         files={files()}
+        chips={chipsOn(props.additions, props.ask.name)}
         onto={props.ask.name}
         class={styles.attachments}
       />

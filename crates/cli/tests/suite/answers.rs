@@ -210,6 +210,35 @@ fn the_files_put_on_an_answer_are_printed_with_it() {
     );
 }
 
+/// And a file put at the comment box comes out on the Response itself, under no
+/// Answer: it answers nothing (ADR-0028).
+#[test]
+fn a_file_put_on_the_set_as_a_whole_is_printed_beside_the_answers() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::start(tmp.path().join("verkstead.db"));
+
+    let id = stored(&server, SET);
+    server.attach_to_set(id, "limits.csv", 9);
+    server.answer(id, COMPLETE);
+
+    let printed = stdout(&finished(answers(&server, tmp.path(), id)));
+    let response = Response::from_yaml(&printed)
+        .unwrap_or_else(|error| panic!("stdout should be a Response: {error}\n{printed}"));
+
+    assert_eq!(response.attachments.len(), 1, "got {printed}");
+    assert!(
+        response.attachments[0].ends_with("limits.csv"),
+        "got {printed}"
+    );
+    assert!(
+        response
+            .answers
+            .iter()
+            .all(|answer| answer.attachments.is_empty()),
+        "and no Answer carries it, got {printed}",
+    );
+}
+
 #[test]
 fn an_unanswered_set_is_refused_rather_than_waited_on() {
     let tmp = tempfile::tempdir().unwrap();

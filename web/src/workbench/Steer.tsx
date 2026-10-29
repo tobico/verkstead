@@ -507,7 +507,7 @@ function briefStands(conversation: ConversationView): boolean {
 /// rather than saved a press at a time: the card writes each of them as it is
 /// touched because a drafting conversation is there to be edited, and this is
 /// part of one submit that either lands whole or does not happen.
-type Addition = {
+export type Addition = {
   mode: CompanionMode;
   /// The branch its checkout comes off, as the picker writes it: the empty
   /// string is the rule — that repo's default branch as origin holds it.
@@ -523,7 +523,7 @@ type Addition = {
 /// The defaults the setup card's *Add companion repo* uses, because they are the
 /// same defaults for the same reason — the least a human has to say to put a
 /// repository in.
-const PLAINEST: Addition = { mode: "ReadOnly", base: RULE, branch: "" };
+export const PLAINEST: Addition = { mode: "ReadOnly", base: RULE, branch: "" };
 
 /// And what one row of the set already there is holding while it is opened up.
 ///
@@ -844,12 +844,6 @@ function Adding(props: {
   keeper: Keeping;
   disabled: boolean;
 }): JSX.Element {
-  /// What is in the branch field: what has been typed, or the conversation's
-  /// own branch, which is what *mirroring* comes to. Drawn filled in rather than
-  /// empty, exactly as the setup card's is, so what the human reads is what they
-  /// will get.
-  const branch = () => props.addition?.branch || chosen(props.conversation);
-
   return (
     <li class={styles.steerAdd}>
       {/* Pressed as a row — see `rowPress`, and the press a label stops
@@ -876,67 +870,117 @@ function Adding(props: {
 
       <Show when={props.addition}>
         {(addition) => (
-          <div class={styles.steerAddConfig}>
-            <Toggle
-              label={<>Read-write</>}
-              on={addition().mode === "ReadWrite"}
-              disabled={props.disabled}
-              flip={(on) => {
-                props.settle({
-                  ...addition(),
-                  mode: on ? "ReadWrite" : "ReadOnly",
-                  // A branch name left behind on a row flipped back to
-                  // read-only would be a name for a branch nobody will cut: a
-                  // read-only checkout is detached and holds none.
-                  branch: on ? addition().branch : "",
-                });
-                props.keeper.keep();
-              }}
-            />
-
-            <BasePicker
-              id={`steer-companion-${props.repo.id}-base`}
-              label={<>Base for {props.repo.name}</>}
-              repo={props.repo}
-              chosen={addition().base}
-              disabled={props.disabled}
-              pick={(picked) => {
-                props.settle({ ...addition(), base: picked ?? RULE });
-                props.keeper.keep();
-              }}
-            />
-
-            {/* Only where there is a branch to name. A read-only companion is
-                checked out detached and takes no name in somebody else's
-                repository. */}
-            <Show when={addition().mode === "ReadWrite"}>
-              <div class={styles.steerAddBranch}>
-                <label for={`steer-companion-${props.repo.id}-branch`}>
-                  Branch in {props.repo.name}
-                </label>
-                <input
-                  id={`steer-companion-${props.repo.id}-branch`}
-                  type="text"
-                  value={branch()}
-                  disabled={props.disabled}
-                  onInput={(event) => {
-                    props.settle({
-                      ...addition(),
-                      branch: event.currentTarget.value,
-                    });
-                    props.keeper.settle();
-                  }}
-                  onBlur={() => props.keeper.keep()}
-                />
-                <Note class={styles.fieldNote}>
-                  Cleared, it follows this conversation's own branch.
-                </Note>
-              </div>
-            </Show>
-          </div>
+          <CompanionFields
+            class={styles.steerAddConfig}
+            id={`steer-companion-${props.repo.id}`}
+            repo={props.repo}
+            addition={addition()}
+            mirroring={chosen(props.conversation)}
+            disabled={props.disabled}
+            settle={props.settle}
+            pressed={() => props.keeper.keep()}
+            typed={() => props.keeper.settle()}
+          />
         )}
       </Show>
     </li>
+  );
+}
+
+/// What the setup card's row asks about a repository going in: how far in, off
+/// which branch, and under what name.
+///
+/// Drawn under a ticked row of the steer's section, and on the card a question
+/// set's Attach menu opens for a repo (ADR-0028) — the same question asked at
+/// the two moments a running conversation can take one. Opening a read-only
+/// companion up asks it with the mode fixed: read-write is the whole of what is
+/// being asked for, so there is no switch.
+export function CompanionFields(props: {
+  /// What the controls' ids start with, one per repo on a panel that may draw
+  /// several of these.
+  id: string;
+  repo: RepoEntry;
+  addition: Addition;
+  /// What a cleared branch name comes to: the conversation's own branch, which
+  /// is what the field is filled in with.
+  mirroring: string;
+  /// Opening a companion up rather than adding one: read-write, with no switch.
+  opening?: boolean;
+  disabled: boolean;
+  settle: (addition: Addition) => void;
+  /// A press made — the switch, the base, or leaving the branch field.
+  pressed?: () => void;
+  /// A key typed in the branch field.
+  typed?: () => void;
+  class?: string;
+}): JSX.Element {
+  /// What is in the branch field: what has been typed, or the conversation's
+  /// own branch, which is what *mirroring* comes to. Drawn filled in rather than
+  /// empty, exactly as the setup card's is, so what the human reads is what they
+  /// will get.
+  const branch = () => props.addition.branch || props.mirroring;
+
+  const writing = () => props.opening || props.addition.mode === "ReadWrite";
+
+  return (
+    <div class={props.class}>
+      <Show when={!props.opening}>
+        <Toggle
+          label={<>Read-write</>}
+          on={props.addition.mode === "ReadWrite"}
+          disabled={props.disabled}
+          flip={(on) => {
+            props.settle({
+              ...props.addition,
+              mode: on ? "ReadWrite" : "ReadOnly",
+              // A branch name left behind on a row flipped back to read-only
+              // would be a name for a branch nobody will cut: a read-only
+              // checkout is detached and holds none.
+              branch: on ? props.addition.branch : "",
+            });
+            props.pressed?.();
+          }}
+        />
+      </Show>
+
+      <BasePicker
+        id={`${props.id}-base`}
+        label={<>Base for {props.repo.name}</>}
+        repo={props.repo}
+        chosen={props.addition.base}
+        disabled={props.disabled}
+        pick={(picked) => {
+          props.settle({ ...props.addition, base: picked ?? RULE });
+          props.pressed?.();
+        }}
+      />
+
+      {/* Only where there is a branch to name. A read-only companion is
+          checked out detached and takes no name in somebody else's
+          repository. */}
+      <Show when={writing()}>
+        <div class={styles.steerAddBranch}>
+          <label for={`${props.id}-branch`}>Branch in {props.repo.name}</label>
+          <input
+            id={`${props.id}-branch`}
+            type="text"
+            value={branch()}
+            disabled={props.disabled}
+            onInput={(event) => {
+              props.settle({
+                ...props.addition,
+                branch: event.currentTarget.value,
+              });
+              props.typed?.();
+            }}
+            onBlur={() => props.pressed?.()}
+          />
+          <Note class={styles.fieldNote}>
+            Cleared, it follows this conversation's own branch.
+          </Note>
+        </div>
+      </Show>
+    </div>
   );
 }
 

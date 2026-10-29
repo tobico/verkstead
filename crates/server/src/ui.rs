@@ -34,29 +34,30 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio_util::io::ReaderStream;
 use verkstead_render::{
-    Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, AtOnceView, Attached,
-    AttachmentRemoved, Author, AuthorEdit, AuthorEdited, AuthorSaved, BaseBranchChoice,
-    BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView, ClonableRepo, Cloning,
-    CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
-    ComponentsView, Confirming, ConflictResolution, ConversationArchived, ConversationClosed,
-    ConversationEntry, ConversationMove, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Creation, Cursor, DevicesView, DiskUse, DroppedRow,
-    Eviction, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
-    FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
-    LanguageCleared, LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer,
-    McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewAnnex, NewCompanion,
-    NewConversation, NewJoin, NewRank, OpenTerminal, PairingView, Parked, PendingSteerView,
-    Permitting, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
-    Resumed, RoleChoice, RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress,
-    ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    ShowArchived, ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
-    SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
-    TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
-    TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    AdditionMade, AdditionRemoved, Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice,
+    AtOnceView, Attached, AttachmentRemoved, Author, AuthorEdit, AuthorEdited, AuthorSaved,
+    BaseBranchChoice, BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView,
+    ClonableRepo, Cloning, CommentedOn, CompanionAdded, CompanionBaseRecorded,
+    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
+    CompanionView, CompileCaching, ComponentsView, Confirming, ConflictResolution,
+    ConversationArchived, ConversationClosed, ConversationEntry, ConversationMove,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
+    Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView,
+    FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
+    FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
+    IgnoredCommentsEdit, InstallPress, LanguageCleared, LanguageEdit, LanguageView, Lifecycle,
+    Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption,
+    NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank, OpenTerminal, PairingView, Parked,
+    PendingSteerView, Permitting, Picking, Process, ProcessChoice, ProcessPicked, ProfileChoice,
+    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, Running,
+    RunningOn, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, SizeRefused, Standing,
+    SteerCancelled, SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission,
+    StoreView, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
+    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo, Transferring, UnreadEntry,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -82,8 +83,8 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Under the Set rather than under its Conversation, because the sheet
         // is a page about one Set: which Conversation's directory the file
         // lands in is read off the Set, the way everything else on that page
-        // is. The Answer is in the path too, there being one paperclip per
-        // Question and nothing set-wide to put a file on.
+        // is. The Answer is in the path too, there being one Attach menu per
+        // Question — and the comment box's file, below, has none.
         //
         // One request per file, the raw bytes as the body and the name in the
         // path — and a body limit of its own over the router's default, exactly
@@ -96,9 +97,23 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // its label: two files on one Answer may share a name, and neither of
         // them is a key. Under the Set rather than under the Answer for that
         // reason as well — the id is the whole of what says which file this is.
+        // And one put at the comment box, on the Set as a whole: no label in
+        // the path, because it answers no Question (ADR-0028).
+        .route(
+            "/api/ui/sets/{id}/attachments/{name}",
+            post(attach_to_set).layer(DefaultBodyLimit::max(crate::attachments::MAX_BYTES + 1)),
+        )
         .route(
             "/api/ui/sets/{id}/attachments/{attachment}/remove",
             post(detach_from_answer),
+        )
+        // And what the same menus pick to add to the work, recorded on the Set
+        // under the Question it was picked at — or none, at the comment box —
+        // and taken off again by the row's own id (ADR-0028).
+        .route("/api/ui/sets/{id}/additions", post(add_to_set))
+        .route(
+            "/api/ui/sets/{id}/additions/{addition}/remove",
+            post(remove_from_set),
         )
         .route("/api/ui/repos", get(repos).post(register_repo))
         // And making one, which is the other way a Repo arrives. Its own path
@@ -959,12 +974,8 @@ pub(crate) async fn set_reading(
     // ordinary Sets, and what makes one either is where the work stands while it
     // is being answered. A Conversation that cannot be read draws no option,
     // which is what every state but those two gets anyway.
-    let ending = match store::state(&state.pool, conversation).await {
-        Ok(state) => match state {
-            Some(store::Lifecycle::FollowUp) => Some(verkstead_render::Ending::FollowUp),
-            Some(store::Lifecycle::Investigating) => Some(verkstead_render::Ending::Investigation),
-            _ => None,
-        },
+    let lifecycle = match store::state(&state.pool, conversation).await {
+        Ok(state) => state,
         Err(error) => {
             tracing::error!(
                 error = ?error,
@@ -973,6 +984,11 @@ pub(crate) async fn set_reading(
             );
             None
         }
+    };
+    let ending = match lifecycle {
+        Some(store::Lifecycle::FollowUp) => Some(verkstead_render::Ending::FollowUp),
+        Some(store::Lifecycle::Investigating) => Some(verkstead_render::Ending::Investigation),
+        _ => None,
     };
 
     // And the files the human put on its Answers, which the sheet draws under
@@ -984,6 +1000,41 @@ pub(crate) async fn set_reading(
         Ok(attachments) => attachments,
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "reading the files put on a Set failed");
+            return Err(unavailable("The question set couldn't be read."));
+        }
+    };
+
+    // And what was picked on it to add to the work, which the sheet draws as
+    // chips beside those files and the record draws under its Answers — read
+    // here for the files' reason. With the servers the Conversation has
+    // already, which the sheet's menus leave out.
+    let additions = match crate::answer_additions::picked(state, id).await {
+        Ok(additions) => additions,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading what was picked on a Set failed");
+            return Err(unavailable("The question set couldn't be read."));
+        }
+    };
+    // What a lock, or the Conversation closing, left unapplied is struck on the
+    // record: nothing is ever going to put it on.
+    let additions = match (&standing, lifecycle) {
+        (verkstead_render::Standing::LockedUnanswered(_), _)
+        | (verkstead_render::Standing::Waiting(_), Some(store::Lifecycle::Closed)) => {
+            crate::answer_additions::unapplied(additions)
+        }
+        _ => additions,
+    };
+    let servers = match store::mcp_servers(&state.pool, conversation).await {
+        Ok(servers) => servers,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading a Set's Conversation's servers failed");
+            return Err(unavailable("The question set couldn't be read."));
+        }
+    };
+    let addable = match crate::answer_additions::addable(state, conversation).await {
+        Ok(addable) => addable,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading what a Set's sheet could add failed");
             return Err(unavailable("The question set couldn't be read."));
         }
     };
@@ -1003,6 +1054,9 @@ pub(crate) async fn set_reading(
             standing,
             ending,
             attachments,
+            additions,
+            servers,
+            addable,
             inlining
                 .as_ref()
                 .map(|inlining| inlining as &dyn verkstead_render::PictureReader),
@@ -1067,14 +1121,44 @@ async fn submit_response(
         return Json(Submitted::NoSuchSet).into_response();
     };
 
-    let submission =
-        match store::submit_response(&state.pool, &state.settlements, id, &response).await {
-            Ok(submission) => submission,
-            Err(error) => {
-                tracing::error!(error = ?error, set_id = id, "taking a Response failed");
-                return unavailable("The response couldn't be taken.");
-            }
-        };
+    // Every question before anything is stored: a server gone from the settings
+    // since it was picked refuses the Submit by name. See
+    // [`crate::answer_additions::undeclared`].
+    match crate::answer_additions::undeclared(&state, id).await {
+        Ok(None) => {}
+        Ok(Some(name)) => return Json(Submitted::ServerGone(name)).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading what was picked on a Set failed");
+            return unavailable("The response couldn't be taken.");
+        }
+    }
+
+    // And every git question a picked companion turns on, still before
+    // anything is stored or made. See [`crate::answer_additions::readied`].
+    let alongside = match crate::answer_additions::readied(&state, id).await {
+        Ok(crate::answer_additions::Readied::Ready(alongside)) => alongside,
+        Ok(crate::answer_additions::Readied::RepoGone(name)) => {
+            return Json(Submitted::RepoGone(name)).into_response();
+        }
+        Ok(crate::answer_additions::Readied::Refused { repo, why }) => {
+            return Json(Submitted::Companion { repo, why }).into_response();
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "asking about a Set's companions failed");
+            return unavailable("The response couldn't be taken.");
+        }
+    };
+
+    let submission = match crate::answer_additions::submit(&state, id, alongside, &response).await {
+        Ok(crate::answer_additions::Answering::Stored(submission)) => submission,
+        Ok(crate::answer_additions::Answering::Refused { repo, why }) => {
+            return Json(Submitted::Companion { repo, why }).into_response();
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "taking a Response failed");
+            return unavailable("The response couldn't be taken.");
+        }
+    };
 
     Json(match submission {
         store::Submission::Accepted(taken) => {
@@ -2578,6 +2662,28 @@ pub(crate) async fn conversation_view(
     // A read that fails leaves the steers to draw without their Pairing rather
     // than taking the Conversation down with it: everything else about the
     // record is in hand, and a pane short one line is better than no pane.
+    // And what each Set's answer put on the Conversation, read once for the
+    // lot of them and drawn as a line under each Set's Event. A read that
+    // fails leaves the lines off rather than the Timeline, for the steers'
+    // reason below.
+    let mut set_added = match crate::answer_additions::on_timeline(state, id).await {
+        Ok(added) => added,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what a Set added failed");
+            HashMap::new()
+        }
+    };
+
+    // And which of them carried the session waiting on them on, said at the end
+    // of the same line.
+    let carried = match store::carried_sets(&state.pool, id).await {
+        Ok(carried) => carried,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading which Sets carried a session on failed");
+            std::collections::HashSet::new()
+        }
+    };
+
     let steer_pairings = match crate::profiles::keyed(state, steered(&timeline)).await {
         Ok(pairings) => pairings,
         Err(error) => {
@@ -2728,6 +2834,8 @@ pub(crate) async fn conversation_view(
                                 asked.set_id,
                                 set,
                                 standing,
+                                set_added.remove(&asked.set_id).unwrap_or_default(),
+                                carried.contains(&asked.set_id),
                             )
                         }
                         // A row of its own rather than an omission: the ask
@@ -4995,10 +5103,30 @@ async fn attach_to_answer(
         return Json(AnswerAttached::NoSuchSet).into_response();
     };
 
-    match crate::answer_files::attach(&state, id, &label, &name, &body).await {
+    match crate::answer_files::attach(&state, id, Some(&label), &name, &body).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, label = %label, name = %name, "putting a file on an Answer failed");
+            unavailable("The file couldn't be attached.")
+        }
+    }
+}
+
+/// `POST /api/ui/sets/{id}/attachments/{name}` — put a file on a Set as a
+/// whole, at its comment box: the same upload under no Question (ADR-0028).
+async fn attach_to_set(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+    body: axum::body::Bytes,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(AnswerAttached::NoSuchSet).into_response();
+    };
+
+    match crate::answer_files::attach(&state, id, None, &name, &body).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, name = %name, "putting a file on a Question Set failed");
             unavailable("The file couldn't be attached.")
         }
     }
@@ -5027,6 +5155,51 @@ async fn detach_from_answer(
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, attachment, "removing a file from an Answer failed");
             unavailable("The file couldn't be removed.")
+        }
+    }
+}
+
+/// `POST /api/ui/sets/{id}/additions` — record a pick from one of the sheet's
+/// Attach menus on the Set, pending — see [`crate::answer_additions`].
+async fn add_to_set(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(picking): Json<Picking>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(AdditionMade::NoSuchSet).into_response();
+    };
+
+    match crate::answer_additions::add(&state, id, picking.label.as_deref(), &picking.pick).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "adding to a Question Set failed");
+            unavailable("That couldn't be added.")
+        }
+    }
+}
+
+/// `POST /api/ui/sets/{id}/additions/{addition}/remove` — and take one off
+/// again.
+async fn remove_from_set(
+    State(state): State<AppState>,
+    Path((id, addition)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(AdditionRemoved::NoSuchSet).into_response();
+    };
+
+    // An id that is not a number names nothing, which is the state the × asked
+    // for — the way a file's removal reads one.
+    let Ok(addition) = addition.parse::<i64>() else {
+        return Json(AdditionRemoved::Removed).into_response();
+    };
+
+    match crate::answer_additions::remove(&state, id, addition).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, addition, "taking an addition off a Question Set failed");
+            unavailable("That couldn't be removed.")
         }
     }
 }
@@ -6185,7 +6358,7 @@ fn moved_profiles(state: &AppState, moved: bool) {
 /// there is not something a database knows, and a companion deleted by hand
 /// should read as a Conversation with a problem rather than as an obscure
 /// failure from whatever next works in it.
-async fn companion(
+pub(crate) async fn companion(
     companion: store::Companion,
     authors: &[crate::settings::Author],
 ) -> Result<CompanionView, anyhow::Error> {

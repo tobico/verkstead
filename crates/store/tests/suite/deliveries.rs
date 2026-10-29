@@ -89,10 +89,13 @@ fn answering() -> Response {
             free_text: Some("In process for now.".to_owned()),
             unanswered: false,
             attachments: Vec::new(),
+            added: Vec::new(),
         }],
         comment: None,
         direction: None,
         nothing_else: false,
+        added: Vec::new(),
+        attachments: Vec::new(),
     }
 }
 
