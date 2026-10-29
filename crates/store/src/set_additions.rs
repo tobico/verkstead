@@ -474,7 +474,9 @@ pub async fn take_off_set(pool: &SqlitePool, set_id: i64, id: i64) -> Result<Tak
 /// is where each went, and is empty for a Conversation with nothing checked out
 /// yet, whose grill start makes them. Each applied row of a read-write
 /// companion keeps the branch it was cut, mirroring resolved, so the record
-/// says what the Timeline and the agent are told.
+/// says what the Timeline and the agent are told. And an opened-up companion
+/// takes the base its card named, where it named one, because that is where
+/// its branch was cut from.
 pub(crate) async fn apply(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     set_id: i64,
@@ -519,6 +521,10 @@ pub(crate) async fn apply(
     .await
     .with_context(|| format!("putting the Repos added on Question Set {set_id} alongside"))?;
 
+    // And the base the card named, where it named one: the branch was cut
+    // from there, so it is what the stages after this one cut it from and what
+    // the sweep tells the work's commits apart by. None keeps the base the
+    // companion was first checked out off, which is what it was cut from then.
     sqlx::query(
         "UPDATE companions
          SET mode = ?, branch = COALESCE((SELECT branch FROM set_additions
@@ -526,12 +532,19 @@ pub(crate) async fn apply(
                                             AND set_additions.kind = 'opened-up'
                                             AND set_additions.state = 'pending'
                                             AND set_additions.repo_id = companions.repo_id),
-                                         '')
+                                         ''),
+             base_ref = COALESCE((SELECT base FROM set_additions
+                                  WHERE set_additions.set_id = ?
+                                    AND set_additions.kind = 'opened-up'
+                                    AND set_additions.state = 'pending'
+                                    AND set_additions.repo_id = companions.repo_id),
+                                 base_ref)
          WHERE (conversation_id, repo_id) IN
                (SELECT conversation_id, repo_id FROM set_additions
                 WHERE set_id = ? AND kind = 'opened-up' AND state = 'pending')",
     )
     .bind(CompanionMode::ReadWrite.stored())
+    .bind(set_id)
     .bind(set_id)
     .bind(set_id)
     .execute(&mut **tx)
@@ -1189,6 +1202,88 @@ mod tests {
             "the Set's record names the branch mirroring cut",
         );
         assert_eq!(read[1].state, AdditionState::Applied);
+    }
+
+    /// An opened-up companion keeps the base the card named, which is what its
+    /// branch was cut from, and the base it had where the card named none.
+    #[tokio::test]
+    async fn answering_records_the_base_an_opened_up_companion_was_cut_from() {
+        let (_dir, pool, conversation, set) = waiting().await;
+        let mut repos = Vec::new();
+        for name in ["docs", "infra"] {
+            let path = std::path::PathBuf::from(format!("/srv/{name}"));
+            let id = crate::register_repo(&pool, &path, name, "main")
+                .await
+                .unwrap()
+                .unwrap()
+                .id;
+            crate::add_companion(&pool, conversation, id).await.unwrap();
+            assert_eq!(
+                crate::configure_companion(
+                    &pool,
+                    conversation,
+                    id,
+                    crate::Change::Base(Some("release")),
+                )
+                .await
+                .unwrap(),
+                crate::Configured::Saved
+            );
+            repos.push(id);
+        }
+
+        add_to_set(
+            &pool,
+            conversation,
+            set,
+            Some("Q1"),
+            &Addition::OpenedUp {
+                repo_id: repos[0],
+                base: Some("develop".to_owned()),
+                branch: None,
+            },
+        )
+        .await
+        .unwrap();
+        add_to_set(
+            &pool,
+            conversation,
+            set,
+            Some("Q1"),
+            &Addition::OpenedUp {
+                repo_id: repos[1],
+                base: None,
+                branch: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        crate::insert_response(&pool, set, &answer())
+            .await
+            .unwrap()
+            .unwrap();
+
+        let companions = crate::companions(&pool, conversation).await.unwrap();
+        let base = |repo: i64| {
+            companions
+                .iter()
+                .find(|one| one.repo.id == repo)
+                .unwrap()
+                .base_ref
+                .clone()
+        };
+
+        assert_eq!(
+            base(repos[0]).as_deref(),
+            Some("develop"),
+            "the base the card named is the one on the record"
+        );
+        assert_eq!(
+            base(repos[1]).as_deref(),
+            Some("release"),
+            "and one that named none keeps the base it had"
+        );
     }
 
     /// A server the Conversation holds already is the state the pick asked for.
