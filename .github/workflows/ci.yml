@@ -41,7 +41,15 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      # Keyed on the root `Cargo.toml` as well as the action's own key, which
+      # hashes the lockfile and the members' manifests but not the root, where
+      # `[profile.dev]` is. Without it a profile change keeps the key, so every
+      # run restores dependencies built the old way, rebuilds them all, and
+      # never saves over them, because the action saves only when its key
+      # misses. Every job's cache below is keyed the same way.
       - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: ${{ hashFiles('Cargo.toml') }}
 
       # The sandbox suite runs a real `bwrap` rather than a stand-in — what it
       # checks is which paths come in writable, read-only and absent, and there
@@ -174,10 +182,10 @@ jobs:
 
       # A key of its own: this job builds one test target of one crate, and a
       # cache shared with the `Rust` job would have the two evicting each
-      # other.
+      # other. And on the root `Cargo.toml`, as the `Rust` job's says why.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          key: package-stores
+          key: package-stores-${{ hashFiles('Cargo.toml') }}
 
       # The same bubblewrap the `Rust` job installs, and for the same reason —
       # see the comment there for why the sysctl goes off as well. Every proof
@@ -485,10 +493,11 @@ jobs:
         uses: dtolnay/rust-toolchain@1.95.0
 
       # A key of its own: this is an Apple dependency tree, and one shared with
-      # the Linux job would have the two evicting each other.
+      # the Linux job would have the two evicting each other. And on the root
+      # `Cargo.toml`, as the `Rust` job's says why.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          key: macos-sandbox
+          key: macos-sandbox-${{ hashFiles('Cargo.toml') }}
 
       # No `web/dist` is fetched and none is needed: the embed is
       # `allow_missing`, so the server compiles without the viewer — and what
@@ -917,15 +926,16 @@ jobs:
       # and one shared with either of the others would have them evicting each
       # other. Every leg shares it, because they all build the same tree.
       #
-      # **The key names the build profile, because the action's own key does
+      # **Keyed on the root `Cargo.toml`, because the action's own key is
       # not.** It hashes the lockfile and the members' manifests, but not the
       # workspace's root `Cargo.toml`, where `[profile.dev]` is. So when the
       # build went to line tables, the key stayed the same, and every leg
       # restored dependencies built with full debug info and rebuilt all 302
       # of them. It never saved over them either, because the action saves only
-      # when its key misses. A change to `[profile.dev]` changes this key too.
-      # Ten legs racing to save one key is harmless: the first wins, and the
-      # rest warn that it already exists.
+      # when its key misses. With the root's hash in the key, a change to
+      # `[profile.dev]` is a new key of its own accord. Ten legs racing to save
+      # one key is harmless: the first wins, and the rest warn that it already
+      # exists.
       #
       # Only the dependencies are kept. The workspace's own crates were kept as
       # well for one run, but did not pay: the checkout gives every source file
@@ -933,7 +943,7 @@ jobs:
       # ledger above has the figures.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          key: windows-line-tables
+          key: windows-${{ hashFiles('Cargo.toml') }}
 
       # The one thing the sessions suite needs that the runner image has not
       # got, and it is here to prove a *negative*: no session on this platform
