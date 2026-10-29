@@ -169,6 +169,13 @@ async fn what_a_session_printed_arrives_and_then_the_reading_ends() {
 /// is what says whether a process id is anybody — because what is being tested
 /// is that the promise holds outside this process.
 ///
+/// **Not one cmdlet in the probe**, the rule `sessions_windows.rs`'s stand-ins
+/// are written by: the first cmdlet a runner looks up sends PowerShell through
+/// its modules for minutes, and this probe printed nothing inside [`PATIENCE`]
+/// on a slow one (run 40809146920). So the framework does what `Start-Process`,
+/// `Write-Output` and `Start-Sleep` did — `Process.Start`, which shell-executes
+/// the way `Start-Process` does, `[Console]::Out` and `Thread.Sleep`.
+///
 /// [`Child`]: verkstead_server::terminal::Child
 #[tokio::test]
 async fn a_child_that_is_dropped_takes_what_it_started_with_it() {
@@ -181,9 +188,10 @@ async fn a_child_that_is_dropped_takes_what_it_started_with_it() {
         .arg("-NonInteractive")
         .arg("-Command")
         .arg(
-            "$started = Start-Process -FilePath powershell.exe \
-             -ArgumentList '-NoProfile','-Command','Start-Sleep 600' -PassThru; \
-             Write-Output ('grandchild ' + $started.Id); Start-Sleep 600",
+            "$started = [System.Diagnostics.Process]::Start('powershell.exe', \
+             '-NoProfile -Command [System.Threading.Thread]::Sleep(600000)'); \
+             [Console]::Out.WriteLine('grandchild ' + $started.Id); \
+             [System.Threading.Thread]::Sleep(600000)",
         );
 
     let child = terminal.spawn(&probe).expect("a shell to run on it");
