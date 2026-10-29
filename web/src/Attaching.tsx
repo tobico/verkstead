@@ -239,11 +239,6 @@ export function attaching(what: {
   /// which of them has is the caller's to know, and a card left hanging under
   /// the trigger after a press is a list the human has finished with.
   offering?: (shut: () => void) => JSX.Element;
-
-  /// Whether the menu's first row, *Attach file…*, is drawn at all. True unless
-  /// said otherwise: the one menu without it is the answer sheet's comment box,
-  /// which takes no file of its own.
-  filing?: boolean;
 }): Attaching {
   const offered = () => what.offered?.() ?? true;
 
@@ -312,7 +307,6 @@ export function attaching(what: {
         add={what.add}
         class={props.class}
         offering={what.offering}
-        filing={what.filing ?? true}
         label={what.onto ? `Attach to ${what.onto}` : "Attach"}
       />
     );
@@ -529,9 +523,6 @@ function AttachMenu(props: {
   offering: (shut: () => void) => JSX.Element;
   class?: string;
 
-  /// Whether *Attach file…* is drawn — see `filing` in [`attaching`].
-  filing: boolean;
-
   /// What the trigger and its drop are called: *Attach* where there is one on
   /// the page, and named for what it is under where there are several.
   label: string;
@@ -553,31 +544,27 @@ function AttachMenu(props: {
       >
         {() => (
           <>
-            <Show when={props.filing}>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  // The menu first: the picker is the platform's own window and
-                  // what opens it is a press that has done its work, so the
-                  // card it was pressed in has no business still hanging under
-                  // the trigger behind it.
-                  shut();
-                  picker.click();
-                }}
-              >
-                Attach file…
-              </button>
-            </Show>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                // The menu first: the picker is the platform's own window and
+                // what opens it is a press that has done its work, so the card
+                // it was pressed in has no business still hanging under the
+                // trigger behind it.
+                shut();
+                picker.click();
+              }}
+            >
+              Attach file…
+            </button>
 
             {props.offering(shut)}
           </>
         )}
       </Menu>
 
-      <Show when={props.filing}>
-        <Picker ref={(input) => (picker = input)} add={props.add} />
-      </Show>
+      <Picker ref={(input) => (picker = input)} add={props.add} />
     </>
   );
 }
