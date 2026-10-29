@@ -19,21 +19,50 @@
 //! of a list waiting to be sent. The attaching itself is the one piece the
 //! composers share — see [`Attaching`](../Attaching.tsx) — and what is here is
 //! the one thing that differs: where a chosen file goes.
+//!
+//! **And the control is the composer's plus-menu**, at every Question and at
+//! the comment box alike: *Attach file…* first — at the comment box a file is
+//! on the Set as a whole, answering nothing — then the declared MCP servers the Conversation does not have yet, and *Add
+//! a server…*. A server picked there is recorded on the Set the moment it is
+//! picked, under the Question it was picked at or under none at the comment
+//! box, and drawn as a chip beside that Answer's files — read back off the Set
+//! like them, so it survives a reload and shows on another device. Nothing
+//! reaches the Conversation until the Set is answered (ADR-0028).
+//!
+//! **And past the servers, the repos and the devices**: each registered repo
+//! the work could have alongside it, through the steer's own fields on a card,
+//! each read-only companion to open up through the same card, and each device
+//! of the cluster the work could be permitted to move to, picked at once.
+//! Recorded and drawn exactly as a server is.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  createUniqueId,
+} from "solid-js";
 import { createStore } from "solid-js/store";
 
 import app from "../App.module.css";
-import { attaching, type Shown } from "../Attaching";
+import { attaching, type Chip, type Shown } from "../Attaching";
 import { Modal } from "../Modal";
 import {
+  addToSet,
   attachToAnswer,
+  attachToSet,
   removeAnswerAttachment,
+  removeFromSet,
   submitResponse,
 } from "../api/client";
 import type {
+  AddableView,
+  AdditionMade,
+  AdditionRemoved,
+  AdditionView,
   AnswerAttached,
   AnswerAttachmentRemoved,
   AskView,
@@ -41,9 +70,12 @@ import type {
   Direction,
   Ending,
   OptionView,
+  Pick as Picked,
   ProposalView,
   QuestionView,
+  RepoEntry,
   Response as Decided,
+  SteerCompanionRefusal,
   Submitted,
 } from "../api/types";
 import {
@@ -54,6 +86,10 @@ import {
 } from "../directions";
 import { ErrorLine, Note } from "../notices";
 import { keyOf, useDevice } from "../reaching";
+import { addingServer } from "../workbench/AddServer";
+import { otherAuthor } from "../workbench/Timeline";
+import { addingRepo } from "./AddingRepo";
+import { ServerRows } from "../workbench/Composer";
 import { rowPress } from "../rows";
 import styles from "./Answering.module.css";
 import { AskText } from "./AskText";
@@ -114,6 +150,17 @@ export function Answering(props: {
   /// answered by the Set being read again.
   attachments: AttachmentView[];
 
+  /// What has been picked on this Set to add to the work, each under the
+  /// Question it was picked at or under none — the record, like the files.
+  additions: AdditionView[];
+
+  /// The MCP servers the Conversation has already, which the menus leave out.
+  servers: string[];
+
+  /// And the rest of what the menus offer: Repos to add alongside, read-only
+  /// companions to open up, and devices the work may be transferred to.
+  addable: AddableView;
+
   /// What the page around the sheet does once an answer is sent, where it does
   /// anything: the workbench puts its Timeline back into advancing, so the
   /// next landing carries the selection on from the Set just answered. The
@@ -170,6 +217,73 @@ export function Answering(props: {
     attached: () => props.attachments,
   });
 
+  // And what is picked at the same menus to add to the work, held once for the
+  // sheet the same way: the chips each Answer and the comment box draw, the
+  // presses that put one on and take it off, and what came back refused.
+  const additions = picking({
+    set: () => props.id,
+    picked: () => props.additions,
+    mirroring: () => props.addable.branch,
+  });
+
+  // The cards *Add a server…* and a repo's row open, one each for the whole
+  // sheet and drawn beside it — the menu's rows go with the press that opened
+  // it. Which menu one was opened from is held here, so what it confirms is
+  // picked there.
+  let openedAt: string | null = null;
+  const declaring = addingServer((name) =>
+    additions.pick(openedAt, { Server: { name } }, name),
+  );
+  const joining = addingRepo(
+    (pick) => additions.pick(openedAt, pick, "That repo"),
+    () => props.addable.branch,
+  );
+
+  /// The rows an Attach menu holds under *Attach file…*, at `label` or at the
+  /// comment box where `null`: the servers the Conversation does not have and
+  /// this Set has not had picked, and *Add a server…*; then the repos and the
+  /// devices, past what this Set has had picked already.
+  const offering = (label: string | null) => (shut: () => void) => (
+    <>
+      <ServerRows
+        attached={[...props.servers, ...additions.servers()]}
+        attach={(name) => {
+          shut();
+          additions.pick(label, { Server: { name } }, name);
+        }}
+        add={() => {
+          shut();
+          openedAt = label;
+          declaring.open();
+        }}
+      />
+      <AddableRows
+        addable={props.addable}
+        repos={additions.repos()}
+        devices={additions.devices()}
+        join={(repo, opening) => {
+          shut();
+          openedAt = label;
+          joining.open(repo, opening);
+        }}
+        permit={(device, name) => {
+          shut();
+          additions.pick(label, { Device: { device } }, name);
+        }}
+      />
+    </>
+  );
+
+  // The comment box's own piece: the files put on the Set as a whole, which
+  // answer no Question, and the chips of what was picked at its menu.
+  const comment = attaching({
+    shown: () => files.shown(null),
+    add: (chosen) => files.send(null, chosen),
+    onto: "the question set",
+    chips: () => additions.chips(null),
+    offering: offering(null),
+  });
+
   /// What the sheet says right now, as a Response.
   ///
   /// The labels a file was put on go with it: a Question with one on it and
@@ -192,9 +306,10 @@ export function Answering(props: {
       submitResponse(device(), props.id, sending),
     onSuccess: (outcome: Submitted) => {
       if (typeof outcome !== "string") {
-        // Rejected by the grammar. The page builds Responses that resolve the
-        // Set, so that is a bug here rather than anything the human did — and
-        // their draft stands, because it is the only copy of what they wrote.
+        // Rejected by the grammar, or for a server picked on it that has gone
+        // from the settings since. The first is a bug here and the second the
+        // human's to put right with the chip's × — either way their draft
+        // stands, because it is the only copy of what they wrote.
         return;
       }
 
@@ -287,6 +402,8 @@ export function Answering(props: {
                   ask={question.ask}
                   fields={fields(question.ask.name)}
                   files={files}
+                  additions={additions}
+                  offering={offering(question.ask.name)}
                 />
               </Show>
               {/* Sub-questions get no anchor of their own: one scrolls into
@@ -300,6 +417,8 @@ export function Answering(props: {
                           ask={subquestion}
                           fields={fields(subquestion.name)}
                           files={files}
+                          additions={additions}
+                          offering={offering(subquestion.name)}
                         />
                       </li>
                     )}
@@ -333,18 +452,46 @@ export function Answering(props: {
           without one still draws the card, so the box is in the same place
           either way. */}
       <Postscript html={props.postscript}>
-        <section class={page.setComment}>
-          <div class={app.grow} data-value={sheet.comment}>
-            <textarea
-              id="set-comment"
-              name="set-comment"
-              rows="1"
-              placeholder="Other comments"
-              aria-label="Other comments"
-              value={sheet.comment}
-              onInput={(event) => setSheet("comment", event.currentTarget.value)}
-            />
+        <section
+          class={page.setComment}
+          classList={{ [styles.taking!]: comment.over() }}
+          {...comment.dropping}
+        >
+          <div class={styles.writing}>
+            <div
+              class={`${app.grow} ${styles.field}`}
+              data-value={sheet.comment}
+            >
+              <textarea
+                id="set-comment"
+                name="set-comment"
+                rows="1"
+                placeholder="Other comments"
+                aria-label="Other comments"
+                value={sheet.comment}
+                onInput={(event) =>
+                  setSheet("comment", event.currentTarget.value)
+                }
+              />
+            </div>
+            <comment.Clip class={styles.attach} />
           </div>
+          <comment.Pills class={styles.attachments} />
+          <For each={files.refusals(null)}>
+            {(said) => (
+              <ErrorLine class={styles.attachFailure}>{said}</ErrorLine>
+            )}
+          </For>
+          <Show when={files.refusedRemoval(null)}>
+            {(said) => (
+              <ErrorLine class={styles.attachFailure}>{said()}</ErrorLine>
+            )}
+          </Show>
+          <Show when={additions.refused(null)}>
+            {(said) => (
+              <ErrorLine class={styles.attachFailure}>{said()}</ErrorLine>
+            )}
+          </Show>
         </section>
         {/* And, on the Sets of a state that has an ending to mark, the way to
             say there is nothing else — under the box rather than beside it,
@@ -360,6 +507,8 @@ export function Answering(props: {
           )}
         </Show>
       </Postscript>
+      {declaring.modal()}
+      {joining.modal()}
       <section class={styles.submit}>
         <button type="button" onClick={start} disabled={submit.isPending}>
           {submit.isPending ? "Sending…" : "Submit"}
@@ -587,6 +736,9 @@ function Asking(props: {
   ask: AskView;
   fields: Fields;
   files: Putting;
+  additions: Picking;
+  /// The rows its Attach menu holds under *Attach file…*.
+  offering: (shut: () => void) => JSX.Element;
 }): JSX.Element {
   const group = () => `${props.ask.name}-option`;
   const field = () => `${props.ask.name}-free-text`;
@@ -600,6 +752,8 @@ function Asking(props: {
     shown: () => props.files.shown(props.ask.name),
     add: (chosen) => props.files.send(props.ask.name, chosen),
     onto: props.ask.name,
+    chips: () => props.additions.chips(props.ask.name),
+    offering: props.offering,
   });
 
   // With no Options the free text *is* the answer; with them it is whatever the
@@ -692,6 +846,10 @@ function Asking(props: {
           than one inside a pill, a pill being a name on a line with nowhere in
           it to say a sentence. */}
       <Show when={props.files.refusedRemoval(props.ask.name)}>
+        {(said) => <ErrorLine class={styles.attachFailure}>{said()}</ErrorLine>}
+      </Show>
+      {/* And what could not be added or taken off at its menu. */}
+      <Show when={props.additions.refused(props.ask.name)}>
         {(said) => <ErrorLine class={styles.attachFailure}>{said()}</ErrorLine>}
       </Show>
     </div>
@@ -907,31 +1065,34 @@ export const ANSWER_ATTACHMENT_REMOVAL_REFUSAL: Record<
 /// Its own key rather than its name, because two files chosen together may
 /// share one — and what the key is for is taking the right one out of the row
 /// when the right request lands.
-type Landing = { key: number; label: string; name: string };
+/// Each keyed by the label of the Question it is under, or `null` at the
+/// comment box, where a file is on the Set as a whole.
+type Landing = { key: number; label: string | null; name: string };
 
-/// Something said about one Answer's files.
-type Said = { label: string; said: string };
+/// Something said about one Answer's files, or the comment box's.
+type Said = { label: string | null; said: string };
 
 /// What the sheet does about the files on its Answers, held once for the page:
 /// the row of pills each question hands the attaching piece, the requests a
 /// choice and a × make, and what came back refused from either of them.
 type Putting = {
-  /// The row under one question: what the record holds for it, and what this
-  /// device is still sending after that.
-  shown: (label: string) => Array<Shown>;
+  /// The row under one question, or under the comment box where `null`: what
+  /// the record holds for it, and what this device is still sending after
+  /// that.
+  shown: (label: string | null) => Array<Shown>;
 
   /// Every question the record says a file was put on, which is what makes an
   /// entry carrying nothing else an Answer rather than a question left open.
   answered: () => string[];
 
   /// What could not be attached under one question, one line per file.
-  refusals: (label: string) => string[];
+  refusals: (label: string | null) => string[];
 
   /// And what could not be taken off again, one line for its row.
-  refusedRemoval: (label: string) => string | null;
+  refusedRemoval: (label: string | null) => string | null;
 
   /// Send every file chosen under one question, each on a request of its own.
-  send: (label: string, files: Array<File>) => void;
+  send: (label: string | null, files: Array<File>) => void;
 };
 
 /// The whole of that, made once by the sheet.
@@ -961,11 +1122,12 @@ function putting(what: {
 
   let keys = 0;
 
-  /// The record's own files under one label, in the order they were attached.
-  const on = (label: string) =>
+  /// The record's own files under one label, in the order they were attached —
+  /// the comment box's being the ones under none.
+  const on = (label: string | null) =>
     what.attached().filter((attachment) => attachment.label === label);
 
-  const send = (label: string, files: Array<File>) => {
+  const send = (label: string | null, files: Array<File>) => {
     // A fresh choice clears what the last one under this question had to say:
     // the lines are about files the human has moved on from.
     setRefusals((said) => said.filter((one) => one.label !== label));
@@ -974,7 +1136,11 @@ function putting(what: {
       const key = (keys += 1);
       setLanding((held) => [...held, { key, label, name: file.name }]);
 
-      void attachToAnswer(device(), what.set(), label, file)
+      void (
+        label === null
+          ? attachToSet(device(), what.set(), file)
+          : attachToAnswer(device(), what.set(), label, file)
+      )
         .then(async (outcome: AnswerAttached) => {
           if (typeof outcome === "string") {
             setRefusals((said) => [
@@ -1015,7 +1181,7 @@ function putting(what: {
 
   /// And taking one off the record, which is the × on a pill.
   const forget = (attachment: AttachmentView) => {
-    const label = attachment.label ?? "";
+    const label = attachment.label;
     setRemoving((was) => [...was, attachment.id]);
 
     void removeAnswerAttachment(device(), what.set(), attachment.id)
@@ -1048,7 +1214,7 @@ function putting(what: {
       );
   };
 
-  const shown = (label: string): Array<Shown> => [
+  const shown = (label: string | null): Array<Shown> => [
     ...on(label).map((attachment) => ({
       name: attachment.name,
       remove: () => forget(attachment),
@@ -1069,7 +1235,7 @@ function putting(what: {
       .map((attachment) => attachment.label)
       .filter((label): label is string => label !== null);
 
-  const said = (held: Array<Said>, label: string) =>
+  const said = (held: Array<Said>, label: string | null) =>
     held.filter((one) => one.label === label).map((one) => one.said);
 
   return {
@@ -1079,6 +1245,319 @@ function putting(what: {
     refusedRemoval: (label) => said(refusedRemoval(), label)[0] ?? null,
     send,
   };
+}
+
+/// What could not be picked on a Set or taken off it, one sentence per way of
+/// being refused — the files' own, with the two only a server meets.
+export const ADDITION_REFUSAL: Record<
+  Exclude<AdditionMade | AdditionRemoved, { Added: unknown } | "Removed">,
+  string
+> = {
+  NoSuchSet: "This question set is no longer here.",
+  Answered: "This question set has been answered, so what it adds is settled.",
+  Locked: "This question set was locked unanswered, so what it adds is settled.",
+  Closed: "This conversation is closed.",
+  NoSuchLabel: "This question set doesn't ask that question.",
+  NoSuchServer: "That server is no longer declared in the settings.",
+  AlreadyOn: "This conversation has that already.",
+  NoSuchRepo: "That repo is no longer registered.",
+  NotACompanion: "That repo isn't alongside this conversation, so there's nothing to open up.",
+  NotAMember: "That device isn't linked to this one any more.",
+  WorkIsHere: "The work is on that device already.",
+};
+
+/// What the sheet does about what is picked at its menus, held once for the
+/// page: the chips under each Answer and the comment box, the two presses, and
+/// one line apiece of what came back refused.
+type Picking = {
+  /// The chips under one question, or under the comment box where `null`.
+  chips: (label: string | null) => Array<Chip>;
+
+  /// Every server picked on the Set wherever it was picked, which the menus
+  /// leave out: a Set adds a server once.
+  servers: () => string[];
+
+  /// And every repo, added or opened up, and every device, for the same reason.
+  repos: () => number[];
+  devices: () => string[];
+
+  /// Pick something at one question's menu, or at the comment box's, with
+  /// what a failure to reach the server calls it.
+  pick: (label: string | null, pick: Picked, called: string) => void;
+
+  /// And what could not be done there.
+  refused: (label: string | null) => string | null;
+};
+
+/// The whole of that, made once by the sheet.
+///
+/// [`putting`]'s arrangement for a reference rather than bytes: each press is
+/// its own request with its own answer, and the chips are drawn off the Set,
+/// so reading it again is how one arrives and how one goes.
+function picking(what: {
+  set: () => number;
+
+  /// What the Set says has been picked on it.
+  picked: () => AdditionView[];
+
+  /// What a read-write branch picked with no name comes to.
+  mirroring: () => string;
+}): Picking {
+  const queries = useQueryClient();
+  const device = useDevice();
+
+  const [refusals, setRefusals] = createSignal<
+    Array<{ label: string | null; said: string }>
+  >([]);
+
+  // Which picks have a press in flight, by what was picked for a pick and by
+  // the row's id for a ×: the one thing either can be truly disabled for.
+  const [working, setWorking] = createSignal<Array<string | number>>([]);
+
+  const say = (label: string | null, said: string | null) =>
+    setRefusals((held) => [
+      ...held.filter((one) => one.label !== label),
+      ...(said === null ? [] : [{ label, said }]),
+    ]);
+
+  const settle = (
+    label: string | null,
+    key: string | number,
+    made: Promise<AdditionMade | AdditionRemoved>,
+    failed: string,
+  ) => {
+    setWorking((was) => [...was, key]);
+
+    void made
+      .then(async (outcome) => {
+        say(
+          label,
+          typeof outcome !== "string" || outcome === "Removed"
+            ? null
+            : ADDITION_REFUSAL[outcome],
+        );
+
+        await queries.invalidateQueries({ queryKey: keyOf(device(), "set") });
+      })
+      .catch((error: unknown) =>
+        say(
+          label,
+          `${failed} ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      )
+      .finally(() => setWorking((was) => was.filter((one) => one !== key)));
+  };
+
+  const pick = (label: string | null, picked: Picked, called: string) =>
+    settle(
+      label,
+      JSON.stringify(picked),
+      addToSet(device(), what.set(), { label, pick: picked }),
+      `${called} couldn't be added.`,
+    );
+
+  const forget = (addition: AdditionView) =>
+    settle(
+      addition.label,
+      addition.id,
+      removeFromSet(device(), what.set(), addition.id),
+      "That couldn't be removed.",
+    );
+
+  const chips = (label: string | null): Array<Chip> =>
+    what
+      .picked()
+      .filter((addition) => addition.label === label)
+      .map((addition) =>
+        // Struck as it crossed on a transfer: drawn as the record has it, with
+        // nothing to take off.
+        addition.state === "Struck"
+          ? { ...chipped(addition, what.mirroring()), struck: true }
+          : {
+              ...chipped(addition, what.mirroring()),
+              remove: () => forget(addition),
+              removing: working().includes(addition.id),
+            },
+      );
+
+  const servers = () =>
+    what
+      .picked()
+      .flatMap((addition) =>
+        "Server" in addition.added ? [addition.added.Server.name] : [],
+      );
+
+  const repos = () =>
+    what.picked().flatMap((addition) => {
+      if ("Companion" in addition.added) return [addition.added.Companion.repo_id];
+      if ("OpenedUp" in addition.added) return [addition.added.OpenedUp.repo_id];
+      return [];
+    });
+
+  const devices = () =>
+    what
+      .picked()
+      .flatMap((addition) =>
+        "Device" in addition.added ? [addition.added.Device.device] : [],
+      );
+
+  return {
+    chips,
+    servers,
+    repos,
+    devices,
+    pick,
+    refused: (label) =>
+      refusals().find((one) => one.label === label)?.said ?? null,
+  };
+}
+
+/// What one addition's chip says, whatever kind it is: the name, and for a repo
+/// how far in the work reaches and on which branch — `mirroring` being what a
+/// branch picked with no name comes to.
+///
+/// A name the record could not put to it any more — a repo unregistered, a
+/// device unlinked since the pick — reads as gone, under the id it was picked
+/// by, which is the whole of what is left to say about it.
+export function chipped(
+  addition: AdditionView,
+  mirroring: string,
+): Pick<Chip, "name" | "kind" | "detail" | "gone"> {
+  const added = addition.added;
+
+  if ("Server" in added) {
+    return { name: added.Server.name, gone: !added.Server.declared };
+  }
+
+  if ("Companion" in added) {
+    const { name, repo_id, mode, branch } = added.Companion;
+
+    return {
+      kind: "repo",
+      name: name ?? `repo ${repo_id}`,
+      detail:
+        mode === "ReadOnly"
+          ? "read-only"
+          : `read-write on ${branch ?? mirroring}`,
+      gone: name === null,
+    };
+  }
+
+  if ("OpenedUp" in added) {
+    const { name, repo_id, branch } = added.OpenedUp;
+
+    return {
+      kind: "repo",
+      name: name ?? `repo ${repo_id}`,
+      detail: `opened up on ${branch ?? mirroring}`,
+      gone: name === null,
+    };
+  }
+
+  // A repo picked on the device the work was moved from that none here
+  // matches, which is why it is struck.
+  if ("Unmatched" in added) {
+    return {
+      kind: "repo",
+      name: added.Unmatched.name,
+      detail: "not on this device",
+    };
+  }
+
+  return {
+    kind: "device",
+    name: added.Device.name ?? added.Device.device.slice(0, 8),
+    gone: added.Device.name === null,
+  };
+}
+
+/// The rows of an Attach menu past the servers (ADR-0028): each registered
+/// repo the work could have alongside it and each read-only companion it
+/// could open up, under *Repos alongside*; then each device of the cluster the
+/// work could be permitted to move to, under *May be transferred to*.
+///
+/// What the conversation has already is left out by the server, and what this
+/// set has had picked is left out here: a set adds each once. A group with
+/// nothing to offer is not drawn, which is every sheet with no cluster under
+/// the second.
+///
+/// A repo's row opens a card, so it carries the ellipsis; a device's acts at
+/// once. Only registered repos: registering is done at a desk, so the repo
+/// dropdown's *Open repo…* and *Create repo…* are not here.
+function AddableRows(props: {
+  addable: AddableView;
+  /// The repos and devices picked on the set already.
+  repos: number[];
+  devices: string[];
+  join: (repo: RepoEntry, opening: boolean) => void;
+  permit: (device: string, name: string) => void;
+}): JSX.Element {
+  const adding = () =>
+    props.addable.repos.filter((repo) => !props.repos.includes(repo.id));
+  const opening = () =>
+    props.addable.read_only.filter(
+      (companion) => !props.repos.includes(companion.repo.id),
+    );
+  const devices = () =>
+    props.addable.devices.filter(
+      (device) => !props.devices.includes(device.device),
+    );
+
+  const repos = createUniqueId();
+  const moving = createUniqueId();
+
+  return (
+    <>
+      <Show when={adding().length + opening().length > 0}>
+        <div role="group" aria-labelledby={repos} class={styles.adding}>
+          <div id={repos} role="presentation" class={styles.addingHead}>
+            Repos alongside
+          </div>
+          <For each={adding()}>
+            {(repo) => (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => props.join(repo, false)}
+              >
+                {repo.name}…
+              </button>
+            )}
+          </For>
+          <For each={opening()}>
+            {(companion) => (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => props.join(companion.repo, true)}
+              >
+                Open up {companion.repo.name}…
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
+
+      <Show when={devices().length > 0}>
+        <div role="group" aria-labelledby={moving} class={styles.adding}>
+          <div id={moving} role="presentation" class={styles.addingHead}>
+            May be transferred to
+          </div>
+          <For each={devices()}>
+            {(device) => (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => props.permit(device.device, device.name)}
+              >
+                {device.name}
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
+    </>
+  );
 }
 
 /// Every question of the Set in the order it was asked, Sub-questions under the
@@ -1106,6 +1585,19 @@ function blank(ask: Asked): Filled {
   return { label: ask.label, selected: null, free_text: "" };
 }
 
+/// Why a repo picked on the set couldn't go in as it was picked, in the
+/// Steer's terms but not its words: nothing was steered here.
+const COMPANION_REFUSAL: Record<Extract<SteerCompanionRefusal, string>, string> = {
+  OwnRepo: "It's this conversation's own repo.",
+  AlreadyAdded: "It's already on this conversation.",
+  NotACompanion: "It isn't on this conversation, so there's nothing to open up.",
+  AlreadyReadWrite: "It's already read-write on this conversation.",
+  FetchFailed: "Git couldn't fetch from its remote. The server log says why.",
+  NoBaseCommit: "Its base has nothing to check out.",
+  BranchExists: "The branch already exists there, and Verkstead didn't make it.",
+  WorktreeRefused: "Git wouldn't make its worktree. The server log says why.",
+};
+
 /// Why the Response did not land, when it did not. A Response that was taken
 /// says nothing here — the page is already on its way back to the list.
 function refused(outcome: Submitted | undefined, error: Error | null): string | null {
@@ -1127,6 +1619,21 @@ function refused(outcome: Submitted | undefined, error: Error | null): string | 
   }
   if (outcome === "Locked") {
     return "This question set was locked unanswered, so your response wasn't stored.";
+  }
+
+  if ("ServerGone" in outcome) {
+    return `The MCP server ${outcome.ServerGone} is no longer declared, so your response wasn't stored. Remove it, or declare it again in settings.`;
+  }
+  if ("RepoGone" in outcome) {
+    return `The ${outcome.RepoGone} repo is no longer registered, so your response wasn't stored. Remove it, or register it again.`;
+  }
+  if ("Companion" in outcome) {
+    const { repo, why } = outcome.Companion;
+    const reason =
+      typeof why === "object"
+        ? otherAuthor({ companion: repo, ...why.OtherAuthor })
+        : COMPANION_REFUSAL[why];
+    return `The ${repo} repo can't be added, so your response wasn't stored. ${reason} Remove it to send your answers without it.`;
   }
 
   return `This response doesn't resolve the question set: ${outcome.Rejected.join("; ")}`;

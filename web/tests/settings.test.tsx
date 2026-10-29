@@ -25,7 +25,7 @@
 //! answer to a save with the account GitHub verified the token as.
 //!
 //! What a token really verifies as, and that it is written down either way, are
-//! the server's to decide — `crates/server/tests/settings.rs` is what says so.
+//! the server's to decide — `crates/server/tests/suite/settings.rs` is what says so.
 //! This side's job is to send what was typed, to say in words what came back,
 //! and never to show the token again.
 

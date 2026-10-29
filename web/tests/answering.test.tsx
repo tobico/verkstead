@@ -791,6 +791,30 @@ describe("a submit that did not land", () => {
     );
   });
 
+  it("names a server picked on the set that is no longer declared", async () => {
+    const page = await refused({ ServerGone: "docs" });
+
+    expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
+      "The MCP server docs is no longer declared",
+    );
+  });
+
+  it("names a repo picked on the set that is no longer registered", async () => {
+    const page = await refused({ RepoGone: "docs" });
+
+    expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
+      "The docs repo is no longer registered",
+    );
+  });
+
+  it("names a repo that couldn't be checked out, and why", async () => {
+    const page = await refused({ Companion: { repo: "docs", why: "BranchExists" } });
+    const said = page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent;
+
+    expect(said).toContain("The docs repo can't be added, so your response wasn't stored.");
+    expect(said).toContain("The branch already exists there");
+  });
+
   it("carries back what the server said the Response failed to resolve", async () => {
     const page = await refused({ Rejected: ["Q2b is unaccounted for"] });
 

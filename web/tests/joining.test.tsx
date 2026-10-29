@@ -9,7 +9,7 @@
 //!
 //! The reading is the fixture the server's own tests wrote, so what the card is
 //! drawn from is the shape the endpoint really answers with — see
-//! `crates/server/tests/ui_content.rs`, and `tests/joining.rs` beside it, whose
+//! `crates/server/tests/suite/ui_content.rs`, and `tests/suite/joining.rs` beside it, whose
 //! subject that shape is.
 //!
 //! **The fingerprint is the point of the card.** The name and the OS say which

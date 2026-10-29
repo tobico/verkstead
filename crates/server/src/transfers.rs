@@ -1319,11 +1319,11 @@ async fn record(
     conversation_id: i64,
     there: i64,
 ) -> Result<(), String> {
-    let slice = store::slice(&state.pool, conversation_id)
+    let mut slice = store::slice(&state.pool, conversation_id)
         .await
         .map_err(|why| format!("This device couldn't read the conversation's record: {why:#}."))?;
 
-    let repos = matched(state, device, &slice).await?;
+    let repos = matched(state, device, &mut slice).await?;
     let profiles = accounts(state, &slice).await?;
     let files = attached(state, conversation_id, slice.weight()).await?;
 
@@ -1356,14 +1356,21 @@ async fn record(
 /// the same question of the Conversation's own repository and each Companion,
 /// and this is every repository the *record* names, which is those and whatever
 /// a commit was once recorded in.
+///
+/// **Except a Repo only a pending pick on a Question Set names**, which is struck
+/// in the slice instead — it crosses naming no Repo, under the name it has here —
+/// and the move goes on (ADR-0028, *Pending additions cross with the record*).
+/// Nothing has been done in it yet, and the Set is still the human's to answer
+/// there with the rest of what they picked.
 async fn matched(
     state: &AppState,
     device: &str,
-    slice: &store::Slice,
+    slice: &mut store::Slice,
 ) -> Result<Vec<(i64, i64)>, String> {
-    let ids: Vec<i64> = slice.repos().into_iter().collect();
+    let needed = slice.repos();
+    let picked = slice.picked_repos();
 
-    if ids.is_empty() {
+    if needed.is_empty() && picked.is_empty() {
         return Ok(Vec::new());
     }
 
@@ -1371,11 +1378,16 @@ async fn matched(
         return Err("This server holds no device identity to match repos through.".to_owned());
     };
 
-    let mut ours = Vec::with_capacity(ids.len());
+    let mut ids = Vec::with_capacity(needed.len() + picked.len());
+    let mut ours = Vec::with_capacity(needed.len() + picked.len());
 
-    for id in &ids {
+    for id in needed.iter().chain(&picked) {
         match store::load_repo(&state.pool, *id).await {
-            Ok(Some(repo)) => ours.push(repo),
+            Ok(Some(repo)) => {
+                ids.push(*id);
+                ours.push(repo);
+            }
+            Ok(None) if picked.contains(id) => slice.strike(*id, &format!("repo {id}")),
             Ok(None) => {
                 return Err(format!(
                     "The record names repo {id}, which isn't registered on this device any \
@@ -1390,6 +1402,10 @@ async fn matched(
         }
     }
 
+    if ours.is_empty() {
+        return Ok(Vec::new());
+    }
+
     let theirs = crate::matching::each_across(devices, device, &ours)
         .await
         .map_err(|refusal| refusal.saying)?;
@@ -1397,14 +1413,16 @@ async fn matched(
     let mut across = Vec::with_capacity(ids.len());
 
     for ((id, repo), there) in ids.into_iter().zip(&ours).zip(theirs) {
-        let Some(there) = there else {
-            return Err(format!(
-                "No repo there is {name}, which this conversation's record names.",
-                name = repo.name,
-            ));
-        };
-
-        across.push((id, there.id));
+        match there {
+            Some(there) => across.push((id, there.id)),
+            None if picked.contains(&id) => slice.strike(id, &repo.name),
+            None => {
+                return Err(format!(
+                    "No repo there is {name}, which this conversation's record names.",
+                    name = repo.name,
+                ));
+            }
+        }
     }
 
     Ok(across)

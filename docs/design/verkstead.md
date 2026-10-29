@@ -376,6 +376,25 @@ flowchart LR
   the same go rather than repeating the Notice: an empty `.tasks/` is read
   against the branch, which tells a backlog worked through from one that never
   landed.
+- **Adding from an answer** (*settled 2026-10-29, building
+  add-to-running-conversation*). A question set is where the human finds out
+  the work needs more than it was given, so every answer field and the
+  set-level comment box carry the composer's Attach menu: a file, a declared
+  MCP server, a registered repo as a companion, a read-only companion opened up
+  to read-write, and a device ticked under *May be transferred to*. A pick is
+  recorded on the set at once, as a file on an answer is, and applied in the
+  transaction that stores the response, which carries an `added` list beside
+  `attachments`. Only what changes the sandbox (a companion or a server) ends
+  the session idling on that very set and carries it on in a wider one, the
+  carried conversation's machinery on the device it never left; a device tick
+  and a file restart nothing, and a deferred ask's additions reach the next
+  launch. Every question a checkout turns on is asked before anything is
+  ended, so a refusal keeps the answers on the sheet. Pending picks cross with
+  the record on a transfer, a companion the far end has no repo for arriving
+  struck. A file at the comment box is a set-level attachment, the set's rather
+  than an answer's. See [ADR-0028](../adr/0028-adding-from-an-answer.md),
+  which amends ADR-0021 (declared MCP servers) and extends ADR-0020's
+  *Transfer*.
 - **Wrap-up phase, per PR.** After a PR opens: the agent re-reviews the PR in
   a fresh context and raises a question set for any issues it finds;
   meanwhile Verkstead monitors the CI run and dispatches fix sessions on

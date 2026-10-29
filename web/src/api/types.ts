@@ -117,6 +117,75 @@ account: ProfileAccount,
 harness: boolean, };
 
 /**
+ * What a Question Set's sheet offers to add past the MCP servers, as the
+ * Conversation stands while the Set waits (ADR-0028).
+ *
+ * What is on the Conversation already is left out here, by the server, which
+ * is what knows; what has been picked on the Set and is still pending is the
+ * sheet's to leave out, off the Set's own additions.
+ */
+export type AddableView = { 
+/**
+ * Every registered Repo that is neither the Conversation's own nor a
+ * Companion of it already, in the order the Repo list draws them.
+ */
+repos: Array<RepoEntry>, 
+/**
+ * The Companions it holds read-only, each of which may be opened up.
+ */
+read_only: Array<CompanionView>, 
+/**
+ * The cluster's other devices the work may be moved to that are not
+ * permitted already: not the device it is on, not the one it was drafted
+ * on, and not one ticked. Empty with no cluster.
+ */
+devices: Array<DeviceIdentity>, 
+/**
+ * What a read-write branch left blank comes to: the Conversation's own
+ * branch, which is what the card's branch field is filled in with.
+ */
+branch: string, };
+
+/**
+ * What was picked.
+ */
+export type Added = { "Server": { name: string, declared: boolean, } } | { "Companion": { repo_id: number, name: string | null, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, name: string | null, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, name: string | null, } } | { "Unmatched": { name: string, } };
+
+/**
+ * What became of a pick.
+ *
+ * The refusals a file on an Answer meets, for the same reasons — see
+ * [`AnswerAttached`] — and the two only a server can.
+ */
+export type AdditionMade = { "Added": { addition: AdditionView, } } | "NoSuchSet" | "Answered" | "Locked" | "Closed" | "NoSuchLabel" | "NoSuchServer" | "AlreadyOn" | "NoSuchRepo" | "NotACompanion" | "NotAMember" | "WorkIsHere";
+
+/**
+ * And of taking a pick off again, refused by the same freezes.
+ */
+export type AdditionRemoved = "Removed" | "NoSuchSet" | "Answered" | "Locked" | "Closed";
+
+/**
+ * Where an addition has got to: pending while the Set waits, applied by the
+ * Submit that answered it, struck where the Set settled without applying it.
+ */
+export type AdditionState = "Pending" | "Applied" | "Struck";
+
+/**
+ * One thing picked on a Question Set's sheet to add to the work, as the sheet
+ * and the Set's record draw it (ADR-0028).
+ *
+ * Picked at a Question's Attach menu, under its label, or at the set-level
+ * comment box's, under none — and recorded on the Set the moment it is picked,
+ * so a reload and a second device draw the same chip.
+ */
+export type AdditionView = { id: number, 
+/**
+ * The label of the Question it was picked at, or `null` for the comment
+ * box.
+ */
+label: string | null, added: Added, state: AdditionState, };
+
+/**
  * What became of pressing Adopt.
  *
  * Named the way [`GrillingStarted`]'s refusals are, and for the same reason: a
@@ -398,7 +467,19 @@ unanswered?: boolean,
  * files leaves the field out altogether, and why a Response stored before
  * the field existed reads as it always did.
  */
-attachments?: Array<string>, };
+attachments?: Array<string>, 
+/**
+ * What the human added to the Conversation with this Answer — an MCP
+ * server, a device the work may be moved to — each named in words and
+ * where it is, in the order they were picked (ADR-0028).
+ *
+ * **Filled on the way out**, exactly as [`Answer::attachments`] is: the
+ * sheet records each pick on the Set as it is made, the Submit applies
+ * them, and the rows are what say which Answer each came with. A Response
+ * is stored as it was sent, and one stored before the field existed reads
+ * as it always did.
+ */
+added?: Array<string>, };
 
 /**
  * What became of putting a file on an Answer.
@@ -619,7 +700,7 @@ declared: boolean, };
  * Question are that Answer's, and a page can only know which it is holding by
  * being told.
  */
-export type AttachmentOrigin = "Brief" | "Answer";
+export type AttachmentOrigin = "Brief" | "Answer" | "Set";
 
 /**
  * And of taking one off again.
@@ -672,7 +753,7 @@ origin: AttachmentOrigin,
 /**
  * The label of the Question this file was put under, on a file put on an
  * Answer — `Q7` for a Question, `Q7a` for a Sub-question — and `null` on
- * every one of the Brief's.
+ * every one of the Brief's and on one put at a Set's comment box.
  *
  * Beside the origin rather than inside it, because that is how the record
  * holds it: the origin is a word, and this is what the word is read with.
@@ -4576,6 +4657,11 @@ form: SteerForm, };
 export type Permitting = "Recorded" | "NotAMember" | "DraftedThere" | "WorkIsHere" | "Elsewhere" | "NoSuchConversation";
 
 /**
+ * What a row of the menu picks.
+ */
+export type Pick = { "Server": { name: string, } } | { "Companion": { repo_id: number, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, } };
+
+/**
  * What a Conversation has settled about one of its roles, as the page shows
  * it: the Pairing its sessions run under, that the role runs none, or nothing
  * picked yet.
@@ -4593,6 +4679,15 @@ export type Permitting = "Recorded" | "NotAMember" | "DraftedThere" | "WorkIsHer
  * shape the viewer is generated from for a few bytes nobody is counting.
  */
 export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
+
+/**
+ * A pick made at an Attach menu on the sheet: where it was made, and what.
+ */
+export type Picking = { 
+/**
+ * The Question's label, or `null` for the set-level comment box.
+ */
+label: string | null, pick: Pick, };
 
 /**
  * An Event the Timeline keeps in view rather than letting scroll past.
@@ -5214,7 +5309,19 @@ rows: Array<SetRow>,
  * The same verdict the Set's own sheet carries, from the same registry of
  * held waits — this is a Timeline the human answers from.
  */
-standing: Standing, };
+standing: Standing, 
+/**
+ * What answering it put on the Conversation, in the order it was picked:
+ * the line under the Set's Event that says so, in the shape a steer's line
+ * takes (ADR-0028). Empty for nearly every Set, and for any that has not
+ * been answered.
+ */
+added: Array<Added>, 
+/**
+ * Whether answering it ended the session waiting on it and carried it on in
+ * a sandbox with what was added — said at the end of the same line.
+ */
+carried_on: boolean, };
 
 /**
  * One Question as the page draws it, with its Sub-questions nested one level
@@ -5634,7 +5741,23 @@ direction?: Direction | null,
  * Postscript and reads an ordinary Response, and the ending is entirely
  * the system's.
  */
-nothing_else?: boolean, };
+nothing_else?: boolean, 
+/**
+ * What the human added to the Conversation at the set-level comment box,
+ * each named in words — see [`Answer::added`], which is the same list for
+ * what came with one Answer, and is filled the same way.
+ */
+added?: Array<string>, 
+/**
+ * The files the human put at the set-level comment box, each by the path
+ * the session reads it at, in the order they were attached (ADR-0028).
+ *
+ * **Filled on the way out**, exactly as [`Answer::attachments`] is. Not an
+ * Answer to anything, which is why they ride here rather than on any
+ * Answer: a Set with one of these and no Answers is as unanswered as it
+ * was.
+ */
+attachments?: Array<string>, };
 
 /**
  * What became of pressing Resume.
@@ -6148,7 +6271,23 @@ ending: Ending | null,
  * and never the bytes, which is the whole of what a reader of one can know
  * about the files.
  */
-attachments: Array<AttachmentView>, };
+attachments: Array<AttachmentView>, 
+/**
+ * What the human picked on this Set to add to the work, in the order they
+ * picked — each under the Question it was picked at, or under none for the
+ * comment box (ADR-0028). Pending chips with a × while the Set waits.
+ */
+additions: Array<AdditionView>, 
+/**
+ * The MCP servers the Conversation has already, by name, which the sheet's
+ * Attach menus leave out: what is on already is nothing to add.
+ */
+servers: Array<string>, 
+/**
+ * And the rest of what those menus offer: Repos to work alongside,
+ * read-only Companions to open up, and devices to permit.
+ */
+addable: AddableView, };
 
 /**
  * The settings as the human has just written them.
@@ -7330,7 +7469,7 @@ export type StoreView = { name: string, eviction: Eviction, };
 /**
  * What became of the human's Response.
  */
-export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Locked" | { "Rejected": Array<string> };
+export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Locked" | { "Rejected": Array<string> } | { "ServerGone": string } | { "RepoGone": string } | { "Companion": { repo: string, why: SteerCompanionRefusal, } };
 
 /**
  * What became of a device asking to be notified.

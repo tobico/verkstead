@@ -17,6 +17,10 @@ use verkstead_store::{Settlements, Waits};
 /// Answer to a Question Set rather than on the Brief.
 mod answer_files;
 
+/// And what is picked at those same menus to add to the work, recorded on the
+/// Set until its Submit (ADR-0028).
+mod answer_additions;
+
 /// What a Keeper does to its Annex's box, said once for every way of having
 /// one, and the WSL distro that is the first of them (ADR-0024).
 pub mod annex;
@@ -44,7 +48,7 @@ mod browsing;
 /// lasts is part of the product's own promise rather than an implementation
 /// detail of an endpoint, and what proves a boundary has really been taken back
 /// is a suite standing where the close and the sweep do — see
-/// `crates/server/tests/sandbox_windows.rs`.
+/// `crates/server/tests/suite/sandbox_windows.rs`.
 pub mod boundaries;
 pub mod build_cache;
 mod capture;

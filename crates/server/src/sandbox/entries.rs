@@ -449,7 +449,7 @@ pub fn taken_back(data_dir: &Path, conversation: i64) {
 /// else takes the entries off the human's directories; this leaves them exactly
 /// where they are, with the record still under the Data Directory, which is the
 /// state the next server's sweep has to be able to clear. Nothing in the server
-/// calls it — see `crates/server/tests/sandbox_windows.rs`, which is the whole
+/// calls it — see `crates/server/tests/suite/sandbox_windows.rs`, which is the whole
 /// of why it is here.
 pub fn forgotten(data_dir: &Path, conversation: i64) {
     let name = held_under(data_dir, conversation);

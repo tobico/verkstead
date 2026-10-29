@@ -364,7 +364,7 @@ pub(crate) fn told(pool: &SqlitePool, conversation_id: i64, news: News) {
 /// roadmap moving on, each of which is a session running inside Verkstead. The
 /// settle that says this is [`crate::settling`]'s, and a suite asking what a
 /// *cluster* makes of a piece of news says it here rather than standing a
-/// wrap-up up to produce one — see `tests/news.rs`. The path it takes is the
+/// wrap-up up to produce one — see `tests/suite/news.rs`. The path it takes is the
 /// whole of the real one: the local push, and then every member.
 pub fn the_work_is_done(pool: &SqlitePool, conversation_id: i64) {
     told(pool, conversation_id, News::Done);

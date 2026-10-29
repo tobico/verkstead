@@ -1206,6 +1206,8 @@ describe("a set on another device", () => {
     title: "A question set",
     rows: [],
     standing: { Waiting: "waiting" },
+    added: [],
+    carried_on: false,
   };
 
   /// The pane over that Set, drawn for the member the way the details pane

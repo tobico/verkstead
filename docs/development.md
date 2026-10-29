@@ -23,8 +23,8 @@ $ nix develop
 Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 `git`, the `node` and `pnpm` the viewer is built with, and the Electron the
 desktop app runs on — and every tool the language descriptors' proofs in
-`crates/server/tests/package_stores.rs` install or build with, a JDK, Maven
-and Gradle among them.
+`crates/server/tests/suite/package_stores.rs` install or build with, a JDK,
+Maven and Gradle among them.
 
 ### 2. Build the viewer and start the server (terminal 1)
 
@@ -1075,6 +1075,7 @@ at the machine to ask, where a `serve` started in a terminal has not.
 
 ```console
 $ cargo test              # unit, schema and end-to-end tests
+$ cargo test -p verkstead-server --test suite -- conversations::   # one suite
 $ cargo clippy --all-targets
 $ cargo fmt
 $ nix fmt                 # the Nix files
@@ -1085,6 +1086,13 @@ $ blender -b tools/hammer/verkstead-hammer.blend \
 $ tools/generate-icons.sh     # the favicon and PWA icons, after re-rendering the artwork
 $ tools/generate-packaging.sh # the launcher icons, the menu bar template, the icns and the ico
 ```
+
+A crate's integration tests are one test binary, `suite`, and each file under
+its `tests/suite/` is a module of it — so a suite is run by hand by its
+module's name, as the second line does for the server's conversations suite
+and nothing else. The server keeps seven files beside `suite` as test binaries
+of their own, because what makes each safe is being the only test in its
+process: those are run by their own names, `--test servers_path` and the like.
 
 None of the three desktop artifacts a release ships is a script here. All
 three are the packed Electron app, which is `pnpm run pack` in `desktop/` —
@@ -1222,10 +1230,10 @@ its suite evaluates the written flake with a real `nix` where one is on
 
 ### The sessions suite, and the machine under it
 
-`crates/server/tests/sessions.rs` is the one suite that is really a hundred and
-forty small servers, each running a real session in a real sandbox and judged on
-wall clock. That makes it the one suite whose result depends on what else the
-machine is doing, so it has two knobs of its own.
+`crates/server/tests/suite/sessions.rs` is the one suite that is really a
+hundred and forty small servers, each running a real session in a real sandbox
+and judged on wall clock. That makes it the one suite whose result depends on
+what else the machine is doing, so it has two knobs of its own.
 
 `VERKSTEAD_TEST_PACE` is a multiplier over everything time-shaped in it — the
 budgets a session is judged idle, rescued and ended by, how long a wait gives
@@ -1251,12 +1259,12 @@ for you.
 
 **Windows runs an arm of its own**, because that suite is `cfg(unix)`: it
 stands on a mount namespace, a `/bin/sh` probe and a `stty`, and a Windows
-session has none of the three. `crates/server/tests/sessions_windows.rs` asks a
-dozen of the same questions of the other machine — a grilling started by
-pressing the button, run on a pseudoconsole in a profile of the Conversation's
-own, with a PowerShell script where claude goes — and
-`crates/server/tests/terminal_windows.rs` is the console's own pair beside
-`terminal.rs`, asking `mode con` what `stty` is asked there. Both are
+session has none of the three.
+`crates/server/tests/suite/sessions_windows.rs` asks a dozen of the same
+questions of the other machine — a grilling started by pressing the button, run
+on a pseudoconsole in a profile of the Conversation's own, with a PowerShell
+script where claude goes — and `crates/server/tests/suite/terminal_windows.rs`
+is the console's own pair beside `terminal.rs`, asking `mode con` what `stty` is asked there. Both are
 `cfg(windows)`, so a Linux or a Mac checkout compiles neither: the
 `windows-2025` job is where they run, and it installs an `sccache` on the
 runner for the three of them that are about the build cache — a Compile Server
@@ -1298,8 +1306,31 @@ side of the boundary by `verkstead session-launcher`, so the image a description
 names has to be a real `verkstead.exe` rather than the test harness's own —
 and a server-crate test has no `CARGO_BIN_EXE_verkstead` to read. It looks for
 one beside its own binary, in `target/debug`, and says so where there is none.
-`cargo build --workspace --all-targets` puts it there, which is what the
+`cargo build --workspace --tests --bins` puts it there, which is what the
 `windows-2025` job does before it runs anything.
+
+**The `windows-2025` job runs the suite through nextest, over ten legs.** Each
+leg builds the workspace for itself and runs a tenth of the tests, dealt out
+one at a time across every binary by `--partition slice:N/10`. nextest runs
+every test in a process of its own and tests from every binary at once, so a
+lock in a `static` keeps nothing in order there. What has to stay serial (the
+suites that start processes as the session account, and the registry tests) is
+held serial by `.config/nextest.toml`, which says why. The doc-tests, which
+nextest does not run, go through `cargo test --doc` on the first leg. To run
+the suite the way a leg does, install `cargo-nextest` and run:
+
+```console
+$ cargo build --workspace --tests --bins
+$ cargo nextest run --workspace --no-fail-fast
+```
+
+The legs are working toward a budget of ten minutes each. The job's comment in
+`.github/workflows/ci.yml` keeps the ledger of what each lever came to and says
+what is left. The job's `timeout-minutes` is fifteen, not ten. The last run
+measured took 6m03 to 10m08, so its slowest leg missed ten by eight seconds,
+on a slow runner's tests. A hard ten would fail a leg now and then for no
+fault of the code. Fifteen catches a hang without failing a leg that drew a
+slow runner. The one lever left is a larger runner, which is not free.
 
 
 And in `web/`, which is the Solid viewer
@@ -1502,7 +1533,7 @@ committed downscales, so every platform draws the same pixels.
 
 The tests run the real server in-process, so the round trip they check is the
 one an agent gets — including the quickstart above, whose example files
-[`crates/cli/tests/ask.rs`](../crates/cli/tests/ask.rs) drives end to end, taking
+[`crates/cli/tests/suite/ask.rs`](../crates/cli/tests/suite/ask.rs) drives end to end, taking
 the human's part over the API the viewer's **Submit** posts through.
 
 `verkstead-render` is everything the server does to what an agent wrote before

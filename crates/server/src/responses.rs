@@ -52,7 +52,55 @@ pub(crate) async fn submit_response(
         Err(refusal) => return refusal,
     }
 
-    match store::submit_response(&state.pool, &state.settlements, id, &response).await {
+    // A server picked on the Set and gone from the settings since refuses the
+    // Response by name, before anything is stored — see
+    // [`crate::answer_additions::undeclared`].
+    match crate::answer_additions::undeclared(&state, id).await {
+        Ok(None) => {}
+        Ok(Some(name)) => {
+            return yaml(
+                StatusCode::CONFLICT,
+                &ApiError::new(format!(
+                    "the MCP server {name} added on Question Set {id} is no longer declared"
+                )),
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading what was picked on a Set failed");
+            return unavailable("the Response could not be taken");
+        }
+    }
+
+    // And every git question a picked companion turns on — see
+    // [`crate::answer_additions::readied`].
+    let alongside = match crate::answer_additions::readied(&state, id).await {
+        Ok(crate::answer_additions::Readied::Ready(alongside)) => alongside,
+        Ok(crate::answer_additions::Readied::RepoGone(name)) => {
+            return yaml(
+                StatusCode::CONFLICT,
+                &ApiError::new(format!(
+                    "the repo {name} added on Question Set {id} is no longer registered"
+                )),
+            );
+        }
+        Ok(crate::answer_additions::Readied::Refused { repo, why }) => {
+            return companion_refused(id, &repo, &why);
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "asking about a Set's companions failed");
+            return unavailable("the Response could not be taken");
+        }
+    };
+
+    let submission = match crate::answer_additions::submit(&state, id, alongside, &response).await {
+        Ok(crate::answer_additions::Answering::Stored(submission)) => Ok(submission),
+        Ok(crate::answer_additions::Answering::Refused { repo, why }) => {
+            return companion_refused(id, &repo, &why);
+        }
+        Err(error) => Err(error),
+    };
+
+    match submission {
         Ok(Submission::Accepted(taken)) => {
             crate::conversations::settle_a_proposal(&state, id, taken.proposed).await;
 
@@ -79,6 +127,21 @@ pub(crate) async fn submit_response(
             unavailable("the Response could not be taken")
         }
     }
+}
+
+/// A companion picked on the Set that cannot go in as it was picked: a 409
+/// naming the repo and the Steer's reason.
+fn companion_refused(
+    id: i64,
+    repo: &str,
+    why: &verkstead_render::SteerCompanionRefusal,
+) -> HttpResponse {
+    yaml(
+        StatusCode::CONFLICT,
+        &ApiError::new(format!(
+            "the repo {repo} added on Question Set {id} cannot be checked out: {why:?}"
+        )),
+    )
 }
 
 /// How long a wait is held open when the client does not say.
@@ -168,6 +231,19 @@ pub(crate) async fn wait_for_response(
                 // failed is answered as one and the client comes back, and a
                 // Set marked delivered on the way out of a failed read would be
                 // one whose Answers a later prompt then passed over.
+                // And what the human added with it, the same way and for the
+                // same reason. See [`crate::answer_additions::onto`].
+                if let Err(error) =
+                    crate::answer_additions::onto(&state, conversation_id, id, &mut response).await
+                {
+                    tracing::error!(
+                        error = ?error,
+                        set_id = id,
+                        "reading what was added with a Question Set's Answers failed",
+                    );
+                    return unavailable("the Response could not be read");
+                }
+
                 if let Err(error) =
                     crate::answer_files::onto(&state, conversation_id, id, &mut response).await
                 {

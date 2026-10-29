@@ -7,8 +7,9 @@
 //! is one or none — a Conversation takes as many files as the human has to
 //! hand.
 //!
-//! **What a file is attached to is its origin.** There are two of them: the
-//! Brief, and an Answer to a Question Set. A second value in this column rather
+//! **What a file is attached to is its origin.** There are three of them: the
+//! Brief, an Answer to a Question Set, and the Set as a whole — the file put at
+//! its comment box, which answers nothing (ADR-0028). A second value in this column rather
 //! than a second table, because the upload is the Conversation's rather than the
 //! Brief's and what changes between the two is only what the human was looking
 //! at when they made it.
@@ -87,6 +88,15 @@ pub enum Origin {
         /// `Q7a` for a Sub-question, which is what an Answer names one by.
         label: String,
     },
+
+    /// Put at the answer sheet's comment box: on the Set as a whole, under no
+    /// Question. **Not an Answer to anything** — a Set with one of these and no
+    /// Answers is as unanswered as it was — which is why it is a value of its
+    /// own rather than an Answer with no label.
+    Set {
+        /// The Set it was put on.
+        set: i64,
+    },
 }
 
 impl Origin {
@@ -96,6 +106,7 @@ impl Origin {
         match self {
             Self::Brief => "brief",
             Self::Answer { .. } => "answer",
+            Self::Set { .. } => "set",
         }
     }
 
@@ -103,14 +114,14 @@ impl Origin {
     pub(crate) fn set(&self) -> Option<i64> {
         match self {
             Self::Brief => None,
-            Self::Answer { set, .. } => Some(*set),
+            Self::Answer { set, .. } | Self::Set { set } => Some(*set),
         }
     }
 
     /// And the Question it was put under, the same way round.
     pub(crate) fn label(&self) -> Option<&str> {
         match self {
-            Self::Brief => None,
+            Self::Brief | Self::Set { .. } => None,
             Self::Answer { label, .. } => Some(label),
         }
     }
@@ -130,6 +141,10 @@ impl Origin {
             "answer" => match (set, label) {
                 (Some(set), Some(label)) => Self::Answer { set, label },
                 _ => bail!("a file is attached to an Answer that names no Set or no Question"),
+            },
+            "set" => match set {
+                Some(set) => Self::Set { set },
+                None => bail!("a file is attached to a Question Set that names no Set"),
             },
             other => bail!("a file is attached to the unknown origin {other:?}"),
         })
@@ -750,6 +765,30 @@ mod tests {
                 (wording, "The wording of the error".to_owned()),
             ],
             "each Set named once, whatever it is holding",
+        );
+    }
+
+    /// A file put at the comment box is on the Set and under no Question: it
+    /// comes back with the Set's own files, and names the Set to a later
+    /// prompt's heading the way an Answer's does.
+    #[tokio::test]
+    async fn a_file_on_the_set_names_the_set_and_no_question() {
+        let (_dir, pool, conversation) = conversation().await;
+        let set = asked_about(&pool, conversation, "How the limiter counts").await;
+
+        let put = attach(&pool, conversation, Origin::Set { set }, "trace.txt", 9)
+            .await
+            .unwrap();
+
+        assert_eq!(put.origin, Origin::Set { set });
+        assert_eq!(
+            set_attachments(&pool, set).await.unwrap(),
+            vec![put.clone()]
+        );
+        assert_eq!(attachments(&pool, conversation).await.unwrap(), vec![put]);
+        assert_eq!(
+            attached_sets(&pool, conversation).await.unwrap(),
+            [(set, "How the limiter counts".to_owned())],
         );
     }
 

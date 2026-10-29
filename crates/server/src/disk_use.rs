@@ -3,7 +3,7 @@
 //!
 //! **Measured in the background and read from what was last measured.** A store
 //! is many thousands of files — a year's Maven repository, a pnpm store — and a
-//! walk of them is seconds of disk, which is not something a settings read can
+//! walk of them takes seconds of disk, which is not something a settings read can
 //! be made to wait on. So the figures are held here, per language, and the read
 //! takes whatever is held: the last figure, or nothing yet, which the page says
 //! as *not measured yet* — see [`DiskUse::of`]. The measuring is a loop of its

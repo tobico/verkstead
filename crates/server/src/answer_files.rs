@@ -1,5 +1,7 @@
 //! The files the human puts on an Answer: the upload the answer sheet's
-//! paperclip makes, and the removal its × makes.
+//! *Attach file…* makes, and the removal its × makes — and the same pair at the
+//! comment box, where a file is on the Set as a whole and answers nothing
+//! (ADR-0028).
 //!
 //! The Brief's own pair said again from the other page — see
 //! [`crate::conversations::attach`], which is where the same two acts are made
@@ -41,7 +43,8 @@ use crate::attachments::{self, Attachments};
 use crate::platform::Platform;
 use crate::{AppState, store};
 
-/// Put a file on one of a Set's Answers.
+/// Put a file on one of a Set's Answers — or, where `label` is `None`, on the
+/// Set as a whole, the file put at its comment box.
 ///
 /// The two writes [`crate::conversations::attach`] makes, in the order it makes
 /// them: the bytes into the Conversation's own directory, and then the row that
@@ -55,7 +58,7 @@ use crate::{AppState, store};
 pub(crate) async fn attach(
     state: &AppState,
     set_id: i64,
-    label: &str,
+    label: Option<&str>,
     name: &str,
     body: &[u8],
 ) -> Result<AnswerAttached> {
@@ -72,7 +75,9 @@ pub(crate) async fn attach(
         Standing::Fixed(refusal) => return Ok(refusal.attaching()),
     };
 
-    if !asks(&state.pool, set_id, label).await? {
+    if let Some(label) = label
+        && !asks(&state.pool, set_id, label).await?
+    {
         return Ok(AnswerAttached::NoSuchLabel);
     }
 
@@ -89,9 +94,12 @@ pub(crate) async fn attach(
     let attachment = store::attach(
         &state.pool,
         conversation,
-        store::Origin::Answer {
-            set: set_id,
-            label: label.trim().to_owned(),
+        match label {
+            Some(label) => store::Origin::Answer {
+                set: set_id,
+                label: label.trim().to_owned(),
+            },
+            None => store::Origin::Set { set: set_id },
         },
         &kept,
         body.len() as i64,
@@ -182,6 +190,12 @@ pub(crate) async fn onto(
 
     let inside = Attachments::under(&state.data_dir).inside(Platform::HERE, conversation_id);
 
+    let path = |file: &store::Attachment| {
+        crate::sandbox::under(&inside, &file.name)
+            .display()
+            .to_string()
+    };
+
     for answer in &mut response.answers {
         let label = answer.label.trim();
 
@@ -189,21 +203,25 @@ pub(crate) async fn onto(
             .iter()
             .filter(|file| match &file.origin {
                 store::Origin::Answer { label: on, .. } => on == label,
-                store::Origin::Brief => false,
+                store::Origin::Brief | store::Origin::Set { .. } => false,
             })
-            .map(|file| {
-                crate::sandbox::under(&inside, &file.name)
-                    .display()
-                    .to_string()
-            })
+            .map(path)
             .collect();
     }
+
+    // And the comment box's, on the Response itself: they answer nothing, so
+    // no Answer carries them.
+    response.attachments = files
+        .iter()
+        .filter(|file| matches!(file.origin, store::Origin::Set { .. }))
+        .map(path)
+        .collect();
 
     Ok(())
 }
 
 /// Where a Set stands, as far as its files are concerned.
-enum Standing {
+pub(crate) enum Standing {
     /// Waiting on the human, with the Conversation whose directory its files
     /// land in — which is read here because the sheet is a page about a Set and
     /// the directory is a Conversation's.
@@ -220,7 +238,7 @@ enum Standing {
 /// what they closed, and a Closed Conversation is work nothing is going to pick
 /// up. The refusals of the two presses are the same list, so one reading
 /// answers both — see [`Fixed::attaching`] and [`Fixed::removing`].
-enum Fixed {
+pub(crate) enum Fixed {
     NoSuchSet,
     Answered,
     Locked,
@@ -258,7 +276,7 @@ impl Fixed {
 /// which directory its files would land in, and a Set that names no Conversation
 /// names no directory. It is the same answer a Set that is not there gets,
 /// because from the sheet's side there is no such Set to speak of.
-async fn standing(pool: &SqlitePool, set_id: i64) -> Result<Standing> {
+pub(crate) async fn standing(pool: &SqlitePool, set_id: i64) -> Result<Standing> {
     match store::settlement(pool, set_id).await? {
         Some(store::Settlement::Answered(_)) => return Ok(Standing::Fixed(Fixed::Answered)),
         Some(store::Settlement::LockedUnanswered(_)) => {
@@ -283,7 +301,7 @@ async fn standing(pool: &SqlitePool, set_id: i64) -> Result<Standing> {
 /// A Set this build cannot read asks nothing anybody here can name — the stored
 /// body is kept as it stands and rendered by nothing, so a file put under one of
 /// its labels would be a pill no page could ever draw.
-async fn asks(pool: &SqlitePool, set_id: i64, label: &str) -> Result<bool> {
+pub(crate) async fn asks(pool: &SqlitePool, set_id: i64, label: &str) -> Result<bool> {
     let Some(stored) = store::load_set(pool, set_id).await? else {
         return Ok(false);
     };
@@ -306,6 +324,11 @@ async fn asks(pool: &SqlitePool, set_id: i64, label: &str) -> Result<bool> {
 /// that use it walk several Sets: a relaunched grilling is primed with
 /// everything settled, and a folding carries every Deferred Ask answered since.
 /// One read, and the Sets are told apart inside it.
+///
+/// **And what was added with those Answers**, in the words a waiting agent is
+/// given them in — see [`crate::answer_additions::primed`]. The same record
+/// beside the Response for the same reason, so an exchange names it under the
+/// decision it came with (ADR-0028).
 pub(crate) struct OnAnswers {
     /// Every file the Conversation holds, in the order they were attached —
     /// the Brief's among them, which name no Answer and are therefore never
@@ -314,6 +337,10 @@ pub(crate) struct OnAnswers {
 
     /// Where the Conversation's directory is reached from inside the sandbox.
     inside: PathBuf,
+
+    /// Every addition an answer applied to the Conversation, already in words,
+    /// in the order they were picked.
+    added: Vec<crate::answer_additions::Said>,
 }
 
 impl OnAnswers {
@@ -332,17 +359,39 @@ impl OnAnswers {
             }
         };
 
-        OnAnswers::holding(
-            files,
-            Attachments::under(&state.data_dir).inside(Platform::HERE, conversation_id),
-        )
+        let added = match crate::answer_additions::primed(state, conversation_id).await {
+            Ok(added) => added,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, "reading what this Conversation's Answers added failed");
+                Vec::new()
+            }
+        };
+
+        OnAnswers {
+            added,
+            ..OnAnswers::holding(
+                files,
+                Attachments::under(&state.data_dir).inside(Platform::HERE, conversation_id),
+            )
+        }
     }
 
     /// Made of what the record holds and where the sandbox puts it, which is
     /// the pair every reading of these is: the rows say which file is on which
     /// Answer, and the directory says what to call it.
     pub(crate) fn holding(files: Vec<store::Attachment>, inside: PathBuf) -> OnAnswers {
-        OnAnswers { files, inside }
+        OnAnswers {
+            files,
+            inside,
+            added: Vec::new(),
+        }
+    }
+
+    /// And what the Answers added, already in words: what [`Self::of`] reads
+    /// beside the files.
+    #[cfg(test)]
+    pub(crate) fn adding(self, added: Vec<crate::answer_additions::Said>) -> OnAnswers {
+        OnAnswers { added, ..self }
     }
 
     /// The files put on one Set's Answers, which is what an exchange of that Set
@@ -376,13 +425,46 @@ impl OnSet<'_> {
             .iter()
             .filter(|file| match &file.origin {
                 store::Origin::Answer { set, label: on } => *set == self.set_id && on == label,
-                store::Origin::Brief => false,
+                store::Origin::Brief | store::Origin::Set { .. } => false,
             })
-            .map(|file| {
-                crate::sandbox::under(&self.answers.inside, &file.name)
-                    .display()
-                    .to_string()
-            })
+            .map(|file| self.path(file))
             .collect()
+    }
+
+    /// And the paths the files put at the Set's comment box are read at: on the
+    /// Set as a whole, under no Question.
+    pub(crate) fn on_the_set(&self) -> Vec<String> {
+        self.answers
+            .files
+            .iter()
+            .filter(|file| file.origin == store::Origin::Set { set: self.set_id })
+            .map(|file| self.path(file))
+            .collect()
+    }
+
+    /// What was added with one Question's Answer, in words, in the order it
+    /// was picked.
+    pub(crate) fn added_under(&self, label: &str) -> Vec<String> {
+        self.added(Some(label))
+    }
+
+    /// And what was added at the Set's comment box, under no Question.
+    pub(crate) fn added_on_the_set(&self) -> Vec<String> {
+        self.added(None)
+    }
+
+    fn added(&self, label: Option<&str>) -> Vec<String> {
+        self.answers
+            .added
+            .iter()
+            .filter(|said| said.set_id == self.set_id && said.label.as_deref() == label)
+            .map(|said| said.said.clone())
+            .collect()
+    }
+
+    fn path(&self, file: &store::Attachment) -> String {
+        crate::sandbox::under(&self.answers.inside, &file.name)
+            .display()
+            .to_string()
     }
 }

@@ -1724,7 +1724,7 @@ describe("how a card says where its conversation has got to", () => {
 /// knows about.
 ///
 /// What the server does with the order is asked over there — the tests in
-/// `crates/server/tests/conversations.rs` say where an unplaced Conversation
+/// `crates/server/tests/suite/conversations.rs` say where an unplaced Conversation
 /// lands. What is asked here is that the list moves under the hand and that what
 /// is sent is what is on the screen.
 /// The sidebar as the collapsed strip draws it, under 100rem: the logo, the
@@ -3228,7 +3228,7 @@ describe("the page of a draft from before, holding a pull request", () => {
   ///
   /// What is asked here is that the control is drawn as one that works, the rule
   /// being that what a control cannot do it does not draw. That the server lets
-  /// the move through is `crates/server/tests/conversations.rs`'s.
+  /// the move through is `crates/server/tests/suite/conversations.rs`'s.
   it("leaves the repo picker open, as every other draft's is", async () => {
     theHolding();
     const { container } = mount(`/conversations/${HOLDING.id}`);
@@ -5074,7 +5074,7 @@ describe("the target a review is pointed at", () => {
 ///
 /// What follows a switch — the base back on the new repo's default, a companion
 /// that has just become the conversation's own repo dropped — is the server's,
-/// and `crates/store/tests/conversations.rs` is what says so. What is asked here
+/// and `crates/store/tests/suite/conversations.rs` is what says so. What is asked here
 /// is that the press goes out, that the panel reads the record back, and that a
 /// branch already cut settles the picker rather than hiding it.
 describe("switching a draft's repo", () => {
@@ -5343,7 +5343,7 @@ describe("switching a draft's repo", () => {
 ///
 /// Which Processes may be recorded at all is the server's — the four whose
 /// stages have not landed are refused over there, and
-/// `crates/server/tests/conversations.rs` is what says so. What is asked here is
+/// `crates/server/tests/suite/conversations.rs` is what says so. What is asked here is
 /// the composer's half: where it stands, what it offers, that a pick goes out,
 /// that a refusal is said under the control, and the two states it is drawn
 /// settled in.
@@ -5488,7 +5488,7 @@ describe("a conversation's process", () => {
 ///
 /// Whether a repository may be added at all is the server's — its own repo and
 /// one already there are refused over there, and the tests in
-/// `crates/server/tests/conversations.rs` are what say so. What is asked here is
+/// `crates/server/tests/suite/conversations.rs` are what say so. What is asked here is
 /// that the press goes out, that the row is drawn, and that a refusal is said in
 /// words where it was made.
 describe("a conversation's companion repos", () => {
@@ -5725,7 +5725,7 @@ describe("a conversation's companion repos", () => {
 /// what its branch is called.
 ///
 /// Whether any of it may be changed at all is the server's, and the tests in
-/// `crates/server/tests/conversations.rs` are what say so. What is asked here
+/// `crates/server/tests/suite/conversations.rs` are what say so. What is asked here
 /// is that each control draws what the record holds, that its save goes out,
 /// and that a refusal is said on the row it was refused for.
 describe("configuring a companion repo", () => {
