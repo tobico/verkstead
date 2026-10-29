@@ -82,7 +82,7 @@ const REST = {
   sandbox_binds: ["/var/cache/verkstead-node", "/var/cache/verkstead-cargo"],
   // And the text every session is given, likewise: what is sent is what the
   // file holds afterwards, so a save that left it out would clear it.
-  instructions: TOLD.instructions,
+  instructions: "Keep",
 };
 
 /// The same settings with the limits somewhere else — what a save answers with,

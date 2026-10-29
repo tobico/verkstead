@@ -3405,7 +3405,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // typed. Two paragraphs rather than a line, because what the pane
             // has to draw is prose with its line breaks in it, and a fixture
             // holding one line would prove nothing about the box that holds it.
-            "instructions": "Prefer the smallest change that does the job.\n\nSay what you could not finish rather than finishing something else.\n",
+            "instructions": { "Set": { "text": "Prefer the smallest change that does the job.\n\nSay what you could not finish rather than finishing something else.\n" } },
         }),
     )
     .await;

@@ -108,9 +108,9 @@ pub use settings::{
     AtOnceEdit, AtOnceView, Author, AuthorEdit, AuthorEdited, AuthorEntry, AuthorRemoved,
     AuthorSaved, AuthorToken, BindEntry, CleanupEdit, CleanupStepEdit, CleanupStepView,
     CleanupView, CompileCaching, ConflictResolution, DiskUse, Eviction, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, LanguageCleared, LanguageEdit, LanguageView, McpHeader, McpHeaderEdit,
-    McpHeaderValues, McpServer, McpServerEdit, McpServersEdit, PathResolution, PathSource,
-    PathsView, PointingRepo, RuleField, RuleRefused, Running, RunningOn, ServerField,
+    IgnoredCommentsEdit, InstructionsEdit, LanguageCleared, LanguageEdit, LanguageView, McpHeader,
+    McpHeaderEdit, McpHeaderValues, McpServer, McpServerEdit, McpServersEdit, PathResolution,
+    PathSource, PathsView, PointingRepo, RuleField, RuleRefused, Running, RunningOn, ServerField,
     ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView, SizeRefused, StoreView,
     TokenEdit, TokenSaved, Tried, UnreadEntry, UnrepointedRepo, Unrepointing, Verified,
 };

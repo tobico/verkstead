@@ -45,18 +45,19 @@ use verkstead_render::{
     Eviction, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
     FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
     FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
-    LanguageCleared, LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer,
-    McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewAnnex, NewCompanion,
-    NewConversation, NewJoin, NewRank, OpenTerminal, PairingView, Parked, PendingSteerView,
-    Permitting, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
-    Resumed, RoleChoice, RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress,
-    ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    ShowArchived, ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
-    SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
-    TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
-    TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    InstructionsEdit, LanguageCleared, LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader,
+    McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewAnnex,
+    NewCompanion, NewConversation, NewJoin, NewRank, OpenTerminal, PairingView, Parked,
+    PendingSteerView, Permitting, Process, ProcessChoice, ProcessPicked, ProfileChoice,
+    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, Running,
+    RunningOn, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, SizeRefused, Standing,
+    SteerCancelled, SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission,
+    StoreView, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
+    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo, Transferring, UnreadEntry,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -6902,7 +6903,7 @@ async fn save_settings(
                 // And the text every session is given, which the file never
                 // holds: it is a record's, written below — see
                 // [`crate::settings::Settings::save_config`].
-                edit.instructions.clone(),
+                settings.config().instructions().to_owned(),
             )
             // On what the file already holds, for the reason the secrets below are
             // written that way. `session_path` is a key in this file the page has
@@ -7023,19 +7024,20 @@ async fn save_settings(
 
         drop(_authors_writing);
 
-        // And the Instructions' record, as it was typed — a value, so a box
-        // cleared is the empty text — and nothing written where the text is
-        // what the record already says: a save about another section rewrites
-        // nothing and tells nobody (ADR-0028). Nothing about it can be
-        // refused, being somebody's prose.
-        let instructions_moved = runtime
-            .block_on(crate::replicating::instructions::saved(
-                &pool,
-                &settings,
-                &device,
-                edit.instructions,
-            ))
-            .map_err(std::io::Error::other)?;
+        // And the Instructions' record, where this save was about them: as
+        // they were typed, so a box cleared is the empty text, and nothing
+        // written where the text is what the record already says. A save about
+        // another section sends `Keep`, and never writes back the text its page
+        // last read over a newer one from another device (ADR-0028). Nothing
+        // about it can be refused, being somebody's prose.
+        let instructions_moved = match edit.instructions {
+            InstructionsEdit::Keep => false,
+            InstructionsEdit::Set { text } => runtime
+                .block_on(crate::replicating::instructions::saved(
+                    &pool, &settings, &device, text,
+                ))
+                .map_err(std::io::Error::other)?,
+        };
 
         // What GitHub made of it: whose it is, and what it may do. The second
         // half is here because a token that authenticates perfectly and cannot

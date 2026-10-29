@@ -108,7 +108,7 @@ const REST = {
   share_on_done: TOLD.share_on_done,
   // And the text every session is given, likewise: what is sent is what the
   // file holds afterwards, so a save that left it out would clear it.
-  instructions: TOLD.instructions,
+  instructions: "Keep",
 };
 
 /// The same settings with the installation having said one of its own as well,

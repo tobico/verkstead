@@ -3499,6 +3499,12 @@ export type InstallState = { "install": "Idle" } | { "install": "Installing" } |
 why: string, };
 
 /**
+ * What is to become of the Instructions on a save — see
+ * [`SettingsEdit::instructions`].
+ */
+export type InstructionsEdit = "Keep" | { "Set": { text: string, } };
+
+/**
  * One thing the far end has not got.
  *
  * Each names the *somewhere* it is to be put right, because each is a different
@@ -6259,16 +6265,19 @@ ignored_comments: IgnoredCommentsEdit,
  */
 mcp_servers: McpServersEdit, 
 /**
- * And the text every session is given, as a value again — the plainest one
- * here. What is sent is what `config.yaml` holds afterwards, so a box
- * cleared on the page is the key taken out of the file.
+ * And what is to become of the text every session is given, which is an
+ * action for a reason of its own: the text is one record for the whole
+ * cluster, the newest write winning (ADR-0028), so a section that rode it
+ * along as a value would write back whatever the page last read — over a
+ * newer text saved on another device since. So only the Instructions'
+ * own form speaks for it, and every other section sends `Keep`.
  *
  * Nothing about it can be turned down. It is a paragraph of somebody's
  * prose for an agent to read: there is no grammar to get wrong, nothing to
  * compile and nobody to ask about it, so a save carrying it cannot fail
  * the way one carrying a rule can.
  */
-instructions: string, };
+instructions: InstructionsEdit, };
 
 /**
  * What became of a save.

@@ -1221,7 +1221,7 @@ async fn adding_a_second_author_keeps_a_repo_that_recorded_none_as_the_first() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;

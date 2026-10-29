@@ -88,7 +88,7 @@ const REST = {
   conflict_resolution: TOLD.conflict_resolution,
   share_on_done: TOLD.share_on_done,
   sandbox_binds: ["/var/cache/verkstead-node", "/var/cache/verkstead-cargo"],
-  instructions: TOLD.instructions,
+  instructions: "Keep",
 };
 
 afterEach(() => {
@@ -402,7 +402,7 @@ describe("the pane", () => {
         conflict_resolution: UNSET.conflict_resolution,
         share_on_done: UNSET.share_on_done,
         sandbox_binds: [],
-        instructions: "",
+        instructions: "Keep",
         mcp_servers: {
           Set: {
             servers: [{ ...declared, id: null }],

@@ -74,7 +74,6 @@ import {
   heldAtOnce,
   heldAuthor,
   heldCleanup,
-  heldInstructions,
   heldLanguages,
   heldPaths,
 } from "./held";
@@ -230,9 +229,10 @@ export function CleanupPane(props: {
         share_on_done: told()?.share_on_done ?? false,
         // And the paths as they stand — see [`heldPaths`].
         ...heldPaths(told()),
-        // And the text every session is given, likewise — see
-        // [`heldInstructions`].
-        ...heldInstructions(told()),
+        // And the text every session is given, left where it is: it is one
+        // record for the whole cluster, and a form that sent the text it last
+        // read could write it back over a newer one — see [`InstructionsEdit`].
+        instructions: "Keep",
         // And the ignore rules left exactly where they are. Alone among the
         // settings they travel as an action rather than a value: this form has
         // nothing to say about them, and one that spoke for them could have its

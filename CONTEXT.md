@@ -986,8 +986,10 @@ that is the same on every device, the newest write winning
 ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)). A save on any device
 is the text every device's next session is given. **Cleared is an empty
 text**, written like any other and never a deletion stamp, so a text typed
-afterwards stands. A save from the settings page writes the record only where
-the text changed, so a save about another section moves nothing. Nothing in it
+afterwards stands. Only the Instructions' own form speaks for the text: every
+other section of the settings page saves it as *keep*, so a page drawn before
+another device's text arrived never writes the old one back, and its own save
+writes the record only where the text changed. Nothing in it
 can be refused, there being no grammar in a paragraph of prose to get wrong.
 **Out of `config.yaml`**: the `instructions:` key a device from before held is
 taken up once at its start and dropped from the file, and a key written back

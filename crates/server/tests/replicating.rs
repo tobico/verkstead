@@ -308,7 +308,7 @@ impl Verkstead {
                     "sandbox_binds": [],
                     "ignored_comments": "Keep",
                     "mcp_servers": "Keep",
-                    "instructions": "",
+                    "instructions": "Keep",
                 })
                 .to_string(),
             ),
@@ -399,7 +399,7 @@ impl Verkstead {
                     "sandbox_binds": [],
                     "ignored_comments": "Keep",
                     "mcp_servers": "Keep",
-                    "instructions": text,
+                    "instructions": { "Set": { "text": text } },
                 })
                 .to_string(),
             ),
@@ -472,7 +472,7 @@ impl Verkstead {
                     "sandbox_binds": [],
                     "ignored_comments": "Keep",
                     "mcp_servers": { "Set": { "servers": servers, "removed": removed } },
-                    "instructions": "",
+                    "instructions": "Keep",
                 })
                 .to_string(),
             ),
@@ -1541,8 +1541,9 @@ async fn a_device_upgraded_with_no_text_wipes_nobodys() {
     }
 }
 
-/// A settings save about another section, carrying the text as the page drew
-/// it, leaves the Instructions' record as it was: its stamp unmoved.
+/// A settings save about another section, which sends `Keep`, leaves the
+/// Instructions' record as it was, its stamp unmoved; and so does the
+/// Instructions' own save of the text the record already holds.
 #[tokio::test]
 async fn a_save_about_another_section_leaves_the_instructions_stamp() {
     let a = Verkstead::answering(A).await;
@@ -1550,9 +1551,38 @@ async fn a_save_about_another_section_leaves_the_instructions_stamp() {
     a.saves_instructions("Say it plainly.").await;
     let stamp = a.instructions_stamp().await.expect("a record was written");
 
-    a.saves_instructions("Say it plainly.").await;
+    a.saves_author(WORK, "Ada Lovelace", "ada@work.example")
+        .await;
+    assert_eq!(a.instructions_stamp().await, Some(stamp.clone()));
+    a.instructions_saying("Say it plainly.").await;
 
+    a.saves_instructions("Say it plainly.").await;
     assert_eq!(a.instructions_stamp().await, Some(stamp));
+}
+
+/// A section's save from a page drawn before another device's text arrived
+/// never writes the old text back: it sends `Keep`, so the newer text stands
+/// on both devices.
+#[tokio::test]
+async fn a_stale_page_saving_another_section_keeps_a_newer_text() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    b.saves_instructions("Say it plainly.").await;
+    a.instructions_saying("Say it plainly.").await;
+
+    a.saves_instructions("Say it at length.").await;
+    b.instructions_saying("Say it at length.").await;
+
+    // B's Git section, which sends `Keep` whatever text its page last drew.
+    b.saves_author(WORK, "Ada Lovelace", "ada@work.example")
+        .await;
+
+    b.instructions_saying("Say it at length.").await;
+    a.instructions_saying("Say it at length.").await;
 }
 
 /// A server declared on A is on B's Attach menu — the settings read both

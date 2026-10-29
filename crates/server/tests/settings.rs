@@ -147,7 +147,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -169,7 +169,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -189,7 +189,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -278,7 +278,7 @@ async fn save_at_once(app: &Router, roadmap_stages: &str, conversations: &str) -
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -303,7 +303,7 @@ async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) ->
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -480,7 +480,7 @@ async fn a_save_about_one_author_leaves_the_others_as_they_were() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -537,7 +537,7 @@ async fn a_save_under_a_new_uuid_adds_an_author_and_the_read_carries_every_one()
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -612,7 +612,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -856,7 +856,7 @@ async fn a_save_carrying_the_binds_as_they_stand_leaves_them() {
             "sandbox_binds": ["/var/cache/verkstead-node"],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -955,7 +955,7 @@ async fn save_languages(app: &Router, languages: serde_json::Value) -> SettingsS
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -1264,7 +1264,7 @@ async fn a_languages_switch_and_size_go_in_and_come_back() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1417,7 +1417,7 @@ async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file(
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1468,7 +1468,7 @@ async fn a_save_carries_the_old_key_into_the_map_and_writes_it_away() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1610,7 +1610,7 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1737,7 +1737,7 @@ async fn a_save_carrying_the_limit_as_it_stands_leaves_it() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1813,7 +1813,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1851,7 +1851,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1895,7 +1895,7 @@ async fn sharing_on_done_goes_in_and_comes_back() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1938,7 +1938,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1958,7 +1958,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -2026,15 +2026,15 @@ async fn the_instructions_are_never_written_into_the_file() {
     );
 }
 
-/// And a save from another section leaves it where it is — the same contract
-/// every other value on this page is saved under, because one request writes
-/// the whole of `config.yaml`.
+/// And a save from another section leaves it where it is: it sends `Keep`,
+/// the text being one record for the cluster that a page's last read must
+/// never be written back over (ADR-0028).
 ///
 /// `session_path` rides along too, and it is the one key here no section has a
 /// field for: a save built out of what a page sent would take away the
 /// directory a harness Verkstead installed is really in.
 #[tokio::test]
-async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
+async fn a_save_from_another_section_leaves_the_instructions() {
     let (dir, app) = app().await;
 
     // The one key the page cannot send, written the way an install writes it.
@@ -2047,7 +2047,7 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
     save_instructions(&app, "Prefer the smallest change.").await;
 
     // The Language support section's own save, which is about a size and carries
-    // everything else as the page last read it.
+    // everything else as the page last read it — the Instructions aside.
     let saved = save(
         &app,
         &serde_json::json!({
@@ -2061,7 +2061,7 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "Prefer the smallest change.",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -2161,7 +2161,7 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -2216,7 +2216,7 @@ async fn save_instructions(app: &Router, instructions: &str) -> SettingsSaved {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": instructions,
+            "instructions": { "Set": { "text": instructions } },
         }),
     )
     .await
@@ -2259,7 +2259,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -2277,7 +2277,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -2330,7 +2330,7 @@ async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
             "sandbox_binds": binds,
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -2561,7 +2561,7 @@ async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
             "sandbox_binds": [],
             "ignored_comments": { "Set": { "rules": rules } },
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -2726,7 +2726,7 @@ async fn a_refused_save_writes_nothing_at_all() {
             "sandbox_binds": [],
             "ignored_comments": { "Set": { "rules": [rule("", "[oh")] } },
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -2879,7 +2879,7 @@ async fn save_servers_removing(
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": { "Set": { "servers": servers, "removed": removed } },
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -3145,7 +3145,7 @@ async fn a_save_refused_over_a_name_writes_nothing_at_all() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": { "Set": { "servers": [server("Docs", "https://example.com")] } },
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -3360,7 +3360,7 @@ async fn a_header_value_appears_in_no_answer_this_endpoint_gives() {
                 "https://mcp.example.com/docs",
                 serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
             )] } },
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -4127,7 +4127,7 @@ mod trying {
                         serde_json::json!([super::set("X-Api-Key", "sk-athirdsecret")]),
                     ),
                 ] } },
-                "instructions": "",
+                "instructions": "Keep",
             }),
         )
         .await;

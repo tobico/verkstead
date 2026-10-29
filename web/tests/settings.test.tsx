@@ -559,7 +559,7 @@ describe("saving", () => {
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the
         // file holds afterwards, so a save that left it out would clear it.
-        instructions: TOLD.instructions,
+        instructions: "Keep",
       }),
     );
   });
@@ -812,7 +812,7 @@ describe("replacing and clearing the token", () => {
         ignored_comments: TOLD.ignored_comments,
         running: TOLD.running,
         mcp_servers: TOLD.mcp_servers,
-        instructions: TOLD.instructions,
+        instructions: "Keep",
       },
       verified: null,
       refused: [],
@@ -842,7 +842,7 @@ describe("replacing and clearing the token", () => {
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the
         // file holds afterwards, so a save that left it out would clear it.
-        instructions: TOLD.instructions,
+        instructions: "Keep",
       }),
     );
 
@@ -1252,7 +1252,7 @@ describe("sharing on Done", () => {
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the
         // file holds afterwards, so a save that left it out would clear it.
-        instructions: TOLD.instructions,
+        instructions: "Keep",
       }),
     );
 
@@ -1371,7 +1371,7 @@ describe("how a conflict is resolved", () => {
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the
         // file holds afterwards, so a save that left it out would clear it.
-        instructions: TOLD.instructions,
+        instructions: "Keep",
       }),
     );
 

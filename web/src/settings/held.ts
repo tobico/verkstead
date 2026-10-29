@@ -1,11 +1,12 @@
-//! The paths, the Cleanup, the limits and the instructions a save carries when
-//! the form in front of the human is not about them.
+//! The paths, the Cleanup and the limits a save carries when the form in front
+//! of the human is not about them.
 //!
 //! One request writes the whole of `config.yaml`, so every section's save sends
-//! every value in it — the author, the languages, the share-on-Done switch, the
-//! sandbox binds and the text every session is given. A section that left one
-//! out would be a section that emptied it: what is sent is what the file holds
-//! afterwards.
+//! every value in it — the author, the languages, the share-on-Done switch and
+//! the sandbox binds. A section that left one out would be a section that
+//! emptied it: what is sent is what the file holds afterwards. The text every
+//! session is given is not among them: it is a record for the whole cluster
+//! rather than a key of the file, and every form but its own sends `Keep`.
 //!
 //! Only the settings' own go back. The installation's entries come back on every
 //! read labelled as the unit's word, they were never in this file, and sending
@@ -60,26 +61,12 @@ export function heldConfig(told: SettingsView | undefined) {
     // And the binds the settings hold, again for that reason — a list a form
     // left out would be a list it emptied. See [`heldPaths`].
     ...heldPaths(told),
-    // And the text every session is given, likewise: a form that left it out
-    // would be a form that cleared it.
-    ...heldInstructions(told),
+    // And the text every session is given, left where it is: it is one record
+    // for the whole cluster, and a form that sent the text it last read could
+    // write it back over a newer one saved on another device — see
+    // [`InstructionsEdit`]. Only the Instructions' own form sends a text.
+    instructions: "Keep" as const,
   };
-}
-
-/// And the instructions every session is given, as they stand, ready to be
-/// spread into a save.
-///
-/// Empty where the read has not landed, which is what the server writes for a
-/// Verkstead nobody has told anything — and what a form sending it would ask
-/// for is the state the file is already in.
-///
-/// Verbatim, because verbatim is what a harness is handed: a form riding this
-/// along has nothing to say about the words in it, and is not entitled to trim
-/// them on the way past.
-export function heldInstructions(told: SettingsView | undefined): {
-  instructions: string;
-} {
-  return { instructions: told?.instructions ?? "" };
 }
 
 /// And the languages as they stand, ready to be spread into a save by a section

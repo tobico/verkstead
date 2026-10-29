@@ -50,7 +50,6 @@ import {
   heldAtOnce,
   heldAuthor,
   heldCleanup,
-  heldInstructions,
   heldLanguages,
   heldPaths,
 } from "./held";
@@ -137,9 +136,10 @@ export function useWritingPaths() {
         at_once: heldAtOnce(standing),
         conflict_resolution: standing?.conflict_resolution ?? "Merge",
         share_on_done: standing?.share_on_done ?? false,
-        // And the text every session is given, likewise — see
-        // [`heldInstructions`].
-        ...heldInstructions(standing),
+        // And the text every session is given, left where it is: it is one
+        // record for the whole cluster, and a form that sent the text it last
+        // read could write it back over a newer one — see [`InstructionsEdit`].
+        instructions: "Keep",
         ...lists,
         // And the ignore rules left exactly where they are. Alone among the
         // settings they travel as an action rather than a value: this form has

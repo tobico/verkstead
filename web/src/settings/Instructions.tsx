@@ -162,10 +162,10 @@ export function InstructionsPane(props: {
         // name somebody hand-edited into the file weeks ago — see
         // [`McpServersEdit`].
         mcp_servers: "Keep",
-        // And the one thing this form is about, exactly as it was typed: what
-        // is sent is what the file holds afterwards, so an emptied box is the
-        // text taken away.
-        instructions,
+        // And the one thing this form is about, exactly as it was typed: the
+        // one form that sends a text rather than `Keep`, so an emptied box is
+        // the text cleared on every device.
+        instructions: { Set: { text: instructions } },
       }),
     onSuccess: (saved: SettingsSaved) => {
       // What was typed goes, because the answer is now what the field follows.

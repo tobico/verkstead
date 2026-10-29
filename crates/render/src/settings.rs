@@ -995,15 +995,33 @@ pub struct SettingsEdit {
     /// row whose URL was rewritten is that declaration with the new one.
     pub mcp_servers: McpServersEdit,
 
-    /// And the text every session is given, as a value again — the plainest one
-    /// here. What is sent is what `config.yaml` holds afterwards, so a box
-    /// cleared on the page is the key taken out of the file.
+    /// And what is to become of the text every session is given, which is an
+    /// action for a reason of its own: the text is one record for the whole
+    /// cluster, the newest write winning (ADR-0028), so a section that rode it
+    /// along as a value would write back whatever the page last read — over a
+    /// newer text saved on another device since. So only the Instructions'
+    /// own form speaks for it, and every other section sends `Keep`.
     ///
     /// Nothing about it can be turned down. It is a paragraph of somebody's
     /// prose for an agent to read: there is no grammar to get wrong, nothing to
     /// compile and nobody to ask about it, so a save carrying it cannot fail
     /// the way one carrying a rule can.
-    pub instructions: String,
+    pub instructions: InstructionsEdit,
+}
+
+/// What is to become of the Instructions on a save — see
+/// [`SettingsEdit::instructions`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum InstructionsEdit {
+    /// Leave the text alone. What every section but the Instructions' own
+    /// sends.
+    Keep,
+
+    /// Make this the text, exactly as it was typed — an empty one being the
+    /// text cleared, which is still a text rather than a removal. Nothing is
+    /// written where it is what the record already says.
+    Set { text: String },
 }
 
 /// One language as the human has just left it: the two keys of its entry the
