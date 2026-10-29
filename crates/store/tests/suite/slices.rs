@@ -636,11 +636,16 @@ async fn what_each_set_landed_as_is_written_down_against_the_conversation() {
 async fn a_sets_pending_picks_cross_and_a_repo_with_no_match_is_struck() {
     let here = end().await;
     let worked = owning(&here.pool, "rate-limiting").await;
-    let open = ask(&here.pool, worked.id, &owning::asked(), Ask::Blocking)
-        .await
-        .unwrap()
-        .expect("the Conversation is there to ask from")
-        .id;
+    let open = ask(
+        &here.pool,
+        worked.id,
+        &super::owning::asked(),
+        Ask::Blocking,
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation is there to ask from")
+    .id;
 
     let ours = repos(&here.pool).await;
     let shared = register_repo(
