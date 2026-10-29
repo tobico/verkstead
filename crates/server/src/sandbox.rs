@@ -207,9 +207,9 @@ pub(crate) const SYSTEM: &[&str] = if cfg!(target_os = "macos") {
 /// `/nix` is the whole of what makes the box usable — every binary a session
 /// runs is under it — and the rest is what a dynamic linker, a certificate store
 /// and a shell need to exist at all. `/run/current-system` is NixOS's own, and
-/// is what `PATH` below points at. Where the certificate store, the resolver
-/// or the user's name is a link out of `/etc` to somewhere none of these
-/// reach, [`on_the_machine`] binds that too — see [`FOLLOWED`].
+/// is what `PATH` below points at. Where one of the [`FOLLOWED`] entries under
+/// `/etc` is a link to somewhere none of these reach, [`on_the_machine`] binds
+/// that too.
 ///
 /// One that is not there is skipped rather than refused: `/lib64` is an x86
 /// fact, and a machine without `/run/current-system` is one that is not NixOS,
