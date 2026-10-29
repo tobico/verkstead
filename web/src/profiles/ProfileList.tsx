@@ -192,8 +192,7 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
   ConfigNotAbsolute:
     "Give the config file's absolute path, starting with a slash.",
   ConfigMissing: "There's nothing at the config file's path.",
-  NotAFile:
-    "That isn't a file. A session's ~/.claude.json is copied from one.",
+  NotAFile: "That isn't a file. A session's ~/.claude.json is copied from one.",
   HomeNotAbsolute: "Give the home's absolute path, starting with a slash.",
   HomeMissing: "There's nothing at the home's path.",
   HomeNotADirectory:
@@ -763,9 +762,7 @@ export function ProfilePane(props: {
                       <Icon of={faCircleExclamation} class={styles.trouble} />
                       {why()}
                     </ErrorLine>
-                    <Show
-                      when={offered() && profile().broken === "SignedOut"}
-                    >
+                    <Show when={offered() && profile().broken === "SignedOut"}>
                       {logIn()}
                     </Show>
                   </div>
@@ -804,7 +801,8 @@ export function ProfilePane(props: {
       <Show when={saved()?.bound === false}>
         <p class={styles.athome}>
           This profile isn't bound on this device. Saving here changes it on
-          every device, but not the paths below, which are another device's.
+          every device. Its agent and the paths below are another device's, and
+          can't be changed here.
         </p>
       </Show>
 
@@ -820,6 +818,7 @@ export function ProfilePane(props: {
               sends them to the create. */}
           <ProfileForm
             initial={initial}
+            unbound={saved()?.bound === false}
             submit={adding() ? "Save" : "Save changes"}
             save={(profile) => {
               const which = props.profile;
@@ -922,6 +921,15 @@ export function ProfileForm(props: {
   /// never reaches here: it is about what is in the fields, and it is drawn
   /// under them.
   saved: () => void;
+
+  /// Whether the Profile is one this device holds no binding of, whose agent
+  /// and paths are therefore drawn read-only.
+  ///
+  /// A save over one writes the record alone and leaves its account as it
+  /// was — the paths are another device's, and its harness is the shape every
+  /// device's binding of it is in — so a field that took a change here would
+  /// be a change the save then quietly drops.
+  unbound?: boolean;
 }): JSX.Element {
   // What has been typed, or `null` while nothing has.
   const [edited, setEdited] = createSignal<ProfileEdit | null>(null);
@@ -977,6 +985,10 @@ export function ProfileForm(props: {
   /// And the agent type, which takes the account's paths with it: they are the
   /// old type's fields, and there is nothing in them the new type asked for.
   const pickedType = (agent_type: AgentType) => {
+    if (props.unbound) {
+      return;
+    }
+
     setEdited({ ...form(), account: BLANK_ACCOUNT[agent_type] });
     setRefused(null);
   };
@@ -1079,7 +1091,7 @@ export function ProfileForm(props: {
           reading of a row that is not on offer. Its account is untouched by
           that: what the form sends is what was read back, until another
           type is picked. */}
-      <fieldset class={styles.agents}>
+      <fieldset class={styles.agents} disabled={props.unbound}>
         <legend>Agent</legend>
 
         <div class={styles.segments}>
@@ -1100,6 +1112,7 @@ export function ProfileForm(props: {
                   name={`${id}-agent_type`}
                   value={agent_type}
                   checked={form().account.agent_type === agent_type}
+                  disabled={props.unbound}
                   onChange={() => pickedType(agent_type)}
                 />
                 <HarnessMark of={agent_type} class={styles.segmentMark} />
@@ -1144,14 +1157,26 @@ export function ProfileForm(props: {
                 the server can read, because an account may be anywhere —
                 and showing the dotfiles these fields exist to point at,
                 with the files as well where the field names one. */}
-            <PathField
-              id={`profile-${field.key}`}
-              dotfiles
-              files={field.file}
-              placeholder={field.placeholder}
-              value={path(form().account, field.key)}
-              write={typedPath(field.key)}
-            />
+            <Show
+              when={!props.unbound}
+              fallback={
+                <input
+                  id={`profile-${field.key}`}
+                  type="text"
+                  readOnly
+                  value={path(form().account, field.key)}
+                />
+              }
+            >
+              <PathField
+                id={`profile-${field.key}`}
+                dotfiles
+                files={field.file}
+                placeholder={field.placeholder}
+                value={path(form().account, field.key)}
+                write={typedPath(field.key)}
+              />
+            </Show>
           </>
         )}
       </For>

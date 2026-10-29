@@ -112,9 +112,7 @@ function mountCards(opening: string | null = null) {
   const add = vi.fn();
 
   return {
-    ...mounting(() => (
-      <ProfileList opening={opening} open={open} add={add} />
-    )),
+    ...mounting(() => <ProfileList opening={opening} open={open} add={add} />),
     open,
     add,
   };
@@ -369,9 +367,9 @@ describe("the cards", () => {
       expect.anything(),
     );
     expect(
-      [...container.querySelectorAll(`.${styles.profile} .${styles.title}`)].map(
-        (name) => name.textContent,
-      ),
+      [
+        ...container.querySelectorAll(`.${styles.profile} .${styles.title}`),
+      ].map((name) => name.textContent),
     ).toEqual(SAVED.map(reads));
   });
 
@@ -561,6 +559,44 @@ describe("a member's accounts", () => {
     await waitFor(() => screen.getByLabelText("Name"));
 
     expect(document.body.textContent).not.toContain("isn't bound");
+  });
+
+  /// And its agent and paths drawn read-only over one bound elsewhere: a save
+  /// writes the record alone, so a field that took a change would be a change
+  /// quietly dropped. Over one bound here both stay editable.
+  it("draws the agent and paths read-only over one not bound here", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountPane(MIRROR.id);
+
+    await waitFor(() => screen.getByLabelText("Name"));
+
+    const radios = screen.getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.every((radio) => radio.disabled)).toBe(true);
+
+    const paths = [
+      ...document.querySelectorAll<HTMLInputElement>(
+        "#profile-claude_dir, #profile-config_file, #profile-home",
+      ),
+    ];
+    expect(paths.length).toBeGreaterThan(0);
+    expect(paths.every((field) => field.readOnly)).toBe(true);
+  });
+
+  it("leaves them editable over one bound here", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountPane(CLUSTER[0]!.id);
+
+    await waitFor(() => screen.getByLabelText("Name"));
+
+    const radios = screen.getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.some((radio) => radio.disabled)).toBe(false);
+
+    const paths = [
+      ...document.querySelectorAll<HTMLInputElement>(
+        "#profile-claude_dir, #profile-config_file, #profile-home",
+      ),
+    ];
+    expect(paths.some((field) => field.readOnly)).toBe(false);
   });
 
   /// The save goes to the Profile's own endpoint on the device the browser
@@ -966,7 +1002,8 @@ describe("logging an account in", () => {
   });
 
   it("says a refused code was not taken, over the fresh address", async () => {
-    const FRESH = "https://claude.com/cai/oauth/authorize?code=true&state=fresh";
+    const FRESH =
+      "https://claude.com/cai/oauth/authorize?code=true&state=fresh";
     const REFUSED = "Claude didn't accept that code.";
     let refused = false;
 
@@ -1015,10 +1052,17 @@ describe("logging an account in", () => {
   it("tells the server this device has stopped looking when it closes", async () => {
     const fetching = serving(
       whenever("/api/ui/profiles", json(SIGNED_OUT)),
-      whenever(LOGIN, json({ state: "Waiting", url: ADDRESS, refused: null }), "POST"),
+      whenever(
+        LOGIN,
+        json({ state: "Waiting", url: ADDRESS, refused: null }),
+        "POST",
+      ),
       whenever(LOGIN, json({ state: "Waiting", url: ADDRESS, refused: null })),
-      whenever(`${LOGIN}/close`, () =>
-        Promise.resolve(new Response(null, { status: 204 })), "POST"),
+      whenever(
+        `${LOGIN}/close`,
+        () => Promise.resolve(new Response(null, { status: 204 })),
+        "POST",
+      ),
     );
     mountCards();
 
@@ -1151,11 +1195,15 @@ describe("the pane a card opens", () => {
 
     it("says an account at home with no login cannot be used away", async () => {
       const login = `/api/ui/profiles/${CLUSTER[0]!.id}/login`;
-      const address = "https://claude.com/cai/oauth/authorize?code=true&state=1";
+      const address =
+        "https://claude.com/cai/oauth/authorize?code=true&state=1";
       serving(
         whenever("/api/ui/profiles", json([{ ...CLUSTER[0]!, login: false }])),
         whenever(login, json({ state: "Starting" }), "POST"),
-        whenever(login, json({ state: "Waiting", url: address, refused: null })),
+        whenever(
+          login,
+          json({ state: "Waiting", url: address, refused: null }),
+        ),
       );
       mountPane(CLUSTER[0]!.id);
 
@@ -1195,9 +1243,7 @@ describe("the pane a card opens", () => {
         { said: NOT_USABLE_AWAY, red: false },
       ]);
       // One Log in, beside the sentence it is the fix for.
-      expect(
-        screen.getAllByRole("button", { name: "Log in" }),
-      ).toHaveLength(1);
+      expect(screen.getAllByRole("button", { name: "Log in" })).toHaveLength(1);
     });
 
     it("says nothing over a profile with nothing wrong with it", async () => {
@@ -1480,7 +1526,9 @@ describe("the pane a card opens", () => {
     serving(whenever("/api/ui/profiles", json({ error: "gone" }, 500)));
     mountPane(FABLE.id);
 
-    await waitFor(() => screen.getByText(/The agent profiles couldn't be read/));
+    await waitFor(() =>
+      screen.getByText(/The agent profiles couldn't be read/),
+    );
   });
 });
 
@@ -1892,9 +1940,9 @@ describe("the models a profile lists", () => {
     await waitFor(() => screen.getByLabelText("Opus 5"));
 
     expect(ticked()).toEqual(OPUS.models);
-    expect(
-      (screen.getByLabelText("Fable 5") as HTMLInputElement).checked,
-    ).toBe(false);
+    expect((screen.getByLabelText("Fable 5") as HTMLInputElement).checked).toBe(
+      false,
+    );
   });
 
   /// An id the list has not learned is a row like the others, ticked, reading as
@@ -1905,9 +1953,9 @@ describe("the models a profile lists", () => {
 
     await waitFor(() => screen.getByLabelText(UNKNOWN));
 
-    expect(
-      (screen.getByLabelText(UNKNOWN) as HTMLInputElement).checked,
-    ).toBe(true);
+    expect((screen.getByLabelText(UNKNOWN) as HTMLInputElement).checked).toBe(
+      true,
+    );
     expect(ticked()).toEqual(MIXED.models);
   });
 
@@ -1946,9 +1994,9 @@ describe("the models a profile lists", () => {
 
     // Trimmed, and ticked where it landed: at the end of what the profile
     // already lists.
-    expect(
-      (screen.getByLabelText(UNKNOWN) as HTMLInputElement).checked,
-    ).toBe(true);
+    expect((screen.getByLabelText(UNKNOWN) as HTMLInputElement).checked).toBe(
+      true,
+    );
     expect(
       (screen.getByLabelText("Another model id") as HTMLInputElement).value,
     ).toBe("");
@@ -1969,7 +2017,9 @@ describe("the models a profile lists", () => {
 
     await waitFor(() => screen.getByLabelText("Fable 5"));
 
-    const add = screen.getByRole("button", { name: "Add" }) as HTMLButtonElement;
+    const add = screen.getByRole("button", {
+      name: "Add",
+    }) as HTMLButtonElement;
     expect(add.disabled).toBe(true);
 
     fireEvent.input(screen.getByLabelText("Another model id"), {
@@ -1992,7 +2042,6 @@ describe("the models a profile lists", () => {
     expect(ticked()).toEqual(["claude-fable-5"]);
   });
 });
-
 
 describe("browsing for the account's paths", () => {
   /// The labels the fields are found by, which are the ones the form has — what
@@ -2068,10 +2117,7 @@ describe("browsing for the account's paths", () => {
       whenever(listingAt(null), json(SERVERS_HOME)),
       whenever(listingAt("/home/ada/accounts"), json(ACCOUNTS)),
       whenever(listingAt("/home/ada/accounts/work"), json(WORK)),
-      whenever(
-        listingAt("/home/ada/accounts/work/.claude"),
-        json(CLAUDE),
-      ),
+      whenever(listingAt("/home/ada/accounts/work/.claude"), json(CLAUDE)),
       ...answers,
     );
   }
@@ -2141,10 +2187,7 @@ describe("browsing for the account's paths", () => {
 
     expect(held(CONFIG)).toBe("/home/ada/accounts/work/.claude.json");
     expect(
-      askedFor(
-        fetching,
-        listingAt("/home/ada/accounts/work/.claude.json"),
-      ),
+      askedFor(fetching, listingAt("/home/ada/accounts/work/.claude.json")),
     ).toBe(0);
   });
 
