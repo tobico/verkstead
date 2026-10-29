@@ -1966,7 +1966,9 @@ async fn a_press_on_a_preview_with_a_live_terminal_only_refocuses_it() {
 
     assert_eq!(press().await, TerminalOpened::Refocused { number });
 
-    watcher.types("[Console]::Out.WriteLine('still ' + 'here')\r").await;
+    watcher
+        .types("[Console]::Out.WriteLine('still ' + 'here')\r")
+        .await;
     let showing = watcher.until(|grid| grid.contains("still here")).await;
 
     assert_eq!(
