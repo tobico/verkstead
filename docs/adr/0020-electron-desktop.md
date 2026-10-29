@@ -423,3 +423,121 @@ not taken up.
 - **A certificate on a USB token.** The CA/Browser Forum has required the key
   in a hardware module since 2023, and a token cannot be plugged into GitHub's
   runners. Rejected.
+
+## Amended: a download offers to install itself
+
+Decided in the grilling of 2026-10-29 (Sets 1515 to 1517).
+
+**A Mac app run from the dmg or from Downloads, and an AppImage run from
+wherever it was saved, offer to install themselves.** Packaging above left each
+as the thing a human downloads: the README told a Mac to drag the bundle into
+Applications and a Linux desktop to make the file executable and run it, and
+nothing in the app knew where it was running from. What that left was this: a
+Mac app run from the image, or from a Downloads folder it was quarantined into,
+is run by Gatekeeper from a read-only randomised path, where the Update
+[ADR-0027](0027-cluster-updates.md) gave it cannot land; and an AppImage in
+`~/Downloads` is one whose Launch on startup entry and self-update both point at
+a file in Downloads, with no entry in the applications menu. Windows is
+untouched, by decision: its download is the installer (ADR-0027), and the Brief's
+naming of it was a slip the human corrected.
+
+**Where it fires.** A packed app running from outside an Applications folder —
+Electron's own `isInApplicationsFolder` on a Mac, `$APPIMAGE` not under
+`~/Applications` on Linux, which is where AppImageLauncher and Gear Lever put
+theirs too, so a human who already integrated it is left alone. One rule on both
+platforms; Downloads and the dmg alone, by path, was the Brief's wording and was
+not taken, the detection being more fragile and a human who keeps AppImages in
+`~/bin` seeing the offer once and ticking the box. Never on a checkout run, and
+never on a hidden start: a login's start has nobody at a window that never came
+up, and the offer waits for the next shown launch. In the lifecycle it comes
+after the single-instance lock and before the port probe and the sidecar, so
+nothing has been started when the app hands over to the copy — and the relaunch
+needs no wait of its own, Electron's relaunch and its Mac move both waiting for
+this process to exit before the new one starts.
+
+**The dialog** is the platform's own message box with its own checkbox, as the
+two dialogs the app already has are native: *Install Verkstead?*, a sentence
+saying where it runs from and what installing does, **Install** and **Skip**,
+**Don't ask again**. Skip asks again at the next launch; the box writes a fourth
+key into `desktop.json`, read one key at a time like the three before it. A card
+drawn by the page was rejected: it would need a window up and a bridge channel
+for a question the app can ask before either exists.
+
+**Install on a Mac** is Electron's `moveToApplicationsFolder` into
+`/Applications`: it moves, trashes the copy that was there, asks for the
+administrator's password where the folder wants one, and relaunches on its own.
+`~/Applications` by a copy of Verkstead's own was rejected: `/Applications` is
+where the README has pointed and where the release leg installs the bundle to
+prove it. The dmg is left mounted. A password dialog cancelled is a move that
+could not be made, and gets the failure dialog below rather than a silent skip:
+the human pressed Install, and an app that said nothing about not having done
+it would be the one hiding something.
+
+**Install on Linux** moves `$APPIMAGE` to `~/Applications/Verkstead-x86_64.AppImage`
+— the release's own name, whatever a browser renamed the download to — keeps it
+executable, writes `~/.local/share/applications/net.tobico.Verkstead.desktop`
+naming the copy, quoted the way the autostart entry quotes its path, copies the
+icon set out of the mounted image into `~/.local/share/icons/hicolor`, and
+relaunches from the copy. The icons because an entry whose `Icon` names nothing
+draws the generic launcher icon, and the only icons are inside an image that is
+gone once the app is not running from it; one png beside the file was rejected
+for the set. Move rather than copy, on both platforms: a download left behind is
+one that shows the offer again if it is ever run. The Launch on startup entry
+needs nothing done to it — every launch rewrites it with the running path while
+it is there, as the **Startup Registration** entry says.
+
+**A Verkstead already installed there** has its version read first:
+`CFBundleShortVersionString` out of the bundle's `Info.plist`, and
+`X-AppImage-Version` out of the desktop entry electron-builder writes into the
+image's root, which the AppImage runtime extracts without starting anything, so
+a release from before this one answers too — a `--version` flag of the app's own
+was rejected for that reason. Newer than the one running: *Open the installed
+Verkstead?*, with **Open installed** relaunching it and ending this one, and
+**Keep this one** carrying on. Older or the same: replaced, a pre-release
+counting as older than its release. An installed copy that is *running* never
+reaches this — the single-instance lock has handed the launch over before any
+dialog could be drawn.
+
+**Failure** — no space, a folder that cannot be made — is an error dialog saying
+why, and the app carries on from where it is; quitting was rejected.
+
+**And the Desktop settings page is the way back.** A row drawn only while the
+app runs from outside Applications, saying where it runs from, with an
+**Install** button: the dialog's Install over one more bridge channel, raising
+the same dialog with one more sentence when sessions are running on this device,
+naming them as stopped and resumed, the way the Update card names them. Without
+the row, Don't ask again would leave hand-editing `desktop.json` as the one way
+to install later, which is not a control. Refusing while a session runs, and
+installing from the page with no dialog, were both offered and not taken.
+
+**And `--install` is the dialog's Install with nobody asked**, an argument of
+the app's own beside `--hidden`: run from outside Applications it installs and
+relaunches as the press would, and run from inside it does nothing but say so.
+It exists because a native dialog cannot be pressed on a runner: the release
+legs install with it the way a downloader does — the Linux leg from a Downloads
+of its own into a home of its own, asserting the file, the entry, the icons and
+the relaunch; the Mac leg out of the mounted image in place of the `ditto` into
+`/Applications` it did by hand, asserting that the relaunched app runs from
+`/Applications` and is not translocated. Seeding `desktop.json` with the box
+ticked before a shown launch, and proving the move by hand alone, was the
+alternative and was not taken.
+
+### Considered Options
+
+- **Windows too.** Rejected: the exe is the installer.
+- **Only the dmg and Downloads, by path.** Rejected for one rule on both
+  platforms, the box being the way out for a human who keeps AppImages
+  elsewhere.
+- **`~/Applications` on a Mac, by a copy of Verkstead's own.** Rejected for
+  Electron's call into `/Applications`.
+- **Copy, and leave the download.** Rejected: one Verkstead afterwards.
+- **Replace an installed copy whatever its version.** Refined by the human: a
+  newer one is offered to open instead.
+- **A card drawn by the page.** Rejected for the native dialog.
+- **A file of its own for Don't ask again.** Rejected for a fourth key.
+- **Nothing beyond the dialog.** Rejected for the row on the Desktop page.
+- **Quit when the move fails.** Rejected for carrying on.
+- **A cancelled password dialog as a silent skip.** Rejected for the failure
+  dialog.
+- **No `--install`, the legs seeding the box ticked.** Rejected: the move
+  would be proven by hand alone.
