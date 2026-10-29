@@ -722,10 +722,7 @@ async fn pressing(app: &Router, path: &str, saying: Option<&str>) -> (StatusCode
 /// rather than built with `json!`, that one sorting its keys and this being the
 /// order the field is declared in.
 fn refused_over(broken: &str) -> String {
-    format!(
-        "{{\"ProfileBroken\":{{\"broken\":\"{broken}\",\"agent_type\":\"Claude\",\
-         \"device\":null}}}}"
-    )
+    format!("{{\"ProfileBroken\":{{\"broken\":\"{broken}\",\"agent_type\":\"Claude\"}}}}")
 }
 
 /// One row of a Profiles list, by the name on it.

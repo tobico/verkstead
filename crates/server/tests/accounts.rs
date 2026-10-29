@@ -573,15 +573,32 @@ impl Verkstead {
     }
 
     /// The mirror of the member's Profile called `name`, once the refresher has
-    /// written it down.
+    /// written it down **and a binding of it has said its device holds a
+    /// login**. The record and its bindings are pulled apart, so a row listed a
+    /// moment before the binding arrives is one with nothing to copy yet, and a
+    /// fetch made then is refused as having no device to copy from.
     async fn mirror_of(&self, name: &str) -> ProfileEntry {
+        self.mirror_where(name, |row| row.login).await
+    }
+
+    /// The mirror of `name` as soon as it is listed at all, logged in anywhere
+    /// or not — for a Profile no device has said a login of.
+    async fn listed(&self, name: &str) -> ProfileEntry {
+        self.mirror_where(name, |_| true).await
+    }
+
+    async fn mirror_where(
+        &self,
+        name: &str,
+        ready: impl Fn(&ProfileEntry) -> bool,
+    ) -> ProfileEntry {
         let mut last = Vec::new();
 
         let waited = tokio::time::timeout(WAITING, async {
             loop {
                 last = self.profiles().await;
 
-                if let Some(row) = called(&last, name) {
+                if let Some(row) = called(&last, name).filter(|row| ready(row)) {
                     return row.clone();
                 }
 
@@ -1339,7 +1356,7 @@ async fn a_home_that_is_not_answering_refuses_the_launch_by_name() {
     .await
     .unwrap();
 
-    let mirror = b.mirror_of("work").await;
+    let mirror = b.listed("work").await;
 
     let why = b
         .fetches(&mirror)
