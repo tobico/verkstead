@@ -598,6 +598,8 @@ jobs:
   # | The slow session-account tests      | 40795830677 | 4m18 + 8m11 = 13m48   | 3m01 + 4m25 = 8m12    |
   # | The same, measured again            | 40798711420 | 5m00 + 4m39 = 10m34   | 3m02 + 3m24 = 7m11    |
   # | Workspace crates cached: the fill   | 40801531180 | 5m22 + 4m58 = 11m20   | 3m37 + 3m05 = 7m30    |
+  # | The same, on a server commit        | 40804267131 | 3m35 + 4m45 = 9m23    | 2m10 + 3m14 = 6m13    |
+  # | Keyed by profile, no crates: fill   | 40806644844 | 4m22 + 6m43 = 12m09   | 3m11 + 3m09 = 7m10    |
   #
   # What each lever came to, row by row:
   #
@@ -759,6 +761,42 @@ jobs:
   # remaining leg's share of the 40 test-minutes up by about 25 seconds, on
   # legs already over ten. The timeout stays at fifteen: the head of this
   # comment says what is left.
+  #
+  # Workspace crates cached: `rust-cache`'s `cache-workspace-crates`, the free
+  # lever the maintainer chose. It needed a new key, because the action saves
+  # only when its key misses. The first run filled that key with nothing to
+  # restore, so it built cold (run 40801531180). It built in 3m37 to 5m52,
+  # no slower than the warm runs before it. That was the first sign that
+  # those runs had not been warm at all.
+  #
+  # The second run, on a commit that touched the server crate, built in 2m10
+  # to 3m57 (run 40804267131). Every leg came in under ten, the slowest at
+  # 9m23, and the typical leg was about eight minutes. Leg 9's first attempt
+  # failed one `announcing` test that passed on its re-run, and took 10m11.
+  # The row is the re-run. What each of the ten came to:
+  #
+  # | Leg | Build + test = job    |   | Leg | Build + test = job    |
+  # | --- | --------------------- | - | --- | --------------------- |
+  # | 1   | 3m34 + 3m28 = 8m11    |   | 6   | 2m10 + 3m14 = 6m13    |
+  # | 2   | 3m34 + 3m16 = 7m42    |   | 7   | 3m35 + 4m45 = 9m23    |
+  # | 3   | 2m19 + 4m03 = 7m12    |   | 8   | 3m23 + 3m53 = 8m22    |
+  # | 4   | 2m49 + 3m45 = 7m25    |   | 9   | 3m49 + 3m42 = 8m31    |
+  # | 5   | 3m32 + 4m07 = 8m37    |   | 10  | 3m57 + 3m25 = 8m15    |
+  #
+  # **But the workspace's crates were not what paid.** Every leg compiled all
+  # five of them again, because the checkout gives every source file a new
+  # mtime and cargo rebuilds a crate whose sources are newer than its
+  # artifacts. What paid was the new key. The action hashes the lockfile and
+  # the members' manifests into its key, but not the workspace's root
+  # `Cargo.toml`, where `[profile.dev]` is. So when line tables came in, the
+  # key stayed the same. Every leg since then has restored dependencies built
+  # with full debug info and rebuilt all 302 of them; run 40798711420
+  # compiled 302 crates on a full match. And none of them saved, because a
+  # full match saves nothing. Under the new key a leg compiles six.
+  #
+  # So the next commit took `cache-workspace-crates` back out, and renamed the
+  # key `windows-line-tables` for what it is really there for. Its own run
+  # filled that key and built cold again, in 3m11 to 5m32 (run 40806644844).
   #
   # `slice` partitioning deals the tests out one at a time across every binary,
   # so each leg gets its share of each suite rather than whole binaries. What
