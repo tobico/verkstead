@@ -867,7 +867,7 @@ jobs:
       #
       # **The windows-2025 image already has real-time protection off** (run
       # 40678176057), so today these exclusions have nothing to work against —
-      # the ledger below says what that came to. The step stays so that an
+      # the ledger above says what that came to. The step stays so that an
       # image which turns it back on costs this job nothing, and it says on
       # the run which of the two it found.
       - name: Exclude the build and the tests from Defender
