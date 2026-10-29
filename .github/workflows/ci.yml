@@ -597,6 +597,7 @@ jobs:
   # | The same, measured again            | 40709146514 | 4m58 + 6m26 = 12m23   | 3m18 + 4m10 = 8m22    |
   # | The slow session-account tests      | 40795830677 | 4m18 + 8m11 = 13m48   | 3m01 + 4m25 = 8m12    |
   # | The same, measured again            | 40798711420 | 5m00 + 4m39 = 10m34   | 3m02 + 3m24 = 7m11    |
+  # | Workspace crates cached: the fill   | 40801531180 | 5m22 + 4m58 = 11m20   | 3m37 + 3m05 = 7m30    |
   #
   # What each lever came to, row by row:
   #
