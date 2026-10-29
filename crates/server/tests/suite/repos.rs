@@ -39,9 +39,10 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    AuthorRemoved, Cloned, Created, Registered, RepoEntry, RepoRemoved, RepoView, Repointed,
+    AuthorRemoved, Cloned, Created, PointingRepo, Registered, RepoEntry, RepoRemoved, RepoView,
+    Repointed,
 };
-use verkstead_server::settings::{Author, Mirrored, Settings};
+use verkstead_server::settings::{Author, Recorded, Settings};
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
 use crate::fixture_repositories::repository;
@@ -1208,7 +1209,7 @@ async fn adding_a_second_author_keeps_a_repo_that_recorded_none_as_the_first() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1583,6 +1584,14 @@ async fn remove_author(app: &Router, id: &str) -> AuthorRemoved {
     .await
 }
 
+/// A Repo of this device's, as a removal names one.
+fn here(name: &str) -> PointingRepo {
+    PointingRepo {
+        name: name.to_owned(),
+        device: None,
+    }
+}
+
 /// An Author two registered Repos point at is refused removal naming both;
 /// once both are unregistered — their association kept as history — it goes,
 /// and its token with it.
@@ -1606,7 +1615,8 @@ async fn an_author_repos_point_at_is_refused_removal_naming_them() {
     assert_eq!(
         remove_author(&app, "personal").await,
         AuthorRemoved::InUse {
-            repos: vec!["askance".to_owned(), "verkstead".to_owned()],
+            repos: vec![here("askance"), here("verkstead")],
+            unasked: vec![],
         },
     );
     assert!(
@@ -1622,7 +1632,7 @@ async fn an_author_repos_point_at_is_refused_removal_naming_them() {
 
     assert_eq!(
         remove_author(&app, "personal").await,
-        AuthorRemoved::Removed
+        AuthorRemoved::Removed { unasked: vec![] }
     );
 
     let settings = Settings::in_data_dir(dir.path());
@@ -1716,23 +1726,22 @@ async fn a_clone_naming_no_author_is_the_one_authors() {
     assert_eq!(repo.author.as_deref(), Some("work"));
 }
 
-/// A device with no Author of its own and one mirror — an Annex, which its
-/// Keeper gives no Author and which sees the Keeper's over the one list — has
-/// a registration naming nobody recorded as that mirror: there is still nobody
+/// A device whose one Author was made on another — an Annex, which its Keeper
+/// gives no Author and which holds the Keeper's as records — has a
+/// registration naming nobody recorded as that Author: there is still nobody
 /// else it could be (ADR-0024).
 #[tokio::test]
-async fn a_repo_registered_with_only_a_mirror_is_recorded_as_it() {
+async fn a_repo_registered_with_only_an_author_made_elsewhere_is_recorded_as_it() {
     let src = tempfile::tempdir().unwrap();
     let (dir, app) = workbench().await;
 
-    Settings::in_data_dir(dir.path()).holding_mirrors(vec![Mirrored::of(
+    Settings::in_data_dir(dir.path()).holding_authors(vec![Recorded::of(
         Author::of(
             "keepers".to_owned(),
             None,
             Some("Ada Lovelace".to_owned()),
             Some("ada@work.example".to_owned()),
         ),
-        "the-keeper".to_owned(),
         false,
     )]);
 

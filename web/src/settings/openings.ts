@@ -89,32 +89,31 @@ export const WORDS = [
 export type Opening =
   | (typeof WORDS)[number]
   | "profile:new"
-  | `profile:${number}`;
+  | `profile:${string}`;
 
 /// Whether a segment is one of the words above.
 function worded(what: string | undefined): what is (typeof WORDS)[number] {
   return WORDS.some((word) => word === what);
 }
 
-/// What opens a Profile's form: its id, or `"new"` for the blank one.
-export function opensProfile(which: number | "new"): Opening {
+/// What opens a Profile's form: its uuid, or `"new"` for the blank one.
+export function opensProfile(which: string): Opening {
   return `profile:${which}`;
 }
 
-/// And which Profile an opening names — its id, `"new"` for the blank form, or
-/// `null` where it names no Profile at all.
+/// And which Profile an opening names — its uuid, `"new"` for the blank form,
+/// or `null` where it names no Profile at all.
 ///
 /// The one opening carrying an id of its own, now that a Repo's pane is gone:
 /// what is left beside it is named by a word, and a word is compared rather
 /// than read apart.
-export function profileOpened(opening: Opening | null): number | "new" | null {
+export function profileOpened(opening: Opening | null): string | null {
   const prefix = "profile:";
   if (opening === null || !opening.startsWith(prefix)) {
     return null;
   }
 
-  const which = opening.slice(prefix.length);
-  return which === "new" ? "new" : Number(which);
+  return opening.slice(prefix.length);
 }
 
 /// Where the settings stand, which every one of their details panes is nested
@@ -150,19 +149,11 @@ export function openingAt(pathname: string): Opening | null {
     return what;
   }
 
-  if (what === "profiles" && which !== undefined) {
-    const profile = which === "new" ? "new" : id(which);
-    return profile === null ? null : opensProfile(profile);
+  // Any segment at all is a Profile's uuid, or `new` for the blank form: a
+  // uuid nothing is saved under names no Profile, which the pane answers.
+  if (what === "profiles" && which !== undefined && which !== "") {
+    return opensProfile(which);
   }
 
   return null;
-}
-
-/// The id a segment names, or `null` where it names none.
-///
-/// Digits and nothing else, because an id is what the server issued. A segment
-/// that is anything else names no Profile — and neither does an id nothing is
-/// saved under, which the pane answers the same way.
-function id(segment: string): number | null {
-  return /^\d+$/.test(segment) ? Number(segment) : null;
 }

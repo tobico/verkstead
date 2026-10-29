@@ -122,7 +122,7 @@ pub struct PendingForm {
 /// left on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingPairing {
-    pub profile_id: i64,
+    pub profile_id: String,
     pub model: String,
 }
 
@@ -187,7 +187,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              instruction     TEXT,
              follow_up       TEXT,
              investigation   TEXT,
-             profile_id      INTEGER REFERENCES profiles(id),
+             profile_id      TEXT,
              model           TEXT,
              interrupt       INTEGER NOT NULL DEFAULT 0
          ) STRICT",
@@ -287,7 +287,7 @@ pub async fn pending_steer(
         Option<String>,
         Option<String>,
         Option<String>,
-        Option<i64>,
+        Option<String>,
         Option<String>,
         i64,
     );
@@ -413,7 +413,11 @@ pub async fn save_pending_steer(
     .bind(form.instruction.as_deref())
     .bind(form.follow_up.as_deref())
     .bind(form.investigation.as_deref())
-    .bind(form.pairing.as_ref().map(|pairing| pairing.profile_id))
+    .bind(
+        form.pairing
+            .as_ref()
+            .map(|pairing| pairing.profile_id.as_str()),
+    )
     .bind(form.pairing.as_ref().map(|pairing| pairing.model.as_str()))
     .bind(i64::from(form.interrupt))
     .bind(conversation_id)

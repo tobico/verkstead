@@ -63,7 +63,7 @@ async fn drafting(pool: &SqlitePool) -> i64 {
 }
 
 /// An Agent Profile to pair with, by name and with the models it lists.
-async fn profile(pool: &SqlitePool, name: &str, models: &[&str]) -> i64 {
+async fn profile(pool: &SqlitePool, name: &str, models: &[&str]) -> String {
     create_profile(
         pool,
         &ProfileFacts {
@@ -263,7 +263,7 @@ async fn a_save_writes_the_whole_form_and_reads_it_back() {
         follow_up: Some("And say what came of it".to_owned()),
         investigation: Some("Does it count the 429s it sends?".to_owned()),
         pairing: Some(PendingPairing {
-            profile_id: account,
+            profile_id: account.clone(),
             model: "opus".to_owned(),
         }),
         interrupt: true,

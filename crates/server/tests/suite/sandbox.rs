@@ -978,10 +978,10 @@ async fn grilling_with(
         .unwrap()
         .expect("the Conversation starts");
 
-    store::set_grilling_pairing(&pool, id, profile.id, profile.model())
+    store::set_grilling_pairing(&pool, id, &profile.id, profile.model())
         .await
         .unwrap();
-    store::set_implementation_pairing(&pool, id, profile.id, profile.model())
+    store::set_implementation_pairing(&pool, id, &profile.id, profile.model())
         .await
         .unwrap();
 
@@ -1518,28 +1518,37 @@ async fn a_repo_opened_under_the_second_author_runs_its_sessions_as_it() {
     }
 }
 
-/// A Repo pointed at a member's Author whose home holds no token runs its
-/// sessions as that Author's name and email, and with no `GH_TOKEN` at all —
-/// a tokenless Author, as one of this device's own would be — and nothing of
-/// this device's own Author.
+/// A Repo pointed at an Author made on another device, which holds no token
+/// for it, runs its sessions as that Author's name and email, and with no
+/// `GH_TOKEN` at all — a tokenless Author — and nothing of any other Author.
 #[tokio::test]
-async fn a_repo_pointed_at_a_tokenless_mirror_runs_its_sessions_as_it() {
-    use verkstead_server::settings::{Author, Mirrored};
+async fn a_repo_pointed_at_a_tokenless_author_made_elsewhere_runs_its_sessions_as_it() {
+    use verkstead_server::settings::{Author, Recorded};
 
     let mut fixture = grilling().await;
     fixture.configure(THE_AUTHOR);
     fixture.configure_github_token("author_tokens:\n  work: ghp_theworkone\n");
 
-    fixture.settings.holding_mirrors(vec![Mirrored::of(
-        Author::of(
-            "away".to_owned(),
-            Some("Away".to_owned()),
-            Some("Ada Lovelace".to_owned()),
-            Some("ada@away.example".to_owned()),
+    fixture.settings.holding_authors(vec![
+        Recorded::of(
+            Author::of(
+                "work".to_owned(),
+                None,
+                Some("Tobias Cohen".to_owned()),
+                Some("tobi@tobico.net".to_owned()),
+            ),
+            false,
         ),
-        "the-workstation".to_owned(),
-        false,
-    )]);
+        Recorded::of(
+            Author::of(
+                "away".to_owned(),
+                Some("Away".to_owned()),
+                Some("Ada Lovelace".to_owned()),
+                Some("ada@away.example".to_owned()),
+            ),
+            false,
+        ),
+    ]);
 
     fixture.recorded_as("away").await;
 
@@ -1555,13 +1564,13 @@ async fn a_repo_pointed_at_a_tokenless_mirror_runs_its_sessions_as_it() {
     }
 }
 
-/// A Repo pointed at a member's Author whose token's copy has arrived runs its
-/// sessions as that Author: its name, its email and the copy as `GH_TOKEN` —
-/// and none of the other tokens this device holds, though it holds a copy of
-/// every one of the home's Authors' beside its own.
+/// A Repo pointed at an Author whose token is held on another device, and
+/// whose copy has arrived, runs its sessions as that Author: its name, its
+/// email and the copy as `GH_TOKEN` — and none of the other tokens this device
+/// holds.
 #[tokio::test]
-async fn a_repo_pointed_at_a_mirror_runs_its_sessions_from_the_copy() {
-    use verkstead_server::settings::{Author, Mirrored};
+async fn a_repo_pointed_at_an_author_made_elsewhere_runs_its_sessions_from_the_copy() {
+    use verkstead_server::settings::{Author, Recorded};
 
     let mut fixture = grilling().await;
     fixture.configure(THE_AUTHOR);
@@ -1571,19 +1580,18 @@ async fn a_repo_pointed_at_a_mirror_runs_its_sessions_from_the_copy() {
     );
 
     let mirror = |id: &str, email: &str| {
-        Mirrored::of(
+        Recorded::of(
             Author::of(
                 id.to_owned(),
                 None,
                 Some("Ada Lovelace".to_owned()),
                 Some(email.to_owned()),
             ),
-            "the-workstation".to_owned(),
             true,
         )
     };
 
-    fixture.settings.holding_mirrors(vec![
+    fixture.settings.holding_authors(vec![
         mirror("away", "ada@away.example"),
         mirror("other", "ada@other.example"),
     ]);

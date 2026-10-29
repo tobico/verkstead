@@ -96,7 +96,8 @@ pub use onboarding::{
 pub use profiles::{
     AccountFile, AccountLogin, AgentType, Broken, MemoryFile, MemoryLeft, MemoryWanted,
     PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen, ProfileDeleted,
-    ProfileEdit, ProfileEntry, ProfileSaved, ProfileTrouble, RepoPairingsView, RoleChoice,
+    ProfileDevice, ProfileEdit, ProfileEntry, ProfileSaved, ProfileTrouble, RepoPairingsView,
+    RoleChoice,
 };
 pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
@@ -108,11 +109,11 @@ pub use settings::{
     AtOnceEdit, AtOnceView, Author, AuthorEdit, AuthorEdited, AuthorEntry, AuthorRemoved,
     AuthorSaved, AuthorToken, BindEntry, CleanupEdit, CleanupStepEdit, CleanupStepView,
     CleanupView, CompileCaching, ConflictResolution, DiskUse, Eviction, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, LanguageCleared, LanguageEdit, LanguageView, McpHeader, McpHeaderEdit,
-    McpServer, McpServerEdit, McpServersEdit, PathResolution, PathSource, PathsView, RuleField,
-    RuleRefused, Running, RunningOn, ServerField, ServerRefused, ServerTried, SettingsEdit,
-    SettingsSaved, SettingsView, SizeRefused, StoreView, TokenEdit, TokenSaved, Tried, UnreadEntry,
-    Verified,
+    IgnoredCommentsEdit, InstructionsEdit, LanguageCleared, LanguageEdit, LanguageView, McpHeader,
+    McpHeaderEdit, McpHeaderValues, McpServer, McpServerEdit, McpServersEdit, PathResolution,
+    PathSource, PathsView, PointingRepo, RuleField, RuleRefused, Running, RunningOn, ServerField,
+    ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView, SizeRefused, StoreView,
+    TokenEdit, TokenSaved, Tried, UnreadEntry, UnrepointedRepo, Unrepointing, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

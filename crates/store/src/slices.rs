@@ -34,9 +34,9 @@
 //!
 //! **The two ids that are not the store's to renumber** are the Repo and the
 //! Agent Profile, because neither is this Conversation's: a Repo is one
-//! directory on one machine and an account is at home on one, so both are
+//! directory on one machine and an account is bound per device, so both are
 //! settled outside — the Repos by the match the whole cluster runs on and the
-//! Profiles by the device each is at home on — and arrive here as a
+//! Profiles by their uuids — and arrive here as a
 //! [`Renaming`].
 //!
 //! **And a slice is bounded.** A Transcript is megabytes of a session talking,
@@ -171,9 +171,9 @@ pub struct Marks {
 /// **Neither is this Conversation's.** A Repo is one directory on one machine
 /// and the same repository is another on the next, so which of the far end's
 /// Repos each of these rows means is the cluster's own match — see
-/// `server::matching`. An Agent Profile is at home on one device and is a mirror
-/// on every other, so which row means it there is that pairing read back — see
-/// `server::peer::transfers`.
+/// `server::matching`. An Agent Profile is one record under one uuid on every
+/// device, bound on some and run from a copy on the rest, so which row means it
+/// there is that uuid read back — see `server::peer::transfers`.
 ///
 /// Both are settled by the devices rather than by the store, and arrive here
 /// already answered.
@@ -188,7 +188,7 @@ pub struct Renaming {
     /// the ordinary end of an account deleted a year after the Steer that ran
     /// under it: the column lands empty rather than pointing at somebody else's
     /// account, and the rest of the row stands.
-    pub profiles: HashMap<i64, i64>,
+    pub profiles: HashMap<String, String>,
 }
 
 /// What one column of a carried row holds.
@@ -983,14 +983,24 @@ impl Slice {
         }
     }
 
-    /// And every Agent Profile it names.
-    pub fn profiles(&self) -> BTreeSet<i64> {
-        self.named(Holds::Profile)
+    /// And every Agent Profile it names, by uuid.
+    pub fn profiles(&self) -> BTreeSet<String> {
+        let mut named = BTreeSet::new();
+
+        for (rows, at) in self.columns(Holds::Profile) {
+            named.extend(rows.rows.iter().filter_map(|row| match row.get(at)? {
+                Cell::Text(id) => Some(id.clone()),
+                _ => None,
+            }));
+        }
+
+        named
     }
 
-    /// The ids held by every column of that kind.
-    fn named(&self, kind: Holds) -> BTreeSet<i64> {
-        let mut named = BTreeSet::new();
+    /// Every table of the slice that has a column of that kind, and where in
+    /// its rows the column is.
+    fn columns(&self, kind: Holds) -> Vec<(&Rows, usize)> {
+        let mut found = Vec::new();
 
         for rows in &self.tables {
             let Some(carried) = CARRIED.iter().find(|carried| carried.table == rows.table) else {
@@ -1002,22 +1012,31 @@ impl Slice {
                     continue;
                 }
 
-                let Some(at) = rows.columns.iter().position(|name| name == column) else {
-                    continue;
-                };
-
-                named.extend(
-                    rows.rows
-                        .iter()
-                        // A pending pick's Repo, which crosses or is struck —
-                        // see [`Self::picked_repos`].
-                        .filter(|row| !(kind == Holds::Repo && pending(rows, row)))
-                        .filter_map(|row| row.get(at)?.id())
-                        // The Repo column that holds no repository, which is
-                        // nothing to go and match — see [`NO_REPOSITORY`].
-                        .filter(|id| !(kind == Holds::Repo && *id == NO_REPOSITORY)),
-                );
+                if let Some(at) = rows.columns.iter().position(|name| name == column) {
+                    found.push((rows, at));
+                }
             }
+        }
+
+        found
+    }
+
+    /// The ids held by every column of that kind.
+    fn named(&self, kind: Holds) -> BTreeSet<i64> {
+        let mut named = BTreeSet::new();
+
+        for (rows, at) in self.columns(kind) {
+            named.extend(
+                rows.rows
+                    .iter()
+                    // A pending pick's Repo, which crosses or is struck —
+                    // see [`Self::picked_repos`].
+                    .filter(|row| !(kind == Holds::Repo && pending(rows, row)))
+                    .filter_map(|row| row.get(at)?.id())
+                    // The Repo column that holds no repository, which is
+                    // nothing to go and match — see [`NO_REPOSITORY`].
+                    .filter(|id| !(kind == Holds::Repo && *id == NO_REPOSITORY)),
+            );
         }
 
         named
@@ -1215,8 +1234,13 @@ impl Landing<'_> {
                 // and the alternative to an empty column is a row pointing at
                 // somebody else's account.
                 Some(Holds::Profile) => {
-                    match cell.id().and_then(|was| self.renaming.profiles.get(&was)) {
-                        Some(here) => Cell::Int(*here),
+                    let here = match &cell {
+                        Cell::Text(was) => self.renaming.profiles.get(was),
+                        _ => None,
+                    };
+
+                    match here {
+                        Some(here) => Cell::Text(here.clone()),
                         None => Cell::Null,
                     }
                 }

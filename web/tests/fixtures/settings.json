@@ -268,11 +268,13 @@
           "set": false
         }
       ],
+      "id": "e9b83cd2-7376-559c-907d-f0e5e578e2a9",
       "name": "docs",
       "url": "https://mcp.example.com/docs"
     },
     {
       "headers": [],
+      "id": "14ed7fe9-7df6-5e66-872c-fc0ba3ffe900",
       "name": "tickets",
       "url": "https://mcp.example.com/tickets"
     }

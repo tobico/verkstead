@@ -5,9 +5,33 @@
       "claude_dir": "/srv/accounts/fable/.claude",
       "config_file": "/srv/accounts/fable/.claude.json"
     },
+    "bound": true,
     "broken": null,
-    "device": null,
-    "id": 1,
+    "devices": [
+      {
+        "bound": {
+          "agent_type": "Claude",
+          "claude_dir": "/srv/accounts/fable/.claude",
+          "config_file": "/srv/accounts/fable/.claude.json"
+        },
+        "device": {
+          "id": null,
+          "name": "workbench",
+          "os": "Linux",
+          "reachable": true
+        }
+      },
+      {
+        "bound": null,
+        "device": {
+          "id": "0011223344556677889900aabbccddee",
+          "name": "laptop",
+          "os": "macOS",
+          "reachable": true
+        }
+      }
+    ],
+    "id": "11111111-1111-4111-8111-111111111111",
     "login": true,
     "memory": true,
     "models": [
@@ -21,9 +45,33 @@
       "claude_dir": "/srv/accounts/opus/.claude",
       "config_file": "/srv/accounts/opus/.claude.json"
     },
+    "bound": true,
     "broken": null,
-    "device": null,
-    "id": 2,
+    "devices": [
+      {
+        "bound": {
+          "agent_type": "Claude",
+          "claude_dir": "/srv/accounts/opus/.claude",
+          "config_file": "/srv/accounts/opus/.claude.json"
+        },
+        "device": {
+          "id": null,
+          "name": "workbench",
+          "os": "Linux",
+          "reachable": true
+        }
+      },
+      {
+        "bound": null,
+        "device": {
+          "id": "0011223344556677889900aabbccddee",
+          "name": "laptop",
+          "os": "macOS",
+          "reachable": true
+        }
+      }
+    ],
+    "id": "22222222-2222-4222-8222-222222222222",
     "login": true,
     "memory": true,
     "models": [
@@ -37,14 +85,33 @@
       "claude_dir": "/home/you/accounts/personal/.claude",
       "config_file": "/home/you/accounts/personal/.claude.json"
     },
+    "bound": false,
     "broken": null,
-    "device": {
-      "id": "0011223344556677889900aabbccddee",
-      "name": "laptop",
-      "os": "macOS",
-      "reachable": true
-    },
-    "id": 3,
+    "devices": [
+      {
+        "bound": null,
+        "device": {
+          "id": null,
+          "name": "workbench",
+          "os": "Linux",
+          "reachable": true
+        }
+      },
+      {
+        "bound": {
+          "agent_type": "Claude",
+          "claude_dir": "/home/you/accounts/personal/.claude",
+          "config_file": "/home/you/accounts/personal/.claude.json"
+        },
+        "device": {
+          "id": "0011223344556677889900aabbccddee",
+          "name": "laptop",
+          "os": "macOS",
+          "reachable": true
+        }
+      }
+    ],
+    "id": "33333333-3333-4333-8333-333333333333",
     "login": true,
     "memory": true,
     "models": [

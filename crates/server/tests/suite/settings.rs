@@ -147,7 +147,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -169,7 +169,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -189,7 +189,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -278,7 +278,7 @@ async fn save_at_once(app: &Router, roadmap_stages: &str, conversations: &str) -
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -303,7 +303,7 @@ async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) ->
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -431,8 +431,17 @@ async fn the_first_save_makes_the_one_author_and_every_save_after_is_about_it() 
     assert_eq!(saved.settings.git_author.name, "Tobias Cohen");
     assert!(saved.settings.github_token.is_some(), "under the same uuid");
 
+    let authors = Settings::in_data_dir(dir.path())
+        .config()
+        .authors()
+        .to_vec();
+    assert_eq!(authors.len(), 1, "one Author: {authors:?}");
+
     let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-    assert_eq!(config.matches("- id:").count(), 1, "one Author: {config}");
+    assert!(
+        !config.contains("authors"),
+        "the Authors are records: {config}"
+    );
 
     let secrets = std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap();
     assert!(
@@ -471,7 +480,7 @@ async fn a_save_about_one_author_leaves_the_others_as_they_were() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -482,9 +491,9 @@ async fn a_save_about_one_author_leaves_the_others_as_they_were() {
         saved.verified
     );
 
-    let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-    assert!(config.contains("name: Home"), "{config}");
-    assert!(config.contains("name: Tobias Cohen"), "{config}");
+    let config = Settings::in_data_dir(dir.path()).config();
+    assert_eq!(config.author("home").unwrap().name(), Some("Home"));
+    assert_eq!(config.author("work").unwrap().name(), Some("Tobias Cohen"));
 
     let secrets = std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap();
     assert!(secrets.contains("work: ghp_anewone"), "{secrets}");
@@ -528,7 +537,7 @@ async fn a_save_under_a_new_uuid_adds_an_author_and_the_read_carries_every_one()
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -603,7 +612,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -777,19 +786,26 @@ async fn the_secrets_file_lands_readable_by_nobody_else() {
     assert_eq!(mode & 0o777, 0o600);
 }
 
-/// The files are the source of truth, so the endpoint reads them rather than
-/// remembering what it last wrote.
+/// The files are the source of truth for what is still in them, so the
+/// endpoint reads them rather than remembering what it last wrote — and the
+/// Authors are not in them any more: an `authors:` key written in by hand is
+/// ignored, the records being the database's (ADR-0028).
 #[tokio::test]
 async fn a_hand_edit_to_either_file_is_what_the_next_read_says() {
     let (dir, app) = app().await;
 
-    save_token(&app, "ghp_thefirsttoken").await;
+    let made = save_token(&app, "ghp_thefirsttoken").await;
+    let id = made
+        .settings
+        .git_author
+        .id
+        .expect("the token made an Author");
     save_author(&app, "Tobias Cohen", "tobi@tobico.net").await;
 
     hand_edit(
         dir.path(),
         "secrets.yaml",
-        "author_tokens:\n  by-hand: by-hand-abcd\n",
+        &format!("author_tokens:\n  {id}: by-hand-abcd\n"),
     );
     hand_edit(
         dir.path(),
@@ -806,8 +822,12 @@ async fn a_hand_edit_to_either_file_is_what_the_next_read_says() {
             .last_four,
         "abcd",
     );
-    assert_eq!(settings.git_author.name, "By Hand");
-    assert_eq!(settings.git_author.email, "hand@tobico.net");
+    assert_eq!(settings.git_author.id.as_deref(), Some(id.as_str()));
+    assert_eq!(
+        settings.git_author.name, "Tobias Cohen",
+        "the key is ignored"
+    );
+    assert_eq!(settings.git_author.email, "tobi@tobico.net");
 }
 
 /// The binds are values now, so a save carrying them as they stand is what
@@ -836,7 +856,7 @@ async fn a_save_carrying_the_binds_as_they_stand_leaves_them() {
             "sandbox_binds": ["/var/cache/verkstead-node"],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -935,7 +955,7 @@ async fn save_languages(app: &Router, languages: serde_json::Value) -> SettingsS
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -1244,7 +1264,7 @@ async fn a_languages_switch_and_size_go_in_and_come_back() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1397,7 +1417,7 @@ async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file(
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1448,7 +1468,7 @@ async fn a_save_carries_the_old_key_into_the_map_and_writes_it_away() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1590,7 +1610,7 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1717,7 +1737,7 @@ async fn a_save_carrying_the_limit_as_it_stands_leaves_it() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1793,7 +1813,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1831,7 +1851,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1875,7 +1895,7 @@ async fn sharing_on_done_goes_in_and_comes_back() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1918,7 +1938,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1938,7 +1958,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -1947,9 +1967,8 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
     assert!(saved.settings.share_on_done, "the switch stands");
 }
 
-/// The text every session is given goes into the file and comes back off it,
-/// line breaks and all — through a restart, because a session reads this file
-/// afresh rather than reading anything the server has been holding.
+/// The text every session is given goes into its record and comes back off
+/// it, line breaks and all — through a restart, which reads the record again.
 ///
 /// The one setting on this page written for something other than Verkstead to
 /// read: what is in the box is handed to a harness, so what survives the round
@@ -1976,21 +1995,24 @@ async fn the_instructions_go_in_and_come_back_verbatim() {
     assert_eq!(settings(&restarted).await.instructions, text);
 }
 
-/// And clearing the box takes the key out of the file rather than leaving an
-/// empty one behind: a key holding nothing would read as a setting somebody
-/// made.
+/// And the text is never written into `config.yaml`: it is a record in the
+/// database, the cluster's (ADR-0028) — and clearing the box is an empty text
+/// rather than a key left behind.
 #[tokio::test]
-async fn clearing_the_instructions_writes_the_key_away() {
+async fn the_instructions_are_never_written_into_the_file() {
     let (dir, app) = app().await;
 
     save_instructions(&app, "Prefer the smallest change.").await;
 
     let config = dir.path().join("config.yaml");
+    let written = std::fs::read_to_string(&config).unwrap_or_default();
     assert!(
-        std::fs::read_to_string(&config)
-            .unwrap()
-            .contains("instructions"),
-        "the text somebody typed is in config.yaml",
+        !written.contains("instructions"),
+        "the text somebody typed is not in config.yaml: {written}",
+    );
+    assert_eq!(
+        settings(&app).await.instructions,
+        "Prefer the smallest change."
     );
 
     let saved = save_instructions(&app, "").await;
@@ -2000,19 +2022,19 @@ async fn clearing_the_instructions_writes_the_key_away() {
     let written = std::fs::read_to_string(&config).unwrap();
     assert!(
         !written.contains("instructions"),
-        "and clearing it takes the key away: {written}",
+        "and clearing it leaves no key behind: {written}",
     );
 }
 
-/// And a save from another section leaves it where it is — the same contract
-/// every other value on this page is saved under, because one request writes
-/// the whole of `config.yaml`.
+/// And a save from another section leaves it where it is: it sends `Keep`,
+/// the text being one record for the cluster that a page's last read must
+/// never be written back over (ADR-0028).
 ///
 /// `session_path` rides along too, and it is the one key here no section has a
 /// field for: a save built out of what a page sent would take away the
 /// directory a harness Verkstead installed is really in.
 #[tokio::test]
-async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
+async fn a_save_from_another_section_leaves_the_instructions() {
     let (dir, app) = app().await;
 
     // The one key the page cannot send, written the way an install writes it.
@@ -2025,7 +2047,7 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
     save_instructions(&app, "Prefer the smallest change.").await;
 
     // The Language support section's own save, which is about a size and carries
-    // everything else as the page last read it.
+    // everything else as the page last read it — the Instructions aside.
     let saved = save(
         &app,
         &serde_json::json!({
@@ -2039,7 +2061,7 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "Prefer the smallest change.",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -2139,14 +2161,18 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
 
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
 
-    assert!(written.contains("Ada"), "what the page sent is in the file");
+    assert_eq!(
+        Settings::in_data_dir(dir.path()).config().authors()[0].name(),
+        Some("Ada"),
+        "what the page sent is the Author's record",
+    );
 
     for key in [
         "gleam",
@@ -2190,7 +2216,7 @@ async fn save_instructions(app: &Router, instructions: &str) -> SettingsSaved {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": instructions,
+            "instructions": { "Set": { "text": instructions } },
         }),
     )
     .await
@@ -2233,7 +2259,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -2251,7 +2277,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -2304,7 +2330,7 @@ async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
             "sandbox_binds": binds,
             "ignored_comments": "Keep",
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -2535,7 +2561,7 @@ async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
             "sandbox_binds": [],
             "ignored_comments": { "Set": { "rules": rules } },
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await
@@ -2700,7 +2726,7 @@ async fn a_refused_save_writes_nothing_at_all() {
             "sandbox_binds": [],
             "ignored_comments": { "Set": { "rules": [rule("", "[oh")] } },
             "mcp_servers": "Keep",
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -2803,8 +2829,43 @@ async fn sending_no_rules_takes_the_ones_that_were_there_away() {
 }
 
 /// Save a list of MCP server declarations and leave the rest of both files
-/// alone, which is what the section's own press sends.
+/// alone, which is what the section's own press sends — each row of a name
+/// already declared carrying that record's uuid, and every declaration not
+/// sent removed by its uuid, the way the page says which rows are which.
 async fn save_servers(app: &Router, servers: serde_json::Value) -> SettingsSaved {
+    let standing = settings(app).await.mcp_servers;
+    let mut servers = servers;
+    let rows = servers.as_array_mut().expect("a list of rows");
+
+    for row in rows.iter_mut() {
+        let named = standing
+            .iter()
+            .find(|declared| row["name"].as_str() == Some(declared.name.as_str()));
+
+        if let Some(declared) = named {
+            row["id"] = declared.id.clone().into();
+        }
+    }
+
+    let removed: Vec<String> = standing
+        .iter()
+        .filter(|declared| {
+            !rows
+                .iter()
+                .any(|row| row["name"].as_str() == Some(declared.name.as_str()))
+        })
+        .map(|declared| declared.id.clone())
+        .collect();
+
+    save_servers_removing(app, servers, removed).await
+}
+
+/// And the same with the rows and the removals said outright.
+async fn save_servers_removing(
+    app: &Router,
+    servers: serde_json::Value,
+    removed: Vec<String>,
+) -> SettingsSaved {
     save(
         app,
         &serde_json::json!({
@@ -2817,8 +2878,8 @@ async fn save_servers(app: &Router, servers: serde_json::Value) -> SettingsSaved
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
-            "mcp_servers": { "Set": { "servers": servers } },
-            "instructions": "",
+            "mcp_servers": { "Set": { "servers": servers, "removed": removed } },
+            "instructions": "Keep",
         }),
     )
     .await
@@ -2853,14 +2914,29 @@ fn clear(name: &str) -> serde_json::Value {
 
 /// And the declaration as it comes back, for comparing against: a name, a URL
 /// and the names of its headers.
-fn declared(name: &str, url: &str) -> McpServer {
+fn declared(name: &str, url: &str) -> Declared {
     declaring(name, url, &[])
+}
+
+/// A declaration as it comes back, bar the uuid of its record, which the
+/// server mints — what [`declared`] and [`declaring`] compare against.
+#[derive(Debug)]
+struct Declared(McpServer);
+
+impl PartialEq<Declared> for McpServer {
+    fn eq(&self, other: &Declared) -> bool {
+        McpServer {
+            id: other.0.id.clone(),
+            ..self.clone()
+        } == other.0
+    }
 }
 
 /// And one with headers on it, each its name and whether a value is kept to
 /// send in it.
-fn declaring(name: &str, url: &str, headers: &[(&str, bool)]) -> McpServer {
-    McpServer {
+fn declaring(name: &str, url: &str, headers: &[(&str, bool)]) -> Declared {
+    Declared(McpServer {
+        id: String::new(),
         name: name.to_owned(),
         url: url.to_owned(),
         headers: headers
@@ -2870,7 +2946,7 @@ fn declaring(name: &str, url: &str, headers: &[(&str, bool)]) -> McpServer {
                 set: *set,
             })
             .collect(),
-    }
+    })
 }
 
 /// What `secrets.yaml` holds now, as text — which is where a header value is
@@ -2917,10 +2993,11 @@ async fn the_declared_servers_go_in_and_come_back() {
     assert_eq!(settings(&app).await.mcp_servers, saved.settings.mcp_servers);
 }
 
-/// The file rather than the process: a second server over the same Data
-/// Directory reads what the first one wrote.
+/// The database rather than the process or `config.yaml`: a second server
+/// over the same Data Directory reads what the first one wrote, and the file
+/// holds none of it (ADR-0028).
 #[tokio::test]
-async fn the_declarations_are_in_the_config_file_and_outlive_the_server() {
+async fn the_declarations_are_records_and_outlive_the_server() {
     let (dir, app) = app().await;
 
     save_servers(
@@ -2929,13 +3006,9 @@ async fn the_declarations_are_in_the_config_file_and_outlive_the_server() {
     )
     .await;
 
-    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap_or_default();
 
-    assert!(written.contains("mcp_servers"), "{written}");
-    assert!(
-        written.contains("https://mcp.example.com/docs"),
-        "{written}"
-    );
+    assert!(!written.contains("mcp_servers"), "{written}");
 
     let restarted = app_over(dir.path()).await;
 
@@ -3072,7 +3145,7 @@ async fn a_save_refused_over_a_name_writes_nothing_at_all() {
             "sandbox_binds": [],
             "ignored_comments": "Keep",
             "mcp_servers": { "Set": { "servers": [server("Docs", "https://example.com")] } },
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -3256,12 +3329,12 @@ async fn a_headers_name_comes_back_and_its_value_never_does() {
     assert!(written.contains("Bearer sk-averysecretkey"), "{written}");
     assert!(written.contains("verkstead"), "{written}");
 
-    // And `config.yaml` holds the names and no part of either value, the two
-    // files being split by what is secret rather than by what it configures.
-    let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    // And `config.yaml` holds no part of either value, nor the declaration,
+    // which is a record now.
+    let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap_or_default();
 
-    assert!(config.contains("Authorization"), "{config}");
     assert!(!config.contains("sk-averysecretkey"), "{config}");
+    assert!(!config.contains("Authorization"), "{config}");
 }
 
 /// The promise the token's own test makes, made again for a header: a value that
@@ -3287,7 +3360,7 @@ async fn a_header_value_appears_in_no_answer_this_endpoint_gives() {
                 "https://mcp.example.com/docs",
                 serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
             )] } },
-            "instructions": "",
+            "instructions": "Keep",
         }),
     )
     .await;
@@ -3442,8 +3515,8 @@ async fn a_header_taken_off_the_declaration_takes_its_value_with_it() {
 }
 
 /// Deleting a declaration takes its headers with it, so declaring that name
-/// again starts with none — the secrets are held under the name that declared
-/// them, and a name nobody declares holds nothing.
+/// again starts with none — the secrets are held under the uuid of the
+/// declaration, and declaring the name again is a new one.
 #[tokio::test]
 async fn deleting_a_server_takes_its_header_values_with_it() {
     let (dir, app) = app().await;
@@ -4054,7 +4127,7 @@ mod trying {
                         serde_json::json!([super::set("X-Api-Key", "sk-athirdsecret")]),
                     ),
                 ] } },
-                "instructions": "",
+                "instructions": "Keep",
             }),
         )
         .await;

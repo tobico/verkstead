@@ -76,13 +76,13 @@ async fn grilled(
         .unwrap()
         .unwrap();
 
-    set_grilling_pairing(pool, id, grilling.id, Some(MODEL))
+    set_grilling_pairing(pool, id, &grilling.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(pool, id, implementation.id, Some(MODEL))
+    set_implementation_pairing(pool, id, &implementation.id, Some(MODEL))
         .await
         .unwrap();
-    set_review_pairing(pool, id, review.id, Some(MODEL))
+    set_review_pairing(pool, id, &review.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -98,10 +98,10 @@ async fn unreviewed(pool: &SqlitePool, repo: &Repo, grilling: &Profile, implemen
         .unwrap()
         .unwrap();
 
-    set_grilling_pairing(pool, id, grilling.id, Some(MODEL))
+    set_grilling_pairing(pool, id, &grilling.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(pool, id, implementation.id, Some(MODEL))
+    set_implementation_pairing(pool, id, &implementation.id, Some(MODEL))
         .await
         .unwrap();
     skip_review(pool, id).await.unwrap();
@@ -172,13 +172,13 @@ async fn choosing_without_grilling_remembers_nothing() {
         .await
         .unwrap()
         .unwrap();
-    set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, fable.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
-    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+    set_review_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -257,7 +257,7 @@ async fn a_model_a_profile_no_longer_lists_still_comes_back_as_it_was_written() 
 
     grilled(&pool, &repo, &fable, &fable, &fable).await;
 
-    update_profile(&pool, fable.id, &facts("fable", &["claude-sonnet-5"]))
+    update_profile(&pool, &fable.id, &facts("fable", &["claude-sonnet-5"]))
         .await
         .unwrap();
 
@@ -286,7 +286,7 @@ async fn a_removed_profile_is_taken_out_of_the_memory_that_named_it() {
     grilled(&pool, &repo, &fable, &opus, &haiku).await;
 
     assert_eq!(
-        delete_profile(&pool, opus.id).await.unwrap(),
+        delete_profile(&pool, &opus.id).await.unwrap(),
         Deleting::Deleted
     );
 
@@ -391,13 +391,13 @@ async fn drafted(
         .unwrap()
         .unwrap();
 
-    set_grilling_pairing(pool, id, grilling.id, Some(MODEL))
+    set_grilling_pairing(pool, id, &grilling.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(pool, id, implementation.id, Some(MODEL))
+    set_implementation_pairing(pool, id, &implementation.id, Some(MODEL))
         .await
         .unwrap();
-    set_review_pairing(pool, id, review.id, Some(MODEL))
+    set_review_pairing(pool, id, &review.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -478,7 +478,7 @@ async fn a_draft_closed_unstarted_is_passed_over_and_a_started_one_closed_is_not
             .unwrap()
             .grilling
             .pairing()
-            .map(|pairing| pairing.profile.id),
+            .map(|pairing| pairing.profile.id.clone()),
         Some(fable.id),
     );
 }

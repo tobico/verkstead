@@ -326,9 +326,10 @@ describe("a shared conversation", () => {
                 pairing: {
                   Under: {
                     profile: {
-                      id: 1,
+                      id: "11111111-1111-4111-8111-111111111111",
                       broken: null,
                       login: true,
+                      devices: [],
                       name: "work",
                       account: {
                         agent_type: "Claude",
@@ -337,7 +338,7 @@ describe("a shared conversation", () => {
                       },
                       models: ["claude-fable-5"],
                       memory: true,
-                      device: null,
+                      bound: true,
                     },
                     model: "claude-fable-5",
                   },

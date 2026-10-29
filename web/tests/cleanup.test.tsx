@@ -91,7 +91,7 @@ const REST = {
   ...PATHS,
   // And the text every session is given, likewise: what is sent is what the
   // file holds afterwards, so a save that left it out would clear it.
-  instructions: TOLD.instructions,
+  instructions: "Keep",
 };
 
 /// The same settings with the Cleanup somewhere else — what a save answers with,

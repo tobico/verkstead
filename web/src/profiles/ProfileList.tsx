@@ -45,19 +45,24 @@
 //! What is on the card is what a list is scanned for: one line reading as the
 //! harness's mark, the harness, and the profile's own name after an em dash —
 //! "Claude Code — Personal" — with a red mark after the name where the account
-//! has gone. The mounted paths come off it and into the pane, which has room for
-//! them, and so do the models: a profile carries every model its account can
+//! has gone. The mounted paths come off its line and into the pane, which has
+//! room for them — the lines per device below are where a cluster says where
+//! each is bound — and so do the models: a profile carries every model its account can
 //! launch, and a card that listed them put a line of ids under every row. The
 //! agent type stays on the card as the mark it is drawn by rather than as a
 //! word, and is the form's own field in the pane, over the paths it decides.
 //!
-//! And under that line, on the rows that have one, the machine the account is
-//! on: every device of a cluster lists every member's accounts here beside its
-//! own, so which machine a row's account sits on is a fact on the row rather
-//! than a section it is filed under. Nothing at all on this device's own, which
-//! is every row where there is no cluster — and what the warning says for one
-//! of those rows is where to go and look rather than a path to put right,
-//! nothing here having fetched the account.
+//! No machine is drawn on a card's own line: a profile is the cluster's, every
+//! device holding the one record, so there is no home to mark — and two alike
+//! that arrived by replication are drawn two alike.
+//!
+//! Under it, in a cluster, is **a line per device** — this one first, then the
+//! members as the Devices section lists them — saying how that device runs it:
+//! bound at the paths its binding holds, or from a copy. The only place a
+//! device is named on a profile, and drawn off the bindings every device holds
+//! of every other, so a member that is not answering keeps its line, dimmed,
+//! from the last binding of it this device holds. A Verkstead in no cluster has
+//! one place anything could be bound, and draws no line at all.
 //!
 //! The warning itself is the pane's. A card holding a broken profile is dimmed
 //! and carries a red `circle-exclamation` after its name, read aloud as the
@@ -148,14 +153,15 @@ import {
 } from "../api/client";
 import { AGENT_NAME, type AgentType } from "../agents";
 import { NOT_USABLE_AWAY, brokenReading } from "../broken";
-import { osIcon } from "../devices";
 import type {
   ProfileAccount,
   ProfileDeleted,
+  ProfileDevice,
   ProfileEdit,
   ProfileEntry,
   ProfileSaved,
 } from "../api/types";
+import { osIcon } from "../devices";
 import { useReading } from "../freshness";
 import { rowPress } from "../rows";
 import { KNOWN_MODELS, known, prettify } from "../models";
@@ -186,8 +192,7 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
   ConfigNotAbsolute:
     "Give the config file's absolute path, starting with a slash.",
   ConfigMissing: "There's nothing at the config file's path.",
-  NotAFile:
-    "That isn't a file. A session's ~/.claude.json is copied from one.",
+  NotAFile: "That isn't a file. A session's ~/.claude.json is copied from one.",
   HomeNotAbsolute: "Give the home's absolute path, starting with a slash.",
   HomeMissing: "There's nothing at the home's path.",
   HomeNotADirectory:
@@ -380,9 +385,9 @@ function useProfiles() {
 export function ProfileList(props: {
   /// Which Profile's pane is open — its id, `"new"` while the blank form is, or
   /// `null` where the details pane is showing something else entirely.
-  opening: number | "new" | null;
+  opening: string | null;
   /// Open one, which is what pressing a card does.
-  open: (id: number) => void;
+  open: (id: string) => void;
   /// And open the blank form, which is what the plus does.
   add: () => void;
 }): JSX.Element {
@@ -491,8 +496,8 @@ function ProfileCard(props: {
         press={props.press}
       >
         {/* One line, as every section card on the page is: the reading at the
-            near end — cut rather than wrapped — and at the far one which
-            machine the account is on and whether it is logged in. */}
+            near end — cut rather than wrapped — and at the far one whether it
+            is logged in. */}
         <div class={styles.line}>
           {/* The harness's mark and the reading beside it, drawn the way the
               picker rows draw the same pair: a list of accounts is sorted by
@@ -525,25 +530,10 @@ function ProfileCard(props: {
             </Switch>
           </span>
           <span class={styles.end}>
-            {/* And which machine the account is on, where it is not this one: every
-                device lists every member's accounts as one list, so which machine a
-                row's account sits on is a fact on the row rather than a section it
-                is filed under. Drawn the way a sidebar row draws the same fact —
-                the mark for the operating system and the name after it, the mark
-                unlabelled because the words beside it say it. Nothing at all for
-                this device's own, which is every row where there is no cluster. */}
-            <Show when={props.profile.device}>
-              {(device) => (
-                <span class={styles.device}>
-                  <Icon of={osIcon(device().os ?? "")} class={styles.os} />
-                  {device().name}
-                </span>
-              )}
-            </Show>
-            {/* And the login, which the server runs in the Profile's own sandbox
-                — see `LoggingIn.tsx`. A Claude account at home here only: a
-                mirror's account is a copy, and its login is made on the machine it
-                is at home on. A press of its own inside the card, so it stands out
+            {/* The login, which the server runs in the Profile's own sandbox —
+                see `LoggingIn.tsx`. A Claude account bound here only: one bound
+                elsewhere runs from a copy, and its login is made on a machine it
+                is bound on. A press of its own inside the card, so it stands out
                 of the card's press and the card's keys alike. */}
             <Show when={loggable(props.profile)}>
               <Show
@@ -569,6 +559,16 @@ function ProfileCard(props: {
             </Show>
           </span>
         </div>
+
+        {/* And how each device of the cluster runs it, a line apiece: none
+            at all on a Verkstead in no cluster. */}
+        <Show when={props.profile.devices.length > 0}>
+          <ul class={styles.devices}>
+            <For each={props.profile.devices}>
+              {(line) => <DeviceLine line={line} />}
+            </For>
+          </ul>
+        </Show>
       </CardButton>
       {/* Beside the card rather than inside it, so that nothing pressed in the
           modal is a press on the card. */}
@@ -583,18 +583,66 @@ function ProfileCard(props: {
   );
 }
 
-/// Whether the account is one with no login file at home here: perfectly
-/// runnable, and not one that can be lent to another device, there being
-/// nothing to mirror. Not a refusal — a mirror with none is broken and says so
-/// in its own words, and this is the same account read where it lives.
-function notLendable(profile: ProfileEntry): boolean {
-  return !profile.login && profile.device === null;
+/// One device's line on a card: the device, drawn as the Devices section
+/// draws it, and either the paths its binding holds or that it runs from a copy.
+///
+/// Read, never edited, from here: a binding is written only by the device it
+/// names, and this device's own is what the form in the pane rewrites.
+function DeviceLine(props: { line: ProfileDevice }): JSX.Element {
+  const device = () => props.line.device;
+  const os = () => device().os ?? "";
+
+  return (
+    <li
+      class={[
+        styles.device,
+        device().reachable ? undefined : styles.unreachable,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <Icon of={osIcon(os())} label={os()} class={styles.os} />
+      <span class={styles.deviceName}>
+        {device().name}
+        <Show when={device().id === null}>
+          {" "}
+          <span class={styles.here}>this device</span>
+        </Show>
+      </span>
+      <Show
+        when={props.line.bound}
+        fallback={<span class={styles.how}>runs from a copy</span>}
+      >
+        {(account) => (
+          <span class={styles.how} title={paths(account())}>
+            bound at <code>{paths(account())}</code>
+          </span>
+        )}
+      </Show>
+    </li>
+  );
 }
 
-/// Whether a card offers a login: a Claude Profile at home on this device —
-/// see ADR-0022 for why no other.
+/// The paths a binding holds, in its harness's shape: Claude's pair, or the one
+/// home every harness after it keeps.
+function paths(account: ProfileAccount): string {
+  return ACCOUNT_FIELDS[account.agent_type]
+    .map((field) => path(account, field.key))
+    .join(" and ");
+}
+
+/// Whether the account is one with no login file bound here: perfectly
+/// runnable, and not one that can be lent to another device, there being
+/// nothing to copy. Not a refusal — read on a device it is not bound on, it is
+/// broken and says so in its own words.
+function notLendable(profile: ProfileEntry): boolean {
+  return !profile.login && profile.bound;
+}
+
+/// Whether a card offers a login: a Claude Profile bound on this device — see
+/// ADR-0022 for why no other.
 function loggable(profile: ProfileEntry): boolean {
-  return profile.account.agent_type === "Claude" && profile.device === null;
+  return profile.account.agent_type === "Claude" && profile.bound;
 }
 
 /// Whether the account is logged in here: it holds a login file, and the server
@@ -613,7 +661,7 @@ function loggedIn(profile: ProfileEntry): boolean {
 export function ProfilePane(props: {
   /// Which Profile the form is about: its id, or `"new"` for one that does not
   /// exist yet.
-  profile: number | "new";
+  profile: string;
   /// The way back to the settings, which is a change of level rather than a
   /// navigation: what is open stays open, and the URL goes on saying so.
   back: () => void;
@@ -658,7 +706,7 @@ export function ProfilePane(props: {
   };
 
   const remove = useMutation(() => ({
-    mutationFn: (id: number) => deleteProfile(id),
+    mutationFn: (id: string) => deleteProfile(id),
     onSuccess: (outcome: ProfileDeleted) => {
       // A profile that was already gone is one this page's list is wrong about,
       // and reading it again is both the correction and the explanation.
@@ -714,9 +762,7 @@ export function ProfilePane(props: {
                       <Icon of={faCircleExclamation} class={styles.trouble} />
                       {why()}
                     </ErrorLine>
-                    <Show
-                      when={offered() && profile().broken === "SignedOut"}
-                    >
+                    <Show when={offered() && profile().broken === "SignedOut"}>
                       {logIn()}
                     </Show>
                   </div>
@@ -747,21 +793,17 @@ export function ProfilePane(props: {
         }}
       </Show>
 
-      {/* And where a save over this Profile goes, on the rows whose account is
-          on another machine. Every device's Profiles section lists every
-          member's accounts and the form over one of those saves like any other
-          — the save and the removal are put to the machine the account is on,
-          as edits of its own Profile (ADR-0020, *Shared Profiles*), and what
-          comes back is that machine's own answer. Said because the paths under
-          it are that machine's rather than this one's, which is the one thing
-          about this form a reader cannot tell by looking at it. */}
-      <Show when={saved()?.device}>
-        {(device) => (
-          <p class={styles.athome}>
-            This account is on {device().name}. Saving or removing it here
-            changes it there.
-          </p>
-        )}
+      {/* And what a save over a Profile this device is not bound on leaves
+          alone: its paths, which are another device's. The save and the
+          removal are this device's own writes of the one record, which every
+          device pulls (ADR-0028); the paths under it are not, which is the one
+          thing about this form a reader cannot tell by looking at it. */}
+      <Show when={saved()?.bound === false}>
+        <p class={styles.athome}>
+          This profile isn't bound on this device. Saving here changes it on
+          every device. Its agent and the paths below are another device's, and
+          can't be changed here.
+        </p>
       </Show>
 
       {/* The blank form first, so that adding one never waits on a read it has
@@ -776,6 +818,7 @@ export function ProfilePane(props: {
               sends them to the create. */}
           <ProfileForm
             initial={initial}
+            unbound={saved()?.bound === false}
             submit={adding() ? "Save" : "Save changes"}
             save={(profile) => {
               const which = props.profile;
@@ -878,6 +921,15 @@ export function ProfileForm(props: {
   /// never reaches here: it is about what is in the fields, and it is drawn
   /// under them.
   saved: () => void;
+
+  /// Whether the Profile is one this device holds no binding of, whose agent
+  /// and paths are therefore drawn read-only.
+  ///
+  /// A save over one writes the record alone and leaves its account as it
+  /// was — the paths are another device's, and its harness is the shape every
+  /// device's binding of it is in — so a field that took a change here would
+  /// be a change the save then quietly drops.
+  unbound?: boolean;
 }): JSX.Element {
   // What has been typed, or `null` while nothing has.
   const [edited, setEdited] = createSignal<ProfileEdit | null>(null);
@@ -933,6 +985,10 @@ export function ProfileForm(props: {
   /// And the agent type, which takes the account's paths with it: they are the
   /// old type's fields, and there is nothing in them the new type asked for.
   const pickedType = (agent_type: AgentType) => {
+    if (props.unbound) {
+      return;
+    }
+
     setEdited({ ...form(), account: BLANK_ACCOUNT[agent_type] });
     setRefused(null);
   };
@@ -1035,7 +1091,7 @@ export function ProfileForm(props: {
           reading of a row that is not on offer. Its account is untouched by
           that: what the form sends is what was read back, until another
           type is picked. */}
-      <fieldset class={styles.agents}>
+      <fieldset class={styles.agents} disabled={props.unbound}>
         <legend>Agent</legend>
 
         <div class={styles.segments}>
@@ -1056,6 +1112,7 @@ export function ProfileForm(props: {
                   name={`${id}-agent_type`}
                   value={agent_type}
                   checked={form().account.agent_type === agent_type}
+                  disabled={props.unbound}
                   onChange={() => pickedType(agent_type)}
                 />
                 <HarnessMark of={agent_type} class={styles.segmentMark} />
@@ -1100,14 +1157,26 @@ export function ProfileForm(props: {
                 the server can read, because an account may be anywhere —
                 and showing the dotfiles these fields exist to point at,
                 with the files as well where the field names one. */}
-            <PathField
-              id={`profile-${field.key}`}
-              dotfiles
-              files={field.file}
-              placeholder={field.placeholder}
-              value={path(form().account, field.key)}
-              write={typedPath(field.key)}
-            />
+            <Show
+              when={!props.unbound}
+              fallback={
+                <input
+                  id={`profile-${field.key}`}
+                  type="text"
+                  readOnly
+                  value={path(form().account, field.key)}
+                />
+              }
+            >
+              <PathField
+                id={`profile-${field.key}`}
+                dotfiles
+                files={field.file}
+                placeholder={field.placeholder}
+                value={path(form().account, field.key)}
+                write={typedPath(field.key)}
+              />
+            </Show>
           </>
         )}
       </For>

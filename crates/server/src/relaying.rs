@@ -57,14 +57,16 @@
 //!
 //! **And so do the reads that news sets going**, which are the other calls here
 //! no browser asked for: a member's Conversations for the merged sidebar, and
-//! its Agent Profiles for the mirror rows. Both are one shape — a dial, a
+//! the ports its terminals offer for forwarding. Both are one shape — a dial, a
 //! status, a bound, and a line in the log rather than a failure — so they go
 //! through [`read_of`] rather than being written twice.
 //!
 //! **And the presses nobody asked for, the same way.** Some of what crosses a
 //! link is this device writing to a member rather than reading it: a Rank minted
-//! on the machine that merged the lists, and an edit or a removal over a
-//! **mirror** put to the device that Agent Profile is at home on. Those go
+//! on the machine that merged the lists, and the account of an Agent Profile
+//! not bound here — fetched before a launch from a device it is bound on, and
+//! the login and memory a session left written back to that same device as the
+//! session ends. Those go
 //! through [`put_to`] and [`word_from`], which are [`read_of`]'s counterparts —
 //! and what comes back is the far end's own answer, so a name already taken over
 //! there is said in the words a local clash is said in. A machine that did not
@@ -511,7 +513,7 @@ impl Stream for OneAttempt {
 ///
 /// **The calls nobody asked for.** Everything above is a browser's request
 /// carried across; this is the other kind — the sidebar's account of a member's
-/// Conversations, and the mirrors of a member's Agent Profiles — so it carries
+/// Conversations, and the ports a member's terminals offer — so it carries
 /// no header of a browser's and no body at all. Both readers want the same four
 /// things of it: the dial, the status, a bound on what is read, and a sentence
 /// in the log rather than a failure, so it is written once here rather than
@@ -595,6 +597,8 @@ pub(crate) enum Unread {
 pub(crate) enum Read {
     Profiles,
     Authors,
+    Instructions,
+    McpServers,
     Conversations,
 }
 
@@ -603,6 +607,8 @@ impl Read {
         match self {
             Read::Profiles => "Agent Profiles",
             Read::Authors => "Authors",
+            Read::Instructions => "Instructions",
+            Read::McpServers => "MCP servers",
             Read::Conversations => "Conversations",
         }
     }
@@ -838,10 +844,10 @@ impl Refusal {
 ///
 /// [`read_of`]'s counterpart in the other direction, and the calls are the same
 /// kind of call: nobody's browser asked for either. A Rank is written to the
-/// device that owns the row it belongs to — see [`crate::ranking`] — and an edit
-/// or a removal over a **mirror** is put to the device that Agent Profile is at
-/// home on, see [`crate::mirroring`]. One function rather than the arms written
-/// out twice, the four findings of a dial reading the same either way.
+/// device that owns the row it belongs to — see [`crate::ranking`] — and what a
+/// session run from a copy left in an account is written back to the device it
+/// was fetched from, see [`crate::mirroring`]. One function rather than the arms
+/// written out twice, the four findings of a dial reading the same either way.
 ///
 /// **A refusal from the far end is a refusal here** rather than an answer handed
 /// back for the caller to read a status off. What the human has to be told about
@@ -902,11 +908,11 @@ pub(crate) async fn put_to(
 /// it did, read back into the very type a browser pressing over there would have
 /// received.
 ///
-/// Which is the whole of how a press relayed home answers in the home device's
-/// own vocabulary. A name already taken on that machine comes back as the word
-/// its own store refused with, so the page says it in the words a local clash is
-/// said in and this device composes no second opinion about somebody else's
-/// rows.
+/// Which is the whole of how a press relayed to a member answers in that
+/// device's own vocabulary. A name already taken on that machine comes back as
+/// the word its own store refused with, so the page says it in the words a local
+/// clash is said in and this device composes no second opinion about somebody
+/// else's rows.
 ///
 /// `most` is the caller's bound, applied as [`read_of`]'s is: an outcome is one
 /// short word, and what a bound is for is the machine that answers and then

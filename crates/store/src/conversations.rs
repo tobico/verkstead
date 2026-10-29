@@ -1347,9 +1347,9 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              base_ref                  TEXT,
              state                     TEXT NOT NULL,
              rank                      TEXT,
-             grilling_profile_id       INTEGER REFERENCES profiles(id),
-             implementation_profile_id INTEGER REFERENCES profiles(id),
-             review_profile_id         INTEGER REFERENCES profiles(id)
+             grilling_profile_id       TEXT,
+             implementation_profile_id TEXT,
+             review_profile_id         TEXT
          ) STRICT",
     )
     .execute(pool)
@@ -2466,9 +2466,9 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         Option<String>,
         Option<String>,
         String,
-        Option<i64>,
-        Option<i64>,
-        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
         i64,
         String,
         String,
@@ -2782,13 +2782,13 @@ async fn pairing(
     pool: &SqlitePool,
     conversation: i64,
     role: Role,
-    profile_id: Option<i64>,
+    profile_id: Option<String>,
 ) -> Result<Option<super::Pairing>> {
     let Some(profile_id) = profile_id else {
         return Ok(None);
     };
 
-    let Some(profile) = super::load_profile(pool, profile_id).await? else {
+    let Some(profile) = super::load_profile(pool, &profile_id).await? else {
         return Ok(None);
     };
 
@@ -2816,7 +2816,7 @@ async fn picked(
     pool: &SqlitePool,
     conversation: i64,
     role: Role,
-    profile_id: Option<i64>,
+    profile_id: Option<String>,
 ) -> Result<super::Picked> {
     if skipped(pool, conversation, role).await? {
         return Ok(super::Picked::Skipped);
@@ -3211,7 +3211,7 @@ impl Role {
 pub async fn set_grilling_pairing(
     pool: &SqlitePool,
     id: i64,
-    profile_id: i64,
+    profile_id: &str,
     model: Option<&str>,
 ) -> Result<Chosen> {
     choose(pool, id, Role::Grilling, profile_id, model).await
@@ -3221,7 +3221,7 @@ pub async fn set_grilling_pairing(
 pub async fn set_implementation_pairing(
     pool: &SqlitePool,
     id: i64,
-    profile_id: i64,
+    profile_id: &str,
     model: Option<&str>,
 ) -> Result<Chosen> {
     choose(pool, id, Role::Implementation, profile_id, model).await
@@ -3231,7 +3231,7 @@ pub async fn set_implementation_pairing(
 pub async fn set_review_pairing(
     pool: &SqlitePool,
     id: i64,
-    profile_id: i64,
+    profile_id: &str,
     model: Option<&str>,
 ) -> Result<Chosen> {
     choose(pool, id, Role::Review, profile_id, model).await
@@ -3316,7 +3316,7 @@ async fn choose(
     pool: &SqlitePool,
     id: i64,
     role: Role,
-    profile_id: i64,
+    profile_id: &str,
     model: Option<&str>,
 ) -> Result<Chosen> {
     let mut tx = super::writing(pool, "choosing a Profile for a Conversation").await?;
@@ -3352,26 +3352,27 @@ async fn choose(
 /// because a Pairing is both halves and either alone is not something to launch
 /// a session with. See [`steer_conversation`].
 ///
-/// The Profile is selected from `profiles` inside the statement rather than
-/// checked first, as a Conversation's Repo is: SQLite enforces a foreign key
-/// only when asked to, and a column naming a Profile that is not there is a
-/// session that fails to start with nobody watching.
+/// The Profile is looked for inside the transaction that writes it — a
+/// live record, see `profiles::pickable` — there being no foreign key
+/// behind the column: a column naming a Profile that is not there is a session
+/// that fails to start with nobody watching.
 pub(crate) async fn settle(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     id: i64,
     role: Role,
-    profile_id: i64,
+    profile_id: &str,
     model: Option<&str>,
 ) -> Result<bool> {
+    if !super::profiles::pickable(tx, profile_id).await? {
+        return Ok(false);
+    }
+
     let changed = sqlx::query(&format!(
-        "UPDATE conversations
-         SET {} = (SELECT id FROM profiles WHERE id = ?)
-         WHERE id = ? AND EXISTS (SELECT 1 FROM profiles WHERE id = ?)",
+        "UPDATE conversations SET {} = ? WHERE id = ?",
         role.column()
     ))
     .bind(profile_id)
     .bind(id)
-    .bind(profile_id)
     .execute(&mut **tx)
     .await
     .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?
@@ -5662,7 +5663,7 @@ pub struct Settling<'a> {
     /// runs its sessions under.
     pub role: Role,
 
-    pub profile_id: i64,
+    pub profile_id: &'a str,
 
     /// One of that Profile's models. Never absent: there is no default model
     /// anywhere, so a Pairing is picked whole or not at all.

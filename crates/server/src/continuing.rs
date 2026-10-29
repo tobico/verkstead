@@ -1877,7 +1877,7 @@ pub(crate) async fn settle(
         store::set_grilling_pairing(
             &state.pool,
             id,
-            grilling.profile.id,
+            &grilling.profile.id,
             grilling.model.as_deref(),
         )
         .await?;
@@ -1887,7 +1887,7 @@ pub(crate) async fn settle(
         store::set_implementation_pairing(
             &state.pool,
             id,
-            implementation.profile.id,
+            &implementation.profile.id,
             implementation.model.as_deref(),
         )
         .await?;
@@ -1899,7 +1899,7 @@ pub(crate) async fn settle(
             store::skip_review(&state.pool, id).await?;
         }
         store::Picked::Under(review) => {
-            store::set_review_pairing(&state.pool, id, review.profile.id, review.model.as_deref())
+            store::set_review_pairing(&state.pool, id, &review.profile.id, review.model.as_deref())
                 .await?;
         }
     }
@@ -2082,8 +2082,8 @@ async fn load(state: &AppState, conversation_id: i64) -> Option<store::Conversat
 /// What is missing that a stage cannot commit as, in the halt's words, and
 /// what to do about it: the Repo called `repo` named, and sent to the Repos
 /// pane, where its own record is why — an Author no longer in the one list, or
-/// none picked among several — or sent to the device a mirrored Author is at
-/// home on, where its token is still to arrive from; then the Repo's Author
+/// none picked among several — or told its token is on another device and
+/// still to arrive from one; then the Repo's Author
 /// named where there is more than one it could have been, and the sentence a
 /// missing git author always had where there is not.
 fn unsigned(config: &Config, recorded: Option<&str>, repo: &str) -> (String, String) {
@@ -2100,13 +2100,13 @@ fn unsigned(config: &Config, recorded: Option<&str>, repo: &str) -> (String, Str
                 "Pick one under Repos in settings".to_owned(),
             );
         }
-        Some(Unauthored::TokenAwaited { device }) => {
+        Some(Unauthored::TokenAwaited) => {
             return (
                 format!(
-                    "the `{repo}` repo's author is at home on {device} and its token hasn't \
-                     reached this device yet"
+                    "the `{repo}` repo's author has a token on another device and it hasn't \
+                     reached this one yet"
                 ),
-                format!("Once {device} is reachable again"),
+                "Once a device holding it is reachable again".to_owned(),
             );
         }
         None => {}
@@ -2192,34 +2192,33 @@ mod tests {
         );
     }
 
-    /// A halt over a Repo pointed at a member's Author whose token's copy has
-    /// not arrived names the device it is at home on, and sends the human
-    /// there rather than to settings.
+    /// A halt over a Repo pointed at an Author whose token's copy has not
+    /// arrived says so, and sends the human to a device holding it rather than
+    /// to settings.
     #[test]
-    fn a_halt_over_a_mirror_awaiting_its_token_names_its_home() {
-        use crate::settings::{Mirrored, Settings};
+    fn a_halt_over_an_author_awaiting_its_token_says_it_is_on_its_way() {
+        use crate::settings::{Recorded, Settings};
 
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
-        settings.holding_mirrors(vec![Mirrored::of(
+        settings.holding_authors(vec![Recorded::of(
             Author::of(
                 "away".to_owned(),
                 None,
                 Some("Ada Lovelace".to_owned()),
                 Some("ada@away.example".to_owned()),
             ),
-            "the-workstation".to_owned(),
             true,
         )]);
 
         assert_eq!(
             unsigned(&settings.config(), Some("away"), "verkstead"),
             (
-                "the `verkstead` repo's author is at home on the-workstation and its token \
-                 hasn't reached this device yet"
+                "the `verkstead` repo's author has a token on another device and it hasn't \
+                 reached this one yet"
                     .to_owned(),
-                "Once the-workstation is reachable again".to_owned(),
+                "Once a device holding it is reachable again".to_owned(),
             )
         );
     }

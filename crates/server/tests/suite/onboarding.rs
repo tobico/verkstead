@@ -51,7 +51,7 @@ use verkstead_render::{
 use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
 use verkstead_server::platform::{Environment, Platform};
-use verkstead_server::store::{Account, AgentType, Mirror, ProfileFacts};
+use verkstead_server::store::{Account, AgentType, ProfileFacts};
 use verkstead_server::{open_database, router_onboarding_asking_github, store};
 
 /// A program that is there and does nothing, which is the whole of what a row
@@ -288,7 +288,7 @@ fn an_account(dir: &Path, agent_type: AgentType) {
 
 /// An Agent Profile in the store, which is the whole of what the accounts step
 /// asks for.
-async fn a_profile(pool: &SqlitePool, dir: &Path) -> i64 {
+async fn a_profile(pool: &SqlitePool, dir: &Path) -> String {
     let account = dir.join("account");
     std::fs::create_dir_all(&account).unwrap();
 
@@ -312,21 +312,18 @@ async fn a_profile(pool: &SqlitePool, dir: &Path) -> i64 {
 }
 
 /// And a **mirror** of a member's Profile, written down the way the refresher
-/// writes one: the same row, marked with the device it is at home on and the id
-/// it has there (ADR-0020, *Shared Profiles*).
+/// writes one: the same row, held under the uuid its home knows it by and marked
+/// with the device it is at home on (ADR-0020, *Shared Profiles*).
 ///
 /// Its account's paths are the home machine's and belong to no filesystem here,
 /// which is the whole of what a mirror is — nothing on this box is at them, and
 /// what a session away from home is given is fetched from that device before the
 /// launch.
-async fn a_mirror(pool: &SqlitePool) -> i64 {
-    store::record_mirror(
+async fn a_mirror(pool: &SqlitePool) {
+    store::profile_arrived(
         pool,
-        &Mirror {
-            device: "aa00bb11cc22dd33ee44ff5566778899".to_owned(),
-            id: 4,
-            login: true,
-        },
+        "4e0f1d2c-0000-4000-8000-000000000004",
+        "aa00bb11cc22dd33ee44ff5566778899",
         &ProfileFacts {
             name: Some("Theirs".to_owned()),
             account: Account::Claude {
@@ -685,7 +682,7 @@ async fn deleting_the_last_profile_mid_run_leaves_the_mode_where_it_was() {
         "this start found the objective met"
     );
 
-    store::delete_profile(&pool, profile).await.unwrap();
+    store::delete_profile(&pool, &profile).await.unwrap();
 
     let reading = reading(&app).await;
 

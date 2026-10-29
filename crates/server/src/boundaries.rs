@@ -333,7 +333,9 @@ mod tests {
         remembering::wrote(
             held.path(),
             &Remembered {
-                conversation: crate::sandbox::login_boundary(grilling),
+                conversation: crate::sandbox::login_boundary(
+                    "0b0e4c1a-5d2f-4e7b-9a3c-6f1d2e3b4a5c",
+                ),
                 account: "vk-0123456789ab".to_owned(),
                 sid: "S-1-5-21-1-2-3-1001".to_owned(),
                 entries: Vec::new(),

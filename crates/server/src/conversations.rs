@@ -57,7 +57,7 @@ use crate::github::Gh;
 use crate::handoffs::Handoffs;
 use crate::merging;
 use crate::repos::git;
-use crate::settings::{Author, Config, Signature, Unauthored};
+use crate::settings::{Author, Config, Declaration, Signature, Unauthored};
 use crate::skills;
 use crate::stages::Startable;
 use crate::store;
@@ -208,7 +208,7 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
         store::set_grilling_pairing(
             &state.pool,
             id,
-            pairing.profile.id,
+            &pairing.profile.id,
             pairing.model.as_deref(),
         )
         .await?;
@@ -218,7 +218,7 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
         store::set_implementation_pairing(
             &state.pool,
             id,
-            pairing.profile.id,
+            &pairing.profile.id,
             pairing.model.as_deref(),
         )
         .await?;
@@ -232,7 +232,7 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
         store::set_review_pairing(
             &state.pool,
             id,
-            pairing.profile.id,
+            &pairing.profile.id,
             pairing.model.as_deref(),
         )
         .await?;
@@ -300,7 +300,7 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
 /// and a default that does not is an empty picker.
 async fn unremembered(state: &AppState) -> Result<RepoPairingsView> {
     let last = store::last_started_pairings(&state.pool).await?;
-    let profiles = store::profiles(&state.pool).await?;
+    let profiles = store::profiles_as_saved(&state.pool).await?;
 
     let under = |pairing: Option<PairingView>| match pairing {
         Some(pairing) => PickedView::Under(pairing),
@@ -995,9 +995,14 @@ pub(crate) async fn attached(pool: &SqlitePool, id: i64) -> Result<Vec<Attachmen
 /// nothing — which is not the same thing as the chip whose declaration went
 /// afterwards, that one being a reference the human made while it meant
 /// something.
+///
+/// And refused where two live declarations clash over the name, for the same
+/// reason: a session would be handed neither, so the chip would be born broken.
 pub(crate) async fn attach_server(state: &AppState, id: i64, name: &str) -> Result<ServerAttached> {
-    if !declared_servers(state).iter().any(|held| held == name) {
-        return Ok(ServerAttached::NoSuchServer);
+    match state.settings.config().declaration_of(name) {
+        Declaration::One(_) => {}
+        Declaration::Gone => return Ok(ServerAttached::NoSuchServer),
+        Declaration::Clash => return Ok(ServerAttached::Clashes),
     }
 
     // Whether there was one to put on is nothing to report: a name the
@@ -1030,31 +1035,41 @@ pub(crate) async fn detach_server(state: &AppState, id: i64, name: &str) -> Resu
 }
 
 /// The Conversation's MCP servers, in the shape the workbench draws them: each
-/// name, and whether the settings still declare one by it.
+/// name, whether the settings still declare one by it, and whether two
+/// declarations clash over it.
 ///
 /// The settings are read here rather than sent to the page beside the record,
-/// because what the page has to draw is one chip per name and the fact it needs
-/// about each is this one — the URL is no business of a viewer's and the headers
+/// because what the page has to draw is one chip per name and the facts it needs
+/// about each are these — the URL is no business of a viewer's and the headers
 /// beside it are secrets.
+///
+/// Read rather than remembered, which is the declarations' own contract: one
+/// added, corrected, deleted or replicated in takes effect on the next thing
+/// that asks.
 pub(crate) async fn attached_servers(state: &AppState, id: i64) -> Result<Vec<AttachedServerView>> {
-    let declared = declared_servers(state);
+    let config = state.settings.config();
 
     Ok(store::mcp_servers(&state.pool, id)
         .await?
         .into_iter()
-        .map(|name| AttachedServerView {
-            declared: declared.contains(&name),
-            name,
+        .map(|name| {
+            let declaration = config.declaration_of(&name);
+
+            AttachedServerView {
+                declared: declaration != Declaration::Gone,
+                clashes: declaration == Declaration::Clash,
+                name,
+            }
         })
         .collect())
 }
 
-/// What the settings declare, by name, as of this moment.
+/// What the live declarations name, as of this moment, a clashing name once per
+/// declaration.
 ///
-/// Read rather than remembered, which is `config.yaml`'s own contract: a
-/// declaration added, corrected or deleted takes effect on the next thing that
-/// asks. A half-written entry is no declaration and never reaches here — see
-/// `servers_kept` in [`crate::settings`].
+/// Read rather than remembered, which is the declarations' own contract: one
+/// added, corrected, deleted or replicated in takes effect on the next thing
+/// that asks. A half-written entry is no declaration and never reaches here.
 pub(crate) fn declared_servers(state: &AppState) -> Vec<String> {
     state
         .settings
@@ -1477,9 +1492,7 @@ fn unauthored_start(why: Unauthored, repo: &str) -> GrillingStarted {
     match why {
         Unauthored::Gone => GrillingStarted::RepoAuthorGone { repo },
         Unauthored::Unpicked => GrillingStarted::RepoAuthorUnpicked { repo },
-        Unauthored::TokenAwaited { device } => {
-            GrillingStarted::RepoAuthorTokenAwaited { repo, device }
-        }
+        Unauthored::TokenAwaited => GrillingStarted::RepoAuthorTokenAwaited { repo },
     }
 }
 
@@ -1492,11 +1505,8 @@ fn unauthored_take_up(config: &Config, conversation: &store::Conversation) -> Op
     match config.author_missing(conversation.repo.author.as_deref()) {
         Some(Unauthored::Gone) => return Some(TakenUp::RepoAuthorGone { repo: repo() }),
         Some(Unauthored::Unpicked) => return Some(TakenUp::RepoAuthorUnpicked { repo: repo() }),
-        Some(Unauthored::TokenAwaited { device }) => {
-            return Some(TakenUp::RepoAuthorTokenAwaited {
-                repo: repo(),
-                device,
-            });
+        Some(Unauthored::TokenAwaited) => {
+            return Some(TakenUp::RepoAuthorTokenAwaited { repo: repo() });
         }
         None => {}
     }
@@ -2571,11 +2581,8 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     match config.author_missing(conversation.repo.author.as_deref()) {
         Some(Unauthored::Gone) => return Ok(Adopted::RepoAuthorGone { repo: repo() }),
         Some(Unauthored::Unpicked) => return Ok(Adopted::RepoAuthorUnpicked { repo: repo() }),
-        Some(Unauthored::TokenAwaited { device }) => {
-            return Ok(Adopted::RepoAuthorTokenAwaited {
-                repo: repo(),
-                device,
-            });
+        Some(Unauthored::TokenAwaited) => {
+            return Ok(Adopted::RepoAuthorTokenAwaited { repo: repo() });
         }
         None => {}
     }
@@ -5206,13 +5213,13 @@ fn chosen(conversation: &store::Conversation) -> impl Iterator<Item = &store::Pr
 /// on the Profile's row before anybody presses anything, and a refusal that
 /// said only *a chosen profile is broken* would be a second, vaguer account of
 /// it — so what goes back is what the row carries, and the viewer composes the
-/// one sentence for both. Which is what makes a Start refused over a Profile
-/// whose home has stopped answering name that machine.
+/// one sentence for both.
+///
+/// No device is named: the row names none, a Profile having no home to mark.
 fn trouble(profile: &ProfileEntry) -> Option<ProfileTrouble> {
     Some(ProfileTrouble {
         broken: profile.broken?,
         agent_type: profile.account.agent_type(),
-        device: profile.device.as_ref().map(|device| device.name.clone()),
     })
 }
 

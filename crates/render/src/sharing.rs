@@ -399,6 +399,9 @@ fn boarding(event: TimelineEvent) -> TimelineEvent {
                     SteerPairingView::Under(under) => SteerPairingView::Under(PairingView {
                         profile: ProfileEntry {
                             account: unpathed(under.profile.account),
+                            // Where each device keeps it, and what those
+                            // devices are called, are this cluster's.
+                            devices: Vec::new(),
                             ..under.profile
                         },
                         ..under

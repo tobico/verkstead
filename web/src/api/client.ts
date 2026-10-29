@@ -25,8 +25,6 @@ import type {
   Attached,
   AttachmentRemoved,
   AuthorEntry,
-  AuthorEdit,
-  AuthorEdited,
   AuthorRemoved,
   BacklogPane,
   Locked,
@@ -1951,7 +1949,7 @@ export function createProfile(profile: ProfileEdit): Promise<ProfileSaved> {
 /// Rewrite one, whole. Everything about a profile is the human's to change:
 /// nothing has been built from it that a change would contradict.
 export function editProfile(
-  id: number,
+  id: string,
   profile: ProfileEdit,
 ): Promise<ProfileSaved> {
   return post<ProfileSaved>(`/api/ui/profiles/${id}`, profile);
@@ -1959,32 +1957,32 @@ export function editProfile(
 
 /// Remove one nobody is running under. There is nothing to send but its own id,
 /// which is in the path.
-export function deleteProfile(id: number): Promise<ProfileDeleted> {
+export function deleteProfile(id: string): Promise<ProfileDeleted> {
   return post<ProfileDeleted>(`/api/ui/profiles/${id}/delete`);
 }
 
 /// Open a Profile's login: the one already running for it, joined, or a new
 /// one started. `viewer` is a name the modal made up for itself, so that its
 /// closing is told apart from another device's.
-export function openLogin(profile: number, viewer: string): Promise<LoginState> {
+export function openLogin(profile: string, viewer: string): Promise<LoginState> {
   return post<LoginState>(`/api/ui/profiles/${profile}/login`, { viewer });
 }
 
 /// Where a Profile's login has got to — `null` where none is running.
-export function loadLogin(profile: number): Promise<LoginState | null> {
+export function loadLogin(profile: string): Promise<LoginState | null> {
   return get<LoginState | null>(`/api/ui/profiles/${profile}/login`);
 }
 
 /// The code the login page handed back, for the login waiting on it.
 export function sendLoginCode(
-  profile: number,
+  profile: string,
   code: string,
 ): Promise<LoginState> {
   return post<LoginState>(`/api/ui/profiles/${profile}/login/code`, { code });
 }
 
 /// This device closing the modal. The last one to close it ends the login.
-export async function closeLogin(profile: number, viewer: string): Promise<void> {
+export async function closeLogin(profile: string, viewer: string): Promise<void> {
   const at = `/api/ui/profiles/${profile}/login/close`;
 
   await refused(at, await sent(at, { viewer }));
@@ -2403,8 +2401,8 @@ export function saveSettings(edit: SettingsEdit): Promise<SettingsSaved> {
   return post<SettingsSaved>("/api/ui/settings", edit);
 }
 
-/// The cluster's one list of Authors: this device's own, then a mirror of every
-/// member's, each marked with the device it is at home on.
+/// The cluster's one list of Authors, every record the device holds, whichever
+/// device made it.
 ///
 /// Of whichever device is asked: a member's own list is what names an Author
 /// beside work on that member, a Repo there recording a uuid out of it.
@@ -2415,20 +2413,20 @@ export function listAuthors(device: Device): Promise<AuthorEntry[]> {
 /// Take one Author out of the settings, by its uuid: its entry and its token.
 ///
 /// The outcome is the answer's body, a Repo removal's way: a registered Repo
-/// still pointing at it refuses it, naming the Repos.
+/// still pointing at it — here or on any member that answers — refuses it,
+/// naming the Repos with their devices.
 export function removeAuthor(id: string): Promise<AuthorRemoved> {
   return post<AuthorRemoved>(`/api/ui/authors/${encodeURIComponent(id)}/remove`);
 }
 
-/// Rewrite one Author's fields and set or clear its token, by its uuid, and
-/// nothing else of the settings — what the Git section sends for a member's
-/// Author, which the server puts to the device it is at home on. A machine
-/// that is not answering is a refusal naming it.
-export function editAuthor(
-  id: string,
-  edit: AuthorEdit,
-): Promise<AuthorEdited> {
-  return post<AuthorEdited>(`/api/ui/authors/${encodeURIComponent(id)}`, edit);
+/// **Repoint them all to…**: every Repo pointing at the Author `id`, on every
+/// device that answers, pointed at the Author `to` — and then `id` removed.
+/// Answered as a removal is, a Repo that refused the repoint named instead.
+export function repointAuthors(id: string, to: string): Promise<AuthorRemoved> {
+  return post<AuthorRemoved>(
+    `/api/ui/authors/${encodeURIComponent(id)}/repoint`,
+    { author: to },
+  );
 }
 
 /// Empty every store of one language — sccache's too, for Rust.

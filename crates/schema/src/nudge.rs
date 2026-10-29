@@ -25,7 +25,7 @@ use ts_rs::TS;
 /// A page too old to know a kind treats it as everything having moved, which is
 /// the behaviour every kind used to get — so a new kind is safe to add and an
 /// old page stays correct against a newer server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Nudge {
@@ -156,21 +156,36 @@ pub enum Nudge {
     /// callers, and a second device watching is what it is waiting for.
     Profiles,
 
-    /// The Authors moved: one saved or removed here, or the mirrors of a
-    /// member's rewritten off what it last answered (ADR-0025).
+    /// The Authors moved: one saved or removed here, or records pulled off a
+    /// member merged into the table (ADR-0028).
     ///
-    /// **What a member hears to read this device's Authors again**, the way it
-    /// hears [`Nudge::Profiles`] — announced to the cluster where a save or a
-    /// removal changes the list, and kept to this device's own pages where all
-    /// that moved is the mirrors it holds of somebody else's.
+    /// **What a member hears to pull this device's Authors again** —
+    /// announced to the cluster where a write here changes a record, and kept
+    /// to this device's own pages where all that moved is what it pulled.
     Authors,
+
+    /// The Instructions text moved: saved here, or a member's record of it
+    /// merged into the table (ADR-0028).
+    ///
+    /// **What a member hears to pull this device's Instructions again**, as
+    /// [`Nudge::Authors`] is for the Authors — announced to the cluster where a
+    /// save here changes the text, and kept to this device's own pages where
+    /// all that moved is what it pulled.
+    Instructions,
+
+    /// The declared MCP servers moved: one declared, edited or removed here,
+    /// or a member's records of them merged into the table (ADR-0028).
+    ///
+    /// **What a member hears to pull this device's declarations again**, as
+    /// [`Nudge::Authors`] is for the Authors.
+    McpServers,
 
     /// Where a Profile's login has got to moved: the harness printed the
     /// address, took a code, finished, or was killed.
     ///
     /// What lets a second device's modal show the address the first one's
     /// login printed, without either of them asking again.
-    Login { profile: i64 },
+    Login { profile: String },
 
     /// Everything of one device's, which is the widest thing there is to say:
     /// read back whatever of it is on screen.

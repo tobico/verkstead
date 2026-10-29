@@ -156,7 +156,7 @@ import * as pairing from "../pairing";
 import { ShowArchived } from "./Archived";
 import { Conversations } from "./Conversations";
 import { addingServer } from "./AddServer";
-import { ServerRows } from "./Composer";
+import { ServerRows, clashing } from "./Composer";
 import styles from "./Composer.module.css";
 import { PaneHead } from "./PaneHead";
 import { Wordmark } from "./Wordmark";
@@ -590,6 +590,9 @@ function Compose(props: {
         gone:
           settings.data !== undefined &&
           !settings.data.mcp_servers.some((one) => one.name === name),
+        clashes:
+          settings.data !== undefined &&
+          clashing(settings.data.mcp_servers).has(name),
         remove: () => setServers((was) => was.filter((one) => one !== name)),
         removing: make.isPending,
       })),

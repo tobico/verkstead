@@ -256,9 +256,9 @@ async fn back(state: &AppState, id: i64, arrival: &store::Arrival) -> Result<i64
 /// comes out pointing at the Event it actually landed as. What the store cannot
 /// work out for itself is the two ids that are not this Conversation's: the
 /// Repos, which the sending device matched against this registry before it sent
-/// anything, and the Agent Profiles, which are named across a cluster by the
-/// device each is at home on — see [`resolved`], which is the same reading one
-/// call along.
+/// anything, and the Agent Profiles, which are named across a cluster by their
+/// uuids, the same on every device — see [`resolved`], which is the same reading
+/// one call along.
 ///
 /// **The files first, then the rows.** An attachment is a row and bytes both,
 /// and the row is what names the file: written the other way round there would
@@ -552,7 +552,10 @@ async fn carries_on(state: &AppState, id: i64) {
 /// here is a Steer somebody ran a year ago, and an account deleted since is a
 /// name no machine can keep. The column lands empty and the rest of the Steer
 /// stands — see `store::slices`.
-async fn accounts(state: &AppState, record: &RecordAcross) -> Result<HashMap<i64, i64>, Response> {
+async fn accounts(
+    state: &AppState,
+    record: &RecordAcross,
+) -> Result<HashMap<String, String>, Response> {
     if record.profiles.is_empty() {
         return Ok(HashMap::new());
     }
@@ -573,7 +576,7 @@ async fn accounts(state: &AppState, record: &RecordAcross) -> Result<HashMap<i64
     Ok(record
         .profiles
         .iter()
-        .filter_map(|(there, named)| Some((*there, here(&profiles, &state.device, named)?)))
+        .filter_map(|named| Some((named.id.clone(), here(&profiles, named)?)))
         .collect())
 }
 
@@ -789,13 +792,11 @@ async fn resolved(
             PickedAcross::Skipped => store::ArrivingPicked::Skipped,
 
             PickedAcross::Under(pairing) => {
-                let Some(profile_id) = here(&profiles, &state.device, &pairing.profile) else {
+                let Some(profile_id) = here(&profiles, &pairing.profile) else {
                     return Err((
                         StatusCode::BAD_REQUEST,
                         format!(
-                            "this device holds no Agent Profile for the one at home on {device} \
-                             as {id}\n",
-                            device = pairing.profile.device,
+                            "this device holds no Agent Profile {id}\n",
                             id = pairing.profile.id,
                         ),
                     )
@@ -818,23 +819,14 @@ async fn resolved(
 /// Which row of this device's `profiles` is the Profile a transfer names, where
 /// one is.
 ///
-/// Two ways to be it, and they are the same fact read from the two sides: the
-/// account is at home **here**, in which case the pair names this device and one
-/// of its own rows; or it is at home on some other machine, in which case what
-/// this device holds is a **mirror** of it, marked with that machine and the id
-/// it has there — see [`crate::mirroring`].
-///
-/// One of this device's own rows is never matched by the mirror arm and a mirror
-/// is never matched by the first, which is what keeps a Profile from being read
-/// as its own mirror on the machine it is at home on.
-fn here(profiles: &[store::Profile], device: &str, named: &ProfileAcross) -> Option<i64> {
+/// The record held under its uuid, which is one Profile's on every device:
+/// bound here, or run from a copy here where it is bound on some other machine
+/// — see [`crate::mirroring`].
+fn here(profiles: &[store::Profile], named: &ProfileAcross) -> Option<String> {
     profiles
         .iter()
-        .find(|profile| match &profile.mirror {
-            None => named.device == device && named.id == profile.id,
-            Some(mirror) => mirror.device == named.device && mirror.id == named.id,
-        })
-        .map(|profile| profile.id)
+        .find(|profile| profile.id == named.id)
+        .map(|profile| profile.id.clone())
 }
 
 /// The routes, over the state the workbench answers out of — mounted by

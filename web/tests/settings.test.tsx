@@ -50,6 +50,7 @@ import type {
   AuthorSaved,
   ConflictResolution,
   ConversationEntry,
+  Nudge,
   ProfileEntry,
   RepoEntry,
   SettingsSaved,
@@ -83,7 +84,9 @@ import { rowKey } from "../src/reaching";
 import notices from "../src/notices.module.css";
 import { SET_UP, drawn } from "./bench";
 import { json, serving, whenever } from "./serving";
-import { MIRRORED, oneList } from "./authors";
+import { stream, streaming } from "./streaming";
+import { listenForNudges } from "../src/nudge";
+import { CLIENT, oneList } from "./authors";
 import { authorLabel } from "../src/authors";
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
@@ -556,7 +559,7 @@ describe("saving", () => {
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the
         // file holds afterwards, so a save that left it out would clear it.
-        instructions: TOLD.instructions,
+        instructions: "Keep",
       }),
     );
   });
@@ -809,7 +812,7 @@ describe("replacing and clearing the token", () => {
         ignored_comments: TOLD.ignored_comments,
         running: TOLD.running,
         mcp_servers: TOLD.mcp_servers,
-        instructions: TOLD.instructions,
+        instructions: "Keep",
       },
       verified: null,
       refused: [],
@@ -839,7 +842,7 @@ describe("replacing and clearing the token", () => {
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the
         // file holds afterwards, so a save that left it out would clear it.
-        instructions: TOLD.instructions,
+        instructions: "Keep",
       }),
     );
 
@@ -1249,7 +1252,7 @@ describe("sharing on Done", () => {
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the
         // file holds afterwards, so a save that left it out would clear it.
-        instructions: TOLD.instructions,
+        instructions: "Keep",
       }),
     );
 
@@ -1368,7 +1371,7 @@ describe("how a conflict is resolved", () => {
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the
         // file holds afterwards, so a save that left it out would clear it.
-        instructions: TOLD.instructions,
+        instructions: "Keep",
       }),
     );
 
@@ -1475,6 +1478,23 @@ const TWO: SettingsView = {
   authors: [{ ...TOLD.authors[0]!, display_name: "Work" }, SECOND],
 };
 
+/// And the settings with an Author made on another device beside this one's,
+/// as the one list holds it here: a record like any other, with no token on
+/// this device yet.
+const ELSEWHERE: SettingsView = {
+  ...TOLD,
+  authors: [
+    TOLD.authors[0]!,
+    {
+      id: CLIENT.id,
+      display_name: CLIENT.display_name,
+      name: CLIENT.name,
+      email: CLIENT.email,
+      github_token: null,
+    },
+  ],
+};
+
 /// What a uuid minted in the page looks like: a version-4 one.
 const MINTED = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -1484,13 +1504,30 @@ async function pickAuthor(label: string) {
   fireEvent.click(await waitFor(() => screen.getByRole("option", { name: label })));
 }
 
+/// Pick `author`, press **Remove author**, and the card's own Remove.
+async function removing(author: AuthorSaved) {
+  await pickAuthor(author.name);
+  await pickAuthor("Remove author");
+
+  const asking = await waitFor(() => screen.getByRole("dialog"));
+  fireEvent.click(
+    [...asking.querySelectorAll("button")].find(
+      (one) => one.textContent === "Remove",
+    )!,
+  );
+}
+
 describe("the authors", () => {
   /// **Remove author** asks once, naming the Author, and sends nothing until
   /// the card's own Remove is pressed.
   it("asks once before removing an Author", async () => {
     const fetching = serving(
       whenever("/api/ui/settings", json(TWO)),
-      whenever(`/api/ui/authors/${SECOND.id}/remove`, json("Removed"), "POST"),
+      whenever(
+        `/api/ui/authors/${SECOND.id}/remove`,
+        json({ Removed: { unasked: [] } }),
+        "POST",
+      ),
     );
     mountPane();
     await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
@@ -1516,43 +1553,143 @@ describe("the authors", () => {
     await waitFor(() => expect(removals()).toHaveLength(1));
   });
 
-  /// Refused while registered repos point at it, naming them under the
-  /// dropdown — where the human is looking when they pressed it.
-  it("names the repos a removal was refused over", async () => {
+  /// Refused while registered repos point at it, naming each with its device
+  /// under the dropdown — where the human is looking when they pressed it —
+  /// and the member that wasn't answering.
+  it("names the repos a removal was refused over, with their devices", async () => {
     serving(
       whenever("/api/ui/settings", json(TWO)),
       whenever(
         `/api/ui/authors/${SECOND.id}/remove`,
-        json({ InUse: { repos: ["askance", "verkstead"] } }),
+        json({
+          InUse: {
+            repos: [
+              { name: "askance", device: null },
+              { name: "verkstead", device: "desk-pc" },
+            ],
+            unasked: ["laptop"],
+          },
+        }),
         "POST",
       ),
     );
     mountPane();
     await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
 
-    await pickAuthor(SECOND.name);
-    await pickAuthor("Remove author");
-
-    const asking = await waitFor(() => screen.getByRole("dialog"));
-    fireEvent.click(
-      [...asking.querySelectorAll("button")].find(
-        (one) => one.textContent === "Remove",
-      )!,
-    );
+    await removing(SECOND);
 
     await waitFor(() =>
-      screen.getByText(/askance and verkstead are still this author's/),
+      screen.getByText(
+        /askance on this device and verkstead on desk-pc are still this author's/,
+      ),
+    );
+    screen.getByText(/laptop wasn't answering, so its repos weren't checked/);
+    screen.getByRole("combobox", { name: "Repoint them all to…" });
+  });
+
+  /// **Repoint them all to…** offers every other Author, and a pick sends the
+  /// repoint for the one whose removal was refused.
+  it("repoints them all to the Author picked, and then the removal goes", async () => {
+    const fetching = serving(
+      whenever("/api/ui/settings", json(TWO)),
+      whenever(
+        `/api/ui/authors/${SECOND.id}/remove`,
+        json({
+          InUse: {
+            repos: [{ name: "verkstead", device: "desk-pc" }],
+            unasked: [],
+          },
+        }),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/authors/${SECOND.id}/repoint`,
+        json({ Removed: { unasked: [] } }),
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await removing(SECOND);
+
+    const picker = (await waitFor(() =>
+      screen.getByRole("combobox", { name: "Repoint them all to…" }),
+    )) as HTMLSelectElement;
+    expect([...picker.options].map((one) => one.value).filter(Boolean)).toEqual(
+      [TWO.authors[0]!.id],
+    );
+
+    fireEvent.change(picker, { target: { value: TWO.authors[0]!.id } });
+
+    await waitFor(() => {
+      const sent = fetching.mock.calls.find(([asked]) =>
+        String(asked).endsWith("/repoint"),
+      );
+      expect(sent).toBeDefined();
+      expect(JSON.parse(String(sent![1]!.body))).toEqual({
+        author: TWO.authors[0]!.id,
+      });
+    });
+    await waitFor(() =>
+      expect(screen.queryByText(/still this author's/)).toBeNull(),
     );
   });
 
-  /// A member's Author is a row of the dropdown after this device's own,
-  /// marked with its machine, and picked it is edited with the same fields,
-  /// the pane saying which machine a press goes to (ADR-0025).
-  it("lists a member's author marked with its machine", async () => {
+  /// A repo the repoint was refused on is named with why, and the Author
+  /// stays.
+  it("names a repo live work kept from being repointed", async () => {
     serving(
-      whenever("/api/ui/settings", json(TOLD)),
-      whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
+      whenever("/api/ui/settings", json(TWO)),
+      whenever(
+        `/api/ui/authors/${SECOND.id}/remove`,
+        json({
+          InUse: {
+            repos: [{ name: "verkstead", device: "desk-pc" }],
+            unasked: [],
+          },
+        }),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/authors/${SECOND.id}/repoint`,
+        json({
+          Unrepointed: {
+            repos: [
+              {
+                repo: { name: "verkstead", device: "desk-pc" },
+                why: { InUse: { on: ["rate-limiting"], beside: [] } },
+              },
+            ],
+            unasked: [],
+          },
+        }),
+        "POST",
+      ),
     );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await removing(SECOND);
+
+    const picker = await waitFor(() =>
+      screen.getByRole("combobox", { name: "Repoint them all to…" }),
+    );
+    fireEvent.change(picker, { target: { value: TWO.authors[0]!.id } });
+
+    await waitFor(() =>
+      screen.getByText(
+        /verkstead on desk-pc wasn't repointed\. rate-limiting is still going on it\..*The author stays\./,
+      ),
+    );
+  });
+
+  /// An Author made on another device is a row of the dropdown like any
+  /// other, with no machine on it, and picked it is edited with the same
+  /// fields and removed with the same press: it is a record this device holds
+  /// (ADR-0028).
+  it("lists an author made on another device with no machine on it", async () => {
+    theSettings(ELSEWHERE);
     mountPane();
     await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
 
@@ -1563,171 +1700,86 @@ describe("the authors", () => {
         .map((option) => option.textContent),
     ).toEqual([
       authorLabel(TOLD.authors[0]!),
-      "Client · the-workstation",
+      "Client",
       "Add author",
       "Remove author",
     ]);
-    fireEvent.click(
-      screen.getByRole("option", { name: "Client · the-workstation" }),
-    );
+    fireEvent.click(screen.getByRole("option", { name: "Client" }));
 
     await waitFor(() =>
-      screen.getByText(
-        "This author is at home on the-workstation. Saving or removing it here changes it there.",
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+        CLIENT.email,
       ),
     );
-    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
-      MIRRORED.email,
-    );
-    screen.getByText("A token is saved on the-workstation.");
-    expect(screen.queryByLabelText("Token")).toBeNull();
+    expect(screen.queryByText(/at home on/)).toBeNull();
 
     fireEvent.click(screen.getByRole("combobox", { name: "Author" }));
     screen.getByRole("option", { name: "Remove author" });
   });
 
-  /// Save over a mirror sends its fields alone to its own route, which the
-  /// server puts to its home — never a settings save — and the list is read
-  /// again rather than drawn from what was typed.
-  it("saves a member's author to its home", async () => {
-    let listed = oneList(TOLD, MIRRORED);
-    const fetching = serving(
-      whenever("/api/ui/settings", json(TOLD)),
-      whenever("/api/ui/authors", () => json(listed)()),
-      whenever(
-        `/api/ui/authors/${MIRRORED.id}`,
-        () => {
-          listed = oneList(TOLD, { ...MIRRORED, email: "ada@new.example" });
-          return json({ Saved: { verified: null } })();
-        },
-        "POST",
-      ),
-    );
+  /// Two Authors with one name and email stay two, made on two devices and
+  /// never merged: two rows, until somebody removes one.
+  it("draws two authors with one name and email as two rows", async () => {
+    const twice: SettingsView = {
+      ...TOLD,
+      authors: [
+        TOLD.authors[0]!,
+        { ...TOLD.authors[0]!, id: CLIENT.id, github_token: null },
+      ],
+    };
+    theSettings(twice);
     mountPane();
     await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
-    await pickAuthor("Client · the-workstation");
 
-    const email = (await waitFor(() =>
-      screen.getByLabelText("Email"),
-    )) as HTMLInputElement;
-    fireEvent.input(email, { target: { value: "ada@new.example" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() =>
-      expect(
-        fetching.mock.calls.filter(
-          ([asked]) => String(asked) === `/api/ui/authors/${MIRRORED.id}`,
-        ),
-      ).toHaveLength(1),
-    );
-    const [, init] = fetching.mock.calls.find(
-      ([asked]) => String(asked) === `/api/ui/authors/${MIRRORED.id}`,
-    )!;
-    expect(JSON.parse(String(init!.body))).toEqual({
-      display_name: MIRRORED.display_name,
-      name: MIRRORED.name,
-      email: "ada@new.example",
-      github_token: "Keep",
-    });
+    fireEvent.click(screen.getByRole("combobox", { name: "Author" }));
     expect(
-      fetching.mock.calls.some(
-        ([asked, init]) =>
-          String(asked) === "/api/ui/settings" && init?.method === "POST",
+      within(screen.getByRole("listbox"))
+        .getAllByRole("option", { name: authorLabel(TOLD.authors[0]!) }),
+    ).toHaveLength(2);
+  });
+
+  /// An Author edited on another device redraws here on the `authors` Nudge
+  /// this device announces once it has pulled the record — the fields the
+  /// Git section draws are the settings read, which that Nudge reads again.
+  it("redraws an author edited on another device on the authors nudge", async () => {
+    let standing = ELSEWHERE;
+    serving(
+      whenever("/api/ui/settings", () => json(standing)()),
+      whenever("/api/ui/authors", () => json(oneList(standing))()),
+    );
+    streaming();
+    const queries = client();
+    render(() => (
+      <QueryClientProvider client={queries}>
+        <GitPane back={vi.fn()} />
+      </QueryClientProvider>
+    ));
+    const listening = listenForNudges(queries);
+    stream().opens();
+
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+    await pickAuthor("Client");
+    await waitFor(() =>
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+        CLIENT.email,
       ),
-    ).toBe(false);
+    );
+
+    standing = {
+      ...ELSEWHERE,
+      authors: ELSEWHERE.authors.map((one) =>
+        one.id === CLIENT.id ? { ...one, email: "ada@new.example" } : one,
+      ),
+    };
+    stream().nudges({ kind: "authors" } satisfies Nudge);
 
     await waitFor(() =>
       expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
         "ada@new.example",
       ),
     );
-  });
 
-  /// A token replaced on a mirror is verified on its home, and what that
-  /// device's GitHub said is drawn here.
-  it("shows the verification a member's author's home answered", async () => {
-    serving(
-      whenever("/api/ui/settings", json(TOLD)),
-      whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
-      whenever(
-        `/api/ui/authors/${MIRRORED.id}`,
-        json({
-          Saved: {
-            verified: { Account: { login: "ada-client", missing: [] } },
-          },
-        }),
-        "POST",
-      ),
-    );
-    mountPane();
-    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
-    await pickAuthor("Client · the-workstation");
-
-    fireEvent.click(
-      await waitFor(() => screen.getByRole("button", { name: "Replace" })),
-    );
-    fireEvent.input(screen.getByLabelText("Token"), {
-      target: { value: "ghp_fromhere" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() => screen.getByText("ada-client"));
-  });
-
-  /// A home that is not answering refuses the Save, naming the machine.
-  it("names the machine that didn't take a member's author's save", async () => {
-    serving(
-      whenever("/api/ui/settings", json(TOLD)),
-      whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
-      whenever(
-        `/api/ui/authors/${MIRRORED.id}`,
-        json({ error: "the-workstation couldn't be reached." }, 502),
-        "POST",
-      ),
-    );
-    mountPane();
-    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
-    await pickAuthor("Client · the-workstation");
-
-    fireEvent.click(
-      await waitFor(() => screen.getByRole("button", { name: "Save" })),
-    );
-
-    await waitFor(() =>
-      screen.getByText(/the-workstation couldn't be reached\./),
-    );
-  });
-
-  /// And a removal refused at home names that machine's Repos, and where to
-  /// repoint them.
-  it("names the home's repos a member's author's removal was refused over", async () => {
-    serving(
-      whenever("/api/ui/settings", json(TOLD)),
-      whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
-      whenever(
-        `/api/ui/authors/${MIRRORED.id}/remove`,
-        json({ InUse: { repos: ["askance"] } }),
-        "POST",
-      ),
-    );
-    mountPane();
-    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
-    await pickAuthor("Client · the-workstation");
-    await pickAuthor("Remove author");
-
-    const asking = await waitFor(() => screen.getByRole("dialog"));
-    expect(asking.textContent).toContain("settings on the-workstation");
-    fireEvent.click(
-      [...asking.querySelectorAll("button")].find(
-        (one) => one.textContent === "Remove",
-      )!,
-    );
-
-    await waitFor(() =>
-      screen.getByText(
-        /askance is still this author's\. Pick another author for it under Repos on the-workstation first/,
-      ),
-    );
+    listening();
   });
 
   /// With one Author there is no dropdown, and so no way to remove it.
@@ -2411,14 +2463,18 @@ describe("the path a details pane stands at", () => {
     );
   });
 
-  /// A segment that is no id the server ever issued names no pane at all, and
-  /// leaves the details as bare as they are when nothing is open: the URL is a
-  /// record of what was picked rather than a promise that it is still there.
-  it("leaves the details bare where the path names nothing", async () => {
+  /// A segment that is no uuid anything is saved under still names a Profile's
+  /// pane, and the pane says the Profile is gone rather than drawing a form: the
+  /// URL is a record of what was picked rather than a promise that it is still
+  /// there.
+  it("says the profile is gone where the path names one nothing is saved under", async () => {
     const { container } = thePage("/settings/profiles/nonsense");
 
     await drawn(container, `.${profileList.profiles} .${profileList.profile}`);
-    expect(panes(container)[2]!.textContent).toBe("");
+    await waitFor(() =>
+      expect(panes(container)[2]!.textContent).toContain("That profile is gone."),
+    );
+    expect(screen.queryByLabelText(/^Name/)).toBeNull();
   });
 });
 
@@ -2430,7 +2486,9 @@ describe("where a settings details pane stands", () => {
     expect(pathTo("git")).toBe("/settings/git");
     expect(pathTo("sandbox")).toBe("/settings/sandbox");
     expect(pathTo("instructions")).toBe("/settings/instructions");
-    expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
+    expect(pathTo(opensProfile("77777777-7777-4777-8777-777777777777"))).toBe(
+      "/settings/profiles/77777777-7777-4777-8777-777777777777",
+    );
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
     expect(pathTo("repos")).toBe("/settings/repos");
   });
@@ -2441,7 +2499,7 @@ describe("where a settings details pane stands", () => {
       "sandbox",
       "instructions",
       "repos",
-      opensProfile(7),
+      opensProfile("77777777-7777-4777-8777-777777777777"),
       opensProfile("new"),
     ] as const) {
       expect(openingAt(pathTo(opening))).toBe(opening);
@@ -2451,12 +2509,21 @@ describe("where a settings details pane stands", () => {
   /// Which Profile an opening is about, asked of the opening rather than of the
   /// path — it is what says which card reads as open.
   it("says which profile an opening names, and which names none", () => {
-    expect(profileOpened(opensProfile(7))).toBe(7);
+    expect(profileOpened(opensProfile("77777777-7777-4777-8777-777777777777"))).toBe("77777777-7777-4777-8777-777777777777");
     expect(profileOpened(opensProfile("new"))).toBe("new");
     expect(profileOpened("git")).toBeNull();
     expect(profileOpened("repos")).toBeNull();
     expect(profileOpened(null)).toBeNull();
   });
+
+  /// A Profile's uuid is not read apart: any one segment under the profiles
+  /// names one, and a uuid nothing is saved under is the pane's to answer.
+  it.each([["nonsense"], ["7"], ["7.5"]])(
+    "reads /settings/profiles/%s as a profile's opening",
+    (which) => {
+      expect(openingAt(`/settings/profiles/${which}`)).toBe(opensProfile(which));
+    },
+  );
 
   /// The settings' own path opens nothing, and neither does anything that is
   /// not a path of ours — whatever it starts with.
@@ -2466,9 +2533,7 @@ describe("where a settings details pane stands", () => {
     ["/settings/nonsense"],
     ["/settings/git/extra"],
     ["/settings/profiles"],
-    ["/settings/profiles/nonsense"],
-    ["/settings/profiles/7/extra"],
-    ["/settings/profiles/7.5"],
+    ["/settings/profiles/77777777-7777-4777-8777-777777777777/extra"],
     // Every one of these named a Repo's own pane or the form that registered
     // another, and the segment reaches nothing now: the Repos are the word
     // above, whole.

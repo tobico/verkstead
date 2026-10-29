@@ -31,7 +31,6 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 mod archives;
 mod arrivals;
 mod attachments;
-mod author_mirrors;
 mod banners;
 mod births;
 mod captures;
@@ -65,6 +64,10 @@ mod push;
 /// hands the answer to whichever device owns the row that moved — see
 /// `server::ranking`. What is written down here is the key and nothing else.
 pub mod ranks;
+/// The **Replicated records**: a record held by every device of the cluster,
+/// the newest write winning and a removal final (ADR-0028). Public as a module
+/// because a kind is declared by whoever owns it — see [`replicated::Kind`].
+pub mod replicated;
 mod repos;
 mod session_endings;
 mod session_names;
@@ -88,9 +91,6 @@ pub use arrivals::{Arrival, ArrivingPicked, Replacing, arrive, arrived_checkout,
 pub use attachments::{
     Attaching, Attachment, Detaching, Origin, attach, attach_to_draft, attached_sets, attachment,
     attachments, detach, detach_from_draft, detach_from_set, set_attachment, set_attachments,
-};
-pub use author_mirrors::{
-    AuthorMirror, author_mirrors, forget_author_mirrors_of_departed, record_author_mirrors,
 };
 pub use banners::{dismiss_remote_banner, remote_banner_dismissed};
 pub use births::{
@@ -156,7 +156,10 @@ pub use memos::{
     Memo, Retirement, Retiring, StandingMemo, leave_memo, memo_of, restore_memo, retire_memo,
     standing_memos,
 };
-pub use migrations::{rank_the_conversations, record_the_repo_authors, stamp_the_births};
+pub use migrations::{
+    rank_the_conversations, record_the_repo_authors, renumbered_profiles, renumbering_done,
+    stamp_the_births, stamp_the_profiles,
+};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use pending_steers::{
@@ -166,9 +169,10 @@ pub use pending_steers::{
 pub use permitted::{forbid_device, permit_device, permitted_devices};
 pub use previews::{Preview, retire_preview, standing_previews, suggest_preview};
 pub use profiles::{
-    Account, AgentType, Channel, Clash, Deleting, Mirror, Pairing, Picked, Profile, ProfileFacts,
-    Saving, create_profile, delete_profile, forget_mirrors_except, forget_mirrors_of_departed,
-    load_profile, profiles, record_mirror, update_profile,
+    Account, AgentType, Binding, Bindings, BoundWhere, Channel, Clash, Deleting, Minted, Pairing,
+    Picked, Profile, ProfileFacts, ProfileRecord, Profiles, Saving, Settled, Unbound, binding_uuid,
+    bound_where, create_profile, delete_profile, load_profile, logins_held, profile_arrived,
+    profiles, profiles_as_saved, settle, this_device_called, update_profile,
 };
 pub use pull_requests::{
     Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup,
@@ -1022,10 +1026,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // — see [`banners`].
     banners::apply_schema(pool).await?;
 
-    // And the Authors every member holds at home, one row apiece and keyed by
-    // the uuid that is the same everywhere — see [`author_mirrors`]. Hanging off
-    // nothing, the membership it is pruned against coming and going on its own.
-    author_mirrors::apply_schema(pool).await?;
+    // And the records every device of a cluster holds — Authors first — with
+    // which kinds have been taken up out of where they were kept before. See
+    // [`replicated`]. Hanging off nothing, a record being nobody's to cascade
+    // from.
+    replicated::apply_schema(pool).await?;
 
     // And last of all, whatever a database written by an older Verkstead
     // still needs done to it. After every table above, because what a rewrite

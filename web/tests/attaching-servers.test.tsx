@@ -100,6 +100,7 @@ function declaring(...names: string[]): SettingsView {
   return {
     ...SETTINGS,
     mcp_servers: names.map((name) => ({
+      id: `uuid-of-${name}`,
       name,
       url: `https://mcp.example.com/${name}`,
       headers: [],
@@ -181,7 +182,7 @@ describe("the Attach menu on a draft's composer", () => {
                 ...OPEN,
                 mcp_servers: [
                   ...OPEN.mcp_servers,
-                  { name: "tickets", declared: true },
+                  { name: "tickets", declared: true, clashes: false },
                 ],
               }
             : OPEN,
@@ -244,7 +245,7 @@ describe("adding a server from the Attach menu", () => {
   /// each header kept, and the new one at the end — and then the attach of the
   /// name it was saved under, which is what *confirmed* means here.
   it("declares the server and attaches it to the Conversation", async () => {
-    const NEW = { name: "wiki", url: "https://mcp.example.com/wiki" };
+    const NEW = { id: "uuid-of-wiki", name: "wiki", url: "https://mcp.example.com/wiki" };
     const fetching = theWorkbench(
       whenever(
         "/api/ui/settings",
@@ -296,6 +297,7 @@ describe("adding a server from the Attach menu", () => {
       Set: {
         servers: [
           ...SETTINGS.mcp_servers.map((one) => ({
+            id: one.id,
             name: one.name,
             url: one.url,
             headers: one.headers.map((header) => ({
@@ -305,9 +307,12 @@ describe("adding a server from the Attach menu", () => {
           })),
           {
             ...NEW,
+            // A new declaration, whose uuid the server mints.
+            id: null,
             headers: [{ name: "Authorization", value: { Set: { value: "Bearer abc" } } }],
           },
         ],
+        removed: [],
       },
     });
     // And everything else on the settings left as it stands.
@@ -371,7 +376,7 @@ describe("adding a server from the Attach menu", () => {
   /// card stays up to say so, with the attach one press further on, so a
   /// mistyped URL is caught where it was typed.
   it("holds the card open on a server that was not reached, until Attach anyway", async () => {
-    const NEW = { name: "wiki", url: "https://mcp.example.com/wikki" };
+    const NEW = { id: "uuid-of-wiki", name: "wiki", url: "https://mcp.example.com/wikki" };
     const fetching = theWorkbench(
       whenever(
         "/api/ui/settings",
@@ -442,6 +447,7 @@ describe("adding a server from the Attach menu", () => {
           return json({
             ...landed(
               servers.map((one) => ({
+                id: one.id ?? `uuid-of-${one.name}`,
                 name: one.name,
                 url: one.url,
                 headers: [],
@@ -591,6 +597,56 @@ describe("the chips on a draft's composer", () => {
     expect(gone.textContent).toContain("archive");
     expect(
       within(gone).getByRole("button", { name: "Remove archive" }),
+    ).toBeTruthy();
+  });
+
+  /// A name two declarations share — two devices that each declared it apart —
+  /// is not offered: a session would be handed neither, and the server refuses
+  /// to attach it.
+  it("leaves out a name two declarations clash over", async () => {
+    const settings = declaring("tickets", "alerts");
+    theWorkbench(
+      whenever(
+        "/api/ui/settings",
+        json({
+          ...settings,
+          mcp_servers: [
+            ...settings.mcp_servers,
+            { ...settings.mcp_servers[0]!, id: "another-tickets" },
+          ],
+        }),
+      ),
+    );
+
+    const menu = await openMenu(await openComposer());
+
+    expect(rows(menu)).toEqual(["Attach file…", "alerts", "Add a server…"]);
+  });
+
+  /// And a chip on a name that clashes says so, keeping its ×.
+  it("says so where two declarations clash over the name", async () => {
+    theWorkbench(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}`,
+        json({
+          ...OPEN,
+          mcp_servers: [{ name: "docs", declared: true, clashes: true }],
+        }),
+      ),
+    );
+
+    const pane = await openComposer();
+    const clashing = await waitFor(() => {
+      const found = chips(pane).find((chip) =>
+        chip.classList.contains(pill.missing!),
+      );
+      expect(found, "expected a chip that clashes").toBeTruthy();
+      return found!;
+    });
+
+    expect(clashing.textContent).toContain("two clash until one is removed");
+    expect(
+      within(clashing).getByRole("button", { name: "Remove docs" }),
     ).toBeTruthy();
   });
 

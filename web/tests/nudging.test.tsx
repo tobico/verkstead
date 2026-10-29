@@ -559,6 +559,14 @@ const ABOUT: Record<string, readonly string[]> = {
   // The one list of Authors, which the Brief's Author fact reads — a pane this
   // sweep never opens — and the Git switcher and the Repos pane beside it.
   authors: [],
+  // The Instructions text, which the settings page alone draws — a pane this
+  // sweep never opens.
+  instructions: [],
+  // The declared MCP servers, which the settings page and the Attach menu
+  // draw off the settings — neither among the panes this sweep opens — and
+  // the open Conversation, whose chips say whether each name is still
+  // declared and whether two declarations clash over it.
+  mcp_servers: [OPENED],
   // The joins in flight, which move the list the modal is drawn from and the
   // Devices section of the Remote access pane. Neither is among the five: the
   // modal is read by the shell rather than by a page, and the Devices section
@@ -570,8 +578,10 @@ const ABOUT: Record<string, readonly string[]> = {
   // sidebar. The membership decides which rows are on the merged list and
   // whether any row carries a machine at all, so a device unlinked is its
   // Conversations to take off the list and the last one unlinked is every
-  // remaining row to redraw without a device.
-  devices: [SIDEBAR],
+  // remaining row to redraw without a device. And the Profiles, every card
+  // drawing a line per device of the cluster, and a device first linking
+  // naming its own unnamed Profiles after itself in the write that links it.
+  devices: [SIDEBAR, PROFILES],
   // And what is out there rather than in the cluster: a device nobody has typed
   // an address for was heard advertising itself, or one that had been heard
   // stopped. It names the Discovered list under that same section — not the

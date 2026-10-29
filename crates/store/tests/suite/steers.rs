@@ -152,7 +152,7 @@ async fn naming(pool: &SqlitePool, id: i64) -> bool {
 }
 
 /// An Agent Profile to pair with, by name and with the models it lists.
-async fn profile(pool: &SqlitePool, name: &str, models: &[&str]) -> i64 {
+async fn profile(pool: &SqlitePool, name: &str, models: &[&str]) -> String {
     create_profile(
         pool,
         &ProfileFacts {
@@ -291,7 +291,7 @@ async fn a_steer_settles_the_pairing_the_human_picked() {
             Steer {
                 pairings: &[Settling {
                     role: Role::Implementation,
-                    profile_id: profile,
+                    profile_id: &profile,
                     model: "opus-4.8",
                 }],
                 ..into(Lifecycle::Wrapping)
@@ -344,7 +344,7 @@ async fn a_steer_naming_a_profile_that_has_gone_moves_nothing() {
             Steer {
                 pairings: &[Settling {
                     role: Role::Implementation,
-                    profile_id: 404,
+                    profile_id: "no-such-profile",
                     model: "opus-5",
                 }],
                 ..into(Lifecycle::Wrapping)
@@ -1053,7 +1053,7 @@ async fn a_steer_records_the_whole_form_beside_its_event() {
             Steer {
                 pairings: &[Settling {
                     role: Role::Implementation,
-                    profile_id: profile,
+                    profile_id: &profile,
                     model: "opus-4.8",
                 }],
                 companions: &[Joining {
@@ -1070,7 +1070,7 @@ async fn a_steer_records_the_whole_form_beside_its_event() {
                     digest: true,
                     interrupt: true,
                     pairing: Some(PickedPairing {
-                        profile_id: profile,
+                        profile_id: &profile,
                         model: "opus-4.8",
                     }),
                 },
@@ -1158,14 +1158,14 @@ async fn a_steer_whose_profile_has_been_removed_still_says_one_was_picked() {
         Steer {
             pairings: &[Settling {
                 role: Role::Implementation,
-                profile_id: profile,
+                profile_id: &profile,
                 model: "opus-5",
             }],
             recorded: Recorded {
                 digest: false,
                 interrupt: false,
                 pairing: Some(PickedPairing {
-                    profile_id: profile,
+                    profile_id: &profile,
                     model: "opus-5",
                 }),
             },
@@ -1176,7 +1176,7 @@ async fn a_steer_whose_profile_has_been_removed_still_says_one_was_picked() {
     .unwrap();
 
     assert_eq!(
-        delete_profile(&pool, profile).await.unwrap(),
+        delete_profile(&pool, &profile).await.unwrap(),
         Deleting::Deleted,
         "an account is the human's to be finished with, whatever named it",
     );

@@ -10,21 +10,26 @@
 //! single home each backend after it keeps one under — is the agent type's, and
 //! every judgement here is made per type for that reason.
 //!
-//! **And a Profile may be a member's**, which is the one row here nothing is
-//! judged about against this filesystem: a **mirror** names an account on
-//! another machine, and its paths belong to no filesystem here — see
-//! [`crate::mirroring`]. So it is answered out of the row itself and out of
-//! this device, and the machine it is at home on rides out beside it for every
-//! list that draws several devices' accounts as one.
+//! **And a Profile may be bound on other devices alone**, which is the one
+//! row here nothing is judged about against this filesystem: every device
+//! holds the one record (ADR-0028), and the account paths on a row this device
+//! holds no binding of are another machine's — see [`store::Unbound`]. So it
+//! is answered out of the record and out of this device.
 //!
-//! **Which does not make a mirror unbreakable**, it makes it break over
-//! different things: the three that would stop a launch away from home, asked
-//! in the order a launch would meet them. Whether the home device is answering
-//! at all, whether the account over there holds a login there is anything to
-//! mirror, and whether the harness is on *this* machine. Each is named on the
-//! row and each refuses a Start by name, before a session comes up logged out
-//! with nothing saying why — see [`broken`], where the three are decided, and
-//! [`verkstead_render::Broken`], which is the vocabulary they are said in.
+//! **Which does not make such a Profile unbreakable**, it makes it break over
+//! different things: the two that would stop a launch here, asked in the order
+//! a launch would meet them. Whether a device it is bound on, whose account
+//! there holds a login, is answering at all, and whether the harness is on
+//! *this* machine. Each is named on the row and each refuses a Start by name,
+//! before a session comes up logged out with nothing saying why — see
+//! [`broken`], where the two are decided, and [`verkstead_render::Broken`],
+//! which is the vocabulary they are said in. **Per device**: every device
+//! answers them for itself.
+//!
+//! **Whether a bound account holds a login is said by the device it is bound
+//! on**, the one that can look: every read here looks at this device's own
+//! bound accounts and writes what it saw onto their bindings where that moved,
+//! which replicate — see [`looked`].
 //!
 //! Nothing here mounts anything. A Profile is a record of an account a session
 //! will later be run under; the bind-mounting arrives with the stage that runs
@@ -37,7 +42,7 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice, RowDevice,
+    ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice, RowDevice,
 };
 
 use crate::resolved::{Resolved, resolve};
@@ -59,10 +64,31 @@ pub(crate) async fn create(pool: &SqlitePool, edit: &ProfileEdit) -> Result<Prof
 
 /// Rewrite one, whole. Everything about a Profile is the human's to change:
 /// nothing has been built from it that a change would contradict.
-pub(crate) async fn edit(pool: &SqlitePool, id: i64, edit: &ProfileEdit) -> Result<ProfileSaved> {
-    let facts = match checked(edit).await? {
-        Ok(facts) => facts,
-        Err(refusal) => return Ok(refusal),
+///
+/// **A Profile this device holds no binding of is rewritten as a record
+/// alone**: its paths are other devices', so what the form carries of them is
+/// neither judged against this filesystem nor written, and binding this
+/// device is a press of its own.
+pub(crate) async fn edit(pool: &SqlitePool, id: &str, edit: &ProfileEdit) -> Result<ProfileSaved> {
+    let Some(held) = store::load_profile(pool, id).await? else {
+        return Ok(ProfileSaved::NoSuchProfile);
+    };
+
+    let facts = match held.unbound {
+        None => match checked(edit).await? {
+            Ok(facts) => facts,
+            Err(refusal) => return Ok(refusal),
+        },
+
+        Some(_) => match named(edit) {
+            Ok((name, models)) => store::ProfileFacts {
+                name,
+                account: held.account,
+                models,
+                memory: edit.memory,
+            },
+            Err(refusal) => return Ok(refusal),
+        },
     };
 
     Ok(match store::update_profile(pool, id, &facts).await? {
@@ -79,7 +105,7 @@ pub(crate) async fn edit(pool: &SqlitePool, id: i64, edit: &ProfileEdit) -> Resu
 /// takes the Profile out of every Pairing that named it in the one transaction
 /// that removes it, and a Conversation left with an empty picker is read as one
 /// that has not chosen — see [`picked`].
-pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<ProfileDeleted> {
+pub(crate) async fn remove(pool: &SqlitePool, id: &str) -> Result<ProfileDeleted> {
     Ok(match store::delete_profile(pool, id).await? {
         store::Deleting::Deleted => ProfileDeleted::Removed,
         store::Deleting::NoSuchProfile => ProfileDeleted::NoSuchProfile,
@@ -87,12 +113,10 @@ pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<ProfileDeleted>
 }
 
 /// Every Profile, each with whether its account is still where it was left —
-/// **this device's own rows and every mirror together**.
+/// **every live record, bound here or not**.
 ///
-/// One list rather than a section per device (ADR-0020, *Shared Profiles*): a
-/// Profile is a Profile, and which machine its account sits on is a fact on the
-/// row. What refreshes the mirrors is [`crate::mirroring`]; what this does is
-/// read them back beside this device's own.
+/// One list rather than a section per device (ADR-0028): a Profile is the
+/// cluster's, and no device is its home.
 pub(crate) async fn listed(state: &AppState) -> Result<Vec<ProfileEntry>> {
     entries(state, store::profiles(&state.pool).await?).await
 }
@@ -160,6 +184,60 @@ pub(crate) async fn picked(state: &AppState, picked: store::Picked) -> Result<Pi
     })
 }
 
+/// Look at whether the account of each Profile bound here holds a login file,
+/// and say so on this device's binding of it where that moved — see
+/// [`store::logins_held`] — telling the members to pull where it did.
+///
+/// **The device bound on an account is the only one that can look**, and a
+/// device running the Profile from a copy fetches only from a binding that
+/// holds one. So it is asked on every read of this device's Profiles, at the
+/// start, and as a login written back by a member lands; a read where nothing
+/// moved writes nothing.
+pub(crate) async fn looked(state: &AppState, profiles: &[store::Profile]) {
+    let bound: Vec<store::Profile> = profiles
+        .iter()
+        .filter(|profile| profile.unbound.is_none())
+        .cloned()
+        .collect();
+
+    if bound.is_empty() {
+        return;
+    }
+
+    let held = tokio::task::spawn_blocking(move || {
+        bound
+            .iter()
+            .map(|profile| (profile.id.clone(), lends(profile)))
+            .collect::<Vec<_>>()
+    })
+    .await;
+
+    let Ok(held) = held else {
+        return;
+    };
+
+    match store::logins_held(&state.pool, &held).await {
+        Ok(true) => state.nudges.announce(verkstead_schema::Nudge::Profiles),
+        Ok(false) => {}
+        Err(why) => tracing::warn!(
+            error = ?why,
+            "whether this device's accounts hold a login could not be written onto their \
+             bindings, so a member may fetch from one that has none",
+        ),
+    }
+}
+
+/// And the same for every Profile this device holds, read for it.
+pub(crate) async fn looked_at_all(state: &AppState) {
+    match store::profiles(&state.pool).await {
+        Ok(profiles) => looked(state, &profiles).await,
+        Err(why) => tracing::warn!(
+            error = ?why,
+            "the Profiles could not be read to look at whether their accounts hold a login",
+        ),
+    }
+}
+
 /// Read a batch of Profiles into rows, looking at the filesystem once for the
 /// lot of them.
 ///
@@ -167,31 +245,34 @@ pub(crate) async fn picked(state: &AppState, picked: store::Picked) -> Result<Pi
 /// together rather than one call per Profile, since the whole point of the batch
 /// is that it is one hop off the runtime instead of a list's worth.
 ///
-/// **And the devices the mirrors among them are at home on, read once beside
-/// them.** A mirror carries a Device Id and nothing else about the machine: what
-/// the row is drawn with — the name, the word for the operating system, whether
-/// the last dial got through — is this device's own reading of its membership,
-/// exactly as a merged sidebar row's is (see [`crate::merging`]). Asked only
-/// where there is a mirror in the batch, so the ordinary installation pays
-/// nothing for it.
+/// **And the membership, read once beside them**, for whether a device a
+/// launch of one not bound here would fetch from is answering — see
+/// [`broken`] — and for the card's line per device: see [`Lines`].
 ///
-/// **And the machine itself goes in with them**, for the one thing a mirror is
-/// judged against here: whether the harness it runs is installed on this box —
-/// see [`broken`]. One probe for the batch and one `PATH` walk per harness in
-/// it, inside the same blocking hop the paths are resolved in.
+/// **And the machine itself goes in with them**, for the one thing such a
+/// Profile is judged against here: whether the harness it runs is installed on
+/// this box. One probe for the batch and one `PATH` walk per harness in it,
+/// inside the same blocking hop the paths are resolved in.
 async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<ProfileEntry>> {
-    let homes = homes_of(&state.pool, &profiles).await?;
+    looked(state, &profiles).await;
+
+    let members = store::members(&state.pool).await?;
+    let lines = Lines::read(state, &members).await?;
+    let members: HashMap<String, store::Member> = members
+        .into_iter()
+        .map(|member| (member.device.clone(), member))
+        .collect();
     let machine = state.onboarding.machine().clone();
     let signed_out = state.logins.signed_out();
 
     Ok(tokio::task::spawn_blocking(move || {
-        // Whether each harness a mirror in this batch runs is on this machine,
-        // asked once apiece: a Profiles section of a cluster draws every
-        // member's accounts, and four walks are not one per row.
+        // Whether each harness a Profile not bound here runs is on this
+        // machine, asked once apiece: a cluster's Profiles section holds every
+        // device's accounts, and four walks are not one per row.
         let mut harnesses: HashMap<store::AgentType, bool> = HashMap::new();
 
         for profile in &profiles {
-            if profile.mirror.is_some() {
+            if profile.unbound.is_some() {
                 let agent_type = profile.agent_type();
 
                 harnesses
@@ -203,20 +284,26 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
         profiles
             .into_iter()
             .map(|profile| {
-                let home = profile
-                    .mirror
-                    .as_ref()
-                    .map(|mirror| whose(&homes, &mirror.device));
+                // Whether a device a launch could fetch from is answering, for
+                // one not bound here: one bound with a login, and none being
+                // none.
+                let reachable = profile.unbound.as_ref().is_none_or(|unbound| {
+                    unbound
+                        .lending
+                        .iter()
+                        .any(|device| whose(&members, device).reachable)
+                });
 
                 ProfileEntry {
-                    id: profile.id,
-                    broken: broken(&profile, home.as_ref(), &harnesses, &signed_out),
+                    id: profile.id.clone(),
+                    broken: broken(&profile, reachable, &harnesses, &signed_out),
                     login: lends(&profile),
-                    device: home,
+                    bound: profile.unbound.is_none(),
                     name: profile.name,
                     account: account(&profile.account),
                     models: profile.models,
                     memory: profile.memory,
+                    devices: lines.of(&profile.id),
                 }
             })
             .collect()
@@ -224,48 +311,96 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
     .await?)
 }
 
-/// The membership, where any of `profiles` is a mirror, and nothing at all
-/// otherwise.
-async fn homes_of(
-    pool: &SqlitePool,
-    profiles: &[store::Profile],
-) -> Result<HashMap<String, store::Member>> {
-    if !profiles.iter().any(|profile| profile.mirror.is_some()) {
-        return Ok(HashMap::new());
-    }
-
-    members_by_device(pool).await
+/// What a Profile card's line per device is drawn off: every device of the
+/// cluster, this one first and then the members in the order the Devices
+/// section lists them, and where each Profile is bound.
+///
+/// **Nothing at all on a Verkstead in no cluster**, and on a router with no
+/// identity: one device is the only place anything could be bound, and a line
+/// would say what the card already does. The bindings are read only where
+/// there is a line to draw.
+struct Lines {
+    /// What each device is drawn as, by the Device Id its bindings are
+    /// written under — this device's own first, with no id.
+    devices: Vec<(String, RowDevice)>,
+    bound: store::BoundWhere,
 }
 
-/// Every member of this device's cluster, by its Device Id: what a mirror's
-/// device mark is drawn from — see [`whose`].
-pub(crate) async fn members_by_device(pool: &SqlitePool) -> Result<HashMap<String, store::Member>> {
-    Ok(store::members(pool)
-        .await?
-        .into_iter()
-        .map(|member| (member.device.clone(), member))
-        .collect())
+impl Lines {
+    async fn read(state: &AppState, members: &[store::Member]) -> Result<Self> {
+        let (Some(here), false) = (state.devices.as_ref(), members.is_empty()) else {
+            return Ok(Self {
+                devices: Vec::new(),
+                bound: store::BoundWhere::default(),
+            });
+        };
+
+        let bound = store::bound_where(&state.pool).await?;
+
+        // This device drawn as the Devices section draws it, and each member
+        // as it last answered.
+        let this = RowDevice {
+            id: None,
+            name: here.name(),
+            os: Some(here.os()),
+            reachable: true,
+        };
+
+        let devices = std::iter::once((bound.here.clone(), this))
+            .chain(members.iter().map(|member| {
+                (
+                    member.device.clone(),
+                    RowDevice {
+                        id: Some(member.device.clone()),
+                        name: member.name.clone(),
+                        os: Some(member.os.clone()),
+                        reachable: member.reachable,
+                    },
+                )
+            }))
+            .collect();
+
+        Ok(Self { devices, bound })
+    }
+
+    /// The lines of the Profile `id`: a binding's account on every device
+    /// holding one, and *runs from a copy* on every other.
+    fn of(&self, id: &str) -> Vec<ProfileDevice> {
+        let bound = self
+            .bound
+            .bound
+            .get(id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+
+        self.devices
+            .iter()
+            .map(|(device, row)| ProfileDevice {
+                device: row.clone(),
+                bound: bound
+                    .iter()
+                    .find(|(on, _)| on == device)
+                    .map(|(_, held)| account(held)),
+            })
+            .collect()
+    }
 }
 
 /// Whether the account this row names holds a **login file** — the fact that
-/// says whether it can be used away from the device it is at home on at all.
+/// says whether it can be used on a device it is not bound on at all.
 ///
-/// **Answered by the device the account is on, wherever the row is drawn.** One
-/// of this device's own is looked at here, at the one path the harness keeps a
-/// login under; a mirror carries what the home device said the last time the
-/// rows were refreshed, that path being on a filesystem this box cannot read.
-/// So the answer on a row is always the answer the machine holding the account
-/// gave.
+/// One bound here is looked at here, at the one path the harness keeps a login
+/// under. One bound elsewhere holds one where any device's binding of it says
+/// so — see [`store::Unbound::lending`].
 ///
 /// A login kept somewhere that is not a file — a Claude login in the macOS
 /// Keychain — reads the same as a sign-out, which is what it is from here: there
-/// is nothing to hand another machine. Neither stops a session at home, which is
+/// is nothing to hand another machine. Neither stops a session here, which is
 /// why this is a fact beside [`ProfileEntry::broken`] rather than a way of being
-/// it, and why the row says *cannot be used away* rather than *broken* on the
-/// machine the account is on.
+/// it.
 fn lends(profile: &store::Profile) -> bool {
-    match &profile.mirror {
-        Some(mirror) => mirror.login,
+    match &profile.unbound {
+        Some(unbound) => !unbound.lending.is_empty(),
         None => matches!(
             resolve(&crate::sandbox::root::login_at(&profile.account)),
             Resolved::At(_)
@@ -273,16 +408,14 @@ fn lends(profile: &store::Profile) -> bool {
     }
 }
 
-/// How a mirror's home device is drawn, off that reading.
+/// How a device a Profile is bound on is read, off the membership.
 ///
-/// **A device the membership no longer holds still draws a row**, under the id
-/// itself and reading as not answering: the mirrors of an unlinked device are
-/// taken away by the refresher rather than here (see
-/// [`crate::mirroring`]), so what this covers is the moment between the
-/// unlink and the next sweep — and a row with no name at all would be worse than
-/// one naming a machine by its id.
-pub(crate) fn whose(homes: &HashMap<String, store::Member>, device: &str) -> RowDevice {
-    match homes.get(device) {
+/// **A device the membership does not hold still reads**, under the id itself
+/// and as not answering: a binding outlives the link to the device that wrote
+/// it, and a reading with no name at all would be worse than one naming a
+/// machine by its id.
+pub(crate) fn whose(members: &HashMap<String, store::Member>, device: &str) -> RowDevice {
+    match members.get(device) {
         Some(member) => RowDevice {
             id: Some(member.device.clone()),
             name: member.name.clone(),
@@ -379,57 +512,49 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// a dangling symlink where the account was is a Profile that cannot be run
 /// under.
 ///
-/// **A mirror is answered before any of that and asks three other questions.**
-/// Its paths are the home machine's, so resolving them here would be asking the
-/// wrong filesystem a question it may well answer *yes* to — two machines set up
-/// alike hold the same paths, and the account under them is somebody else's. What
-/// a session away from home is given is not those paths either: the login and the
-/// configuration a Built Root is made from are fetched into a mirror of that
-/// account under this device's Data Directory before each launch. See
-/// [`crate::mirroring::account`].
+/// **A Profile not bound here is answered before any of that and asks two
+/// other questions.** The paths on it are another machine's, so resolving them
+/// here would be asking the wrong filesystem a question it may well answer
+/// *yes* to — two machines set up alike hold the same paths, and the account
+/// under them is somebody else's. What a session here is given is not those
+/// paths either: the login and the configuration a Built Root is made from are
+/// fetched from a device it is bound on into a copy under this device's Data
+/// Directory before each launch. See [`crate::mirroring::account`].
 ///
-/// So what is asked instead is the three things that would stop *that*, **in
-/// the order a launch would meet them**: the home device is dialled, the
-/// account is fetched out of it, and the harness is run here.
+/// So what is asked instead is the two things that would stop *that*, **in the
+/// order a launch would meet them**: a bound device is dialled and the account
+/// fetched out of it, and the harness is run here.
 ///
-/// 1. **The home is not answering** — [`Broken::HomeUnreachable`]. Nothing can
-///    be fetched, so nothing can be built, and the two readings below are what
-///    that machine last said rather than what is true now. This device's own
-///    reading of its membership is what says so, which is the same reading the
-///    sidebar draws a member's Conversation unreachable off.
-/// 2. **The account at home holds no login file** — [`Broken::NoLoginAtHome`].
-///    There is nothing to mirror, so a session here would come up logged out;
-///    the Profile is still perfectly runnable on the machine it is on, and the
-///    fix is a login there. See [`lends`].
-/// 3. **The harness is not on this machine** — [`Broken::HarnessMissing`]. The
-///    onboarding probe's own finding, in that step's own word: a root built out
-///    of a mirrored account is no use where there is no program to run in it.
+/// 1. **No device it is bound on whose binding holds a login is answering** —
+///    [`Broken::NoBoundDevice`], naming none. Nothing can be fetched, so
+///    nothing can be built. This device's own reading of its membership is
+///    what says so, which is the same reading the sidebar draws a member
+///    unreachable off, and `reachable` is it. A binding with no login is no
+///    source — see [`lends`].
+/// 2. **The harness is not on this machine** — [`Broken::HarnessMissing`]. The
+///    onboarding probe's own finding, in that step's own word.
 ///
-/// **And that is the whole of it for a mirror**: a row that passes all three is
-/// a row to run under, and there is nothing about this filesystem to go and put
-/// right.
+/// **And that is the whole of it** for such a Profile: a row that passes both
+/// is a row to run under, and there is nothing about this filesystem to go and
+/// put right.
 ///
-/// **One of this device's own may also have signed out** — [`Broken::SignedOut`]
-/// — where a press found its account with no login. Asked after its paths,
-/// which a login could not put right. `signed_out` is what
-/// [`crate::logins::asked`] found.
+/// **One bound here may also have signed out** — [`Broken::SignedOut`] — where
+/// a press found its account with no login. Asked after its paths, which a
+/// login could not put right. `signed_out` is what [`crate::logins::asked`]
+/// found.
 fn broken(
     profile: &store::Profile,
-    home: Option<&RowDevice>,
+    reachable: bool,
     harnesses: &HashMap<store::AgentType, bool>,
-    signed_out: &HashSet<i64>,
+    signed_out: &HashSet<String>,
 ) -> Option<Broken> {
-    if profile.mirror.is_some() {
-        if home.is_some_and(|home| !home.reachable) {
-            return Some(Broken::HomeUnreachable);
-        }
-
-        if !lends(profile) {
-            return Some(Broken::NoLoginAtHome);
+    if profile.unbound.is_some() {
+        if !reachable {
+            return Some(Broken::NoBoundDevice);
         }
 
         // Absent from the map is a batch nothing probed, which cannot happen
-        // for a row that is a mirror — [`entries`] fills it off the same rows.
+        // for a row not bound here — [`entries`] fills it off the same rows.
         // Read as *there* rather than as broken, a Profile refused for a probe
         // nobody made being worse than one offered and found wanting.
         if !harnesses
@@ -481,6 +606,27 @@ fn broken(
 /// does: resolving a path is blocking, and a save is rare enough that the thread
 /// it borrows costs nothing.
 async fn checked(edit: &ProfileEdit) -> Result<Result<store::ProfileFacts, ProfileSaved>> {
+    let (name, models) = match named(edit) {
+        Ok(named) => named,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+
+    let account = edit.account.clone();
+    let memory = edit.memory;
+
+    Ok(tokio::task::spawn_blocking(move || inspect(&account))
+        .await?
+        .map(|account| store::ProfileFacts {
+            name,
+            account,
+            models,
+            memory,
+        }))
+}
+
+/// The name and the models the human typed, tidied — or the reason they are
+/// not going to be saved. Everything of a save but the account.
+fn named(edit: &ProfileEdit) -> Result<(Option<String>, Vec<String>), ProfileSaved> {
     // Trimmed, and a box with nothing but space in it is no name at all: a
     // Profile may go unnamed, and one called `" "` would be a name nobody could
     // tell from none.
@@ -502,20 +648,10 @@ async fn checked(edit: &ProfileEdit) -> Result<Result<store::ProfileFacts, Profi
         .collect();
 
     if models.is_empty() {
-        return Ok(Err(ProfileSaved::Modelless));
+        return Err(ProfileSaved::Modelless);
     }
 
-    let account = edit.account.clone();
-    let memory = edit.memory;
-
-    Ok(tokio::task::spawn_blocking(move || inspect(&account))
-        .await?
-        .map(|account| store::ProfileFacts {
-            name,
-            account,
-            models,
-            memory,
-        }))
+    Ok((name, models))
 }
 
 /// The account, resolved — or the reason it is refused.
@@ -639,7 +775,7 @@ pub(crate) async fn choose_grilling(
     }
 
     Ok(chosen(
-        store::set_grilling_pairing(pool, id, choice.profile_id, Some(&choice.model)).await?,
+        store::set_grilling_pairing(pool, id, &choice.profile_id, Some(&choice.model)).await?,
     ))
 }
 
@@ -654,7 +790,8 @@ pub(crate) async fn choose_implementation(
     }
 
     Ok(chosen(
-        store::set_implementation_pairing(pool, id, choice.profile_id, Some(&choice.model)).await?,
+        store::set_implementation_pairing(pool, id, &choice.profile_id, Some(&choice.model))
+            .await?,
     ))
 }
 
@@ -678,7 +815,7 @@ pub(crate) async fn choose_review(
     }
 
     Ok(chosen(
-        store::set_review_pairing(pool, id, choice.profile_id, Some(&choice.model)).await?,
+        store::set_review_pairing(pool, id, &choice.profile_id, Some(&choice.model)).await?,
     ))
 }
 
@@ -710,7 +847,7 @@ pub(crate) async fn unlisted(
     pool: &SqlitePool,
     choice: &ProfileChoice,
 ) -> Result<Option<Unlisted>> {
-    let Some(profile) = store::load_profile(pool, choice.profile_id).await? else {
+    let Some(profile) = store::load_profile(pool, &choice.profile_id).await? else {
         return Ok(Some(Unlisted::NoSuchProfile));
     };
 

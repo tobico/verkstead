@@ -186,14 +186,16 @@ mod merges;
 /// One sidebar for the cluster: every member's Conversations held in memory and
 /// merged with this device's own by Rank (ADR-0020, *The opened device relays*).
 mod merging;
-/// One list of accounts for the cluster: a mirror row per member Agent Profile,
-/// fetched over the link and kept beside this device's own (ADR-0020, *Shared
-/// Profiles*).
+/// What a device holds of an Agent Profile not bound on it: a copy of the
+/// account, fetched before each launch from a device it is bound on, and the
+/// memory store synced with that same device (ADR-0020, *Shared Profiles*;
+/// ADR-0028).
 ///
-/// Public for the reason [`matching`] is: what a session away from home is given
-/// of an account is the product's own boundary rather than an implementation
-/// detail of a launch, and what proves it is a suite standing where the device
-/// about to launch stands — see [`mirroring::account::fetched`].
+/// Public for the reason [`matching`] is: what a session that runs from a copy
+/// is given of an account is the product's own boundary rather than an
+/// implementation detail of a launch, and what proves it is a suite standing
+/// where the device about to launch stands — see
+/// [`mirroring::account::fetched`].
 pub mod mirroring;
 /// Telling the open viewer pages that the pending world moved (ADR-0009).
 ///
@@ -279,6 +281,7 @@ pub mod remote;
 /// Following a Conversation's branch to the name a session renamed it to,
 /// rather than repairing a checkout that has not come adrift after all.
 mod renames;
+pub mod replicating;
 mod reply;
 mod repos;
 /// Speaking to a session that has gone idle without asking anything.
@@ -1319,10 +1322,10 @@ pub fn router_answering_devices_telling_checking_updates(
 /// The peer half is handed to [`peer::router`] the way [`router_over_the_link`]'s
 /// is, which is what puts the Member Gate in front of it.
 ///
-/// **And `machine` is what the mirrors are judged on**, which is the one thing
-/// a clustered router probes that a lone one never does: a **mirror** of a
-/// member's Profile whose harness is not on this box reads broken in the
-/// onboarding probe's own word, so a suite about mirrors has to say what this
+/// **And `machine` is what the Profiles not bound here are judged on**, which is
+/// the one thing a clustered router probes that a lone one never does: a Profile
+/// not bound here whose harness is not on this box reads broken in the
+/// onboarding probe's own word, so a suite about them has to say what this
 /// box has rather than take whatever the runner happens to hold — see
 /// [`profiles::broken`]. A served Verkstead passes [`onboarding::Machine::here`],
 /// as every other constructor does.
@@ -1393,17 +1396,17 @@ pub fn routers_keeping_answering_devices_telling(
 /// in `data_dir` and reaching GitHub through `gh`.
 ///
 /// What a served Verkstead in a cluster is, and what a suite asking whether a
-/// session away from home comes up logged in has to stand up: the mirrors are
-/// refreshed off the membership behind the state (see [`mirroring`]), the account
-/// of a member's Profile is fetched over the cluster handle as each session
+/// session that runs from a copy comes up logged in has to stand up: the Profile
+/// records are pulled off the membership behind the state, the account of a
+/// Profile not bound here is fetched over the cluster handle as each session
 /// starts (see [`mirroring::account`]), and the agent that runs is `agents`'.
 /// Every other clustered constructor here runs no session at all, which is every
 /// question about a cluster but that one.
 ///
-/// And `machine` is what its mirrors are judged on, for the reason
-/// [`routers_answering_devices_telling`] takes one: a session away from home is
-/// refused where the harness it would run is not on this box, and what a suite
-/// stubs the agent with is not what the probe walks a `PATH` for.
+/// And `machine` is what its Profiles not bound here are judged on, for the
+/// reason [`routers_answering_devices_telling`] takes one: a session that runs
+/// from a copy is refused where the harness it would run is not on this box, and
+/// what a suite stubs the agent with is not what the probe walks a `PATH` for.
 pub fn routers_running_sessions_answering_devices(
     pool: SqlitePool,
     data_dir: PathBuf,
@@ -1791,18 +1794,12 @@ fn standing(
     // one that needs the state.
     merging::refreshing(&state);
 
-    // And the mirror rows of every member's Agent Profiles, beside it and on the
-    // same channel: read once now, and again whenever a member says its Profiles
-    // moved or the membership itself does (ADR-0020, *Shared Profiles*) — see
-    // [`mirroring`]. A sweep of its own rather than a second thing the one above
-    // does, because what it keeps is rows in this store rather than a list in
-    // this device's memory, and the two are refreshed by different news.
-    mirroring::refreshing(&state);
-
-    // And the mirror rows of every member's Authors, on the Profiles' schedule
-    // and beside them, so every device draws one list of Authors (ADR-0025) —
-    // see [`mirroring::authors`].
-    mirroring::authors::refreshing(&state);
+    // And every member's Replicated records pulled and merged into this
+    // device's, beside it and on the same channel: read once now, and again
+    // whenever a member says its records moved or the membership itself does,
+    // so every device holds the cluster's Authors, Agent Profiles, Instructions
+    // and MCP servers (ADR-0028) — see [`replicating`].
+    replicating::pulling(&state);
 
     // And what this device forwards, on the same channel again: a member's
     // `ports` Nudge is that Conversation's ports read over the link and held on
@@ -2409,6 +2406,23 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         .await
         .context("stamping the Conversations of a database written before there were birth keys")?;
 
+    // And which device this is, to the Profiles: the device every record and
+    // binding taken up at the open was written by, and the one this device's
+    // own were minted on where they were numbered before they had uuids — see
+    // [`store::stamp_the_profiles`]. Here for the reason the two above are,
+    // and before the routes because a Profile here is read through this
+    // device's binding of it, and the list a member reads carries the minting.
+    store::stamp_the_profiles(&pool, device.id())
+        .await
+        .context("stamping the Profiles of a database written before they had uuids")?;
+
+    // And each member's account mirrored here moved from the Profile's integer
+    // to its uuid, before anything launches into one — see
+    // [`mirroring::account::renumbered`].
+    mirroring::account::renumbered(&pool, &data_dir)
+        .await
+        .context("moving the account mirrors to the uuids their Profiles are named by")?;
+
     // And the listener that presents it, taken now: the peer port is the second
     // address this start claims, and one somebody else is already on is a
     // misconfiguration to refuse here rather than a Verkstead that comes up
@@ -2489,6 +2503,31 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     if let Some(id) = moving_the_single_author(&settings, &pool).await? {
         tracing::info!(author = %id, "the one git author and GitHub token are now an Author");
     }
+
+    // And then the list of Authors taken up out of `config.yaml` into the
+    // database, once, under the uuids the file carried — so nothing a Repo
+    // records changes — and the table's live records held for the settings to
+    // resolve out of from here on (ADR-0028). After the move above, whose
+    // Author is one of the list's; and before anything reads an Author. See
+    // [`replicating::authors::taken_up`].
+    replicating::authors::taken_up(&pool, &settings, device.id())
+        .await
+        .context("taking the Authors up out of config.yaml into the database")?;
+
+    // And the Instructions text the same way, once: a non-empty text stamped
+    // older than any edit, an empty one or an Annex's never taken up — see
+    // [`replicating::instructions::taken_up`].
+    replicating::instructions::taken_up(&pool, &settings, device.id())
+        .await
+        .context("taking the Instructions up out of config.yaml into the database")?;
+
+    // And the declared MCP servers the same way, once: each under a uuid
+    // derived from its name, stamped older than any edit, its header values
+    // rekeyed under that uuid; an Annex's never taken up — see
+    // [`replicating::mcp_servers::taken_up`].
+    replicating::mcp_servers::taken_up(&pool, &settings, device.id())
+        .await
+        .context("taking the MCP servers up out of config.yaml into the database")?;
 
     // And the shared build cache, which is resolved for the reason the binds
     // above are and *made* here, which they never are — see

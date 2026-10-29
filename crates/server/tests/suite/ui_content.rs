@@ -1667,13 +1667,13 @@ fn wrap_up_proposal() -> QuestionSet {
 /// any of them can be recorded in — every fixture below chooses before it
 /// advances.
 async fn pairings(pool: &SqlitePool, conversation: i64, profiles: &[store::Profile]) {
-    store::set_grilling_pairing(pool, conversation, profiles[0].id, profiles[0].model())
+    store::set_grilling_pairing(pool, conversation, &profiles[0].id, profiles[0].model())
         .await
         .unwrap();
-    store::set_implementation_pairing(pool, conversation, profiles[1].id, profiles[1].model())
+    store::set_implementation_pairing(pool, conversation, &profiles[1].id, profiles[1].model())
         .await
         .unwrap();
-    store::set_review_pairing(pool, conversation, profiles[2].id, profiles[2].model())
+    store::set_review_pairing(pool, conversation, &profiles[2].id, profiles[2].model())
         .await
         .unwrap();
 }
@@ -2125,6 +2125,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .unwrap(),
         );
     }
+    let profiles = numbered(&pool, profiles).await;
     write(
         "profiles.json",
         &pin_health(&get(&app, "/api/ui/profiles").await),
@@ -2838,10 +2839,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_pairing(&pool, waiting, profiles[0].id, None)
+    store::set_grilling_pairing(&pool, waiting, &profiles[0].id, None)
         .await
         .unwrap();
-    store::set_implementation_pairing(&pool, waiting, profiles[1].id, None)
+    store::set_implementation_pairing(&pool, waiting, &profiles[1].id, None)
         .await
         .unwrap();
     store::save_brief(
@@ -3411,7 +3412,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // typed. Two paragraphs rather than a line, because what the pane
             // has to draw is prose with its line breaks in it, and a fixture
             // holding one line would prove nothing about the box that holds it.
-            "instructions": "Prefer the smallest change that does the job.\n\nSay what you could not finish rather than finishing something else.\n",
+            "instructions": { "Set": { "text": "Prefer the smallest change that does the job.\n\nSay what you could not finish rather than finishing something else.\n" } },
         }),
     )
     .await;
@@ -3881,8 +3882,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     // And the Agent Profiles of a device that is in a cluster, which is the
     // other list a membership changes the shape of: every device lists every
-    // member's accounts beside its own, each mirror row saying which machine it
-    // is at home on (ADR-0020, *Shared Profiles*).
+    // Profile of the cluster, each card with a line per device saying whether
+    // that device is bound on it or runs it from a copy (ADR-0028).
     //
     // An app of its own rather than a member added to the one the Profiles above
     // are written from, because a membership is not local to one reading: a
@@ -4289,43 +4290,67 @@ const ANOTHER_MEMBER: &str = "ffeeddccbbaa00998877665544332211";
 #[cfg(unix)]
 const A_THIRD_DEVICE: &str = "99887766554433221100aabbccddeeff";
 
-/// A router whose Profiles are a cluster's: two of this device's own, and one
-/// **mirror** of a member's, which is the row every device in a cluster keeps
-/// per Profile it has heard of (ADR-0020, *Shared Profiles*).
+/// A router whose Profiles are a cluster's: two bound on this device, and one
+/// of a member's bound there alone, which is a record every device in a
+/// cluster holds (ADR-0028).
 ///
-/// The member row beside it is what the mirror is drawn with: the machine's
-/// name and the word its mark comes off are this device's own reading of its
-/// membership rather than anything the far end sent with the Profile. So the
-/// fixture holds both, which is what a linked Verkstead holds.
+/// **Answering for a device**, so that every card carries its line per device:
+/// this machine bound at its paths or running from a copy, and the member
+/// beside it. The member's name and the word its mark comes off are this
+/// device's own reading of its membership rather than anything the far end
+/// sent with the Profile, so the fixture holds both, which is what a linked
+/// Verkstead holds.
 ///
-/// The mirror's account paths are the member's own — `/home/you/…` on a Mac,
-/// which is nowhere on the box writing this — and that is the point of them:
-/// what a session away from home is given is another stage's, and until then
-/// the row reads as one whose account is not on this device.
+/// The member's account paths are its own — `/home/you/…` on a Mac, which is
+/// nowhere on the box writing this — and that is the point of them: what a
+/// session here is given is the account fetched from there.
 #[cfg(unix)]
 async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
-    let (dir, pool, app) = empty_app().await;
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
 
+    let reading = Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], WORKBENCH),
+        Platform::Linux,
+        None,
+        vec!["192.168.1.24".parse().unwrap()],
+    )
+    .calling_itself(A_MACHINE_NAME, "Linux");
+
+    let devices = Devices::of(
+        Device::stated(dir.path(), A_DEVICE).unwrap(),
+        reading,
+        Members::recorded(pool.clone()),
+        Joins::recorded(pool.clone()),
+    );
+    let app = router_answering_devices(pool.clone(), devices);
+
+    let mut profiles = Vec::new();
     for (name, home, models) in [
         ("fable", "/srv/accounts/fable", &["claude-fable-5"][..]),
         ("opus", "/srv/accounts/opus", &["claude-opus-5"][..]),
     ] {
-        store::create_profile(
-            &pool,
-            &store::ProfileFacts {
-                name: Some(name.to_owned()),
-                account: store::Account::Claude {
-                    claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
-                    config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
+        profiles.push(
+            store::create_profile(
+                &pool,
+                &store::ProfileFacts {
+                    name: Some(name.to_owned()),
+                    account: store::Account::Claude {
+                        claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
+                        config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
+                    },
+                    models: models.iter().map(|model| (*model).to_owned()).collect(),
+                    memory: true,
                 },
-                models: models.iter().map(|model| (*model).to_owned()).collect(),
-                memory: true,
-            },
-        )
-        .await
-        .unwrap()
-        .unwrap();
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        );
     }
+    numbered(&pool, profiles).await;
 
     verkstead_store::record_member(
         &pool,
@@ -4343,16 +4368,13 @@ async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
     .await
     .unwrap();
 
-    // Numbered the way the member numbers it rather than the way this device
-    // would: the id on the row is that machine's, and the local id this write
-    // hands out is what everything here names it by.
-    verkstead_store::record_mirror(
+    // Held under the uuid the member knows it by, which is what everything
+    // here names it by too: one Profile is one uuid on every device holding it.
+    // The third of the stated ones, after this device's own two.
+    verkstead_store::profile_arrived(
         &pool,
-        &verkstead_store::Mirror {
-            device: A_MEMBER.to_owned(),
-            id: 4,
-            login: true,
-        },
+        &stated_uuid(3),
+        A_MEMBER,
         &store::ProfileFacts {
             name: Some("personal".to_owned()),
             account: store::Account::Claude {
@@ -4807,6 +4829,13 @@ fn pin_written_at(json: &str, under: &str) -> String {
         }
     }
 
+    // And every declaration's uuid, which a save mints fresh: pinned to the one
+    // its name would be taken up under, which is a uuid all the same.
+    for server in settings["mcp_servers"].as_array_mut().into_iter().flatten() {
+        let name = server["name"].as_str().unwrap_or_default().to_owned();
+        server["id"] = verkstead_server::replicating::mcp_servers::derived_uuid(&name).into();
+    }
+
     serde_json::to_string(&payload).unwrap()
 }
 
@@ -4844,6 +4873,61 @@ fn pin_tried(json: &str) -> String {
     ]);
 
     serde_json::to_string(&payload).unwrap()
+}
+
+/// The uuid the `nth` Profile in a fixture is stated as: the digit, over and
+/// over, in the shape of a version-4 uuid.
+///
+/// A Profile's uuid is minted by SQLite as it is saved, so a fixture written
+/// with the ones it was given would be different bytes on every run — and the
+/// files are committed, the diff being the review. These are what the viewer's
+/// tests read instead, and a reader can tell at a glance which row is which.
+fn stated_uuid(nth: u32) -> String {
+    let digit = char::from_digit(nth, 10).expect("a fixture states fewer than ten Profiles");
+    let run = |many: usize| std::iter::repeat_n(digit, many).collect::<String>();
+
+    format!("{}-{}-4{}-8{}-{}", run(8), run(4), run(3), run(3), run(12))
+}
+
+/// Renumber the Profiles a fixture saved to [`stated_uuid`]'s, in the order they
+/// were saved, and hand them back as they now read.
+///
+/// Done straight after they are saved, while nothing but a Profile's own
+/// binding names it, and in one transaction: a record and its binding change
+/// key together or not at all.
+async fn numbered(pool: &SqlitePool, profiles: Vec<store::Profile>) -> Vec<store::Profile> {
+    let mut tx = pool.begin().await.unwrap();
+
+    let mut stated = Vec::new();
+
+    for (nth, profile) in (1..).zip(&profiles) {
+        let id = stated_uuid(nth);
+
+        for statement in [
+            "UPDATE replicated SET uuid = ? WHERE kind = 'profiles' AND uuid = ?",
+            "UPDATE replicated SET uuid = ?1 || substr(uuid, length(?2) + 1)
+             WHERE kind = 'profile_bindings' AND uuid LIKE ?2 || '/%'",
+        ] {
+            sqlx::query(statement)
+                .bind(&id)
+                .bind(&profile.id)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+        }
+
+        stated.push(id);
+    }
+
+    tx.commit().await.unwrap();
+
+    let mut read = Vec::new();
+
+    for id in stated {
+        read.push(store::load_profile(pool, &id).await.unwrap().unwrap());
+    }
+
+    read
 }
 
 /// Pin everything in a payload that the filesystem would otherwise decide: a

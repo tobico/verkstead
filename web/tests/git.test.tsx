@@ -374,7 +374,7 @@ describe("what the press saves", () => {
       ],
       // And the text every session is given, likewise: what is sent is what the
       // file holds afterwards, so a save that left it out would clear it.
-      instructions: TOLD.instructions,
+      instructions: "Keep",
     });
   });
 

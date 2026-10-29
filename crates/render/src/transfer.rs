@@ -222,9 +222,9 @@ pub enum Permitting {
 ///
 /// Ids are each device's own and collide by construction, so nothing here is one
 /// of the sender's: the Repo is the one *this* device's registry answered for the
-/// match, and each Pairing's Profile is named by the device it is at home on
-/// rather than by a row number. What does travel unchanged is the pair that is
-/// cluster-wide by construction — the **Rank**, which carries the device that
+/// match. What does travel unchanged is what is cluster-wide by construction —
+/// each Pairing's Profile, named by its uuid, the same on every device — and the
+/// pair beside it: the **Rank**, which carries the device that
 /// issued it, and the **birth key**, which says where the work was born.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationAcross {
@@ -287,18 +287,14 @@ pub struct PairingAcross {
     pub model: Option<String>,
 }
 
-/// An Agent Profile named the way a cluster names one: the device it is at home
-/// on, and the id it has **there**.
+/// An Agent Profile named the way a cluster names one: by its **uuid**, which
+/// is the same on every device that holds it (ADR-0028).
 ///
-/// **Never the sender's local id.** A Profile on one machine is a row on every
-/// other that has heard of it — a mirror, with a local id of its own — so the
-/// pair is the one name for it that means the same thing on both ends. The
-/// receiving device turns it back into an id of its own, which is its own row
-/// where the account is at home there and its mirror where it is not.
+/// The receiving device finds the record it holds under that uuid, whether the
+/// Profile is bound there or runs from a copy there.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProfileAcross {
-    pub device: String,
-    pub id: i64,
+    pub id: String,
 }
 
 /// The word that the move is over, and which machine the work came off.

@@ -119,6 +119,12 @@ pub struct Scratch<'a> {
 /// steer whose account has since been removed picked something that is gone,
 /// and a pane that drew them the same would say *nothing picked* over a choice
 /// the human made.
+///
+/// One variant carries a Profile and the rest carry nothing, which is what the
+/// size lint is about — a Profile got bigger when it gained where it was
+/// minted. Left as it is: these are read one role at a time and none is held in
+/// a collection worth counting bytes of.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordedPairing {
     /// Nothing was picked: a steer into Done, where nothing runs and so nothing
@@ -191,7 +197,7 @@ pub struct Recorded<'a> {
 /// sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PickedPairing<'a> {
-    pub profile_id: i64,
+    pub profile_id: &'a str,
 
     /// One of that Profile's models. Never absent: there is no default model
     /// anywhere, so a Pairing is picked whole or not at all.
@@ -217,7 +223,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              conversation_id INTEGER NOT NULL REFERENCES conversations(id),
              digest          INTEGER NOT NULL,
              interrupt       INTEGER NOT NULL,
-             profile_id      INTEGER,
+             profile_id      TEXT,
              model           TEXT
          ) STRICT",
     )
@@ -473,7 +479,7 @@ pub(crate) async fn on_timeline(
     /// The row's own columns, in the order the query below selects them: the
     /// Event it hangs off, the two ticks, and the Pairing as the picker was on
     /// it.
-    type Row = (i64, bool, bool, Option<i64>, Option<String>);
+    type Row = (i64, bool, bool, Option<String>, Option<String>);
 
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT event_id, digest, interrupt, profile_id, model
@@ -502,7 +508,7 @@ pub(crate) async fn on_timeline(
         let pairing = match profile_id {
             None => RecordedPairing::Nothing,
             Some(profile_id) => {
-                match super::profiles::profile_on(&mut *connection, profile_id).await? {
+                match super::profiles::profile_on(&mut *connection, &profile_id).await? {
                     Some(profile) => RecordedPairing::Under(Pairing { profile, model }),
                     // Named an account the Profile list no longer holds, which is a
                     // pick the human made and has since finished with rather than a

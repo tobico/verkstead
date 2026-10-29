@@ -645,7 +645,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .unwrap()
         .expect("the Conversation starts");
 
-    store::set_grilling_pairing(&pool, id, profile.id, profile.model())
+    store::set_grilling_pairing(&pool, id, &profile.id, profile.model())
         .await
         .unwrap();
 

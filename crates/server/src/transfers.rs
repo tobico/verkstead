@@ -24,11 +24,11 @@
 //! far end.
 //!
 //! **And it runs after the session's ending has finished happening.** A session
-//! away from home writes its account's login and this Repo's memory entries back
-//! to the device they are at home on as it ends, and the word that it is over is
-//! the last thing that ending sends — so a mover waiting on that word is waiting
-//! on the write-back too, which is the order a transfer needs and gets for
-//! nothing. See [`crate::sessions::Session::ended`].
+//! that runs from a copy writes its account's login and this Repo's memory
+//! entries back to the device they were fetched from as it ends, and the word
+//! that it is over is the last thing that ending sends — so a mover waiting on
+//! that word is waiting on the write-back too, which is the order a transfer
+//! needs and gets for nothing. See [`crate::sessions::Session::ended`].
 //!
 //! **The far end's answer is the commit point.** The move asks that device to
 //! take the Conversation, it writes a row of its own and answers with the id it
@@ -130,10 +130,10 @@ pub(crate) struct RecordAcross {
     /// whole rule exists to prevent, so nothing is guessed at the other end.
     pub(crate) repos: Vec<(i64, i64)>,
 
-    /// And every Agent Profile the record names, by the device each is at home
-    /// on and the id it has there — which is the one name for an account that
-    /// means the same thing on both machines.
-    pub(crate) profiles: Vec<(i64, ProfileAcross)>,
+    /// And every Agent Profile the record names that this device still holds,
+    /// by its uuid — which is the one name for an account that means the same
+    /// thing on both machines.
+    pub(crate) profiles: Vec<ProfileAcross>,
 
     /// The attached files' bytes, beside the rows that name them. Each lands in
     /// the far end's own attachments directory, under its own Conversation id,
@@ -723,11 +723,11 @@ pub(crate) async fn moving(state: &AppState, conversation_id: i64) -> bool {
 /// [`going`] refuses a launch that is *decided* after the request lands, and
 /// between one being decided and the session being on the register there is a
 /// sandbox to build — on one platform, minutes of it. Nothing hands out a handle
-/// on a session that does not exist yet, so the one thing left is to look again
-/// — see [`A_LAUNCH_IS_LOOKED_FOR_EVERY`]. What it is protecting is the
-/// **ordering**: a session away from home writes its account's login and this
-/// Repo's memory entries back as it ends, and a move that overtook a launch would
-/// leave the far end starting under a login this machine had not returned.
+/// on a session that does not exist yet, so the one thing left is to look again —
+/// see [`A_LAUNCH_IS_LOOKED_FOR_EVERY`]. What it is protecting is the
+/// **ordering**: a session that runs from a copy writes its account's login and
+/// this Repo's memory entries back as it ends, and a move that overtook a launch
+/// would leave the far end starting under a login this machine had not returned.
 ///
 /// **And the same session is never waited on twice.** What tells one from
 /// another is the Timeline Event it is printing into; a register still naming
@@ -791,9 +791,9 @@ fn see_out(state: AppState, conversation_id: i64, device: String) {
             // sandbox in front of that is minutes on one platform — so this is
             // the one thing the mover looks for rather than awaits.
             //
-            // **And it must look, rather than move.** What a session away from
-            // home does as it ends is write its account's login and this Repo's
-            // memory entries back to the device they are at home on, and a move
+            // **And it must look, rather than move.** What a session that runs
+            // from a copy does as it ends is write its account's login and this
+            // Repo's memory entries back to the device they were fetched from, and a move
             // that overtook a launch would be a slice and a bundle leaving
             // while a session here was still to do that — the far end launching
             // under a login this machine had not finished returning, which is
@@ -1075,8 +1075,6 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         });
     };
 
-    let here = state.device.clone();
-
     let going = ConversationAcross {
         born: BirthKey {
             device: born.device,
@@ -1092,15 +1090,15 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
             .grilling_pairing
             .as_ref()
             .map_or(PickedAcross::Nothing, |pairing| {
-                PickedAcross::Under(pairing_across(pairing, &here))
+                PickedAcross::Under(pairing_across(pairing))
             }),
         implementation: conversation
             .implementation_pairing
             .as_ref()
             .map_or(PickedAcross::Nothing, |pairing| {
-                PickedAcross::Under(pairing_across(pairing, &here))
+                PickedAcross::Under(pairing_across(pairing))
             }),
-        review: picked(&conversation.review_pairing, &here),
+        review: picked(&conversation.review_pairing),
     };
 
     let saying = serde_json::to_vec(&going).map_err(|why| Went {
@@ -1221,7 +1219,7 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
             headers: as_json(),
             body: Streamed::saying(
                 serde_json::to_vec(&CameFrom {
-                    device: here,
+                    device: state.device.clone(),
                     asked,
                 })
                 .unwrap_or_default(),
@@ -1308,8 +1306,8 @@ async fn noted(state: &AppState, conversation_id: i64, line: &str) {
 ///
 /// **The two ids the store cannot renumber for itself are settled here**: which
 /// of the far end's Repos each of ours is, by the match the whole cluster runs
-/// on, and what each Agent Profile is called across a cluster, which is the
-/// device it is at home on and its id there. A repository with nowhere to land
+/// on, and what each Agent Profile is called across a cluster, which is its
+/// uuid, the same on every device. A repository with nowhere to land
 /// refuses the move by name; an account the far end has never heard of leaves
 /// its column empty over there, that being history rather than a Pairing
 /// anything is going to be launched under.
@@ -1436,10 +1434,7 @@ async fn matched(
 /// three Pairings are resolved against one. A Profile that is not in it any more
 /// is left out: what names one here is a Steer somebody ran a year ago, and an
 /// account deleted since is a name the record cannot keep on either machine.
-async fn accounts(
-    state: &AppState,
-    slice: &store::Slice,
-) -> Result<Vec<(i64, ProfileAcross)>, String> {
+async fn accounts(state: &AppState, slice: &store::Slice) -> Result<Vec<ProfileAcross>, String> {
     let ids = slice.profiles();
 
     if ids.is_empty() {
@@ -1455,7 +1450,7 @@ async fn accounts(
         .filter_map(|id| {
             let profile = profiles.iter().find(|profile| profile.id == id)?;
 
-            Some((id, profile_across(profile, &state.device)))
+            Some(profile_across(profile))
         })
         .collect())
 }
@@ -1646,40 +1641,28 @@ async fn birth(state: &AppState, conversation_id: i64) -> Option<store::Birth> {
 }
 
 /// One role's choice, as it crosses.
-fn picked(picked: &store::Picked, here: &str) -> PickedAcross {
+fn picked(picked: &store::Picked) -> PickedAcross {
     match picked {
         store::Picked::Nothing => PickedAcross::Nothing,
         store::Picked::Skipped => PickedAcross::Skipped,
-        store::Picked::Under(pairing) => PickedAcross::Under(pairing_across(pairing, here)),
+        store::Picked::Under(pairing) => PickedAcross::Under(pairing_across(pairing)),
     }
 }
 
 /// And one Pairing: the Profile named the way a cluster names one — see
 /// [`profile_across`] — and the model beside it.
-fn pairing_across(pairing: &store::Pairing, here: &str) -> PairingAcross {
+fn pairing_across(pairing: &store::Pairing) -> PairingAcross {
     PairingAcross {
-        profile: profile_across(&pairing.profile, here),
+        profile: profile_across(&pairing.profile),
         model: pairing.model.clone(),
     }
 }
 
-/// One Agent Profile, named the way a cluster names one.
-///
-/// A mirror carries both already — it is a row of this device's marked with
-/// where the account lives. One of this device's own is at home here, so the
-/// pair is this device's id and the row's own: which is exactly what the far end
-/// turns back into a mirror of its own, the work having moved to the machine
-/// that was the member.
-fn profile_across(profile: &store::Profile, here: &str) -> ProfileAcross {
-    match &profile.mirror {
-        Some(mirror) => ProfileAcross {
-            device: mirror.device.clone(),
-            id: mirror.id,
-        },
-        None => ProfileAcross {
-            device: here.to_owned(),
-            id: profile.id,
-        },
+/// One Agent Profile, named the way a cluster names one: by its uuid, which is
+/// the one it has on every device, bound there or not.
+fn profile_across(profile: &store::Profile) -> ProfileAcross {
+    ProfileAcross {
+        id: profile.id.clone(),
     }
 }
 

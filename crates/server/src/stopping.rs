@@ -87,8 +87,8 @@ pub(crate) enum Decided<'a> {
     /// on, which is what the Notice's Log in press opens and what a login on
     /// that Profile looks for.
     SignedOut {
-        /// The Profile, by its id on this device.
-        id: i64,
+        /// The Profile, by its uuid.
+        id: &'a str,
 
         /// And what it is called, which is what the push names.
         profile: &'a str,
@@ -131,7 +131,7 @@ impl<'a> Decided<'a> {
     }
 
     /// And the Profile a login is waiting on, which is a signed-out stop's alone.
-    fn signed_out(self) -> Option<i64> {
+    fn signed_out(self) -> Option<&'a str> {
         match self {
             Self::SignedOut { id, .. } => Some(id),
             Self::Verkstead | Self::OutOfWindow { .. } | Self::Human | Self::Nobody => None,
@@ -632,14 +632,15 @@ pub(crate) fn out_of_window(profile: &str, said: &str) -> String {
 /// Why a run stopped when the account it was spending signed out: which
 /// account, the line the session printed, and where the login is made.
 ///
-/// `home` is the device a mirrored Profile is at home on, by the name it is
-/// shown under — the one place its login can be made (ADR-0022). `None` is a
-/// Profile at home here, whose Notice carries the Log in press instead.
+/// `home` is the device the account of a Profile not bound here was fetched
+/// from, by the name it is shown under — a device it is bound on, where its
+/// login can be made (ADR-0022). `None` is a Profile bound here, whose Notice
+/// carries the Log in press instead.
 pub(crate) fn signed_out(profile: &str, said: &str, home: Option<&str>) -> String {
     let login = match home {
         None => "Log in, and the run carries on by itself.".to_owned(),
         Some(home) => format!(
-            "The account is at home on **{home}**, so log in there, then press **Resume** here."
+            "The account is bound on **{home}**, so log in there, then press **Resume** here."
         ),
     };
 
@@ -842,9 +843,9 @@ mod tests {
 
     use super::*;
 
-    /// A signed-out stop at home here says to log in, the press being on the
-    /// Notice; a mirror's names the device it is at home on and says to log in
-    /// there, there being no press (ADR-0022).
+    /// A signed-out stop under a Profile bound here says to log in, the press
+    /// being on the Notice; one not bound here names the device it is bound on
+    /// and says to log in there, there being no press (ADR-0022).
     #[test]
     fn a_signed_out_stop_says_where_the_login_is_made() {
         assert_eq!(
@@ -861,7 +862,7 @@ mod tests {
             ),
             "The **theirs** account has signed out. The session said: Login expired · Please run \
              /login.\n\n\
-             The account is at home on **laptop**, so log in there, then press **Resume** here.",
+             The account is bound on **laptop**, so log in there, then press **Resume** here.",
         );
     }
 

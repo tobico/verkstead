@@ -56,7 +56,6 @@
 //! See [`AgentOptions`] and [`./agent.ts`](./agent.ts).
 
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
-import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -1782,7 +1781,6 @@ export function RolePicker(props: {
             label: props.away,
             shown: props.away,
             mark: null,
-            on: undefined,
           },
         ]
       : []),
@@ -1796,12 +1794,6 @@ export function RolePicker(props: {
       // to say which backend and a quarter of the box to say the rest in.
       shown: pairing.shown(row, props.saved),
       mark: row.profile.account.agent_type,
-      // And the mark for the machine the account is on, after the harness's,
-      // where that machine is not this one: this picker is cluster-wide, and a
-      // member's account is scanned for by the shape its operating system wears
-      // exactly as a sidebar row of that machine's work is. Nothing at all for
-      // this device's own, which is every row where there is no cluster.
-      on: row.profile.device ? osIcon(row.profile.device.os ?? "") : undefined,
     })),
   ];
 
@@ -1838,7 +1830,6 @@ export function RolePicker(props: {
         label={(row) => row.label}
         closed={(row) => row.shown}
         mark={(row) => row.mark}
-        icon={(row) => row.on}
         chosen={props.chosen}
         pick={(picked) => props.pick(picked)}
         disabled={props.disabled}
@@ -1865,11 +1856,6 @@ type Row = {
   /// glanced at where a row is read down — see `shown` in `../pairing.ts`.
   shown: string;
   mark: AgentType | null;
-
-  /// And the mark for the machine the account is at home on, after the
-  /// harness's, where it is not this one. `undefined` is this device's own — and
-  /// the row that runs nothing, which is on no machine at all.
-  on: IconDefinition | undefined;
 };
 
 /// The branch the work will be done on: empty until the human names one, and

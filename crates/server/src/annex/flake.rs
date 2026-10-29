@@ -478,7 +478,7 @@ mod tests {
         assert_eq!(config.kept_by(), Some(&kept_by()), "{}", files.config);
         assert!(
             config.authors().is_empty(),
-            "the Keeper's Authors reach the Annex as mirrors, not as its own: {}",
+            "the Keeper's Authors reach the Annex as records it pulls, not in its file: {}",
             files.config,
         );
         assert_eq!(files.secrets, "", "and no token of its own either");
@@ -486,9 +486,18 @@ mod tests {
 
     /// The written flake, evaluated by a real `nix`: the module's options, the
     /// hostname and the packages read back out of the configuration, and the
-    /// whole system's derivation evaluates. Fetches both nixpkgs, NixOS-WSL and
-    /// the Keeper's release, so it is minutes on a cold store — and skipped,
-    /// saying so, where there is no `nix` to run.
+    /// whole system's derivation evaluates. Fetches both nixpkgs and NixOS-WSL,
+    /// so it is minutes on a cold store — and skipped, saying so, where there
+    /// is no `nix` to run.
+    ///
+    /// The Keeper's release is the one input it does not fetch. The flake
+    /// names the release of this crate's version, and that tag is made only
+    /// once the release's own tests have passed — so between a version bump
+    /// and its tag, and for good after a release that failed part way, it is
+    /// not there to fetch. The module comes from this checkout instead, which
+    /// is the module that release will carry, and the binary is a stub file:
+    /// an evaluation reads its path and never runs it. What the two inputs
+    /// say, release and asset, is the written flake's own tests' to check.
     #[cfg(target_os = "linux")]
     mod evaluated {
         use super::*;
@@ -539,6 +548,11 @@ mod tests {
                 std::fs::write(dir.path().join(COPIED_BINARY), "#!/bin/sh\n").unwrap();
             }
 
+            // Locked first, because only `flake lock` writes a lock that an
+            // override has moved. This checkout as a git flake, so that only
+            // what it tracks is copied and not `target`; `shallow` because
+            // CI's checkout is; and dirty locks allowed because a working tree
+            // usually is.
             let flake = format!("path:{}", dir.path().display());
             let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
             let mut lock = Command::new("nix");
@@ -564,7 +578,7 @@ mod tests {
 
             let output = Command::new("nix")
                 .args(["--extra-experimental-features", "nix-command flakes"])
-                .arg("eval")
+                .args(["eval", "--allow-dirty-locks"])
                 .arg("--json")
                 .arg(format!(
                     "{flake}#nixosConfigurations.{CONFIGURATION}.config"

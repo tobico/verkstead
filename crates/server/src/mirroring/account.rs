@@ -1,13 +1,13 @@
 //! The **account mirror**: the login and the configuration of a member's
-//! account, fetched from the device it is at home on into a directory of this
+//! account, fetched from a device it is bound on into a directory of this
 //! device's own under the Data Directory, so that a session launched here under
-//! that Profile is given a Built Root made out of it (ADR-0020, *Shared
-//! Profiles*).
+//! a Profile not bound here is given a Built Root made out of it (ADR-0020,
+//! *Shared Profiles*; ADR-0028).
 //!
-//! **The row travels and the account does not.** A mirror row carries what a
-//! Profile is drawn and picked by — see [`super`] — and none of it is an account
-//! a session could run as. What a session away from home gets is a copy of the
-//! little of an account a root is made from: the login, and what the written
+//! **The record replicates and the account does not.** A Profile's record carries
+//! what it is drawn and picked by — see [`super`] — and none of it is an account
+//! a session could run as. What a session that runs from a copy gets is a copy of
+//! the little of an account a root is made from: the login, and what the written
 //! configuration is composed from. The answering half is
 //! [`crate::peer::account`], a member's own route on the Peer Listener behind the
 //! Member Gate, and the one list of what a root is made from is
@@ -20,11 +20,11 @@
 //! mirror — see [`crate::sandbox::Homes::account_mirror`].
 //!
 //! **Fetched before each launch**, rather than once and kept. A login refreshed
-//! at home since the last session is the one this session has to be given, and a
-//! mirror left to go stale would sign a session out for no reason anybody could
-//! see. What the home device says is written over what is there, and every file
-//! of the allowlist it did *not* send is taken away — a login that has gone at
-//! home is a login gone here.
+//! on the device it is bound on since the last session is the one this session
+//! has to be given, and a mirror left to go stale would sign a session out for
+//! no reason anybody could see. What that device says is written over what is
+//! there, and every file of the allowlist it did *not* send is taken away — a
+//! login that has gone there is a login gone here.
 //!
 //! **Written rather than emptied and made again.** Two Conversations may be
 //! running under the one member's account, and on Linux the login is a bind into
@@ -44,12 +44,12 @@
 //! session genuinely changes — the harness refreshes its OAuth pair as it works —
 //! so an account lent out and never written back would be an account signing
 //! itself out a session at a time. What the session left is read off the mirror
-//! once the ending has written everything back into it, and put to the home device
-//! where it is not still what came down: replaced or made where there was none
-//! goes back whole, untouched goes nowhere. **Last write wins** — two machines
-//! refreshing one login may sign one of them out, and nothing here merges or locks
-//! anything. See [`Lending::written_home`], and [`crate::peer::account::LOGIN`],
-//! which is where it lands.
+//! once the ending has written everything back into it, and put to the device it
+//! was fetched from where it is not still what came down: replaced or made where
+//! there was none goes back whole, untouched goes nowhere. **Last write wins** —
+//! two machines refreshing one login may sign one of them out, and nothing here
+//! merges or locks anything. See [`Lending::written_home`], and
+//! [`crate::peer::account::LOGIN`], which is where it lands.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -73,25 +73,31 @@ use crate::store;
 /// reason — see [`super::MOST_THE_PROFILES_ARE`].
 const MOST_AN_ACCOUNT_IS: usize = 1024 * 1024;
 
+/// What a launch from a copy is refused with where no device it is bound on
+/// holds a login to fetch: the gap, naming no device — the row's own reading of
+/// it, see [`verkstead_render::Broken::NoBoundDevice`].
+const NO_BOUND_DEVICE: &str =
+    "No device this profile is bound on has a login to copy. Log in on one of them.";
+
 /// A member's account mirrored here for a launch to be made out of: the Profile
-/// the launch reads in the mirror row's place, and what its ending has to write
-/// back home.
+/// the launch reads in the record's place, and what its ending has to write
+/// back to the device it was fetched from.
 #[derive(Debug, Clone)]
 pub struct Mirrored {
-    /// The same row by the same local id, naming this device's mirror of the
-    /// account rather than the paths on the machine it is at home on. So the root,
+    /// The same Profile by the same uuid, naming this device's mirror of the
+    /// account rather than the paths on a machine it is bound on. So the root,
     /// the Tail that follows the session's log and everything the ending writes
     /// back are what they are for an account on this machine.
     pub profile: store::Profile,
 
-    /// And what the ending puts to the home device — see [`Lent`] and
+    /// And what the ending puts to the device it was fetched from — see [`Lent`] and
     /// [`Lending`].
     pub lent: Lent,
 }
 
-/// What a session away from home carries to its ending: which machine the account
-/// is at home on, the id the Profile has there, where the mirror keeps its login,
-/// and how to tell whether the session changed it.
+/// What a session that runs from a copy carries to its ending: which machine the
+/// account was fetched from, the uuid the Profile has on every device, where the
+/// mirror keeps its login, and how to tell whether the session changed it.
 ///
 /// **Held for as long as the session runs**, by whoever holds the [`Closing`] that
 /// sees to the rest of the ending: the two are the same moment, and the login is
@@ -100,22 +106,33 @@ pub struct Mirrored {
 /// [`Closing`]: crate::sandbox::Closing
 #[derive(Debug, Clone)]
 pub struct Lent {
-    /// The device the account is at home on, and the Profile's id there — which is
-    /// the id the write-back is addressed by, the way every press over a mirror is.
-    at: store::Mirror,
+    /// The device the account was fetched from: one the Profile is bound on.
+    at: String,
+
+    /// And the Profile's uuid, which is the one it has there too — what the
+    /// write-back is addressed by, the way every press over a mirror is.
+    profile: String,
 
     /// Where the mirror keeps its login, on this device.
     login: PathBuf,
 
-    /// And what came down in it, or nothing where the account at home had no login
-    /// file at all — which is the case a session that logs in for the first time
-    /// starts in.
+    /// And what came down in it, or nothing where the account it was fetched from
+    /// had no login file at all — which is the case a session that logs in for the
+    /// first time starts in.
     ///
     /// **A fingerprint rather than the login.** What the ending asks is one
     /// question — *is this still what came down* — and the bytes it answers about
     /// are read off the mirror at the time. So a Profile lent out does not cost a
     /// login held in this process's memory for the hours a session runs.
     came_down: Option<Fingerprint>,
+}
+
+impl Lent {
+    /// The **Device Id** the account was fetched from: one the Profile is bound
+    /// on, and the one the memory store is synced with and a sign-out names.
+    pub fn at(&self) -> &str {
+        &self.at
+    }
 }
 
 /// What a login is remembered by across a session: the SHA-256 of what came down
@@ -127,17 +144,17 @@ pub struct Lent {
 /// the Code pane's version is, see [`crate::files`].
 type Fingerprint = [u8; 32];
 
-/// The Profile a session on this device is launched under, where the row is a
-/// **mirror**: its account fetched from the device it is at home on into this
-/// device's own mirror of it, and the Profile as the launch below reads it — the
-/// same row, naming that directory as its account.
+/// The Profile a session on this device is launched under, where the Profile is
+/// **not bound here**: its account fetched from a device it is bound on into
+/// this device's own mirror of it, and the Profile as the launch below reads it
+/// — the same record, naming that directory as its account.
 ///
-/// `Ok(None)` is one of this device's own rows, which is every Profile on a
-/// Verkstead that is linked to nothing: there is nothing to fetch and nothing to
-/// rewrite, and the launch goes on with the Profile it already had.
+/// `Ok(None)` is a Profile bound here, which is every Profile on a Verkstead
+/// that is linked to nothing: there is nothing to fetch and nothing to rewrite,
+/// and the launch goes on with the Profile it already had.
 ///
-/// `Err` is *the account was never fetched* — the home device did not answer, or
-/// this device could not write the mirror down — and it names the machine. A
+/// `Err` is *the account was never fetched* — no device it is bound on answered,
+/// or this device could not write the mirror down — and it names the machine. A
 /// session is not started on it: what would come up is a session logged out, with
 /// nothing saying why, which is the whole failure this is in front of.
 pub async fn fetched(
@@ -145,19 +162,41 @@ pub async fn fetched(
     homes: &Homes,
     profile: &store::Profile,
 ) -> Result<Option<Mirrored>, Refusal> {
-    let Some(at) = profile.mirror.clone() else {
+    let Some(unbound) = &profile.unbound else {
         return Ok(None);
     };
 
-    let said: Vec<AccountFile> = relaying::word_from(
-        devices,
-        &at.device,
-        relaying::asking(ACCOUNT.replace("{profile}", &at.id.to_string())),
-        MOST_AN_ACCOUNT_IS,
-    )
-    .await?;
+    // The first device bound on it, whose binding holds a login, that
+    // answers: one not answering is passed over for the next, and where none
+    // answered the first one's refusal is the one said, it naming a machine.
+    let mut refused = None;
+    let mut fetched = None;
 
-    let under = homes.account_mirror(profile.id);
+    for at in &unbound.lending {
+        match relaying::word_from::<Vec<AccountFile>>(
+            devices,
+            at,
+            relaying::asking(ACCOUNT.replace("{profile}", &profile.id)),
+            MOST_AN_ACCOUNT_IS,
+        )
+        .await
+        {
+            Ok(said) => {
+                fetched = Some((at.clone(), said));
+                break;
+            }
+
+            Err(why) => {
+                refused.get_or_insert(why);
+            }
+        }
+    }
+
+    let Some((at, said)) = fetched else {
+        return Err(refused.unwrap_or_else(|| Refusal::ours(NO_BOUND_DEVICE.to_owned())));
+    };
+
+    let under = homes.account_mirror(&profile.id);
     let agent_type = profile.agent_type();
 
     // What came down in the login, taken before the answer is written down and off
@@ -202,15 +241,158 @@ pub async fn fetched(
         },
         lent: Lent {
             at,
+            profile: profile.id.clone(),
             login: under.join(inside),
             came_down,
         },
     }))
 }
 
-/// What a session or a terminal away from home holds until its ending, in one
-/// value: the login to write back, the store the sentence goes in where the home
-/// has gone away, and the cluster handle it travels over.
+/// Move each account mirror kept under a Profile's integer id to the uuid the
+/// switch gave that Profile — see [`store::renumbered_profiles`].
+///
+/// **The mirror is a member's login on this disk**, and what takes one away is
+/// the row that names it going — see [`super::swept`], which finds it by the
+/// uuid. So a directory left under the integer would be a login nothing will
+/// ever take away again: it is moved, at the first start, before any route is
+/// answered.
+///
+/// A directory that is not there is a Profile nothing was ever launched under
+/// here, which is let go of the same as one moved. One that will not move is a
+/// line in the log, and asked about again at the next start.
+pub(crate) async fn renumbered(pool: &SqlitePool, data_dir: &Path) -> anyhow::Result<()> {
+    // A router with no Data Directory has nowhere to have kept a mirror, and
+    // the empty path would resolve to the working directory — see
+    // [`crate::nowhere`].
+    if data_dir.as_os_str().is_empty() {
+        return Ok(());
+    }
+
+    let accounts = crate::sandbox::accounts(data_dir);
+
+    for (was, uuid) in store::renumbered_profiles(pool).await? {
+        let from = accounts.join(was.to_string());
+        let to = accounts.join(&uuid);
+
+        match tokio::fs::rename(&from, &to).await {
+            Ok(()) => tracing::info!(
+                from = %from.display(),
+                to = %to.display(),
+                "the mirror of a member's account moved to the uuid its Profile is named by now",
+            ),
+
+            Err(why) if why.kind() == std::io::ErrorKind::NotFound => {}
+
+            Err(why) => {
+                tracing::warn!(
+                    error = ?why,
+                    from = %from.display(),
+                    to = %to.display(),
+                    "the mirror of a member's account could not be moved to the uuid its Profile \
+                     is named by now",
+                );
+
+                continue;
+            }
+        }
+
+        store::renumbering_done(pool, was).await?;
+    }
+
+    Ok(())
+}
+
+/// Move the account mirror kept under a bridged mirror's provisional uuid to
+/// the uuid the device it was minted on publishes — see [`store::settle`].
+///
+/// For [`renumbered`]'s reason: the row that names a mirror is what takes it
+/// away, and a directory left under the provisional uuid is a member's login
+/// nothing names any more. And the next session under the Profile fetches into
+/// the one named by the real uuid, so the move is what keeps that one fetch
+/// rather than a fresh mirror beside a forgotten one.
+///
+/// Where one is already under the real uuid, the provisional one is taken away
+/// instead: a mirror is fetched fresh before every launch, so the one already
+/// in place loses nothing. Anything that will not move is a line in the log.
+pub(crate) async fn bridged(data_dir: &Path, from: &str, to: &str) {
+    // A router with no Data Directory has nowhere to have kept a mirror — see
+    // [`renumbered`].
+    if data_dir.as_os_str().is_empty() {
+        return;
+    }
+
+    let accounts = crate::sandbox::accounts(data_dir);
+    let from = accounts.join(from);
+    let to = accounts.join(to);
+
+    let moved = if tokio::fs::try_exists(&to).await.unwrap_or(false) {
+        tokio::fs::remove_dir_all(&from).await
+    } else {
+        tokio::fs::rename(&from, &to).await
+    };
+
+    match moved {
+        Ok(()) => tracing::info!(
+            from = %from.display(),
+            to = %to.display(),
+            "the mirror of a member's account moved to the uuid the Profile was minted with",
+        ),
+
+        // Never fetched, which is a Profile nothing was launched under here.
+        Err(why) if why.kind() == std::io::ErrorKind::NotFound => {}
+
+        Err(why) => tracing::warn!(
+            error = ?why,
+            from = %from.display(),
+            to = %to.display(),
+            "the mirror of a member's account could not be moved to the uuid the Profile was \
+             minted with",
+        ),
+    }
+}
+
+/// Take away the copy of each removed Profile's account kept under the Data
+/// Directory.
+///
+/// **The record is the last thing on this device that says whose login that
+/// was**, and a removed one is in no list: a directory left behind would be a
+/// member's login on this disk with nothing pointing at it. Asked of every
+/// removed record at every pull, so a directory that would not go is tried
+/// again, and a line in the log meanwhile rather than anything louder.
+pub(crate) async fn swept(data_dir: &Path, removed: &[String]) {
+    // A router with no Data Directory has nowhere to have kept a copy.
+    if data_dir.as_os_str().is_empty() {
+        return;
+    }
+
+    let accounts = crate::sandbox::accounts(data_dir);
+
+    for uuid in removed {
+        let under = accounts.join(uuid);
+
+        match tokio::fs::remove_dir_all(&under).await {
+            Ok(()) => tracing::info!(
+                copy = %under.display(),
+                "the copy of a removed Profile's account is gone with its record",
+            ),
+
+            // Never fetched, which is a Profile nothing was launched under here.
+            Err(why) if why.kind() == std::io::ErrorKind::NotFound => {}
+
+            Err(why) => tracing::warn!(
+                error = ?why,
+                copy = %under.display(),
+                "the copy of a removed Profile's account could not be taken away, so a login \
+                 of it is still on this device",
+            ),
+        }
+    }
+}
+
+/// What a session or a terminal that runs from a copy holds until its ending, in
+/// one value: the login to write back, the store the sentence goes in where the
+/// device it was fetched from has gone away, and the cluster handle it travels
+/// over.
 ///
 /// **One value rather than three arguments beside the launch's own**, because both
 /// callers hold it across a spawn — a session's relay and a terminal's follow loop
@@ -233,8 +415,13 @@ impl Lending {
         }
     }
 
-    /// The login a session away from home left, written back into the account it
-    /// belongs to on the device that account is at home on.
+    /// The **Device Id** the account was fetched from — see [`Lent::at`].
+    pub fn at(&self) -> &str {
+        self.lent.at()
+    }
+
+    /// The login a session that ran from a copy left, written back into the
+    /// account it belongs to on the device it was fetched from.
     ///
     /// **Called once the ending has seen to the profile** — see
     /// [`crate::sandbox::Closing`], which is what puts a login the session replaced
@@ -249,13 +436,13 @@ impl Lending {
     /// merged and nothing is locked — **last write wins**, and a login refreshed on two
     /// machines at once may sign one of them out (ADR-0020, *Shared Profiles*).
     ///
-    /// **A home that has gone away by then is said rather than swallowed.** The mirror
-    /// is left exactly where it is and nothing retries: what is put on the
+    /// **A device that has gone away by then is said rather than swallowed.** The
+    /// mirror is left exactly where it is and nothing retries: what is put on the
     /// Conversation's Timeline is a sentence saying the account was not written, and
-    /// the next session at home may find itself signed out. Which is worth a line — the
-    /// human is the one who can put it right, with a login on that device — where a
-    /// silent loss would be an account signing itself out with nothing anywhere saying
-    /// so.
+    /// the next session on that device may find itself signed out. Which is worth a
+    /// line — the human is the one who can put it right, with a login on that device —
+    /// where a silent loss would be an account signing itself out with nothing
+    /// anywhere saying so.
     pub async fn written_home(self, conversation_id: i64) {
         let Lending {
             pool,
@@ -263,6 +450,7 @@ impl Lending {
             lent:
                 Lent {
                     at,
+                    profile,
                     login,
                     came_down,
                 },
@@ -284,7 +472,7 @@ impl Lending {
                 tracing::error!(
                     error = ?why,
                     conversation_id,
-                    "reading what a session away from home left in its login ended badly, so the \
+                    "reading what a session run from a copy left in its login ended badly, so the \
                      account it belongs to was not written",
                 );
 
@@ -299,8 +487,8 @@ impl Lending {
                 tracing::error!(
                     error = ?why,
                     conversation_id,
-                    "the login a session away from home left could not be composed for the device \
-                     its account is on",
+                    "the login a session run from a copy left could not be composed for the \
+                     device its account was fetched from",
                 );
 
                 return;
@@ -309,23 +497,23 @@ impl Lending {
 
         let call = Call {
             method: reqwest::Method::POST,
-            onwards: LOGIN.replace("{profile}", &at.id.to_string()),
+            onwards: LOGIN.replace("{profile}", &profile),
             headers: as_json(),
             body: Streamed::saying(body),
         };
 
-        match relaying::put_to(devices, &at.device, call).await {
+        match relaying::put_to(devices, &at, call).await {
             Ok(_) => tracing::debug!(
                 conversation_id,
-                device = %at.device,
-                "the login this session left was written into the account on the device it is at \
-                 home on",
+                device = %at,
+                "the login this session left was written into the account on the device it was \
+                 fetched from",
             ),
 
             Err(why) => {
                 tracing::warn!(
                     conversation_id,
-                    device = %at.device,
+                    device = %at,
                     "the login this session left could not be written back: {}",
                     why.saying,
                 );
@@ -350,13 +538,15 @@ impl Lending {
 }
 
 /// What the session left in the mirror's login, where that is something the
-/// account at home has not got — and `None` where nothing is to travel.
+/// account it was fetched from has not got — and `None` where nothing is to
+/// travel.
 ///
 /// Three readings in one comparison. A login whose bytes are no longer what came
 /// down is one the session wrote or replaced, and it goes back whole. A login
 /// where `came_down` is nothing is one made where the account had none, and it is
 /// handed over. And one that still hashes to what arrived is a session that did
-/// not touch it, which is not a write for the account at home to take.
+/// not touch it, which is not a write for the account it was fetched from to
+/// take.
 ///
 /// **A name with nothing at it is nothing to send**, which is the rule a local
 /// ending holds to: a session that took away the file it was given is not a
@@ -367,9 +557,10 @@ impl Lending {
 /// **The mirror is what is read, rather than what this session was handed.** Two
 /// Conversations may be running under the one member's Profile and there is one
 /// mirror between them, written beside and renamed over at each fetch — so a
-/// session may read a login the other one's launch brought down, or send home what
-/// the other one left. Which last write wins settles between two sessions exactly
-/// as it settles between two machines, and neither is held up for the other.
+/// session may read a login the other one's launch brought down, or send back
+/// what the other one left. Which last write wins settles between two sessions
+/// exactly as it settles between two machines, and neither is held up for the
+/// other.
 ///
 /// Blocking: one read.
 fn left_behind(login: &Path, came_down: Option<Fingerprint>) -> Option<String> {
@@ -379,7 +570,8 @@ fn left_behind(login: &Path, came_down: Option<Fingerprint>) -> Option<String> {
 }
 
 /// And the login that arrived, written into the account at `login` — which is the
-/// home device's half, called by [`crate::peer::account::written`].
+/// half on the device it is bound on, called by
+/// [`crate::peer::account::written`].
 ///
 /// **Here rather than there** because it is the same file this module writes into a
 /// mirror, written by the same rules: in place, and readable by its owner alone.
@@ -418,8 +610,8 @@ fn fingerprint(bytes: &[u8]) -> Fingerprint {
     Sha256::digest(bytes).into()
 }
 
-/// What the home device said, written into the mirror at `under` — and every file
-/// of the allowlist it did not say taken away.
+/// What the device it is bound on said, written into the mirror at `under` — and
+/// every file of the allowlist it did not say taken away.
 ///
 /// **The allowlist is this device's own**, rather than whatever arrived: a
 /// mirror holds the files a Built Root is made of and nothing else, so a path
@@ -460,8 +652,9 @@ fn written(
                 beside(&path, text.as_bytes())?;
             }
 
-            // Nothing there at home, so nothing here: an account with no login
-            // file, or one signed out since the last session away. Taking it away
+            // Nothing there on the device it is bound on, so nothing here: an
+            // account with no login file, or one signed out since the last session
+            // run from a copy. Taking it away
             // is the point — a mirror that kept the last login it saw would be a
             // session running as somebody who has signed out.
             None => match std::fs::remove_file(&path) {
@@ -550,6 +743,48 @@ fn owner_only(path: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    /// A member's account mirrored under a Profile's integer moves to the uuid
+    /// the switch gave it, and the record of the move is let go of — so a
+    /// second start finds nothing to move.
+    #[tokio::test]
+    async fn an_account_mirror_moves_from_the_integer_to_the_uuid() {
+        let held = tempfile::tempdir().unwrap();
+        let pool = store::open_database(&held.path().join("verkstead.db"))
+            .await
+            .unwrap();
+        let uuid = "5e1f0a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b";
+
+        sqlx::query("INSERT INTO profiles_renumbered (was, uuid) VALUES (2, ?), (3, ?)")
+            .bind(uuid)
+            .bind("9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let accounts = crate::sandbox::accounts(held.path());
+        std::fs::create_dir_all(accounts.join("2/.claude")).unwrap();
+        std::fs::write(accounts.join("2/.claude/.credentials.json"), "{}").unwrap();
+
+        renumbered(&pool, held.path()).await.unwrap();
+
+        assert!(
+            !accounts.join("2").exists(),
+            "nothing is left under the integer"
+        );
+        assert!(
+            accounts
+                .join(uuid)
+                .join(".claude/.credentials.json")
+                .is_file(),
+            "and the login is under the uuid",
+        );
+        assert_eq!(
+            store::renumbered_profiles(&pool).await.unwrap(),
+            Vec::new(),
+            "a Profile nothing was mirrored for is let go of too",
+        );
+    }
+
     /// A path of an account's own is taken, and one that would land anywhere but
     /// under the mirror is not a file of an account.
     #[test]
@@ -609,7 +844,7 @@ mod tests {
 
     /// One the session left exactly as it was given is not written at all: only
     /// what changed travels, and a write of an unchanged login is a write that
-    /// could only lose a refresh the home device made meanwhile.
+    /// could only lose a refresh the device it is bound on made meanwhile.
     #[test]
     fn a_login_the_session_left_alone_is_not_written() {
         let (_dir, left) = mirror(Some("what came down\n"), Some("what came down\n"));
@@ -638,7 +873,7 @@ mod tests {
         }
     }
 
-    /// The login that arrives home is written in place over the account's own file,
+    /// The login that arrives back is written in place over the account's own file,
     /// so that whatever else is a name for it — a session running there has it
     /// linked into its root — is a name for what arrived.
     #[cfg(unix)]
@@ -659,8 +894,8 @@ mod tests {
             "a login is readable by its owner and nobody else",
         );
 
-        // A second name for that file, which is what a session running on the home
-        // device has while it runs.
+        // A second name for that file, which is what a session running on the
+        // device it is bound on has while it runs.
         let linked = account.path().join("linked");
         std::fs::hard_link(&login, &linked).unwrap();
 

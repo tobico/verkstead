@@ -15,18 +15,13 @@
 //! author_tokens:
 //!   3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01: ghp_...
 //! mcp_headers:
-//!   docs:
+//!   9c1d7e52-4b3a-5f08-8e6d-2a7c0b9f3e14:
 //!     Authorization: Bearer ...
 //! ```
 //!
 //! and `config.yaml` is the one that could be read over anybody's shoulder:
 //!
 //! ```yaml
-//! authors:
-//!   - id: 3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01
-//!     display_name: Work
-//!     name: Tobias Cohen
-//!     email: tobi@tobico.net
 //! rust_build_cache:
 //!   enabled: true
 //!   size: 30G
@@ -60,13 +55,6 @@
 //! ignored_comments:
 //!   - author: coderabbitai
 //!     body: billing
-//! mcp_servers:
-//!   - name: docs
-//!     url: https://mcp.example.com/docs
-//!     headers:
-//!       - Authorization
-//! instructions: |
-//!   Prefer the smallest change that does the job.
 //! kept_by:
 //!   device: 86f1933fecb070cbee865fbb84819d14
 //!   fingerprint: "3F:0A:…"
@@ -80,12 +68,32 @@
 //! anything saved through the settings page applies to the next session without
 //! a restart, and a running session keeps what it started with.
 //!
-//! **There may be more than one of them**, which is what `authors` is: a list
-//! of [`Author`]s, each keyed by a uuid, with its token in the other file under
-//! that uuid (ADR-0025). The uuid is what a Repo records, so the display name is
-//! free to change. An installation from before the list wrote one `git_author`
-//! and one `github_token`, and the first start moves them into it as one Author
-//! — see [`Settings::moving_the_single_author`] — so the files have one shape.
+//! **There may be more than one of them**: a list of [`Author`]s, each keyed by
+//! a uuid, with its token in the other file under that uuid (ADR-0025). The
+//! uuid is what a Repo records, so the display name is free to change. An
+//! installation from before the list wrote one `git_author` and one
+//! `github_token`, and the first start moves them into it as one Author — see
+//! [`Settings::moving_the_single_author`] — so the files have one shape.
+//!
+//! **And the list is not in `config.yaml` any more.** An Author is a
+//! **Replicated record** in the database, the cluster's rather than this
+//! device's (ADR-0028): the `authors:` key a file from before held is taken up
+//! into the table once, under the uuids it carried, and gone from the file
+//! after — see [`crate::replicating::authors`]. The records are held in memory
+//! for these files' readers — see [`Settings::holding_authors`] — and a key
+//! written back into the file by hand is ignored, the log saying so. The
+//! token stays here, under the uuid.
+//!
+//! **Nor are the Instructions**, one replicated text for the cluster, newest
+//! write winning: an `instructions:` key is taken up once and dropped the same
+//! way — see [`crate::replicating::instructions`] and
+//! [`Settings::holding_instructions`].
+//!
+//! **Nor are the declared MCP servers**, a record each under a uuid: the
+//! `mcp_servers:` key is taken up once and dropped, and the header values in
+//! the other file are keyed by the declaration's uuid rather than its name
+//! from the same move on — see [`crate::replicating::mcp_servers`] and
+//! [`Settings::holding_mcp_servers`].
 //!
 //! **Nothing here is ever an error.** A file that is not there, one that is
 //! empty, and one nothing can parse all come back as nothing configured: the
@@ -159,9 +167,10 @@
 //! both Data Directories — and never drawn on the settings page, which keeps it
 //! through a save the way it keeps `session_path`. See [`KeptBy`].
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 
 use regex::Regex;
@@ -203,22 +212,51 @@ pub(crate) const ORDINARY_MODE: u32 = 0o644;
 pub struct Settings {
     dir: PathBuf,
 
-    /// The members' Authors this device holds mirrors of, as the refresher
-    /// last wrote them down — see [`Settings::holding_mirrors`].
-    mirrors: Held,
+    /// What this device holds in memory beside the files: the Authors'
+    /// records — see [`Held`].
+    held: Arc<Held>,
 }
 
-/// The mirrors one Data Directory's handles share.
-type Held = Arc<RwLock<Vec<Mirrored>>>;
+/// What one Data Directory's handles hold in memory between them.
+#[derive(Debug, Default)]
+struct Held {
+    /// The live Author records out of the database, as last laid down — see
+    /// [`Settings::holding_authors`]. `None` until they first are, which is a
+    /// start before the Authors were taken up into the database, and the one
+    /// moment `config.yaml`'s `authors:` is still read.
+    authors: RwLock<Option<Vec<Recorded>>>,
 
-/// Every Data Directory's held mirrors, so that every handle on one directory
-/// reads the same — see [`Settings::holding_mirrors`].
-static MIRRORS: LazyLock<Mutex<HashMap<PathBuf, Held>>> = LazyLock::new(Mutex::default);
+    /// Whether the log has been told that `config.yaml` holds an `authors:`
+    /// key nothing reads any more — once per run, rather than at every read.
+    ignoring_said: AtomicBool,
+
+    /// And the Instructions text out of its record, the same way — see
+    /// [`Settings::holding_instructions`]. `None` until it first is, and an
+    /// empty text where there is no record or the record was cleared.
+    instructions: RwLock<Option<String>>,
+
+    /// And whether the log has been told about an `instructions:` key nothing
+    /// reads any more.
+    ignoring_instructions_said: AtomicBool,
+
+    /// And the live MCP server declarations out of their records, the same
+    /// way — see [`Settings::holding_mcp_servers`]. `None` until they first
+    /// are.
+    mcp_servers: RwLock<Option<Vec<McpServer>>>,
+
+    /// And whether the log has been told about an `mcp_servers:` key nothing
+    /// reads any more.
+    ignoring_servers_said: AtomicBool,
+}
+
+/// Every Data Directory's held lists, so that every handle on one directory
+/// reads the same — see [`Settings::holding_authors`].
+static HELD: LazyLock<Mutex<HashMap<PathBuf, Arc<Held>>>> = LazyLock::new(Mutex::default);
 
 impl Settings {
     /// The settings files kept in `data_dir`, beside the database.
     pub fn in_data_dir(data_dir: &Path) -> Settings {
-        let mirrors = MIRRORS
+        let held = HELD
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(data_dir.to_owned())
@@ -227,30 +265,134 @@ impl Settings {
 
         Settings {
             dir: data_dir.to_owned(),
-            mirrors,
+            held,
         }
     }
 
-    /// Hold `mirrors` as every member's Authors this device knows of, for
-    /// [`Settings::config`] to resolve a Repo's Author out of beside the file's
-    /// own.
+    /// Hold `authors` as every Author there is: the live records of the
+    /// database's table, in the order they were first written down, for
+    /// [`Settings::config`] to lay over whatever `config.yaml` says.
     ///
     /// **Held in memory rather than read off the store**, because the store is
     /// the one thing here that cannot be read where an Author is resolved: a
     /// `gh` call and a sandbox are composed on blocking threads, from these
-    /// files alone. The rows themselves are the store's (ADR-0025, a mirror is
-    /// found rather than told), and the refresher that writes them is what hands
-    /// them on here — see [`crate::mirroring::authors`].
+    /// files alone. What writes the table — a write here, or a member's records
+    /// merged — is what hands the records on here, after every write — see
+    /// [`crate::replicating::authors`].
     ///
-    /// **One per Data Directory rather than one per handle**: the workbench, the
-    /// sandbox's agents and the server's own `gh` each hold a handle made of the
-    /// same directory, and a mirror written down through one is an Author to all
-    /// three.
-    pub fn holding_mirrors(&self, mirrors: Vec<Mirrored>) {
+    /// **One per Data Directory rather than one per handle**: the workbench,
+    /// the sandbox's agents and the server's own `gh` each hold a handle made
+    /// of the same directory, and an Author written through one is an Author
+    /// to all three.
+    ///
+    /// **And from then on `config.yaml` is not read for Authors**: the table is
+    /// the whole of them, and an `authors:` key written into the file by hand
+    /// is ignored, the log saying so once.
+    pub fn holding_authors(&self, authors: Vec<Recorded>) {
         *self
-            .mirrors
+            .held
+            .authors
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = mirrors;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(authors);
+    }
+
+    /// Forget the Authors held, as a new start of the server would find them.
+    #[cfg(test)]
+    pub(crate) fn forgetting_the_authors(&self) {
+        *self
+            .held
+            .authors
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        self.held.ignoring_said.store(false, Ordering::Relaxed);
+    }
+
+    /// Whether the Authors are held off the database's table yet — see
+    /// [`Settings::holding_authors`].
+    pub fn holds_authors(&self) -> bool {
+        self.held
+            .authors
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+    }
+
+    /// Hold `text` as the Instructions every session is given: the text of
+    /// its record in the database's table, for [`Settings::config`] to lay
+    /// over whatever `config.yaml` says — held for the reason the Authors are,
+    /// a Built Root being composed on a blocking thread from these files alone.
+    ///
+    /// **And from then on `config.yaml` is not read for it**: an
+    /// `instructions:` key written into the file by hand is ignored, the log
+    /// saying so once — see [`crate::replicating::instructions`].
+    pub fn holding_instructions(&self, text: String) {
+        *self
+            .held
+            .instructions
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(text);
+    }
+
+    /// Forget the Instructions held, as a new start of the server would.
+    #[cfg(test)]
+    pub(crate) fn forgetting_the_instructions(&self) {
+        *self
+            .held
+            .instructions
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        self.held
+            .ignoring_instructions_said
+            .store(false, Ordering::Relaxed);
+    }
+
+    /// Whether the Instructions are held off their record yet — see
+    /// [`Settings::holding_instructions`].
+    pub fn holds_instructions(&self) -> bool {
+        self.held
+            .instructions
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+    }
+
+    /// Hold `servers` as every MCP server declared: the live records of the
+    /// database's table, each carrying its uuid, in the order they were first
+    /// written down — for [`Settings::config`] to lay over whatever
+    /// `config.yaml` says, for the reason the Authors are held.
+    ///
+    /// **And from then on `config.yaml` is not read for them**: an
+    /// `mcp_servers:` key written into the file by hand is ignored, the log
+    /// saying so once — see [`crate::replicating::mcp_servers`].
+    pub fn holding_mcp_servers(&self, servers: Vec<McpServer>) {
+        *self
+            .held
+            .mcp_servers
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(servers);
+    }
+
+    /// Forget the declarations held, as a new start of the server would.
+    #[cfg(test)]
+    pub(crate) fn forgetting_the_mcp_servers(&self) {
+        *self
+            .held
+            .mcp_servers
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        self.held
+            .ignoring_servers_said
+            .store(false, Ordering::Relaxed);
+    }
+
+    /// Whether the declarations are held off their records yet — see
+    /// [`Settings::holding_mcp_servers`].
+    pub fn holds_mcp_servers(&self) -> bool {
+        self.held
+            .mcp_servers
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
     }
 
     /// Where `secrets.yaml` is, which is what writes it and what says so on a
@@ -285,14 +427,15 @@ impl Settings {
     /// moment: the pair is what a session's git is configured out of, so they
     /// are decided together.
     ///
-    /// **With the mirrors beside the file's own Authors**, which is the one list
-    /// a Repo's Author is resolved out of — see [`Config::author_of`]. Each says
-    /// whether its token's copy is in `secrets.yaml` yet, so the other file is
-    /// read too where a mirror's home holds a token.
+    /// **With the table's Authors in place of the file's**, once they are held,
+    /// which is the one list a Repo's Author is resolved out of — see
+    /// [`Config::author_of`]. Where one holds a token, the other file is read
+    /// too, for whether this device's copy is here yet — see
+    /// [`Config::token_awaited`].
     pub fn config(&self) -> Config {
         let path = self.config_path();
 
-        let config = match text_of(&path) {
+        let mut config = match text_of(&path) {
             None => Config::default(),
             Some(text) => Config::read(&text).unwrap_or_else(|error| {
                 unreadable(&path, &error);
@@ -300,21 +443,104 @@ impl Settings {
             }),
         };
 
-        let mut mirrors = self
-            .mirrors
+        // The record's Instructions over the file's, once it is held, for the
+        // reason the Authors below are.
+        let instructions = self
+            .held
+            .instructions
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
 
-        if mirrors.iter().any(|mirror| mirror.holds_token) {
-            let secrets = self.secrets();
-
-            for mirror in &mut mirrors {
-                mirror.copied = secrets.author_token(mirror.author.id()).is_some();
+        if let Some(text) = instructions {
+            if config.instructions.is_some()
+                && !self
+                    .held
+                    .ignoring_instructions_said
+                    .swap(true, Ordering::Relaxed)
+            {
+                tracing::warn!(
+                    path = %path.display(),
+                    "config.yaml holds an `instructions:` key, which is ignored: the \
+                     Instructions are kept in the database now, and are edited on the \
+                     settings page",
+                );
             }
+
+            config.instructions = prose_written(text);
         }
 
-        Config { mirrors, ..config }
+        // And the records' declarations over the file's, the same way.
+        let servers = self
+            .held
+            .mcp_servers
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+
+        if let Some(servers) = servers {
+            if !config.mcp_servers.is_empty()
+                && !self
+                    .held
+                    .ignoring_servers_said
+                    .swap(true, Ordering::Relaxed)
+            {
+                tracing::warn!(
+                    path = %path.display(),
+                    "config.yaml holds an `mcp_servers:` key, which is ignored: the MCP \
+                     servers are kept in the database now, and are declared and removed on \
+                     the settings page",
+                );
+            }
+
+            config.mcp_servers = servers;
+        }
+
+        // The table's Authors over the file's, once there are any held: the
+        // file was emptied of them as they were taken up, so an `authors:` key
+        // in it now is a hand-edit nothing reads.
+        let authors = self
+            .held
+            .authors
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+
+        let Some(authors) = authors else {
+            return config;
+        };
+
+        if !config.authors.is_empty() && !self.held.ignoring_said.swap(true, Ordering::Relaxed) {
+            tracing::warn!(
+                path = %path.display(),
+                "config.yaml holds an `authors:` key, which is ignored: the Authors are \
+                 kept in the database now, and are added, edited and removed on the \
+                 settings page",
+            );
+        }
+
+        let secrets = authors
+            .iter()
+            .any(|recorded| recorded.holds_token)
+            .then(|| self.secrets());
+
+        config.awaited = authors
+            .iter()
+            .filter(|recorded| recorded.holds_token)
+            .filter(|recorded| {
+                secrets
+                    .as_ref()
+                    .is_some_and(|secrets| secrets.author_token(recorded.author.id()).is_none())
+            })
+            .map(|recorded| recorded.author.id().to_owned())
+            .collect();
+
+        config.authors = authors
+            .into_iter()
+            .map(|recorded| recorded.author)
+            .collect();
+
+        config
     }
 
     /// When `secrets.yaml` was last written, or `None` where there is no file to
@@ -362,7 +588,30 @@ impl Settings {
     /// And write `config.yaml`, the same way but readable: there is nothing in
     /// it that is anybody's secret, and a name and an address the machine's
     /// owner cannot read back would be an odd thing to insist on.
+    ///
+    /// **Never with an Author in it once they are held off the database**:
+    /// whatever `config` says of them is the table's, read back by
+    /// [`Settings::config`], and writing it into the file would be a second
+    /// copy nothing reads.
+    ///
+    /// **And never with the Instructions or the MCP servers in it once they
+    /// are held**, for the same reason — see [`Settings::holding_instructions`]
+    /// and [`Settings::holding_mcp_servers`].
     pub fn save_config(&self, config: &Config) -> std::io::Result<()> {
+        let mut config = config.clone();
+
+        if self.holds_authors() {
+            config.authors = Vec::new();
+        }
+
+        if self.holds_instructions() {
+            config.instructions = None;
+        }
+
+        if self.holds_mcp_servers() {
+            config.mcp_servers = Vec::new();
+        }
+
         write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE)
     }
 
@@ -431,82 +680,165 @@ impl Settings {
         Ok(minted)
     }
 
-    /// Take the Author whose uuid is `id` out of `config.yaml`, and its token
-    /// out of `secrets.yaml` — `false` where the file holds no such Author and
-    /// nothing was written.
-    ///
-    /// Whether anything still points at it is the caller's to ask first — see
-    /// [`crate::repos::remove_author`]: these two files know nothing of the
-    /// Repos. `config.yaml` first, so that stopping between the writes leaves
-    /// a token under a uuid nobody holds, which nothing reads, rather than an
-    /// Author whose token has gone. **A file nothing can parse is an error**
-    /// rather than an Author missing from it: written back from nothing, it
-    /// would lose whatever the human meant by it.
-    pub fn removing_author(&self, id: &str) -> std::io::Result<bool> {
-        let unparsed = || std::io::Error::other("a settings file won't parse");
-
-        let config = Self::parsed(&self.config_path(), Config::read).ok_or_else(unparsed)?;
-        let secrets = Self::parsed(&self.secrets_path(), Secrets::read).ok_or_else(unparsed)?;
-
-        if config.author(id).is_none() {
-            return Ok(false);
-        }
-
-        self.save_config(&config.without_author(id))?;
-
-        if secrets.author_token(id).is_some() {
-            self.save_secrets(&secrets.with_author_token(id, None))?;
-        }
-
-        Ok(true)
+    /// The Authors `config.yaml` holds as written, for taking them up into the
+    /// database — or `None` where the file will not parse, which is the
+    /// human's to fix rather than a list of nobody to take up.
+    pub(crate) fn authors_as_written(&self) -> Option<Vec<Author>> {
+        Self::parsed(&self.config_path(), Config::read).map(|config| config.authors)
     }
 
-    /// Write `author` over the Author `config.yaml` holds under its uuid, and
-    /// — where `token` is `Some` — that Author's token into `secrets.yaml`, a
-    /// `None` inside it taking the token away. `false` where the file holds no
-    /// such Author and nothing was written.
+    /// Take the `authors:` key out of `config.yaml`, every other key as it
+    /// stands, once its Authors are records — see
+    /// [`crate::replicating::authors`]. Nothing is written where the file holds
+    /// none, and a file that will not parse is left for the human, the way
+    /// [`Settings::moving_the_single_author`] leaves one.
+    pub(crate) fn dropping_the_authors(&self) -> std::io::Result<()> {
+        let Some(config) = Self::parsed(&self.config_path(), Config::read) else {
+            return Ok(());
+        };
+
+        if config.authors.is_empty() {
+            return Ok(());
+        }
+
+        let config = Config {
+            authors: Vec::new(),
+            ..config
+        };
+
+        write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE)
+    }
+
+    /// The Instructions `config.yaml` holds as written, for taking them up into
+    /// the database, and whether the file is an Annex's — or `None` where the
+    /// file will not parse, which is the human's to fix.
+    pub(crate) fn instructions_as_written(&self) -> Option<(String, bool)> {
+        Self::parsed(&self.config_path(), Config::read).map(|config| {
+            let kept = config.kept_by.is_some();
+            (config.instructions.unwrap_or_default(), kept)
+        })
+    }
+
+    /// Take the `instructions:` key out of `config.yaml`, every other key as
+    /// it stands, once the text is a record — see
+    /// [`crate::replicating::instructions`]. Nothing is written where the file
+    /// holds none, and a file that will not parse is left for the human.
+    pub(crate) fn dropping_the_instructions(&self) -> std::io::Result<()> {
+        let Some(config) = Self::parsed(&self.config_path(), Config::read) else {
+            return Ok(());
+        };
+
+        if config.instructions.is_none() {
+            return Ok(());
+        }
+
+        let config = Config {
+            instructions: None,
+            ..config
+        };
+
+        write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE)
+    }
+
+    /// The MCP servers `config.yaml` declares as written, for taking them up
+    /// into the database, and whether the file is an Annex's — or `None` where
+    /// the file will not parse, which is the human's to fix.
+    pub(crate) fn mcp_servers_as_written(&self) -> Option<(Vec<McpServer>, bool)> {
+        Self::parsed(&self.config_path(), Config::read)
+            .map(|config| (config.mcp_servers, config.kept_by.is_some()))
+    }
+
+    /// Take the `mcp_servers:` key out of `config.yaml`, every other key as
+    /// it stands, once the declarations are records — see
+    /// [`crate::replicating::mcp_servers`]. Nothing is written where the file
+    /// holds none, and a file that will not parse is left for the human.
+    pub(crate) fn dropping_the_mcp_servers(&self) -> std::io::Result<()> {
+        let Some(config) = Self::parsed(&self.config_path(), Config::read) else {
+            return Ok(());
+        };
+
+        if config.mcp_servers.is_empty() {
+            return Ok(());
+        }
+
+        let config = Config {
+            mcp_servers: Vec::new(),
+            ..config
+        };
+
+        write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE)
+    }
+
+    /// Move each server's header values in `secrets.yaml` from under its name
+    /// to under its uuid, by the `(name, uuid)` pairs of `moved` — every other
+    /// secret as it stands, and a name already moved, or holding nothing,
+    /// left alone. Nothing is written where nothing moved, and a file that
+    /// will not parse is left for the human.
     ///
-    /// One Author and nothing else of either file, which is what an edit put
-    /// here from a member is: that device holds none of this one's other
-    /// settings, so it sends none — see [`crate::mirroring::authors::edited`].
-    /// A file nothing can parse is an error, for [`Settings::removing_author`]'s
-    /// reason.
-    pub fn editing_author(
+    /// The other half of taking the declarations up — see
+    /// [`crate::replicating::mcp_servers`]: keyed by the uuid, a name deleted
+    /// and declared again never inherits the old declaration's values.
+    pub(crate) fn rekeying_the_mcp_headers(
         &self,
-        author: Author,
-        token: Option<Option<String>>,
-    ) -> std::io::Result<bool> {
-        let unparsed = || std::io::Error::other("a settings file won't parse");
+        moved: &[(String, String)],
+    ) -> std::io::Result<()> {
+        let Some(mut secrets) = Self::parsed(&self.secrets_path(), Secrets::read) else {
+            return Ok(());
+        };
 
-        let config = Self::parsed(&self.config_path(), Config::read).ok_or_else(unparsed)?;
+        let mut moving = false;
 
-        if config.author(author.id()).is_none() {
-            return Ok(false);
+        for (name, uuid) in moved {
+            if let Some(values) = secrets.mcp_headers.remove(name) {
+                secrets.mcp_headers.insert(uuid.clone(), values);
+                moving = true;
+            }
         }
 
-        let id = author.id().to_owned();
-
-        self.save_config(&config.with_author(author))?;
-
-        if let Some(token) = token {
-            let secrets = Self::parsed(&self.secrets_path(), Secrets::read).ok_or_else(unparsed)?;
-
-            self.save_secrets(&secrets.with_author_token(&id, token))?;
+        match moving {
+            true => self.save_secrets(&secrets),
+            false => Ok(()),
         }
-
-        Ok(true)
     }
 
-    /// What `secrets.yaml` holds, nothing written counting as empty — or `None`
-    /// where it will not parse.
+    /// Set the token of the Author whose uuid is `id` in `secrets.yaml`, or
+    /// take it away with `None`, every other secret as it stands.
     ///
-    /// **For a write nobody pressed**, which [`Settings::secrets`] would turn a
-    /// file with a typo in it into an empty one for: a background writer that
-    /// wrote that back would take every other secret in the file with it. See
-    /// [`crate::mirroring::authors`], whose copies of the members' tokens are
-    /// written this way.
-    pub(crate) fn secrets_as_written(&self) -> Option<Secrets> {
-        Self::parsed(&self.secrets_path(), Secrets::read)
+    /// **A file nothing can parse is an error** rather than a file of nothing
+    /// to write the token into: written back from nothing, it would lose
+    /// whatever else the human kept in it.
+    pub(crate) fn setting_author_token(
+        &self,
+        id: &str,
+        token: Option<String>,
+    ) -> std::io::Result<()> {
+        let secrets = Self::parsed(&self.secrets_path(), Secrets::read)
+            .ok_or_else(|| std::io::Error::other("secrets.yaml won't parse"))?;
+
+        if token.is_none() && secrets.author_token(id).is_none() {
+            return Ok(());
+        }
+
+        self.save_secrets(&secrets.with_author_token(id, token))
+    }
+
+    /// Set the header values of the declaration whose uuid is `server` in
+    /// `secrets.yaml`, or take them away with `None`, every other secret as it
+    /// stands — and an error where the file will not parse, for the token's
+    /// reason — see [`Settings::setting_author_token`].
+    pub(crate) fn setting_mcp_headers(
+        &self,
+        server: &str,
+        values: Option<BTreeMap<String, String>>,
+    ) -> std::io::Result<()> {
+        let secrets = Self::parsed(&self.secrets_path(), Secrets::read)
+            .ok_or_else(|| std::io::Error::other("secrets.yaml won't parse"))?;
+
+        if values.is_none() && secrets.mcp_headers_of(server).is_none() {
+            return Ok(());
+        }
+
+        self.save_secrets(&secrets.with_mcp_headers_of(server, values))
     }
 
     /// What the settings file at `path` says read by `read`, nothing written
@@ -751,8 +1083,9 @@ pub struct Secrets {
     session_account_password: Option<String>,
 
     /// And the header values each declared MCP server is spoken to with, by
-    /// the server's name and then by the headers: `{"docs": {"Authorization":
-    /// "Bearer ..."}}`, and empty on an installation that has declared none.
+    /// the declaration's uuid and then by the headers:
+    /// `{"9c1d7e52-…": {"Authorization": "Bearer ..."}}`, and empty on an
+    /// installation that has declared none.
     ///
     /// **Here because every one of them is a secret.** A header is what an
     /// API key or a bearer token is sent in, and static headers are the only
@@ -762,14 +1095,21 @@ pub struct Secrets {
     /// goes where the GitHub token goes, and what comes back to the page is
     /// the names and nothing else.
     ///
-    /// **The names are in `config.yaml` and the values are here**, which is
-    /// the one thing in either file said in both. A header name is nobody's
-    /// secret and it is part of the declaration — what the page draws, and
-    /// what says which headers a server has at all — so it is written where
-    /// the declaration is. This holds what may not be read back, and holds it
-    /// under the name that declared it: a header the declaration does not
-    /// name is not sent, and a server that is no longer declared has nothing
-    /// left here at all — see [`Secrets::with_mcp_headers`].
+    /// **The names are on the declaration's record and the values are
+    /// here.** A header name is nobody's secret and it is part of the
+    /// declaration — what the page draws, and what says which headers a
+    /// server has at all — so it is written where the declaration is. This
+    /// holds what may not be read back, and holds it **under the uuid of the
+    /// declaration** rather than its name (ADR-0028): a name deleted and
+    /// declared again is a new record, and never inherits the old one's
+    /// values. A header the declaration does not name is not sent, and a
+    /// declaration that is no longer live has nothing left here at all — see
+    /// [`Secrets::with_mcp_headers`].
+    ///
+    /// **Keyed by the name in a file from before the records**, which the
+    /// move rekeys once — see [`Settings::rekeying_the_mcp_headers`]. Until
+    /// it has, a declaration read off `config.yaml` carries no uuid, and is
+    /// looked up here by its name — see [`McpServer::key`].
     ///
     /// A map rather than the declaration's own order, because the order of
     /// headers on a request is nobody's business and a map is what is read
@@ -851,19 +1191,19 @@ impl Secrets {
         }
     }
 
-    /// And these secrets with the header values of every server in `declared`
-    /// written down — each header's own action applied to what is kept for it,
-    /// and the headers of every server *not* in `declared` gone.
+    /// And these secrets with the header values of every declaration in
+    /// `declared` written down, by its uuid — each header's own action applied
+    /// to what is kept for it, and the headers of every declaration *not* in
+    /// `declared` gone.
     ///
     /// Which is what a save of the MCP servers section writes. `declared` is
-    /// that section as it is to stand: one entry per server, holding the header
-    /// names that server declares and what is to become of each of their values
-    /// — see [`HeaderValue`].
+    /// every live declaration as it is to stand: one entry per uuid, holding
+    /// the header names it declares and what is to become of each of their
+    /// values — see [`HeaderValue`].
     ///
-    /// **A server left out loses its headers**, which is how a declaration
-    /// deleted on the page takes its secrets with it: the section sends the
-    /// whole list, so a server that is not in it is one nobody declares any
-    /// more, and declaring that name again starts with nothing kept for it.
+    /// **A declaration left out loses its headers**, which is how one removed
+    /// on the page takes its secrets with it: declaring that name again is a
+    /// new uuid, and starts with nothing kept for it.
     ///
     /// **A header with no value is no header.** One cleared, one set to
     /// whitespace and one never typed come to the same nothing, and nothing is
@@ -903,15 +1243,30 @@ impl Secrets {
         }
     }
 
-    /// And these secrets with every MCP server's header values as `keeper`'s
-    /// are — the half of [`Config::working_as`] that is secret, handed to an
-    /// Annex at every start. A server's values arrive with its declaration,
-    /// which without them is one its far end refuses. The session account's
-    /// password stands, being the machine's own, and so do the Authors'
-    /// tokens: the copies of the Keeper's arrive with its mirrors (ADR-0025).
-    pub fn working_as(&self, keeper: &Secrets) -> Secrets {
+    /// And these secrets with the header values of the one declaration whose
+    /// uuid is `server` replaced: `values` as a member handed them, or `None`
+    /// where its values were cleared or it was removed — every other
+    /// declaration's as it stands. What the copying of the members' values
+    /// writes — see [`crate::replicating::mcp_servers::copied`].
+    pub fn with_mcp_headers_of(
+        &self,
+        server: &str,
+        values: Option<BTreeMap<String, String>>,
+    ) -> Secrets {
+        let mut mcp_headers = self.mcp_headers.clone();
+
+        match values.map(|values| {
+            values
+                .into_iter()
+                .filter_map(|(header, value)| Some((header, blank_is_nothing(value)?)))
+                .collect::<BTreeMap<_, _>>()
+        }) {
+            Some(values) if !values.is_empty() => mcp_headers.insert(server.to_owned(), values),
+            _ => mcp_headers.remove(server),
+        };
+
         Secrets {
-            mcp_headers: keeper.mcp_headers.clone(),
+            mcp_headers,
             ..self.clone()
         }
     }
@@ -940,19 +1295,24 @@ impl Secrets {
         self.session_account_password.as_deref()
     }
 
-    /// And what is sent in `header` to the server declared as `server`, or
-    /// `None` where nothing is kept for it — a header declared and never given
-    /// a value, or one that was cleared.
+    /// And what is sent in `header` to the declaration whose uuid is
+    /// `server`, or `None` where nothing is kept for it — a header declared and
+    /// never given a value, or one that was cleared.
     ///
-    /// By name both ways round, because that is what this file holds: the
-    /// declaration says which headers a server has and in what order, and this
-    /// says what goes in each of them — see [`Config::attached_among`], which
-    /// is where the two are put together.
+    /// The declaration says which headers a server has and in what order, and
+    /// this says what goes in each of them — see [`Config::attached_among`],
+    /// which is where the two are put together, by [`McpServer::key`].
     pub fn mcp_header(&self, server: &str, header: &str) -> Option<&str> {
         self.mcp_headers
             .get(server)?
             .get(header)
             .map(String::as_str)
+    }
+
+    /// And every header value kept for the declaration whose uuid is `server`,
+    /// by header name, or `None` where nothing is kept for it.
+    pub fn mcp_headers_of(&self, server: &str) -> Option<&BTreeMap<String, String>> {
+        self.mcp_headers.get(server)
     }
 
     /// Whether anything at all is configured here, which is what says a save
@@ -992,6 +1352,13 @@ pub struct Config {
     /// in the order they were written down, each keyed by a uuid — and their
     /// tokens in the other file under it.
     ///
+    /// **The database's records, once they are held** — which a serve has
+    /// done before anything reads one: [`Settings::config`] lays them over
+    /// whatever the file says, and [`Settings::save_config`] never writes them
+    /// into it (ADR-0028). Read out of the file only where they are not held
+    /// yet, which is the start that takes them up — see
+    /// [`crate::replicating::authors::taken_up`].
+    ///
     /// Read the way the declared servers below are: an absent key, an absent
     /// file and one nothing can parse all mean no Authors, which is a session
     /// with no `user.name` and git's own "tell me who you are". An entry with
@@ -1003,12 +1370,11 @@ pub struct Config {
     )]
     authors: Vec<Author>,
 
-    /// And every member's Authors this device holds a mirror of, which are
-    /// Authors a Repo here can be pointed at like the file's own — never read
-    /// from this file nor written to it, but laid beside it by
-    /// [`Settings::config`].
+    /// The Authors whose token is awaited here, by uuid — never read from
+    /// this file nor written to it, but laid beside it by
+    /// [`Settings::config`]. See [`Config::token_awaited`].
     #[serde(skip)]
-    mirrors: Vec<Mirrored>,
+    awaited: BTreeSet<String>,
 
     /// And how the shared Rust build cache is set: whether sessions get one at
     /// all, and how big its compiled half may grow — see [`crate::build_cache`].
@@ -1167,11 +1533,16 @@ pub struct Config {
     /// each, spoken to over HTTP, out of which a Conversation attaches the ones
     /// its sessions are launched with.
     ///
-    /// Declared here rather than beside a Conversation because a declaration is
-    /// a thing Verkstead is *told*, like the binds above it and the
-    /// instructions below: said once for the machine, read at the moment it is
-    /// needed, and referred to by name from wherever it is attached. What a
-    /// Conversation holds is that name.
+    /// Declared rather than beside a Conversation because a declaration is a
+    /// thing Verkstead is *told*, referred to by name from wherever it is
+    /// attached. What a Conversation holds is that name.
+    ///
+    /// **Read here only to be taken up.** A declaration is a Replicated record
+    /// now, the cluster's (ADR-0028): this key is what a file from before
+    /// held, taken up into the database once and dropped from the file — see
+    /// [`crate::replicating::mcp_servers`] — and after that the records'
+    /// declarations are laid over it by [`Settings::config`] and never written
+    /// back by [`Settings::save_config`].
     ///
     /// Read the way everything else in this file is, and refused the way the
     /// rules above it are. An absent key, an absent file and one nothing can
@@ -1188,22 +1559,20 @@ pub struct Config {
     mcp_servers: Vec<McpServer>,
 
     /// And the one text every session is given, whatever harness runs it: what
-    /// a human would have put in their own global `CLAUDE.md`, said once here
+    /// a human would have put in their own global `CLAUDE.md`, said once
     /// because a Built Root holds none of the account's own files.
     ///
-    /// One text for the whole installation rather than one per Agent Profile,
-    /// which is why it is in this file rather than beside a Profile in the
-    /// store: it is a thing Verkstead is *told*, like the author above it and
-    /// the binds beside it, and it is read afresh the moment a session needs it
-    /// — a change on the settings page reaches the next session, and a running
-    /// one keeps what it started with.
+    /// **Read here only to be taken up.** The Instructions are a Replicated
+    /// record now, one text for the whole cluster (ADR-0028): this key is what
+    /// a file from before held, taken up into the database once and dropped
+    /// from the file — see [`crate::replicating::instructions`] — and after
+    /// that the record's text is laid over it by [`Settings::config`] and never
+    /// written back by [`Settings::save_config`].
     ///
     /// Nothing here can be wrong. It is a paragraph of somebody's prose, so
     /// there is nothing to parse and nothing to refuse: an absent key, an
     /// absent file and one nothing can read all mean an empty text, which is a
-    /// session told nothing beyond what its Repo carries. An `Option` for that
-    /// reason and written away when it is nothing, so that clearing the box
-    /// takes the key out of the file rather than leaving an empty one behind.
+    /// session told nothing beyond what its Repo carries.
     ///
     /// Kept exactly as it was typed, which is the one thing in this file not
     /// put through [`blank_is_nothing`] — see [`prose_written`]. What the
@@ -1251,7 +1620,7 @@ impl Config {
             // With the blanks taken out of each and the ones with no uuid
             // dropped — see [`authors_kept`].
             authors: authors_kept(config.authors),
-            mirrors: Vec::new(),
+            awaited: BTreeSet::new(),
             rust_build_cache: RustBuildCache {
                 enabled: config.rust_build_cache.enabled,
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
@@ -1308,7 +1677,7 @@ impl Config {
             // [`Config::keeping_what_the_page_never_drew`], the way an
             // installer's descriptor keys are.
             authors: author.into_iter().collect(),
-            mirrors: Vec::new(),
+            awaited: BTreeSet::new(),
             // And nothing for the key the map replaced: the two keys the page
             // draws of Rust are in `languages` below now, so writing this one
             // as well would leave a second opinion about them in the file. A
@@ -1384,31 +1753,18 @@ impl Config {
         self.authors.iter().find(|author| author.id == id)
     }
 
-    /// The mirror of a member's Author whose uuid is `id`, or `None` where
-    /// there is none — or where this file holds that uuid itself, whatever it
-    /// says about it being what it is here.
-    pub(crate) fn mirror(&self, id: &str) -> Option<&Mirrored> {
-        if self.author(id).is_some() {
-            return None;
-        }
-
-        self.mirrors.iter().find(|mirror| mirror.author.id == id)
-    }
-
-    /// Every Author a Repo here can be pointed at: this file's own, and then
-    /// every member's this device holds a mirror of — the one list.
-    pub(crate) fn one_list(&self) -> impl Iterator<Item = &Author> {
-        self.authors.iter().chain(
-            self.mirrors
-                .iter()
-                .filter(|mirror| self.author(mirror.author.id()).is_none())
-                .map(|mirror| &mirror.author),
-        )
+    /// Whether the token of the Author whose uuid is `id` is awaited here: its
+    /// record says a token is held for it, and no copy has reached this
+    /// device's `secrets.yaml` yet — it travels from whichever member holds
+    /// one (ADR-0028). Working as that Author without it was turned down, and
+    /// so was the host's own login in its place (ADR-0025).
+    pub(crate) fn token_awaited(&self, id: &str) -> bool {
+        self.awaited.contains(id)
     }
 
     /// The Author a Repo recorded as `recorded` is committed and pushed as:
-    /// the one with that uuid in the one list — this file's own or a member's
-    /// mirror — or, where the Repo records none, the one Author configured,
+    /// the one with that uuid — made on this device or any other, which is the
+    /// one list — or, where the Repo records none, the one Author there is,
     /// where there is exactly one.
     ///
     /// The fallback is the promise that one Author changes nothing: a Repo
@@ -1418,15 +1774,9 @@ impl Config {
     /// [`crate::repos::entry`]. A uuid no longer in the list is nobody either,
     /// rather than whoever happens to be first: the wrong name on a commit is
     /// the mistake an Author per Repo exists to stop.
-    ///
-    /// **The fallback counts this file's Authors alone**, so that linking a
-    /// device whose Authors arrive as mirrors never leaves a Repo recording
-    /// none with nobody to commit as: a mirror is picked by name or not at all.
     pub fn author_of(&self, recorded: Option<&str>) -> Option<&Author> {
         match (recorded, self.authors.as_slice()) {
-            (Some(id), _) => self
-                .author(id)
-                .or_else(|| self.mirror(id).map(|mirror| &mirror.author)),
+            (Some(id), _) => self.author(id),
             (None, [only]) => Some(only),
             (None, _) => None,
         }
@@ -1434,69 +1784,37 @@ impl Config {
 
     /// Why a Repo recorded as `recorded` has no Author to work as, where the
     /// reason is the Repo's record rather than an Author's fields: a uuid no
-    /// Author in the one list holds any more, none recorded among several, or
-    /// a mirror whose token's copy has not arrived. `None` where
+    /// Author holds any more, none recorded among several, or an Author whose
+    /// token is awaited here — see [`Config::token_awaited`]. `None` where
     /// [`Config::author_of`] finds one to work as, and where no Author is
-    /// configured or mirrored at all: there is nobody to pick instead, and what
-    /// every door already says — that no git author is set — is the whole of it.
+    /// configured at all: there is nobody to pick instead, and what every door
+    /// already says — that no git author is set — is the whole of it.
     ///
-    /// Asked at every door that commits as the Repo's Author, so that a hand
-    /// edit of this file, or a mirror gone with its home, is named for what it
-    /// is rather than read as nobody having set an author (ADR-0025). Falling
-    /// back to the first Author was turned down there, and so was working as a
-    /// mirror without its token while the copy is awaited.
+    /// Asked at every door that commits as the Repo's Author, so that an
+    /// Author removed is named for what it is rather than read as nobody
+    /// having set an author (ADR-0025). Falling back to the first Author was
+    /// turned down there.
     pub fn author_missing(&self, recorded: Option<&str>) -> Option<Unauthored> {
-        let nobody = self.authors.is_empty() && self.mirrors.is_empty();
-
         match recorded {
-            Some(_) if nobody => None,
-            Some(id) if self.author(id).is_some() => None,
-            Some(id) => match self.mirror(id) {
-                None => Some(Unauthored::Gone),
-                Some(mirror) if mirror.awaited() => Some(Unauthored::TokenAwaited {
-                    device: mirror.device.clone(),
-                }),
-                Some(_) => None,
-            },
+            Some(_) if self.authors.is_empty() => None,
+            Some(id) if self.author(id).is_none() => Some(Unauthored::Gone),
+            Some(id) => self.token_awaited(id).then_some(Unauthored::TokenAwaited),
             None if self.authors.len() > 1 => Some(Unauthored::Unpicked),
             None => None,
         }
     }
 
-    /// The token `author` works as, out of `secrets`: its own where this file
-    /// holds it, and the copy under its uuid where it is a mirror whose home
-    /// holds one. A mirror whose home holds none has none, whatever a copy left
-    /// behind says.
+    /// The token `author` works as, out of `secrets`: whatever this device's
+    /// file holds under its uuid.
     pub(crate) fn token_of<'s>(&self, author: &Author, secrets: &'s Secrets) -> Option<&'s str> {
-        match self.mirror(author.id()) {
-            Some(mirror) if !mirror.holds_token => None,
-            _ => secrets.author_token(author.id()),
-        }
-    }
-
-    /// And the same config with `author` written over the entry under its
-    /// uuid, every other key as it was — see [`Settings::editing_author`].
-    pub fn with_author(mut self, author: Author) -> Config {
-        if let Some(kept) = self.authors.iter_mut().find(|kept| kept.id == author.id) {
-            *kept = author;
-        }
-
-        self
-    }
-
-    /// And the same config with the Author whose uuid is `id` taken out, every
-    /// other key as it was — see [`Settings::removing_author`].
-    pub fn without_author(mut self, id: &str) -> Config {
-        self.authors.retain(|author| author.id != id);
-        self
+        secrets.author_token(author.id())
     }
 
     /// The config a **Keeper** writes for its **Annex** before the Annex first
     /// starts: whose it is, and nothing else, so every other section reads as
     /// nobody having said. **No Author of its own**: the Annex is a linked
-    /// Member, so the Keeper's Authors reach it as mirrors over the one list,
-    /// token copies and all (ADR-0025), and a copy at home here too would be one
-    /// Author at home on two devices.
+    /// Member, so the Keeper's Authors reach it as records like any member's
+    /// (ADR-0028).
     pub fn of_an_annex(kept_by: KeptBy) -> Config {
         Config {
             kept_by: Some(kept_by),
@@ -1604,17 +1922,18 @@ impl Config {
     /// [`crate::annex::booting`]).
     ///
     /// **The Keeper's values, not a merge** (ADR-0024, *The Annex has no
-    /// settings of its own*): the Instructions, the MCP servers with their
-    /// header names, how much runs at once, the Cleanup, the comments Wrapping
+    /// settings of its own*): how much runs at once, the Cleanup, the comments Wrapping
     /// ignores, how a conflict is resolved and whether the record is shared on
-    /// Done — each one as the Keeper's file has it, so a server the Keeper no
-    /// longer declares is gone here too. Everything about the Annex's own
+    /// Done — each one as the Keeper's file has it. Everything about the Annex's own
     /// machine stands as it was: its sandbox binds, `session_path`,
     /// `languages` and `kept_by`.
     ///
-    /// **And not the Authors**: the Annex is a linked Member, so the Keeper's
-    /// reach it as mirrors over the one list (ADR-0025), and a copy here too
-    /// would be one Author at home on two devices.
+    /// **And not the Authors, the Instructions or the MCP servers**: they are
+    /// records in the database rather than the file, and the Annex, a linked
+    /// Member, pulls them the way every member does (ADR-0028). An
+    /// `instructions:` or `mcp_servers:` key the Annex's file still holds is
+    /// the Keeper's old copy, which the Annex drops at its own start rather
+    /// than takes up.
     pub fn working_as(&self, keeper: &Config) -> Config {
         Config {
             cleanup: keeper.cleanup.clone(),
@@ -1622,8 +1941,6 @@ impl Config {
             conflict_resolution: keeper.conflict_resolution,
             share_on_done: keeper.share_on_done,
             ignored_comments: keeper.ignored_comments.clone(),
-            mcp_servers: keeper.mcp_servers.clone(),
-            instructions: keeper.instructions.clone(),
             ..self.clone()
         }
     }
@@ -1710,6 +2027,27 @@ impl Config {
         &self.mcp_servers
     }
 
+    /// What the live declarations say behind one name a Conversation holds:
+    /// one, none, or two or more.
+    ///
+    /// Two or more can only come about by replication — the press refuses a
+    /// name another live declaration has — from two devices that each declared
+    /// it while apart (ADR-0028). Neither is the one meant, so neither is
+    /// launched, and the chip says the two clash until one is removed;
+    /// newest-declaration-wins was turned down.
+    pub fn declaration_of(&self, name: &str) -> Declaration<'_> {
+        let mut named = self
+            .mcp_servers
+            .iter()
+            .filter(|server| server.name() == Some(name));
+
+        match (named.next(), named.next()) {
+            (None, _) => Declaration::Gone,
+            (Some(server), None) => Declaration::One(server),
+            (Some(_), Some(_)) => Declaration::Clash,
+        }
+    }
+
     /// And the ones `attached` names, each as its name and the URL it is
     /// reached at — which is what a Conversation's chips come to at the moment
     /// a session is launched.
@@ -1719,22 +2057,32 @@ impl Config {
     /// Conversation being launched.
     ///
     /// **A name nothing declares is left out**, silently as far as the launch
-    /// goes. A chip whose declaration has since been deleted is already drawn
-    /// as a server that is gone — see the server's
-    /// `conversations::attached_servers` — and there is nowhere to send an
-    /// agent, so there is nothing to write into a root and nothing to tell a
-    /// session about. Holding the launch over it would stop the work for a
-    /// reference the human can see is broken.
+    /// goes, **and so is a name two declarations clash over** — see
+    /// [`Config::declaration_of`]. Either chip is already drawn saying so —
+    /// see the server's `conversations::attached_servers` — and there is
+    /// nowhere to send an agent, so there is nothing to write into a root and
+    /// nothing to tell a session about. Holding the launch over it would stop
+    /// the work for a reference the human can see is broken.
     pub fn servers_among<'a>(&'a self, attached: &[String]) -> Vec<(&'a str, &'a str)> {
+        self.declarations_among(attached)
+            .filter_map(|server| Some((server.name()?, server.url()?)))
+            .collect()
+    }
+
+    /// The one live declaration behind each of `attached` that has exactly
+    /// one, in the order they were attached.
+    fn declarations_among<'a>(
+        &'a self,
+        attached: &[String],
+    ) -> impl Iterator<Item = &'a McpServer> {
         attached
             .iter()
-            .filter_map(|name| {
-                self.mcp_servers
-                    .iter()
-                    .find(|server| server.name() == Some(name.as_str()))
-                    .and_then(|server| Some((server.name()?, server.url()?)))
+            .filter_map(|name| match self.declaration_of(name) {
+                Declaration::One(server) => Some(server),
+                Declaration::Gone | Declaration::Clash => None,
             })
-            .collect()
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 
     /// And the same again with the header values `secrets` keeps for each of
@@ -1751,22 +2099,22 @@ impl Config {
     /// an empty one fails obscurely — which is [`blank_is_nothing`]'s reason
     /// said about a header.
     pub fn attached_among(&self, attached: &[String], secrets: &Secrets) -> Vec<AttachedServer> {
-        self.servers_among(attached)
-            .into_iter()
-            .map(|(name, url)| AttachedServer {
-                name: name.to_owned(),
-                url: url.to_owned(),
-                headers: self
-                    .mcp_servers
-                    .iter()
-                    .find(|server| server.name() == Some(name))
-                    .map(McpServer::headers)
-                    .unwrap_or_default()
-                    .iter()
-                    .filter_map(|header| {
-                        Some((header.clone(), secrets.mcp_header(name, header)?.to_owned()))
-                    })
-                    .collect(),
+        self.declarations_among(attached)
+            .filter_map(|server| {
+                Some(AttachedServer {
+                    name: server.name()?.to_owned(),
+                    url: server.url()?.to_owned(),
+                    headers: server
+                        .headers()
+                        .iter()
+                        .filter_map(|header| {
+                            Some((
+                                header.clone(),
+                                secrets.mcp_header(server.key()?, header)?.to_owned(),
+                            ))
+                        })
+                        .collect(),
+                })
             })
             .collect()
     }
@@ -2102,55 +2450,39 @@ impl GitAuthor {
 /// Repo's own record — see [`Config::author_missing`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unauthored {
-    /// It records a uuid no Author in the one list holds: one removed from
-    /// `config.yaml` by hand, or a mirror gone with its home.
+    /// It records a uuid no Author holds: one removed.
     Gone,
 
     /// It records none, and there is more than one Author it could be.
     Unpicked,
 
-    /// It records a mirror whose home holds a token, and the copy of it has
-    /// not reached this device: working as that Author without it was turned
-    /// down, and so was the host's own login in its place (ADR-0025). `device`
-    /// is the home's name, which is where it has to come from.
-    TokenAwaited { device: String },
+    /// It records an Author whose token is held on another device, and the
+    /// copy of it has not reached this one: working as that Author without it
+    /// was turned down, and so was the host's own login in its place
+    /// (ADR-0025). It comes from whichever member holds one (ADR-0028).
+    TokenAwaited,
 }
 
-/// A member's Author as this device holds it: the Author as its home answers
-/// it, the name of the device it is at home on, and whether that device holds
-/// a token for it — the mirror row, as [`Settings::holding_mirrors`] is handed
-/// it (ADR-0025).
+/// An Author as this device holds its record, for [`Settings::holding_authors`]
+/// (ADR-0028): the Author, and whether its record says a token is held for it,
+/// which is awaited here until this device's `secrets.yaml` holds a copy.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Mirrored {
+pub struct Recorded {
     author: Author,
-    device: String,
     holds_token: bool,
-
-    /// Whether the token's copy is in this device's `secrets.yaml`, which
-    /// [`Settings::config`] reads as it lays the mirrors down.
-    copied: bool,
 }
 
-impl Mirrored {
-    /// The mirror of `author`, at home on the device called `device`.
-    pub fn of(author: Author, device: String, holds_token: bool) -> Mirrored {
-        Mirrored {
+impl Recorded {
+    pub fn of(author: Author, holds_token: bool) -> Recorded {
+        Recorded {
             author,
-            device,
             holds_token,
-            copied: false,
         }
     }
 
-    /// The name of the device it is at home on.
-    pub(crate) fn device(&self) -> &str {
-        &self.device
-    }
-
-    /// Whether its home holds a token whose copy has not arrived here, which
-    /// is a mirror nothing may work as yet.
-    pub(crate) fn awaited(&self) -> bool {
-        self.holds_token && !self.copied
+    /// The uuid of the Author it is.
+    pub(crate) fn id(&self) -> &str {
+        self.author.id()
     }
 }
 
@@ -2574,6 +2906,12 @@ fn rules_kept(rules: Vec<IgnoreRule>) -> Vec<IgnoreRule> {
 /// all, and is dropped as the file is read — see [`servers_kept`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct McpServer {
+    /// The uuid of the record it is, which is what its header values are kept
+    /// under — or `None` for one read off `config.yaml`, which only a file
+    /// from before the records holds. Never written into the file.
+    #[serde(skip)]
+    id: Option<String>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
 
@@ -2586,7 +2924,7 @@ pub struct McpServer {
     /// ordinary declaration.
     ///
     /// **The names only.** Every value is a secret and is in `secrets.yaml`
-    /// under this server's name — see [`Secrets::mcp_header`]. What is here is
+    /// under this declaration's uuid — see [`Secrets::mcp_header`]. What is here is
     /// what may be read back to the page and what says which headers there are
     /// at all; a name declared with nothing kept for it is a header nothing is
     /// sent in.
@@ -2620,10 +2958,33 @@ impl McpServer {
         }
 
         McpServer {
+            id: None,
             name: name.and_then(blank_is_nothing),
             url: url.and_then(blank_is_nothing),
             headers: kept,
         }
+    }
+
+    /// The same declaration as the record under `id` — see
+    /// [`crate::replicating::mcp_servers`].
+    pub fn recorded_as(self, id: String) -> McpServer {
+        McpServer {
+            id: Some(id),
+            ..self
+        }
+    }
+
+    /// The uuid of its record, or `None` for one read off `config.yaml`.
+    pub fn id(&self) -> Option<&str> {
+        self.id.as_deref()
+    }
+
+    /// What its header values are kept under in `secrets.yaml`: its record's
+    /// uuid, or its name where it is read off a `config.yaml` from before the
+    /// records, whose values are still under the name — see the `mcp_headers`
+    /// field of [`Secrets`].
+    pub fn key(&self) -> Option<&str> {
+        self.id().or(self.name())
     }
 
     /// What a Conversation refers to this server by, and what the agent sees in
@@ -2663,6 +3024,21 @@ pub enum HeaderValue {
     /// And take away what is kept, leaving the header declared with nothing to
     /// send in it.
     Clear,
+}
+
+/// What the live declarations say behind one name — see
+/// [`Config::declaration_of`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Declaration<'a> {
+    /// The one declaration of that name, which is what is launched.
+    One(&'a McpServer),
+
+    /// Nothing live declares it: the chip says the server is gone.
+    Gone,
+
+    /// Two or more live declarations share it, which only replication brings
+    /// about: neither is launched, and the chip says they clash.
+    Clash,
 }
 
 /// One attached server as a launch needs it: a name, a URL, and every header it
@@ -2744,8 +3120,10 @@ pub fn trouble_among(servers: &[McpServer]) -> Vec<(usize, ServerTrouble)> {
         .collect()
 }
 
-/// What is wrong with one declaration, given the ones written down before it.
-fn trouble(server: &McpServer, above: &[McpServer]) -> Option<ServerTrouble> {
+/// What is wrong with one declaration, given the ones written down before it —
+/// every live declaration this device holds that the save leaves standing,
+/// where a save declares a new one.
+pub fn trouble(server: &McpServer, above: &[McpServer]) -> Option<ServerTrouble> {
     let Some(name) = server.name() else {
         return Some(ServerTrouble::Name(
             "A server is referred to by name, so it needs one.".to_owned(),
@@ -2970,7 +3348,7 @@ pub(crate) fn blank_is_nothing(value: String) -> Option<String> {
 /// that ends a paragraph are the writing rather than slips in it — and a
 /// harness is handed this verbatim, so a save that tidied it would be one
 /// nobody asked for.
-fn prose_written(text: String) -> Option<String> {
+pub(crate) fn prose_written(text: String) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 
@@ -2980,7 +3358,7 @@ mod tests {
 
     use super::{
         AtOnce, AttachedServer, Author, Cleanup, CleanupStep, Config, ConflictResolution,
-        GitAuthor, HeaderValue, IgnoreRule, KeptBy, Languages, McpServer, Mirrored, RuleTrouble,
+        GitAuthor, HeaderValue, IgnoreRule, KeptBy, Languages, McpServer, Recorded, RuleTrouble,
         Secrets, ServerTrouble, Settings, Signature, Unauthored, trouble_among, yaml,
     };
 
@@ -3375,70 +3753,46 @@ mod tests {
         );
     }
 
-    /// A member's Author resolves out of the one list like this file's own: by
-    /// its uuid, as its name and email, and to the copy of its token where its
-    /// home holds one — and where the copy has not arrived it is named as
-    /// awaited rather than worked as. The one-Author fallback counts this
-    /// file's Authors alone, and a uuid this file holds is its own whatever a
-    /// mirror says.
+    /// An Author last written on another device that holds its token resolves
+    /// like any other, by its uuid, as its name and email — and where the
+    /// token's copy has not arrived here it is named as awaited, saying from
+    /// which device, rather than worked as.
     #[test]
-    fn a_mirror_resolves_out_of_the_one_list() {
+    fn an_author_whose_token_is_elsewhere_is_awaited_until_the_copy_arrives() {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
-        std::fs::write(
-            settings.config_path(),
-            "authors:\n  - id: work\n    name: Tobias Cohen\n",
-        )
-        .unwrap();
+        let author =
+            |id: &str, name: &str| Author::of(id.to_owned(), None, Some(name.to_owned()), None);
 
-        let mirror = |id: &str, name: &str, holds_token| {
-            Mirrored::of(
-                Author::of(id.to_owned(), None, Some(name.to_owned()), None),
-                "the-workstation".to_owned(),
-                holds_token,
-            )
-        };
-
-        settings.holding_mirrors(vec![
-            mirror("tokened", "Ada", true),
-            mirror("tokenless", "Grace", false),
-            mirror("work", "Someone Else", false),
+        settings.holding_authors(vec![
+            Recorded::of(author("work", "Tobias Cohen"), false),
+            Recorded::of(author("tokened", "Ada"), true),
+            Recorded::of(author("tokenless", "Grace"), false),
         ]);
 
         let config = settings.config();
 
         assert_eq!(
-            config.one_list().map(Author::id).collect::<Vec<_>>(),
+            config.authors().iter().map(Author::id).collect::<Vec<_>>(),
             ["work", "tokened", "tokenless"],
         );
         assert_eq!(
             config.author_of(Some("tokenless")).and_then(Author::name),
             Some("Grace"),
         );
-        assert_eq!(
-            config.author_of(Some("work")).and_then(Author::name),
-            Some("Tobias Cohen"),
-            "this file's own, not the mirror of its uuid",
-        );
-        assert_eq!(
-            config.author_of(None).map(Author::id),
-            Some("work"),
-            "the one Author of this file's own, the mirrors not counted",
-        );
-        assert_eq!(config.author_missing(None), None);
+        assert_eq!(config.author_of(None), None, "three to pick from");
+        assert_eq!(config.author_missing(None), Some(Unauthored::Unpicked));
         assert_eq!(config.author_missing(Some("tokenless")), None);
         assert_eq!(
             config.author_missing(Some("tokened")),
-            Some(Unauthored::TokenAwaited {
-                device: "the-workstation".to_owned()
-            }),
+            Some(Unauthored::TokenAwaited),
         );
         assert_eq!(config.author_missing(Some("gone")), Some(Unauthored::Gone));
 
         std::fs::write(
             settings.secrets_path(),
-            "author_tokens:\n  tokened: ghp_thecopy\n  tokenless: ghp_astaleone\n",
+            "author_tokens:\n  tokened: ghp_thecopy\n",
         )
         .unwrap();
 
@@ -3454,73 +3808,97 @@ mod tests {
             config.token_of(config.author_of(Some("tokened")).unwrap(), &secrets),
             Some("ghp_thecopy"),
         );
-        assert_eq!(
-            config.token_of(config.author_of(Some("tokenless")).unwrap(), &secrets),
-            None,
-            "its home holds none, whatever copy lingers",
-        );
 
-        settings.holding_mirrors(Vec::new());
+        settings.holding_authors(vec![Recorded::of(author("work", "Tobias Cohen"), false)]);
 
         assert_eq!(
-            settings.config().author_missing(Some("tokenless")),
+            settings.config().author_missing(Some("tokened")),
             Some(Unauthored::Gone),
-            "a mirror gone with its home",
+            "an Author removed",
         );
     }
 
-    /// Removing an Author takes its entry and its token and nothing else out
-    /// of either file, and one the file does not hold writes nothing.
+    /// Once the Authors are held off the database, they are the whole of the
+    /// list: an `authors:` key in the file is ignored, and a save never
+    /// writes the held ones back into it.
     #[test]
-    fn removing_an_author_takes_its_entry_and_its_token() {
+    fn held_authors_are_the_list_and_never_written_into_the_file() {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
         std::fs::write(
             settings.config_path(),
-            concat!(
-                "authors:\n",
-                "  - id: work\n",
-                "    name: Tobias Cohen\n",
-                "  - id: home\n",
-                "    name: Tobi\n",
-                "share_on_done: true\n",
-            ),
-        )
-        .unwrap();
-        std::fs::write(
-            settings.secrets_path(),
-            "author_tokens:\n  work: ghp_work\n  home: ghp_home\n",
+            "authors:\n  - id: by-hand\n    name: By Hand\nshare_on_done: true\n",
         )
         .unwrap();
 
-        assert!(settings.removing_author("home").unwrap());
+        settings.holding_authors(vec![Recorded::of(
+            Author::of("work".into(), None, Some("Tobias Cohen".into()), None),
+            false,
+        )]);
 
         let config = settings.config();
         let ids: Vec<_> = config.authors().iter().map(Author::id).collect();
-        assert_eq!(ids, ["work"]);
+        assert_eq!(ids, ["work"], "the hand-edited key is ignored");
         assert!(config.share_on_done(), "the rest of the file stands");
 
-        let secrets = settings.secrets();
-        assert_eq!(secrets.author_token("home"), None);
-        assert_eq!(secrets.author_token("work"), Some("ghp_work"));
+        settings.save_config(&config).unwrap();
 
-        assert!(!settings.removing_author("home").unwrap(), "already gone");
+        let written = std::fs::read_to_string(settings.config_path()).unwrap();
+        assert!(!written.contains("authors"), "{written}");
+        assert!(written.contains("share_on_done: true"), "{written}");
     }
 
-    /// A `config.yaml` nothing can parse is not written over by a removal.
+    /// Taking the key out of the file leaves every other key, and a file
+    /// nothing can parse is left as it was.
     #[test]
-    fn removing_an_author_from_a_file_nothing_can_parse_is_an_error() {
+    fn dropping_the_authors_leaves_the_rest_of_the_file() {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
-        std::fs::write(settings.config_path(), "authors: [oh\n").unwrap();
+        std::fs::write(
+            settings.config_path(),
+            "authors:\n  - id: work\n    name: Tobias Cohen\nshare_on_done: true\n",
+        )
+        .unwrap();
 
-        assert!(settings.removing_author("work").is_err());
+        settings.dropping_the_authors().unwrap();
+
+        let written = std::fs::read_to_string(settings.config_path()).unwrap();
+        assert!(!written.contains("authors"), "{written}");
+        assert!(Config::read(&written).unwrap().share_on_done());
+
+        std::fs::write(settings.config_path(), "authors: [oh\n").unwrap();
+        settings.dropping_the_authors().unwrap();
         assert_eq!(
             std::fs::read_to_string(settings.config_path()).unwrap(),
             "authors: [oh\n"
         );
+    }
+
+    /// An Author's token set and taken away, every other secret where it was.
+    #[test]
+    fn an_authors_token_is_set_and_taken_away_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: ghp_work\n",
+        )
+        .unwrap();
+
+        settings
+            .setting_author_token("home", Some("ghp_home".into()))
+            .unwrap();
+        assert_eq!(settings.secrets().author_token("home"), Some("ghp_home"));
+
+        settings.setting_author_token("home", None).unwrap();
+        assert_eq!(settings.secrets().author_token("home"), None);
+        assert_eq!(settings.secrets().author_token("work"), Some("ghp_work"));
+
+        std::fs::write(settings.secrets_path(), "author_tokens: [oh\n").unwrap();
+        assert!(settings.setting_author_token("work", None).is_err());
     }
 
     #[test]

@@ -145,6 +145,11 @@ export type Chip = {
   /// registered repo, no linked device — which is what the chip says under it.
   gone?: boolean;
 
+  /// Whether two declarations share the name, which only two devices declaring
+  /// it apart brings about: a session is handed neither until one is removed,
+  /// and the chip says so.
+  clashes?: boolean;
+
   /// Whether it was picked and never put on: an addition on a question set
   /// that was locked, or whose conversation was closed, before anybody
   /// answered it (ADR-0028). Drawn struck through and said in words.
@@ -583,7 +588,7 @@ function ServerChip(props: { chip: Chip }): JSX.Element {
     <li
       class={`${styles.attachment} ${styles.server}`}
       classList={{
-        [styles.missing!]: props.chip.gone,
+        [styles.missing!]: props.chip.gone || props.chip.clashes,
         [styles.struck!]: props.chip.struck,
       }}
     >
@@ -609,6 +614,11 @@ function ServerChip(props: { chip: Chip }): JSX.Element {
           line through a name is a mark somebody has to know how to read. */}
       <Show when={props.chip.struck}>
         <span class={styles.attachmentSize}>not added</span>
+      </Show>
+      <Show when={props.chip.clashes}>
+        <span class={styles.attachmentSize}>
+          two clash until one is removed
+        </span>
       </Show>
 
       <Show when={props.chip.remove !== undefined}>

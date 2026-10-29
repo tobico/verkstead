@@ -104,21 +104,22 @@ fn says_so(line: &str, phrase: &str) -> bool {
         && line[..reason].ends_with(char::is_whitespace)
 }
 
-/// Where the Profile a session runs under is at home, which decides what the
+/// Where the Profile a session runs under is bound, which decides what the
 /// Notice offers: a Log in press here, or the name of the device to log in on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Home {
-    /// At home on this device, so its login is made here.
+    /// Bound on this device, so its login is made here.
     Here,
 
-    /// A mirror, at home on the device with this Device Id.
+    /// Not bound here: its account was fetched from the device with this
+    /// Device Id, which is where its login is made.
     Away(String),
 }
 
 /// The account's login file as it was when a session's root was built, so that
 /// a sign-out can tell a login replaced since from the one it was given.
 ///
-/// Only a Claude account at home here: a mirror's file is a copy refreshed
+/// Only a Claude account bound here: one not bound here runs from a copy fetched
 /// before each launch, and the other harnesses are never stopped here at all.
 #[derive(Debug, Clone)]
 pub(crate) struct Login {
@@ -132,7 +133,7 @@ impl Login {
     /// Read the login of `profile`'s account now, just before its root is
     /// built — or `None` where a sign-out on it cannot resume by itself.
     pub(crate) fn before_building(profile: &store::Profile) -> Option<Login> {
-        if profile.mirror.is_some() || signed_out_phrase(profile.agent_type()).is_none() {
+        if profile.unbound.is_some() || signed_out_phrase(profile.agent_type()).is_none() {
             return None;
         }
 
@@ -212,14 +213,14 @@ pub(crate) struct Watch {
     conversation_id: i64,
     event_id: i64,
 
-    /// The Profile this session runs under, by its id on this device: what the
-    /// stop records a login as waiting on.
-    profile_id: i64,
+    /// The Profile this session runs under, by its uuid: what the stop records
+    /// a login as waiting on.
+    profile_id: String,
 
     /// And what it is called, which is what the Notice and the push name.
     profile: String,
 
-    /// And where it is at home.
+    /// And where it is bound — here, or the device its account was fetched from.
     home: Home,
 
     /// The phrase, off the agent the Profile runs — see [`signed_out_phrase`].
@@ -247,7 +248,7 @@ impl Watch {
     pub(crate) fn on(
         conversation_id: i64,
         event_id: i64,
-        profile_id: i64,
+        profile_id: String,
         profile: String,
         home: Home,
         agent_type: store::AgentType,
@@ -348,7 +349,7 @@ async fn signed_out(pool: &SqlitePool, nudges: &Nudges, watch: &Watch, said: &st
         nudges,
         conversation_id,
         crate::stopping::Decided::SignedOut {
-            id: watch.profile_id,
+            id: &watch.profile_id,
             profile: &watch.profile,
         },
         crate::stalls::driving(lifecycle),
@@ -504,11 +505,11 @@ async fn carry_on(state: AppState, conversation_id: i64) {
 /// ought to be running now. A run stopped for any other reason, or waiting on
 /// another Profile, is left as it is. A refusal leaves its run stopped where
 /// the human will find it, and pressing Resume there says why.
-pub(crate) async fn logged_in(state: AppState, profile: i64) {
-    let waiting = match store::signed_out_on(&state.pool, profile).await {
+pub(crate) async fn logged_in(state: AppState, profile: String) {
+    let waiting = match store::signed_out_on(&state.pool, &profile).await {
         Ok(waiting) => waiting,
         Err(error) => {
-            tracing::error!(error = ?error, profile_id = profile, "reading the runs a login unblocks failed");
+            tracing::error!(error = ?error, profile_id = %profile, "reading the runs a login unblocks failed");
             return;
         }
     };
@@ -519,19 +520,19 @@ pub(crate) async fn logged_in(state: AppState, profile: i64) {
         {
             Ok(verkstead_render::Resumed::Resumed) => tracing::info!(
                 conversation_id,
-                profile_id = profile,
+                profile_id = %profile,
                 "a login unblocked a run, so it is being driven again"
             ),
             Ok(refusal) => tracing::warn!(
                 conversation_id,
-                profile_id = profile,
+                profile_id = %profile,
                 ?refusal,
                 "a login unblocked a run, but nothing could be started for it"
             ),
             Err(error) => tracing::error!(
                 error = ?error,
                 conversation_id,
-                profile_id = profile,
+                profile_id = %profile,
                 "starting a run a login unblocked failed"
             ),
         }
@@ -547,11 +548,11 @@ async fn home_named(pool: &SqlitePool, device: &str) -> String {
             .find(|member| member.device == device)
             .map(|member| member.name),
         Err(error) => {
-            tracing::error!(error = ?error, device, "reading the device a Profile is at home on failed");
+            tracing::error!(error = ?error, device, "reading the device a Profile is bound on failed");
             None
         }
     }
-    .unwrap_or_else(|| "the device it is at home on".to_owned())
+    .unwrap_or_else(|| "the device it is bound on".to_owned())
 }
 
 #[cfg(test)]
@@ -568,7 +569,7 @@ mod tests {
         Watch::on(
             1,
             2,
-            3,
+            "3".to_owned(),
             "fable".to_owned(),
             Home::Here,
             Claude,

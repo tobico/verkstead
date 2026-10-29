@@ -60,7 +60,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS repo_pairings (
              repo_id    INTEGER NOT NULL REFERENCES repos(id),
              role       TEXT NOT NULL,
-             profile_id INTEGER NOT NULL REFERENCES profiles(id),
+             profile_id TEXT NOT NULL,
              model      TEXT NOT NULL,
              PRIMARY KEY (repo_id, role)
          ) STRICT",
@@ -200,7 +200,7 @@ async fn remembered(pool: &SqlitePool, repo_id: i64, role: Role) -> Result<Picke
         return Ok(Picked::Skipped);
     }
 
-    let row: Option<(i64, String)> = sqlx::query_as(
+    let row: Option<(String, String)> = sqlx::query_as(
         "SELECT profile_id, model FROM repo_pairings WHERE repo_id = ? AND role = ?",
     )
     .bind(repo_id)
@@ -213,7 +213,7 @@ async fn remembered(pool: &SqlitePool, repo_id: i64, role: Role) -> Result<Picke
         return Ok(Picked::Nothing);
     };
 
-    Ok(match super::load_profile(pool, profile_id).await? {
+    Ok(match super::load_profile(pool, &profile_id).await? {
         Some(profile) => Picked::Under(super::Pairing {
             profile,
             model: Some(model),

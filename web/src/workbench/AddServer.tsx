@@ -112,15 +112,17 @@ function AddServer(props: {
   const [elsewhere, setElsewhere] = createSignal<string | null>(null);
 
   // The name this card has already declared, where a save landed and the
-  // server it wrote down did not answer — and why not. A save after that one is
-  // a rewrite of that declaration rather than a second of the same name.
+  // server it wrote down did not answer — and why not — and the uuid of the
+  // record it made. A save after that one is a rewrite of that record rather
+  // than a second of the same name.
   const [declared, setDeclared] = createSignal<string | null>(null);
+  const [record, setRecord] = createSignal<string | null>(null);
   const [unreached, setUnreached] = createSignal<string | null>(null);
 
   /// What is declared already, as the save sends it back — less the one this
   /// card made, which the boxes are now the account of.
   const others = () =>
-    standing(settings.data).filter((one) => one.name !== declared());
+    standing(settings.data).filter((one) => one.id !== record());
 
   /// What is about to be written about one header's value: a typed one set, and
   /// a blank one nothing — there being nothing kept for a header that is new.
@@ -135,6 +137,7 @@ function AddServer(props: {
             servers: [
               ...others(),
               {
+                id: record(),
                 name: name().trim(),
                 url: url().trim(),
                 // A header row nobody wrote anything in is not a header, as a
@@ -145,6 +148,8 @@ function AddServer(props: {
                   .map((one) => ({ name: one.name.trim(), value: becomes(one) })),
               },
             ],
+            // Nothing taken away: the card only ever adds one.
+            removed: [],
           },
         }),
       ),
@@ -184,6 +189,10 @@ function AddServer(props: {
 
       if (tried && "Refused" in tried) {
         setDeclared(called);
+        setRecord(
+          saved.settings.mcp_servers.find((one) => one.name === called)?.id ??
+            null,
+        );
         setUnreached(tried.Refused.why);
         return;
       }

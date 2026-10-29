@@ -380,7 +380,7 @@ import {
   unreadable,
   whenever,
 } from "./serving";
-import { MIRRORED, oneList } from "./authors";
+import { CLIENT, oneList } from "./authors";
 // And the Nudge stream, for the one pane that follows it rather than the cache:
 // the Code pane's tree re-reads the folders it has open on a `files` Nudge, and
 // those listings are held above the pane rather than in a query — see
@@ -6166,9 +6166,10 @@ describe("a conversation's pairings", () => {
       account: { agent_type: "Grok", home: "/srv/accounts/grok" },
       broken: null,
       login: true,
-      id: 9,
+      id: "99999999-9999-4999-8999-999999999999",
       memory: true,
-      device: null,
+      bound: true,
+      devices: [],
       models: ["grok-4.6"],
       name: "grok",
     },
@@ -7994,23 +7995,21 @@ describe("starting the work", () => {
         ProfileBroken: {
           broken: "DirMissing",
           agent_type: "Claude",
-          device: null,
         },
       },
       /Its claude directory is gone/,
     ],
-    // A profile of a member's that cannot be run from here says which machine
-    // to go to, the finding being about that one rather than about this — see
-    // `src/broken.ts`, which is where the one sentence is written.
+    // A profile not bound here with no bound device to fetch it from says the
+    // gap, naming no device — see `src/broken.ts`, which is where the one
+    // sentence is written.
     [
       {
         ProfileBroken: {
-          broken: "HomeUnreachable",
+          broken: "NoBoundDevice",
           agent_type: "Claude",
-          device: "the-workstation",
         },
       },
-      /the-workstation is unreachable/,
+      /No device it's bound on with a login is reachable/,
     ],
     ["WorktreeRefused", /Git wouldn't make the worktree/],
     ["NotDrafting", /already been started/],
@@ -9446,10 +9445,10 @@ describe("the author on the brief", () => {
     expect(terms(summary)).not.toContain("Author");
   });
 
-  /// A member's Author is one of the list, counted and named like this
-  /// device's own (ADR-0025).
-  it("names a mirrored author beside the repo", async () => {
-    const summary = await briefWith(ONE_AUTHOR, MIRRORED.id, MIRRORED);
+  /// An Author made on another device is one of the list, counted and named
+  /// like any other (ADR-0028).
+  it("names an author made on another device beside the repo", async () => {
+    const summary = await briefWith(ONE_AUTHOR, CLIENT.id, CLIENT);
 
     await waitFor(() => expect(said(summary, "Author")).toBe("Client"));
   });
@@ -13380,7 +13379,7 @@ describe("steering a conversation", () => {
     await waitFor(() => expect(writes(fetching, STEER_SAVE)).toBe(1));
     expect(sent(fetching, STEER_SAVE)).toMatchObject({
       target: "Grilling",
-      pairing: { profile_id: 3, model: "claude-sonnet-5" },
+      pairing: { profile_id: PROFILES[2]!.id, model: "claude-sonnet-5" },
     });
   });
 
@@ -13392,7 +13391,7 @@ describe("steering a conversation", () => {
     theGrillingSteering({
       pending_steer: pending({
         target: "Grilling",
-        pairing: { profile_id: 3, model: "claude-sonnet-5" },
+        pairing: { profile_id: PROFILES[2]!.id, model: "claude-sonnet-5" },
       }),
     });
     const { container } = mount(`/conversations/${GRILLING.id}/steer`);
@@ -17741,7 +17740,7 @@ describe("the notice of a stop", () => {
 describe("a run stopped because its account signed out", () => {
   /// The press the server puts on the stop's own notice, for an account at
   /// home on this device (ADR-0022).
-  const PRESS = { profile: 2, name: "opus" };
+  const PRESS = { profile: PROFILES[1]!.id, name: "opus" };
   const LOGIN = `/api/ui/profiles/${PRESS.profile}/login`;
 
   /// The stopped conversation with that press on its notice, or none.

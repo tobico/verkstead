@@ -254,7 +254,10 @@ describe("the pane", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(sent(fetching)).toEqual({ ...REST, instructions: written }),
+      expect(sent(fetching)).toEqual({
+        ...REST,
+        instructions: { Set: { text: written } },
+      }),
     );
   });
 
@@ -275,7 +278,7 @@ describe("the pane", () => {
   });
 
   /// Clearing the box is how the text is taken off — there is nothing else to
-  /// press, and an empty text is what the server writes the key away over.
+  /// press, and an empty text is what the record holds once it is cleared.
   it("sends an empty text where the box was cleared", async () => {
     const fetching = theSettings(TOLD, json(saying(TOLD, "")));
     mountPane();
@@ -285,7 +288,10 @@ describe("the pane", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(sent(fetching)).toEqual({ ...REST, instructions: "" }),
+      expect(sent(fetching)).toEqual({
+        ...REST,
+        instructions: { Set: { text: "" } },
+      }),
     );
   });
 

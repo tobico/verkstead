@@ -80,11 +80,12 @@ GitHub is in use, a token — the human's own name on the work, where an **Agent
 Profile** is the account the agent runs under, and the two are picked
 independently. Keyed by a uuid, with an optional display name that falls back to
 the git name: the uuid is what a Repo records and what every device of a cluster
-agrees on, so the display name is free to change. Kept in `config.yaml` as
-`authors:`, the tokens in `secrets.yaml` under the uuid — the split the GitHub
+agrees on, so the display name is free to change. Kept as a record in the
+database, the tokens in `secrets.yaml` under the uuid — the split the GitHub
 token and the MCP header values already follow — and read at the moment a
 session is launched, so a change reaches the next session without a restart
-([ADR-0025](docs/adr/0025-a-repo-has-an-author.md)).
+([ADR-0025](docs/adr/0025-a-repo-has-an-author.md),
+[ADR-0028](docs/adr/0028-records-are-the-clusters.md)).
 **Every Repo has one**, picked at **Open repo** and **Create repo** where more
 than one exists and recorded silently where there is one, and shown and changed
 on the Repos pane. With one Author nothing on screen says so: the pickers, and
@@ -112,34 +113,42 @@ whose Author is gone from the one list refuses a start by name and halts with a
 **Notice** where nobody pressed; and a **Companion Repo** of another Author is
 refused on the composer, read-only or read-write alike, a sandbox having one
 environment.
-**One list across a cluster**, the way the Profiles are one. An Author is at home
-on the device whose files hold it; every other device keeps a mirror row in
-its database, keyed by the uuid — the display name, the git name, the email,
-whether a token is held, and the home device — read off each member's own list
-over the **Relay** as the Profiles are, and never a mirror of a mirror, and a
-copy of the token in its own `secrets.yaml` under the uuid, so a home that is
-quiet does not stop a Repo here — fetched on a member's own call over the Peer
-Listener, which hands over only that device's own Authors' tokens, written as
-the mirrors refresh, and taken away when the mirror goes, when its device is
-unlinked or when its home stops holding one. A home not answering leaves the
-copy as it stands, and a session carries its own Repo's Author's copy and none
-of the others this device holds.
-A Repo is pointed at a mirror the way it is at one of this device's own, and
-everything that reads a Repo's Author reads the mirror's name and email and the
-copy; a mirror whose home holds no token is a tokenless Author here too.
-A new Author is at home where it was made; a mirror is edited from wherever it
-is drawn and the press relayed home, token verification included; removal checks
-the home device's Repos alone, a member's Repo left pointing at a mirror that
-has gone refusing its start under the rule above. A mirror whose copy has not
-arrived refuses a **Start** by name, naming the home device, and halts a
+**One list across a cluster**, every device holding every Author as a
+**Replicated record** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md))
+under the uuid — no home device, nothing relayed, no device mark, and the
+record in the database rather than `config.yaml`. Every device serves its whole
+table of Authors behind the Member Gate, removed ones included, and pulls each
+member's: at the start, on a member's Authors Nudge, when a member's Nudge
+stream is taken up again and when the membership moves — so a device that was
+off catches up when it comes back, an edit made after a removal stays removed,
+and an Author whose writer is off or unlinked still reaches a newcomer through
+whoever holds it. A member too old to serve them has its Devices row say so,
+naming both releases, and its Authors are absent until it updates. The token
+stays in `secrets.yaml` under the uuid and travels from whoever holds one: a
+token set or cleared is a write to the record — whether one is held, and a
+digest saying which — and after every pull a device without a copy of the
+token the record names asks its members for it, the record's writer first; a
+token cleared, or an Author removed, takes every copy away, and a member not
+answering leaves a copy as it stands. A session carries its own Repo's
+Author's token and none of the others this device holds.
+A Repo is pointed at an Author made on another device the way it is at one made
+here, and everything that reads a Repo's Author reads its name and email and
+the token this device holds. Removal checks this device's Repos and every
+reachable member's, naming each with its device and offering *Repoint them all
+to…*; a member not answering is skipped and said, and a Repo of its left
+pointing at an Author removed refuses its start under the rule above. An Author whose record says a token is held, and whose copy has not
+arrived here, refuses a **Start** by name and halts a
 pipeline step with a Notice, and nothing Verkstead does on its Repo falls back
 to the host's own login meanwhile; a **Transfer** whose far Repo points at another
 Author is refused by the **Preflight**, naming both; and **Create repo** on a
 member offers the one list.
 **On the settings page it is the Git section as it was**, with a dropdown at
 its head picking which Author the fields are about and **Add author** at its
-foot, the way the Repo dropdown carries its two presses. A member's Authors are
-rows of it after this device's own, marked with the machine each is at home on. The onboarding wizard
+foot, the way the Repo dropdown carries its two presses. Every Author of the
+cluster is a row of it and of every picker, wherever it was made, with no
+machine on it; two with one name and email are two rows until the human removes
+one. Add, edit and Remove are writes on the device pressed, a token verified
+there with that device's `gh`, and the others pull them. The onboarding wizard
 asks for one. The first start moves a single `git_author` and `github_token`
 into the list as that one Author, and records every Repo as its, unregistered
 ones included, so no Repo is ever without one.
@@ -502,8 +511,8 @@ answerable on the far end, its Answers reaching a wait opened *there*. Two
 ids are not the record's to renumber and are settled by the devices instead: the
 Repos, by the same match that settled the Conversation's own, refused by name
 where one has nowhere to land; and the Agent Profiles, named across the cluster
-by the device each is at home on, the column landing empty where the far end has
-never heard of the account — which is a Steer whose account was deleted a year
+by the uuid each is the same record under, the column landing empty where the
+far end holds no record of it — which is a Steer whose account was deleted a year
 later rather than a Pairing anything is about to run under. A record is prose
 and binary and can be large, so it crosses under a bound of its own and is
 refused whole rather than in part, naming the Conversation that was too big to
@@ -607,13 +616,13 @@ the word that the move is over. From there the direction is simply reversed — 
 device the work left keeps the copy, its URL redirects, and the merged list draws
 one row — and a third leg lands on the same two ids and the same two checkouts
 again.
-**Before any of it, the account goes home.** A session away from home keeps a
-mirror of its account's login and of this Repo's memory entries and writes both
-back to the device they are at home on as it ends — and the move runs at the turn's
+**Before any of it, the account goes back.** A session under a Profile not bound
+on its device runs from a mirror of its account's login and of this Repo's memory
+entries and writes both back to the device they were fetched from as it ends — and the move runs at the turn's
 end, which is exactly when that happens. So the ordering is the thing: the write-back
 is the last thing a session's ending does before the word that it is over, the mover
 waits for that word, and a launch that has been decided but has not reached the
-register yet is waited for too. The account is home before the slice and the bundle
+register yet is waited for too. The account is written back before the slice and the bundle
 leave, or the far end would launch under a login the source had not finished
 returning.
 _Avoid_: migrate, hand off, sync, failover
@@ -731,7 +740,7 @@ spawn that fails each refuse a session there — so a Notice in front of them wo
 say a conversation had been picked up where nothing ever ran.
 **The Profile's memory switch off** is the first: nothing of the harness's store
 travelled, because a session under a Profile that shares no memory gets a store of
-its own and empty, away from home exactly as at home. **No session on the record**
+its own and empty, from a copy exactly as where the Profile is bound. **No session on the record**
 is the second — a Conversation that moved before it had ever run one, and one whose
 sessions were on a backend that names none and whose own id was never written down —
 and it is the one known at the arrival rather than at the launch. **A Pairing on a
@@ -984,22 +993,30 @@ harness runs it — what a human would otherwise keep in their own global
 `CLAUDE.md`, said once here instead. A **Built Root** holds none of the
 account's own files, so the account's global instructions are not in one, and
 this is what stands where they would have been.
-**One text for the whole installation** rather than one per **Agent Profile**,
-kept in `config.yaml` beside the Authors and the **Sandbox Configuration**'s
-binds — a thing Verkstead is *told* rather than one it finds. It saves as a
-value the way those do: what the page sends is what the file holds afterwards,
-so clearing the box takes the key away rather than leaving an empty one. Nothing
-in it can be refused, there being no grammar in a paragraph of prose to get
-wrong, and an absent key, an empty one and one nothing can parse are the same
-empty text.
+**One text for the whole cluster** rather than one per **Agent Profile** or
+per device: a **Replicated record** in the database, one record under a uuid
+that is the same on every device, the newest write winning
+([ADR-0028](docs/adr/0028-records-are-the-clusters.md)). A save on any device
+is the text every device's next session is given. **Cleared is an empty
+text**, written like any other and never a deletion stamp, so a text typed
+afterwards stands. Only the Instructions' own form speaks for the text: every
+other section of the settings page saves it as *keep*, so a page drawn before
+another device's text arrived never writes the old one back, and its own save
+writes the record only where the text changed. Nothing in it
+can be refused, there being no grammar in a paragraph of prose to get wrong.
+**Out of `config.yaml`**: the `instructions:` key a device from before held is
+taken up once at its start and dropped from the file, and a key written back
+by hand is ignored, the log saying so. An empty text is never taken up, so a
+device that never had one wipes nobody's; a taken-up text is stamped older than
+any edit, the Device Id deciding between two. An **Annex** takes nothing up.
 **Written into each root as the file that harness reads**, verbatim and alone:
 no heading over it and no line saying where it came from. Claude's
 `.claude/CLAUDE.md`, Codex's `.codex/AGENTS.md`, Grok Build's `.grok/AGENTS.md`,
 and the config directory's `AGENTS.md` for OpenCode. Verkstead's own file like
 the configuration file beside it: written rather than joined, never the
 account's, and nothing of it written back as a session ends.
-**Read at the moment a root is built**, like the rest of `config.yaml`: a text
-saved on the settings page reaches the next session, and a running one keeps
+**Read at the moment a root is built**: a text saved on the settings page,
+here or on any member, reaches the next session, and a running one keeps
 what it started with. A text nobody typed is no file at all, so a root then
 holds exactly what it held before there was such a setting.
 **The Repo's own instructions are untouched.** A `CLAUDE.md` or an `AGENTS.md`
@@ -1008,7 +1025,7 @@ above it the way the human's global file used to be.
 _Avoid_: global CLAUDE.md, system prompt, preamble, rules
 
 **MCP server**:
-A tool server an agent may call, **declared** once for the installation on the
+A tool server an agent may call, **declared** once for the cluster on the
 settings page and **attached** to a Conversation from the Attach button where
 its Brief is written, or from an Answer as an **Addition** once the work has
 started (ADR-0028). The one deliberate way an MCP server reaches a session at
@@ -1023,26 +1040,51 @@ rather than a setting. The headers are static values typed once — no OAuth,
 there being no browser at three in the morning — and they are **secrets**:
 written where a secret is written, never read back to the page, and readable by
 Verkstead because a session has to be handed them.
-**The name is the identity**, so it is lowercase letters, digits and hyphens and
-unique among the declarations, and it is what the agent sees in front of the
-server's tool names. A name that is neither is refused as it is typed, naming
-the field at fault. **A server is never renamed**: everything that refers to one
-refers to it by that name, so the settings page offers a name on a new
-declaration alone and changing one is deleting it and declaring another. The URL
-and the headers are edited.
-**Kept in `config.yaml`** beside the Authors and the **Instructions** — a
-thing Verkstead is *told* rather than one it finds — and read at the moment a
-session is launched, so a corrected URL fixes every Conversation that attached
-that server. An absent key, an empty one and one nothing can parse are the same
-no servers, and an entry missing either half is dropped as the file is read.
-**Except the header values, which are in `secrets.yaml`** under the server's
-name, where the GitHub token is: the names are part of the declaration and are
-written with it, and what goes in each of them is a secret. So a header is
-edited as an *action* rather than as a value, one apiece — keep it, set it, or
-clear it — and a value box left blank keeps what is there, the way the token's
-does. A header the declaration names with nothing kept for it is one nothing is
-sent in, and deleting a declaration takes its values with it, so the same name
-declared again starts with none.
+**A replicated record in the database**, the cluster's like the **Author**s and
+the **Instructions** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md),
+amending ADR-0021's *kept in `config.yaml`*): one per declaration, under a
+**uuid**, its fields the name, the URL, the header names and a digest of each
+header's value. Every device serves and pulls it, so a server declared on one
+is on every other's Attach menu. `config.yaml`'s old `mcp_servers:` key is
+taken up once, each declaration under a uuid derived from its name so that one
+declared by hand on two devices is one record, and dropped. Read at the moment
+a session is launched, so a corrected URL fixes every Conversation that
+attached that server.
+**The name is still the identity the agent and the chips see**, so it is
+lowercase letters, digits and hyphens, and it is what the agent sees in front
+of the server's tool names. A name that is neither is refused as it is typed,
+naming the field at fault. **A server is never renamed**: everything that
+refers to one refers to it by that name, so the settings page offers a name on
+a new declaration alone and changing one is removing it and declaring another.
+The URL and the headers are edited.
+**Unique among the live declarations across the cluster**, refused at the press
+against every live record this device holds, whoever wrote it. **Removing one
+is a deletion stamp, and declaring a removed name again is a new record** under
+a new uuid, so a removal is final here as it is for every record.
+**A name two live declarations share launches neither.** Only replication
+brings that about — two devices that each declared `docs` while apart — and
+neither is the one meant, so a session attached to `docs` is handed neither,
+its chip says the two **clash until one is removed**, and attaching the name
+is refused. The settings section draws both rows, each with its own Remove,
+and removing either on any device clears the clash everywhere once the removal
+replicates. Newest-declaration-wins was considered and turned down: it would
+hand a session a server the human on the other device never meant it to have.
+**Except the header values, which are in `secrets.yaml`** under the
+declaration's uuid, where the GitHub token is: the names are part of the
+declaration and are written with it, and what goes in each of them is a secret.
+So a header is edited as an *action* rather than as a value, one apiece — keep
+it, set it, or clear it — and a value box left blank keeps what is there, the
+way the token's does. A header the declaration names with nothing kept for it
+is one nothing is sent in.
+**The values are copied to every device's `secrets.yaml`**, as an **Author**'s
+token is: the record carries a digest of each, never the value, so setting,
+rotating or clearing one is a write to it, and after every pull a device whose
+copy is not the one the record names asks its members for it, the writer
+first, and keeps what matches. There is no home; they travel from whoever
+holds them, and a member not answering leaves the copy as it stands. A removed
+declaration's copy goes everywhere with its deletion stamp, and being under
+the uuid, the old removal never takes a redeclared name's new values,
+whichever order a device pulls the two in.
 The section saves as an action rather than a value, the way the **Ignore rule**s
 do and for the same reason: it is one of the two things on that page a save can
 be *refused* over, so a section that is not about the declarations says nothing
@@ -1056,10 +1098,11 @@ once the work starts, and a read-only row afterwards, exactly as an
 **Attachment** is. What holds them is the Conversation rather than the round, so
 a later drafting round draws the ones it already had — attached, and still the
 human's to take off.
-**A chip whose declaration has been deleted says the server is gone** rather
+**A chip whose name has no live declaration says the server is gone** rather
 than disappearing — the reference was made on purpose, and taking it off is the
-human's — while attaching a name nothing is declared by is refused, the menu it
-was picked from having been drawn a moment earlier.
+human's — while attaching a name nothing live declares is refused, the menu it
+was picked from having been drawn a moment earlier. A name two declarations
+clash over is left off the menu, and its chip says they clash.
 **The servers are a section of the Attach menu of their own**, headed **MCP
 Servers** under *Attach file*, with **Add a server…** at its foot: a card asking
 what a new declaration on the settings page asks, saved as that page saves one,
@@ -1107,8 +1150,8 @@ front of its tool names — `mcp__<server>__<tool>` on Claude and on Codex,
 `<server>__<tool>` on Grok Build, `<server>_<tool>` on OpenCode. Which is the
 one thing about a server a session cannot work out for itself; what it is *for*
 is the Brief's to say, as a file's is. No section at all where a Conversation
-has attached none, and none for a name whose declaration has since been deleted,
-that one being nothing the session was launched with.
+has attached none, and none for a name with no live declaration or with two
+that clash, either being nothing the session was launched with.
 **An unreachable server never holds a launch**: the session starts, and what the
 harness makes of a server that will not answer is said inside it. A declaration
 is tried once on save, while the human is looking at the page, and that is a
@@ -2248,15 +2291,16 @@ Keeper's start, terminated at its stop, never waited on — a workbench opens
 on the Keeper while the Annex is still coming up, and its rows read
 *unreachable* until it answers. It is reached through the **Annex Forward**,
 and it has no settings of its own: what is about the work rather than the
-machine — the Instructions, the MCP servers and their header values, the
-at-once limit, Cleanup, the ignored comments, the conflict resolution and
-sharing on Done — is copied in from its Keeper at every boot. **Its Authors
-are not copied**: it holds none of its own, and the Keeper's reach it as
-mirrors over the one list, token copies and all, the way they reach any
-member — so with one, a Repo there is that one's.
+machine — the at-once limit, Cleanup, the ignored comments, the conflict
+resolution and sharing on Done — is copied in from its Keeper at every boot.
+**Its Authors, the Instructions and the MCP servers are not copied**, nor
+anything of its `secrets.yaml`: it holds none of its own, and the Keeper's
+reach it as records, the way they reach any member, the tokens and the header
+values fetched as any member fetches them — so with one Author, a Repo there
+is that one's.
 **And it never enters Onboarding Mode**: a kept Annex is told so in its
-config and skips the verdict, its objective being met by the mirrors its
-Keeper's Profiles arrive as.
+config and skips the verdict, its objective being met by its Keeper's
+Profiles, which arrive as records it runs from a copy of.
 **On Windows it is a NixOS-WSL distro named `Verkstead`**, disk under
 `%LOCALAPPDATA%\Verkstead\wsl`, built from a flake its Keeper writes and
 pinned to the Keeper's own release; the wizard row that makes it reads
@@ -2401,6 +2445,27 @@ above carry each device's own news alone.
 _Avoid_: proxy, forwarding (a **Forward** is something else), tunnel, the bridge
 (which is the socket half of it alone), remote mode
 
+**Replicated record**:
+A record that is the cluster's rather than any one device's, held whole by every
+device of it ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): a
+**uuid**, the same everywhere; an `updated_at`, the stamp of its last write; a
+**deletion stamp**, set where it has been removed; and the Device Id that wrote
+it last — with the kind's own fields beside them. One facility with kinds on
+it, rather than a copy of the pattern per table: **Authors** first, then the
+**Agent Profiles** and their bindings, the **Instructions** text and the
+declared MCP servers. Kept in the database, never in `config.yaml`, which holds
+what Verkstead is told rather than what it finds.
+**Two rules, each one function.** *The merge*: per record the newest
+`updated_at` wins, the writer's Device Id breaking a tie, and a removal is final
+— a record carrying a deletion stamp is never overwritten by an edit, and a
+deletion stamp arriving beats any edit. *The stamping*: a write is stamped with
+the later of this device's now and one past the stamp it holds for the record,
+so a device whose clock runs behind never has its own edit reverted by the next
+pull. Removed records are kept, never pruned: the deletion stamp is what tells a
+device that was off when the removal happened that its edit stays removed.
+_Avoid_: mirror (the home-device model this replaces), synced row, tombstone
+(which is a Conversation that moved away; this is a deletion stamp)
+
 **Forward**:
 A server started in a **Terminal** on another **Member**, reachable on this
 device's own `localhost` at the same port from the moment this device's browser
@@ -2526,9 +2591,9 @@ _Avoid_: the cluster list, the global sidebar, syncing
 The state a Verkstead that cannot do anything yet is in, and while it is on the
 wizard at `/setup` is the only page there is: every other URL redirects there.
 What it is about is the **objective** — a sandbox, `git` and at least one of the
-four harnesses present; at least one **Agent Profile**, a **mirror** of a
-member's counting as one, its account being fetched from the device it is at
-home on before every launch; an **Author**. Present
+four harnesses present; at least one **Agent Profile**, one bound on a
+member alone counting, its account being fetched from a device it is bound on
+before every launch; an **Author**. Present
 means a session would find it, so every probe resolves on the `PATH` inside the
 **Sandbox** rather than the server's own: a harness on the server's `PATH` and
 nowhere a session looks is a row that ticks and a session that cannot start. The
@@ -3274,8 +3339,8 @@ place, that a roadmap has no Stage left to run, that the roadmap on the record
 is not on the branch to read, that a branch wrote no single roadmap so no Stage
 was started, that the roadmap declares badly so nothing of it was started, that
 a Stage predates the record of which roadmap it belongs to and is the human's to
-continue, that a wrap-up is down to its checks, that a session away from home
-could not write its Profile's login back to the device the account is on — see
+continue, that a wrap-up is down to its checks, that a session that ran from a
+copy could not write its Profile's login back to the device the account was fetched from — see
 **Account mirror** — that a Conversation moved onto this device was taken up
 with the harness's own resume of the conversation it arrived part way through,
 or with Verkstead's own Resume and which reason it was — see **Carried
@@ -3716,9 +3781,9 @@ the transcript it leaves are the account's, and the next session reads them.
 **Off**, the store is the root's own and empty as each session starts: fresh
 memory, none of the human's transcripts in reach, and the session's own
 transcript written into the root, where Verkstead reads it from. The login and
-the written configuration are the same either way. **And the switch holds away
-from home**: a session on one device under a Profile whose account is on another
-is given what that account remembers of this Repo, and what it writes goes back
+the written configuration are the same either way. **And the switch holds on a
+device the Profile is not bound on**: a session there, running from a copy, is
+given what the account remembers of this Repo on a device it is bound on, and what it writes goes back
 — see **Memory sync**. On the Profile form it is one
 checkbox, drawn for every agent type; the cards and the pickers do not show it.
 **A Profile need not be named.** The harness's mark and the model already say
@@ -3726,10 +3791,13 @@ the whole of what most accounts are — the one Claude Code login on this machin
 running Fable 5 — and a box that had to be filled in before a save would be a
 word invented to get past it. So the name is optional, and what a name is *for*
 is telling two accounts of one harness apart: **at most one unnamed Profile per
-harness**, and **no two named alike**. Both are rules the store holds rather
-than looks taken in front of a write, and which of the two refused a save is
-read off what was being saved — a Profile with a name can only have hit the
-second, and one without a name only the first.
+harness**, and **no two of one harness named alike** — a Claude and a Codex
+Profile may share a name, the harness's mark telling them apart. Both are
+checked **at the press, against every live Profile** whichever device wrote
+it, and which of the two refused a save is read off what was being saved — a
+Profile with a name can only have hit the second, and one without a name only
+the first. A pair that arrives alike by replication was pressed on two devices
+apart, and is kept and drawn two alike.
 **An unnamed one reads as nothing wherever the harness and the model say
 enough**, which is most of the places a Profile is read: the pairing rows of a
 harness with one account, the second line of the Agent run card, the Brief's
@@ -3741,82 +3809,90 @@ Profile anything falls back to: there is no default Profile, exactly as there is
 no default model. And a session run under one writes no name into its record, so
 a finished run draws as the harness and the model alone — which is how a record
 from before Verkstead wrote the name down already drew.
-**A cluster's Profiles are one list on every device of it.** A device linked to
-another keeps a **mirror** per Profile that other device holds: a row of its own
-`profiles` table carrying what a row is drawn and picked by — the name, the
-harness, the account as the far end holds it, the models and the memory switch —
-marked with the **Device Id** it is at home on and the id it has there
-(ADR-0020). A row rather than a list held in memory, because a Pairing, a Repo's
-memory of what it was last grilled with and every Conversation name a Profile by
-a **local** id, and a mirror is what gives a member's account one here — so
-nothing that reads a Profile id changes, and a mirror keeps its local id across
-every refresh. What that costs is that the two uniqueness rules above become
-*this device's own rows'*: two machines may each hold a `work`, and each the one
-unnamed Claude account, which is what nearly every installation holds.
-**Which machine an account sits on is a fact on the row**, drawn with the mark
-its operating system wears wherever a device is drawn — on the settings card and
-on every pairing picker, one list rather than a section per device. And nothing
-at all on this device's own rows, a machine's own name on every one of them being
-a column of one answer repeated.
-**They are fetched device to device rather than through the browser**: each
-device reads its members' own `/api/ui/profiles` over the **Relay**, at the
-start, whenever a member says its Profiles moved, and whenever the membership
-itself moves. A member that is not answering keeps the rows it last gave, exactly
-as its Conversations are kept; a Profile removed at home is gone from what that
-device answers, so the mirror goes with it on the next refresh — nulled out of
-every Pairing that named it, exactly as a removal pressed here is. A device that
-has been unlinked takes its mirrors with it, the membership being what prunes
-those.
-**And a session runs under a mirror wherever it is drawn**, the account being
-fetched from the machine it is on before each launch — see **Account mirror**.
-Nothing about the home machine's paths is judged here: they belong to that
-filesystem, and what a session is given is the mirror.
-**Which does not make a mirror unbreakable; it makes it break over other
-things.** Brokenness is answered per read for every Profile — a local one
-against its own paths — and for a mirror the question is the three that would
-stop a launch away from home, asked **in the order a launch would meet them**.
-**The home is not answering**, which is this device's own reading of its
-membership and reads the way that machine reads in the sidebar: nothing can be
-fetched, so nothing can be built. **The account at home holds no login file**,
-which the home device answers as the mirrors refresh and which is what a Claude
-login in the macOS Keychain comes to, and a sign-out at home with it — there is
-nothing to mirror, the fix is a login on that machine, and the Profile is
-meanwhile perfectly runnable there. **Or the harness is not on this machine**,
-which is the onboarding probe's own question answered in the onboarding probe's
-own word, rather than a second vocabulary for one fact.
-**Whether an account holds a login file is a fact on every row**, answered by
-the device the account is on: one of this device's own says *it cannot be used
-away from here*, which is a note rather than a trouble, and the same account
-read as a mirror elsewhere is broken there. Which is the difference the two
-readings are for.
-**Refused rather than hidden.** None of the three takes the row out of a picker
-or out of the Profiles section, and a Conversation paired with one reads as
-paired with a **broken** Profile rather than as one nothing was picked for: a
-row saying why it cannot be run is something to go and put right, where a row
-quietly missing is a human looking for a Profile they know they saved. What they
-do refuse is the **Start**, **by name and before anything starts** — the refusal
-carries what the row carries, so the sentence at the press is the sentence
-already on the row, and a Start refused over a machine that is not answering
-names that machine.
-**And a mirror is edited and removed from wherever it is drawn too**, and the
-press is relayed to the device the account is on: every device's Profiles
-section lists everyone's, and the form over a mirror saves. A save is put to the
-home device as
-the ordinary edit of *its own* Profile, addressed by the id the row records for
-it there, and what comes back is that device's own answer rather than a second
-opinion composed here — a name already taken at home is a name already taken,
-said in the words a local clash is said in, the two uniqueness rules staying that
-device's to hold. The mirror then redraws off the refreshed row rather than off
-what was typed, and the pane says which machine the press goes to, the paths on
-the form being that machine's. A removal is the same hop and takes the Profile
-off its home device, so every device's mirror of it goes on that device's next
-refresh — a Profile removed from one device leaves a Conversation on a third
-reading as one nothing has been picked for. **A home that is not answering
-refuses the press by name** and writes nothing here: a mirror edited against a
-machine that is not there would be a row disagreeing with the account it stands
-for. And **nothing is relayed twice** — a device puts the edit to the Profile's
-home and nowhere else, a third device learning of it by refreshing its own
-mirror, which is the rule every announcement in a cluster is held under.
+**A Profile is a Replicated record** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): its name, its harness, its models and its memory switch, under the uuid every reference to it names, with an `updated_at` and a deletion stamp — so **a removal is a deletion stamp**, kept, and nulls every Pairing that named the uuid on its way. **The account's paths are a binding**, a record of their own per Profile per device, keyed `<uuid>/<device>` and written only by the device it names: this device's binding is what a session here is run as, and a record this device holds no binding of is run from a copy of the account fetched from a device it is bound on. At the switch every device's own Profiles became records under the uuids they already carried, and each device's paths its binding. **Nothing merges two Profiles**, so in a cluster a device names its own unnamed Profiles after itself — the name the Devices section draws it under — **once**: at the switch where it already has members, and otherwise in the write that records its first member, whichever side of the link it is on. Its own is a record it holds a binding of; every unnamed one takes the one name whatever its harness, and a name already taken is no bar, the rules being the press's. A device in no cluster leaves its unnamed Profiles unnamed, and a name the human clears afterwards stays cleared. **Becoming the cluster's**: a device with no binding running from a copy built from the replicated login. The `cluster-owned-records` roadmap lands it.
+**A cluster's Profiles are one list on every device of it.** The records and
+the bindings **replicate** like every Replicated record: each device serves its
+whole table of both on the records route behind the **Member Gate**, and pulls
+each member's at the start, whenever a member says its Profiles moved, and
+whenever the membership moves — so a Profile made on one device is in every
+device's Profiles section and pickers, bound there or not. **Every Profile is
+named by its uuid** (ADR-0028): a Pairing, a Repo's memory of what it was last
+grilled with, a steer, a Transfer, the peer routes and every Conversation name
+one by it, and it is the same uuid on every device. A member that is not
+answering keeps every record this device holds of it, and a device unlinked
+takes nothing with it, a record being the cluster's. A member too old to serve
+the route is a line on its Devices row naming both releases, and its Profiles
+are absent here until it updates.
+**The mirrors retired into records.** A member's Profile that a device held as
+a **mirror** — a row of its own `profiles` table marked with the device it was
+at home on — was written down at the switch as that Profile's record and its
+home's binding, stamped older than anything, so the home's own record wins the
+first pull. A mirror held from before the uuids carries a provisional uuid of
+this device's minting, with the device and the id it had at home beside it, and
+this device's own Profiles numbered before the uuids keep where they were minted
+and the id they had, which is the same pair said from the home's side. **The
+pair is the bridge**: until the home's record arrives carrying it, the
+provisional mirror is in no list and its Pairings hold; once it arrives, the
+provisional uuid is rewritten to the record's in everything that named it, the
+account copy under the Data Directory included — so every Pairing survives the
+switch, whichever device updates first.
+**No device is drawn on a Profile's row**, on the settings card's own line or on
+any pairing picker: a Profile has no home to mark, and two alike that arrived by
+replication are drawn two alike.
+**The card carries a line per device instead**, in a cluster: this device first,
+then every member as the Devices section lists them, each saying how that
+device runs the Profile — **bound**, at the paths its binding holds in the
+harness's own shape, or ***runs from a copy*** where it holds none. Every device
+draws every device's line off the bindings it holds, so a member not answering
+keeps its line, dimmed, from its last binding, and a member unlinked loses its
+line whatever binding it left behind. These lines are the only place a device
+is named on a Profile, and none of them is edited from another device: a
+binding is written by the device it names, and this device's own is what the
+form in the pane the card opens rewrites. A Verkstead in no cluster draws no line
+at all.
+**And a session runs under a Profile not bound here wherever it is drawn**, the
+account being fetched before each launch from the first device it is bound on
+whose binding holds a login and that answers — see **Account mirror**. Nothing
+about that machine's paths is judged here: they belong to that filesystem, and
+what a session is given is the copy. The memory store is synced with that same
+device, and the login written back to it as the session ends.
+**Which does not make such a Profile unbreakable; it makes it break over other
+things.** Brokenness is answered **per device**, per read, for every Profile —
+one bound here against its own paths — and for one bound elsewhere the question
+is the two that would stop a launch here, asked **in the order a launch would
+meet them**. **No device it is bound on with a login is reachable**, which is
+this device's own reading of its membership — the reading a machine is drawn
+unreachable off in the sidebar — and **names no device**: what is missing is a
+source, any of them. A binding whose account holds no login file is no source,
+which is what a Claude login in the macOS Keychain comes to, and a sign-out
+there with it; the fix is a login on that machine. **Or the harness is not on
+this machine**, which is the onboarding probe's own question answered in the
+onboarding probe's own words, rather than a second vocabulary for one fact.
+**Whether an account holds a login file is its binding's to say**, and the
+device bound on it is the one that looks — at every read of its Profiles, at its
+start, and as a login written back lands — writing it on its binding where it
+moved, which replicates. On the device it is bound on an account with none says
+*it cannot be used from another device*, which is a note rather than a trouble:
+it is perfectly runnable there.
+**Refused rather than hidden.** Neither takes the row out of a picker or out of
+the Profiles section, and a Conversation paired with one reads as paired with a
+**broken** Profile rather than as one nothing was picked for: a row saying why
+it cannot be run is something to go and put right, where a row quietly missing
+is a human looking for a Profile they know they saved. What they do refuse is
+the **Start**, **by name and before anything starts** — the refusal carries what
+the row carries, so the sentence at the press is the sentence already on the
+row.
+**An edit or a removal is a local write on whichever device it is pressed**,
+which replicates — there is no home to relay it to, and a device that is not
+answering stops nobody saving. Both uniqueness rules are checked at the press
+against the whole table, so a name taken on another device is refused here in
+the words any clash is. **A save over a Profile not bound here writes the
+record alone**: its paths are other devices', so the pane says the paths under
+the form are another device's and the save leaves them alone, and binding this
+device is a press of its own. A removal is a deletion stamp, and every device
+that pulls it nulls the Pairings on it that named the uuid — a Profile removed
+on one device leaves a Conversation on another reading as one nothing has been
+picked for.
 **Removing one is always allowed**, and it is a delete rather than an
 unregistering: a Profile is a way in to an account, so one the human is finished
 with is one Verkstead should stop holding. Every Conversation that had chosen it
@@ -3909,30 +3985,32 @@ a Built Root is what a session is *given*.
 _Avoid_: account home, joined account, claude home, mounted account
 
 **Account mirror**:
-What a device holds of a **member's** account so that a session can run here
-under a Profile whose account is on that machine: the files a **Built Root** is
-made of, and nothing else of it (ADR-0020). The row travels and the account does
-not — so the login, and whatever the written configuration is composed from, are
-fetched from the home device into a directory of this device's own and the root is
-built out of that, exactly as it is built out of an account on this machine.
+What a device holds of the account of a Profile **not bound** on it, so that a
+session can run here under that Profile — one that *runs from a copy*: the files a
+**Built Root** is made of, and nothing else of it (ADR-0020). The record replicates
+and the account does not — so the login, and whatever the written configuration is
+composed from, are fetched from a device the Profile is bound on into a directory of
+this device's own and the root is built out of that, exactly as it is built out of
+an account on this machine.
 Nothing downstream of the launch knows the difference: the four parts, the trust
 seeded into the copied `.claude.json`, the launch line and the model are what they
 already were.
-**Per Profile, under the Data Directory**, named by the **local** Profile id —
+**Becoming the copy under a cluster-owned Profile** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): the login is replicated, newest write wins, published by every device the Profile is bound on at launch, at ending and on the refresh schedule, so a quiet device blocks no start and nothing is fetched from another device. The `cluster-owned-records` roadmap lands it; what follows is the mirror as it stands.
+**Per Profile, under the Data Directory**, named by the Profile's uuid —
 which is what makes the Windows rule hold by construction: a session's profile is
 under that same directory, so the hard link that joins the login in never crosses
 a volume, and the refusal for an account on another volume cannot fire for a
 mirror.
-**Fetched before each launch**, never kept: a login refreshed at home since the
-last session is the one this session has to be given, and a mirror gone stale
-would sign a session out for no reason anybody could see. What the home device
-sends is written over what is there — beside and renamed, so a session already
-running keeps the file it started with — and every file of the allowlist it did
-*not* send is taken away, a sign-out at home being a mirror with no login in it.
-**And it goes when the mirror row does**, which is the last thing on this device
-that says whose login it holds: a Profile the human removed at home, or a device
-unlinked, takes the directory with the row rather than leaving a member's login
-here with nothing pointing at it.
+**Fetched before each launch**, never kept: a login refreshed on the device it is
+bound on since the last session is the one this session has to be given, and a
+mirror gone stale would sign a session out for no reason anybody could see. What
+that device sends is written over what is there — beside and renamed, so a session
+already running keeps the file it started with — and every file of the allowlist
+it did *not* send is taken away, a sign-out there being a mirror with no login in it.
+**And it goes when the record is removed**, which is the last thing on this
+device that says whose login it holds: a Profile the human removed anywhere
+takes the directory with it rather than leaving a member's login here with
+nothing pointing at it.
 **Only the allowlist travels.** The login as the harness wrote it, and the
 configuration composed the way a root's is: Claude's `settings.json` filtered to
 what reaches a model, its `.claude.json` without the MCP servers *or* the
@@ -3942,27 +4020,30 @@ their paths and their history — and each other harness's `config.toml` or
 instructions file, or any other repository's transcripts. The memory store is not
 on the list: it is joined rather than composed, and is carried entry by entry on
 its own terms — see **Memory sync**.
-**A member's own call rather than the viewer's**: the home device answers it at
-`/api/peer/v1/profiles/<id>/account` on the **Peer Listener** behind the **Member
-Gate**, by the id the mirror row records for it there, and only for a Profile of
-its own — a row that is itself a mirror is an account on a third machine.
-**A home that is not answering starts no session**, and says which machine: a
-session launched under an account nothing fetched is one that comes up logged out
-with nothing on the Timeline saying why, so the refusal goes in the session's
-Capture naming the machine. Which is the backstop rather than the reading: a
-mirror whose home has stopped answering is **broken** on the row long before
-anybody presses anything, and the press is refused there — see **Agent
-Profile**. This is what catches a machine that went away between the two.
+**A member's own call rather than the viewer's**: a bound device answers it at
+`/api/peer/v1/profiles/<uuid>/account` on the **Peer Listener** behind the
+**Member Gate**, by the uuid the Profile has on every device, and only for a
+Profile bound there — one it runs from a copy of is an account on a third
+machine.
+**A bound device that is not answering starts no session**, and says which
+machine: a session launched under an account nothing fetched is one that comes
+up logged out with nothing on the Timeline saying why, so the refusal goes in
+the session's Capture naming the machine — the first one asked, where none of
+the devices bound on it with a login answered. Which is the backstop rather than
+the reading: a Profile with no such device reachable is **broken** on the row
+long before anybody presses anything, and the press is refused there — see
+**Agent Profile**. This is what catches a machine that went away between the
+two.
 **And the login is written back as the session ends**, at
-`/api/peer/v1/profiles/<id>/account/login` on the same listener behind the same
+`/api/peer/v1/profiles/<uuid>/account/login` on the same listener behind the same
 gate. It is the one file of a root a session genuinely changes — the harness
 refreshes its OAuth pair as it works — so an account lent out and never written
 back would be one signing itself out a session at a time. What the session left is
 read off the mirror once the ending has written everything back into it, and the
-home device writes it **in place over the account's own file**, which is how a
+device it was fetched from writes it **in place over the account's own file**, which is how a
 local session's ending writes one: whatever else is a name for that file — a
 session running there has it linked into its root — is a name for what arrived.
-Nothing else of a root comes home, the rest being Verkstead's own or the human's
+Nothing else of a root goes back, the rest being Verkstead's own or the human's
 and no session's to change. A **Terminal**'s ending goes the same way, a human who
 logged in at that shell having logged in to somebody else's account.
 **Only what changed travels**: a login the session replaced, or made where the
@@ -3972,28 +4053,30 @@ all. Which is the three cases a local ending already tells apart.
 them out; that is accepted rather than locked against — nothing is merged and
 nothing is held, and the write that arrives later is the one the account keeps. A
 sign-out that results reads as the Profile being broken there, and the fix is a
-login on its home device. Lending a Profile out exclusively was rejected as a lock
+login on a device it is bound on. Lending a Profile out exclusively was rejected as a lock
 nobody asked for.
-**And a home that has gone away by then is said rather than swallowed**: the
+**And a device that has gone away by then is said rather than swallowed**: the
 mirror is left exactly where it is, nothing retries, and the Conversation's
 Timeline carries a **Notice** saying the account was not written and naming the
-machine. The next session at home may find itself signed out, which is worth a
+machine. The next session on that device may find itself signed out, which is worth a
 line rather than a silent loss.
 _Avoid_: account copy, cached account, synced login, borrowed account
 
 **Memory sync**:
 What carries an **Agent Profile**'s memory store to the device a session is
-running on and back again, where that Profile's account is at home on another
-one (ADR-0020). The **Account mirror** carries what a **Built Root** is *made*
+running on and back again, where that Profile is not bound on it and runs from a
+copy (ADR-0020). The **Account mirror** carries what a **Built Root** is *made*
 from; this carries what it *joins*, and the two together are what makes a
-session away from home the session it would have been at home. Before launch,
-what the home account remembers of this Repo and of this Conversation is
-written into the mirror; as the session ends, what the session wrote goes back.
+session run from a copy the session it would have been where the Profile is bound.
+Before launch, what the account remembers of this Repo and of this Conversation on
+the device it was fetched from is written into the mirror; as the session ends,
+what the session wrote goes back to that same device.
 That is what makes a session run on B readable on A afterwards, and what a
 harness's own resume stands on after a **Transfer**.
-**The memory switch holds away from home.** Switched off, nothing syncs in
-either direction and the session starts on an empty store, exactly as it does
-at home.
+**Becoming union in and fan out** ([ADR-0028](docs/adr/0028-records-are-the-clusters.md)): this Repo's and this Worktree's entries pulled from every reachable device before launch, the newer file winning, and what the session wrote pushed to every reachable device after, nothing deleted anywhere, OpenCode's one database taken newest whole. The `cluster-owned-records` roadmap lands it; what follows is the sync as it stands.
+**The memory switch holds on a copy.** Switched off, nothing syncs in either
+direction and the session starts on an empty store, exactly as it does where the
+Profile is bound.
 **A label apiece, and each machine names its own path.** A memory store is keyed
 by the path a session ran in wherever it is keyed by anything, and every one of
 those paths is a different string on every machine. So nothing crosses the link
@@ -4036,26 +4119,26 @@ through the match across devices — see **Repo**, where origin then name is the
 rule — and **no match is an answer**: there is nothing of that Repo to pull, the
 session starts without it, and the Timeline says so rather than the launch being
 refused. The Worktree's is named off the Data Directory instead, a Worktree
-living under one rather than under the Repo: the home device joins **its own**
+living under one rather than under the Repo: the bound device joins **its own**
 worktrees directory onto the same stem this Worktree carries, which is the path
 it would have used for this work and is what leaves the transcript findable when
 the work comes home.
-**A member's own call rather than the viewer's**, beside the account's: the home
-device answers at `/api/peer/v1/profiles/<id>/memory` on the **Peer Listener**
+**A member's own call rather than the viewer's**, beside the account's: the bound
+device answers at `/api/peer/v1/profiles/<uuid>/memory` on the **Peer Listener**
 behind the **Member Gate**, and takes what the session left at
-`/api/peer/v1/profiles/<id>/memory/left`. A press rather than a path each way,
+`/api/peer/v1/profiles/<uuid>/memory/left`. A press rather than a path each way,
 the question being three facts about the asking device's side and one of them a
 list.
 **Only what changed travels back**, which is the account mirror's rule for the
 login: what came down is remembered by a fingerprint apiece, and a file still
-exactly as it arrived is not sent. **Nothing at home is deleted** — a file the
+exactly as it arrived is not sent. **Nothing on the bound device is deleted** — a file the
 session took away is not a file it asked the account to lose, and the rest of
 that store is the human's own work in other repositories.
-**Best effort rather than a gate.** A home that will not answer is a session
-that starts on an empty store with a **Notice** saying so, where a home that
+**Best effort rather than a gate.** A bound device that will not answer is a session
+that starts on an empty store with a **Notice** saying so, where one that
 will not answer for the *account* starts no session at all: a session with no
 memory comes up new, and a session with no login comes up logged out with
-nothing saying why. The same at the end — what could not be written home is a
+nothing saying why. The same at the end — what could not be written back is a
 line on the Timeline rather than a retry.
 _Avoid_: memory mirror, transcript sync, store copy
 

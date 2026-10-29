@@ -96,7 +96,7 @@ import {
   openAgent,
   theWorkbench,
 } from "./bench";
-import { MIRRORED, oneList } from "./authors";
+import { CLIENT, oneList } from "./authors";
 import { carrying, drag, dropOn } from "./dragging";
 // The path field's own rows are `browsed`, the listbox's being `rows` below:
 // one page draws both, and a browse's levels are not what a picker offers.
@@ -290,10 +290,9 @@ const ANNEXED: DevicesView = {
   ),
 };
 
-/// And the Agent Profiles a device in a cluster answers: two of its own, and a
-/// mirror of a member's account with the machine it is at home on.
+/// And the Agent Profiles a device in a cluster answers: two bound here, and
+/// one bound on a member alone.
 const SHARED = shared as ProfileEntry[];
-const SHARED_MACHINE = SHARED[2]!.device!;
 
 /// Where a call for that member stands. The prefix takes the place of
 /// `/api/ui`, so the far end sees the path the browser would have written
@@ -1176,16 +1175,11 @@ describe("the device the compose page is drafting onto", () => {
     }
   });
 
-  /// And the pairing pickers are cluster-wide, which is the other list a
-  /// membership changes the shape of: every device offers every member's
-  /// accounts beside its own, with the machine on the row (ADR-0020, *Shared
-  /// Profiles*). Two accounts called `work` are two machines', and the name
-  /// alone would not say which.
-  ///
-  /// `tests/fixtures/profiles-shared.json` is that list as the server really
-  /// answers it — the mirror row carries the machine, and this device's own
-  /// carry none.
-  it("offers a member's accounts on the pairing pickers, with the machine", async () => {
+  /// A profile bound on a member alone is offered on the pairing pickers like
+  /// any other, with no machine said on its row: a profile is the cluster's,
+  /// and has no home to mark (ADR-0028). `tests/fixtures/profiles-shared.json`
+  /// is that list as the server really answers it.
+  it("offers a member's accounts on the pairing pickers, with no machine", async () => {
     theCluster(whenever("/api/ui/profiles", json(SHARED)));
     const { container } = mount("/compose");
 
@@ -1194,53 +1188,32 @@ describe("the device the compose page is drafting onto", () => {
     await openAgent(container);
 
     // All three, because a member's account is offered for whichever role the
-    // human would run it in — and the two that can run nothing offer that row
-    // above the accounts, which is on no machine at all.
+    // human would run it in.
     await waitFor(() =>
-      expect(rows("Implementation")).toContain(
-        `Claude Code Opus 5 · personal · ${SHARED_MACHINE.name}`,
-      ),
+      expect(rows("Implementation")).toContain("Claude Code Opus 5 · personal"),
     );
 
     for (const role of ["Grilling", "Review"]) {
-      expect(rows(role)).toContain(
-        `Claude Code Opus 5 · personal · ${SHARED_MACHINE.name}`,
-      );
+      expect(rows(role)).toContain("Claude Code Opus 5 · personal");
     }
 
-    // This device's own say nothing about a machine: a name on every row would
-    // be a column of one answer repeated.
     expect(rows("Implementation")).toContain("Claude Code Fable 5 · fable");
-
-    // And the member's row wears its machine's mark after the harness's, which
-    // is what a list of several devices' accounts is scanned by.
-    const theirs = offered("Implementation").find((row) =>
-      row.textContent!.includes(SHARED_MACHINE.name),
-    )!;
-
-    expect(
-      [...theirs.querySelectorAll("svg path")].map((drawn) =>
-        drawn.getAttribute("d"),
-      ),
-    ).toContain(mark(SHARED_MACHINE.os!));
   });
 
-  /// And a member's account that cannot be run from here stays on the picker
-  /// and says why (ADR-0020, *Shared Profiles*): a row saying what is in the
-  /// way is something to go and put right, and a row quietly missing is a human
-  /// looking for a profile they know they saved.
+  /// And one that cannot be run from here stays on the picker and says why: a
+  /// row saying what is in the way is something to go and put right, and a row
+  /// quietly missing is a human looking for a profile they know they saved.
   ///
-  /// Three findings and one word apiece — the short form of the sentence the
+  /// Two findings and a few words apiece — the short form of the sentence the
   /// card in the Profiles section says in full, see `src/broken.ts`.
   it.each([
-    ["HomeUnreachable", "unreachable"],
-    ["NoLoginAtHome", "no login at home"],
+    ["NoBoundDevice", "no bound device reachable"],
     ["HarnessMissing", "not on this machine"],
   ] as const)("keeps a member's account reading %s on the picker", async (broken, said) => {
     theCluster(
       whenever(
         "/api/ui/profiles",
-        json(SHARED.map((row) => (row.device ? { ...row, broken } : row))),
+        json(SHARED.map((row) => (row.bound ? row : { ...row, broken }))),
       ),
     );
     const { container } = mount("/compose");
@@ -1251,11 +1224,11 @@ describe("the device the compose page is drafting onto", () => {
 
     await waitFor(() =>
       expect(rows("Implementation")).toContain(
-        `Claude Code Opus 5 · personal · ${SHARED_MACHINE.name} · ${said}`,
+        `Claude Code Opus 5 · personal · ${said}`,
       ),
     );
 
-    // And this device's own, which nothing is in the way of, read as they
+    // And the ones bound here, which nothing is in the way of, read as they
     // always did.
     expect(rows("Implementation")).toContain("Claude Code Fable 5 · fable");
   });
@@ -3901,13 +3874,14 @@ describe("registering a repo from the Repo dropdown", () => {
     await waitFor(() => expect(stored().repo).toBe(OPENED.id));
   });
 
-  /// A member's Author is one the repo can be opened as too, named with the
-  /// machine it is at home on, and the pick of it goes out as its uuid.
-  it("offers a member's author with its machine, and opens a repo under it", async () => {
+  /// An Author made on another device is one the repo can be opened as too,
+  /// a row like any other with no machine on it, and the pick of it goes out
+  /// as its uuid.
+  it("offers an author made on another device unmarked, and opens a repo under it", async () => {
     const fetching = theWorkbench(
       whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
       whenever("/api/ui/settings", json(TOKENED)),
-      whenever("/api/ui/authors", json(oneList(TOKENED, MIRRORED))),
+      whenever("/api/ui/authors", json(oneList(TOKENED, CLIENT))),
     );
     const { container } = mount("/compose");
 
@@ -3919,28 +3893,27 @@ describe("registering a repo from the Repo dropdown", () => {
     expect([...pick.options].map((option) => option.text)).toEqual([
       "Select",
       "Ada Lovelace",
-      "Client · the-workstation",
+      "Client",
     ]);
 
-    fireEvent.change(pick, { target: { value: MIRRORED.id } });
+    fireEvent.change(pick, { target: { value: CLIENT.id } });
     register(field, OPENED.path);
 
     await waitFor(() =>
       expect(sent(fetching, "/api/ui/repos")).toEqual({
         path: OPENED.path,
-        author: MIRRORED.id,
+        author: CLIENT.id,
       }),
     );
   });
 
-  /// And a lone member's Author, with none of this device's own, is named on
-  /// the press without a pick being asked for: the server's silent pick is
-  /// this device's own one, of which there is none.
-  it("opens a repo under a lone member's author without asking", async () => {
+  /// And a lone Author, wherever it was made, is not asked about: the press
+  /// names nobody and the server records the one Author there is.
+  it("opens a repo under a lone author without asking", async () => {
     const fetching = theWorkbench(
       whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
       whenever("/api/ui/settings", json({ ...TOKENED, authors: [] })),
-      whenever("/api/ui/authors", json([MIRRORED])),
+      whenever("/api/ui/authors", json([CLIENT])),
     );
     const { container } = mount("/compose");
 
@@ -3958,7 +3931,6 @@ describe("registering a repo from the Repo dropdown", () => {
     await waitFor(() =>
       expect(sent(fetching, "/api/ui/repos")).toEqual({
         path: OPENED.path,
-        author: MIRRORED.id,
       }),
     );
   });
@@ -4755,33 +4727,23 @@ describe("the two repo rows on the picked device", () => {
     expect(stored().repo).toBeNull();
   });
 
-  /// The member's one list: an Author of its own with a token, and its mirror of
-  /// this device's own with none — marked with this device, it being at home
-  /// here.
+  /// The member's one list: an Author made there with a token, and one made
+  /// on this device with none — two records, neither marked.
   const THEIR_OWN: AuthorEntry = {
     id: "6e8f0a2c-3b4d-4e5f-9a1b-2c3d4e5f6a7b",
     display_name: "Laptop",
     name: "Ada Lovelace",
     email: "ada@laptop.example",
     holds_token: true,
-    device: null,
   };
 
-  const HOME_HERE: AuthorEntry = {
-    ...oneList(UNTOKENED)[0]!,
-    device: {
-      id: LINKED.this.device,
-      name: LINKED.this.name,
-      os: LINKED.this.os,
-      reachable: true,
-    },
-  };
+  const MADE_HERE_AUTHOR: AuthorEntry = oneList(UNTOKENED)[0]!;
 
   /// And the member's list served under it, with this device's own a single
   /// Author with a token, so that a card reading the wrong end draws no pick
   /// and a tick.
   const theirAuthors = () => [
-    whenever(at("/authors"), json([THEIR_OWN, HOME_HERE])),
+    whenever(at("/authors"), json([THEIR_OWN, MADE_HERE_AUTHOR])),
     whenever("/api/ui/authors", json(oneList(TOKENED))),
   ];
 
@@ -4804,11 +4766,11 @@ describe("the two repo rows on the picked device", () => {
     expect([...authorPick()!.options].map((option) => option.text)).toEqual([
       "Select",
       "Laptop",
-      `Ada Lovelace · ${LINKED.this.name}`,
+      "Ada Lovelace",
     ]);
 
     // This device's own holds no token over there, so the note stands.
-    fireEvent.change(authorPick()!, { target: { value: HOME_HERE.id } });
+    fireEvent.change(authorPick()!, { target: { value: MADE_HERE_AUTHOR.id } });
     await waitFor(() => expect(noRemote()).toBeTruthy());
     expect(screen.queryByLabelText(/on GitHub too/)).toBeNull();
 
@@ -4829,8 +4791,8 @@ describe("the two repo rows on the picked device", () => {
     });
   });
 
-  /// **Open repo** on the member the same way, and a pick of an Author at home
-  /// on this device goes out as the uuid the member mirrors it under.
+  /// **Open repo** on the member the same way, and a pick of an Author made on
+  /// this device goes out as its uuid, the same on the member.
   it("offers the member's authors on Open repo, this device's among them", async () => {
     const fetching = theirs(
       ...theirAuthors(),
@@ -4847,16 +4809,16 @@ describe("the two repo rows on the picked device", () => {
     expect([...authorPick()!.options].map((option) => option.text)).toEqual([
       "Select",
       "Laptop",
-      `Ada Lovelace · ${LINKED.this.name}`,
+      "Ada Lovelace",
     ]);
 
-    fireEvent.change(authorPick()!, { target: { value: HOME_HERE.id } });
+    fireEvent.change(authorPick()!, { target: { value: MADE_HERE_AUTHOR.id } });
     register(THEIR_OPENED.path);
 
     await waitFor(() => expect(stored().repo).toBe(THEIR_OPENED.id));
     expect(sent(fetching, at("/repos"))).toEqual({
       path: THEIR_OPENED.path,
-      author: HOME_HERE.id,
+      author: MADE_HERE_AUTHOR.id,
     });
   });
 
@@ -5691,6 +5653,7 @@ describe("the MCP servers a compose page holds", () => {
   const declaring = (...names: string[]): SettingsView => ({
     ...SETTINGS,
     mcp_servers: names.map((name) => ({
+      id: `uuid-of-${name}`,
       name,
       url: `https://mcp.example.com/${name}`,
       headers: [],
@@ -5746,7 +5709,12 @@ describe("the MCP servers a compose page holds", () => {
             ...SETTINGS,
             mcp_servers: [
               ...SETTINGS.mcp_servers,
-              { name: "wiki", url: "https://mcp.example.com/wiki", headers: [] },
+              {
+                id: "uuid-of-wiki",
+                name: "wiki",
+                url: "https://mcp.example.com/wiki",
+                headers: [],
+              },
             ],
           },
           verified: null,

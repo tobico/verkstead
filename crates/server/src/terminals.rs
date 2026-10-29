@@ -1266,15 +1266,14 @@ pub(crate) async fn open(
         }
     }
 
-    // And where that Profile is a member's, the account it names is on that
-    // machine: a mirror of it is fetched here before the shell is built out of
-    // it, exactly as a session's launch fetches one — see
+    // And where that Profile is not bound here, the account it names is on a
+    // machine it is bound on: a mirror of it is fetched here before the shell is
+    // built out of it, exactly as a session's launch fetches one — see
     // [`crate::mirroring::account`]. A terminal is the human working where the
-    // agent worked, so what it is given of the account is what the agent was
-    // given.
+    // agent worked, so what it is given of the account is what the agent was given.
     //
-    // A home that is not answering refuses the press, the way a sandbox that
-    // cannot be built does: a shell opened around the home machine's own paths
+    // No bound device answering refuses the press, the way a sandbox that
+    // cannot be built does: a shell opened around a bound machine's own paths
     // would be one writing this account's store wherever those paths happen to
     // land here.
     //
@@ -1634,9 +1633,9 @@ async fn typed(terminal: &Terminal, command: &str, conversation_id: i64, number:
 ///
 /// **And `lending` beside it where the account was a mirror**, which is the same
 /// ending reaching one hop further: the login this shell leaves goes into the
-/// account on the device it is at home on — see
-/// [`crate::mirroring::account::Lending`]. Nothing at all for an account of this
-/// device's own, which is every terminal on a Verkstead linked to nothing.
+/// account on the device it was fetched from — see
+/// [`crate::mirroring::account::Lending`]. Nothing at all for a Profile bound
+/// here, which is every terminal on a Verkstead linked to nothing.
 #[expect(
     clippy::too_many_arguments,
     reason = "\
@@ -1759,9 +1758,9 @@ async fn follow(
     }
 
     // And where that account was a mirror, the login it now holds goes into the
-    // account on the device it is at home on — the way a session's ending writes one
-    // back, and after the close for its reason. A human who logged in at this shell
-    // logged in to somebody else's account, and an account lent out and never
+    // account on the device it was fetched from — the way a session's ending writes
+    // one back, and after the close for its reason. A human who logged in at this
+    // shell logged in to somebody else's account, and an account lent out and never
     // written back is one signing itself out a session at a time.
     if let Some(lending) = lending {
         lending.written_home(conversation_id).await;

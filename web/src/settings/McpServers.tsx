@@ -105,6 +105,9 @@ const TITLE = "MCP Servers";
 /// name typed to match one already declared would otherwise stop being editable
 /// under the hand that was typing it.
 type Editing = {
+  /// The uuid of the declaration's record, or `null` on a row added here and
+  /// not yet saved — which the server mints one for.
+  id: string | null;
   name: string;
   url: string;
   fresh: boolean;
@@ -207,6 +210,7 @@ export function savingServers(
 /// header named, and its value kept.
 export function standing(told: SettingsView | undefined): McpServerEdit[] {
   return (told?.mcp_servers ?? []).map((server) => ({
+    id: server.id,
     name: server.name,
     url: server.url,
     headers: server.headers.map((header) => ({
@@ -300,13 +304,26 @@ export function McpServersPane(props: {
   // lands, so the row a name is on is the row the server declared it on.
   const [tries, setTries] = createSignal<ServerTried[]>([]);
 
+  // And the declarations taken off the page since the last save, by their
+  // records' uuids — which is what a save removes. Said rather than worked out
+  // from what is missing, because a declaration another device made after this
+  // page was read is missing from the rows too, and is nobody's removal.
+  const [removed, setRemoved] = createSignal<string[]>([]);
+
   const told = (): SettingsView | undefined => settings.data;
+
+  /// Whether `row` is a declared one whose name another declared row shares.
+  const clashes = (row: Editing): boolean =>
+    !row.fresh &&
+    drawn().filter((other) => !other.fresh && other.name === row.name).length >
+      1;
 
   /// The rows as they are drawn: what has been edited, or what is declared while
   /// nothing has been.
   const drawn = (): Editing[] =>
     rows() ??
     (told()?.mcp_servers ?? []).map((server) => ({
+      id: server.id,
       name: server.name,
       url: server.url,
       fresh: false,
@@ -374,11 +391,20 @@ export function McpServersPane(props: {
   /// are still the rows the server was talking about.
   const add = () => {
     setRefusals([]);
-    setRows([...drawn(), { name: "", url: "", fresh: true, headers: [] }]);
+    setRows([
+      ...drawn(),
+      { id: null, name: "", url: "", fresh: true, headers: [] },
+    ]);
   };
 
   const remove = (at: number) => {
     setRefusals([]);
+
+    const id = drawn()[at]?.id;
+    if (id) {
+      setRemoved([...removed(), id]);
+    }
+
     setRows(drawn().filter((_, which) => which !== at));
   };
 
@@ -434,6 +460,11 @@ export function McpServersPane(props: {
     const edited = rows();
 
     if (edited !== null) {
+      const ids = edited
+        .filter((row) => !written(row))
+        .flatMap((row) => (row.id ? [row.id] : []));
+
+      setRemoved([...removed(), ...ids]);
       setRows(edited.filter(written));
     }
   };
@@ -443,8 +474,8 @@ export function McpServersPane(props: {
   /// have — the blank rows having been taken off it by [`tidied`] first.
   ///
   /// The row's own `fresh` flag does not travel. It is how this pane knows which
-  /// name to draw as a field, and the server's business is the list as it is to
-  /// stand.
+  /// name to draw as a field; what tells the server which record a row is, is
+  /// its uuid — and every row taken off is said by its uuid too.
   const edit = (): McpServersEdit => {
     const edited = rows();
 
@@ -452,7 +483,8 @@ export function McpServersPane(props: {
       ? "Keep"
       : {
           Set: {
-            servers: edited.map(({ name, url, headers }) => ({
+            servers: edited.map(({ id, name, url, headers }) => ({
+              id,
               name,
               url,
               // Each header by name, with what is to become of the value sent
@@ -464,6 +496,7 @@ export function McpServersPane(props: {
                 value: becomes(header),
               })),
             })),
+            removed: removed(),
           },
         };
   };
@@ -485,6 +518,7 @@ export function McpServersPane(props: {
       // they said: what is drawn from here on is what was written down, and a
       // row that was new is a declaration now.
       setRows(null);
+      setRemoved([]);
       setRefusals([]);
 
       // And what came of speaking to each of them, which is what the rows say
@@ -596,6 +630,16 @@ export function McpServersPane(props: {
                         {(why) => (
                           <ErrorLine class={styles.trouble}>{why()}</ErrorLine>
                         )}
+                      </Show>
+                      {/* Two declared rows of one name, which only two devices
+                          declaring it apart brings about. A server is never
+                          renamed, so removing one is the only way out, and
+                          either Remove does it. */}
+                      <Show when={clashes(row())}>
+                        <ErrorLine class={styles.trouble}>
+                          Another server shares this name, so neither is
+                          given to a session. Remove one of them.
+                        </ErrorLine>
                       </Show>
 
                       <label for={`mcp-url-${at}`}>URL</label>

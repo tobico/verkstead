@@ -206,7 +206,7 @@ async fn a_signed_out_stop_carries_the_profile_it_waits_on() {
     let (_dir, pool) = fresh_pool().await;
     let id = conversation(&pool).await;
 
-    let notice = stop_signed_out(&pool, id, SAID, 7)
+    let notice = stop_signed_out(&pool, id, SAID, "7")
         .await
         .unwrap()
         .expect("a Conversation that is there stops");
@@ -220,12 +220,12 @@ async fn a_signed_out_stop_carries_the_profile_it_waits_on() {
             notice,
             at: it.at.clone(),
             resets: None,
-            signed_out: Some(7),
+            signed_out: Some("7".to_owned()),
         },
     );
 
     assert_eq!(
-        stop_signed_out(&pool, id, "and again", 7).await.unwrap(),
+        stop_signed_out(&pool, id, "and again", "7").await.unwrap(),
         None,
         "one stop per Conversation, this kind as much as any",
     );
@@ -267,21 +267,24 @@ async fn a_login_finds_the_runs_waiting_on_its_profile() {
         unreachable!()
     };
 
-    stop_signed_out(&pool, first, SAID, 7).await.unwrap();
-    stop_signed_out(&pool, second, SAID, 7).await.unwrap();
+    stop_signed_out(&pool, first, SAID, "7").await.unwrap();
+    stop_signed_out(&pool, second, SAID, "7").await.unwrap();
     stop(&pool, by_hand, Decision::Human, SAID, None)
         .await
         .unwrap();
-    stop_signed_out(&pool, elsewhere, SAID, 8).await.unwrap();
+    stop_signed_out(&pool, elsewhere, SAID, "8").await.unwrap();
 
-    assert_eq!(signed_out_on(&pool, 7).await.unwrap(), vec![first, second]);
-    assert_eq!(signed_out_on(&pool, 8).await.unwrap(), vec![elsewhere]);
-    assert_eq!(signed_out_on(&pool, 9).await.unwrap(), Vec::<i64>::new());
+    assert_eq!(
+        signed_out_on(&pool, "7").await.unwrap(),
+        vec![first, second]
+    );
+    assert_eq!(signed_out_on(&pool, "8").await.unwrap(), vec![elsewhere]);
+    assert_eq!(signed_out_on(&pool, "9").await.unwrap(), Vec::<i64>::new());
 
     clear_stop(&pool, first).await.unwrap();
 
     assert_eq!(
-        signed_out_on(&pool, 7).await.unwrap(),
+        signed_out_on(&pool, "7").await.unwrap(),
         vec![second],
         "and a run driven again is not waiting on anything",
     );

@@ -309,15 +309,16 @@ pub struct ConversationEntry {
 /// the OS is worth drawing at all (see [`RowDevice::os`]).
 ///
 /// The sidebar's rows carry one only for another device's work. A Profile
-/// card's mirror carries one too, for the device its account lives on, and
-/// always in full — see [`crate::ProfileEntry`].
+/// card's line per device carries one too, this device's own among them, and
+/// always in full — see [`crate::ProfileDevice`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct RowDevice {
-    /// The **Device Id**. Never `null` on what a server answers today — this
-    /// device's own rows carry no `RowDevice` at all — but the viewer reads
-    /// `null` as *this device*, the shape it keys its queries and composes its
-    /// paths by, so a local URL keeps the shape it has always had.
+    /// The **Device Id**, or `null` for *this device*: the shape the viewer
+    /// keys its queries and composes its paths by, so a local URL keeps the
+    /// shape it has always had. A sidebar row of this device's own carries no
+    /// `RowDevice` at all; a Profile card's line for this device carries one
+    /// with no id.
     pub id: Option<String>,
 
     /// What it is shown as: the hostname of the machine, as that machine last
@@ -334,8 +335,8 @@ pub struct RowDevice {
     /// is already on says nothing. The hub decides it, by the server's
     /// `platform::same_mark` — the viewer's `osIcon` rule said a second time.
     ///
-    /// **Never `null` on a Profile card's mirror**, which draws the device's
-    /// full badge whatever the hub is.
+    /// **Never `null` on a Profile card's line per device**, which draws the
+    /// device's full badge whatever the hub is.
     pub os: Option<String>,
 
     /// And whether the device is answering. `false` is the row drawn dimmed,
@@ -1347,8 +1348,14 @@ pub struct AttachedServerView {
     /// Read at the moment the Conversation is, as everything about a
     /// declaration is: a server deleted from the settings turns this false on
     /// every Conversation that attached it, and declaring one of that name
-    /// again turns it back.
+    /// again turns it back. True where two or more do — see [`Self::clashes`].
     pub declared: bool,
+
+    /// Whether two or more live declarations share the name, which only
+    /// replication brings about: two devices that each declared it while
+    /// apart. A session is handed neither, and the chip says the two clash
+    /// until one is removed on the settings page.
+    pub clashes: bool,
 }
 
 /// One companion repo of a Conversation: which Repo, how far into it a session
@@ -2449,11 +2456,10 @@ pub struct NoticeEvent {
     /// markdown on this wire is.
     pub html: String,
 
-    /// The login this Notice offers, where it is the stop of a run whose
-    /// account signed out and the account is at home on this device
-    /// (ADR-0022). `None` everywhere else — a mirrored Profile's Notice names
-    /// the device to log in on instead, and a stop that has been resumed offers
-    /// nothing.
+    /// The login this Notice offers, where it is the stop of a run whose account
+    /// signed out and the Profile is bound on this device (ADR-0022). `None`
+    /// everywhere else — the Notice of a Profile not bound here names the device to
+    /// log in on instead, and a stop that has been resumed offers nothing.
     pub log_in: Option<NoticeLogIn>,
 }
 
@@ -2462,9 +2468,9 @@ pub struct NoticeEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct NoticeLogIn {
-    /// The Profile, by its id on this device. Always a Claude one: that is the
-    /// one harness Verkstead runs a login for.
-    pub profile: i64,
+    /// The Profile, by its uuid. Always a Claude one: that is the one harness
+    /// Verkstead runs a login for.
+    pub profile: String,
 
     /// What the human called it, where they called it anything — which the
     /// modal reads beside the harness, the way the Profile's card does.
@@ -4288,6 +4294,12 @@ pub enum ServerAttached {
     /// name, and one made against a name nothing answers to would be a chip born
     /// pointing at nothing.
     NoSuchServer,
+
+    /// Two or more live declarations share that name, which only replication
+    /// brings about, and a session would be handed neither: a chip made now
+    /// would be one born clashing. Removing one on the settings page is the way
+    /// out.
+    Clashes,
 }
 
 /// And of taking one off again.
@@ -4712,14 +4724,12 @@ pub enum GrillingStarted {
         repo: String,
     },
 
-    /// Or it records a member's Author whose home holds a token, and the copy
-    /// of that token has not reached this device yet. Named with the home
-    /// device, the way a Profile whose home is not answering is: working as
-    /// that Author without it, or as the host's own login, was turned down
-    /// (ADR-0025).
+    /// Or it records an Author whose record says a token is held for it, and
+    /// the copy of that token has not reached this device yet from whichever
+    /// member holds one (ADR-0028): working as that Author without it, or as
+    /// the host's own login, was turned down (ADR-0025).
     RepoAuthorTokenAwaited {
         repo: String,
-        device: String,
     },
 
     /// A companion is under another Author than the Repo, which it can only
@@ -5594,7 +5604,6 @@ pub enum Adopted {
     },
     RepoAuthorTokenAwaited {
         repo: String,
-        device: String,
     },
 
     /// A companion is under another Author than the Repo — see
@@ -5831,7 +5840,6 @@ pub enum TakenUp {
     },
     RepoAuthorTokenAwaited {
         repo: String,
-        device: String,
     },
 
     /// A companion is under another Author than the Repo — see

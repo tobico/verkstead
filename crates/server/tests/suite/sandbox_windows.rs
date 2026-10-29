@@ -433,7 +433,7 @@ impl Grilling {
         .unwrap()
         .expect("the second Conversation starts");
 
-        store::set_grilling_pairing(&self.pool, id, self.profile.id, self.profile.model())
+        store::set_grilling_pairing(&self.pool, id, &self.profile.id, self.profile.model())
             .await
             .unwrap();
 
@@ -978,7 +978,7 @@ async fn grilling() -> Grilling {
         .unwrap()
         .expect("the Conversation starts");
 
-    store::set_grilling_pairing(&pool, id, profile.id, profile.model())
+    store::set_grilling_pairing(&pool, id, &profile.id, profile.model())
         .await
         .unwrap();
 

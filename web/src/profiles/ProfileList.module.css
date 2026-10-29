@@ -90,24 +90,59 @@
   gap: 0.75rem;
 }
 
-/* And which machine the account is on, under the reading, where it is not this
-   one. The sidebar row's own line — a mark and a name, dimmed, because it is
-   what a row is told apart by rather than what it says. */
-.profile .device {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  min-width: 0;
+/* And under it, in a cluster, a line per device: the device's mark and name,
+   then how it runs the profile — bound at its paths, or from a copy. Quieter and
+   smaller than the line over them, being where the profile is rather than what
+   it is; each one line, the paths cut at the far end. */
+.devices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
 
-/* The mark itself, sized against the line it stands in rather than in pixels:
-   this line is smaller than the card's own, and a mark written down in rem
-   would be the one thing on it that did not shrink with it. */
-.profile .os {
+.device {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+/* A member not answering, drawn from the last binding of it this device holds
+   and dimmed the way the Devices section dims its row. */
+.device.unreachable {
+  opacity: 0.55;
+}
+
+.device .os {
   flex: none;
-  width: 1em;
+  width: 0.95rem;
+}
+
+.device .deviceName {
+  flex: none;
+  color: var(--ink);
+}
+
+.device .here {
+  margin-inline-start: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.device .how {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.device code {
+  font-size: 0.95em;
 }
 
 /* The Log in press, small: it is a thing to do about the account rather than
@@ -126,10 +161,8 @@
   color: var(--ink-soft);
 }
 
-/* And the same fact said in the pane, over the form: which machine the account is
-   on, and that a save or a removal here is put to it. A line of prose rather than
-   the card's mark and name, because what it is saying is where the press goes
-   rather than which row this is — the paths under it are that machine's. */
+/* And over the form, for a profile not bound on this device: that the paths
+   under it are another device's, and a save leaves them alone. */
 .athome {
   margin: 0 0 0.85rem;
   font-size: 0.9rem;

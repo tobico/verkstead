@@ -1,6 +1,6 @@
 //! What a start, an adoption and a take-up say over a repo with no author of its
 //! own to work as: one the one list no longer holds, none picked among
-//! several, or a member's whose token hasn't reached this device (ADR-0025).
+//! several, or one whose token hasn't reached this device (ADR-0025).
 //!
 //! The same sentence at every door, naming the repo and sending the human to
 //! where another is picked.
@@ -36,12 +36,12 @@ describe("a repo with no author of its own", () => {
     );
   });
 
-  it("names the device a mirrored author's token is still to come from", () => {
-    const awaited = { repo: "verkstead", device: "the-workstation" };
+  it("says an author's token is still to come from another device", () => {
+    const awaited = { repo: "verkstead" };
     const said = grillRefusal({ RepoAuthorTokenAwaited: awaited });
 
     expect(said).toBe(
-      "The verkstead repo's author is at home on the-workstation, and its token hasn't reached this device yet. Try again once the-workstation is reachable.",
+      "The verkstead repo's author has a token on another device, and it hasn't reached this one yet. Try again once a device holding it is reachable.",
     );
     expect(adoptRefusal({ RepoAuthorTokenAwaited: awaited })).toBe(said);
     expect(takeUpRefusal({ RepoAuthorTokenAwaited: awaited })).toBe(said);

@@ -7,13 +7,13 @@
 //! finding and the facts around it — see `Broken` and `ProfileTrouble` — and
 //! what is here is the sentence.
 //!
-//! **Three of the findings are about a mirror**, which is a Profile whose
-//! account is on another machine: its home not answering, its account holding
-//! no login there is anything to mirror, and the harness it runs not being on
-//! *this* box. Each is something to go and put right somewhere, which is why
-//! every one of them names the somewhere — the machine, or this one.
+//! **Two of the findings are about a Profile not bound here**, whose account
+//! is on other machines: no device it is bound on with a login to copy
+//! answering, and the harness it runs not being on *this* box. Each is
+//! something to go and put right somewhere, and each device answers them for
+//! itself.
 //!
-//! **And one is about an account at home here: it has signed out.** A press
+//! **And one is about an account bound here: it has signed out.** A press
 //! found it with no login, and the card's Log in button is the fix.
 //!
 //! **And the harness one is the onboarding probe's own sentence**, because it
@@ -55,8 +55,8 @@ export const UNREACHABLE = "unreachable";
 /// A login kept in the macOS Keychain, and an account nobody has logged in to
 /// yet, are both perfectly runnable here: what they cannot do is be lent to
 /// another machine, there being no file to mirror. So the row says that and
-/// nothing stronger, and the same account read as a mirror elsewhere is broken
-/// there — see `Broken.NoLoginAtHome`.
+/// nothing stronger, and the same account read on a device it is not bound on
+/// is broken there — see `Broken.NoBoundDevice`.
 export const NOT_USABLE_AWAY =
   "This account has no login file, so it can't be used from another device. Log in here to give it one.";
 
@@ -70,16 +70,12 @@ export function brokenReading(profile: ProfileEntry): string | null {
     : troubleReading({
         broken: profile.broken,
         agent_type: profile.account.agent_type,
-        device: profile.device?.name ?? null,
       });
 }
 
 /// The same sentence out of what a refused press carries, which is the same
-/// three facts a row holds: the finding, the harness, and the machine the
-/// account is at home on.
+/// facts a row holds: the finding and the harness. No finding names a device.
 export function troubleReading(said: ProfileTrouble): string {
-  const where = said.device ?? "the device it's at home on";
-
   switch (said.broken) {
     case "DirMissing":
       return "Its claude directory is gone.";
@@ -87,10 +83,8 @@ export function troubleReading(said: ProfileTrouble): string {
       return "Its config file is gone.";
     case "HomeMissing":
       return "The home it kept its account under is gone.";
-    case "HomeUnreachable":
-      return `Its account can't be fetched, because ${where} is ${UNREACHABLE}. No session here can run under it.`;
-    case "NoLoginAtHome":
-      return `Its account on ${where} has no login file, so there's nothing to mirror here. Log in on that machine.`;
+    case "NoBoundDevice":
+      return "No device it's bound on with a login is reachable, so no session here can run under it.";
     case "HarnessMissing":
       return harnessAbsent(said.agent_type);
     case "SignedOut":
@@ -111,10 +105,8 @@ export function brokenBriefly(broken: Broken): string {
     case "ConfigMissing":
     case "HomeMissing":
       return "account gone";
-    case "HomeUnreachable":
-      return UNREACHABLE;
-    case "NoLoginAtHome":
-      return "no login at home";
+    case "NoBoundDevice":
+      return "no bound device reachable";
     case "HarnessMissing":
       return "not on this machine";
     case "SignedOut":

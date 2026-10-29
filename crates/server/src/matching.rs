@@ -165,6 +165,22 @@ pub async fn each_with_origin(
         .collect())
 }
 
+/// Every Repo on `device`'s registry, as it answers them — the whole reading
+/// [`each_with_origin`] matches against, for a caller that wants the rows
+/// themselves: an Author's removal, asking which of them point at it.
+pub(crate) async fn registry_of(
+    devices: &Devices,
+    device: &str,
+) -> Result<Vec<RepoAcross>, Refusal> {
+    relaying::word_from(
+        Some(devices),
+        device,
+        relaying::asking(REPOS.to_owned()),
+        MOST_THE_REPOS_ARE,
+    )
+    .await
+}
+
 /// How long one member has to answer the clonable reading before it is taken as
 /// having nothing to offer: **three seconds**.
 ///
@@ -173,7 +189,8 @@ pub async fn each_with_origin(
 /// rather than on the address, and short enough that a laptop with its lid shut
 /// is a pause rather than a group that never arrives. A member that answers late
 /// is read again the next time the dropdown is.
-const MOST_A_MEMBER_IS_WAITED_ON: std::time::Duration = std::time::Duration::from_secs(3);
+pub(crate) const MOST_A_MEMBER_IS_WAITED_ON: std::time::Duration =
+    std::time::Duration::from_secs(3);
 
 /// Every **Clonable Repo** the cluster holds for this device: what the other
 /// members have registered, by origin, that none of `here` — this device's own

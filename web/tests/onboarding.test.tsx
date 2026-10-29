@@ -377,7 +377,7 @@ describe("the lines under a met step", () => {
   it("names each harness once", () => {
     const codex = {
       ...PROFILE_LIST[0]!,
-      id: 9,
+      id: "99999999-9999-4999-8999-999999999999",
       account: { agent_type: "Codex", home: "/srv/accounts/codex" },
     } as ProfileEntry;
 

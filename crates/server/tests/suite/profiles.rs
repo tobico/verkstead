@@ -149,7 +149,7 @@ async fn save(app: &Router, body: &serde_json::Value) -> ProfileSaved {
 
 /// And the same body sent at a Profile that is already there, which is the one
 /// form doing the other half of what it does.
-async fn rewrite(app: &Router, id: i64, body: &serde_json::Value) -> ProfileSaved {
+async fn rewrite(app: &Router, id: &str, body: &serde_json::Value) -> ProfileSaved {
     post(app, &format!("/api/ui/profiles/{id}"), body).await
 }
 
@@ -180,7 +180,7 @@ async fn listed(app: &Router) -> Vec<ProfileEntry> {
     get(app, "/api/ui/profiles").await
 }
 
-async fn remove(app: &Router, id: i64) -> ProfileDeleted {
+async fn remove(app: &Router, id: &str) -> ProfileDeleted {
     post(
         app,
         &format!("/api/ui/profiles/{id}/delete"),
@@ -254,7 +254,7 @@ async fn opened(app: &Router, id: i64) -> ConversationView {
     get(app, &format!("/api/ui/conversations/{id}")).await
 }
 
-async fn choose_grilling(app: &Router, id: i64, profile_id: i64, model: &str) -> ProfileChosen {
+async fn choose_grilling(app: &Router, id: i64, profile_id: &str, model: &str) -> ProfileChosen {
     post(
         app,
         &format!("/api/ui/conversations/{id}/grilling-pairing"),
@@ -266,7 +266,7 @@ async fn choose_grilling(app: &Router, id: i64, profile_id: i64, model: &str) ->
 async fn choose_implementation(
     app: &Router,
     id: i64,
-    profile_id: i64,
+    profile_id: &str,
     model: &str,
 ) -> ProfileChosen {
     post(
@@ -277,7 +277,7 @@ async fn choose_implementation(
     .await
 }
 
-async fn choose_review(app: &Router, id: i64, profile_id: i64, model: &str) -> ProfileChosen {
+async fn choose_review(app: &Router, id: i64, profile_id: &str, model: &str) -> ProfileChosen {
     post(
         app,
         &format!("/api/ui/conversations/{id}/review-pairing"),
@@ -382,7 +382,7 @@ async fn a_profile_saved_with_its_memory_off_reads_back_off() {
     forgetting["memory"] = serde_json::Value::Bool(false);
 
     assert_eq!(
-        rewrite(&app, profile.id, &forgetting).await,
+        rewrite(&app, &profile.id, &forgetting).await,
         ProfileSaved::Saved
     );
     assert!(!listed(&app).await[0].memory);
@@ -418,7 +418,7 @@ async fn a_profile_is_rewritten_whole_and_removed_when_nobody_is_running_under_i
     assert_eq!(rows[0].name.as_deref(), Some("anthropic"));
     assert_eq!(rows[0].models, &["claude-fable-5"]);
 
-    assert_eq!(remove(&app, profile.id).await, ProfileDeleted::Removed);
+    assert_eq!(remove(&app, &profile.id).await, ProfileDeleted::Removed);
     assert!(listed(&app).await.is_empty());
 }
 
@@ -763,7 +763,7 @@ async fn taking_the_name_off_a_second_profile_is_refused() {
     let (second_dir, second_config) = pair(accounts.path(), "anthropic");
 
     assert_eq!(
-        rewrite(&app, named.id, &unnamed(&second_dir, &second_config)).await,
+        rewrite(&app, &named.id, &unnamed(&second_dir, &second_config)).await,
         ProfileSaved::DefaultTaken
     );
 
@@ -773,10 +773,11 @@ async fn taking_the_name_off_a_second_profile_is_refused() {
         .iter()
         .find(|profile| profile.name.is_none())
         .expect("the unnamed one is on the list")
-        .id;
+        .id
+        .clone();
 
     assert_eq!(
-        rewrite(&app, unnamed_id, &unnamed(&claude_dir, &config_file)).await,
+        rewrite(&app, &unnamed_id, &unnamed(&claude_dir, &config_file)).await,
         ProfileSaved::Saved
     );
 }
@@ -1026,7 +1027,7 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     let opus = saved(&app, accounts.path(), "opus").await;
 
     assert_eq!(
-        choose_grilling(&app, id, fable.id, MODEL).await,
+        choose_grilling(&app, id, &fable.id, MODEL).await,
         ProfileChosen::Chosen
     );
 
@@ -1040,7 +1041,7 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     assert_eq!(half.implementation_pairing, None);
 
     assert_eq!(
-        choose_implementation(&app, id, opus.id, MODEL).await,
+        choose_implementation(&app, id, &opus.id, MODEL).await,
         ProfileChosen::Chosen
     );
 
@@ -1066,8 +1067,8 @@ async fn a_pairing_says_back_the_model_it_was_chosen_with() {
     let id = conversation(&app, accounts.path()).await;
     let work = saved(&app, accounts.path(), "work").await;
 
-    choose_grilling(&app, id, work.id, MODELS[1]).await;
-    choose_implementation(&app, id, work.id, MODELS[0]).await;
+    choose_grilling(&app, id, &work.id, MODELS[1]).await;
+    choose_implementation(&app, id, &work.id, MODELS[0]).await;
 
     let view = opened(&app, id).await;
     assert_eq!(
@@ -1090,11 +1091,11 @@ async fn a_model_the_profile_does_not_list_cannot_be_paired_with_it() {
     let work = saved(&app, accounts.path(), "work").await;
 
     assert_eq!(
-        choose_grilling(&app, id, work.id, "claude-haiku-4-5").await,
+        choose_grilling(&app, id, &work.id, "claude-haiku-4-5").await,
         ProfileChosen::NoSuchModel
     );
     assert_eq!(
-        choose_implementation(&app, id, work.id, "claude-haiku-4-5").await,
+        choose_implementation(&app, id, &work.id, "claude-haiku-4-5").await,
         ProfileChosen::NoSuchModel
     );
 
@@ -1118,19 +1119,19 @@ async fn a_conversation_is_not_ready_to_grill_until_every_pairing_is_chosen() {
         "a fresh Conversation has chosen none of them"
     );
 
-    choose_grilling(&app, id, fable.id, MODEL).await;
+    choose_grilling(&app, id, &fable.id, MODEL).await;
     assert!(
         !opened(&app, id).await.ready_to_grill,
         "one of the three is not all of them"
     );
 
-    choose_implementation(&app, id, opus.id, MODEL).await;
+    choose_implementation(&app, id, &opus.id, MODEL).await;
     assert!(
         !opened(&app, id).await.ready_to_grill,
         "and neither is two of them: the review is a pick of its own"
     );
 
-    choose_review(&app, id, haiku.id, MODEL).await;
+    choose_review(&app, id, &haiku.id, MODEL).await;
     assert!(opened(&app, id).await.ready_to_grill);
 }
 
@@ -1143,9 +1144,9 @@ async fn a_drafting_conversation_with_an_unpaired_profile_is_not_ready_to_grill(
     let id = conversation(&app, accounts.path()).await;
     let work = saved(&app, accounts.path(), "work").await;
 
-    choose_grilling(&app, id, work.id, MODEL).await;
-    choose_implementation(&app, id, work.id, MODEL).await;
-    choose_review(&app, id, work.id, MODEL).await;
+    choose_grilling(&app, id, &work.id, MODEL).await;
+    choose_implementation(&app, id, &work.id, MODEL).await;
+    choose_review(&app, id, &work.id, MODEL).await;
     assert!(opened(&app, id).await.ready_to_grill);
 
     // The shape an old choice left behind: the Profile, and no model beside it.
@@ -1154,7 +1155,7 @@ async fn a_drafting_conversation_with_an_unpaired_profile_is_not_ready_to_grill(
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
-    store::set_grilling_pairing(&pool, id, work.id, None)
+    store::set_grilling_pairing(&pool, id, &work.id, None)
         .await
         .unwrap();
 
@@ -1176,9 +1177,9 @@ async fn a_conversation_holding_a_broken_profile_is_not_ready_to_grill() {
     let opus = saved(&app, accounts.path(), "opus").await;
     let haiku = saved(&app, accounts.path(), "haiku").await;
 
-    choose_grilling(&app, id, fable.id, MODEL).await;
-    choose_implementation(&app, id, opus.id, MODEL).await;
-    choose_review(&app, id, haiku.id, MODEL).await;
+    choose_grilling(&app, id, &fable.id, MODEL).await;
+    choose_implementation(&app, id, &opus.id, MODEL).await;
+    choose_review(&app, id, &haiku.id, MODEL).await;
     assert!(opened(&app, id).await.ready_to_grill);
 
     std::fs::remove_file(accounts.path().join("opus/.claude.json")).unwrap();
@@ -1200,22 +1201,22 @@ async fn one_profile_can_be_every_one_of_a_conversations_choices() {
     let id = conversation(&app, accounts.path()).await;
     let only = saved(&app, accounts.path(), "work").await;
 
-    choose_grilling(&app, id, only.id, MODEL).await;
-    choose_implementation(&app, id, only.id, MODEL).await;
-    choose_review(&app, id, only.id, MODEL).await;
+    choose_grilling(&app, id, &only.id, MODEL).await;
+    choose_implementation(&app, id, &only.id, MODEL).await;
+    choose_review(&app, id, &only.id, MODEL).await;
 
     let view = opened(&app, id).await;
     assert_eq!(
-        view.grilling_pairing.as_ref().map(|p| p.profile.id),
-        Some(only.id)
+        view.grilling_pairing.as_ref().map(|p| p.profile.id.clone()),
+        Some(only.id.clone())
     );
     assert_eq!(
-        view.implementation_pairing.map(|p| p.profile.id),
-        Some(only.id)
+        view.implementation_pairing.map(|p| p.profile.id.clone()),
+        Some(only.id.clone())
     );
     assert_eq!(
-        view.review_pairing.pairing().map(|p| p.profile.id),
-        Some(only.id)
+        view.review_pairing.pairing().map(|p| p.profile.id.clone()),
+        Some(only.id.clone())
     );
     assert!(view.ready_to_grill);
 }
@@ -1233,13 +1234,13 @@ async fn a_profile_a_conversation_has_chosen_is_removed_and_nulled_out_of_it() {
     let id = conversation(&app, accounts.path()).await;
     let profile = saved(&app, accounts.path(), "work").await;
 
-    choose_grilling(&app, id, profile.id, MODEL).await;
-    choose_implementation(&app, id, profile.id, MODEL).await;
-    choose_review(&app, id, profile.id, MODEL).await;
+    choose_grilling(&app, id, &profile.id, MODEL).await;
+    choose_implementation(&app, id, &profile.id, MODEL).await;
+    choose_review(&app, id, &profile.id, MODEL).await;
 
     assert!(opened(&app, id).await.ready_to_grill);
 
-    assert_eq!(remove(&app, profile.id).await, ProfileDeleted::Removed);
+    assert_eq!(remove(&app, &profile.id).await, ProfileDeleted::Removed);
     assert!(listed(&app).await.is_empty());
 
     let view = opened(&app, id).await;
@@ -1259,23 +1260,26 @@ async fn a_profile_that_is_not_there_says_so_however_it_is_asked_about() {
     let id = conversation(&app, accounts.path()).await;
     let (claude_dir, config_file) = pair(accounts.path(), "work");
 
+    // A uuid of the right shape that nothing here was ever saved under.
+    let nowhere = "00000000-0000-4000-8000-000000000404";
+
     let rewritten: ProfileSaved = post(
         &app,
-        "/api/ui/profiles/404",
+        &format!("/api/ui/profiles/{nowhere}"),
         &edit("work", &claude_dir, &config_file, &["claude-opus-5"]),
     )
     .await;
     assert_eq!(rewritten, ProfileSaved::NoSuchProfile);
 
-    assert_eq!(remove(&app, 404).await, ProfileDeleted::NoSuchProfile);
+    assert_eq!(remove(&app, nowhere).await, ProfileDeleted::NoSuchProfile);
 
     // Chosen between the list a page read and the choice it made from it.
     assert_eq!(
-        choose_grilling(&app, id, 404, MODEL).await,
+        choose_grilling(&app, id, nowhere, MODEL).await,
         ProfileChosen::NoSuchProfile
     );
     assert_eq!(
-        choose_implementation(&app, id, 404, MODEL).await,
+        choose_implementation(&app, id, nowhere, MODEL).await,
         ProfileChosen::NoSuchProfile
     );
 }
@@ -1286,18 +1290,18 @@ async fn choosing_on_a_conversation_that_is_not_there_says_so() {
     let profile = saved(&app, accounts.path(), "work").await;
 
     assert_eq!(
-        choose_grilling(&app, 404, profile.id, MODEL).await,
+        choose_grilling(&app, 404, &profile.id, MODEL).await,
         ProfileChosen::NoSuchConversation
     );
     assert_eq!(
-        choose_implementation(&app, 404, profile.id, MODEL).await,
+        choose_implementation(&app, 404, &profile.id, MODEL).await,
         ProfileChosen::NoSuchConversation
     );
 }
 
-/// An id out of a URL the human may have typed, which is not always a number.
+/// An id out of a URL the human may have typed, which is not always a uuid.
 #[tokio::test]
-async fn an_id_that_is_not_a_number_names_no_profile() {
+async fn an_id_that_is_not_a_uuid_names_no_profile() {
     let (accounts, _dir, app) = workbench().await;
     let (claude_dir, config_file) = pair(accounts.path(), "work");
 
@@ -1367,9 +1371,9 @@ async fn a_new_conversation_arrives_with_what_its_repo_was_last_grilled_with() {
     let opus = saved(&app, accounts.path(), "opus").await;
     let haiku = saved(&app, accounts.path(), "haiku").await;
 
-    choose_grilling(&app, id, fable.id, MODEL).await;
-    choose_implementation(&app, id, opus.id, MODEL).await;
-    choose_review(&app, id, haiku.id, MODEL).await;
+    choose_grilling(&app, id, &fable.id, MODEL).await;
+    choose_implementation(&app, id, &opus.id, MODEL).await;
+    choose_review(&app, id, &haiku.id, MODEL).await;
     grill(dir.path(), id).await;
 
     let next = another(&app).await;
@@ -1416,22 +1420,22 @@ async fn changing_the_prefill_before_grilling_is_what_gets_remembered() {
     let fable = saved(&app, accounts.path(), "fable").await;
     let opus = saved(&app, accounts.path(), "opus").await;
 
-    choose_grilling(&app, first, fable.id, MODEL).await;
-    choose_implementation(&app, first, fable.id, MODEL).await;
+    choose_grilling(&app, first, &fable.id, MODEL).await;
+    choose_implementation(&app, first, &fable.id, MODEL).await;
     grill(dir.path(), first).await;
 
     // Prefilled with fable, changed to opus, and grilled on the change.
     let second = another(&app).await;
     assert_eq!(
-        choose_implementation(&app, second, opus.id, MODELS[0]).await,
+        choose_implementation(&app, second, &opus.id, MODELS[0]).await,
         ProfileChosen::Chosen
     );
     grill(dir.path(), second).await;
 
     let view = opened(&app, another(&app).await).await;
     assert_eq!(
-        view.grilling_pairing.as_ref().map(|p| p.profile.id),
-        Some(fable.id),
+        view.grilling_pairing.as_ref().map(|p| p.profile.id.clone()),
+        Some(fable.id.clone()),
         "the half nobody touched is still what it was"
     );
 
@@ -1449,16 +1453,16 @@ async fn a_remembered_profile_whose_pair_has_gone_is_not_prefilled() {
     let fable = saved(&app, accounts.path(), "fable").await;
     let opus = saved(&app, accounts.path(), "opus").await;
 
-    choose_grilling(&app, id, fable.id, MODEL).await;
-    choose_implementation(&app, id, opus.id, MODEL).await;
+    choose_grilling(&app, id, &fable.id, MODEL).await;
+    choose_implementation(&app, id, &opus.id, MODEL).await;
     grill(dir.path(), id).await;
 
     std::fs::remove_file(accounts.path().join("opus/.claude.json")).unwrap();
 
     let view = opened(&app, another(&app).await).await;
     assert_eq!(
-        view.grilling_pairing.as_ref().map(|p| p.profile.id),
-        Some(fable.id),
+        view.grilling_pairing.as_ref().map(|p| p.profile.id.clone()),
+        Some(fable.id.clone()),
         "the half that is still there is still prefilled"
     );
     assert_eq!(view.implementation_pairing, None);
@@ -1472,8 +1476,8 @@ async fn a_remembered_model_a_profile_no_longer_lists_is_not_prefilled() {
     let id = conversation(&app, accounts.path()).await;
     let work = saved(&app, accounts.path(), "work").await;
 
-    choose_grilling(&app, id, work.id, MODEL).await;
-    choose_implementation(&app, id, work.id, MODEL).await;
+    choose_grilling(&app, id, &work.id, MODEL).await;
+    choose_implementation(&app, id, &work.id, MODEL).await;
     grill(dir.path(), id).await;
 
     // Retyped without the model both halves were remembered with.
@@ -1499,8 +1503,8 @@ async fn a_new_conversation_arrives_with_no_review_where_that_is_what_was_grille
     let id = conversation(&app, accounts.path()).await;
     let fable = saved(&app, accounts.path(), "fable").await;
 
-    choose_grilling(&app, id, fable.id, MODEL).await;
-    choose_implementation(&app, id, fable.id, MODEL).await;
+    choose_grilling(&app, id, &fable.id, MODEL).await;
+    choose_implementation(&app, id, &fable.id, MODEL).await;
     assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
     grill(dir.path(), id).await;
 
@@ -1523,9 +1527,9 @@ async fn a_remembered_grilling_skip_is_read_as_nothing_and_never_written_again()
     let id = conversation(&app, accounts.path()).await;
     let fable = saved(&app, accounts.path(), "fable").await;
 
-    choose_grilling(&app, id, fable.id, MODEL).await;
-    choose_implementation(&app, id, fable.id, MODEL).await;
-    choose_review(&app, id, fable.id, MODEL).await;
+    choose_grilling(&app, id, &fable.id, MODEL).await;
+    choose_implementation(&app, id, &fable.id, MODEL).await;
+    choose_review(&app, id, &fable.id, MODEL).await;
     grill(dir.path(), id).await;
 
     remember_a_grilling_skip(dir.path()).await;
@@ -1538,8 +1542,8 @@ async fn a_remembered_grilling_skip_is_read_as_nothing_and_never_written_again()
     );
     assert_eq!(
         view.implementation_pairing
-            .map(|pairing| pairing.profile.id),
-        Some(fable.id),
+            .map(|pairing| pairing.profile.id.clone()),
+        Some(fable.id.clone()),
         "and the pickers beside it are filled as they always were",
     );
     assert_eq!(
@@ -1552,9 +1556,9 @@ async fn a_remembered_grilling_skip_is_read_as_nothing_and_never_written_again()
     // written from the Conversation, which has an account on the role and
     // nothing picked away.
     let next = another(&app).await;
-    choose_grilling(&app, next, fable.id, MODEL).await;
-    choose_implementation(&app, next, fable.id, MODEL).await;
-    choose_review(&app, next, fable.id, MODEL).await;
+    choose_grilling(&app, next, &fable.id, MODEL).await;
+    choose_implementation(&app, next, &fable.id, MODEL).await;
+    choose_review(&app, next, &fable.id, MODEL).await;
     grill(dir.path(), next).await;
 
     assert_eq!(
@@ -1562,8 +1566,8 @@ async fn a_remembered_grilling_skip_is_read_as_nothing_and_never_written_again()
             .await
             .grilling_pairing
             .as_ref()
-            .map(|pairing| pairing.profile.id),
-        Some(fable.id),
+            .map(|pairing| pairing.profile.id.clone()),
+        Some(fable.id.clone()),
         "the account that interviewed last, with the row before it gone",
     );
 }
@@ -1606,9 +1610,9 @@ async fn a_repos_pairings_are_offered_before_anything_is_created() {
     let opus = saved(&app, accounts.path(), "opus").await;
     let haiku = saved(&app, accounts.path(), "haiku").await;
 
-    choose_grilling(&app, id, fable.id, MODEL).await;
-    choose_implementation(&app, id, opus.id, MODEL).await;
-    choose_review(&app, id, haiku.id, MODEL).await;
+    choose_grilling(&app, id, &fable.id, MODEL).await;
+    choose_implementation(&app, id, &opus.id, MODEL).await;
+    choose_review(&app, id, &haiku.id, MODEL).await;
     grill(dir.path(), id).await;
 
     let offered = prefill(&app, only_repo(&app).await).await;
@@ -1650,8 +1654,8 @@ async fn a_repo_that_last_ran_no_review_offers_that() {
     let id = conversation(&app, accounts.path()).await;
     let fable = saved(&app, accounts.path(), "fable").await;
 
-    choose_grilling(&app, id, fable.id, MODEL).await;
-    choose_implementation(&app, id, fable.id, MODEL).await;
+    choose_grilling(&app, id, &fable.id, MODEL).await;
+    choose_implementation(&app, id, &fable.id, MODEL).await;
     assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
     grill(dir.path(), id).await;
 
@@ -1672,16 +1676,19 @@ async fn a_memory_that_no_longer_applies_is_offered_as_nothing() {
     let fable = saved(&app, accounts.path(), "fable").await;
     let opus = saved(&app, accounts.path(), "opus").await;
 
-    choose_grilling(&app, id, fable.id, MODEL).await;
-    choose_implementation(&app, id, opus.id, MODEL).await;
+    choose_grilling(&app, id, &fable.id, MODEL).await;
+    choose_implementation(&app, id, &opus.id, MODEL).await;
     grill(dir.path(), id).await;
 
     std::fs::remove_file(accounts.path().join("opus/.claude.json")).unwrap();
 
     let offered = prefill(&app, only_repo(&app).await).await;
     assert_eq!(
-        offered.grilling.as_ref().map(|pairing| pairing.profile.id),
-        Some(fable.id),
+        offered
+            .grilling
+            .as_ref()
+            .map(|pairing| pairing.profile.id.clone()),
+        Some(fable.id.clone()),
         "the half that is still there is still offered"
     );
     assert_eq!(offered.implementation, None);
@@ -1695,8 +1702,8 @@ async fn a_model_a_profile_no_longer_lists_is_offered_as_nothing() {
     let id = conversation(&app, accounts.path()).await;
     let work = saved(&app, accounts.path(), "work").await;
 
-    choose_grilling(&app, id, work.id, MODEL).await;
-    choose_implementation(&app, id, work.id, MODEL).await;
+    choose_grilling(&app, id, &work.id, MODEL).await;
+    choose_implementation(&app, id, &work.id, MODEL).await;
     grill(dir.path(), id).await;
 
     // Retyped without the model both halves were remembered with.
@@ -1783,8 +1790,13 @@ async fn started_on(app: &Router, repo_id: i64) -> i64 {
 
 /// Which Profile and model a picker ended up on, for comparing a whole prefill
 /// at a glance.
-fn on(pairing: Option<&verkstead_render::PairingView>) -> Option<(i64, &str)> {
-    pairing.map(|pairing| (pairing.profile.id, pairing.model.as_deref().unwrap()))
+fn on(pairing: Option<&verkstead_render::PairingView>) -> Option<(&str, &str)> {
+    pairing.map(|pairing| {
+        (
+            pairing.profile.id.as_str(),
+            pairing.model.as_deref().unwrap(),
+        )
+    })
 }
 
 /// A Repo nothing has grilled arrives filled with what the last work anywhere
@@ -1798,20 +1810,26 @@ async fn a_repo_never_grilled_is_offered_what_the_last_start_anywhere_ran_under(
     let opus = saved(&app, accounts.path(), "opus").await;
     let haiku = saved(&app, accounts.path(), "haiku").await;
 
-    choose_grilling(&app, id, opus.id, MODEL).await;
-    choose_implementation(&app, id, haiku.id, MODELS[0]).await;
-    choose_review(&app, id, fable.id, MODEL).await;
+    choose_grilling(&app, id, &opus.id, MODEL).await;
+    choose_implementation(&app, id, &haiku.id, MODELS[0]).await;
+    choose_review(&app, id, &fable.id, MODEL).await;
     grill(dir.path(), id).await;
 
     let askance = fresh_repo(&app, accounts.path(), "askance").await;
     let offered = prefill(&app, askance).await;
 
-    assert_eq!(on(offered.grilling.as_ref()), Some((opus.id, MODEL)));
+    assert_eq!(
+        on(offered.grilling.as_ref()),
+        Some((opus.id.as_str(), MODEL))
+    );
     assert_eq!(
         on(offered.implementation.as_ref()),
-        Some((haiku.id, MODELS[0]))
+        Some((haiku.id.as_str(), MODELS[0]))
     );
-    assert_eq!(on(offered.review.pairing()), Some((fable.id, MODEL)));
+    assert_eq!(
+        on(offered.review.pairing()),
+        Some((fable.id.as_str(), MODEL))
+    );
 
     let view = opened(&app, started_on(&app, askance).await).await;
     assert_eq!(view.grilling_pairing, offered.grilling);
@@ -1828,20 +1846,29 @@ async fn a_draft_filled_since_the_last_start_is_not_what_a_fresh_repo_copies() {
     let fable = saved(&app, accounts.path(), "fable").await;
     let opus = saved(&app, accounts.path(), "opus").await;
 
-    choose_grilling(&app, id, opus.id, MODEL).await;
-    choose_implementation(&app, id, opus.id, MODEL).await;
-    choose_review(&app, id, opus.id, MODEL).await;
+    choose_grilling(&app, id, &opus.id, MODEL).await;
+    choose_implementation(&app, id, &opus.id, MODEL).await;
+    choose_review(&app, id, &opus.id, MODEL).await;
     grill(dir.path(), id).await;
 
     let draft = another(&app).await;
-    choose_grilling(&app, draft, fable.id, MODELS[0]).await;
-    choose_implementation(&app, draft, fable.id, MODELS[0]).await;
-    choose_review(&app, draft, fable.id, MODELS[0]).await;
+    choose_grilling(&app, draft, &fable.id, MODELS[0]).await;
+    choose_implementation(&app, draft, &fable.id, MODELS[0]).await;
+    choose_review(&app, draft, &fable.id, MODELS[0]).await;
 
     let offered = prefill(&app, fresh_repo(&app, accounts.path(), "askance").await).await;
-    assert_eq!(on(offered.grilling.as_ref()), Some((opus.id, MODEL)));
-    assert_eq!(on(offered.implementation.as_ref()), Some((opus.id, MODEL)));
-    assert_eq!(on(offered.review.pairing()), Some((opus.id, MODEL)));
+    assert_eq!(
+        on(offered.grilling.as_ref()),
+        Some((opus.id.as_str(), MODEL))
+    );
+    assert_eq!(
+        on(offered.implementation.as_ref()),
+        Some((opus.id.as_str(), MODEL))
+    );
+    assert_eq!(
+        on(offered.review.pairing()),
+        Some((opus.id.as_str(), MODEL))
+    );
 }
 
 /// The role the last start picked away is not picked away on a fresh Repo: it
@@ -1853,21 +1880,27 @@ async fn a_skip_on_the_last_start_is_not_carried_to_a_fresh_repo() {
     let fable = saved(&app, accounts.path(), "fable").await;
     let opus = saved(&app, accounts.path(), "opus").await;
 
-    choose_grilling(&app, id, opus.id, MODEL).await;
-    choose_implementation(&app, id, opus.id, MODEL).await;
+    choose_grilling(&app, id, &opus.id, MODEL).await;
+    choose_implementation(&app, id, &opus.id, MODEL).await;
     assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
     grill(dir.path(), id).await;
 
     let offered = prefill(&app, fresh_repo(&app, accounts.path(), "askance").await).await;
 
-    assert_eq!(on(offered.grilling.as_ref()), Some((opus.id, MODEL)));
-    assert_eq!(on(offered.implementation.as_ref()), Some((opus.id, MODEL)));
+    assert_eq!(
+        on(offered.grilling.as_ref()),
+        Some((opus.id.as_str(), MODEL))
+    );
+    assert_eq!(
+        on(offered.implementation.as_ref()),
+        Some((opus.id.as_str(), MODEL))
+    );
 
     // The default is the earliest Claude Profile, on the table's model for the
     // role — which that Profile lists.
     assert_eq!(
         on(offered.review.pairing()),
-        Some((fable.id, "claude-opus-5"))
+        Some((fable.id.as_str(), "claude-opus-5"))
     );
 }
 
@@ -1879,11 +1912,14 @@ async fn a_repo_with_partial_memory_is_not_filled_from_anywhere_else() {
     let id = conversation(&app, accounts.path()).await;
     let fable = saved(&app, accounts.path(), "fable").await;
 
-    choose_grilling(&app, id, fable.id, MODEL).await;
+    choose_grilling(&app, id, &fable.id, MODEL).await;
     grill(dir.path(), id).await;
 
     let offered = prefill(&app, only_repo(&app).await).await;
-    assert_eq!(on(offered.grilling.as_ref()), Some((fable.id, MODEL)));
+    assert_eq!(
+        on(offered.grilling.as_ref()),
+        Some((fable.id.as_str(), MODEL))
+    );
     assert_eq!(offered.implementation, None);
     assert_eq!(offered.review, PickedView::Nothing);
 
@@ -1933,15 +1969,15 @@ async fn the_platform_default_prefers_claude_code_and_its_unnamed_profile() {
     let offered = prefill(&app, repo).await;
     assert_eq!(
         on(offered.grilling.as_ref()),
-        Some((unnamed.id, "claude-fable-5"))
+        Some((unnamed.id.as_str(), "claude-fable-5"))
     );
     assert_eq!(
         on(offered.implementation.as_ref()),
-        Some((unnamed.id, "claude-opus-5"))
+        Some((unnamed.id.as_str(), "claude-opus-5"))
     );
     assert_eq!(
         on(offered.review.pairing()),
-        Some((unnamed.id, "claude-opus-5"))
+        Some((unnamed.id.as_str(), "claude-opus-5"))
     );
 }
 
@@ -1957,11 +1993,11 @@ async fn the_platform_default_takes_the_earliest_named_profile() {
     let offered = prefill(&app, repo).await;
     assert_eq!(
         on(offered.grilling.as_ref()),
-        Some((zeta.id, "claude-fable-5"))
+        Some((zeta.id.as_str(), "claude-fable-5"))
     );
     assert_eq!(
         on(offered.implementation.as_ref()),
-        Some((zeta.id, "claude-opus-5"))
+        Some((zeta.id.as_str(), "claude-opus-5"))
     );
 }
 
@@ -2042,9 +2078,9 @@ async fn an_unusable_candidate_falls_through_to_the_default_and_then_to_nothing(
         ProfileSaved::Saved
     );
 
-    choose_grilling(&app, id, opus.id, MODEL).await;
-    choose_implementation(&app, id, fable.id, MODEL).await;
-    choose_review(&app, id, fable.id, MODEL).await;
+    choose_grilling(&app, id, &opus.id, MODEL).await;
+    choose_implementation(&app, id, &fable.id, MODEL).await;
+    choose_review(&app, id, &fable.id, MODEL).await;
     grill(dir.path(), id).await;
 
     let askance = fresh_repo(&app, accounts.path(), "askance").await;
@@ -2054,10 +2090,13 @@ async fn an_unusable_candidate_falls_through_to_the_default_and_then_to_nothing(
     let offered = prefill(&app, askance).await;
     assert_eq!(
         on(offered.grilling.as_ref()),
-        Some((fable.id, "claude-fable-5")),
+        Some((fable.id.as_str(), "claude-fable-5")),
         "the broken copy falls to the default",
     );
-    assert_eq!(on(offered.implementation.as_ref()), Some((fable.id, MODEL)));
+    assert_eq!(
+        on(offered.implementation.as_ref()),
+        Some((fable.id.as_str(), MODEL))
+    );
 
     std::fs::remove_file(accounts.path().join("fable/.claude.json")).unwrap();
 

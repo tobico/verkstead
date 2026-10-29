@@ -701,7 +701,7 @@ async fn switching_a_drafts_repo_resets_its_base_and_drops_only_the_companion_it
         .await
         .unwrap()
         .expect("nothing is called that yet");
-    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
     set_base_commit(&pool, id, Some("main")).await.unwrap();

@@ -194,7 +194,7 @@ label: string | null, added: Added, state: AdditionState, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, device: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
 /**
  * Why, as the judgement put it.
  */
@@ -689,9 +689,16 @@ name: string,
  * Read at the moment the Conversation is, as everything about a
  * declaration is: a server deleted from the settings turns this false on
  * every Conversation that attached it, and declaring one of that name
- * again turns it back.
+ * again turns it back. True where two or more do — see [`Self::clashes`].
  */
-declared: boolean, };
+declared: boolean, 
+/**
+ * Whether two or more live declarations share the name, which only
+ * replication brings about: two devices that each declared it while
+ * apart. A session is handed neither, and the chip says the two clash
+ * until one is removed on the settings page.
+ */
+clashes: boolean, };
 
 /**
  * What a file was attached to.
@@ -793,26 +800,23 @@ id: string | null,
 display_name: string, name: string, email: string, };
 
 /**
- * One Author's fields and its token, edited alone: what the Git section
- * sends for a **mirror**, which is put to the device that Author is at home on
- * as the ordinary edit of its own (ADR-0025).
+ * One Author's fields and its token, edited alone, on the device it is
+ * pressed on: a write to the Author's record there, which every member pulls.
  *
- * The Author alone rather than a [`SettingsEdit`], because a settings save is
- * the whole of the files it is made on, and this device holds none of the
- * home device's other settings to send. The fields are values and the token
- * is an action, as they are in a settings save, for its reason.
+ * The Author alone rather than a [`SettingsEdit`], which is the whole of the
+ * files it is made on. The fields are values and the token is an action, as
+ * they are in a settings save, for its reason.
  */
 export type AuthorEdit = { display_name: string, name: string, email: string, github_token: TokenEdit, };
 
 /**
- * What became of an [`AuthorEdit`], in the words of the device the Author is
- * at home on.
+ * What became of an [`AuthorEdit`].
  */
 export type AuthorEdited = { "Saved": { verified: Verified | null, } } | "NoSuchAuthor";
 
 /**
- * One Author of the cluster's **one list**: this device's own, or a mirror of
- * one a member holds at home (ADR-0025).
+ * One Author of the cluster's **one list**: a record every device holds,
+ * whichever made it (ADR-0028).
  *
  * What `GET /api/ui/authors` answers, to this device's pages and to a member
  * across the link alike — which is why there is **nothing of the token** here,
@@ -825,25 +829,22 @@ export type AuthorEntry = { id: string,
  */
 display_name: string, name: string, email: string, 
 /**
- * Whether the device it is at home on holds a GitHub token for it.
+ * Whether this device's `secrets.yaml` holds a GitHub token for it.
  */
-holds_token: boolean, 
-/**
- * The device it is at home on, or `null` for one of this device's own.
- *
- * A member taking this list in takes only the rows with none, so a mirror
- * is always one hop from its home and never a mirror of a mirror.
- */
-device: RowDevice | null, };
+holds_token: boolean, };
 
 /**
- * What became of removing an Author, from the Git section's switcher.
+ * What became of removing an Author, from the Git section's switcher — or of
+ * **Repoint them all to…** on the refusal, which removes it once every Repo
+ * pointing at it has been pointed elsewhere.
  *
- * Refused while a registered Repo points at it (ADR-0025): its next session
- * would have nobody to commit as. An unregistered Repo keeps the association
- * as history and blocks nothing.
+ * Refused while a registered Repo points at it (ADR-0025, ADR-0028): its next
+ * session would have nobody to commit as. This device's Repos are looked at
+ * and every member's that answers; a member that does not is skipped and named
+ * in `unasked`, and blocks nothing. An unregistered Repo keeps the association
+ * as history and blocks nothing either.
  */
-export type AuthorRemoved = "Removed" | "NoSuchAuthor" | { "InUse": { repos: Array<string>, } };
+export type AuthorRemoved = { "Removed": { unasked: Array<string>, } } | "NoSuchAuthor" | { "InUse": { repos: Array<PointingRepo>, unasked: Array<string>, } } | { "Unrepointed": { repos: Array<UnrepointedRepo>, unasked: Array<string>, } };
 
 /**
  * One Author as the settings files hold it, with what can be said about its
@@ -1003,20 +1004,20 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * was written down. This is what has become of its account since — the pair
  * for a Claude Profile, and the one home for every type that keeps one.
  *
- * **And three of them are a mirror's**, which is the same question asked of a
- * Profile whose account is on another machine. None of that machine's paths is
- * judged here — they belong to no filesystem this device can read — so what is
- * asked instead is the three things that would stop a launch away from home,
- * in the order a launch would meet them: the home device answering at all, an
- * account with a login to lend, and the harness to run it on this machine.
+ * **And two of them are a Profile's not bound here**, whose account is on
+ * other machines. None of their paths is judged here — they belong to no
+ * filesystem this device can read — so what is asked instead is the two things
+ * that would stop a launch from a copy, in the order a launch would meet them:
+ * a bound device holding a login answering at all, and the harness to run it
+ * on this machine. **Per device**: every device answers them for itself.
  *
  * **Refused rather than hidden.** A row that says why it cannot be run is
  * something to go and put right, and a row quietly missing is a human looking
- * for a Profile they know they saved. So none of the three takes a row out of
+ * for a Profile they know they saved. So none of them takes a row out of
  * a picker, and a Pairing made against one goes on reading as a Pairing — with
  * a broken Profile in it.
  */
-export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "HomeUnreachable" | "NoLoginAtHome" | "HarnessMissing" | "SignedOut";
+export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "NoBoundDevice" | "HarnessMissing" | "SignedOut";
 
 /**
  * One session's Capture, whole, as the details pane receives it.
@@ -3463,7 +3464,7 @@ export type FoundOn = "Lan" | "Tailscale";
  * the Repo they are about. Nothing gates the button on a companion: the
  * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, device: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * What the companion Repo is called, which is what the human picked it
  * by and what they will go and look at.
@@ -3577,6 +3578,12 @@ export type InstallState = { "install": "Idle" } | { "install": "Installing" } |
  * rather than run.
  */
 why: string, };
+
+/**
+ * What is to become of the Instructions on a save — see
+ * [`SettingsEdit::instructions`].
+ */
+export type InstructionsEdit = "Keep" | { "Set": { text: string, } };
 
 /**
  * One thing the far end has not got.
@@ -4011,16 +4018,23 @@ export type McpHeaderEdit = { name: string, value: HeaderEdit, };
  * with a value is send a new one. So this is not the shape a save sends, unlike
  * [`IgnoreRule`], which is the same both ways: see [`McpServerEdit`].
  *
- * **The name is the identity** — lowercase letters, digits and hyphens, unique
- * among the declarations, and never changed. It is what a Conversation's chip
- * refers to and what the agent sees in front of the server's tool names, so a
- * renamed declaration would be one every chip pointing at it had lost.
+ * **The name is the identity the agent and the chips see** — lowercase
+ * letters, digits and hyphens, unique among the live declarations, and never
+ * changed. It is what a Conversation's chip refers to and what the agent sees
+ * in front of the server's tool names, so a renamed declaration would be one
+ * every chip pointing at it had lost. **The record is the uuid**: a name
+ * removed and declared again is a new record under a new one.
  *
  * **HTTP only.** There is no command, no arguments and no transport to choose:
  * a stdio server is a child process an agent starts inside its own sandbox, and
  * it was turned down in the grilling this was settled in.
  */
-export type McpServer = { name: string, url: string, 
+export type McpServer = { 
+/**
+ * The uuid of the declaration's record, which a save sends back to say
+ * which record a row is (ADR-0028).
+ */
+id: string, name: string, url: string, 
 /**
  * The headers it is spoken to with, in the order they are sent. Empty is a
  * server that wants none.
@@ -4040,7 +4054,13 @@ headers: Array<McpHeader>, };
  * taken off the row is one the declaration no longer names, and one added is a
  * name with a value to set.
  */
-export type McpServerEdit = { name: string, url: string, headers: Array<McpHeaderEdit>, };
+export type McpServerEdit = { 
+/**
+ * The uuid of the record the row was drawn from, or `null` for a row
+ * added on the page — a new declaration, under a uuid the server mints.
+ * A row drawn from a record keeps that record's name, whatever it sends.
+ */
+id: string | null, name: string, url: string, headers: Array<McpHeaderEdit>, };
 
 /**
  * What is to become of the declared MCP servers on a save.
@@ -4049,7 +4069,7 @@ export type McpServerEdit = { name: string, url: string, headers: Array<McpHeade
  * thing on this page a save can be refused over, so a section that is not about
  * them says nothing about them and cannot be turned down by one.
  */
-export type McpServersEdit = "Keep" | { "Set": { servers: Array<McpServerEdit>, } };
+export type McpServersEdit = "Keep" | { "Set": { servers: Array<McpServerEdit>, removed: Array<string>, } };
 
 /**
  * A Memo as the page receives it: what the session named it and wrote, who it
@@ -4242,11 +4262,10 @@ at: string,
  */
 html: string, 
 /**
- * The login this Notice offers, where it is the stop of a run whose
- * account signed out and the account is at home on this device
- * (ADR-0022). `None` everywhere else — a mirrored Profile's Notice names
- * the device to log in on instead, and a stop that has been resumed offers
- * nothing.
+ * The login this Notice offers, where it is the stop of a run whose account
+ * signed out and the Profile is bound on this device (ADR-0022). `None`
+ * everywhere else — the Notice of a Profile not bound here names the device to
+ * log in on instead, and a stop that has been resumed offers nothing.
  */
 log_in: NoticeLogIn | null, };
 
@@ -4256,10 +4275,10 @@ log_in: NoticeLogIn | null, };
  */
 export type NoticeLogIn = { 
 /**
- * The Profile, by its id on this device. Always a Claude one: that is the
- * one harness Verkstead runs a login for.
+ * The Profile, by its uuid. Always a Claude one: that is the one harness
+ * Verkstead runs a login for.
  */
-profile: number, 
+profile: string, 
 /**
  * What the human called it, where they called it anything — which the
  * modal reads beside the harness, the way the Profile's card does.
@@ -4273,7 +4292,7 @@ name: string | null, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "login", profile: number, } | { "kind": "everything" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "login", profile: string, } | { "kind": "everything" };
 
 /**
  * One Nudge as it goes down a stream: what moved, and **whose news it is**.
@@ -4298,7 +4317,7 @@ export type Nudged = {
  * Device Id — absent for this device's own, which is every Nudge a
  * workbench has ever sent about its own work.
  */
-device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "login", profile: number, } | { "kind": "everything" });
+device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "login", profile: string, } | { "kind": "everything" });
 
 /**
  * And the same of every Conversation at once: what a member offers the device
@@ -4679,11 +4698,11 @@ export type Pick = { "Server": { name: string, } } | { "Companion": { repo_id: n
  * empty picker would draw the placeholder over a settled choice.
  *
  * One variant carries a Profile and the other two carry nothing, which is what
- * the size lint is about — a Profile got bigger when it gained the device it is
- * at home on. Left as it is: these are made one at a time on the way to being
- * serialized, none of them is held in a collection, and a `Box` in a view type
- * would be a pointer written into the shape the viewer is generated from for a
- * few bytes nobody is counting.
+ * the size lint is about — a Profile's own fields, its account's paths and its
+ * list of models among them, are what make it big. Left as it is: these are
+ * made one at a time on the way to being serialized, none of them is held in a
+ * collection, and a `Box` in a view type would be a pointer written into the
+ * shape the viewer is generated from for a few bytes nobody is counting.
  */
 export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
 
@@ -4725,6 +4744,20 @@ export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": Ta
  * being Apple's own on either.
  */
 export type Platform = "Linux" | "MacOs" | "Windows";
+
+/**
+ * A Repo an Author's removal found pointing at it, named with its device.
+ */
+export type PointingRepo = { 
+/**
+ * What its device calls it, which is its directory's own name.
+ */
+name: string, 
+/**
+ * The member it is registered on, by the name the human gave that
+ * machine, or `null` for this device.
+ */
+device: string | null, };
 
 /**
  * What the terminals on a Conversation offered to one device are listening on
@@ -4876,7 +4909,11 @@ export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, confi
 /**
  * Which Profile and model a Conversation is pairing for one of its roles.
  */
-export type ProfileChoice = { profile_id: number, 
+export type ProfileChoice = { 
+/**
+ * The Profile, by its uuid.
+ */
+profile_id: string, 
 /**
  * One of that Profile's models. Never absent: there is no default model
  * anywhere, so a Pairing is picked whole or not at all.
@@ -4897,6 +4934,28 @@ export type ProfileChosen = "Chosen" | "NoSuchConversation" | "NoSuchProfile" | 
  * that can go wrong is asking about one that has already gone.
  */
 export type ProfileDeleted = "Removed" | "NoSuchProfile";
+
+/**
+ * One device's line on a Profile card: the device, and whether it holds a
+ * **binding** of the Profile.
+ *
+ * Every device draws every device's line off what it holds, the bindings
+ * replicating like the records they bind (ADR-0028). A binding is only ever
+ * written by the device it names, so the paths on another device's line are
+ * that device's to change and nobody else's.
+ */
+export type ProfileDevice = { 
+/**
+ * Which device, drawn in full: its name, the mark for its OS and whether
+ * it is answering. The `id` is `null` on this device's own line.
+ */
+device: RowDevice, 
+/**
+ * The account its binding names, in the harness's own shape, or `null`
+ * for a device holding no binding — one that **runs from a copy** of the
+ * account under its own Data Directory.
+ */
+bound: ProfileAccount | null, };
 
 /**
  * A Profile as the human has just written it, for saving or for rewriting.
@@ -4938,7 +4997,11 @@ memory: boolean, };
  * whatever was typed to save them: those are what will be bind-mounted, so
  * those are what is worth showing.
  */
-export type ProfileEntry = { id: number, 
+export type ProfileEntry = { 
+/**
+ * The uuid it is known by, the same on every device that holds it.
+ */
+id: string, 
 /**
  * What the human calls this account, and `null` where they have called it
  * nothing.
@@ -4967,16 +5030,16 @@ models: Array<string>,
 broken: Broken | null, 
 /**
  * Whether the account this row names holds a **login file**, which is what
- * says the Profile can be used away from the device it is at home on.
+ * says the Profile can be used from a device it is not bound on.
  *
- * Answered on the row wherever it is drawn, and by the device the account
- * is on: a mirror carries what that machine last said, and this device's
- * own rows are looked at here. A login kept somewhere that is not a file —
- * the macOS Keychain — leaves nothing for another device to mirror, and so
- * does a sign-out; either way the account is still perfectly runnable on
- * the machine it is on, which is why this is a fact beside [`Self::broken`]
- * rather than a way of being it. A *mirror* with no login at home is
- * broken, and that is [`Broken::NoLoginAtHome`].
+ * Answered by the devices the account is on: one bound here is looked at
+ * here, and one bound elsewhere carries what its bindings last said. A
+ * login kept somewhere that is not a file — the macOS Keychain — leaves
+ * nothing for another device to copy, and so does a sign-out; either way
+ * the account is still perfectly runnable on the machine it is on, which
+ * is why this is a fact beside [`Self::broken`] rather than a way of being
+ * it. One not bound here with no login on any bound device it can reach is
+ * broken, and that is [`Broken::NoBoundDevice`].
  */
 login: boolean, 
 /**
@@ -4986,19 +5049,27 @@ login: boolean,
  */
 memory: boolean, 
 /**
- * Which device this Profile is at home on, and `null` for this one's own —
- * which is every Profile on a Verkstead that is linked to nothing.
+ * Whether this device holds a **binding** of it: its own account's paths,
+ * which [`Self::account`] then is and a session here is run as. `false`
+ * is a Profile bound on other devices alone, whose paths on the row are
+ * one of theirs and belong to no filesystem here.
  *
- * The same shape a Conversation's row carries whose work it is, and for the
- * same reason: the name and the mark for the operating system are this
- * device's own reading of its membership rather than anything the far end
- * said, and one shape means one way of drawing a device wherever a list has
- * several machines' rows in it. See [`crate::RowDevice`].
- *
- * One list rather than a section per device: a Profile is a Profile, and
- * which machine its account sits on is a fact on the row.
+ * No device is drawn on the row's own line either way: a Profile is the
+ * cluster's, and has no home to mark. Where it is bound is
+ * [`Self::devices`].
  */
-device: RowDevice | null, };
+bound: boolean, 
+/**
+ * How each device of the cluster runs it, a line apiece: this device
+ * first, then every member in the order the Devices section lists them —
+ * see [`ProfileDevice`].
+ *
+ * **Empty on a Verkstead in no cluster**, whose one device is the only
+ * place anything could be bound and says nothing a line would. A member
+ * not answering keeps its line, drawn from the last binding of it this
+ * device holds; one unlinked loses it, whatever binding it left behind.
+ */
+devices: Array<ProfileDevice>, };
 
 /**
  * What became of saving a Profile.
@@ -5011,13 +5082,14 @@ export type ProfileSaved = "Saved" | "NoSuchProfile" | "Modelless" | "NameTaken"
 
 /**
  * Why a press that would have started a session was refused over a Profile:
- * what is wrong with it, what it runs, and the machine it is at home on.
+ * what is wrong with it, and what it runs.
  *
  * **Enough to say the sentence the row says.** Every one of the readings above
  * is drawn on the Profile's own row, and a refusal saying only *a chosen
  * profile is broken* would be a second, vaguer account of something the human
- * is already being told precisely. So what travels is the three facts that
- * sentence is composed out of, and the viewer composes it once for both.
+ * is already being told precisely. So what travels is the two facts that
+ * sentence is composed out of, and the viewer composes it once for both. No
+ * device is among them: a Profile is the cluster's, and no finding names one.
  */
 export type ProfileTrouble = { 
 /**
@@ -5027,12 +5099,7 @@ broken: Broken,
 /**
  * Which harness it runs, for the trouble that is about the harness.
  */
-agent_type: AgentType, 
-/**
- * And the machine the account is at home on, where that is not this one —
- * which is what the two troubles about a home name.
- */
-device: string | null, };
+agent_type: AgentType, };
 
 /**
  * The grilling's closing proposal as the Set it rides draws it: which direction
@@ -5787,15 +5854,16 @@ export type RoleChoice = { pairing: ProfileChoice | null, };
  * the OS is worth drawing at all (see [`RowDevice::os`]).
  *
  * The sidebar's rows carry one only for another device's work. A Profile
- * card's mirror carries one too, for the device its account lives on, and
- * always in full — see [`crate::ProfileEntry`].
+ * card's line per device carries one too, this device's own among them, and
+ * always in full — see [`crate::ProfileDevice`].
  */
 export type RowDevice = { 
 /**
- * The **Device Id**. Never `null` on what a server answers today — this
- * device's own rows carry no `RowDevice` at all — but the viewer reads
- * `null` as *this device*, the shape it keys its queries and composes its
- * paths by, so a local URL keeps the shape it has always had.
+ * The **Device Id**, or `null` for *this device*: the shape the viewer
+ * keys its queries and composes its paths by, so a local URL keeps the
+ * shape it has always had. A sidebar row of this device's own carries no
+ * `RowDevice` at all; a Profile card's line for this device carries one
+ * with no id.
  */
 id: string | null, 
 /**
@@ -5814,8 +5882,8 @@ name: string,
  * is already on says nothing. The hub decides it, by the server's
  * `platform::same_mark` — the viewer's `osIcon` rule said a second time.
  *
- * **Never `null` on a Profile card's mirror**, which draws the device's
- * full badge whatever the hub is.
+ * **Never `null` on a Profile card's line per device**, which draws the
+ * device's full badge whatever the hub is.
  */
 os: string | null, 
 /**
@@ -6032,7 +6100,7 @@ export type ServeView = { "serve": "Off" } | { "serve": "On", address: string, }
  * attached*: a server the Conversation holds already is taken out of the menu,
  * and the state a second press asks for is the state there is.
  */
-export type ServerAttached = "Attached" | "NoSuchConversation" | "NotDrafting" | "NoSuchServer";
+export type ServerAttached = "Attached" | "NoSuchConversation" | "NotDrafting" | "NoSuchServer" | "Clashes";
 
 /**
  * Which of a declaration's two halves something is about.
@@ -6336,16 +6404,19 @@ ignored_comments: IgnoredCommentsEdit,
  */
 mcp_servers: McpServersEdit, 
 /**
- * And the text every session is given, as a value again — the plainest one
- * here. What is sent is what `config.yaml` holds afterwards, so a box
- * cleared on the page is the key taken out of the file.
+ * And what is to become of the text every session is given, which is an
+ * action for a reason of its own: the text is one record for the whole
+ * cluster, the newest write winning (ADR-0028), so a section that rode it
+ * along as a value would write back whatever the page last read — over a
+ * newer text saved on another device since. So only the Instructions'
+ * own form speaks for it, and every other section sends `Keep`.
  *
  * Nothing about it can be turned down. It is a paragraph of somebody's
  * prose for an agent to read: there is no grammar to get wrong, nothing to
  * compile and nobody to ask about it, so a save carrying it cannot fail
  * the way one carrying a rule can.
  */
-instructions: string, };
+instructions: InstructionsEdit, };
 
 /**
  * What became of a save.
@@ -7489,7 +7560,7 @@ conversation: number, } } | { "WouldDiscard": {
  * every Conversation standing on a link of it is closed by the one
  * press.
  */
-uncommitted: Array<Uncommitted>, } } | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, device: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+uncommitted: Array<Uncommitted>, } } | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
 /**
  * Where it is checked out, as git named it.
  */
@@ -8015,6 +8086,16 @@ at: string, set_id: number,
  * been told nothing by the row.
  */
 why: string, };
+
+/**
+ * A Repo **Repoint them all to…** could not repoint, and why.
+ */
+export type UnrepointedRepo = { repo: PointingRepo, why: Unrepointing, };
+
+/**
+ * Why one Repo was not repointed.
+ */
+export type Unrepointing = { "InUse": { on: Array<string>, beside: Array<string>, } } | "NoSuchAuthor" | { "Refused": string };
 
 /**
  * A device asking not to be told any more, named by its endpoint — which is the

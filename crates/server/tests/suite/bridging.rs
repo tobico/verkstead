@@ -567,7 +567,7 @@ async fn paired(on: &Verkstead, root: &Path, conversation: i64) {
     .expect("nothing else is saved under that name");
 
     assert_eq!(
-        store::set_grilling_pairing(&on.pool, conversation, profile.id, None)
+        store::set_grilling_pairing(&on.pool, conversation, &profile.id, None)
             .await
             .unwrap(),
         store::Chosen::Chosen,

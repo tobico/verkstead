@@ -277,7 +277,7 @@ fn held(form: &SteerForm) -> store::PendingForm {
         follow_up: form.follow_up.clone(),
         investigation: form.investigation.clone(),
         pairing: form.pairing.as_ref().map(|picked| store::PendingPairing {
-            profile_id: picked.profile_id,
+            profile_id: picked.profile_id.clone(),
             model: picked.model.clone(),
         }),
         interrupt: form.interrupt,
@@ -643,7 +643,7 @@ pub(crate) async fn submit(
                 .pairing
                 .as_ref()
                 .map(|choice| store::PickedPairing {
-                    profile_id: choice.profile_id,
+                    profile_id: &choice.profile_id,
                     model: &choice.model,
                 }),
         },
@@ -1308,7 +1308,7 @@ fn settling<'a>(conversation: &Conversation, submission: &'a SteerSubmission) ->
         })
         .map(|role| Settling {
             role,
-            profile_id: choice.profile_id,
+            profile_id: &choice.profile_id,
             model: &choice.model,
         })
         .collect()

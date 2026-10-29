@@ -60,6 +60,12 @@
     "kind": "authors"
   },
   {
+    "kind": "instructions"
+  },
+  {
+    "kind": "mcp_servers"
+  },
+  {
     "kind": "everything"
   }
 ]

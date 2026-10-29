@@ -148,6 +148,7 @@ export function Brief(props: {
         chips={props.conversation.mcp_servers.map((server) => ({
           name: server.name,
           gone: !server.declared,
+          clashes: server.clashes,
         }))}
         class={styles.attachments}
       />
@@ -269,14 +270,14 @@ function Configuration(props: {
 /// its git name where it has none, as the Git section and the Repos pane label
 /// it.
 ///
-/// Drawn only once more than one Author is on the list, mirrors counted, there
+/// Drawn only once more than one Author is on the list, there
 /// being nothing to tell apart with one — but a Repo with none picked, or one
 /// whose Author the list no longer holds, says so whatever the count: a start
 /// on it is refused, and a blank here would be the pane hiding why.
 ///
 /// The one list of the device holding the work, read the way the Repos pane
 /// reads it: an Author is named by a uuid out of that machine's list, and this
-/// machine's would call a member's Author gone.
+/// machine's may not have pulled one made there yet.
 function Author(props: { repo: RepoEntry }): JSX.Element {
   const device = useDevice();
 

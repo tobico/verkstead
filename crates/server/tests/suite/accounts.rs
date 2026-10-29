@@ -327,7 +327,7 @@ impl Verkstead {
     /// `.claude.json`, and another repository's transcripts under `projects/`.
     /// What none of that does is travel — see
     /// [`nothing_lands_in_the_mirror_but_the_files_a_root_is_made_of`].
-    async fn account(&self, name: &str) -> i64 {
+    async fn account(&self, name: &str) -> String {
         let under = self.elsewhere.path().join(name);
         let claude_dir = under.join(".claude");
         let config_file = under.join(".claude.json");
@@ -395,12 +395,13 @@ impl Verkstead {
         called(&self.profiles().await, name)
             .expect("the Profile that was just saved is on the list")
             .id
+            .clone()
     }
 
     /// And the same account with its **memory switch off**, which is a session
     /// given a store of its own rather than the account's — at home and away
     /// alike.
-    async fn account_forgetting(&self, name: &str) -> i64 {
+    async fn account_forgetting(&self, name: &str) -> String {
         let profile = self.account(name).await;
 
         let said = press(
@@ -572,15 +573,32 @@ impl Verkstead {
     }
 
     /// The mirror of the member's Profile called `name`, once the refresher has
-    /// written it down.
+    /// written it down **and a binding of it has said its device holds a
+    /// login**. The record and its bindings are pulled apart, so a row listed a
+    /// moment before the binding arrives is one with nothing to copy yet, and a
+    /// fetch made then is refused as having no device to copy from.
     async fn mirror_of(&self, name: &str) -> ProfileEntry {
+        self.mirror_where(name, |row| row.login).await
+    }
+
+    /// The mirror of `name` as soon as it is listed at all, logged in anywhere
+    /// or not — for a Profile no device has said a login of.
+    async fn listed(&self, name: &str) -> ProfileEntry {
+        self.mirror_where(name, |_| true).await
+    }
+
+    async fn mirror_where(
+        &self,
+        name: &str,
+        ready: impl Fn(&ProfileEntry) -> bool,
+    ) -> ProfileEntry {
         let mut last = Vec::new();
 
         let waited = tokio::time::timeout(WAITING, async {
             loop {
                 last = self.profiles().await;
 
-                if let Some(row) = called(&last, name) {
+                if let Some(row) = called(&last, name).filter(|row| ready(row)) {
                     return row.clone();
                 }
 
@@ -616,7 +634,7 @@ impl Verkstead {
 
     /// One of this device's own Profiles taken away, which is what leaves every
     /// device's mirror of it with nothing to refresh off.
-    async fn removes(&self, profile: i64) {
+    async fn removes(&self, profile: &str) {
         let said = press(
             &self.workbench,
             &format!("{PROFILES}/{profile}/delete"),
@@ -631,7 +649,7 @@ impl Verkstead {
     /// as a launch here fetches it — the Profile the launch then reads, naming this
     /// device's own mirror as its account, and what its ending has to write home.
     async fn fetches(&self, row: &ProfileEntry) -> Result<mirroring::account::Mirrored, Refusal> {
-        let profile = store::load_profile(&self.pool, row.id)
+        let profile = store::load_profile(&self.pool, &row.id)
             .await
             .unwrap()
             .expect("the mirror row is in this device's store");
@@ -709,15 +727,15 @@ impl Verkstead {
         Homes::on(Platform::HERE, self.home.path().to_owned(), self.dir.path())
     }
 
-    /// Where this device keeps its mirror of the Profile with that local id.
-    fn mirror_directory(&self, profile: i64) -> PathBuf {
-        self.dir.path().join("accounts").join(profile.to_string())
+    /// Where this device keeps its mirror of the Profile with that uuid.
+    fn mirror_directory(&self, profile: &str) -> PathBuf {
+        self.dir.path().join("accounts").join(profile)
     }
 
     /// A Conversation grilling under `profile`, started the way the composer and
     /// the setup card start one: a real repository, all three Pairings on that
     /// Profile, a Brief, and the press.
-    async fn grilling_under(&self, profile: i64) -> i64 {
+    async fn grilling_under(&self, profile: &str) -> i64 {
         let path = repository(self.elsewhere.path().join("verkstead"));
 
         let registered = press(
@@ -1145,7 +1163,7 @@ async fn a_session_away_from_home_runs_under_the_account_at_home() {
         "a member's account is a row to run under: {mirror:?}",
     );
 
-    let conversation = b.grilling_under(mirror.id).await;
+    let conversation = b.grilling_under(&mirror.id).await;
     let said = b.printed(conversation, "config: ").await;
 
     assert!(
@@ -1181,7 +1199,7 @@ async fn a_session_away_from_home_runs_under_the_account_at_home() {
     // its Data Directory — which is what makes the login a hard link can join in
     // on Windows and what a session end has to write back.
     assert_eq!(
-        login_in(&b.mirror_directory(mirror.id))
+        login_in(&b.mirror_directory(&mirror.id))
             .as_deref()
             .map(|login| login.contains(TOKEN)),
         Some(true),
@@ -1199,7 +1217,7 @@ async fn a_login_refreshed_at_home_is_the_one_the_next_launch_gets() {
     a.account("work").await;
 
     let mirror = b.mirror_of("work").await;
-    let under = b.mirror_directory(mirror.id);
+    let under = b.mirror_directory(&mirror.id);
 
     let fetched = b.fetches(&mirror).await.expect("A answered");
 
@@ -1249,7 +1267,7 @@ async fn a_profile_removed_at_home_takes_the_mirror_of_its_account_with_it() {
     let at_home = a.account("work").await;
 
     let mirror = b.mirror_of("work").await;
-    let under = b.mirror_directory(mirror.id);
+    let under = b.mirror_directory(&mirror.id);
 
     b.fetches(&mirror).await.expect("A answered");
 
@@ -1258,7 +1276,7 @@ async fn a_profile_removed_at_home_takes_the_mirror_of_its_account_with_it() {
         "the mirror holds A's login, which is what there is to be rid of",
     );
 
-    a.removes(at_home).await;
+    a.removes(&at_home).await;
     b.without("work").await;
 
     // Waited for rather than read at once: the row goes inside the transaction
@@ -1289,7 +1307,7 @@ async fn nothing_lands_in_the_mirror_but_the_files_a_root_is_made_of() {
     a.account("work").await;
 
     let mirror = b.mirror_of("work").await;
-    let under = b.mirror_directory(mirror.id);
+    let under = b.mirror_directory(&mirror.id);
 
     b.fetches(&mirror).await.expect("A answered");
 
@@ -1321,13 +1339,10 @@ async fn a_home_that_is_not_answering_refuses_the_launch_by_name() {
 
     // What it last gave, which on a running server is what the last refresh
     // wrote down.
-    store::record_mirror(
+    store::profile_arrived(
         &b.pool,
-        &verkstead_store::Mirror {
-            device: A.to_owned(),
-            id: 7,
-            login: true,
-        },
+        "7a1d0c2e-0000-4000-8000-000000000007",
+        A,
         &store::ProfileFacts {
             name: Some("work".to_owned()),
             account: store::Account::Claude {
@@ -1341,7 +1356,7 @@ async fn a_home_that_is_not_answering_refuses_the_launch_by_name() {
     .await
     .unwrap();
 
-    let mirror = b.mirror_of("work").await;
+    let mirror = b.listed("work").await;
 
     let why = b
         .fetches(&mirror)
@@ -1356,7 +1371,7 @@ async fn a_home_that_is_not_answering_refuses_the_launch_by_name() {
     );
 
     assert_eq!(
-        login_in(&b.mirror_directory(mirror.id)),
+        login_in(&b.mirror_directory(&mirror.id)),
         None,
         "and nothing was written: a mirror half-fetched would be a session \
          running as somebody nothing said was signed in",
@@ -1376,7 +1391,7 @@ async fn a_token_refreshed_in_a_session_away_from_home_lands_in_the_account() {
     a.account("work").await;
 
     let mirror = b.mirror_of("work").await;
-    let conversation = b.grilling_under(mirror.id).await;
+    let conversation = b.grilling_under(&mirror.id).await;
 
     b.printed(conversation, "refreshed the login").await;
 
@@ -1388,7 +1403,7 @@ async fn a_token_refreshed_in_a_session_away_from_home_lands_in_the_account() {
          {held:?}",
     );
     assert_eq!(
-        login_in(&b.mirror_directory(mirror.id)).as_deref(),
+        login_in(&b.mirror_directory(&mirror.id)).as_deref(),
         Some(held.as_str()),
         "and the mirror is left where it is: the account was written, and \
          nothing here was taken away",
@@ -1412,7 +1427,7 @@ async fn only_a_login_the_session_changed_goes_back_home() {
 
     let mirror = b.mirror_of("work").await;
     let conversation = b.conversation().await;
-    let under = b.mirror_directory(mirror.id);
+    let under = b.mirror_directory(&mirror.id);
 
     // Untouched: the ending writes nothing, which is read off a home that has
     // refreshed its own login since the fetch — a write of what came down would
@@ -1495,13 +1510,13 @@ async fn two_devices_refreshing_one_login_end_on_the_later_write() {
     );
 
     std::fs::write(
-        b.mirror_directory(b_mirror.id)
+        b.mirror_directory(&b_mirror.id)
             .join(".claude/.credentials.json"),
         b_refreshed,
     )
     .unwrap();
     std::fs::write(
-        c.mirror_directory(c_mirror.id)
+        c.mirror_directory(&c_mirror.id)
             .join(".claude/.credentials.json"),
         c_refreshed,
     )
@@ -1539,7 +1554,7 @@ async fn a_home_that_has_gone_away_is_said_on_the_timeline() {
 
     let mirror = b.mirror_of("work").await;
     let conversation = b.conversation().await;
-    let under = b.mirror_directory(mirror.id);
+    let under = b.mirror_directory(&mirror.id);
 
     let lent = b.fetches(&mirror).await.expect("A answered").lent;
 
@@ -1599,7 +1614,7 @@ async fn a_session_away_from_home_starts_with_what_the_account_remembered() {
     );
 
     let mirror = b.mirror_of("work").await;
-    let conversation = b.grilling_under(mirror.id).await;
+    let conversation = b.grilling_under(&mirror.id).await;
     let said = b.printed(conversation, "ran").await;
 
     assert!(
@@ -1629,7 +1644,7 @@ async fn the_transcript_of_a_session_away_from_home_comes_home() {
     a.account("work").await;
 
     let mirror = b.mirror_of("work").await;
-    let conversation = b.grilling_under(mirror.id).await;
+    let conversation = b.grilling_under(&mirror.id).await;
 
     b.printed(conversation, "ran").await;
 
@@ -1654,7 +1669,7 @@ async fn no_repo_match_is_said_on_the_timeline_and_starts_the_session_anyway() {
     a.account("work").await;
 
     let mirror = b.mirror_of("work").await;
-    let conversation = b.grilling_under(mirror.id).await;
+    let conversation = b.grilling_under(&mirror.id).await;
 
     b.printed(conversation, "ran").await;
 
@@ -1693,7 +1708,7 @@ async fn a_profile_that_shares_no_memory_syncs_nothing_away_from_home() {
     );
 
     let mirror = b.mirror_of("work").await;
-    let conversation = b.grilling_under(mirror.id).await;
+    let conversation = b.grilling_under(&mirror.id).await;
     let said = b.printed(conversation, "ran").await;
 
     assert!(

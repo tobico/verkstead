@@ -9,12 +9,16 @@
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
+use verkstead_store::replicated::{Record, merge, records};
 use verkstead_store::{
-    Account, AgentType, Chosen, Clash, Deleting, Event, Lifecycle, Pairing, PendingForm,
-    PendingPairing, Picked, Profile, ProfileFacts, Saving, create_profile, delete_profile,
-    load_conversation, load_profile, open_database, open_pending_steer, profiles, register_repo,
-    save_pending_steer, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
-    skip_review, start_capture, start_conversation, start_grilling, timeline, update_profile,
+    Account, AgentType, Binding, Bindings, Chosen, Clash, Deleting, Event, Lifecycle, Linking,
+    Pairing, PendingForm, PendingPairing, Picked, Profile, ProfileFacts, ProfileRecord, Profiles,
+    Saving, Settled, Unbound, binding_uuid, create_profile, delete_profile, load_conversation,
+    load_profile, logins_held, open_database, open_pending_steer, profile_arrived, profiles,
+    record_member, register_repo, save_pending_steer, set_grilling_pairing,
+    set_implementation_pairing, set_review_pairing, settle, skip_review, stamp_the_profiles,
+    start_capture, start_conversation, start_grilling, this_device_called, timeline,
+    update_profile,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -135,85 +139,77 @@ async fn a_saved_profile_holds_its_account_and_its_models() {
     assert_eq!(profile.agent_type(), AgentType::Claude);
 
     assert_eq!(
-        load_profile(&pool, profile.id).await.unwrap(),
+        load_profile(&pool, &profile.id).await.unwrap(),
         Some(profile)
     );
 }
 
 /// A Profile of a type this binary does not have is a database written by a
-/// newer Verkstead. Refused by the word that is in the column, rather than read
+/// newer Verkstead. Refused by the word that is in the record, rather than read
 /// past as though it were a Claude row with a pair it has not got.
 #[tokio::test]
 async fn a_profile_naming_an_agent_type_this_binary_has_not_got_is_refused_by_name() {
     let (_dir, pool) = fresh_pool().await;
 
-    sqlx::query(
-        "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
-         VALUES (?, ?, ?, ?, ?)",
+    written_by_hand(
+        &pool,
+        r#"{"name":"work","harness":"gemini","models":["gemini-code"],"memory":true}"#,
+        r#"{"home":"/watched/accounts/work/.gemini"}"#,
     )
-    .bind("work")
-    .bind("")
-    .bind("")
-    .bind("grok-code")
-    .bind("grok")
-    .execute(&pool)
-    .await
-    .unwrap();
+    .await;
 
     let refused = profiles(&pool).await.unwrap_err().to_string();
     assert!(
-        refused.contains("grok"),
+        refused.contains("gemini"),
         "the refusal should name the word it did not know, and said {refused:?}"
     );
+}
+
+/// A record and this device's binding of it written straight into the table,
+/// standing in for a database somebody edited by hand.
+async fn written_by_hand(pool: &SqlitePool, record: &str, binding: &str) {
+    let id = "0b0e4c1a-5d2f-4e7b-9a3c-6f1d2e3b4a5c";
+
+    for (kind, uuid, body) in [
+        ("profiles", id.to_owned(), record),
+        ("profile_bindings", format!("{id}/"), binding),
+    ] {
+        sqlx::query(
+            "INSERT INTO replicated (kind, uuid, updated_at, deleted_at, written_by, body)
+             VALUES (?, ?, 1, NULL, '', ?)",
+        )
+        .bind(kind)
+        .bind(uuid)
+        .bind(body)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
 }
 
 /// And a Profile of a type whose whole account is one home, with no home
 /// recorded, is refused the same way.
 ///
 /// Nothing above the store can write one: a home is put down with the Profile
-/// and taken away with it. So what this catches is a row somebody edited by
+/// and taken away with it. So what this catches is a record somebody edited by
 /// hand — and reading it past as a home of the empty string would be a bind
 /// landing on `/`.
 #[tokio::test]
 async fn a_profile_whose_account_is_a_home_it_has_not_got_is_refused() {
     let (_dir, pool) = fresh_pool().await;
 
-    sqlx::query(
-        "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
-         VALUES (?, ?, ?, ?, ?)",
+    written_by_hand(
+        &pool,
+        r#"{"name":"work","harness":"codex","models":["gpt-5-codex"],"memory":true}"#,
+        r#"{"claude_dir":"/watched/.claude","config_file":"/watched/.claude.json"}"#,
     )
-    .bind("work")
-    .bind("")
-    .bind("")
-    .bind("gpt-5-codex")
-    .bind("codex")
-    .execute(&pool)
-    .await
-    .unwrap();
+    .await;
 
     let refused = profiles(&pool).await.unwrap_err().to_string();
     assert!(
         refused.contains("home"),
         "the refusal should say what is missing, and said {refused:?}"
     );
-}
-
-/// The table the account of every type after Claude lives in: one home per
-/// Profile, keyed by its id.
-#[tokio::test]
-async fn a_profiles_single_home_directory_has_a_table_of_its_own() {
-    let (_dir, pool) = fresh_pool().await;
-    let profile = saved(&pool, "work").await;
-
-    keep_home(&pool, profile.id, "/watched/accounts/work").await;
-
-    let home: (String,) = sqlx::query_as("SELECT home FROM profile_homes WHERE profile_id = ?")
-        .bind(profile.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-
-    assert_eq!(home.0, "/watched/accounts/work");
 }
 
 /// A Profile whose account is one home round-trips whole: saved with it, listed
@@ -235,7 +231,7 @@ async fn a_profile_whose_account_is_one_home_round_trips_with_it() {
     assert_eq!(saved.account, codex("work"));
     assert_eq!(saved.agent_type(), AgentType::Codex);
 
-    let loaded = load_profile(&pool, saved.id)
+    let loaded = load_profile(&pool, &saved.id)
         .await
         .unwrap()
         .expect("the Profile was just saved");
@@ -282,7 +278,7 @@ async fn the_types_that_each_keep_one_home_read_back_as_themselves() {
     assert_eq!(latest.agent_type(), AgentType::OpenCode);
 
     for profile in [&saved, &latest] {
-        let loaded = load_profile(&pool, profile.id)
+        let loaded = load_profile(&pool, &profile.id)
             .await
             .unwrap()
             .expect("the Profile was just saved");
@@ -313,14 +309,14 @@ async fn rewriting_a_profile_with_a_home_replaces_the_home() {
         .unwrap();
 
     assert_eq!(
-        update_profile(&pool, saved.id, &facts_for("work", codex("moved")))
+        update_profile(&pool, &saved.id, &facts_for("work", codex("moved")))
             .await
             .unwrap(),
         Saving::Saved
     );
     assert_eq!(homes(&pool).await, 1, "one home, the one it is under now");
     assert_eq!(
-        load_profile(&pool, saved.id)
+        load_profile(&pool, &saved.id)
             .await
             .unwrap()
             .unwrap()
@@ -340,7 +336,7 @@ async fn removing_a_profile_with_a_home_takes_the_home_it_wrote() {
         .unwrap();
 
     assert_eq!(
-        delete_profile(&pool, saved.id).await.unwrap(),
+        delete_profile(&pool, &saved.id).await.unwrap(),
         Deleting::Deleted
     );
     assert_eq!(homes(&pool).await, 0);
@@ -356,7 +352,7 @@ async fn a_claude_profile_writes_no_home_at_all() {
     assert_eq!(homes(&pool).await, 0);
 
     assert_eq!(
-        update_profile(&pool, saved.id, &facts("work"))
+        update_profile(&pool, &saved.id, &facts("work"))
             .await
             .unwrap(),
         Saving::Saved
@@ -364,71 +360,17 @@ async fn a_claude_profile_writes_no_home_at_all() {
     assert_eq!(homes(&pool).await, 0);
 }
 
-/// And removing a Profile takes the home with it.
-///
-/// `profile_homes` references `profiles(id)` and foreign keys are enforced, so
-/// a home left behind is not an orphan row but a Profile that cannot be removed
-/// at all — which is the stage that first writes one finding removal broken
-/// rather than finding it arranged.
-#[tokio::test]
-async fn removing_a_profile_takes_the_home_it_kept_its_account_under_with_it() {
-    let (_dir, pool) = fresh_pool().await;
-    let profile = saved(&pool, "work").await;
-
-    keep_home(&pool, profile.id, "/watched/accounts/work").await;
-
-    assert_eq!(
-        delete_profile(&pool, profile.id).await.unwrap(),
-        Deleting::Deleted
-    );
-    assert_eq!(
-        homes(&pool).await,
-        0,
-        "the home goes with the Profile that kept its account under it"
-    );
-}
-
-/// And rewriting one replaces it, as it replaces the model list: the account is
-/// the type's shape, so the home a Profile had is the old type's if the type has
-/// changed.
-#[tokio::test]
-async fn rewriting_a_profile_replaces_the_home_its_account_was_under() {
-    let (_dir, pool) = fresh_pool().await;
-    let profile = saved(&pool, "work").await;
-
-    keep_home(&pool, profile.id, "/watched/accounts/work").await;
-
-    assert_eq!(
-        update_profile(&pool, profile.id, &facts("work"))
-            .await
-            .unwrap(),
-        Saving::Saved
-    );
-    assert_eq!(
-        homes(&pool).await,
-        0,
-        "a rewrite writes the account whole rather than reconciling it"
-    );
-}
-
-/// A home written straight into the table, standing in for the backend that
-/// will keep its whole account under one: there is no type with a home yet, so
-/// nothing above the store can put a row here.
-async fn keep_home(pool: &SqlitePool, id: i64, home: &str) {
-    sqlx::query("INSERT INTO profile_homes (profile_id, home) VALUES (?, ?)")
-        .bind(id)
-        .bind(home)
-        .execute(pool)
-        .await
-        .expect("the table is there to be written to");
-}
-
-/// And how many the table is holding.
+/// How many homes this device's live bindings hold: one for every Profile
+/// whose account is one.
 async fn homes(pool: &SqlitePool) -> i64 {
-    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM profile_homes")
-        .fetch_one(pool)
-        .await
-        .unwrap();
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM replicated
+         WHERE kind = 'profile_bindings' AND deleted_at IS NULL
+           AND json_extract(body, '$.home') IS NOT NULL",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
 
     count
 }
@@ -449,7 +391,7 @@ async fn a_profile_holds_every_model_it_lists_in_the_order_it_was_given() {
     let profile = create_profile(&pool, &several).await.unwrap().unwrap();
     assert_eq!(profile.models, several.models);
 
-    let read = load_profile(&pool, profile.id).await.unwrap().unwrap();
+    let read = load_profile(&pool, &profile.id).await.unwrap().unwrap();
     assert_eq!(read.models, several.models);
 
     let listed = profiles(&pool).await.unwrap();
@@ -465,15 +407,15 @@ async fn rewriting_a_profile_replaces_its_list_rather_than_adding_to_it() {
 
     let mut shorter = facts("work");
     shorter.models = vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()];
-    update_profile(&pool, profile.id, &shorter).await.unwrap();
+    update_profile(&pool, &profile.id, &shorter).await.unwrap();
 
     let mut shorter_still = facts("work");
     shorter_still.models = vec!["claude-opus-5".to_owned()];
-    update_profile(&pool, profile.id, &shorter_still)
+    update_profile(&pool, &profile.id, &shorter_still)
         .await
         .unwrap();
 
-    let read = load_profile(&pool, profile.id).await.unwrap().unwrap();
+    let read = load_profile(&pool, &profile.id).await.unwrap().unwrap();
     assert_eq!(read.models, ["claude-opus-5"]);
 }
 
@@ -482,11 +424,11 @@ async fn rewriting_a_profile_replaces_its_list_rather_than_adding_to_it() {
 /// Claude account it always was, with nothing for the human to re-enter.
 #[tokio::test]
 async fn a_profile_written_before_the_list_reads_its_old_model_as_its_only_one() {
-    let (_dir, pool) = fresh_pool().await;
+    let (dir, pool) = fresh_pool().await;
 
     sqlx::query(
-        "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
-         VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO profiles (id, name, claude_dir, config_file, model, agent_type)
+         VALUES ('0b0e4c1a-5d2f-4e7b-9a3c-6f1d2e3b4a5c', ?, ?, ?, ?, ?)",
     )
     .bind("work")
     .bind("/watched/accounts/work/.claude")
@@ -497,11 +439,24 @@ async fn a_profile_written_before_the_list_reads_its_old_model_as_its_only_one()
     .await
     .unwrap();
 
+    // Kept where Profiles were kept before they were records, and taken up as
+    // the database is next opened.
+    sqlx::query("DELETE FROM replicated_taken_up WHERE kind = 'profiles'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
     let listed = profiles(&pool).await.unwrap();
     assert_eq!(listed[0].models, ["claude-opus-5"]);
     assert_eq!(listed[0].account, claude("work"));
 
-    let read = load_profile(&pool, listed[0].id).await.unwrap().unwrap();
+    let read = load_profile(&pool, &listed[0].id).await.unwrap().unwrap();
     assert_eq!(read.models, ["claude-opus-5"]);
     assert_eq!(read.account, claude("work"));
 }
@@ -587,7 +542,7 @@ async fn taking_the_name_off_a_second_profile_is_refused() {
     let named = saved(&pool, "anthropic").await;
 
     assert_eq!(
-        update_profile(&pool, named.id, &unnamed(claude("anthropic")))
+        update_profile(&pool, &named.id, &unnamed(claude("anthropic")))
             .await
             .unwrap(),
         Saving::DefaultTaken,
@@ -601,7 +556,7 @@ async fn taking_the_name_off_a_second_profile_is_refused() {
         .expect("the unnamed one is on the list");
 
     assert_eq!(
-        update_profile(&pool, alone.id, &unnamed(claude("work")))
+        update_profile(&pool, &alone.id, &unnamed(claude("work")))
             .await
             .unwrap(),
         Saving::Saved,
@@ -621,6 +576,44 @@ async fn a_name_another_profile_already_has_is_refused() {
     assert_eq!(profiles(&pool).await.unwrap().len(), 1);
 }
 
+/// Both rules are per harness: a Codex Profile named like a Claude one is a
+/// row of its own harness, told apart by the harness's mark in a picker — and
+/// a rename onto a name only another harness holds goes through too.
+#[tokio::test]
+async fn a_name_another_harnesss_profile_has_is_saved() {
+    let (_dir, pool) = fresh_pool().await;
+    saved(&pool, "work").await;
+
+    let theirs = create_profile(&pool, &facts_for("work", codex("work")))
+        .await
+        .unwrap()
+        .expect("a Codex Profile is in no Claude Profile's way");
+
+    assert_eq!(profiles(&pool).await.unwrap().len(), 2);
+
+    assert_eq!(
+        create_profile(&pool, &facts_for("work", codex("second")))
+            .await
+            .unwrap(),
+        Err(Clash::NameTaken),
+        "and two of one harness named alike are still refused",
+    );
+
+    let elsewhere = create_profile(&pool, &facts_for("elsewhere", codex("elsewhere")))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        update_profile(&pool, &elsewhere.id, &facts_for("work", grok("elsewhere")))
+            .await
+            .unwrap(),
+        Saving::Saved,
+        "a Grok Profile may be called what a Claude and a Codex one are",
+    );
+    assert_ne!(theirs.id, elsewhere.id);
+}
+
 #[tokio::test]
 async fn everything_about_a_profile_is_the_humans_to_rewrite() {
     let (_dir, pool) = fresh_pool().await;
@@ -630,11 +623,11 @@ async fn everything_about_a_profile_is_the_humans_to_rewrite() {
     changed.models = vec!["claude-fable-5".to_owned()];
 
     assert_eq!(
-        update_profile(&pool, profile.id, &changed).await.unwrap(),
+        update_profile(&pool, &profile.id, &changed).await.unwrap(),
         Saving::Saved
     );
 
-    let read = load_profile(&pool, profile.id).await.unwrap().unwrap();
+    let read = load_profile(&pool, &profile.id).await.unwrap().unwrap();
     assert_eq!(read.name.as_deref(), Some("anthropic"));
     assert_eq!(read.models, ["claude-fable-5"]);
     assert_eq!(read.account, claude("anthropic"));
@@ -652,7 +645,7 @@ async fn a_profile_holds_its_memory_switch_either_way() {
         .unwrap();
     assert!(!created.memory);
     assert!(
-        !load_profile(&pool, created.id)
+        !load_profile(&pool, &created.id)
             .await
             .unwrap()
             .unwrap()
@@ -663,7 +656,7 @@ async fn a_profile_holds_its_memory_switch_either_way() {
     assert!(remembering.memory);
 
     assert_eq!(
-        update_profile(&pool, remembering.id, &forgetting_as("remembering"))
+        update_profile(&pool, &remembering.id, &forgetting_as("remembering"))
             .await
             .unwrap(),
         Saving::Saved
@@ -684,13 +677,13 @@ async fn a_profile_holds_its_memory_switch_either_way() {
     );
 
     assert_eq!(
-        update_profile(&pool, remembering.id, &facts("remembering"))
+        update_profile(&pool, &remembering.id, &facts("remembering"))
             .await
             .unwrap(),
         Saving::Saved
     );
     assert!(
-        load_profile(&pool, remembering.id)
+        load_profile(&pool, &remembering.id)
             .await
             .unwrap()
             .unwrap()
@@ -717,11 +710,13 @@ async fn a_profile_keeping_its_own_name_is_not_refused() {
     same_name.models = vec!["claude-fable-5".to_owned()];
 
     assert_eq!(
-        update_profile(&pool, profile.id, &same_name).await.unwrap(),
+        update_profile(&pool, &profile.id, &same_name)
+            .await
+            .unwrap(),
         Saving::Saved
     );
     assert_eq!(
-        load_profile(&pool, profile.id)
+        load_profile(&pool, &profile.id)
             .await
             .unwrap()
             .unwrap()
@@ -737,13 +732,13 @@ async fn renaming_a_profile_to_another_ones_name_is_refused() {
     let personal = saved(&pool, "personal").await;
 
     assert_eq!(
-        update_profile(&pool, personal.id, &facts("work"))
+        update_profile(&pool, &personal.id, &facts("work"))
             .await
             .unwrap(),
         Saving::NameTaken
     );
     assert_eq!(
-        load_profile(&pool, personal.id)
+        load_profile(&pool, &personal.id)
             .await
             .unwrap()
             .unwrap()
@@ -758,10 +753,17 @@ async fn rewriting_a_profile_that_is_not_there_says_so() {
     let (_dir, pool) = fresh_pool().await;
 
     assert_eq!(
-        update_profile(&pool, 404, &facts("work")).await.unwrap(),
+        update_profile(&pool, "no-such-profile", &facts("work"))
+            .await
+            .unwrap(),
         Saving::NoSuchProfile
     );
-    assert!(load_profile(&pool, 404).await.unwrap().is_none());
+    assert!(
+        load_profile(&pool, "no-such-profile")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -770,14 +772,102 @@ async fn a_profile_nobody_is_running_under_is_removed() {
     let profile = saved(&pool, "work").await;
 
     assert_eq!(
-        delete_profile(&pool, profile.id).await.unwrap(),
+        delete_profile(&pool, &profile.id).await.unwrap(),
         Deleting::Deleted
     );
     assert!(profiles(&pool).await.unwrap().is_empty());
+    assert_eq!(load_profile(&pool, &profile.id).await.unwrap(), None);
+
+    // A deletion stamp on the record and on this device's binding, both kept:
+    // the stamp is what every other device is to learn from it.
+    let removed = records::<Profiles>(&pool).await.unwrap();
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0].uuid, profile.id);
+    assert!(
+        removed[0].removed(),
+        "the record carries its deletion stamp"
+    );
+    assert_eq!(removed[0].fields.name.as_deref(), Some("work"));
+
+    let bindings = records::<Bindings>(&pool).await.unwrap();
+    assert_eq!(bindings.len(), 1);
+    assert!(bindings[0].removed(), "and the binding goes with it");
 
     assert_eq!(
-        delete_profile(&pool, profile.id).await.unwrap(),
+        delete_profile(&pool, &profile.id).await.unwrap(),
         Deleting::NoSuchProfile
+    );
+    assert_eq!(
+        update_profile(&pool, &profile.id, &facts("work"))
+            .await
+            .unwrap(),
+        Saving::NoSuchProfile,
+        "a removal is final",
+    );
+
+    saved(&pool, "work").await;
+}
+
+/// A Profile is a record and this device's binding of it: the account's paths
+/// are the binding's, kept under `<uuid>/<device>` once the serve has said
+/// which device this is — and moved with it when the id it goes by changes.
+#[tokio::test]
+async fn a_profile_is_a_record_and_this_devices_binding() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let before = saved(&pool, "before").await;
+
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    let after = saved(&pool, "after").await;
+
+    let written = records::<Profiles>(&pool).await.unwrap();
+    assert_eq!(
+        written
+            .iter()
+            .map(|record| (record.uuid.as_str(), record.written_by.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (before.id.as_str(), THIS_DEVICE),
+            (after.id.as_str(), THIS_DEVICE)
+        ],
+        "a record written before the serve said which device this is is said to be its",
+    );
+    assert_eq!(written[1].fields.harness, "claude");
+    assert_eq!(written[1].fields.models, ["claude-opus-5"]);
+
+    let bindings = records::<Bindings>(&pool).await.unwrap();
+    assert_eq!(
+        bindings
+            .iter()
+            .map(|binding| binding.uuid.clone())
+            .collect::<Vec<_>>(),
+        [
+            binding_uuid(&before.id, THIS_DEVICE),
+            binding_uuid(&after.id, THIS_DEVICE)
+        ],
+    );
+    assert_eq!(
+        bindings[1].fields.claude_dir.as_deref(),
+        Some("/watched/accounts/after/.claude")
+    );
+
+    stamp_the_profiles(&pool, "ff00ee11dd22cc33bb44aa5566778899")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        records::<Bindings>(&pool).await.unwrap()[0].uuid,
+        binding_uuid(&before.id, "ff00ee11dd22cc33bb44aa5566778899"),
+        "a binding is where this machine keeps the account, whatever id it goes by",
+    );
+    assert_eq!(
+        load_profile(&pool, &before.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .account,
+        claude("before"),
     );
 }
 
@@ -795,15 +885,15 @@ async fn a_profile_a_conversation_has_chosen_is_removed_and_nulled_out_of_it() {
     let grilling = saved(&pool, "fable").await;
     let implementing = saved(&pool, "opus").await;
 
-    set_grilling_pairing(&pool, id, grilling.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &grilling.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, implementing.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &implementing.id, Some(MODEL))
         .await
         .unwrap();
 
     assert_eq!(
-        delete_profile(&pool, grilling.id).await.unwrap(),
+        delete_profile(&pool, &grilling.id).await.unwrap(),
         Deleting::Deleted
     );
 
@@ -816,7 +906,7 @@ async fn a_profile_a_conversation_has_chosen_is_removed_and_nulled_out_of_it() {
     assert_eq!(
         conversation
             .implementation_pairing
-            .map(|pairing| pairing.profile.id),
+            .map(|pairing| pairing.profile.id.clone()),
         Some(implementing.id),
         "and the role that named another account is untouched",
     );
@@ -836,18 +926,18 @@ async fn removing_a_profile_nulls_it_out_of_all_three_roles() {
     let id = conversation(&pool).await;
     let one = saved(&pool, "work").await;
 
-    set_grilling_pairing(&pool, id, one.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &one.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, one.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &one.id, Some(MODEL))
         .await
         .unwrap();
-    set_review_pairing(&pool, id, one.id, Some(MODEL))
+    set_review_pairing(&pool, id, &one.id, Some(MODEL))
         .await
         .unwrap();
 
     assert_eq!(
-        delete_profile(&pool, one.id).await.unwrap(),
+        delete_profile(&pool, &one.id).await.unwrap(),
         Deleting::Deleted
     );
 
@@ -868,14 +958,14 @@ async fn removing_a_profile_takes_the_model_paired_with_it_too() {
     let going = saved(&pool, "fable").await;
     let staying = saved(&pool, "opus").await;
 
-    set_grilling_pairing(&pool, id, going.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &going.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, staying.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &staying.id, Some(MODEL))
         .await
         .unwrap();
 
-    delete_profile(&pool, going.id).await.unwrap();
+    delete_profile(&pool, &going.id).await.unwrap();
 
     let paired: Vec<(String,)> =
         sqlx::query_as("SELECT role FROM pairing_models WHERE conversation_id = ?")
@@ -906,10 +996,10 @@ async fn a_profile_a_started_conversation_runs_under_is_removed_all_the_same() {
     let id = conversation(&pool).await;
     let profile = saved(&pool, "work").await;
 
-    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, profile.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -924,7 +1014,7 @@ async fn a_profile_a_started_conversation_runs_under_is_removed_all_the_same() {
     .unwrap();
 
     assert_eq!(
-        delete_profile(&pool, profile.id).await.unwrap(),
+        delete_profile(&pool, &profile.id).await.unwrap(),
         Deleting::Deleted
     );
 
@@ -961,15 +1051,15 @@ async fn a_removal_neither_writes_nor_clears_the_row_that_runs_no_session() {
     let profile = saved(&pool, "work").await;
 
     skip_review(&pool, kept).await.unwrap();
-    set_grilling_pairing(&pool, kept, profile.id, Some(MODEL))
+    set_grilling_pairing(&pool, kept, &profile.id, Some(MODEL))
         .await
         .unwrap();
 
-    set_review_pairing(&pool, paired, profile.id, Some(MODEL))
+    set_review_pairing(&pool, paired, &profile.id, Some(MODEL))
         .await
         .unwrap();
 
-    delete_profile(&pool, profile.id).await.unwrap();
+    delete_profile(&pool, &profile.id).await.unwrap();
 
     assert_eq!(
         load_conversation(&pool, kept)
@@ -1002,10 +1092,10 @@ async fn removing_a_profile_leaves_what_ran_under_it_on_the_record() {
     let id = conversation(&pool).await;
     let profile = saved(&pool, "work").await;
 
-    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, profile.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -1031,7 +1121,7 @@ async fn removing_a_profile_leaves_what_ran_under_it_on_the_record() {
     .await
     .unwrap();
 
-    delete_profile(&pool, profile.id).await.unwrap();
+    delete_profile(&pool, &profile.id).await.unwrap();
 
     let ran = timeline(&pool, id)
         .await
@@ -1067,7 +1157,7 @@ async fn a_session_under_a_profile_nobody_named_records_no_name() {
         .unwrap()
         .expect("nothing of this harness is unnamed yet");
 
-    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -1131,13 +1221,13 @@ async fn a_removal_leaves_no_row_anywhere_that_names_the_profile() {
         .unwrap()
         .unwrap();
 
-    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, profile.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
-    set_review_pairing(&pool, id, profile.id, Some(MODEL))
+    set_review_pairing(&pool, id, &profile.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -1150,7 +1240,7 @@ async fn a_removal_leaves_no_row_anywhere_that_names_the_profile() {
         id,
         &PendingForm {
             pairing: Some(PendingPairing {
-                profile_id: profile.id,
+                profile_id: profile.id.clone(),
                 model: MODEL.to_owned(),
             }),
             ..PendingForm::default()
@@ -1180,28 +1270,28 @@ async fn a_removal_leaves_no_row_anywhere_that_names_the_profile() {
 
     for (table, column) in &naming {
         assert!(
-            naming_rows(&pool, table, column, profile.id).await > 0,
+            naming_rows(&pool, table, column, &profile.id).await > 0,
             "nothing in {table}.{column} names the Profile, so its removal is \
              something this test never sees happen",
         );
     }
 
     assert_eq!(
-        delete_profile(&pool, profile.id).await.unwrap(),
+        delete_profile(&pool, &profile.id).await.unwrap(),
         Deleting::Deleted
     );
 
     for (table, column) in &naming {
         assert_eq!(
-            naming_rows(&pool, table, column, profile.id).await,
+            naming_rows(&pool, table, column, &profile.id).await,
             0,
             "{table}.{column} still names the Profile that was removed",
         );
     }
 }
 
-/// Every table-and-column pair the schema says points at `profiles`, asked of
-/// SQLite rather than written down here.
+/// Every table-and-column pair the schema has naming a Profile, asked of
+/// SQLite rather than written down here: every column called for one.
 async fn names_a_profile(pool: &SqlitePool) -> Vec<(String, String)> {
     let tables: Vec<(String,)> = sqlx::query_as(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
@@ -1213,18 +1303,20 @@ async fn names_a_profile(pool: &SqlitePool) -> Vec<(String, String)> {
     let mut naming = Vec::new();
 
     for (table,) in tables {
-        let keys: Vec<(String, String)> = sqlx::query_as(&format!(
-            "SELECT \"table\", \"from\" FROM pragma_foreign_key_list('{table}')"
+        // A mirror's own two tables, which a record has no row in, and the
+        // recorded steers, which keep the uuid of what was picked for good.
+        if ["profile_models", "profile_homes", "steers"].contains(&table.as_str()) {
+            continue;
+        }
+
+        let columns: Vec<(String,)> = sqlx::query_as(&format!(
+            "SELECT name FROM pragma_table_info('{table}') WHERE name LIKE '%profile_id'"
         ))
         .fetch_all(pool)
         .await
         .unwrap();
 
-        for (points_at, column) in keys {
-            if points_at == "profiles" {
-                naming.push((table.clone(), column));
-            }
-        }
+        naming.extend(columns.into_iter().map(|(column,)| (table.clone(), column)));
     }
 
     naming.sort();
@@ -1232,7 +1324,7 @@ async fn names_a_profile(pool: &SqlitePool) -> Vec<(String, String)> {
 }
 
 /// How many rows of one of them name this Profile.
-async fn naming_rows(pool: &SqlitePool, table: &str, column: &str, id: i64) -> i64 {
+async fn naming_rows(pool: &SqlitePool, table: &str, column: &str, id: &str) -> i64 {
     let (rows,): (i64,) =
         sqlx::query_as(&format!("SELECT COUNT(*) FROM {table} WHERE {column} = ?"))
             .bind(id)
@@ -1253,7 +1345,7 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     let opus = saved(&pool, "opus").await;
 
     assert_eq!(
-        set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+        set_grilling_pairing(&pool, id, &fable.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::Chosen
@@ -1263,13 +1355,13 @@ async fn a_conversation_chooses_its_two_pairings_independently() {
     // grill from.
     let half = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        half.grilling_pairing.as_ref().map(|p| p.profile.id),
+        half.grilling_pairing.as_ref().map(|p| p.profile.id.clone()),
         Some(fable.id)
     );
     assert_eq!(half.implementation_pairing, None);
 
     assert_eq!(
-        set_implementation_pairing(&pool, id, opus.id, Some(MODEL))
+        set_implementation_pairing(&pool, id, &opus.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::Chosen
@@ -1307,7 +1399,7 @@ async fn a_pairing_holds_the_model_it_was_chosen_with() {
     .unwrap()
     .unwrap();
 
-    set_grilling_pairing(&pool, id, profile.id, Some("claude-fable-5"))
+    set_grilling_pairing(&pool, id, &profile.id, Some("claude-fable-5"))
         .await
         .unwrap();
 
@@ -1322,7 +1414,7 @@ async fn a_pairing_holds_the_model_it_was_chosen_with() {
 
     // And choosing again replaces both halves rather than leaving the old model
     // beside the new Profile.
-    set_grilling_pairing(&pool, id, profile.id, Some("claude-opus-5"))
+    set_grilling_pairing(&pool, id, &profile.id, Some("claude-opus-5"))
         .await
         .unwrap();
 
@@ -1375,10 +1467,10 @@ async fn a_pairing_cannot_be_chosen_once_grilling_has_started() {
     let fable = saved(&pool, "fable").await;
     let opus = saved(&pool, "opus").await;
 
-    set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, fable.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -1393,13 +1485,13 @@ async fn a_pairing_cannot_be_chosen_once_grilling_has_started() {
     .unwrap();
 
     assert_eq!(
-        set_grilling_pairing(&pool, id, opus.id, Some(MODEL))
+        set_grilling_pairing(&pool, id, &opus.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::NotDrafting
     );
     assert_eq!(
-        set_implementation_pairing(&pool, id, opus.id, Some(MODEL))
+        set_implementation_pairing(&pool, id, &opus.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::NotDrafting
@@ -1429,21 +1521,26 @@ async fn one_profile_can_be_both_of_a_conversations_choices() {
     let id = conversation(&pool).await;
     let only = saved(&pool, "work").await;
 
-    set_grilling_pairing(&pool, id, only.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &only.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, only.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &only.id, Some(MODEL))
         .await
         .unwrap();
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        conversation.grilling_pairing.as_ref().map(|p| p.profile.id),
-        Some(only.id)
+        conversation
+            .grilling_pairing
+            .as_ref()
+            .map(|p| p.profile.id.clone()),
+        Some(only.id.clone())
     );
     assert_eq!(
-        conversation.implementation_pairing.map(|p| p.profile.id),
-        Some(only.id)
+        conversation
+            .implementation_pairing
+            .map(|p| p.profile.id.clone()),
+        Some(only.id.clone())
     );
 }
 
@@ -1455,13 +1552,13 @@ async fn a_profile_that_is_not_there_cannot_be_chosen() {
     let id = conversation(&pool).await;
 
     assert_eq!(
-        set_grilling_pairing(&pool, id, 404, Some(MODEL))
+        set_grilling_pairing(&pool, id, "no-such-profile", Some(MODEL))
             .await
             .unwrap(),
         Chosen::NoSuchProfile
     );
     assert_eq!(
-        set_implementation_pairing(&pool, id, 404, Some(MODEL))
+        set_implementation_pairing(&pool, id, "no-such-profile", Some(MODEL))
             .await
             .unwrap(),
         Chosen::NoSuchProfile
@@ -1478,13 +1575,13 @@ async fn choosing_on_a_conversation_that_is_not_there_says_so() {
     let profile = saved(&pool, "work").await;
 
     assert_eq!(
-        set_grilling_pairing(&pool, 404, profile.id, Some(MODEL))
+        set_grilling_pairing(&pool, 404, &profile.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::NoSuchConversation
     );
     assert_eq!(
-        set_implementation_pairing(&pool, 404, profile.id, Some(MODEL))
+        set_implementation_pairing(&pool, 404, &profile.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::NoSuchConversation
@@ -1514,10 +1611,10 @@ async fn profiles_and_the_choices_made_of_them_survive_a_restart() {
     let id = conversation(&pool).await;
     let fable = saved(&pool, "fable").await;
     let opus = saved(&pool, "opus").await;
-    set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, opus.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &opus.id, Some(MODEL))
         .await
         .unwrap();
     pool.close().await;
@@ -1591,7 +1688,7 @@ async fn picking_a_review_pairing_and_picking_none_replace_each_other() {
     let id = conversation(&pool).await;
     let fable = saved(&pool, "fable").await;
 
-    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+    set_review_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
     skip_review(&pool, id).await.unwrap();
@@ -1606,7 +1703,7 @@ async fn picking_a_review_pairing_and_picking_none_replace_each_other() {
         "the account it was going to be reviewed under is off it",
     );
 
-    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+    set_review_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -1617,7 +1714,7 @@ async fn picking_a_review_pairing_and_picking_none_replace_each_other() {
         .review_pairing;
 
     assert_eq!(
-        picked.pairing().map(|pairing| pairing.profile.id),
+        picked.pairing().map(|pairing| pairing.profile.id.clone()),
         Some(fable.id),
         "and picking an account back takes the row that ran nothing away",
     );
@@ -1630,13 +1727,13 @@ async fn no_review_cannot_be_picked_once_grilling_has_started() {
     let id = conversation(&pool).await;
     let fable = saved(&pool, "fable").await;
 
-    set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+    set_grilling_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
-    set_implementation_pairing(&pool, id, fable.id, Some(MODEL))
+    set_implementation_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
-    set_review_pairing(&pool, id, fable.id, Some(MODEL))
+    set_review_pairing(&pool, id, &fable.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -1659,8 +1756,640 @@ async fn no_review_cannot_be_picked_once_grilling_has_started() {
             .unwrap()
             .review_pairing
             .pairing()
-            .map(|pairing| pairing.profile.id),
+            .map(|pairing| pairing.profile.id.clone()),
         Some(fable.id),
         "and what it was grilled under is exactly where it was",
+    );
+}
+
+/// A Profile saved here is minted a uuid of its own, and two are never alike.
+#[tokio::test]
+async fn a_profile_saved_here_is_named_by_a_uuid_of_its_own() {
+    let (_dir, pool) = fresh_pool().await;
+    let work = saved(&pool, "work").await;
+    let personal = saved(&pool, "personal").await;
+
+    for profile in [&work, &personal] {
+        assert_eq!(profile.id.len(), 36, "a uuid: {}", profile.id);
+        assert_eq!(profile.minted, None, "and never numbered anything else");
+    }
+    assert_ne!(work.id, personal.id);
+    assert_eq!(load_profile(&pool, &work.id).await.unwrap(), Some(work));
+}
+
+/// The member the records below arrive from.
+const HOME: &str = "ff11223344556677889900aabbccddee";
+
+/// The uuid that member's Profile is a record under.
+const AT_HOME: &str = "5a1e0c3d-7b2f-4e8a-9c6d-1f0e2d3c4b5a";
+
+/// A member's Profile record arriving, written by [`HOME`] at `updated_at`:
+/// named `name`, Claude, and where it was minted where that is said. Removed
+/// where `removed` says so.
+async fn arrived(
+    pool: &SqlitePool,
+    name: &str,
+    minted: Option<i64>,
+    updated_at: i64,
+    removed: bool,
+) {
+    merge::<Profiles>(
+        pool,
+        &[Record {
+            uuid: AT_HOME.to_owned(),
+            updated_at,
+            deleted_at: removed.then_some(updated_at),
+            written_by: HOME.to_owned(),
+            fields: ProfileRecord {
+                name: Some(name.to_owned()),
+                harness: "claude".to_owned(),
+                models: vec![MODEL.to_owned()],
+                memory: true,
+                minted_on: minted.map(|_| HOME.to_owned()),
+                minted_id: minted,
+            },
+        }],
+    )
+    .await
+    .unwrap();
+}
+
+/// And that member's binding of it, its paths for `name`'s account.
+async fn bound_at_home(pool: &SqlitePool, name: &str) {
+    let Account::Claude {
+        claude_dir,
+        config_file,
+    } = claude(name)
+    else {
+        unreachable!()
+    };
+
+    merge::<Bindings>(
+        pool,
+        &[Record {
+            uuid: binding_uuid(AT_HOME, HOME),
+            updated_at: 1,
+            deleted_at: None,
+            written_by: HOME.to_owned(),
+            fields: Binding {
+                claude_dir: Some(claude_dir.to_string_lossy().into_owned()),
+                config_file: Some(config_file.to_string_lossy().into_owned()),
+                home: None,
+                login: true,
+            },
+        }],
+    )
+    .await
+    .unwrap();
+}
+
+/// A Profile arriving from a member is listed and picked here like one saved
+/// here, with no binding of this device's: bound on the member, and its paths
+/// the member's.
+#[tokio::test]
+async fn a_members_profile_is_listed_with_no_binding_here() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    arrived(&pool, "theirs", None, 1, false).await;
+
+    let listed = profiles(&pool).await.unwrap();
+    assert_eq!(
+        listed.len(),
+        1,
+        "listed before any binding of it has arrived"
+    );
+    assert_eq!(
+        listed[0].unbound,
+        Some(Unbound {
+            bound_on: vec![],
+            lending: vec![],
+        }),
+        "bound nowhere this device has heard of",
+    );
+
+    bound_at_home(&pool, "theirs").await;
+
+    let held = load_profile(&pool, AT_HOME).await.unwrap().unwrap();
+    assert_eq!(held.name.as_deref(), Some("theirs"));
+    assert_eq!(
+        held.unbound,
+        Some(Unbound {
+            bound_on: vec![HOME.to_owned()],
+            lending: vec![HOME.to_owned()],
+        }),
+    );
+    assert_eq!(held.account, claude("theirs"), "the member's paths");
+
+    let id = conversation(&pool).await;
+    assert_eq!(
+        set_grilling_pairing(&pool, id, AT_HOME, Some(MODEL))
+            .await
+            .unwrap(),
+        Chosen::Chosen,
+        "and it is picked like any other",
+    );
+}
+
+/// A binding says whether the account at its paths holds a login, as the
+/// device bound on it last looked: written over this device's own binding where
+/// it moved, kept by a save that keeps the paths, and a member's binding that
+/// holds none is no device to fetch the account from.
+#[tokio::test]
+async fn a_binding_says_whether_its_account_holds_a_login() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    let ours = saved(&pool, "ours").await;
+
+    let login = |pool: SqlitePool, id: String| async move {
+        records::<Bindings>(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|binding| binding.uuid == binding_uuid(&id, THIS_DEVICE))
+            .expect("this device's binding")
+            .fields
+            .login
+    };
+
+    assert!(
+        login(pool.clone(), ours.id.clone()).await,
+        "taken to hold one until this device has looked",
+    );
+
+    let held = [(ours.id.clone(), false)];
+    assert!(logins_held(&pool, &held).await.unwrap(), "moved");
+    assert!(!logins_held(&pool, &held).await.unwrap(), "and said once");
+    assert!(!login(pool.clone(), ours.id.clone()).await);
+
+    update_profile(&pool, &ours.id, &facts_for("renamed", claude("ours")))
+        .await
+        .unwrap();
+    assert!(
+        !login(pool.clone(), ours.id.clone()).await,
+        "a save over the same paths keeps what was looked",
+    );
+
+    // A member's, bound there with no login file.
+    arrived(&pool, "theirs", None, 1, false).await;
+    bound_at_home(&pool, "theirs").await;
+
+    let mut binding = records::<Bindings>(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|binding| binding.uuid == binding_uuid(AT_HOME, HOME))
+        .unwrap();
+    binding.fields.login = false;
+    binding.updated_at = 2;
+    merge::<Bindings>(&pool, &[binding]).await.unwrap();
+
+    assert!(
+        !logins_held(&pool, &[(AT_HOME.to_owned(), true)])
+            .await
+            .unwrap(),
+        "and nothing is said over another device's binding",
+    );
+
+    assert_eq!(
+        load_profile(&pool, AT_HOME).await.unwrap().unwrap().unbound,
+        Some(Unbound {
+            bound_on: vec![HOME.to_owned()],
+            lending: vec![],
+        }),
+        "bound there, and nothing to fetch from it",
+    );
+}
+
+/// A Profile this device holds no binding of is rewritten as a record alone:
+/// its harness is kept and no binding of this device's is written, whatever
+/// account the save carried.
+#[tokio::test]
+async fn editing_a_profile_not_bound_here_writes_the_record_alone() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    arrived(&pool, "theirs", None, 1, false).await;
+    bound_at_home(&pool, "theirs").await;
+
+    assert_eq!(
+        update_profile(&pool, AT_HOME, &facts_for("renamed", codex("mine")))
+            .await
+            .unwrap(),
+        Saving::Saved,
+    );
+
+    let held = load_profile(&pool, AT_HOME).await.unwrap().unwrap();
+    assert_eq!(held.name.as_deref(), Some("renamed"));
+    assert_eq!(held.agent_type(), AgentType::Claude, "its harness kept");
+    assert_eq!(held.account, claude("theirs"), "and the member's paths");
+    assert!(held.unbound.is_some(), "and still no binding here");
+
+    let bindings = records::<Bindings>(&pool).await.unwrap();
+    assert_eq!(bindings.len(), 1, "the member's alone");
+
+    let record = records::<Profiles>(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|record| record.uuid == AT_HOME)
+        .unwrap();
+    assert_eq!(
+        record.written_by, THIS_DEVICE,
+        "a write of this device's own"
+    );
+}
+
+/// A record arriving removed nulls every Pairing on this device that named it,
+/// as removing one here does, and the Profile is in no list after it.
+#[tokio::test]
+async fn a_record_arriving_removed_nulls_every_pairing_that_named_it() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    arrived(&pool, "theirs", None, 1, false).await;
+    bound_at_home(&pool, "theirs").await;
+
+    let id = conversation(&pool).await;
+    set_grilling_pairing(&pool, id, AT_HOME, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(&pool, id, AT_HOME, Some(MODEL))
+        .await
+        .unwrap();
+
+    arrived(&pool, "theirs", None, 2, true).await;
+
+    let settled = settle(&pool).await.unwrap();
+    assert_eq!(settled.removed, vec![AT_HOME.to_owned()]);
+
+    for (table, column) in names_a_profile(&pool).await {
+        assert_eq!(
+            naming_rows(&pool, &table, &column, AT_HOME).await,
+            0,
+            "{table}.{column} still names the removed Profile",
+        );
+    }
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.grilling_pairing, None);
+    assert_eq!(conversation.implementation_pairing, None);
+    assert!(profiles(&pool).await.unwrap().is_empty());
+}
+
+/// A mirror held from before the uuids: the member's Profile once numbered 7
+/// there, under a provisional uuid of this device's minting — a row of the old
+/// table, which is in no list.
+///
+/// Every Pairing is made against it while it is a record, which is the only
+/// thing a Pairing can be made against now, and then the record is turned into
+/// the row a database from before this release holds.
+async fn provisional(pool: &SqlitePool, id: i64) -> String {
+    let provisional = "0d0e0f10-1112-4314-9516-171819202122".to_owned();
+
+    merge::<Profiles>(
+        pool,
+        &[Record {
+            uuid: provisional.clone(),
+            updated_at: 1,
+            deleted_at: None,
+            written_by: HOME.to_owned(),
+            fields: ProfileRecord {
+                name: Some("work".to_owned()),
+                harness: "claude".to_owned(),
+                models: vec![MODEL.to_owned()],
+                memory: true,
+                minted_on: None,
+                minted_id: None,
+            },
+        }],
+    )
+    .await
+    .unwrap();
+
+    set_grilling_pairing(pool, id, &provisional, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(pool, id, &provisional, Some(MODEL))
+        .await
+        .unwrap();
+    set_review_pairing(pool, id, &provisional, Some(MODEL))
+        .await
+        .unwrap();
+
+    open_pending_steer(pool, id).await.unwrap();
+    save_pending_steer(
+        pool,
+        id,
+        &PendingForm {
+            pairing: Some(PendingPairing {
+                profile_id: provisional.clone(),
+                model: MODEL.to_owned(),
+            }),
+            ..PendingForm::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    sqlx::query("DELETE FROM replicated WHERE uuid = ?")
+        .bind(&provisional)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "INSERT INTO profiles
+             (id, name, claude_dir, config_file, model, agent_type, memory, home_device, home_id)
+         VALUES (?, 'work', '/theirs/.claude', '/theirs/.claude.json', ?, 'claude', 1, ?, 7)",
+    )
+    .bind(&provisional)
+    .bind(MODEL)
+    .bind(HOME)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    provisional
+}
+
+/// A mirror from before the uuids is in no list while it is provisional, its
+/// Pairings kept; and once its home's record arrives carrying where it was
+/// minted, every row that named the provisional uuid names the record's, with
+/// nothing nulled on the way, and the row is gone.
+#[tokio::test]
+async fn a_provisional_mirror_is_bridged_onto_the_record_its_home_published() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+    let id = conversation(&pool).await;
+
+    let provisional = provisional(&pool, id).await;
+
+    start_grilling(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // And the two columns that name one beyond the pickers: the Profile a
+    // signed-out stop waits on, and a recorded steer's.
+    sqlx::query("UPDATE conversations SET stopped_signed_out = ? WHERE id = ?")
+        .bind(&provisional)
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut naming = names_a_profile(&pool).await;
+    naming.push(("conversations".to_owned(), "stopped_signed_out".to_owned()));
+
+    for (table, column) in &naming {
+        assert!(
+            naming_rows(&pool, table, column, &provisional).await > 0,
+            "nothing in {table}.{column} names the mirror, so its bridge is something \
+             this test never sees",
+        );
+    }
+
+    assert!(
+        profiles(&pool).await.unwrap().is_empty(),
+        "a provisional mirror is in no list",
+    );
+    assert_eq!(
+        settle(&pool).await.unwrap(),
+        Settled::default(),
+        "and nothing bridges it before its home's record arrives",
+    );
+
+    arrived(&pool, "work", Some(7), 1, false).await;
+
+    assert_eq!(
+        settle(&pool).await.unwrap().bridged,
+        vec![(provisional.clone(), AT_HOME.to_owned())],
+    );
+
+    for (table, column) in &naming {
+        assert_eq!(
+            naming_rows(&pool, table, column, &provisional).await,
+            0,
+            "{table}.{column} still names the provisional uuid",
+        );
+        assert!(
+            naming_rows(&pool, table, column, AT_HOME).await > 0,
+            "{table}.{column} lost the Profile rather than following it",
+        );
+    }
+
+    let (rows,): (i64,) = sqlx::query_as("SELECT count(*) FROM profiles")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0, "no mirror row is left");
+
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .grilling_pairing
+            .map(|pairing| pairing.profile.id),
+        Some(AT_HOME.to_owned()),
+        "the Pairing draws the record",
+    );
+
+    assert!(
+        settle(&pool).await.unwrap().bridged.is_empty(),
+        "and a second settling finds nothing left to bridge",
+    );
+}
+
+/// What a member's other Profiles were numbered, and what another member's
+/// were, bridge nothing.
+#[tokio::test]
+async fn a_pair_that_matches_no_mirror_bridges_nothing() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    let provisional = provisional(&pool, id).await;
+
+    arrived(&pool, "work", Some(8), 1, false).await;
+    assert!(settle(&pool).await.unwrap().bridged.is_empty());
+
+    assert_eq!(
+        naming_rows(&pool, "conversations", "grilling_profile_id", &provisional).await,
+        1,
+        "the Pairing still names the mirror",
+    );
+}
+
+/// What this device is called, as the serve says it: the name its unnamed
+/// Profiles are named after.
+const CALLED: &str = "the-workstation";
+
+/// A member's device, and the uuid of a Profile it made.
+const MEMBER_DEVICE: &str = "0011223344556677889900aabbccddee";
+const MEMBER: &str = "7d3c1b2a-0f4e-4a5b-9c8d-1e2f3a4b5c6d";
+
+/// A member, written down the way a link writes one.
+async fn linked(pool: &SqlitePool, device: &str) {
+    record_member(
+        pool,
+        &Linking {
+            device: device.to_owned(),
+            name: format!("{device}-machine"),
+            os: "Linux".to_owned(),
+            addresses: vec!["127.0.0.1:1".to_owned()],
+            fingerprint: format!("{device}-fingerprint"),
+            kept_by: None,
+            version: None,
+            install: None,
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// What every Profile here is called, by harness, in the order written down.
+async fn called_here(pool: &SqlitePool) -> Vec<(String, Option<String>)> {
+    records::<Profiles>(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|record| (record.fields.harness, record.fields.name))
+        .collect()
+}
+
+/// A device in no cluster leaves its unnamed Profiles unnamed: there is
+/// nothing for them to be told apart from.
+#[tokio::test]
+async fn a_device_in_no_cluster_leaves_its_unnamed_profiles_unnamed() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    create_profile(&pool, &unnamed(claude("default")))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(this_device_called(&pool, CALLED).await.unwrap().is_empty());
+    assert!(this_device_called(&pool, CALLED).await.unwrap().is_empty());
+
+    assert_eq!(called_here(&pool).await, [("claude".to_owned(), None)]);
+}
+
+/// **At the switch, on a device that has members**: the serve saying what it
+/// is called names each of its own unnamed Profiles after it, whatever the
+/// harness — and never one a member made, which is bound there, nor one
+/// already named, nor one removed.
+#[tokio::test]
+async fn at_the_switch_a_device_with_members_names_its_own_unnamed_profiles() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    let claude_one = create_profile(&pool, &unnamed(claude("default")))
+        .await
+        .unwrap()
+        .unwrap();
+    let codex_one = create_profile(&pool, &unnamed(codex("default")))
+        .await
+        .unwrap()
+        .unwrap();
+    saved(&pool, "work").await;
+
+    // A Profile already called what this device is, which the naming is not
+    // turned away by: the rules are the press's.
+    saved(&pool, CALLED).await;
+
+    profile_arrived(&pool, MEMBER, MEMBER_DEVICE, &unnamed(claude("theirs")))
+        .await
+        .unwrap();
+
+    linked(&pool, MEMBER_DEVICE).await;
+
+    assert_eq!(
+        called_here(&pool)
+            .await
+            .iter()
+            .filter(|(_, name)| name.is_none())
+            .count(),
+        3,
+        "nothing is named while the serve has not said what this device is called",
+    );
+
+    let named = this_device_called(&pool, CALLED).await.unwrap();
+
+    assert_eq!(named, [claude_one.id.clone(), codex_one.id.clone()]);
+    assert_eq!(
+        called_here(&pool).await,
+        [
+            ("claude".to_owned(), Some(CALLED.to_owned())),
+            ("codex".to_owned(), Some(CALLED.to_owned())),
+            ("claude".to_owned(), Some("work".to_owned())),
+            ("claude".to_owned(), Some(CALLED.to_owned())),
+            ("claude".to_owned(), None),
+        ],
+        "this device's own, two alike with the one already called so; the member's \
+         left for it to name",
+    );
+
+    let written = records::<Profiles>(&pool).await.unwrap();
+    assert_eq!(
+        written[0].written_by, THIS_DEVICE,
+        "an ordinary record write, which replicates",
+    );
+}
+
+/// **When a device first links**: the write that records its first member
+/// names its own unnamed Profiles, once — a name the human cleared afterwards
+/// stays cleared across a restart and a later link.
+#[tokio::test]
+async fn a_device_first_linking_names_its_unnamed_profiles_once() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+    this_device_called(&pool, CALLED).await.unwrap();
+
+    let default = create_profile(&pool, &unnamed(claude("default")))
+        .await
+        .unwrap()
+        .unwrap();
+
+    linked(&pool, MEMBER_DEVICE).await;
+
+    assert_eq!(
+        load_profile(&pool, &default.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .name
+            .as_deref(),
+        Some(CALLED),
+        "named in the write that linked it",
+    );
+
+    assert_eq!(
+        update_profile(&pool, &default.id, &unnamed(claude("default")))
+            .await
+            .unwrap(),
+        Saving::Saved,
+        "and the human clears it",
+    );
+
+    // A restart, which says the name again, and a later link.
+    assert!(this_device_called(&pool, CALLED).await.unwrap().is_empty());
+    linked(&pool, "ff11223344556677889900aabbccddee").await;
+
+    assert_eq!(
+        load_profile(&pool, &default.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .name,
+        None,
+        "the name cleared stays cleared",
     );
 }

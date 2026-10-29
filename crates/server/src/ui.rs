@@ -45,19 +45,19 @@ use verkstead_render::{
     Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView,
     FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
     FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, InstallPress, LanguageCleared, LanguageEdit, LanguageView, Lifecycle,
-    Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption,
-    NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank, OpenTerminal, PairingView, Parked,
-    PendingSteerView, Permitting, Picking, Process, ProcessChoice, ProcessPicked, ProfileChoice,
-    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
-    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, Running,
-    RunningOn, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, SizeRefused, Standing,
-    SteerCancelled, SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission,
-    StoreView, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
-    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo, Transferring, UnreadEntry,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    IgnoredCommentsEdit, InstallPress, InstructionsEdit, LanguageCleared, LanguageEdit,
+    LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging,
+    MissedOut, NewAdoption, NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank,
+    OpenTerminal, PairingView, Parked, PendingSteerView, Permitting, Picking, Process,
+    ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
+    RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField,
+    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
+    SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
+    TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
+    TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -65,6 +65,7 @@ use crate::device::Unlinkable;
 use crate::onboarding::Refusal;
 use crate::peer::workbench::OverTheLink;
 use crate::settings::{AtOnce, Cleanup, CleanupStep, Config, RuleTrouble};
+use crate::store::replicated::Written;
 use crate::updating::members::Untold;
 use crate::{AppState, store};
 
@@ -684,17 +685,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // And taking one Author away, which is a press on the Git section's
         // switcher rather than a key of a save: refused by name while a Repo
         // points at it, the way a Repo's removal is refused under live work.
-        // And the cluster's one list of Authors: this device's own and a mirror
-        // of every member's, marked with its home — what the Git switcher draws,
-        // and what a member reads this device's own off across the link (see
-        // [`crate::mirroring::authors`]). Nothing of a token but whether one is
-        // held, because a member reads it too.
+        // And the cluster's one list of Authors, every device's alike — what
+        // the Git switcher draws (see [`crate::replicating::authors`]).
+        // Nothing of a token but whether this device holds one.
         .route("/api/ui/authors", get(authors))
-        // And one Author edited alone, which is what the Git section sends for
-        // a member's: put to the device it is at home on, as that device's own
-        // edit — see [`crate::mirroring::authors::edited`].
+        // And one Author edited alone, which is what the Git section sends.
         .route("/api/ui/authors/{id}", post(edit_author))
         .route("/api/ui/authors/{id}/remove", post(remove_author))
+        .route("/api/ui/authors/{id}/repoint", post(repoint_authors))
         // Emptying one language's stores, which is an act rather than a value
         // the settings hold, so a route of its own rather than a key of a save.
         .route("/api/ui/languages/{name}/clear", post(clear_language))
@@ -1420,10 +1418,13 @@ async fn remove_repo(State(state): State<AppState>, Path(id): Path<String>) -> H
     }
 }
 
-/// `GET /api/ui/authors` — the one list of Authors: this device's own, then a
-/// mirror of every member's with the device it is at home on.
+/// `GET /api/ui/authors` — the one list of Authors, made on this device or any
+/// other.
 async fn authors(State(state): State<AppState>) -> HttpResponse {
-    match crate::mirroring::authors::listed(&state).await {
+    let settings = state.settings.clone();
+
+    match tokio::task::spawn_blocking(move || crate::replicating::authors::listed(&settings)).await
+    {
         Ok(listed) => Json(listed).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading the Authors failed");
@@ -1435,88 +1436,100 @@ async fn authors(State(state): State<AppState>) -> HttpResponse {
 /// `POST /api/ui/authors/{id}` — rewrite one Author's fields, and set or clear
 /// its token, and nothing else of either file.
 ///
-/// **Reached for a mirror, and relayed home when it is one** (ADR-0025): the
-/// edit is put to the device the Author is at home on, and what comes back is
-/// that device's own word — the token verified there, with its own `gh` — or a
-/// refusal naming the machine that did not take it. See
-/// [`crate::mirroring::authors::edited`]. Arriving at home, it is the half
-/// below: the Author's own entry written over and the token by the settings
-/// save's rules, then tried against GitHub after the writing for its reason.
+/// A write on this device whichever device made the Author: the record written
+/// over and the token by the settings save's rules, then tried against GitHub
+/// from here, with this device's `gh`, after the writing for its reason.
 async fn edit_author(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(edit): Json<AuthorEdit>,
 ) -> HttpResponse {
-    match crate::mirroring::authors::edited(&state, &id, &edit).await {
-        Ok(crate::mirroring::Pressed::Here) => {}
-
-        Ok(crate::mirroring::Pressed::Away(outcome)) => {
-            return Json(outcome).into_response();
-        }
-
-        Ok(crate::mirroring::Pressed::Refused(why)) => {
-            tracing::warn!("an Author was not saved at home: {}", why.saying);
-            return refused(why.status, ApiError::new(why.saying));
-        }
-
-        Err(error) => {
-            tracing::error!(
-                error = ?error,
-                author = id,
-                "reading which device an Author is at home on failed",
-            );
-            return unavailable("The author couldn't be saved.");
-        }
-    }
-
     let settings = state.settings.clone();
     let gh = state.github.clone();
 
-    let saved = tokio::task::spawn_blocking(move || {
+    let saved = async {
+        let author = crate::settings::Author::of(
+            id.clone(),
+            Some(edit.display_name.clone()),
+            Some(edit.name.clone()),
+            Some(edit.email.clone()),
+        );
+
+        // Nothing written for an Author there is no record of — the token
+        // included, which would otherwise sit under a uuid nobody holds.
+        crate::replicating::authors::taken_up(&state.pool, &settings, &state.device).await?;
+
+        if settings.config().author(&id).is_none() {
+            return Ok::<_, anyhow::Error>(AuthorEdited::NoSuchAuthor);
+        }
+
+        // The token into `secrets.yaml` first, so that the record written
+        // after it says whether the file holds one — the two together, so the
+        // copying never reads one without the other.
+        let _writing = crate::replicating::authors::writing_held().await;
+
         let token = match &edit.github_token {
             TokenEdit::Keep => None,
             TokenEdit::Set { token } => Some(Some(token.clone())),
             TokenEdit::Clear => Some(None),
         };
 
-        let author = crate::settings::Author::of(
-            id.clone(),
-            Some(edit.display_name),
-            Some(edit.name),
-            Some(edit.email),
-        );
+        let token_moved = token.is_some();
 
-        if !settings.editing_author(author, token)? {
-            return Ok::<_, std::io::Error>(AuthorEdited::NoSuchAuthor);
+        if let Some(token) = token {
+            let settings = settings.clone();
+            let id = id.clone();
+
+            tokio::task::spawn_blocking(move || settings.setting_author_token(&id, token))
+                .await??;
+        }
+
+        let written = crate::replicating::authors::edited(
+            &state.pool,
+            &settings,
+            &state.device,
+            &author,
+            token_moved,
+        )
+        .await?;
+
+        drop(_writing);
+
+        if matches!(written, Written::Absent | Written::Removed) {
+            return Ok(AuthorEdited::NoSuchAuthor);
         }
 
         // Read back off the file rather than taken from the request, for the
         // settings save's reason: a token of whitespace is nothing configured.
         let verified = match &edit.github_token {
-            TokenEdit::Set { .. } => settings
-                .secrets()
-                .author_token(&id)
-                .map(|token| verifying(&gh, token)),
+            TokenEdit::Set { .. } => {
+                let settings = settings.clone();
+                let id = id.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    settings
+                        .secrets()
+                        .author_token(&id)
+                        .map(|token| verifying(&gh, token))
+                })
+                .await?
+            }
             TokenEdit::Keep | TokenEdit::Clear => None,
         };
 
         Ok(AuthorEdited::Saved { verified })
-    })
+    }
     .await;
 
     match saved {
-        Ok(Ok(outcome)) => {
-            // Every member's mirror of it, and its copy of the token, redrawn
-            // on the read this sets going.
+        Ok(outcome) => {
+            // Every member pulls the record on the Nudge, and fetches its copy
+            // of the token where the record says one moved.
             if matches!(outcome, AuthorEdited::Saved { .. }) {
                 state.nudges.announce(Nudge::Authors);
             }
 
             Json(outcome).into_response()
-        }
-        Ok(Err(error)) => {
-            tracing::error!(error = ?error, "writing an Author into the settings files failed");
-            unavailable("The author couldn't be saved.")
         }
         Err(error) => {
             tracing::error!(error = ?error, "saving an Author failed");
@@ -1528,38 +1541,56 @@ async fn edit_author(
 /// `POST /api/ui/authors/{id}/remove` — take one Author out of the settings.
 ///
 /// Every refusal is a named outcome in the body, the Repo removal's way: the
-/// Repos pointing at it are what the switcher puts in words.
+/// Repos pointing at it, this device's and every answering member's, are what
+/// the switcher puts in words.
 ///
-/// **Relayed home for a mirror**, checking that device's Repos alone, and
-/// refused naming the machine where it did not take it — see
-/// [`crate::mirroring::authors::removed`].
+/// A removal is a deletion stamp on the Author's record, which every member
+/// merges on the pull this sets going.
 async fn remove_author(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
-    match crate::mirroring::authors::removed(&state, &id).await {
-        Ok(crate::mirroring::Pressed::Here) => {}
+    let removed = crate::repos::remove_author(
+        &state.pool,
+        &state.settings,
+        &state.device,
+        state.devices.as_ref(),
+        &id,
+    )
+    .await;
 
-        Ok(crate::mirroring::Pressed::Away(outcome)) => {
-            return Json(outcome).into_response();
-        }
+    author_removed(&state, &id, removed)
+}
 
-        Ok(crate::mirroring::Pressed::Refused(why)) => {
-            tracing::warn!("an Author was not removed at home: {}", why.saying);
-            return refused(why.status, ApiError::new(why.saying));
-        }
+/// `POST /api/ui/authors/{id}/repoint` — **Repoint them all to…**: every Repo
+/// pointing at the Author, here and on every answering member, pointed at the
+/// one the body names, and then the Author removed. See
+/// [`crate::repos::repoint_authors`].
+async fn repoint_authors(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(repointing): Json<verkstead_render::Repointing>,
+) -> HttpResponse {
+    let removed = crate::repos::repoint_authors(
+        &state.pool,
+        &state.settings,
+        &state.device,
+        state.devices.as_ref(),
+        &id,
+        &repointing.author,
+    )
+    .await;
 
-        Err(error) => {
-            tracing::error!(
-                error = ?error,
-                author = id,
-                "reading which device an Author is at home on failed",
-            );
-            return unavailable("The author couldn't be removed.");
-        }
-    }
+    author_removed(&state, &id, removed)
+}
 
-    match crate::repos::remove_author(&state.pool, &state.settings, &id).await {
+/// What a removal answers, either way it was asked for.
+fn author_removed(
+    state: &AppState,
+    id: &str,
+    removed: anyhow::Result<verkstead_render::AuthorRemoved>,
+) -> HttpResponse {
+    match removed {
         Ok(outcome) => {
-            // Every member's mirror of it goes on the read this sets going.
-            if outcome == verkstead_render::AuthorRemoved::Removed {
+            // Every member pulls the deletion stamp on the Nudge.
+            if matches!(outcome, verkstead_render::AuthorRemoved::Removed { .. }) {
                 state.nudges.announce(Nudge::Authors);
             }
 
@@ -2466,12 +2497,15 @@ pub(crate) async fn conversation_view(
     let resets = stopped.as_ref().and_then(|stopped| stopped.resets.clone());
 
     // And the login a signed-out stop's Notice offers: on that Notice alone,
-    // only while the stop stands, and only for an account at home here. A
-    // mirror's login is made on its own device, and its Notice says which
-    // (ADR-0022). A Profile that has gone since offers nothing.
-    let log_in = match marked.and_then(|stopped| Some((stopped.notice, stopped.signed_out?))) {
-        Some((notice, profile)) => match store::load_profile(&state.pool, profile).await {
-            Ok(Some(profile)) if profile.mirror.is_none() => Some((
+    // only while the stop stands, and only for an account bound here. One
+    // bound elsewhere is logged in to on a device it is bound on, and its
+    // Notice says which (ADR-0022). A Profile that has gone since offers
+    // nothing.
+    let log_in = match marked
+        .and_then(|stopped| Some((stopped.notice, stopped.signed_out.clone()?)))
+    {
+        Some((notice, profile)) => match store::load_profile(&state.pool, &profile).await {
+            Ok(Some(profile)) if profile.unbound.is_none() => Some((
                 notice,
                 verkstead_render::NoticeLogIn {
                     profile: profile.id,
@@ -6128,85 +6162,42 @@ async fn create_profile(
 
 /// `POST /api/ui/profiles/{id}` — rewrite one, whole.
 ///
-/// **Reached for a mirror too, and relayed home when it is one** (ADR-0020,
-/// *Shared Profiles*). Every device's Profiles section lists every member's
-/// accounts, so the form over one of those saves like any other — and the save is
-/// put to the device that Profile is at home on, as the ordinary edit of its own
-/// Profile it is. What comes back is that device's own word, so a name already
-/// taken there is said in the words a local clash is said in; a home that did not
-/// take it is named in the refusal and nothing here has moved. See
-/// [`crate::mirroring::edited`].
+/// **A local write on whichever device it is pressed**, every device holding
+/// the one record (ADR-0028): what this device saves replicates, and there is
+/// no home to put it to. A Profile this device holds no binding of is
+/// rewritten as a record alone — see [`crate::profiles::edit`].
 async fn edit_profile(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(edit): Json<ProfileEdit>,
 ) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(verkstead_render::ProfileSaved::NoSuchProfile).into_response();
-    };
-
-    match crate::mirroring::edited(&state, id, &edit).await {
-        // One of this device's own rows, which is every row where there is no
-        // cluster: the press falls through to the half below.
-        Ok(crate::mirroring::Pressed::Here) => {}
-
-        Ok(crate::mirroring::Pressed::Away(outcome)) => {
-            return Json(outcome).into_response();
-        }
-
-        Ok(crate::mirroring::Pressed::Refused(why)) => {
-            tracing::warn!("an Agent Profile was not saved at home: {}", why.saying);
-            return refused(why.status, ApiError::new(why.saying));
-        }
-
-        Err(error) => {
-            tracing::error!(
-                error = ?error,
-                profile_id = id,
-                "reading which device an Agent Profile is at home on failed",
-            );
-            return unavailable("The agent profile couldn't be saved.");
-        }
-    }
-
-    match crate::profiles::edit(&state.pool, id, &edit).await {
+    match crate::profiles::edit(&state.pool, &id, &edit).await {
         Ok(outcome) => {
             moved_profiles(&state, outcome == verkstead_render::ProfileSaved::Saved);
             Json(outcome).into_response()
         }
         Err(error) => {
-            tracing::error!(error = ?error, profile_id = id, "rewriting an Agent Profile failed");
+            tracing::error!(error = ?error, profile_id = %id, "rewriting an Agent Profile failed");
             unavailable("The agent profile couldn't be saved.")
         }
     }
 }
 
-/// `POST /api/ui/profiles/{id}/delete` — remove one, whoever had chosen it.
-///
-/// **The same hop for a mirror**: the removal is put to the device the Profile is
-/// at home on and takes it off that machine, and every device's mirror of it goes
-/// on its next refresh — so a Conversation on a third device that had picked it is
-/// left with an empty picker, exactly as a local removal leaves one. See
-/// [`crate::mirroring::removed`].
 /// A device opening a Profile's login modal: the login already running for it,
 /// or a new one — see [`crate::logins::Logins::opened`].
 ///
-/// Refused for anything but a Claude Profile at home on this device — see
+/// Refused for anything but a Claude Profile bound on this device — see
 /// [`crate::sandbox::Sandbox::for_login`].
 async fn login_opened(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(opened): Json<verkstead_render::LoginOpened>,
 ) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    let profile = match store::load_profile(&state.pool, id).await {
+    let profile = match store::load_profile(&state.pool, &id).await {
         Ok(Some(profile)) => profile,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, profile_id = id, "reading an Agent Profile failed");
+            tracing::error!(error = ?error, profile_id = %id, "reading an Agent Profile failed");
             return unavailable("The agent profile couldn't be read.");
         }
     };
@@ -6218,10 +6209,10 @@ async fn login_opened(
         );
     }
 
-    if profile.mirror.is_some() {
+    if profile.unbound.is_some() {
         return refused(
             StatusCode::CONFLICT,
-            ApiError::new("Log in on the device this profile is at home on."),
+            ApiError::new("Log in on a device this profile is bound on."),
         );
     }
 
@@ -6239,11 +6230,7 @@ async fn login_opened(
 
 /// Where a Profile's login has got to — `null` where none is running.
 async fn login_reading(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    Json(state.logins.reading(id)).into_response()
+    Json(state.logins.reading(&id)).into_response()
 }
 
 /// The code the login page handed back, for the login waiting on it.
@@ -6252,13 +6239,11 @@ async fn login_coded(
     Path(id): Path<String>,
     Json(code): Json<verkstead_render::LoginCode>,
 ) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    match state.logins.coded(id, &code.code) {
+    match state.logins.coded(&id, &code.code) {
         Ok(reading) => {
-            state.nudges.announce_here(Nudge::Login { profile: id });
+            state.nudges.announce_here(Nudge::Login {
+                profile: id.clone(),
+            });
             Json(reading).into_response()
         }
         Err(crate::logins::Refusal::NotRunning) => refused(
@@ -6279,49 +6264,25 @@ async fn login_closed(
     Path(id): Path<String>,
     Json(closed): Json<verkstead_render::LoginClosed>,
 ) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    state.logins.closed(id, &closed.viewer);
+    state.logins.closed(&id, &closed.viewer);
 
     StatusCode::NO_CONTENT.into_response()
 }
 
+/// `POST /api/ui/profiles/{id}/delete` — remove one, whoever had chosen it.
+///
+/// **A deletion stamp on the record**, on whichever device it is pressed: it
+/// replicates, and every device that pulls it nulls the Pairings that named
+/// it, so a Conversation on another device that had picked it is left with an
+/// empty picker, exactly as a removal pressed there leaves one.
 async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(verkstead_render::ProfileDeleted::NoSuchProfile).into_response();
-    };
-
-    match crate::mirroring::removed(&state, id).await {
-        Ok(crate::mirroring::Pressed::Here) => {}
-
-        Ok(crate::mirroring::Pressed::Away(outcome)) => {
-            return Json(outcome).into_response();
-        }
-
-        Ok(crate::mirroring::Pressed::Refused(why)) => {
-            tracing::warn!("an Agent Profile was not removed at home: {}", why.saying);
-            return refused(why.status, ApiError::new(why.saying));
-        }
-
-        Err(error) => {
-            tracing::error!(
-                error = ?error,
-                profile_id = id,
-                "reading which device an Agent Profile is at home on failed",
-            );
-            return unavailable("The agent profile couldn't be removed.");
-        }
-    }
-
-    match crate::profiles::remove(&state.pool, id).await {
+    match crate::profiles::remove(&state.pool, &id).await {
         Ok(outcome) => {
             moved_profiles(&state, outcome == verkstead_render::ProfileDeleted::Removed);
             Json(outcome).into_response()
         }
         Err(error) => {
-            tracing::error!(error = ?error, profile_id = id, "removing an Agent Profile failed");
+            tracing::error!(error = ?error, profile_id = %id, "removing an Agent Profile failed");
             unavailable("The agent profile couldn't be removed.")
         }
     }
@@ -6330,11 +6291,11 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
 /// Say that the Agent Profiles moved, where the press that just answered moved
 /// them.
 ///
-/// **This is what a member watches.** Every device in a cluster lists every
-/// member's Profiles as mirror rows of its own, refreshed off the news that
-/// member sends (ADR-0020, *Shared Profiles*) — so a save, a rewrite or a
-/// removal pressed here is what tells the rest of the cluster to read this
-/// device's list again. See [`crate::mirroring`], which is the other end of it.
+/// **This is what a member watches.** Every device in a cluster holds the one
+/// table of Profile records and pulls a member's off the news that member
+/// sends (ADR-0028) — so a save, a rewrite or a removal pressed here is what
+/// tells the rest of the cluster to pull this device's records again. See
+/// [`crate::replicating`], which is the other end of it.
 ///
 /// Ordinary news rather than [`crate::nudge::Nudges::announce_here`]: this is
 /// about the accounts this device holds, which is precisely what a member has a
@@ -6849,6 +6810,26 @@ async fn save_settings(
     State(state): State<AppState>,
     Json(edit): Json<SettingsEdit>,
 ) -> HttpResponse {
+    // The Authors taken up out of `config.yaml` where they have not been yet —
+    // which a serve has done already — since what the Git section sends is a
+    // write to their table. See [`crate::replicating::authors::taken_up`].
+    if let Err(error) =
+        crate::replicating::authors::taken_up(&state.pool, &state.settings, &state.device).await
+    {
+        tracing::error!(error = ?error, "taking the Authors up into the database failed");
+        return unavailable("The settings couldn't be saved.");
+    }
+
+    // And the Instructions the same way, whose text the save writes to its
+    // record — see [`crate::replicating::instructions::taken_up`].
+    if let Err(error) =
+        crate::replicating::instructions::taken_up(&state.pool, &state.settings, &state.device)
+            .await
+    {
+        tracing::error!(error = ?error, "taking the Instructions up into the database failed");
+        return unavailable("The settings couldn't be saved.");
+    }
+
     // A save that adds an Author beside the only one there is ends the one
     // Author's standing for every Repo that records none, so they are recorded
     // as it first — see [`recording_the_only_author`].
@@ -6862,7 +6843,7 @@ async fn save_settings(
 
     // This device's Authors as they stood, for telling the cluster afterwards
     // whether the save moved them — see below.
-    let authors_before = crate::mirroring::authors::own(&state.settings);
+    let authors_before = crate::replicating::authors::listed(&state.settings);
 
     // And whether it set or cleared a token, which the rows above cannot show:
     // a rotation leaves an Author holding one, and every member's copy of it is
@@ -6894,7 +6875,24 @@ async fn save_settings(
     // And what is running, which a Clear is refused over — the same.
     let running = running(&state);
 
+    // And the table the Git section's Author is written into, which is the
+    // store's: written from the blocking hop below through the runtime, after
+    // the files and before the view that rides back reads them.
+    let runtime = tokio::runtime::Handle::current();
+    let pool = state.pool.clone();
+    let device = state.device.clone();
+
     let saved = tokio::task::spawn_blocking(move || {
+        // The declarations taken up first, where a server stood up without a
+        // serve has not: what a save's names are checked against and its rows
+        // written over is the records — see
+        // [`crate::replicating::mcp_servers`].
+        runtime
+            .block_on(crate::replicating::mcp_servers::taken_up(
+                &pool, &settings, &device,
+            ))
+            .map_err(std::io::Error::other)?;
+
         // What the rules are to be afterwards, and what is wrong with them —
         // both before a byte of either file is written, because a refusal here
         // is the whole request refused. A save that wrote the author down and
@@ -6923,28 +6921,29 @@ async fn save_settings(
         // touched. A save turned down over a name is the whole request refused,
         // like one turned down over a pattern.
         //
-        // And what is to become of the header values with them, which is the
-        // one thing this section writes into the *other* file: a declaration is
-        // a name, a URL and the names of its headers, and every value is a
-        // secret kept where the token is kept — see [`header_actions`].
-        let (servers, headers, refused_servers) = match &edit.mcp_servers {
+        // Each row is a record: one drawn from a record an edit of it, one
+        // added a new declaration, and each of `removed` a deletion stamp —
+        // and a new name is checked against every live record this device
+        // holds, whoever wrote it (ADR-0028).
+        let (declaring, refused_servers) = match &edit.mcp_servers {
             // Whatever is declared, carried through untouched — a name this page
-            // would have refused included. The reading half keeps one of those
-            // and this half is not entitled to drop it: a save about the build
-            // cache has no business rewriting a declaration, and no business
-            // being refused over one either.
+            // would have refused included. A save about the build cache has no
+            // business rewriting a declaration, and no business being refused
+            // over one either.
             //
             // And nothing at all about the headers, which is what leaves every
             // key where it is: a section that says nothing about the
             // declarations says nothing about their secrets either.
-            McpServersEdit::Keep => (settings.config().mcp_servers().to_vec(), None, Vec::new()),
+            McpServersEdit::Keep => (None, Vec::new()),
 
-            McpServersEdit::Set { servers: sent } => {
-                let servers: Vec<_> = sent.iter().map(as_declared).collect();
-                let refused = server_refusals(&servers);
-                let headers = header_actions(&servers, sent);
+            McpServersEdit::Set {
+                servers: sent,
+                removed,
+            } => {
+                let rows: Vec<_> = sent.iter().map(as_row).collect();
+                let refused = server_refusals(settings.config().mcp_servers(), &rows, removed);
 
-                (servers, Some(headers), refused)
+                (Some((rows, sent.clone(), removed.clone())), refused)
             }
         };
 
@@ -6977,6 +6976,8 @@ async fn save_settings(
                     tried: Vec::new(),
                 },
                 Vec::new(),
+                false,
+                false,
             ));
         }
 
@@ -7004,16 +7005,22 @@ async fn save_settings(
             None => None,
         };
 
+        // The Author the section drew, which is a write to its record once
+        // the token beside it is in `secrets.yaml` — see below. Handed to the
+        // file's save too, where it is never written: the Authors are the
+        // table's — see [`crate::settings::Settings::save_config`].
+        let author = id.clone().map(|id| {
+            crate::settings::Author::of(
+                id,
+                Some(drawn.display_name),
+                Some(drawn.name),
+                Some(drawn.email),
+            )
+        });
+
         settings.save_config(
             &Config::of(
-                id.clone().map(|id| {
-                    crate::settings::Author::of(
-                        id,
-                        Some(drawn.display_name),
-                        Some(drawn.name),
-                        Some(drawn.email),
-                    )
-                }),
+                author.clone(),
                 // The two keys the page writes, per language it drew: the
                 // switch as it stands, and the size as it was typed with an
                 // empty field meaning nothing configured — clearing it is how
@@ -7061,14 +7068,14 @@ async fn save_settings(
                 // And the rules, decided above: either what was already written down
                 // or the whole list the page sent, in the order it sent it.
                 rules,
-                // And the declared servers, decided the same way and above the
-                // same refusal.
-                servers,
-                // And the text every session is given, as it was typed: a value
-                // like the binds above it, so what the page sent is what the
-                // file holds afterwards and a box cleared is a key taken away.
-                // Nothing about it can be refused — it is somebody's prose.
-                edit.instructions,
+                // And the declared servers, which the file never holds: they are
+                // records, written below — see
+                // [`crate::settings::Settings::save_config`].
+                settings.config().mcp_servers().to_vec(),
+                // And the text every session is given, which the file never
+                // holds: it is a record's, written below — see
+                // [`crate::settings::Settings::save_config`].
+                settings.config().instructions().to_owned(),
             )
             // On what the file already holds, for the reason the secrets below are
             // written that way. `session_path` is a key in this file the page has
@@ -7090,12 +7097,42 @@ async fn save_settings(
         // Once for both of them rather than a write apiece: what the file holds
         // afterwards is one thing, and two writes would be a window in which it
         // held half of it.
+        //
+        // The declarations' records first, where this save was about them, so
+        // that a row added has the uuid its header values are kept under — and
+        // what is to become of every live declaration's values with them: the
+        // one thing this section writes into `secrets.yaml` — see
+        // [`header_actions`].
+        let mut servers_moved = false;
+        let headers = match &declaring {
+            None => None,
+            Some((rows, sent, removed)) => {
+                let (written, moved) = runtime
+                    .block_on(crate::replicating::mcp_servers::saved(
+                        &pool, &settings, &device, rows, removed,
+                    ))
+                    .map_err(std::io::Error::other)?;
+                servers_moved = moved;
+
+                Some(header_actions(
+                    settings.config().mcp_servers(),
+                    &written,
+                    sent,
+                ))
+            }
+        };
+
+        // And the Author's token and record written together, so the copying
+        // of the members' tokens never reads one without the other — see
+        // [`crate::replicating::authors::copied`].
+        let _authors_writing = crate::replicating::authors::writing_held_blocking();
+
         let mut secrets = settings.secrets();
         let mut writing = false;
 
-        // The headers first, where this save was about the declarations: the
-        // servers the section did not send are the ones whose keys go, which is
-        // how deleting a declaration takes its secrets with it.
+        // The headers first, where this save was about the declarations: a
+        // declaration no longer live is one whose keys go, which is how
+        // removing one takes its secrets with it.
         if let Some(headers) = &headers {
             secrets = secrets.with_mcp_headers(headers);
             writing = true;
@@ -7129,6 +7166,50 @@ async fn save_settings(
         if writing {
             settings.save_secrets(&secrets)?;
         }
+
+        // And onto each declaration's record, which values the file now holds
+        // for it, where the save set or cleared one: what tells every member
+        // to fetch them (ADR-0028).
+        if let Some(headers) = &headers {
+            servers_moved |= runtime
+                .block_on(crate::replicating::mcp_servers::valued(
+                    &pool, &settings, &device, headers,
+                ))
+                .map_err(std::io::Error::other)?;
+        }
+
+        // And the Author's record, after the token so that it says whether
+        // `secrets.yaml` holds one where the save set or cleared it — a write
+        // stamped past whatever this device held of it, and nothing written
+        // where nothing the section drew changed (ADR-0028).
+        if let Some(author) = &author {
+            runtime
+                .block_on(crate::replicating::authors::written(
+                    &pool,
+                    &settings,
+                    &device,
+                    author,
+                    token_moved,
+                ))
+                .map_err(std::io::Error::other)?;
+        }
+
+        drop(_authors_writing);
+
+        // And the Instructions' record, where this save was about them: as
+        // they were typed, so a box cleared is the empty text, and nothing
+        // written where the text is what the record already says. A save about
+        // another section sends `Keep`, and never writes back the text its page
+        // last read over a newer one from another device (ADR-0028). Nothing
+        // about it can be refused, being somebody's prose.
+        let instructions_moved = match edit.instructions {
+            InstructionsEdit::Keep => false,
+            InstructionsEdit::Set { text } => runtime
+                .block_on(crate::replicating::instructions::saved(
+                    &pool, &settings, &device, text,
+                ))
+                .map_err(std::io::Error::other)?,
+        };
 
         // What GitHub made of it: whose it is, and what it may do. The second
         // half is here because a token that authenticates perfectly and cannot
@@ -7183,12 +7264,14 @@ async fn save_settings(
                 tried: Vec::new(),
             },
             trying,
+            instructions_moved,
+            servers_moved,
         ))
     })
     .await;
 
     match saved {
-        Ok(Ok((mut saved, trying))) => {
+        Ok(Ok((mut saved, trying, instructions_moved, servers_moved))) => {
             // After the writing and never before it — see [`crate::mcp`]: a URL
             // is typed once beside a token that will not be shown again, and a
             // server that could not be reached this minute is still a
@@ -7196,11 +7279,22 @@ async fn save_settings(
             // was spoken to, and changes nothing about what was saved.
             saved.tried = crate::mcp::tried(&trying).await;
 
-            // And every member told where the save moved this device's Authors,
-            // which is what has each read them again and redraw its mirrors.
+            // And every member told where the save moved the Authors, which is
+            // what has each pull the records again.
             // Only then: a save about the build cache is no news to anybody.
-            if token_moved || crate::mirroring::authors::own(&state.settings) != authors_before {
+            if token_moved || crate::replicating::authors::listed(&state.settings) != authors_before
+            {
                 state.nudges.announce(Nudge::Authors);
+            }
+
+            // And where it moved the Instructions, for the same reason.
+            if instructions_moved {
+                state.nudges.announce(Nudge::Instructions);
+            }
+
+            // And where it moved the declarations.
+            if servers_moved {
+                state.nudges.announce(Nudge::McpServers);
             }
 
             Json(saved).into_response()
@@ -7590,52 +7684,65 @@ fn as_written(rule: &crate::settings::IgnoreRule) -> IgnoreRule {
     }
 }
 
-/// One MCP server as `config.yaml` holds it, out of what the page sent: a name,
-/// a URL and the names of its headers, each blank one nothing at all.
+/// One row of the MCP servers section, out of what the page sent: the record
+/// it was drawn from, and a name, a URL and the names of its headers, each
+/// blank one nothing at all.
 ///
 /// The header *values* are not here. They are secrets and they are in
 /// `secrets.yaml` — see [`header_actions`], which is the other half of one of
 /// these.
-fn as_declared(server: &McpServerEdit) -> crate::settings::McpServer {
-    crate::settings::McpServer::of(
-        Some(server.name.clone()),
-        Some(server.url.clone()),
-        server
-            .headers
-            .iter()
-            .map(|header| header.name.clone())
-            .collect(),
-    )
+fn as_row(server: &McpServerEdit) -> crate::replicating::mcp_servers::Row {
+    crate::replicating::mcp_servers::Row {
+        id: server.id.clone(),
+        server: crate::settings::McpServer::of(
+            Some(server.name.clone()),
+            Some(server.url.clone()),
+            server
+                .headers
+                .iter()
+                .map(|header| header.name.clone())
+                .collect(),
+        ),
+    }
 }
 
-/// And what is to become of each of their values, by the name the declaration
-/// ended up with: what [`crate::settings::Secrets::with_mcp_headers`] writes.
+/// And what is to become of the header values of every live declaration, by
+/// its uuid, once a save has been written: what
+/// [`crate::settings::Secrets::with_mcp_headers`] writes. `written` is the uuid
+/// each of `sent` was written under.
 ///
-/// Read off `declared` rather than off `sent`, so that the two halves of a
-/// declaration cannot come apart: a header whose name was blank, or one written
-/// twice, is one header or none by the time the file holds it — see
-/// [`crate::settings::McpServer::of`] — and a secret written under a name no
-/// declaration carries would be one nothing could ever send or take away.
+/// Read off the declarations as they now stand rather than off `sent`, so that
+/// the two halves of one cannot come apart: a header whose name was blank, or
+/// one written twice, is one header or none by the time the record holds it —
+/// see [`crate::settings::McpServer::of`] — and a secret written under a name
+/// no declaration carries would be one nothing could ever send or take away.
 ///
-/// A declared header the page said nothing about is kept. That is only ever a
-/// hand-edited `config.yaml`, this being built out of what the page sent; and
-/// keeping is what every other untouched value does.
+/// A declared header the page said nothing about is kept, and so is every
+/// header of a declaration the page did not send — one merged from another
+/// device after it was read: keeping is what every other untouched value does.
 fn header_actions(
     declared: &[crate::settings::McpServer],
+    written: &[Option<String>],
     sent: &[McpServerEdit],
 ) -> Vec<(String, Vec<(String, crate::settings::HeaderValue)>)> {
     declared
         .iter()
-        .zip(sent)
-        .filter_map(|(declared, sent)| {
+        .filter_map(|declared| {
+            let uuid = declared.key()?;
+            let sent = written
+                .iter()
+                .zip(sent)
+                .find(|(written, _)| written.as_deref() == Some(uuid))
+                .map(|(_, sent)| sent);
+
             let headers = declared
                 .headers()
                 .iter()
                 .map(|header| {
                     let wanted = sent
-                        .headers
-                        .iter()
-                        .find(|edit| edit.name.trim() == header)
+                        .and_then(|sent| {
+                            sent.headers.iter().find(|edit| edit.name.trim() == header)
+                        })
                         .map(|edit| match &edit.value {
                             HeaderEdit::Keep => crate::settings::HeaderValue::Keep,
                             HeaderEdit::Set { value } => {
@@ -7649,27 +7756,20 @@ fn header_actions(
                 })
                 .collect();
 
-            Some((declared.name()?.to_owned(), headers))
+            Some((uuid.to_owned(), headers))
         })
         .collect()
 }
 
-/// And the other way round, for the read: a half the file does not hold is an
-/// empty box on the page, which is the same thing said in the shape a form
-/// holds.
-///
-/// Which is only ever a hand-edit. A declaration missing either half is dropped
-/// as the file is read — see `settings::servers_kept` — so what reaches here has
-/// both, and the fallbacks are what keeps this honest rather than what it is
-/// for.
+/// And the other way round, for the read: a declaration as the section draws
+/// its row, its record's uuid with it.
 fn as_declared_row(
     server: &crate::settings::McpServer,
     secrets: &crate::settings::Secrets,
 ) -> McpServer {
-    let name = server.name().unwrap_or_default();
-
     McpServer {
-        name: name.to_owned(),
+        id: server.key().unwrap_or_default().to_owned(),
+        name: server.name().unwrap_or_default().to_owned(),
         url: server.url().unwrap_or_default().to_owned(),
         // The names of its headers, each saying whether anything is kept to
         // send in it, and no part of a value: that is what the token's own view
@@ -7680,20 +7780,26 @@ fn as_declared_row(
             .iter()
             .map(|header| McpHeader {
                 name: header.clone(),
-                set: secrets.mcp_header(name, header).is_some(),
+                set: server
+                    .key()
+                    .and_then(|key| secrets.mcp_header(key, header))
+                    .is_some(),
             })
             .collect(),
     }
 }
 
-/// What is wrong with the declarations a save is asking for, one entry per row
-/// at fault, and empty where there is nothing wrong with any of them.
-///
-/// Over the whole list rather than one at a time, because one of the two things
-/// that can be wrong with a name is that another declaration has it — see
-/// `settings::trouble_among`, which is where that is decided.
-fn server_refusals(servers: &[crate::settings::McpServer]) -> Vec<ServerRefused> {
-    crate::settings::trouble_among(servers)
+/// What is wrong with the rows a save is asking for, one entry per row at
+/// fault, and empty where there is nothing wrong with any of them — a new
+/// name checked against every live record — see
+/// [`crate::replicating::mcp_servers::refusals`], which is where that is
+/// decided.
+fn server_refusals(
+    live: &[crate::settings::McpServer],
+    rows: &[crate::replicating::mcp_servers::Row],
+    removed: &[String],
+) -> Vec<ServerRefused> {
+    crate::replicating::mcp_servers::refusals(live, rows, removed)
         .into_iter()
         .map(|(at, trouble)| {
             let (field, why) = match trouble {

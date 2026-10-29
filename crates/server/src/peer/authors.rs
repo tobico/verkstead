@@ -1,26 +1,26 @@
-//! One of this device's Authors' **token**, handed to a member for the copy it
-//! keeps in its own `secrets.yaml` (ADR-0025).
+//! An Author's **token**, handed to a member for the copy it keeps in its own
+//! `secrets.yaml` (ADR-0025, ADR-0028).
 //!
-//! **The answering half of the token copy.** A member keeps a mirror row of
-//! every Author at home here, and a Repo there pointed at one commits and
-//! pushes from a copy of its token — held there rather than fetched at the
-//! moment of need, so that a quiet home does not stop a Repo over there. This
-//! is what the copy is written from, and [`crate::mirroring::authors`] is the
-//! end that asks and writes it down as its mirrors refresh.
+//! **The answering half of the token copy.** Every device holds every Author as
+//! a replicated record, and a Repo pointed at one commits and pushes from this
+//! device's copy of its token — held here rather than fetched at the moment of
+//! need, so that a device that is off does not stop a Repo over here. The
+//! record says whether a token is held and which; this is what the copy is
+//! fetched from — see [`crate::replicating::authors::copied`].
+//!
+//! **From whoever holds one.** There is no home: this answers for any Author
+//! this device holds a live record of, with whatever its `secrets.yaml` holds
+//! under the uuid — a token set here and a copy fetched from somewhere else
+//! alike — so a token reaches every device while the one it was set on is off.
 //!
 //! **A member's own call rather than the viewer's**, beside
 //! [`super::account`], whose shape it is: what it hands over is a credential,
-//! no page draws it, and the one caller is a device keeping its mirrors.
+//! and no page draws it.
 //!
 //! **Gated to members like everything else on this listener**: [`super::router`]
 //! puts [`super::members_only`] over it, so it travels over the mutually
 //! authenticated link the account mirror's login already travels, and a caller
 //! whose certificate this device holds no membership for never reaches it.
-//!
-//! **And only this device's own Authors.** A uuid this device holds a mirror
-//! of is an Author at home on a third machine — whose token is that machine's
-//! to hand over, a copy of a copy being two hops from the home — and answers as
-//! an Author not here at all does: `404`.
 
 use axum::Json;
 use axum::Router;
@@ -32,27 +32,26 @@ use verkstead_render::AuthorToken;
 
 use crate::AppState;
 
-/// Where a member asks after the token of one of this device's Authors, by its
-/// uuid — which is its uuid on every device.
+/// Where a member asks after the token of an Author, by its uuid — which is its
+/// uuid on every device.
 ///
 /// **Not under `/api/ui/`**, which is the viewer's namespace and is drawn by a
 /// browser. The account's shape, for its reason.
 pub const TOKEN: &str = "/api/peer/v1/authors/{author}/token";
 
 /// `GET /api/peer/v1/authors/{author}/token` — the token `secrets.yaml` holds
-/// for one of this device's Authors, or `null` where it holds none.
+/// for an Author, or `null` where it holds none.
 ///
 /// **Read at the moment it is asked for**, off the two files, as everything
 /// about an Author is: a rotation saved here is what the next call answers.
 ///
-/// **An Author that is not one of this device's own is `404`** — a mirror, or
-/// a uuid nobody here has heard of, which is the ordinary answer for one
-/// removed between the member's last refresh and this call.
+/// **A uuid this device holds no live record of is `404`** — one nobody here
+/// has heard of, or one removed, whose copy went with it.
 pub(crate) async fn held(State(state): State<AppState>, Path(author): Path<String>) -> Response {
     let settings = state.settings.clone();
 
     let read = tokio::task::spawn_blocking(move || {
-        // The file's own Authors and nothing of the mirrors laid beside them.
+        // The table's live Authors, which are the ones the settings hold.
         settings
             .config()
             .author(&author)
@@ -68,15 +67,14 @@ pub(crate) async fn held(State(state): State<AppState>, Path(author): Path<Strin
 
         Ok(None) => (
             StatusCode::NOT_FOUND,
-            "this device holds no Author of its own under that uuid\n",
+            "this device holds no Author under that uuid\n",
         )
             .into_response(),
 
         Err(why) => {
             tracing::error!(
                 error = ?why,
-                "a member asked after one of this device's Authors' tokens and the settings \
-                 could not be read",
+                "a member asked after an Author's token and the settings could not be read",
             );
 
             (

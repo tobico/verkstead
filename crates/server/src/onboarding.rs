@@ -1448,19 +1448,19 @@ async fn steps(
     Ok(StepsView {
         dependencies: dependencies_met(dependencies),
 
-        // **A mirror counts, however it was made.** What this step asks is
-        // whether there is an account for a session to run under, and a
-        // member's Profile is one: the login and the configuration a Built Root
-        // is made from are fetched from the device it is at home on before
+        // **A Profile not bound here counts, however it was made.** What this
+        // step asks is whether there is an account for a session to run under,
+        // and a member's Profile is one: the login and the configuration a Built
+        // Root is made from are fetched from a device it is bound on before
         // every launch, which is the whole of what ADR-0020's *Shared Profiles*
-        // is for. A device with nothing but mirrors runs sessions, so a rule
-        // that wanted one of this device's own would hold the wizard open over
+        // is for. A device with no binding of its own runs sessions, so a rule
+        // that wanted one bound here would hold the wizard open over
         // a machine that works — and the objective is what Onboarding Mode is
         // decided off, so it would hold the machine at `/setup` after the next
         // start rather than merely leave a tick off.
         //
         // Every row rather than every runnable row, for the reason the harness
-        // probes are not asked here either: whether a mirror's home is
+        // probes are not asked here either: whether a device it is bound on is
         // answering is a fact about this moment, and a verdict that moved with
         // the network would take a Verkstead in and out of the wizard as a
         // laptop's lid opened.

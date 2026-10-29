@@ -5109,7 +5109,7 @@ mod tests {
     fn pairing(model: &str) -> store::Pairing {
         store::Pairing {
             profile: store::Profile {
-                id: 1,
+                id: "1".to_owned(),
                 name: Some(model.to_owned()),
                 account: store::Account::Claude {
                     claude_dir: PathBuf::from("/data/claude"),
@@ -5117,7 +5117,8 @@ mod tests {
                 },
                 models: vec![model.to_owned()],
                 memory: true,
-                mirror: None,
+                unbound: None,
+                minted: None,
             },
             model: Some(model.to_owned()),
         }

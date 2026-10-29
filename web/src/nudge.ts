@@ -458,8 +458,12 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     //
     // **And the Components row**, whose release is the one the Keeper's start
     // reads off its Annex as it links it, which is announced as this kind.
+    //
+    // **And the Profiles**: every card draws a line per device of the cluster,
+    // and a device first linking names its own unnamed Profiles after itself in
+    // the write that links it, which no Profiles news follows.
     case "devices":
-      return [["devices"], ["conversations"], ["components"]];
+      return [["devices"], ["conversations"], ["components"], ["profiles"]];
 
     // And what is *out there* moving, which is a different list and a different
     // question: a device nobody has typed an address for was heard advertising
@@ -473,11 +477,28 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     case "profiles":
       return [keyOf(device, "profiles")];
 
-    // The Authors moved: one saved or removed on this device, or the mirrors it
-    // holds of a member's rewritten. The one list the Git switcher and the
-    // Repos pane name an Author out of.
+    // The Authors moved: one saved or removed on this device, or a record
+    // pulled off a member. The one list the switchers and pickers name an
+    // Author out of, and the settings the Git section draws its rows from.
     case "authors":
-      return [keyOf(device, "authors")];
+      return [keyOf(device, "authors"), keyOf(device, "settings")];
+
+    // The Instructions text moved: saved on this device, or a record of it
+    // pulled off a member. The settings page draws it, and nothing else does.
+    case "instructions":
+      return [keyOf(device, "settings")];
+
+    // The declared MCP servers moved: one declared, edited or removed on this
+    // device, or a record of one pulled off a member. The settings page draws
+    // them, and so does the Attach menu, off the same read.
+    //
+    // **And every Conversation of that device**, whose chips say whether their
+    // names are still declared and whether two declarations clash over one —
+    // read with the Conversation rather than off the settings. A declaration
+    // replicated in or removed on another device moves those with nothing
+    // else here moving.
+    case "mcp_servers":
+      return [keyOf(device, "settings"), keyOf(device, "conversation")];
 
     // Where a Profile's login has got to moved — which is what shows a second
     // device's modal the address the first one's login printed. This device's

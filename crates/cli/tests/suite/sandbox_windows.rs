@@ -406,10 +406,10 @@ fn standing(granting: bool) -> Grilling {
             .unwrap()
             .expect("the Repo was just registered");
 
-        store::set_grilling_pairing(&pool, id, profile.id, None)
+        store::set_grilling_pairing(&pool, id, &profile.id, None)
             .await
             .unwrap();
-        store::set_implementation_pairing(&pool, id, profile.id, None)
+        store::set_implementation_pairing(&pool, id, &profile.id, None)
             .await
             .unwrap();
         store::start_grilling(&pool, id, &commit, &worktree, &[])
