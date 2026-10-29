@@ -4424,6 +4424,11 @@ pub enum Added {
         device: String,
         name: Option<String>,
     },
+
+    /// A repo picked on the device the work was moved from that no repo on
+    /// this one matched, by the name it had there: struck as it crossed, and
+    /// never applied.
+    Unmatched { name: String },
 }
 
 /// Where an addition has got to: pending while the Set waits, applied by the

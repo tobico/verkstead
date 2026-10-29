@@ -431,7 +431,7 @@ describe("the timeline line under a set that added repos", () => {
         },
       ]),
     ).toBe(
-      "You added docs read-write on limits, infra read-only and website opened up to read-write on counting.",
+      "You added docs read-write on limits, infra read-only, and website opened up to read-write on counting.",
     );
   });
 });
@@ -789,5 +789,29 @@ describe("the chips of what was picked", () => {
 
     const row = screen.getByRole("list", { name: "Attached to Q1" });
     expect(row.textContent).toContain("no longer registered");
+  });
+
+  /// A repo picked before a transfer that no repo on this device matches
+  /// arrives struck, says why, and has nothing to take off.
+  it("strikes a repo this device has no match for, saying why", async () => {
+    await answering({
+      ...OFFERING,
+      additions: [
+        {
+          id: 4,
+          label: "Q1",
+          added: { Unmatched: { name: "lonely" } },
+          state: "Struck",
+        },
+      ],
+    });
+
+    const row = screen.getByRole("list", { name: "Attached to Q1" });
+    const chip = row.querySelector(`.${pill.server}`)!;
+    expect(chip.classList.contains(pill.struck!)).toBe(true);
+    expect(chip.textContent).toContain("lonely");
+    expect(chip.textContent).toContain("not on this device");
+    expect(chip.textContent).toContain("not added");
+    expect(screen.queryByRole("button", { name: "Remove lonely" })).toBeNull();
   });
 });

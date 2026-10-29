@@ -2437,11 +2437,11 @@ export function addedWith(
 }
 
 /// Names run together the way a sentence runs them: `a`, `a and b`,
-/// `a, b and c`.
+/// `a, b, and c` — the serial comma `docs/copy.md` asks for.
 function listed(names: string[]): string {
-  return names.length < 2
-    ? names.join("")
-    : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  if (names.length < 3) return names.join(" and ");
+
+  return `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`;
 }
 
 /// A Question Set whose stored body this build cannot read: a row saying so,

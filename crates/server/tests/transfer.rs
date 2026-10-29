@@ -3345,6 +3345,116 @@ async fn a_set_left_open_is_answerable_where_the_work_now_is() {
     );
 }
 
+/// **And what was picked on it crosses with it** (ADR-0028, *Pending additions
+/// cross with the record*): a repo the far end holds nothing of no longer
+/// refuses the move, but lands struck under the name it had, while a device
+/// tick lands as it was — and the Set is still answered there.
+#[tokio::test]
+async fn a_pick_of_a_repo_the_far_end_lacks_lands_struck_and_the_set_still_answers() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    a.asks(conversation, ASKED).await;
+
+    let asked = *a
+        .sets_on(conversation)
+        .await
+        .first()
+        .expect("the Set asked");
+    let lonely = store::register_repo(
+        &a.pool,
+        &repository(spill.path().join("lonely")),
+        "lonely",
+        "main",
+    )
+    .await
+    .unwrap()
+    .expect("nothing is registered there yet")
+    .id;
+
+    for addition in [
+        store::Addition::Companion {
+            repo_id: lonely,
+            mode: store::CompanionMode::ReadOnly,
+            base: None,
+            branch: None,
+        },
+        store::Addition::Device {
+            device: B.to_owned(),
+        },
+    ] {
+        store::add_to_set(&a.pool, conversation, asked, Some("Q1"), &addition)
+            .await
+            .unwrap();
+    }
+
+    a.stops_at_once(conversation).await;
+
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the move went ahead over a repo B holds nothing of")
+        .id;
+
+    let set = *b.sets_on(there).await.first().expect("the Set crossed");
+
+    let picked: Vec<(store::Addition, store::AdditionState)> = store::set_additions(&b.pool, set)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|added| (added.addition, added.state))
+        .collect();
+
+    assert_eq!(
+        picked,
+        vec![
+            (
+                store::Addition::Unmatched {
+                    name: "lonely".to_owned(),
+                },
+                store::AdditionState::Struck,
+            ),
+            (
+                store::Addition::Device {
+                    device: B.to_owned(),
+                },
+                store::AdditionState::Pending,
+            ),
+        ],
+    );
+
+    let taken = b
+        .workbench
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/conversations/{there}/api/v1/sets/{set}/response"))
+                .header(CONTENT_TYPE, "application/yaml")
+                .body(Body::from(ANSWERED))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = taken.status();
+    let bytes = taken.into_body().collect().await.unwrap().to_bytes();
+
+    assert!(
+        status.is_success(),
+        "answering it on B: {status} {}",
+        String::from_utf8_lossy(&bytes),
+    );
+}
+
 /// **And the Set a session that has gone was waiting on is locked where the work
 /// lands**, by the very Resume that starts the work again there.
 ///

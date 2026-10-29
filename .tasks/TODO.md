@@ -28,4 +28,4 @@ is the Deferred Ask's own rule and was accepted as the intermediate state.
 - [x] 04: Submit applies companions — [details](04-submit-applies-companions.md)
 - [x] 05: The restart — [details](05-the-restart.md)
 - [x] 06: A set-level file — [details](06-set-level-file.md)
-- [ ] 07: Crossing on transfer, and the words — [details](07-crossing-and-the-words.md)
+- [x] 07: Crossing on transfer, and the words — [details](07-crossing-and-the-words.md)

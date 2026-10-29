@@ -263,7 +263,9 @@ pub(crate) async fn readied(state: &AppState, set_id: i64) -> Result<Readied> {
         let repo_id = match &added.addition {
             store::Addition::Companion { repo_id, .. }
             | store::Addition::OpenedUp { repo_id, .. } => *repo_id,
-            store::Addition::Server { .. } | store::Addition::Device { .. } => continue,
+            store::Addition::Server { .. }
+            | store::Addition::Device { .. }
+            | store::Addition::Unmatched { .. } => continue,
         };
 
         if store::registered_repo(&state.pool, repo_id)
@@ -300,7 +302,9 @@ pub(crate) async fn readied(state: &AppState, set_id: i64) -> Result<Readied> {
                 },
                 base,
             )),
-            store::Addition::Server { .. } | store::Addition::Device { .. } => {}
+            store::Addition::Server { .. }
+            | store::Addition::Device { .. }
+            | store::Addition::Unmatched { .. } => {}
         }
     }
 
@@ -478,7 +482,10 @@ pub(crate) async fn submit(
 /// still open, with a session running that was already running when the Set
 /// was asked. A relaunch locks the Sets it orphans, so an open Set and a
 /// session older than it is that session's own question; a Set whose asker has
-/// gone with nothing started since has no session running at all.
+/// gone with nothing started since has no session running at all. Or a Set that
+/// crossed on a Transfer, which the arrival left open and whose asker the
+/// session the arrival started carries on (ADR-0028, *Pending additions cross
+/// with the record*).
 ///
 /// **And a state whose relaunch is that same session again**: a grilling, a run,
 /// a follow-up or an investigation, each of which Resume starts again by
@@ -511,7 +518,15 @@ async fn widening(state: &AppState, set_id: i64, response: &Response) -> Result<
         return Ok(None);
     };
 
-    if session.event_id > asked_at {
+    // Or one started after it on this device, where the Set crossed with the
+    // record: an arrival leaves the Sets it brought open and its session is
+    // the asker's carried on, told to wait on them again.
+    if session.event_id > asked_at
+        && !store::sets_as_they_landed(&state.pool, conversation_id)
+            .await?
+            .values()
+            .any(|landed| *landed == set_id)
+    {
         return Ok(None);
     }
 
@@ -676,6 +691,11 @@ fn said(
         "Verkstead carried this conversation on in a session started with it, which is this one.";
 
     match addition {
+        // Never applied, being struck as it crossed: said for completeness.
+        store::Addition::Unmatched { name } => format!(
+            "The repo `{name}`, which no repo on this device matched when the work was moved \
+             here, so it was not added."
+        ),
         store::Addition::Server { name } => {
             let tools = agent.map_or_else(String::new, |agent| {
                 format!(
@@ -815,6 +835,7 @@ pub(crate) async fn widened_with(
             store::Addition::Device { device } => {
                 format!("leave to move the work to the device `{device}`")
             }
+            store::Addition::Unmatched { name } => format!("the repo `{name}`, not added"),
         })
         .collect();
 
@@ -1067,6 +1088,7 @@ fn viewed(added: store::SetAddition, naming: &Naming) -> AdditionView {
                 name: naming.device(&device),
                 device,
             },
+            store::Addition::Unmatched { name } => Added::Unmatched { name },
         },
         state: match added.state {
             store::AdditionState::Pending => verkstead_render::AdditionState::Pending,

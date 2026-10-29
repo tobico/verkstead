@@ -149,7 +149,7 @@ branch: string, };
 /**
  * What was picked.
  */
-export type Added = { "Server": { name: string, declared: boolean, } } | { "Companion": { repo_id: number, name: string | null, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, name: string | null, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, name: string | null, } };
+export type Added = { "Server": { name: string, declared: boolean, } } | { "Companion": { repo_id: number, name: string | null, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, name: string | null, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, name: string | null, } } | { "Unmatched": { name: string, } };
 
 /**
  * What became of a pick.

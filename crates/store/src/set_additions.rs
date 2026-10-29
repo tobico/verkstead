@@ -56,6 +56,13 @@ pub enum Addition {
     /// Another device of the cluster, by its Device Id, the work may be moved
     /// to.
     Device { device: String },
+
+    /// A companion or an opened-up Repo picked on the device the work was
+    /// moved from, that no Repo here matches: dropped as it crossed, and kept
+    /// by the name it had there so the strike can say what it was. Always
+    /// [`AdditionState::Struck`], and never picked — see
+    /// [`super::Slice::strike`].
+    Unmatched { name: String },
 }
 
 impl Addition {
@@ -67,6 +74,7 @@ impl Addition {
             Self::Companion { .. } => "companion",
             Self::OpenedUp { .. } => "opened-up",
             Self::Device { .. } => "device",
+            Self::Unmatched { .. } => "companion",
         }
     }
 }
@@ -169,7 +177,8 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              device          TEXT,
              state           TEXT NOT NULL,
              added_at        TEXT NOT NULL,
-             carried_on      INTEGER NOT NULL DEFAULT 0
+             carried_on      INTEGER NOT NULL DEFAULT 0,
+             repo_name       TEXT
          ) STRICT",
     )
     .execute(pool)
@@ -194,12 +203,28 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
             .context("adding the column saying a Set's answer carried a session on")?;
     }
 
+    // The name a Repo a Transfer could not match was picked under — see
+    // [`Addition::Unmatched`]. The same two paths.
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('set_additions') WHERE name = ?")
+            .bind("repo_name")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the column naming a Repo a Transfer struck")?;
+
+    if there.is_none() {
+        sqlx::query("ALTER TABLE set_additions ADD COLUMN repo_name TEXT")
+            .execute(pool)
+            .await
+            .context("adding the column naming a Repo a Transfer struck")?;
+    }
+
     Ok(())
 }
 
 /// The columns every read takes, in the order [`Row`] holds them.
-const COLUMNS: &str =
-    "id, set_id, label, kind, server, repo_id, mode, base, branch, device, state, added_at";
+const COLUMNS: &str = "id, set_id, label, kind, server, repo_id, mode, base, branch, device, \
+                       state, added_at, repo_name";
 
 type Row = (
     i64,
@@ -214,13 +239,27 @@ type Row = (
     Option<String>,
     String,
     String,
+    Option<String>,
 );
 
 /// A row read back. A kind this does not know, or one missing what its kind
 /// names, is a database written by a Verkstead this one does not understand.
 fn made(row: Row) -> Result<SetAddition> {
-    let (id, set_id, label, kind, server, repo_id, mode, base, branch, device, state, added_at) =
-        row;
+    let (
+        id,
+        set_id,
+        label,
+        kind,
+        server,
+        repo_id,
+        mode,
+        base,
+        branch,
+        device,
+        state,
+        added_at,
+        repo_name,
+    ) = row;
 
     let addition = match (kind.as_str(), server, repo_id, device) {
         ("server", Some(name), _, _) => Addition::Server { name },
@@ -236,6 +275,9 @@ fn made(row: Row) -> Result<SetAddition> {
             branch,
         },
         ("device", _, _, Some(device)) => Addition::Device { device },
+        ("companion" | "opened-up", _, None, _) if repo_name.is_some() => Addition::Unmatched {
+            name: repo_name.unwrap_or_default(),
+        },
         (other, ..) => bail!("an addition on Question Set {set_id} is an unreadable {other:?}"),
     };
 
@@ -287,6 +329,10 @@ pub async fn add_to_set(
 ) -> Result<AddingToSet> {
     let mut tx = super::writing(pool, "adding to a Question Set").await?;
 
+    if let Addition::Unmatched { .. } = addition {
+        bail!("a Repo a Transfer struck is not something to pick");
+    }
+
     match settled(&mut tx, set_id).await? {
         Some(true) => return Ok(AddingToSet::Answered),
         Some(false) => return Ok(AddingToSet::Locked),
@@ -305,6 +351,7 @@ pub async fn add_to_set(
             Key::Id(*repo_id),
         ),
         Addition::Device { device } => ("kind = 'device' AND device = ?", Key::Text(device)),
+        Addition::Unmatched { .. } => unreachable!("refused above"),
     };
 
     let query = format!("SELECT {COLUMNS} FROM set_additions WHERE set_id = ? AND {same}");
@@ -351,6 +398,7 @@ pub async fn add_to_set(
             None,
         ),
         Addition::Device { device } => (None, None, None, None, None, Some(device.as_str())),
+        Addition::Unmatched { .. } => unreachable!("refused above"),
     };
 
     let row: Row = sqlx::query_as(&format!(

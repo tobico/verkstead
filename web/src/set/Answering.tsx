@@ -1368,11 +1368,17 @@ function picking(what: {
     what
       .picked()
       .filter((addition) => addition.label === label)
-      .map((addition) => ({
-        ...chipped(addition, what.mirroring()),
-        remove: () => forget(addition),
-        removing: working().includes(addition.id),
-      }));
+      .map((addition) =>
+        // Struck as it crossed on a transfer: drawn as the record has it, with
+        // nothing to take off.
+        addition.state === "Struck"
+          ? { ...chipped(addition, what.mirroring()), struck: true }
+          : {
+              ...chipped(addition, what.mirroring()),
+              remove: () => forget(addition),
+              removing: working().includes(addition.id),
+            },
+      );
 
   const servers = () =>
     what
@@ -1445,6 +1451,16 @@ export function chipped(
       name: name ?? `repo ${repo_id}`,
       detail: `opened up on ${branch ?? mirroring}`,
       gone: name === null,
+    };
+  }
+
+  // A repo picked on the device the work was moved from that none here
+  // matches, which is why it is struck.
+  if ("Unmatched" in added) {
+    return {
+      kind: "repo",
+      name: added.Unmatched.name,
+      detail: "not on this device",
     };
   }
 

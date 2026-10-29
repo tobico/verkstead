@@ -22,6 +22,14 @@ capability comes back as something **said** rather than something **found** —
 which is the rule `crates/server/src/settings.rs` is built on, and the same move
 the git author and the global instructions were made by.
 
+Amended by [ADR-0028](0028-adding-from-an-answer.md) (2026-10-29): **a server
+may also be attached after the work has started, from an Answer.** Picked on a
+waiting Question Set's Attach menu, it is put on the Conversation by the Submit
+that answers the Set, by name, and the session waiting on that Set is carried on
+in a Built Root written with it. Attached and removed while the round drafts and
+fixed once the work starts still holds for the Brief's chips; this is a second
+moment, beside it, and nothing still takes a server off.
+
 ## The decision
 
 An **MCP server** is declared once for the installation, in a new section of the
