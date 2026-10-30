@@ -6,9 +6,10 @@ Where the platform wanted has a device that is linked but not ticked, or
 ticked but asleep, Verkstead asks rather than deciding — with a Question Set
 of its own, the first it has ever authored. The Set names Verkstead as the
 asker, says what wants the platform and why the device cannot be used yet, and
-carries two Options: *Move to nuc-win* or *Wait for nuc-win*, against *Run it
-here*. A ticked device that answers before the human does moves the work and
-locks the Set with a line saying so. And `verkstead transfer` on such a device
+carries *Move to nuc-win* against *Run it here* where the device is not
+permitted, and *Run it here* alone where it is permitted but asleep — the open
+Set being the wait, which no answer closes. A ticked device that answers before
+the human does moves the work and locks the Set with a line saying so. And `verkstead transfer` on such a device
 is accepted as a request: the turn ends, the same Set goes up with *Keep it
 here* as its second Option, *Move to* ticks and moves, and *Keep it here*
 resumes the session with a note that the work stays. Demonstrable: a Windows

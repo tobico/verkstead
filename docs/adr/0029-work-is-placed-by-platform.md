@@ -98,11 +98,12 @@ ticked but asleep, Verkstead puts a Question Set of its own**, the first Set
 Verkstead has ever authored. A stop with a split Resume row and a Timeline card
 with two presses were both offered; the Set was chosen because an open Set is
 already what draws *Blocked on you* and reaches a phone, and because its Attach
-menu already offers the tick. Two Options each:
+menu already offers the tick. The Options are what the human can do about it,
+and waiting is not one of them:
 
 | Case | The Set says | Options |
 | --- | --- | --- |
-| Ticked, asleep | *Stage 03 wants Windows. nuc-win is not awake.* | **Wait for nuc-win** · **Run it here** |
+| Ticked, asleep | *Stage 03 wants Windows. nuc-win is not awake, and the work moves there by itself once it is.* | **Run it here** |
 | Linked, not ticked | *Stage 03 wants Windows. nuc-win is linked but not permitted.* | **Move to nuc-win** · **Run it here** |
 | The agent's call on either | *The agent asked to move to nuc-win, which is not permitted.* | **Move to nuc-win** · **Keep it here** |
 | No device of it linked | *Stage 03 wants Windows. No Windows device is linked.* | none — a Notice, and the work runs here |
@@ -111,6 +112,12 @@ menu already offers the tick. Two Options each:
 move runs and the Set is locked, its line saying the device answered, because
 the tick already was the consent. A ticked device being asleep is a stop that
 lifts itself.
+
+**The open Set is the wait.** A *Wait for nuc-win* Option was written first
+and taken back: answered, it would close the one Set that could still say
+*Run it here*, leaving work waiting on a device that might never wake and no
+press to refuse with. So the asleep case has no answer meaning *wait*: the
+human wakes the device or presses **Run it here**, and either settles it.
 
 **`verkstead transfer` on such a device is accepted as a request rather than
 refused**: the turn ends, the same Set goes up, *Move to* ticks the device and

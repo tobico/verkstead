@@ -3369,7 +3369,7 @@ at the press, in the same words.
 Nothing to do about one, however much it says. A Notice is written after the
 fact and stays on the record for ever; what a stopped run is waiting on is that
 it is **Stopped**, and what answers that is **Resume**.
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): the one thing Verkstead writes on its own account gains a second — a Question Set of its own, asked where declared work wants a device that is asleep or not yet permitted, with two Options and Verkstead named as the asker.
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): the one thing Verkstead writes on its own account gains a second — a Question Set of its own, asked where declared work wants a device that is asleep or not yet permitted, Verkstead named as the asker, and left open as the wait for a sleeping device, which settles it by answering.
 _Avoid_: log line, info event, message, alert
 
 **Transcript**:
