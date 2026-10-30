@@ -29,6 +29,12 @@ settles.
 - **The platform is a preference**: *Run it here* starts the stage at home.
 - **The roadmap's declaration is read as it always was**, off the top of the
   chain at every start; ADR-0021's *acted on by nothing* is what this ends.
+- **Stage 03's hold on a stage's tasks comes off here.** Stage 03 places a
+  declared task by moving its Conversation, and a stage's Conversation moved
+  off home goes dark to its roadmap's scheduler until stage 05 lands — so
+  stage 03 writes its fallback Notice for a stage's declared task and runs it
+  where it is (Set 1543, Q4). With 05's driving and this stage's placing in,
+  a stage's declared task is placed like any other.
 
 ## Proposed tasks (provisional)
 
@@ -41,7 +47,10 @@ settles.
    and a start at home for a platform with no device.
 4. **The roadmap pane** — a stage's platform, shown today, gains the device it
    was placed on.
-5. **The glossary** — **Stage**'s platform sentence and **Permitted Device**
+5. **Lifting the hold on a stage's tasks** — stage 03's hold on placing a
+   declared task inside a stage comes off; such a task moves the stage as any
+   declared task moves its Conversation, and home still sees it settle.
+6. **The glossary** — **Stage**'s platform sentence and **Permitted Device**
    rewritten to what is now true.
 
 ## Re-verify at start
@@ -53,6 +62,9 @@ settles.
 - A stage is still made from `startable`'s answer in
   `crates/server/src/conversations.rs` and `crates/server/src/stages.rs`, and
   the platform word is still parsed beside the dependencies there.
+- Stage 03's hold on a stage's declared tasks is still where it left it, in
+  the driver's placement before a task's launch in
+  `crates/server/src/runner.rs`.
 - The Transfer with nothing running is still the human-pressed path in
   `crates/server/src/transfers.rs`, and the preflight's `Lacking` still names
   what a device lacks.
