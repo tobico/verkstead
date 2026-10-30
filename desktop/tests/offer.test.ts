@@ -12,6 +12,7 @@
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   mkdtempSync,
   readFileSync,
   statSync,
@@ -27,22 +28,30 @@ import {
   asking,
   bundle,
   CATEGORIES,
+  executable,
   entry,
   failure,
   FILENAME,
   HICOLOR,
   icons,
+  imageVersion,
+  installed,
   install,
   INSTALLING,
   KEYWORDS,
   moveInto,
+  newer,
   NotInstalled,
   offered,
+  instead,
+  OPENING,
   type Placing,
   placed,
   plan,
   relaunched,
+  shortVersion,
   shown,
+  version,
 } from "../src/offer.js";
 import { DEFAULTS } from "../src/settings.js";
 import { APP_ID } from "../src/startup.js";
@@ -508,5 +517,171 @@ describe("a Mac's move", () => {
 
     expect(() => moveInto(move)).toThrow(NotInstalled);
     expect(() => moveInto(move)).toThrow("It couldn't be moved into Applications (Failed to copy app).");
+  });
+});
+
+describe("the installed copy", () => {
+  it("is ~/Applications/Verkstead-x86_64.AppImage on Linux", () => {
+    expect(installed({ platform: "linux", env: { HOME } })).toBe(`${HOME}/${APPLICATIONS}/${FILENAME}`);
+  });
+
+  it("is /Applications/Verkstead.app on a Mac", () => {
+    expect(installed({ platform: "darwin", env: { HOME } })).toBe("/Applications/Verkstead.app");
+  });
+
+  it("is nowhere without a home on Linux", () => {
+    expect(installed({ platform: "linux", env: {} })).toBeUndefined();
+  });
+
+  it("is started by the bundle's executable on a Mac, and by the file itself on Linux", () => {
+    expect(executable("/Applications/Verkstead.app", "darwin")).toBe(
+      "/Applications/Verkstead.app/Contents/MacOS/Verkstead",
+    );
+    expect(executable(`${HOME}/${APPLICATIONS}/${FILENAME}`, "linux")).toBe(`${HOME}/${APPLICATIONS}/${FILENAME}`);
+  });
+});
+
+describe("reading an installed version", () => {
+  /// What electron-builder writes into a packed bundle, cut down to the keys
+  /// either side of the one read.
+  const plist = (version: string): string =>
+    '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n' +
+    "  <key>CFBundleName</key>\n  <string>Verkstead</string>\n" +
+    `  <key>CFBundleShortVersionString</key>\n  <string>${version}</string>\n` +
+    "  <key>CFBundleVersion</key>\n  <string>12</string>\n</dict>\n</plist>\n";
+
+  /// And what it writes into an AppImage's root, as 0.3.0's image holds it.
+  const desktop = (version: string | undefined): string =>
+    "[Desktop Entry]\nName=Verkstead\nExec=AppRun %U\nTerminal=false\nType=Application\nIcon=Verkstead\n" +
+    (version === undefined ? "" : `X-AppImage-Version=${version}\n`) +
+    "Categories=Development;\n";
+
+  it("reads a Mac's out of CFBundleShortVersionString", () => {
+    expect(shortVersion(plist("0.4.0"))).toBe("0.4.0");
+  });
+
+  it("reads none out of a plist without the key, or with it empty", () => {
+    expect(shortVersion("<plist><dict><key>CFBundleVersion</key><string>12</string></dict></plist>")).toBeUndefined();
+    expect(shortVersion(plist(""))).toBeUndefined();
+  });
+
+  it("reads Linux's out of X-AppImage-Version", () => {
+    expect(imageVersion(desktop("0.4.0-beta.2"))).toBe("0.4.0-beta.2");
+  });
+
+  /// The Rust AppImage's entry had the same name and no version in it.
+  it("reads none out of an entry without the key", () => {
+    expect(imageVersion(desktop(undefined))).toBeUndefined();
+  });
+
+  it("reads only the key at the start of a line", () => {
+    expect(imageVersion("[Desktop Entry]\nComment=X-AppImage-Version=9.9.9\n")).toBeUndefined();
+  });
+});
+
+describe("reading the installed copy off the disk", () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "verkstead-installed-"));
+  });
+
+  it("reads a bundle's Info.plist", () => {
+    const app = join(root, "Verkstead.app");
+    mkdirSync(join(app, "Contents"), { recursive: true });
+    writeFileSync(
+      join(app, "Contents", "Info.plist"),
+      "<plist><dict><key>CFBundleShortVersionString</key><string>0.4.0</string></dict></plist>",
+    );
+
+    expect(version(app, { platform: "darwin", env: {} })).toBe("0.4.0");
+  });
+
+  /// A stand-in for the AppImage runtime: `--appimage-extract <name>` writes
+  /// that one file under `squashfs-root` in the directory it is run from.
+  const image = (said: string): string => {
+    const file = join(root, FILENAME);
+    writeFileSync(
+      file,
+      "#!/bin/sh\n" +
+        '[ "$1" = --appimage-extract ] || exit 3\n' +
+        "mkdir -p squashfs-root\n" +
+        `printf '[Desktop Entry]\\n${said}\\n' > "squashfs-root/$2"\n`,
+      { mode: 0o755 },
+    );
+    return file;
+  };
+
+  it("extracts an AppImage's root entry and reads it, leaving nothing behind", () => {
+    const scratch = join(root, "tmp");
+    mkdirSync(scratch);
+
+    expect(version(image("X-AppImage-Version=0.4.0"), { platform: "linux", env: { TMPDIR: scratch } })).toBe("0.4.0");
+    expect(readdirSync(scratch)).toEqual([]);
+  });
+
+  it("reads nothing where there is no file", () => {
+    expect(version(join(root, "gone"), { platform: "linux", env: {} })).toBeUndefined();
+    expect(version(join(root, "gone.app"), { platform: "darwin", env: {} })).toBeUndefined();
+  });
+
+  it("reads nothing out of a file that will not extract", () => {
+    const file = join(root, "broken");
+    writeFileSync(file, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+
+    expect(version(file, { platform: "linux", env: {} })).toBeUndefined();
+  });
+});
+
+describe("whether the installed copy is newer", () => {
+  it("is newer by major, minor or patch", () => {
+    expect(newer("1.0.0", "0.9.9")).toBe(true);
+    expect(newer("0.4.0", "0.3.9")).toBe(true);
+    expect(newer("0.3.10", "0.3.9")).toBe(true);
+  });
+
+  it("is not newer when older", () => {
+    expect(newer("0.3.0", "0.4.0")).toBe(false);
+    expect(newer("0.3.9", "0.3.10")).toBe(false);
+  });
+
+  it("is not newer when the same", () => {
+    expect(newer("0.3.0", "0.3.0")).toBe(false);
+  });
+
+  it("counts a pre-release older than its release", () => {
+    expect(newer("0.4.0-beta.1", "0.4.0")).toBe(false);
+    expect(newer("0.4.0", "0.4.0-beta.1")).toBe(true);
+    expect(newer("0.4.0-beta.1", "0.3.0")).toBe(true);
+  });
+
+  it("orders pre-releases the way semver does", () => {
+    expect(newer("0.4.0-beta.2", "0.4.0-beta.1")).toBe(true);
+    expect(newer("0.4.0-beta.10", "0.4.0-beta.9")).toBe(true);
+    expect(newer("0.4.0-beta", "0.4.0-alpha.3")).toBe(true);
+    expect(newer("0.4.0-beta.1", "0.4.0-beta")).toBe(true);
+    expect(newer("0.4.0-alpha", "0.4.0-1")).toBe(true);
+  });
+
+  it("ignores build metadata", () => {
+    expect(newer("0.4.0+mac", "0.4.0")).toBe(false);
+  });
+
+  it("counts an unreadable version as older", () => {
+    expect(newer(undefined, "0.3.0")).toBe(false);
+    expect(newer("not a version", "0.3.0")).toBe(false);
+    expect(newer("0.4", "0.3.0")).toBe(false);
+  });
+});
+
+describe("the open-installed dialog", () => {
+  it("asks, names both versions, and offers the installed one first", () => {
+    expect(instead("0.4.0", "0.3.0")).toEqual({
+      message: "Open the installed Verkstead?",
+      detail: "Verkstead 0.4.0 is already installed, and this is 0.3.0.",
+      buttons: ["Open installed", "Keep this one"],
+      defaultId: OPENING,
+      cancelId: 1,
+    });
   });
 });

@@ -47,7 +47,15 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { app, BrowserWindow, dialog, ipcMain, Notification } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  type MessageBoxOptions,
+  type MessageBoxReturnValue,
+  Notification,
+} from "electron";
 import electronUpdater from "electron-updater";
 
 import { artwork } from "./artwork.js";
@@ -75,17 +83,23 @@ import { grey, shortcuts } from "./menu.js";
 import { hold, type Notice, opens, showing } from "./notices.js";
 import {
   asking,
+  executable,
   failure,
   HICOLOR,
   install as installTo,
   INSTALL,
+  installed,
   INSTALLING,
+  instead,
   moveInto,
+  newer,
   NotInstalled,
   offered,
+  OPENING,
   placed,
   plan,
   relaunched,
+  version,
 } from "./offer.js";
 import { dataDir, logDir } from "./platform.js";
 import { GUIDE, ISSUES } from "./roles.js";
@@ -468,9 +482,21 @@ function noticed({ window, visit }: Opened, arrived: Notice, on: boolean): void 
 /// this process to have gone before the copy starts, which is what lets the
 /// copy take the lock.
 ///
+/// **A newer Verkstead already installed is offered to open instead** — see
+/// [`superseded`] — and an older or the same one is replaced.
+///
 /// **A failure carries on from where it is** (ADR-0020): the dialog says why,
 /// and this launch goes on serving out of the download.
-async function installing(from: string, machine: { platform: NodeJS.Platform; env: Environment }): Promise<boolean> {
+async function installing(
+  from: string,
+  machine: { platform: NodeJS.Platform; env: Environment },
+  asked: boolean,
+): Promise<boolean> {
+  const over = await superseded(machine, asked);
+  if (over !== undefined) {
+    return over;
+  }
+
   if (machine.platform === "darwin") {
     // After ready, as the rest of Electron's AppKit is: the move may put up
     // the administrator's password dialog.
@@ -478,7 +504,9 @@ async function installing(from: string, machine: { platform: NodeJS.Platform; en
     say(`installing ${from} into /Applications`);
 
     try {
-      moveInto(() => app.moveToApplicationsFolder());
+      // A copy already there is replaced: `superseded` has read its version
+      // and found it older or the same, so the conflict is no question.
+      moveInto(() => app.moveToApplicationsFolder({ conflictHandler: () => true }));
     } catch (trouble) {
       return failed(trouble, from, machine);
     }
@@ -516,9 +544,60 @@ async function installing(from: string, machine: { platform: NodeJS.Platform; en
     return failed(trouble, from, machine);
   }
 
-  // The copy is relaunched with the environment this run was given rather than
-  // the one its mount made of it — the same reading the sidecar is handed, see
-  // [`unmounted`]. The copy's own runtime puts its own mount in front again.
+  say(`installed, so this launch hands over to ${planned.file}`);
+  handOver(planned.file, machine);
+  return true;
+}
+
+/// Whether a newer Verkstead is already installed, and what came of it: true
+/// is this launch handed over to it, false is **Keep this one** — the launch
+/// carrying on from where it is, with nothing installed — and nothing is an
+/// Install to go ahead with, over an older copy, the same one, one whose
+/// version cannot be read, or none.
+///
+/// Asked, the open-installed dialog says so; `--install`, with nobody to ask,
+/// opens the newer copy and says so in the log.
+async function superseded(
+  machine: { platform: NodeJS.Platform; env: Environment },
+  asked: boolean,
+): Promise<boolean | undefined> {
+  const there = installed(machine);
+  if (there === undefined || !existsSync(there)) {
+    return undefined;
+  }
+
+  const was = version(there, machine);
+  const running = app.getVersion();
+  if (was === undefined || !newer(was, running)) {
+    say(`${there} is ${was ?? "of a version that cannot be read"}, not newer than ${running}, so it is replaced`);
+    return undefined;
+  }
+
+  if (asked) {
+    say(`${there} is ${was}, newer than ${running}, so the launch offers to open it instead`);
+    const answer = await answered(instead(was, running));
+    if (answer.response !== OPENING) {
+      say("Keep this one is pressed, so this launch carries on from where it is");
+      return false;
+    }
+  } else {
+    say(`${INSTALL} finds ${there} at ${was}, newer than ${running}, so it opens that instead`);
+  }
+
+  say(`this launch hands over to the installed ${there}`);
+  handOver(executable(there, machine.platform), machine);
+  return true;
+}
+
+/// End this launch, and start `exe` in its place.
+///
+/// The copy is relaunched with the environment this run was given rather than
+/// the one its mount made of it — the same reading the sidecar is handed, see
+/// [`unmounted`]. The copy's own runtime puts its own mount in front again.
+/// Nothing has been started yet, so the exit is all there is to stop, and
+/// Electron's relaunch waits for this process to have gone, which is what lets
+/// the copy take the lock.
+function handOver(exe: string, machine: { platform: NodeJS.Platform; env: Environment }): void {
   const passed = unmounted(machine.env);
   for (const variable of stripped(machine.env, passed)) {
     if (passed[variable] === undefined) {
@@ -528,10 +607,25 @@ async function installing(from: string, machine: { platform: NodeJS.Platform; en
     }
   }
 
-  say(`installed, so this launch hands over to ${planned.file}`);
-  app.relaunch({ execPath: planned.file, args: relaunched(process.argv) });
+  app.relaunch({ execPath: exe, args: relaunched(process.argv) });
   app.exit(0);
-  return true;
+}
+
+/// A native message box asked before any window, and its answer.
+///
+/// **A timer ticks while the box is up, and it is load-bearing.** Measured
+/// on the packed AppImage under Electron 43.7.5 on X11: the box closed at
+/// the press, and the promise it answers with resolved only when something
+/// else next woke the main process — some 30 seconds after launch, or never
+/// — because this early in a launch nothing else is running to. A tick
+/// every tenth of a second is that something, so the press is acted on at
+/// once. `showMessageBoxSync` would need no timer and cannot say whether the
+/// box was ticked.
+async function answered(options: MessageBoxOptions): Promise<MessageBoxReturnValue> {
+  // The message box wants a ready app; `whenReady` answers at once after.
+  await app.whenReady();
+  const awake = setInterval(() => undefined, 100);
+  return dialog.showMessageBox(options).finally(() => clearInterval(awake));
 }
 
 /// An install that did not happen: said in the log and in the failure dialog,
@@ -718,7 +812,7 @@ async function run(): Promise<void> {
   if (process.argv.includes(INSTALL)) {
     if ("outside" in here) {
       say(`${INSTALL} asks for an install with nobody asked`);
-      if (await installing(here.outside, machine)) {
+      if (await installing(here.outside, machine, false)) {
         return;
       }
     } else {
@@ -737,24 +831,10 @@ async function run(): Promise<void> {
     if ("why" in offer) {
       say(`no Install Offer — ${offer.why}`);
     } else {
-      // The message box wants a ready app, and nothing below this needs the
-      // app not to be: `whenReady` is awaited again further down and answers at
-      // once.
-      await app.whenReady();
+      // Nothing below this needs the app not to be ready: `whenReady` is
+      // awaited again further down and answers at once.
       say(`this run is ${offer.offer}, outside Applications, so it offers to install itself`);
-
-      // **A timer ticks while the box is up, and it is load-bearing.** Measured
-      // on the packed AppImage under Electron 43.7.5 on X11: the box closed at
-      // the press, and the promise it answers with resolved only when something
-      // else next woke the main process — some 30 seconds after launch, or never
-      // — because this early in a launch nothing else is running to. A tick
-      // every tenth of a second is that something, so the press is acted on at
-      // once. `showMessageBoxSync` would need no timer and cannot say whether the
-      // box was ticked.
-      const awake = setInterval(() => undefined, 100);
-      const answer = await dialog
-        .showMessageBox(asking(offer.offer, machine))
-        .finally(() => clearInterval(awake));
+      const answer = await answered(asking(offer.offer, machine));
 
       if (answer.checkboxChecked) {
         say("Don't ask again is ticked, so the offer is not made again");
@@ -762,7 +842,7 @@ async function run(): Promise<void> {
       }
 
       if (answer.response === INSTALLING) {
-        if (await installing(offer.offer, machine)) {
+        if (await installing(offer.offer, machine, true)) {
           return;
         }
       } else {

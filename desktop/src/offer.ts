@@ -31,18 +31,34 @@
 //! is gone once the app is not running from it. Move rather than copy: a
 //! download left behind is one that shows the offer again if it is ever run.
 //!
+//! **A Verkstead already installed has its version read first** — see
+//! [`version`] and [`newer`]. A newer one is offered to open instead, and an
+//! older or the same one is replaced, which is what both Installs already do.
+//!
 //! **Everything that decides a path or a file's text is a function of values**,
 //! which vitest runs with the values handed in — the same shape
 //! [`startup.ts`](./startup.js) has. What is left for the edge is the moving and
 //! the writing, which is [`install`], and the dialog and the relaunch, which are
 //! `main.ts`'s.
 
-import { chmodSync, copyFileSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { absolute, dataHome, type Machine } from "./platform.js";
 import type { Settings } from "./settings.js";
 import { APP_ID, COMMENT, NAME, quoted } from "./startup.js";
+import { unmounted } from "./unmounted.js";
 
 /// The flag that is the dialog's **Install** with nobody asked: outside
 /// Applications it installs and relaunches, inside it says so and carries on.
@@ -441,4 +457,175 @@ function move(from: string, to: string): void {
     copyFileSync(from, to);
     rmSync(from);
   }
+}
+
+/// Where a Mac's Install puts the bundle: `moveToApplicationsFolder`'s own
+/// destination, the bundle's name in `/Applications`.
+export const MAC_INSTALLED = "/Applications/Verkstead.app";
+
+/// The installed copy Install would replace on this machine, or nothing where
+/// there is nowhere to install to.
+export function installed(machine: Machine): string | undefined {
+  if (machine.platform === "darwin") {
+    return MAC_INSTALLED;
+  }
+
+  const dir = applications(machine);
+  return dir === undefined ? undefined : join(dir, FILENAME);
+}
+
+/// What starts the installed copy at `at`: the bundle's executable on a Mac —
+/// the product name, under `Contents/MacOS` — and the AppImage itself on Linux.
+export function executable(at: string, platform: NodeJS.Platform): string {
+  return platform === "darwin" ? join(at, "Contents", "MacOS", NAME) : at;
+}
+
+/// The version a Mac bundle's `Info.plist` says it is:
+/// `CFBundleShortVersionString`, which electron-builder writes from
+/// `package.json`'s version.
+///
+/// Read the way [`launchd.ts`](./launchd.js) reads its two keys — the string
+/// after the key — rather than by a plist parser.
+export function shortVersion(plist: string): string | undefined {
+  const after = plist.split("<key>CFBundleShortVersionString</key>")[1];
+  const said = after === undefined ? undefined : /^\s*<string>([^<]*)<\/string>/.exec(after)?.[1]?.trim();
+  return said === "" ? undefined : said;
+}
+
+/// The version an AppImage's root desktop entry says it is:
+/// `X-AppImage-Version`, which electron-builder writes into it. The Rust
+/// AppImage's entry had the same name and no such key, so it says nothing.
+export function imageVersion(desktop: string): string | undefined {
+  const said = /^X-AppImage-Version=(.*)$/m.exec(desktop)?.[1]?.trim();
+  return said === "" ? undefined : said;
+}
+
+/// The version of the copy installed at `at`, or nothing where it cannot be
+/// read — which [`newer`] counts as older.
+///
+/// **A Mac's is a file in the bundle.** **Linux's is inside the image**, and
+/// the AppImage runtime extracts that one file with `--appimage-extract`
+/// without starting Electron — so every release ever shipped answers, and
+/// nothing of the copy's own runs. It extracts into the directory it is run
+/// from, so it is run from a temporary one of this app's own, which goes
+/// afterwards; and with the environment this run was given rather than its
+/// mount's, as the sidecar is (see [`unmounted`]).
+export function version(at: string, machine: Machine): string | undefined {
+  if (machine.platform === "darwin") {
+    const plist = readable(join(at, "Contents", "Info.plist"));
+    return plist === undefined ? undefined : shortVersion(plist);
+  }
+
+  let scratch: string | undefined;
+  try {
+    scratch = mkdtempSync(join(absolute(machine.env.TMPDIR) ?? tmpdir(), "verkstead-installed-"));
+    const name = `${APP_ID}.desktop`;
+    spawnSync(at, ["--appimage-extract", name], {
+      cwd: scratch,
+      env: unmounted(machine.env),
+      stdio: "ignore",
+      timeout: 10_000,
+    });
+    const desktop = readable(join(scratch, "squashfs-root", name));
+    return desktop === undefined ? undefined : imageVersion(desktop);
+  } catch {
+    return undefined;
+  } finally {
+    if (scratch !== undefined) {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }
+}
+
+/// A file's text, or nothing where it cannot be read.
+function readable(file: string): string | undefined {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/// A version as semver orders it: the three numbers, and the pre-release's
+/// identifiers. Build metadata orders nothing, so it is dropped.
+interface Semver {
+  readonly core: readonly [number, number, number];
+  readonly pre: readonly string[];
+}
+
+function semver(text: string): Semver | undefined {
+  const parts = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(text.trim());
+  if (parts === null) {
+    return undefined;
+  }
+
+  return {
+    core: [Number(parts[1]), Number(parts[2]), Number(parts[3])],
+    pre: parts[4] === undefined ? [] : parts[4].split("."),
+  };
+}
+
+/// How `a` orders against `b`: negative, zero or positive.
+///
+/// **A pre-release is older than its release**, and pre-releases order
+/// identifier by identifier — numbers numerically, numbers before words, words
+/// as text, and the shorter first where one runs out.
+function order(a: Semver, b: Semver): number {
+  for (let i = 0; i < 3; i++) {
+    const by = (a.core[i] ?? 0) - (b.core[i] ?? 0);
+    if (by !== 0) {
+      return by;
+    }
+  }
+
+  if (a.pre.length === 0 || b.pre.length === 0) {
+    return b.pre.length - a.pre.length;
+  }
+
+  for (let i = 0; i < Math.min(a.pre.length, b.pre.length); i++) {
+    const x = a.pre[i] ?? "";
+    const y = b.pre[i] ?? "";
+    const numeric = /^\d+$/;
+    if (numeric.test(x) && numeric.test(y)) {
+      const by = Number(x) - Number(y);
+      if (by !== 0) {
+        return by;
+      }
+    } else if (numeric.test(x) !== numeric.test(y)) {
+      return numeric.test(x) ? -1 : 1;
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
+
+  return a.pre.length - b.pre.length;
+}
+
+/// Whether the installed copy, at version `installed`, is newer than the one
+/// `running`.
+///
+/// **Equal is not newer**, and **a version that cannot be read is older**:
+/// the one being run is what the human has in hand, so Install goes ahead.
+export function newer(installed: string | undefined, running: string): boolean {
+  const there = installed === undefined ? undefined : semver(installed);
+  const here = semver(running);
+  return there !== undefined && here !== undefined && order(there, here) > 0;
+}
+
+/// Where in [`instead`]'s buttons **Open installed** is.
+export const OPENING = 0;
+
+/// What the open-installed dialog says, over a newer copy at `installed` than
+/// the one `running`. The words are ADR-0020's.
+export function instead(
+  installed: string,
+  running: string,
+): Omit<Asking, "checkboxLabel"> {
+  return {
+    message: "Open the installed Verkstead?",
+    detail: `Verkstead ${installed} is already installed, and this is ${running}.`,
+    buttons: ["Open installed", "Keep this one"],
+    defaultId: OPENING,
+    cancelId: 1,
+  };
 }

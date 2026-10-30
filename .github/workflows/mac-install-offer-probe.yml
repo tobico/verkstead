@@ -1,4 +1,4 @@
-# Throwaway: install-on-desktop task 02 — the Install Offer on a real Mac.
+# Throwaway: install-on-desktop task 03 — a newer Verkstead already installed, on a real Mac.
 # Lives only on the `macos-pack-probe` branch and merges nowhere.
 name: Mac install-offer probe
 
@@ -119,90 +119,112 @@ jobs:
           SH
           echo "LIB=$RUNNER_TEMP/lib.sh" >> "$GITHUB_ENV"
 
-      # A shown launch out of the dmg: the dialog is up, and says ADR-0020's
-      # words; Skip carries on, and the app serves from where it is.
-      - name: The dialog shows, and Skip carries on
+      # Each arm seeds /Applications/Verkstead.app as a copy of the mounted app
+      # whose CFBundleShortVersionString says $1, quarantine stripped (an edited
+      # Info.plist fails assessment, and a direct exec is all that runs it).
+      - name: Helpers for a seeded install
+        run: |
+          cat >> "$LIB" <<'SH'
+          seed() {
+            stop
+            sudo rm -rf /Applications/Verkstead.app
+            [ -d "$APP" ] || hdiutil attach "$DMG" -nobrowse -mountpoint "$MOUNT"
+            ditto "$APP" /Applications/Verkstead.app
+            xattr -dr com.apple.quarantine /Applications/Verkstead.app
+            plutil -replace CFBundleShortVersionString -string "$1" /Applications/Verkstead.app/Contents/Info.plist
+            echo "seeded /Applications/Verkstead.app at $(plutil -extract CFBundleShortVersionString raw /Applications/Verkstead.app/Contents/Info.plist)"
+            rm -f "$log"
+          }
+          offered() { for _ in $(seq 60); do grep -q "offers to install itself" "$log" 2>/dev/null && break; sleep 1; done; sleep 3; }
+          press() { osascript -e "tell application \"System Events\" to tell process \"Verkstead\" to click button \"$1\" of window 1" && echo "pressed $1"; }
+          relaunched() {
+            for _ in $(seq 90); do [ "$(grep -c 'is starting, at pid' "$log" 2>/dev/null || true)" -ge 2 ] 2>/dev/null && break; sleep 1; done
+            serving && echo "PROVEN: the relaunched app serves" || echo "NOT SERVING after the relaunch"
+            pid=$(grep 'is starting, at pid' "$log" | tail -1 | sed 's/.*at pid //')
+            exe=$(ps -o command= -p "$pid")
+            echo "relaunched pid $pid runs $exe"
+            case "$exe" in /Applications/Verkstead.app/*) echo "PROVEN: it runs from /Applications" ;; *) echo "NOT under /Applications" ;; esac
+            echo "installed version now: $(plutil -extract CFBundleShortVersionString raw /Applications/Verkstead.app/Contents/Info.plist)"
+          }
+          SH
+
+      - name: A newer one installed, and Keep this one carries on
         if: always()
         timeout-minutes: 6
         run: |
           set +e
           . "$LIB"
-          rm -f "$log"
+          seed 99.0.0
           launch
-          for _ in $(seq 60); do grep -q "offers to install itself" "$log" 2>/dev/null && break; sleep 1; done
+          offered
+          press Install
+          for _ in $(seq 30); do grep -q "open it instead" "$log" 2>/dev/null && break; sleep 1; done
           sleep 3
-          shot dialog
+          shot newer-dialog
           echo "== the dialog"; ax Verkstead
-          osascript -e 'tell application "System Events" to tell process "Verkstead" to click button "Skip" of window 1'
-          serving && echo "PROVEN: Skip carries on, and the app serves" || echo "NOT SERVING after Skip"
+          press "Keep this one"
+          serving && echo "PROVEN: Keep this one carries on, and the app serves" || echo "NOT SERVING after Keep this one"
           where
+          echo "installed version still: $(plutil -extract CFBundleShortVersionString raw /Applications/Verkstead.app/Contents/Info.plist)"
           echo "== log"; cat "$log"
           stop
 
-      # Install with nobody asked, out of the (translocated) dmg: the bundle is
-      # moved into /Applications and the app comes back from there.
-      - name: --install moves it into /Applications and it comes back from there
+      - name: A newer one installed, and Open installed hands over to it
         if: always()
         timeout-minutes: 6
         run: |
           set +e
           . "$LIB"
-          rm -f "$log"
-          launch --args --install
-          for _ in $(seq 90); do [ "$(grep -c 'is starting, at pid' "$log" 2>/dev/null || true)" -ge 2 ] 2>/dev/null && break; sleep 1; done
-          serving && echo "PROVEN: the relaunched app serves" || echo "NOT SERVING after --install"
-          shot installed
+          seed 99.0.0
+          launch
+          offered
+          press Install
+          for _ in $(seq 30); do grep -q "open it instead" "$log" 2>/dev/null && break; sleep 1; done
+          sleep 3
+          press "Open installed"
+          relaunched
           echo "== processes"; where
           echo "== log"; cat "$log"
-          pid=$(grep 'is starting, at pid' "$log" | tail -1 | sed 's/.*at pid //')
-          exe=$(ps -o command= -p "$pid")
-          echo "relaunched pid $pid runs $exe"
-          case "$exe" in
-            /Applications/Verkstead.app/*) echo "PROVEN: the relaunched app runs from /Applications" ;;
-            *) echo "NOT under /Applications" ;;
-          esac
-          case "$exe" in *AppTranslocation*) echo "TRANSLOCATED" ;; *) echo "PROVEN: not translocated" ;; esac
-          first=$(grep 'is starting, at pid' "$log" | head -1)
-          echo "the launch out of the dmg: $first"
-          grep "installing" "$log"
-          ls -la /Applications | grep -i verkstead
-          xattr -l /Applications/Verkstead.app
-          hdiutil info | grep -A2 -i verkstead
           stop
 
-      # A move that could not be made: /Applications made unwritable, so the
-      # move asks for the administrator's password, which is cancelled — and the
-      # failure dialog says so, and the app carries on serving.
-      - name: A cancelled move shows the failure dialog, and the app carries on
+      - name: A newer one installed, and --install opens it
         if: always()
-        timeout-minutes: 8
+        timeout-minutes: 6
         run: |
           set +e
           . "$LIB"
-          stop
-          sudo rm -rf /Applications/Verkstead.app
-          sudo chown root:wheel /Applications
-          sudo chmod 755 /Applications
-          ls -ld /Applications
-          [ -d "$APP" ] || hdiutil attach "$DMG" -nobrowse -mountpoint "$MOUNT"
-          rm -f "$log"
+          seed 99.0.0
           launch --args --install
-          for i in $(seq 40); do
-            shot "auth-$i"
-            [ "$i" = 5 ] && { echo "== SecurityAgent"; ax SecurityAgent; echo "== Verkstead"; ax Verkstead; }
-            if osascript -e 'tell application "System Events" to tell process "SecurityAgent" to click button "Cancel" of window 1' 2>/dev/null; then
-              echo "pressed Cancel on the password dialog"; break
-            fi
-            grep -q "the install did not happen" "$log" 2>/dev/null && break
-            sleep 2
-          done
-          for _ in $(seq 30); do grep -q "the install did not happen" "$log" 2>/dev/null && break; sleep 1; done
-          sleep 3
-          shot failure
-          echo "== the failure dialog"; ax Verkstead
-          osascript -e 'tell application "System Events" to tell process "Verkstead" to click button 1 of window 1'
-          serving && echo "PROVEN: after the failure the app carries on serving" || echo "NOT SERVING after the failure"
-          where
+          relaunched
+          echo "== processes"; where
+          echo "== log"; cat "$log"
+          stop
+
+      - name: An older one installed is replaced with no second dialog
+        if: always()
+        timeout-minutes: 6
+        run: |
+          set +e
+          . "$LIB"
+          seed 0.0.1
+          launch
+          offered
+          press Install
+          relaunched
+          shot older-replaced
+          echo "== processes"; where
+          echo "== log"; cat "$log"
+          stop
+
+      - name: The same one installed is replaced by --install
+        if: always()
+        timeout-minutes: 6
+        run: |
+          set +e
+          . "$LIB"
+          seed "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")"
+          launch --args --install
+          relaunched
           echo "== log"; cat "$log"
           stop
 
