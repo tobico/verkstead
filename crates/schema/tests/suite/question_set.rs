@@ -1,7 +1,7 @@
 //! The Question Set as it arrives from an agent: what YAML parses into, and
 //! which shapes the question grammar refuses.
 
-use verkstead_schema::{Direction, QuestionSet};
+use verkstead_schema::{Direction, QuestionSet, WantedPlatform};
 
 /// A Set exercising every part of the wire format at once.
 const FULL_SET: &str = r#"
@@ -716,6 +716,75 @@ fn a_proposal_needs_reasoning_the_human_can_read() {
         error.to_string().contains("rationale"),
         "the refusal should say what is missing, got: {error}"
     );
+}
+
+/// The proposing Set again, wanting a platform with `entry` as its one want.
+fn wanting(entry: &str) -> String {
+    format!("{PROPOSING}  wants:\n{entry}")
+}
+
+#[test]
+fn a_proposal_says_which_platform_the_work_wants_and_why() {
+    let set = QuestionSet::from_yaml(&wanting(
+        "    - platform: windows\n      for: the ConPTY stage\n",
+    ))
+    .expect("a proposal wanting a platform should parse");
+
+    set.validate().expect("a want with a reason is legal");
+
+    let wants = set.proposal.expect("this Set proposes").wants;
+    assert_eq!(wants.len(), 1);
+    assert_eq!(wants[0].platform, WantedPlatform::Windows);
+    assert_eq!(wants[0].reason, "the ConPTY stage");
+}
+
+#[test]
+fn a_platform_that_is_not_one_of_the_three_is_refused_naming_wants() {
+    let error = QuestionSet::from_yaml(&wanting(
+        "    - platform: freebsd\n      for: the jails stage\n",
+    ))
+    .expect_err("there are three platforms, as a stage line has");
+
+    assert!(
+        error.to_string().contains("wants"),
+        "the refusal should name the field, got: {error}"
+    );
+}
+
+#[test]
+fn a_want_with_no_reason_is_refused_naming_wants() {
+    for reason in ["\"\"", "\"   \""] {
+        let error = QuestionSet::from_yaml(&wanting(&format!(
+            "    - platform: macos\n      for: {reason}\n"
+        )))
+        .unwrap()
+        .validate()
+        .expect_err("the reason is what the human reads beside the tick");
+
+        assert!(
+            error.to_string().contains("`wants`"),
+            "the refusal should name the field, got: {error}"
+        );
+    }
+}
+
+#[test]
+fn a_proposal_wanting_nothing_round_trips_without_the_key() {
+    let set = QuestionSet::from_yaml(PROPOSING).unwrap();
+    assert!(set.proposal.as_ref().unwrap().wants.is_empty());
+
+    let yaml = set.to_yaml().unwrap();
+    assert!(
+        !yaml.contains("wants"),
+        "a proposal wanting nothing writes no key, got:\n{yaml}"
+    );
+
+    let wanting = QuestionSet::from_yaml(&wanting(
+        "    - platform: linux\n      for: the bwrap sandbox\n",
+    ))
+    .unwrap();
+    let reparsed = QuestionSet::from_yaml(&wanting.to_yaml().unwrap()).unwrap();
+    assert_eq!(reparsed, wanting);
 }
 
 /// A proposal Set needs nothing answerable of its own.

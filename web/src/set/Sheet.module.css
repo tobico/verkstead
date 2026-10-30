@@ -444,6 +444,13 @@
 
 /* What picking does, said once for the whole chooser — and what ticking does,
    said the same way under the Nothing-else option. */
+/* What the work wants, under the three directions: read as the rest of the
+   card's prose is, at the measure, the platform the only weight in it. */
+.directionPick .wants {
+  margin: 0.75rem 0 0;
+  max-width: var(--measure);
+}
+
 .directionPick .semantics,
 .ending .semantics {
   margin: 0.75rem 0 0;

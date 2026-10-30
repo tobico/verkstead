@@ -14,7 +14,7 @@
 //! first Event would have had to be taken apart to hold the second.
 
 use serde::{Deserialize, Serialize};
-use verkstead_schema::Direction;
+use verkstead_schema::{Direction, WantedPlatform};
 
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
@@ -1428,6 +1428,22 @@ pub struct ProposalView {
 
     /// Why, rendered and sanitized by the server on the way out.
     pub rationale_html: String,
+
+    /// The platforms the work wants, each with its reason, in the order the
+    /// agent wrote them. Empty where it wants none, and the chooser then draws
+    /// nothing for them.
+    pub wants: Vec<WantView>,
+}
+
+/// One platform the proposal wants, and why, as the chooser draws it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct WantView {
+    pub platform: WantedPlatform,
+
+    /// The reason, rendered and sanitized as the rationale is — inline, because
+    /// it finishes a sentence the chooser starts.
+    pub for_html: String,
 }
 
 /// A Conversation's worktree: where it is, and whether it is still there.
@@ -3213,6 +3229,14 @@ pub fn proposal_view(proposal: &verkstead_schema::Proposal) -> ProposalView {
     ProposalView {
         direction: proposal.direction,
         rationale_html: crate::markdown::to_html(&proposal.rationale),
+        wants: proposal
+            .wants
+            .iter()
+            .map(|want| WantView {
+                platform: want.platform,
+                for_html: crate::markdown::to_inline_html(&want.reason),
+            })
+            .collect(),
     }
 }
 

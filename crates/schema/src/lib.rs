@@ -21,5 +21,8 @@ pub use api::{
 pub use liveness::Liveness;
 pub use nudge::{Nudge, Nudged};
 pub use response::{Answer, Response};
-pub use set::{Direction, Proposal, Question, QuestionOption, QuestionSet, RepoDiff, Subquestion};
+pub use set::{
+    Direction, Proposal, Question, QuestionOption, QuestionSet, RepoDiff, Subquestion, Want,
+    WantedPlatform,
+};
 pub use validate::{ValidationError, Violation};

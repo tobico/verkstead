@@ -68,7 +68,7 @@ pub use conversations::{
     SteerRecordView, SteerSaved, SteerSubmission, SteerTarget, SteerUpgradeView, TakenUp,
     TargetNamed, TargetRecorded, TaskDocument, TaskEntry, TaskListEvent, TaskListReached,
     TaskSource, TerminalClosed, TerminalOpened, TerminalPorts, TerminalView, TerminalsView,
-    TimelineEvent, TransferredTo, Uncommitted, UnreadableSetEvent, Watching, Worktree,
+    TimelineEvent, TransferredTo, Uncommitted, UnreadableSetEvent, WantView, Watching, Worktree,
     agent_output_event, agent_output_pinned, backlog_pane, brief_event, commit_event, commit_pane,
     handoff_event, manual_task_event, memo_card, memo_event, moved_event, notice_event,
     proposal_view, pull_request_details, pull_request_event, pull_request_reached,

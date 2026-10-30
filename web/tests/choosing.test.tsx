@@ -27,6 +27,7 @@ import { slidPress } from "./sliding";
 import proposed from "./fixtures/set-proposed.json" with { type: "json" };
 import proposing from "./fixtures/set-proposing.json" with { type: "json" };
 import waiting from "./fixtures/set-answering.json" with { type: "json" };
+import wanting from "./fixtures/set-wanting.json" with { type: "json" };
 
 /// The renderer is a page's own doing and none of these fixtures has a Diagram;
 /// mocked so nothing here loads megabytes of mermaid.
@@ -34,6 +35,9 @@ vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
 const PROPOSING = readable(proposing);
 const PROPOSED = readable(proposed);
+
+/// The same closing Set wanting Windows, for the ConPTY stage.
+const WANTING = readable(wanting);
 
 /// An ordinary Set, which carries no proposal and so has no chooser on it.
 const ORDINARY = readable(waiting);
@@ -153,6 +157,27 @@ describe("the chooser on a Set that carries a proposal", () => {
     expect(said, "and how to disagree, which is the whole way back").toContain(
       "sends it back",
     );
+  });
+
+  it("says which platform the work wants and why, under the directions", async () => {
+    const { page } = await answering(WANTING);
+
+    const line = page.querySelector(`.${sheet.directionPick} .${sheet.wants}`);
+    expect(line, "a proposal wanting a platform says so").toBeTruthy();
+    expect(line!.textContent).toBe(
+      "This work wants Windows for the ConPTY stage and its cfg(windows) tests.",
+    );
+    expect(
+      line!.querySelector("code")?.textContent,
+      "the reason is the agent's markdown, rendered",
+    ).toBe("cfg(windows)");
+  });
+
+  it("says nothing about platforms where the proposal wants none", async () => {
+    const { page } = await answering(PROPOSING);
+
+    expect(page.querySelector(`.${sheet.directionPick}`)).toBeTruthy();
+    expect(page.querySelector(`.${sheet.wants}`)).toBeNull();
   });
 
   it("is not drawn at all on an ordinary Set", async () => {

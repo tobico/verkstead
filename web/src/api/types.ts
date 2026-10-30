@@ -5116,7 +5116,13 @@ direction: Direction,
 /**
  * Why, rendered and sanitized by the server on the way out.
  */
-rationale_html: string, };
+rationale_html: string, 
+/**
+ * The platforms the work wants, each with its reason, in the order the
+ * agent wrote them. Empty where it wants none, and the chooser then draws
+ * nothing for them.
+ */
+wants: Array<WantView>, };
 
 /**
  * The agent's prose, rendered.
@@ -8151,6 +8157,27 @@ export type Violation = {
  * the Set as a whole.
  */
 label?: string | null, message: string, };
+
+/**
+ * One platform the proposal wants, and why, as the chooser draws it.
+ */
+export type WantView = { platform: WantedPlatform, 
+/**
+ * The reason, rendered and sanitized as the rationale is — inline, because
+ * it finishes a sentence the chooser starts.
+ */
+for_html: string, };
+
+/**
+ * The three platforms work can want, in the words a stage line's `on <os>`
+ * spells them.
+ *
+ * The schema's own rather than the server's `Platform`, because this crate is
+ * built for wasm and cannot reach it; the server maps one onto the other where
+ * it needs to. An enum, so a fourth word is refused when the Set is read, as a
+ * fourth direction is.
+ */
+export type WantedPlatform = "linux" | "macos" | "windows";
 
 /**
  * And what a watcher says back up it.

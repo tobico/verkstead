@@ -94,6 +94,7 @@ import { rowPress } from "../rows";
 import styles from "./Answering.module.css";
 import { AskText } from "./AskText";
 import { Postscript } from "./Postscript";
+import { Wanting } from "./Wanting";
 // The question vocabulary, defined once for the form and the record alike —
 // every class below that a settled Set also draws comes from here.
 import page from "./Sheet.module.css";
@@ -647,6 +648,7 @@ function Choosing(props: {
             }}
           </For>
         </ul>
+        <Wanting wants={props.proposal.wants} />
         <p class={page.semantics}>
           Picking a direction accepts the proposal and the agent gets on with
           it. Anything else, your own answer included, sends it back for
