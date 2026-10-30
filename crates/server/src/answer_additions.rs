@@ -143,8 +143,7 @@ pub(crate) async fn add(
                 return Ok(AdditionMade::WorkIsHere);
             }
 
-            let mut members = devices.membership().rows().await?;
-            members.retain(|member| member.device != devices.id());
+            let members = devices.membership().rows().await?;
             if !members.iter().any(|member| &member.device == device) {
                 return Ok(AdditionMade::NotAMember);
             }
