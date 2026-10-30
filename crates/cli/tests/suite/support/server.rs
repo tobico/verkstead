@@ -113,8 +113,26 @@ impl Server {
             let served = app.clone();
 
             runtime.block_on(async move {
-                let listener = verkstead_server::pipe::Listener::open(&data_dir, None)
-                    .expect("nothing else holds this Data Directory's pipe");
+                // A restart can come up before the server it replaces has quite
+                // gone: `kill` stops waiting on the old runtime after a tenth of
+                // a second, and on a loaded machine its worker is still dropping
+                // the old listener after that. Until it has, the pipe object is
+                // still there, and a first instance of a name that exists is
+                // refused as access denied — so that refusal is waited out
+                // rather than taken as somebody else holding the pipe.
+                let deadline = Instant::now() + Duration::from_secs(30);
+                let listener = loop {
+                    match verkstead_server::pipe::Listener::open(&data_dir, None) {
+                        Err(what)
+                            if what.kind() == std::io::ErrorKind::PermissionDenied
+                                && Instant::now() < deadline =>
+                        {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                        }
+                        opened => break opened,
+                    }
+                }
+                .expect("nothing else holds this Data Directory's pipe");
                 let spelling = listener.asked_through().to_owned();
 
                 tokio::spawn(async move {
