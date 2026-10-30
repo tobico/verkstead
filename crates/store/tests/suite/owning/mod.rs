@@ -697,6 +697,7 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
             done: false,
             wrapped: false,
             stopped: false,
+            joined: None,
         },
     )
     .await

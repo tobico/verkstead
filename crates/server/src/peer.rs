@@ -78,6 +78,7 @@ pub mod account;
 pub mod annex_forward;
 pub mod announcing;
 pub mod authors;
+pub mod chains;
 pub mod checkouts;
 pub mod dialling;
 pub mod exchange;

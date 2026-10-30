@@ -131,6 +131,7 @@ pub(crate) fn served(state: AppState) -> Router {
     crate::ui::routes()
         .merge(super::news::route())
         .merge(super::reports::route())
+        .merge(super::chains::route())
         .merge(super::repos::route())
         .merge(super::harnesses::route())
         .merge(super::checkouts::route())

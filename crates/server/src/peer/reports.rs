@@ -28,7 +28,7 @@ use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use verkstead_render::{StageReport, StageReported};
+use verkstead_render::{BirthKey, StageReport, StageReported};
 use verkstead_schema::Nudge;
 
 use crate::{AppState, store};
@@ -49,107 +49,23 @@ pub(crate) async fn heard(
     ConnectInfo(caller): ConnectInfo<Caller>,
     Json(report): Json<StageReport>,
 ) -> Response {
-    let Some(presented) = caller.fingerprint() else {
-        return refused(
-            StatusCode::FORBIDDEN,
-            "a device that presented no certificate has no stage to report on",
-        );
+    let tombstone = match tombstone_of(&state, &caller, &report.born).await {
+        Ok(tombstone) => tombstone,
+        Err(refusal) => return refusal,
     };
-
-    let Some(devices) = state.devices.as_ref() else {
-        tracing::error!("a stage's report arrived at a device that does not know what it is");
-
-        return refused(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "this device cannot say which of its members is calling",
-        );
-    };
-
-    let member = match devices.membership().presenting(&presented).await {
-        Ok(Some(member)) => member,
-
-        // Through the gate and unlinked a moment later: nobody this device
-        // would take a report from.
-        Ok(None) => {
-            return refused(
-                StatusCode::FORBIDDEN,
-                "this device holds no membership for the caller",
-            );
-        }
-
-        Err(why) => {
-            tracing::error!(%why, "the membership a stage's report is attributed to could not be read");
-
-            return refused(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "this device could not read the membership",
-            );
-        }
-    };
-
-    if report.born.device != state.device {
-        return refused(
-            StatusCode::NOT_FOUND,
-            "that stage was not born on this device, so this is not its home",
-        );
-    }
-
-    let born = store::Birth {
-        device: report.born.device.clone(),
-        id: report.born.id,
-    };
-
-    let tombstone = match store::born_as(&state.pool, &born).await {
-        Ok(Some(id)) => id,
-
-        Ok(None) => {
-            return refused(
-                StatusCode::NOT_FOUND,
-                "this device holds no copy of that stage",
-            );
-        }
-
-        Err(why) => {
-            tracing::error!(error = ?why, "looking for the stage a report is about failed");
-
-            return refused(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "this device could not read its own record",
-            );
-        }
-    };
-
-    match store::transferred(&state.pool, tombstone).await {
-        Ok(Some(mark)) if mark.device == member.device => {}
-
-        Ok(_) => {
-            tracing::warn!(
-                tombstone,
-                caller = %member.device,
-                "a member reported on a stage whose live record is not on it, and was refused",
-            );
-
-            return refused(
-                StatusCode::CONFLICT,
-                "the work on that stage is not on the device reporting it",
-            );
-        }
-
-        Err(why) => {
-            tracing::error!(error = ?why, tombstone, "reading where a stage's live record is failed");
-
-            return refused(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "this device could not read its own record",
-            );
-        }
-    }
 
     let standing = store::LiveStanding {
         state: crate::ui::state_of(report.state),
         done: report.done,
         wrapped: report.wrapped,
         stopped: report.stopped,
+        joined: report.joined.map(|joined| store::JoinedAway {
+            branch: joined.branch,
+            number: joined.number,
+            title: joined.title,
+            url: joined.url,
+            base: joined.base,
+        }),
     };
 
     let followed = match store::follow(&state.pool, tombstone, &standing).await {
@@ -167,7 +83,6 @@ pub(crate) async fn heard(
 
     tracing::info!(
         tombstone,
-        device = %member.device,
         state = ?standing.state,
         settled = followed.settled,
         "a stage away from home reported where it stands, and its tombstone follows it",
@@ -184,6 +99,115 @@ pub(crate) async fn heard(
     };
 
     Json(StageReported { said }).into_response()
+}
+
+/// The tombstone a member is calling about, where it is one this device keeps
+/// and the work on it is on that member — or the refusal to answer with.
+///
+/// Shared with [`super::stage_joins`], which is the same member asking about the
+/// same stage: only the device the work is on has anything to say or ask.
+pub(super) async fn tombstone_of(
+    state: &AppState,
+    caller: &Caller,
+    born: &BirthKey,
+) -> Result<i64, Response> {
+    let Some(presented) = caller.fingerprint() else {
+        return Err(refused(
+            StatusCode::FORBIDDEN,
+            "a device that presented no certificate has no stage to report on",
+        ));
+    };
+
+    let Some(devices) = state.devices.as_ref() else {
+        tracing::error!("a call about a stage arrived at a device that does not know what it is");
+
+        return Err(refused(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "this device cannot say which of its members is calling",
+        ));
+    };
+
+    let member = match devices.membership().presenting(&presented).await {
+        Ok(Some(member)) => member,
+
+        // Through the gate and unlinked a moment later: nobody this device
+        // would take a report from.
+        Ok(None) => {
+            return Err(refused(
+                StatusCode::FORBIDDEN,
+                "this device holds no membership for the caller",
+            ));
+        }
+
+        Err(why) => {
+            tracing::error!(%why, "the membership a call about a stage is attributed to could not be read");
+
+            return Err(refused(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not read the membership",
+            ));
+        }
+    };
+
+    if born.device != state.device {
+        return Err(refused(
+            StatusCode::NOT_FOUND,
+            "that stage was not born on this device, so this is not its home",
+        ));
+    }
+
+    let born = store::Birth {
+        device: born.device.clone(),
+        id: born.id,
+    };
+
+    let tombstone = match store::born_as(&state.pool, &born).await {
+        Ok(Some(id)) => id,
+
+        Ok(None) => {
+            return Err(refused(
+                StatusCode::NOT_FOUND,
+                "this device holds no copy of that stage",
+            ));
+        }
+
+        Err(why) => {
+            tracing::error!(error = ?why, "looking for the stage a call is about failed");
+
+            return Err(refused(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not read its own record",
+            ));
+        }
+    };
+
+    match store::transferred(&state.pool, tombstone).await {
+        Ok(Some(mark)) if mark.device == member.device => {}
+
+        Ok(_) => {
+            tracing::warn!(
+                tombstone,
+                caller = %member.device,
+                "a member called about a stage whose live record is not on it, and was refused",
+            );
+
+            return Err(refused(
+                StatusCode::CONFLICT,
+                "the work on that stage is not on the device calling",
+            ));
+        }
+
+        Err(why) => {
+            tracing::error!(error = ?why, tombstone, "reading where a stage's live record is failed");
+
+            return Err(refused(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not read its own record",
+            ));
+        }
+    }
+
+    Ok(tombstone)
 }
 
 /// The route, over the state the workbench answers out of — mounted by

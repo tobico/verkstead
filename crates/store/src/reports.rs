@@ -16,6 +16,12 @@
 //! so all four travel together, and a report sent twice writes the same row
 //! twice. Which is what lets the far end resend freely: [`told`] remembers what
 //! home last took, and anything else is still owed.
+//!
+//! **And the join, which is the chain's fact.** A stage joins its roadmap's
+//! chain by opening its pull request, and home's chain is read off the pull
+//! requests recorded against its stages — so the one a copy away from home
+//! opened travels with the standing, and home records it on the tombstone in the
+//! order it learned of it. See [`JoinedAway`].
 
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
@@ -28,8 +34,10 @@ use super::stops::Decision;
 /// ever been in Done or in Wrapping, and whether it is stopped.
 ///
 /// Exactly the four facts `stage_standings` reads off a Conversation, so a
-/// tombstone written with them reads the standing its live copy does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// tombstone written with them reads the standing its live copy does — and a
+/// fifth, the pull request it joined its chain with, which is what
+/// `stage_chain` reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveStanding {
     /// The state it is in now.
     pub state: Lifecycle,
@@ -43,13 +51,41 @@ pub struct LiveStanding {
 
     /// And whether it is stopped, waiting on somebody's press.
     pub stopped: bool,
+
+    /// The pull request it joined its roadmap's chain with, once it has.
+    pub joined: Option<JoinedAway>,
+}
+
+/// The pull request a stage opened as it joined its roadmap's chain, and the
+/// branch it joined with, as its live copy's record names them.
+///
+/// The first pull request in the stage's own Repo, which is the one its finish
+/// opened: a companion's is another repository's, and the rest of a stack it
+/// was later found on is not what put it in the chain. What home's chain reads
+/// of it is the branch; the rest is the row that branch hangs off.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinedAway {
+    /// The branch, as the record names it now — the name a session renamed it
+    /// to where one did.
+    pub branch: String,
+
+    /// The number GitHub gave the pull request.
+    pub number: i64,
+
+    /// Its title and where it is.
+    pub title: String,
+    pub url: String,
+
+    /// And the branch it goes into, where that was written down.
+    pub base: Option<String>,
 }
 
 /// The one table: what this device last told a stage's home about it, kept on
 /// the copy away from home that did the telling.
 ///
 /// Keyed by the Conversation, one row at most. No row is a copy that has told
-/// home nothing yet, which is every copy that has just arrived.
+/// home nothing yet, which is every copy that has just arrived. The `joined_`
+/// columns are all empty together where home was told of no join.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS stage_reports (
@@ -57,7 +93,12 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              state           TEXT NOT NULL,
              done            INTEGER NOT NULL,
              wrapped         INTEGER NOT NULL,
-             stopped         INTEGER NOT NULL
+             stopped         INTEGER NOT NULL,
+             joined_branch   TEXT,
+             joined_number   INTEGER,
+             joined_title    TEXT,
+             joined_url      TEXT,
+             joined_base     TEXT
          ) STRICT",
     )
     .execute(pool)
@@ -149,20 +190,59 @@ pub async fn live_standing(
         return Ok(None);
     };
 
+    // The first pull request in its own Repo, and the branch as the record names
+    // it — see [`JoinedAway`].
+    let joined: Option<(String, i64, String, String, Option<String>)> = sqlx::query_as(
+        "SELECT COALESCE(c.named_branch, c.branch), p.number, p.title, p.url, p.base_branch
+         FROM conversations c
+         JOIN pull_requests p ON p.conversation_id = c.id AND p.repo_id = c.repo_id
+         WHERE c.id = ?
+         ORDER BY p.event_id
+         LIMIT 1",
+    )
+    .bind(conversation_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("reading the pull request Conversation {conversation_id} joined with")
+    })?;
+
     Ok(Some(LiveStanding {
         state: Lifecycle::read(&state)?,
         // In Done now is in Done ever, whether or not the move was written.
         done: done || Lifecycle::reads_as(&state, Lifecycle::Done),
         wrapped,
         stopped,
+        joined: joined.map(|(branch, number, title, url, base)| JoinedAway {
+            branch,
+            number,
+            title,
+            url,
+            base,
+        }),
     }))
 }
 
 /// What home last took of `conversation_id`'s standing, where it has taken
 /// anything.
 pub async fn told(pool: &SqlitePool, conversation_id: i64) -> Result<Option<LiveStanding>> {
-    let row: Option<(String, bool, bool, bool)> = sqlx::query_as(
-        "SELECT state, done, wrapped, stopped FROM stage_reports WHERE conversation_id = ?",
+    /// The columns in the order the query below selects them.
+    type Row = (
+        String,
+        bool,
+        bool,
+        bool,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+
+    let row: Option<Row> = sqlx::query_as(
+        "SELECT state, done, wrapped, stopped,
+                joined_branch, joined_number, joined_title, joined_url, joined_base
+         FROM stage_reports WHERE conversation_id = ?",
     )
     .bind(conversation_id)
     .fetch_optional(pool)
@@ -171,14 +251,26 @@ pub async fn told(pool: &SqlitePool, conversation_id: i64) -> Result<Option<Live
         format!("reading what home was last told about Conversation {conversation_id}")
     })?;
 
-    row.map(|(state, done, wrapped, stopped)| {
-        Ok(LiveStanding {
-            state: Lifecycle::read(&state)?,
-            done,
-            wrapped,
-            stopped,
-        })
-    })
+    row.map(
+        |(state, done, wrapped, stopped, branch, number, title, url, base)| {
+            Ok(LiveStanding {
+                state: Lifecycle::read(&state)?,
+                done,
+                wrapped,
+                stopped,
+                joined: match (branch, number, title, url) {
+                    (Some(branch), Some(number), Some(title), Some(url)) => Some(JoinedAway {
+                        branch,
+                        number,
+                        title,
+                        url,
+                        base,
+                    }),
+                    _ => None,
+                },
+            })
+        },
+    )
     .transpose()
 }
 
@@ -186,18 +278,35 @@ pub async fn told(pool: &SqlitePool, conversation_id: i64) -> Result<Option<Live
 /// told again.
 pub async fn tell(pool: &SqlitePool, conversation_id: i64, standing: &LiveStanding) -> Result<()> {
     sqlx::query(
-        "INSERT INTO stage_reports (conversation_id, state, done, wrapped, stopped)
-         VALUES (?, ?, ?, ?, ?)
+        "INSERT INTO stage_reports (conversation_id, state, done, wrapped, stopped,
+                                    joined_branch, joined_number, joined_title, joined_url,
+                                    joined_base)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (conversation_id) DO UPDATE SET state = excluded.state,
                                                      done = excluded.done,
                                                      wrapped = excluded.wrapped,
-                                                     stopped = excluded.stopped",
+                                                     stopped = excluded.stopped,
+                                                     joined_branch = excluded.joined_branch,
+                                                     joined_number = excluded.joined_number,
+                                                     joined_title = excluded.joined_title,
+                                                     joined_url = excluded.joined_url,
+                                                     joined_base = excluded.joined_base",
     )
     .bind(conversation_id)
     .bind(standing.state.stored())
     .bind(standing.done)
     .bind(standing.wrapped)
     .bind(standing.stopped)
+    .bind(standing.joined.as_ref().map(|joined| &joined.branch))
+    .bind(standing.joined.as_ref().map(|joined| joined.number))
+    .bind(standing.joined.as_ref().map(|joined| &joined.title))
+    .bind(standing.joined.as_ref().map(|joined| &joined.url))
+    .bind(
+        standing
+            .joined
+            .as_ref()
+            .and_then(|joined| joined.base.as_ref()),
+    )
     .execute(pool)
     .await
     .with_context(|| {
@@ -225,6 +334,13 @@ pub struct Followed {
 /// taken off. Nobody opens a tombstone — its URL leads to the live copy — so
 /// those lines are for the readings, not for a person. One transaction, so a
 /// reading never finds the state moved and the line saying it has not.
+///
+/// **And the join, where the copy has opened its pull request.** The tombstone
+/// is put on the branch the copy joined with and the pull request is recorded
+/// against it, which is what puts the stage in home's chain — after every link
+/// already there, its Event being written now: the order home's chain reads is
+/// the order home learned of each join. A pull request it holds already is
+/// recorded nothing twice.
 ///
 /// Whether the caller may make this write — that `conversation_id` is a
 /// tombstone, and that the device reporting is the one it names — is the
@@ -284,6 +400,42 @@ pub async fn follow(
         if ever && !moved.0 {
             super::conversations::moved(&mut tx, conversation_id, state).await?;
         }
+    }
+
+    if let Some(joined) = &standing.joined {
+        sqlx::query(
+            "UPDATE conversations SET named_branch = ?
+             WHERE id = ? AND COALESCE(named_branch, branch) <> ?",
+        )
+        .bind(&joined.branch)
+        .bind(conversation_id)
+        .bind(&joined.branch)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!("putting the tombstone of Conversation {conversation_id} on its branch")
+        })?;
+
+        let (repo_id,): (i64,) = sqlx::query_as("SELECT repo_id FROM conversations WHERE id = ?")
+            .bind(conversation_id)
+            .fetch_one(&mut *tx)
+            .await
+            .with_context(|| format!("reading the Repo of Conversation {conversation_id}"))?;
+
+        super::pull_requests::record(
+            &mut tx,
+            conversation_id,
+            repo_id,
+            &super::PullRequest {
+                number: joined.number,
+                title: joined.title.clone(),
+                url: joined.url.clone(),
+                head: Some(joined.branch.clone()),
+                base: joined.base.clone(),
+                repo: None,
+            },
+        )
+        .await?;
     }
 
     match (standing.stopped, stopped_at.is_some()) {

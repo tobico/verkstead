@@ -5,7 +5,8 @@
 //! answers with. A stage moved to this device was born on another one, which
 //! keeps its roadmap and a tombstone for it; every lifecycle move made here —
 //! into Wrapping, into Done, Closed, a stop and the stop lifting — is told to
-//! home so the tombstone reads what this copy reads.
+//! home so the tombstone reads what this copy reads. And so is the pull request
+//! its finish opened, which is what puts it in home's chain.
 //!
 //! **What is told is the standing as it is, not the move that changed it**, and
 //! what home last took is written down — see [`store::told`]. So nothing has to
@@ -19,7 +20,7 @@
 //! home carries its roadmap on and answers with what it would have said on the
 //! tombstone — which nobody opens — so this copy says it on its own Timeline.
 
-use verkstead_render::{BirthKey, Lifecycle as Drawn, StageReport, StageReported};
+use verkstead_render::{BirthKey, Lifecycle as Drawn, StageJoined, StageReport, StageReported};
 use verkstead_schema::Nudge;
 
 use crate::AppState;
@@ -144,6 +145,13 @@ async fn report(state: &AppState, conversation_id: i64) {
         done: standing.done,
         wrapped: standing.wrapped,
         stopped: standing.stopped,
+        joined: standing.joined.as_ref().map(|joined| StageJoined {
+            branch: joined.branch.clone(),
+            number: joined.number,
+            title: joined.title.clone(),
+            url: joined.url.clone(),
+            base: joined.base.clone(),
+        }),
     };
 
     let answered = relaying::word_from::<StageReported>(

@@ -124,9 +124,10 @@ pub use transcript::{
     rollout_cwd, rollout_session, statements, transcript_after, transcript_view, turns,
 };
 pub use transfer::{
-    Arrived, BirthKey, CameFrom, CheckoutAcross, CompanionCheckoutAcross, ConversationAcross,
-    HarnessThere, Lacking, MovedFor, PairingAcross, PairingRole, Permitting, PickedAcross,
-    Preflight, ProfileAcross, StageReport, StageReported, TipsThere, Transferring, UntrackedFile,
+    Arrived, BirthKey, CameFrom, ChainLink, CheckoutAcross, CompanionCheckoutAcross,
+    ConversationAcross, HarnessThere, Lacking, MovedFor, PairingAcross, PairingRole, Permitting,
+    PickedAcross, Preflight, ProfileAcross, StageAhead, StageJoin, StageJoined, StageJoining,
+    StageReport, StageReported, TipsThere, Transferring, UntrackedFile,
 };
 pub use update::UpdateNotice;
 pub use view::{

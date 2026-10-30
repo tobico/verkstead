@@ -348,6 +348,67 @@ pub struct StageReport {
 
     /// And whether it is stopped.
     pub stopped: bool,
+
+    /// And the pull request it joined its roadmap's chain with, once its finish
+    /// has opened one: what puts it in home's chain.
+    #[serde(default)]
+    pub joined: Option<StageJoined>,
+}
+
+/// The pull request a stage away from home opened as it joined its roadmap's
+/// chain, and the branch it joined with as its record names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageJoined {
+    pub branch: String,
+    pub number: i64,
+    pub title: String,
+    pub url: String,
+    pub base: Option<String>,
+}
+
+/// A stage away from home at its finish, asking home whether it may join its
+/// roadmap's chain (ADR-0029, *Home drives a roadmap across devices*).
+///
+/// Asked of home because the chain and the queue are home's: the stage is
+/// queued there on its tombstone, the first time it asks, and every later ask
+/// keeps that place.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageJoining {
+    /// The stage, by the key it was born under on home.
+    pub born: BirthKey,
+}
+
+/// Home's answer: what the stage is still waiting on, and the chain it would
+/// join on top of.
+///
+/// Nothing in `ahead` is the stage let in, and `chain` and `foot` are then the
+/// chain to rebase onto — every link home holds, bottom to top, with which of
+/// them have merged left for the far device's git to read.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageJoin {
+    pub ahead: Vec<StageAhead>,
+    pub chain: Vec<ChainLink>,
+
+    /// The branch the stage was cut from, where that was another stage's or the
+    /// roadmap's own rather than the default branch.
+    pub foot: Option<String>,
+}
+
+/// One stage a stage at its finish is waiting on, by its label, and whether it
+/// has joined the chain already or is still to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageAhead {
+    pub stage: String,
+    pub joined: bool,
+}
+
+/// One link of a roadmap's chain as home reads it: its Conversation there, its
+/// label, and its branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChainLink {
+    pub conversation: i64,
+    pub stage: String,
+    pub branch: String,
 }
 
 /// What home answers a report with: what it would have said on the stage's

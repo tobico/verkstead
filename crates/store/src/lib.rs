@@ -187,8 +187,8 @@ pub use push::{
     store_subscription, vapid_keys,
 };
 pub use reports::{
-    Followed, LiveStanding, away_from_home, follow, live_standing, stages_away_from_home, tell,
-    told,
+    Followed, JoinedAway, LiveStanding, away_from_home, follow, live_standing,
+    stages_away_from_home, tell, told,
 };
 pub use repos::{
     ConflictResolution, Repo, Repointing, Unregistering, load_repo, recorded_repos, register_repo,

@@ -24995,6 +24995,12 @@ async fn a_stage_away_from_home_settles_and_starts_nothing_here() {
     )
     .await;
 
+    // Past its join first: a stage away from home asks home whether it may join,
+    // and the home named below is nowhere, so it would wait on it for ever.
+    fixture
+        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .await;
+
     // Born on another device, and moved here: a copy away from its home.
     let pool = open_database(&fixture.database).await.unwrap();
     verkstead_store::record_birth(

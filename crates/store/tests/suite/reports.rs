@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Birth, Lifecycle, LiveStanding, RoadmapStage, StageStanding, Transferred, away_from_home,
-    follow, live_standing, open_database, record_birth, register_repo, stage_standings,
+    Birth, JoinedAway, Lifecycle, LiveStanding, PullRequest, RoadmapStage, StageStanding,
+    Transferred, away_from_home, conversation_branch, follow, live_standing, open_database,
+    record_birth, record_pull_request, register_repo, stage_chain, stage_standings,
     stages_away_from_home, start_conversation, start_stage, tell, told, transfer_away,
 };
 
@@ -89,7 +90,41 @@ fn standing(state: Lifecycle, done: bool, wrapped: bool, stopped: bool) -> LiveS
         done,
         wrapped,
         stopped,
+        joined: None,
     }
+}
+
+/// The pull request a stage joined its chain with, on `branch`.
+fn joined_on(branch: &str, number: i64) -> JoinedAway {
+    JoinedAway {
+        branch: branch.to_owned(),
+        number,
+        title: format!("Stage on {branch}"),
+        url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+        base: Some("mvp".to_owned()),
+    }
+}
+
+/// And what puts a stage born here in the chain: its finish opening a pull
+/// request on its own branch.
+async fn opens(pool: &SqlitePool, repo_id: i64, id: i64, number: i64) {
+    let branch = conversation_branch(pool, id).await.unwrap().unwrap();
+
+    record_pull_request(
+        pool,
+        id,
+        repo_id,
+        &PullRequest {
+            number,
+            title: format!("Stage on {branch}"),
+            url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+            head: Some(branch),
+            base: None,
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
 }
 
 /// A copy of a stage born elsewhere is away from home and says where home is;
@@ -179,6 +214,74 @@ async fn what_home_was_told_is_remembered() {
     let wrapping = standing(Lifecycle::Wrapping, false, true, false);
     tell(&pool, away, &wrapping).await.unwrap();
     assert_eq!(told(&pool, away).await.unwrap(), Some(wrapping));
+
+    // And the join, which is the fifth fact: the pull request the finish opened,
+    // read off the copy's own record and remembered once told.
+    opens(&pool, repo_id, away, 12).await;
+
+    let joined = live_standing(&pool, away).await.unwrap().unwrap();
+
+    assert_eq!(
+        joined.joined,
+        Some(JoinedAway {
+            base: None,
+            ..joined_on("roadmaps/mvp/01", 12)
+        }),
+    );
+    assert_ne!(
+        told(&pool, away).await.unwrap(),
+        Some(joined.clone()),
+        "a join home has not heard of is still owed",
+    );
+
+    tell(&pool, away, &joined).await.unwrap();
+    assert_eq!(told(&pool, away).await.unwrap(), Some(joined));
+}
+
+/// **A join reported puts the tombstone in home's chain**, on the branch the
+/// copy joined with, and after every stage already in it: the order home's
+/// chain reads is the order home learned of each join. The same report again
+/// adds no second link.
+#[tokio::test]
+async fn a_join_reported_puts_the_tombstone_in_homes_chain_in_the_order_home_heard_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool).await;
+
+    let tombstone = stage(&pool, repo_id, "01").await;
+    let at_home = stage(&pool, repo_id, "02").await;
+
+    // Stage 02 joins here first; the far copy of 01 joined earlier by its own
+    // clock, and home is told after.
+    opens(&pool, repo_id, at_home, 20).await;
+
+    let joining = LiveStanding {
+        joined: Some(joined_on("roadmaps/mvp/01-counting", 12)),
+        ..standing(Lifecycle::Wrapping, false, true, false)
+    };
+
+    follow(&pool, tombstone, &joining).await.unwrap();
+    follow(&pool, tombstone, &joining).await.unwrap();
+
+    let chain: Vec<(i64, String)> = stage_chain(&pool, repo_id, "mvp")
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|link| (link.conversation_id, link.branch))
+        .collect();
+
+    assert_eq!(
+        chain,
+        [
+            (at_home, "roadmaps/mvp/02".to_owned()),
+            (tombstone, "roadmaps/mvp/01-counting".to_owned()),
+        ],
+    );
+
+    assert_eq!(
+        live_standing(&pool, tombstone).await.unwrap(),
+        Some(joining),
+        "and the tombstone stands where the copy does, join and all",
+    );
 }
 
 /// **A stage closed on the far device reads abandoned at home**, and one that
