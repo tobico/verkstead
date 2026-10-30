@@ -1,6 +1,8 @@
-# How `cargo nextest run` runs this workspace, which is how the `Windows` job in
-# `.github/workflows/ci.yml` runs its suite. Nothing else reads this: the Linux
-# and macOS jobs, and a `cargo test` anywhere, go by libtest alone.
+# How `cargo nextest run` runs this workspace, which is how the `Rust` and
+# `Windows` jobs in `.github/workflows/ci.yml` run their suites, over legs of
+# their own. The macOS job, the package-stores job and a plain `cargo test`
+# anywhere go by libtest alone, and lose nothing by it: a lock in a `static`
+# still does its work there.
 #
 # **nextest runs every test in a process of its own, and tests out of every
 # binary at once** — which is the whole of what it is there for, and is also
@@ -9,9 +11,17 @@
 # in a `static` was enough to keep them in order. Here it keeps nothing in
 # order: every test has a copy of its own. What those locks were guarding is
 # the machine's rather than the process's, so it is held here instead.
+#
+# And what a `static` was rationing rather than guarding goes to nextest's own
+# thread count, which is the machine's cores: `ROOM` in
+# `crates/server/tests/suite/sessions.rs` caps how many fixtures one process
+# stands up at once, and a process of one test never reaches it. Nothing
+# needs saying here for it — four tests at once on a four-core leg is the load
+# libtest put on the same runner.
 
 [test-groups]
 session-account = { max-threads = 1 }
+compile-server = { max-threads = 1 }
 
 # **The suites that start processes as the session account**, one test at a
 # time across all of them. Three things they share are the machine's, and each
@@ -74,3 +84,21 @@ priority = 100
 [[profile.default.overrides]]
 filter = 'binary_id(verkstead-server::suite) & test(=terminal_windows::a_child_that_is_dropped_takes_what_it_started_with_it)'
 threads-required = 'num-test-threads'
+
+# **The proofs that start a Compile Server**, on Linux, one at a time. A
+# Compile Server listens on sccache's own port, 4226, and there is one of those
+# to a machine, so two at once would be one proof's client reaching the other's
+# server: see `ON_THE_PORT` in `crates/server/tests/suite/package_stores.rs`,
+# the lock that kept them apart in one process.
+#
+# In the `Rust` job these proofs skip, for want of CMake, Ninja and sccache on
+# the runner — the `Package stores` job is where they run, and it runs them
+# under libtest. The group is here so that a leg stays right if the image ever
+# grows the tools, and so that a developer's own `cargo nextest run` does.
+[[profile.default.overrides]]
+filter = '''
+    binary_id(verkstead-server::suite)
+  & ( test(=package_stores::cmake_compiles_through_the_compile_server_and_a_rebuild_or_a_second_conversation_is_all_hits)
+    | test(=package_stores::rust_compiles_again_through_a_cleared_sccache) )
+'''
+test-group = 'compile-server'

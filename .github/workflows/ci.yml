@@ -44,6 +44,7 @@ jobs:
   # | ----------------------------------- | ----------- | --------------------- | --------------------- |
   # | Baseline (`main`), the one before   | 40816509002 | — + 21m50 = 24m49     | —                     |
   # | Baseline (`main`)                   | 40952712743 | — + 18m37 = 20m40     | —                     |
+  # | Format and clippy in `Lint`         | 40981767764 | — + 21m10 = 21m49     | —                     |
   #
   # What each lever came to, row by row:
   #
@@ -56,6 +57,13 @@ jobs:
   # test-minutes, 44 of those in `sessions`, the slowest of them the
   # long-stop tests at a minute or more apiece. Every other binary together
   # came to under four minutes.
+  #
+  # Format, clippy and the drift check moved to a `Lint` job of their own (run
+  # 40981767764), where they took 3m28 between them and the drift check ran
+  # and passed. This job's test step went *up* by two and a half minutes on
+  # the same suite, so the minute and a quarter it gave away was lost in the
+  # noise between two runners: the split is worth having for what it says
+  # when it fails, not for the time.
   rust:
     name: Rust
     runs-on: ubuntu-24.04
@@ -116,22 +124,56 @@ jobs:
             --proc /proc --dev /dev --tmpfs /tmp \
             /bin/sh -c 'echo "the sandbox surface holds"'
 
+      # **The suite runs through nextest rather than `cargo test`**, as the
+      # `Windows` job's does and for its reason: `cargo test` runs the
+      # workspace's test binaries one after another, so the step took as long
+      # as every suite added together, and nextest runs tests out of all of
+      # them at once, four at a time on this runner's four cores. What must not
+      # run at once is held apart by `.config/nextest.toml`, which says why.
+      #
+      # Pinned to the `Windows` job's release, unpacked and put on the `PATH`.
+      - name: Install cargo-nextest
+        run: |
+          version=0.9.144
+          into="$RUNNER_TEMP/cargo-nextest"
+          mkdir -p "$into"
+          curl -sSfL "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$version/cargo-nextest-$version-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar xz -C "$into"
+          echo "$into" >> "$GITHUB_PATH"
+
       # The viewer is not built first. `web/dist` is gitignored and the embed
       # that reads it is `allow_missing`, so the crates compile without it —
       # what the viewer's own suite covers is the viewer job's business.
+      #
+      # A step of its own, so the ledger above can read the build apart from
+      # the tests. The test binaries and nothing else: not `--all-targets`,
+      # which builds the server crate's `examples/` as well — developer probes
+      # that no test runs. The CLI's suite gets the `verkstead` it runs from
+      # cargo building that test target.
+      - name: Build
+        run: cargo build --workspace --tests
+
+      # To the end, whatever fails on the way: nextest stops at its first
+      # failure by default, which is a red check saying nothing about the tests
+      # it cancelled.
       - name: Test
-        run: cargo test --workspace
+        run: cargo nextest run --workspace --no-fail-fast
         env:
           # Twice the suite's own clock for `crates/server/tests/suite/sessions.rs`,
           # which stands real servers up and runs real sessions in real
-          # sandboxes and judges them on wall clock. This runner has two cores
-          # and is building the workspace alongside the run, so a session gets
-          # descheduled past a budget it would have met on a developer's
-          # machine — and what comes out is a different test failing every time,
-          # none of them about the code. See `VERKSTEAD_TEST_PACE` there for why
-          # one factor over the whole file rather than a longer budget here and
-          # there.
+          # sandboxes and judges them on wall clock. A shared four-core runner
+          # is slower than a developer's machine, so a session gets descheduled
+          # past a budget it would have met there — and what comes out is a
+          # different test failing every time, none of them about the code. See
+          # `VERKSTEAD_TEST_PACE` there for why one factor over the whole file
+          # rather than a longer budget here and there.
           VERKSTEAD_TEST_PACE: "2"
+
+      # **And the doc-tests, which nextest does not run.** The workspace has
+      # none today, so this step costs little; it is here so that the first one
+      # somebody writes runs too.
+      - name: Doc-tests
+        run: cargo test --doc --workspace
 
   # The checks that read the code rather than run it: formatting, lints, and
   # whether the committed TypeScript still matches the Rust it is generated
