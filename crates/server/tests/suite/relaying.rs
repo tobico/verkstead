@@ -569,6 +569,106 @@ async fn a_body_over_the_far_ends_limit_is_the_far_ends_own_refusal() {
     );
 }
 
+/// A read put through a connection the link has dropped since the last read is
+/// asked again, and answered, rather than refused as a member that stopped
+/// answering.
+///
+/// **One workbench for both reads**, because that is what holds the dial: the
+/// second read goes out over the connection the first one left open, which the
+/// cut has taken away underneath it without the pool having had a moment to
+/// notice. The far end never had that attempt, so there is nothing a second
+/// one could do twice.
+#[tokio::test]
+async fn a_read_over_a_connection_the_link_dropped_is_asked_again() {
+    let (a, b) = linked().await;
+
+    let link = Link::to(b.address).await;
+    a.linked_to(&b.device, vec![link.at.to_string()]).await;
+
+    let app = a.workbench();
+    let reading = through(B, &format!("/api/ui/conversations/{THERE}"));
+
+    let (status, said) = get(&app, &reading).await;
+    assert_eq!(status, StatusCode::OK, "the first read: {said}");
+
+    link.cut();
+
+    let (status, said) = get(&app, &reading).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the read after the link dropped: {said}",
+    );
+}
+
+/// What A reaches B over in the test above: a listener of the test's own that
+/// joins every connection made to it to B, byte for byte — so that the test can
+/// **cut** it.
+///
+/// **A cut is a link that has gone quiet**, which is what a dropped Wi-Fi or a
+/// laptop's lid is: nothing crosses it any more, and nothing says so either.
+/// The near end of each connection is held open with nothing behind it until A
+/// next writes down it, and is dropped then — so the pool has had no closing
+/// to notice, and the first A hears of it is the request it just sent failing.
+struct Link {
+    at: SocketAddr,
+    cutting: tokio::sync::watch::Sender<()>,
+    accepting: tokio::task::JoinHandle<()>,
+}
+
+impl Link {
+    async fn to(b: SocketAddr) -> Link {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let at = listener.local_addr().unwrap();
+        let (cutting, _) = tokio::sync::watch::channel(());
+
+        let accepting = tokio::spawn({
+            let cutting = cutting.clone();
+
+            async move {
+                while let Ok((mut near, _)) = listener.accept().await {
+                    let mut cut = cutting.subscribe();
+
+                    tokio::spawn(async move {
+                        let Ok(mut far) = tokio::net::TcpStream::connect(b).await else {
+                            return;
+                        };
+
+                        tokio::select! {
+                            _ = tokio::io::copy_bidirectional(&mut near, &mut far) => {}
+
+                            _ = cut.changed() => {
+                                drop(far);
+
+                                let mut said = [0; 1];
+                                let _ = tokio::io::AsyncReadExt::read(&mut near, &mut said).await;
+                            }
+                        }
+                    });
+                }
+            }
+        });
+
+        Link {
+            at,
+            cutting,
+            accepting,
+        }
+    }
+
+    /// Every connection crossing it gone quiet. The next one made is joined as
+    /// before.
+    fn cut(&self) {
+        self.cutting.send_replace(());
+    }
+}
+
+impl Drop for Link {
+    fn drop(&mut self) {
+        self.accepting.abort();
+    }
+}
+
 /// A body that goes on until somebody stops reading it, counting what it gave.
 struct Endless {
     /// What is left of what it would produce, in bytes.

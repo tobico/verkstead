@@ -775,6 +775,16 @@ impl Peers {
     /// handshake and then stopped is a machine that has had part of the
     /// request, and there is nothing left to send it to the next address.
     ///
+    /// **Save for a read, which is asked once more.** The client is held — see
+    /// [`Peers::held_for`] — so an attempt may go out over a connection kept
+    /// from an earlier call, one the link has since dropped without the pool
+    /// having noticed. That fails as a call broken partway through, though the
+    /// far end never had it. A call with no body that changes nothing — see
+    /// [`crate::relaying::Call::may_be_asked_again`] — is put to the same
+    /// address once more, over a client made afresh: every connection the old
+    /// one kept crossed the same link, so the pool is let go of whole rather
+    /// than tried a connection at a time.
+    ///
     /// **No deadline on the answer**, unlike every other dial here — see
     /// [`Peers::relaying`]. The address still has [`REACHING`] to answer the
     /// connection, so a member that has moved costs what it always did.
@@ -791,19 +801,39 @@ impl Peers {
         member: &Member,
         call: &crate::relaying::Call,
     ) -> Result<reqwest::Response> {
-        let (dialling, met) = self.held_for(member)?;
+        let (mut dialling, mut met) = self.held_for(member)?;
         let mut nothing_at = Vec::new();
 
         for address in dialled_at(member) {
-            let mut attempt = dialling
-                .request(call.method.clone(), reaching(address, &call.onwards))
-                .headers(call.headers.clone());
+            let mut asked_again = false;
 
-            if let Some(body) = call.body.for_one_attempt() {
-                attempt = attempt.body(body);
-            }
+            let sent = loop {
+                let mut attempt = dialling
+                    .request(call.method.clone(), reaching(address, &call.onwards))
+                    .headers(call.headers.clone());
 
-            match attempt.send().await {
+                if let Some(body) = call.body.for_one_attempt() {
+                    attempt = attempt.body(body);
+                }
+
+                match attempt.send().await {
+                    Err(why) if !why.is_connect() && !asked_again && call.may_be_asked_again() => {
+                        tracing::debug!(
+                            device = %member.device,
+                            %address,
+                            %why,
+                            "a read broke partway through, so it is asked once more afresh",
+                        );
+
+                        (dialling, met) = self.held_afresh_for(member)?;
+                        asked_again = true;
+                    }
+
+                    sent => break sent,
+                }
+            };
+
+            match sent {
                 Ok(answered) => {
                     // A row a dial dimmed is put back by the next that gets
                     // through, this one included: a stream taken up again or a
@@ -1402,6 +1432,24 @@ impl Peers {
         );
 
         Ok((client, met))
+    }
+
+    /// The same, with whatever was held for `member` let go of first — and
+    /// every connection its pool kept with it.
+    ///
+    /// For a connection found broken: the others in the pool crossed the same
+    /// link to the same machine, so they are no likelier to be standing. A
+    /// call already under way on the old client keeps it until it finishes.
+    fn held_afresh_for(
+        &self,
+        member: &Member,
+    ) -> Result<(reqwest::Client, Arc<Mutex<Option<String>>>)> {
+        self.holding
+            .lock()
+            .expect("nothing panics holding this")
+            .remove(&member.device);
+
+        self.held_for(member)
     }
 
     /// And the one a relayed call is made with: the same certificate presented

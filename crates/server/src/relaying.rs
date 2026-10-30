@@ -390,6 +390,23 @@ pub(crate) struct Call {
     pub(crate) body: Streamed,
 }
 
+impl Call {
+    /// Whether this call may be put to the far end a second time after the
+    /// first broke partway through: a read, carrying nothing.
+    ///
+    /// A read changes nothing however many times it lands, so asking it again
+    /// costs at most a second answer. A press might have been acted on before
+    /// its connection broke, and a body has been read by the first attempt —
+    /// see [`Streamed`] — so neither is.
+    pub(crate) fn may_be_asked_again(&self) -> bool {
+        matches!(self.body, Streamed::Nothing)
+            && matches!(
+                self.method,
+                reqwest::Method::GET | reqwest::Method::HEAD | reqwest::Method::OPTIONS
+            )
+    }
+}
+
 /// The browser's body, as something one dial at a time may send.
 ///
 /// **Read once, and read as it is written.** The bytes never sit anywhere: what
