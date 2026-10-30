@@ -76,8 +76,9 @@ proposal:
 
   `for` is markdown, and the human reads it: the chooser draws it beside the
   tick of each device of that platform the work may be moved to, so finish the
-  sentence *This work wants Windows for …*. An entry without one is refused. A
-  proposal with no `wants` draws the chooser as it always has.
+  sentence *This work wants Windows for …*. An entry without one is refused,
+  and so is a platform named twice: give each one entry, every reason in its
+  `for`. A proposal with no `wants` draws the chooser as it always has.
 - **Ask no question about whether to go ahead.** The workbench draws the
   chooser on any Set carrying a `proposal` — all three directions, yours marked
   as the recommendation, your rationale beside them — and says what picking one

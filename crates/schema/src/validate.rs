@@ -300,6 +300,21 @@ fn check_proposal(set: &QuestionSet, violations: &mut Vec<Violation>) {
             )));
         }
     }
+
+    // And each platform once: the chooser draws a platform's devices under
+    // each entry for it, so a second would draw the same tick twice.
+    for (at, want) in proposal.wants.iter().enumerate() {
+        if proposal.wants[..at]
+            .iter()
+            .any(|earlier| earlier.platform == want.platform)
+        {
+            violations.push(Violation::set(format!(
+                "a proposal's `wants` names {} twice; give it one entry, with every \
+                 reason the work wants it in that entry's `for`",
+                want.platform.word(),
+            )));
+        }
+    }
 }
 
 /// One entry, against the question it names.

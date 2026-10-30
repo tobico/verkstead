@@ -769,6 +769,22 @@ fn a_want_with_no_reason_is_refused_naming_wants() {
 }
 
 #[test]
+fn a_platform_wanted_twice_is_refused_naming_wants() {
+    let error = QuestionSet::from_yaml(&wanting(
+        "    - platform: windows\n      for: the ConPTY stage\n    \
+         - platform: windows\n      for: the installer\n",
+    ))
+    .unwrap()
+    .validate()
+    .expect_err("the chooser would draw the same tick twice");
+
+    assert!(
+        error.to_string().contains("`wants` names windows twice"),
+        "the refusal should name the field and the platform, got: {error}"
+    );
+}
+
+#[test]
 fn a_proposal_wanting_nothing_round_trips_without_the_key() {
     let set = QuestionSet::from_yaml(PROPOSING).unwrap();
     assert!(set.proposal.as_ref().unwrap().wants.is_empty());
