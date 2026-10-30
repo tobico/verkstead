@@ -264,12 +264,14 @@ fn names(devices: &[Device]) -> Vec<String> {
     devices.iter().map(|device| device.name.clone()).collect()
 }
 
-/// Names joined as a sentence says them: `X`, `X or Y`, `X, Y or Z`.
+/// Names joined as a sentence says them: `X`, `X or Y`, `X, Y, or Z` — the
+/// serial comma, as [`both`] and every list on a screen takes it.
 fn either(names: &[String]) -> String {
     match names {
         [] => String::new(),
         [one] => one.clone(),
-        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
+        [first, second] => format!("{first} or {second}"),
+        [rest @ .., last] => format!("{}, or {last}", rest.join(", ")),
     }
 }
 
@@ -1664,7 +1666,7 @@ mod tests {
         assert_eq!(
             Unplaced::NonePermitted(vec![device("Ada"), device("Grace"), device("Kit")])
                 .said(&task("02"), Platform::MacOs),
-            "Task 02 wants macOS, but this conversation may not be transferred to Ada, Grace or \
+            "Task 02 wants macOS, but this conversation may not be transferred to Ada, Grace, or \
              Kit, so it's running here. Tick a macOS device under **May be transferred to** to \
              have tasks like it moved there.",
         );
@@ -1908,7 +1910,7 @@ mod tests {
     }
 
     /// Three or more names take the serial comma, as every list on a screen
-    /// does.
+    /// does — a list of all of them and a choice of one alike.
     #[test]
     fn a_list_of_every_device_takes_the_serial_comma() {
         let names = |names: &[&str]| {
@@ -1923,6 +1925,13 @@ mod tests {
         assert_eq!(
             both(&names(&["Ada", "Grace", "Kit"])),
             "Ada, Grace, and Kit"
+        );
+
+        assert_eq!(either(&names(&["Ada"])), "Ada");
+        assert_eq!(either(&names(&["Ada", "Kit"])), "Ada or Kit");
+        assert_eq!(
+            either(&names(&["Ada", "Grace", "Kit"])),
+            "Ada, Grace, or Kit"
         );
     }
 }
