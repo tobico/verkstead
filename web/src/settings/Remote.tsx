@@ -220,7 +220,7 @@ import type {
   ServePress,
   ServeView,
 } from "../api/types";
-import { osIcon, useDevices } from "../devices";
+import { listed, osIcon, sessionsOn, useDevices } from "../devices";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
@@ -1083,24 +1083,11 @@ function updateWhy(
 ): string {
   const after = last === null ? "" : `, ${last} last`;
   const onto = `${who} restarts on Verkstead ${release ?? "the latest release"}${after}`;
-  const count = branches.length + drafts;
+  const sessions = sessionsOn(branches, drafts);
 
-  if (count === 0) return `${onto}.`;
+  if (sessions === null) return `${onto}.`;
 
-  const named = [
-    ...branches,
-    ...(drafts === 0 ? [] : [drafts === 1 ? "a draft" : `${drafts} drafts`]),
-  ];
-  const sessions = count === 1 ? "the session" : "the sessions";
-
-  return `${onto}, and ${sessions} on ${listed(named)} will be stopped and resumed.`;
-}
-
-/// `a`, `a and b`, `a, b and c`.
-function listed(names: string[]): string {
-  if (names.length < 2) return names.join("");
-
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `${onto}, and ${sessions} will be stopped and resumed.`;
 }
 
 /// What a press on the Devices list is answered with before anything has

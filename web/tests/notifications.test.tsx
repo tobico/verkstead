@@ -307,6 +307,8 @@ function inTheApp(held: Partial<DesktopSettings> = {}, notifiable = true) {
     startup: () => Promise.resolve({ possible: false, on: false }),
     register: () => Promise.resolve({ possible: false, on: false }),
     notifiable: () => Promise.resolve(notifiable),
+    placed: () => Promise.resolve({ outside: false }),
+    install: () => Promise.resolve({}),
     head: () => {},
     where: () => {},
     opening: () => () => {},

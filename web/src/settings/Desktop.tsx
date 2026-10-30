@@ -54,6 +54,16 @@
 //! box is greyed with the reason under it, which is the same shape the greyed
 //! keep-running position has. It is drawn on every platform: what differs
 //! between them is the registration behind it rather than anything here.
+//!
+//! **Install is drawn only while the app says it runs from outside
+//! Applications** (ADR-0020, *Amended: a download offers to install itself*):
+//! the way back once the launch's offer has had **Don't ask again** ticked. A
+//! line naming where it runs from, and the button, which raises the app's own
+//! dialog — the launch's, with one more sentence naming the sessions running on
+//! this device as stopped and resumed, read the way the Update card reads
+//! them, because the install quits the app and the server with it. An Install
+//! that went ahead relaunches the app, so what comes back is a Skip or a
+//! failure, and a failure is said under the button.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch as Choose, onMount, type JSX } from "solid-js";
@@ -61,6 +71,9 @@ import { For, Match, Show, Switch as Choose, onMount, type JSX } from "solid-js"
 import { Check } from "../Check";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
+import { loadDevices } from "../api/client";
+import type { DevicesView } from "../api/types";
+import { sessionsOn } from "../devices";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { rowPress } from "../rows";
@@ -71,6 +84,7 @@ import {
   bridge,
   type Bridge,
   type DesktopSettings,
+  type Pressed,
   type Registration,
   type WhenClosed,
 } from "./bridge";
@@ -89,6 +103,32 @@ const KEY = "desktop";
 /// own: it is the platform's rather than the settings file's, and only the pane
 /// draws it.
 const STARTUP = [KEY, "startup"];
+
+/// And where the app runs from, which is the app's reading and nothing anything
+/// on this page can change: static, and an Install that went ahead is a page
+/// that is not here any more to read it again.
+const PLACED = [KEY, "placed"];
+
+/// What the dialog says of the sessions running on this device, read afresh
+/// at the press — *The sessions on rate-limiting and a draft will be stopped
+/// and resumed.* — or nothing with none running.
+///
+/// A server that cannot say which are running is said as *any*, rather than
+/// as none: the dialog is the last word before the app quits.
+async function stopping(read: () => Promise<DevicesView>): Promise<string | undefined> {
+  let devices: DevicesView;
+  try {
+    devices = await read();
+  } catch {
+    return "Any sessions running here will be stopped and resumed.";
+  }
+
+  const on = sessionsOn(devices.this_running, devices.this_running_drafts);
+
+  return on === null
+    ? undefined
+    : `${on.charAt(0).toUpperCase()}${on.slice(1)} will be stopped and resumed.`;
+}
 
 /// Each position of the radio, in its own words.
 const WORDS_FOR: Record<WhenClosed, string> = {
@@ -133,6 +173,15 @@ function useStartup(reach: Bridge) {
   return useReading(() => ({
     queryKey: STARTUP,
     queryFn: () => reach.startup(),
+    freshness: "static",
+  }));
+}
+
+/// And where the app runs from, out of the bridge — see [`PLACED`].
+function usePlaced(reach: Bridge) {
+  return useReading(() => ({
+    queryKey: PLACED,
+    queryFn: () => reach.placed(),
     freshness: "static",
   }));
 }
@@ -236,6 +285,7 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
   const queries = useQueryClient();
   const desktop = useDesktop(props.reach);
   const starts = useStartup(props.reach);
+  const placed = usePlaced(props.reach);
   const mac = () => props.reach.platform === MAC;
 
   /// The registration asked of the platform again, every time this pane is
@@ -280,6 +330,19 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
   /// buys — a line here where the bridge itself could not be reached.
   const viewing = useMutation(() => ({
     mutationFn: () => props.reach.logs(),
+  }));
+
+  /// And **Install**, which the app asks about in its own dialog, with this
+  /// device's running sessions read at the press — the way the Update card
+  /// reads them again as it is drawn. What comes back is nothing installed,
+  /// and why where it failed.
+  const installing = useMutation(() => ({
+    mutationFn: async (): Promise<Pressed> =>
+      props.reach.install(
+        await stopping(() =>
+          queries.fetchQuery({ queryKey: ["devices"], queryFn: loadDevices, staleTime: 0 }),
+        ),
+      ),
   }));
 
   /// Every position's box, so a press can put the group back where the reading
@@ -433,6 +496,47 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
                   Whether Verkstead starts with this machine couldn't be read.{" "}
                   {starts.error?.message}
                 </ErrorLine>
+              </Show>
+
+              {/* Install, while the app says it runs from outside Applications
+                  and only then: nothing in a browser, which has no bridge, and
+                  nothing on a checkout run or once installed. */}
+              <Show when={placed.data?.outside ? placed.data : undefined}>
+                {(where) => (
+                  <div class={styles.install}>
+                    <p class={styles.from}>
+                      Verkstead is running from <code>{where().from}</code>,
+                      outside Applications.
+                    </p>
+                    {/* The dialog is the window's own while it is up, so a
+                        second press is one that arrived before it: asked for
+                        once. */}
+                    <QuietButton
+                      onClick={() => {
+                        if (!installing.isPending) installing.mutate();
+                      }}
+                    >
+                      Install
+                    </QuietButton>
+
+                    {/* What stopped it, under the button as a refused
+                        registration is under its box: the app's own sentence,
+                        which its failure dialog said too. */}
+                    <Show when={installing.data?.failed}>
+                      {(failed) => (
+                        <ErrorLine class={styles.failure}>
+                          Verkstead couldn't be installed. {failed()}
+                        </ErrorLine>
+                      )}
+                    </Show>
+                    <Show when={installing.isError}>
+                      <ErrorLine class={styles.failure}>
+                        Verkstead couldn't be installed.{" "}
+                        {installing.error?.message}
+                      </ErrorLine>
+                    </Show>
+                  </div>
+                )}
               </Show>
 
               {/* Drawn whatever the switch above says and on every platform: a

@@ -86,6 +86,8 @@ function standingIn(): Told {
     startup: () => Promise.resolve({ possible: false, on: false }),
     register: () => Promise.resolve({ possible: false, on: false }),
     notifiable: () => Promise.resolve(true),
+    placed: () => Promise.resolve({ outside: false }),
+    install: () => Promise.resolve({}),
     head: () => {},
     where: (open) => {
       lists.push(open);
