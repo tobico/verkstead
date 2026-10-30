@@ -2581,6 +2581,77 @@ mod tests {
         }
     }
 
+    /// A platform is written only where the work can be verified nowhere else
+    /// (ADR-0029, *Declaring what the work wants*), and both planning skills
+    /// say so beside the `on <os>` they describe: a line that declared a
+    /// platform for every mention of one would pull work onto a device it does
+    /// not need.
+    #[test]
+    fn both_planning_skills_say_when_a_line_declares_a_platform() {
+        for named in [STAGING, BREAKING_DOWN] {
+            let text = flowed(named);
+
+            for wording in [
+                "can be verified nowhere else",
+                "a platform `cfg`",
+                "a platform's own component",
+                "a suite that only runs on that operating system",
+                "Naming a platform in prose declares nothing",
+                "shared code with a cross-platform suite declares nothing",
+            ] {
+                assert!(
+                    text.contains(wording),
+                    "{named} says when a line declares a platform, `{wording}` among                      it: {text}"
+                );
+            }
+        }
+    }
+
+    /// And each template shows a declared line, an example being what an agent
+    /// copies: the roadmap's among its stage lines, the backlog's among its
+    /// task lines — the same tail, read by the same reading.
+    #[test]
+    fn both_planning_templates_show_a_declared_platform() {
+        let staging = skill(STAGING);
+        let breaking_down = skill(BREAKING_DOWN);
+
+        let declared = |lines: Vec<String>| {
+            lines.iter().any(|line| {
+                crate::checklist::entry(line)
+                    .is_some_and(|entry| crate::declarations::read(entry.after).platform.is_some())
+            })
+        };
+
+        assert!(
+            declared(stage_lines(&staging)),
+            "the roadmap template shows a stage line wanting a platform: {staging}"
+        );
+
+        let task_lines = breaking_down
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("- [") && line.contains("[details]("))
+            .map(|line| line.replace("] NN:", "] 07:"))
+            .collect();
+
+        assert!(
+            declared(task_lines),
+            "the task-list template shows a task line wanting a platform: {breaking_down}"
+        );
+    }
+
+    /// Nothing places a task by its platform yet, and the skill says so rather
+    /// than promising a move the backlog does not make.
+    #[test]
+    fn the_breakdown_skill_says_a_task_platform_is_recorded_not_acted_on() {
+        let breaking_down = flowed(BREAKING_DOWN);
+
+        assert!(
+            breaking_down.contains("recorded rather than acted on"),
+            "a task line's platform is recorded and not yet acted on: {breaking_down}"
+        );
+    }
+
     /// The fork drops what a workstation-driven flow assumes and Verkstead
     /// supplies instead, and gains what only Verkstead's shape needs: the branch
     /// is already made, nobody approves the commit, and the stages are

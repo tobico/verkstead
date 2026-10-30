@@ -22,5 +22,5 @@ Roadmap stage: [01: Every device in every prompt](docs/roadmaps/platform-placeme
 
 - [x] 01: The section, for every member — [details](01-the-section-for-every-member.md)
 - [x] 02: The Guide, the transfer help and the refusal — [details](02-the-guide-the-help-and-the-refusal.md)
-- [ ] 03: Declaring, in staging and breaking-down — [details](03-declaring-in-staging-and-breaking-down.md)
+- [x] 03: Declaring, in staging and breaking-down — [details](03-declaring-in-staging-and-breaking-down.md)
 - [ ] 04: Moving, in implementing, next-task and addressing — [details](04-moving-in-implementing-next-task-and-addressing.md)
