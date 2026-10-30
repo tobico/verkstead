@@ -246,6 +246,27 @@ jobs:
         if: matrix.partition == 1
         run: cargo test --doc --workspace
 
+      # **And whether what this leg's tests wrote is what is committed.** Four
+      # of the server's suites — `ui_content`, `onboarding`, `installing` and
+      # `nudges` — rewrite the payloads in `web/tests/fixtures/` that the
+      # viewer's own suite is fed from, and they run here, on whichever leg
+      # `slice` dealt them to, rather than in `Lint`. So a working tree that is
+      # no longer clean after the tests means a payload the server sends has
+      # changed and the committed one was not, and the viewer is being tested
+      # against a shape the server no longer sends. `types.ts` is written by one
+      # test, so a leg that ran it wrote the whole file and a leg that did not
+      # left it alone: `Lint` checks it too, where a failure says so sooner.
+      - name: Generated files are up to date
+        run: |
+          drift=$(git status --porcelain)
+          if [ -n "$drift" ]; then
+            echo "::error::Generated files drifted from what the server writes. Run 'cargo test' locally and commit the result."
+            echo "Changed by the test run:"
+            echo "$drift"
+            git diff
+            exit 1
+          fi
+
   # The checks that read the code rather than run it: formatting, lints, and
   # whether the committed TypeScript still matches the Rust it is generated
   # from. A job of their own rather than steps in front of `Rust`'s tests, so

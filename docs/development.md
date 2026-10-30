@@ -1323,7 +1323,9 @@ port — is held serial by `.config/nextest.toml`, which says why. The
 doc-tests, which nextest does not run, go through `cargo test --doc` on each
 job's first leg. Formatting, clippy and the generated TypeScript's drift check
 are a `Lint` job of their own, which writes `web/src/api/types.ts` with
-`cargo test -p verkstead-render` alone.
+`cargo test -p verkstead-render` alone. The viewer's fixtures in
+`web/tests/fixtures/` are written by the server's suite, so each Linux leg
+checks its own working tree is still clean after its tests.
 
 To run the suite the way a Linux leg does, install `cargo-nextest` (the dev
 shell has not got it; CI pins 0.9.144) and run:
