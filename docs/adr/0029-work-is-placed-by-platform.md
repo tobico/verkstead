@@ -39,7 +39,11 @@ been told exists.
 a requirement: Verkstead tries hard to place the work there, and runs it where
 it stands only when the human says so. A second spelling for a hard requirement
 was offered and turned down. **A task line in `.tasks/TODO.md` carries the same
-declaration**, read by the one checklist parser both files share.
+declaration**, read by the same `declarations::read` a stage line is. Only
+the reading is shared: a task line's platform is read alone, with none of a
+roadmap's all-or-nothing rule, and a word that is not one of the three is
+refused when the backlog lands, at the `verkstead done` of the session that
+wrote it.
 
 **A staging or breaking-down session writes it only where the work can be
 verified nowhere else**: code under a platform `cfg`, a platform's own
