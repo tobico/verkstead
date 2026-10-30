@@ -1399,6 +1399,18 @@ fn refreshes_its_login_at(gate: &Path, token: &str) -> String {
     )
 }
 
+/// What stands where claude goes for a session whose **prompt** is what is being
+/// read: it prints every argument it was launched with, then waits at `gate`
+/// like [`waits_at`].
+fn says_its_prompt_and_waits_at(gate: &Path) -> String {
+    format!(
+        r#"
+for word in "$@"; do printf 'arg=%s\r\n' "$word"; done
+{}"#,
+        waits_at(gate),
+    )
+}
+
 /// And what stands where claude goes **on the far end**: the session that device's
 /// own Resume starts once the work has arrived.
 ///
@@ -2696,6 +2708,66 @@ async fn a_session_that_asks_for_a_ticked_device_by_name_is_moved_there_and_carr
         resumed.contains("verkstead transfer <device>"),
         "{resumed:?}"
     );
+}
+
+/// **Every device, permitted or not** (ADR-0029, *Consent stays off by default,
+/// and is told*): a session launched where the work was drafted, with nothing
+/// ticked, on a cluster holding a Windows machine, is told that machine exists,
+/// that the work may not move there yet, and how to ask for it — where it was
+/// once told nothing at all.
+#[tokio::test]
+async fn a_session_with_nothing_ticked_is_told_every_device_and_how_to_ask() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, _b, _holding, conversation) = drafted_running(
+        &says_its_prompt_and_waits_at(&gate),
+        &re_primed(),
+        spill.path(),
+        Repositories::Apart,
+    )
+    .await;
+
+    let third = tempfile::tempdir().unwrap();
+    let c = Device::stated(third.path(), C).unwrap();
+    a.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
+
+    assert!(
+        a.view(conversation).await.permitted.is_empty(),
+        "nothing is ticked",
+    );
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+    let told = a.capture(conversation).await.expect("the session printed");
+    std::fs::write(&gate, "go").unwrap();
+
+    let (machine, os) = this_machine();
+    assert!(
+        told.contains(&format!(
+            "This session is running on **{machine}** (id `{A}`), {os}."
+        )),
+        "the session is told the device it is on: {told:?}",
+    );
+    assert!(
+        told.contains(&format!(
+            "- **the-vm** (id `{C}`), Windows 11 — not permitted yet."
+        )),
+        "and the Windows machine, which it may not move to yet: {told:?}",
+    );
+    assert!(
+        told.contains(&format!(
+            "- **{B_MACHINE}** (id `{B}`), {B_OS} — not permitted yet."
+        )),
+        "and every other member the same way: {told:?}",
+    );
+
+    let said = told.split_whitespace().collect::<Vec<_>>().join(" ");
+    for phrase in [
+        "verkstead ask",
+        "Attach menu, under *May be transferred to*",
+    ] {
+        assert!(said.contains(phrase), "and how to ask, {phrase:?}: {said}");
+    }
 }
 
 /// **By its id as well as its name**, which is what an agent retries with when
