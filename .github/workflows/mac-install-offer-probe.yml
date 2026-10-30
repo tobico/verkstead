@@ -148,34 +148,45 @@ jobs:
           }
           SH
 
-      - name: A newer one installed, and Keep this one carries on
+      - name: More helpers
+        run: |
+          cat >> "$LIB" <<'SH'
+          resign() {
+            codesign --force --deep --sign - --preserve-metadata=entitlements /Applications/Verkstead.app 2>&1 | tail -2
+            codesign --verify --deep --verbose=1 /Applications/Verkstead.app 2>&1 | tail -2
+          }
+          why() {
+            echo "== processes"; ps -axo pid,ppid,command | grep -i verkstead | grep -v grep
+            echo "== system log"
+            log show --last 3m --style compact --predicate 'process == "kernel" OR subsystem == "com.apple.MobileFileIntegrity" OR process == "amfid" OR process == "syspolicyd" OR eventMessage CONTAINS[c] "verkstead"' 2>/dev/null | grep -iv "sandbox\|tccd" | tail -40
+          }
+          SH
+
+      # The control: is a copy with an edited Info.plist one the kernel runs?
+      - name: Control — the edited copy, exec'd directly
         if: always()
-        timeout-minutes: 6
+        timeout-minutes: 4
         run: |
           set +e
           . "$LIB"
           seed 99.0.0
-          launch
-          offered
-          press Install
-          for _ in $(seq 30); do grep -q "open it instead" "$log" 2>/dev/null && break; sleep 1; done
-          sleep 3
-          shot newer-dialog
-          echo "== the dialog"; ax Verkstead
-          press "Keep this one"
-          serving && echo "PROVEN: Keep this one carries on, and the app serves" || echo "NOT SERVING after Keep this one"
-          where
-          echo "installed version still: $(plutil -extract CFBundleShortVersionString raw /Applications/Verkstead.app/Contents/Info.plist)"
-          echo "== log"; cat "$log"
+          codesign --verify --deep --verbose=1 /Applications/Verkstead.app 2>&1 | tail -2
+          (/Applications/Verkstead.app/Contents/MacOS/Verkstead > "$RUNNER_TEMP/direct.log" 2>&1 &)
+          sleep 10
+          echo "== direct output"; head -20 "$RUNNER_TEMP/direct.log"
+          grep -q "is starting" "$log" && echo "THE EDITED COPY RUNS" || echo "THE EDITED COPY DOES NOT RUN"
+          why
           stop
 
-      - name: A newer one installed, and Open installed hands over to it
+      - name: A newer one, re-signed, and Open installed hands over to it
         if: always()
         timeout-minutes: 6
         run: |
           set +e
           . "$LIB"
           seed 99.0.0
+          resign
+          rm -f "$log"
           launch
           offered
           press Install
@@ -183,54 +194,21 @@ jobs:
           sleep 3
           press "Open installed"
           relaunched
-          echo "== processes"; where
           echo "== log"; cat "$log"
+          why
           stop
 
-      - name: A newer one installed, and --install opens it
+      - name: A newer one, re-signed, and --install opens it
         if: always()
         timeout-minutes: 6
         run: |
           set +e
           . "$LIB"
           seed 99.0.0
-          launch --args --install
-          relaunched
-          echo "== processes"; where
-          echo "== log"; cat "$log"
-          stop
-
-      - name: An older one installed is replaced with no second dialog
-        if: always()
-        timeout-minutes: 6
-        run: |
-          set +e
-          . "$LIB"
-          seed 0.0.1
-          launch
-          offered
-          press Install
-          relaunched
-          shot older-replaced
-          echo "== processes"; where
-          echo "== log"; cat "$log"
-          stop
-
-      - name: The same one installed is replaced by --install
-        if: always()
-        timeout-minutes: 6
-        run: |
-          set +e
-          . "$LIB"
-          seed "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")"
+          resign
+          rm -f "$log"
           launch --args --install
           relaunched
           echo "== log"; cat "$log"
+          why
           stop
-
-      - name: Keep the screenshots
-        if: always()
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: shots
-          path: ${{ runner.temp }}/shots
