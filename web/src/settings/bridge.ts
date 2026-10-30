@@ -78,7 +78,8 @@ export interface Placement {
   /// row.
   readonly outside: boolean;
 
-  /// And where from, where it does — written from `~` under the home.
+  /// And where from, where it does — written from `~` under the home. Nothing
+  /// on a Mac, whose bundle runs from wherever Gatekeeper translocated it.
   readonly from?: string;
 }
 

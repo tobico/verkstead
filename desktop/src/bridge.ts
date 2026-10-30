@@ -166,7 +166,8 @@ export interface Placement {
   readonly outside: boolean;
 
   /// And where from, as a human reads it, where it is outside: the AppImage's
-  /// path written from `~`, or the bundle's on a Mac.
+  /// path written from `~`. Nothing on a Mac, whose bundle runs from wherever
+  /// Gatekeeper translocated it.
   readonly from?: string;
 }
 

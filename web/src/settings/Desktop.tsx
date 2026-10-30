@@ -504,9 +504,20 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
               <Show when={placed.data?.outside ? placed.data : undefined}>
                 {(where) => (
                   <div class={styles.install}>
+                    {/* A Mac names no path: its bundle runs from wherever
+                        Gatekeeper translocated it, which nobody chose. */}
                     <p class={styles.from}>
-                      Verkstead is running from <code>{where().from}</code>,
-                      outside Applications.
+                      <Show
+                        when={where().from}
+                        fallback="Verkstead is running from outside Applications."
+                      >
+                        {(from) => (
+                          <>
+                            Verkstead is running from <code>{from()}</code>,
+                            outside Applications.
+                          </>
+                        )}
+                      </Show>
                     </p>
                     {/* The dialog is the window's own while it is up, so a
                         second press is one that arrived before it: asked for

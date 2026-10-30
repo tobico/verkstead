@@ -175,8 +175,16 @@ export function bundle(exe: string): string {
 /// outside, and the path written the way the dialog writes it, or not outside
 /// at all — an app already installed, a checkout run, and a platform with no
 /// offer alike.
+///
+/// **A Mac's names no path**, for the reason [`asking`] gives: a quarantined
+/// app runs from the randomised folder Gatekeeper translocated it to, which is
+/// what the macos-15 probe drew on the row.
 export function placement(where: Placed, machine: Machine): Placement {
-  return "outside" in where ? { outside: true, from: shown(where.outside, machine) } : { outside: false };
+  if (!("outside" in where)) {
+    return { outside: false };
+  }
+
+  return machine.platform === "darwin" ? { outside: true } : { outside: true, from: shown(where.outside, machine) };
 }
 
 /// Whether this launch puts the offer up: the file it would install, or why it

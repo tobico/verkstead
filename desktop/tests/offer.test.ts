@@ -225,7 +225,7 @@ describe("where a run is, as the Desktop page reads it", () => {
     }
   });
 
-  it("names a Mac's bundle", () => {
+  it("names no path on a Mac, whose bundle may be translocated", () => {
     const mac = { platform: "darwin" as const, env: { HOME: "/Users/ada" } };
     const where = placed({
       packaged: true,
@@ -234,7 +234,7 @@ describe("where a run is, as the Desktop page reads it", () => {
       ...mac,
     });
 
-    expect(placement(where, mac)).toEqual({ outside: true, from: "/Volumes/Verkstead/Verkstead.app" });
+    expect(placement(where, mac)).toEqual({ outside: true });
   });
 });
 

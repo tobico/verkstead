@@ -715,15 +715,17 @@ describe("Install", () => {
     );
   });
 
-  it("is drawn on a Mac", async () => {
-    standingIn(DEFAULTS, "darwin", false, UNREGISTERED, {
-      outside: true,
-      from: "/Volumes/Verkstead/Verkstead.app",
-    });
-    mountPane();
+  /// The app names no path on a Mac, whose bundle runs from wherever
+  /// Gatekeeper translocated it.
+  it("is drawn on a Mac, naming no path", async () => {
+    standingIn(DEFAULTS, "darwin", false, UNREGISTERED, { outside: true });
+    const { container } = mountPane();
 
     await screen.findByRole("button", { name: "Install" });
-    expect(screen.getByText("/Volumes/Verkstead/Verkstead.app")).toBeTruthy();
+    expect(container.querySelector(`.${styles.install} code`)).toBeNull();
+    expect(container.querySelector(`.${styles.from}`)!.textContent).toBe(
+      "Verkstead is running from outside Applications.",
+    );
   });
 
   /// With nothing running here the dialog is the launch's own, so nothing is
