@@ -33,6 +33,10 @@ jobs:
   # only: the repository is public, and the maintainer is an individual for
   # whom a larger runner is not on the table.
   #
+  # **The budget is met.** On the last run measured (run 40986546310) the five
+  # legs took 4m45 to 7m12, where the one job had taken 20 to 25 minutes, and
+  # `timeout-minutes` is fifteen, which catches a hang rather than a slow leg.
+  #
   # **The ledger.** Each lever lands as a commit of its own on one pull request
   # (#285 is the issue it closes), and its row is the run of that commit. A row
   # gives the slowest and the fastest leg, read off the run's job timings as
@@ -46,6 +50,7 @@ jobs:
   # | Baseline (`main`)                   | 40952712743 | — + 18m37 = 20m40     | —                     |
   # | Format and clippy in `Lint`         | 40981767764 | — + 21m10 = 21m49     | —                     |
   # | nextest, one job                    | 40984244052 | 1m48 + 16m04 = 18m33  | —                     |
+  # | The legs, five of them              | 40986546310 | 1m41 + 4m47 = 7m12    | 1m51 + 2m23 = 4m45    |
   #
   # What each lever came to, row by row:
   #
@@ -77,6 +82,23 @@ jobs:
   # 1,595 of the test-seconds. So more threads on one runner is not the lever:
   # more runners is.
   #
+  # The legs: five (run 40986546310), each building for itself and running a
+  # fifth of the tests — 923 on four of them and 922 on the fifth, the 4614
+  # of the row before. They built in 1m41 to 2m31 and tested in 2m23 to 4m47,
+  # and every leg came in under seven and a quarter minutes, the typical one
+  # near six and a half. What set the slow ones was a single test each rather
+  # than their share: leg 2 drew the 110-second opencode long-stop test and a
+  # 67-second one beside it, and leg 1 the annex flake evaluation at 70
+  # seconds. What each of the five came to:
+  #
+  # | Leg | Build + test = job    |
+  # | --- | --------------------- |
+  # | 1   | 2m28 + 3m36 = 6m46    |
+  # | 2   | 1m41 + 4m47 = 7m12    |
+  # | 3   | 1m51 + 2m23 = 4m45    |
+  # | 4   | 2m15 + 3m01 = 5m59    |
+  # | 5   | 2m31 + 3m40 = 6m45    |
+  #
   # `slice` partitioning deals the tests out one at a time across every binary,
   # so each leg gets its share of each suite rather than whole binaries, and
   # what `.config/nextest.toml` holds serial is serial per leg, each leg being
@@ -97,7 +119,8 @@ jobs:
       # A red leg does not cancel the others: what the rest of the suite says
       # is worth having from the same run.
       fail-fast: false
-      # Five legs — the ledger above says why that many. The count is said
+      # Five legs — the ledger above says why that many, and that the slowest
+      # came in near seven. The count is said
       # three times, and the three move together: this list, the job's name,
       # and the `slice:` of the test step.
       matrix:
