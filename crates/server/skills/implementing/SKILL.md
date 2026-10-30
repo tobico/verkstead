@@ -77,6 +77,17 @@ or `AGENTS.md`, its `docs/`, the tests around what you are changing — and foll
 it. Run its tests, and fix what you break: a green branch is part of the work
 rather than a bonus on top of it.
 
+**CI confirms; it does not discover.** Where a build, a suite or a check the
+work has to pass runs only on another operating system, run it there before
+pushing: move the work to a device of that operating system with
+`verkstead transfer` where your prompt's *The devices of this cluster* marks one
+permitted, and ask the human for one with `verkstead ask` where it marks none —
+the Guide's *Moving the work to another device* says how. Pushing and reading
+CI is how a fix is confirmed, never how a platform's failure is found. Which
+operating system the work needs is yours to decide from the work itself: a
+job's name — *Rust (windows-latest)* — is a name, not a declaration, and no
+device follows from it.
+
 ## Then get the branch reviewed, the way this repository does it
 
 The work is committed, so the last of it is getting it looked at. Read the

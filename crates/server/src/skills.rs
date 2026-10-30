@@ -3688,6 +3688,62 @@ mod tests {
         );
     }
 
+    /// CI confirms; it does not discover (ADR-0029, *What the skills say*). The
+    /// three skills that build say a platform's build, suite or check is run on
+    /// that platform — moving where the prompt permits it and asking where it
+    /// does not — and point at the prompt's section and the Guide's rather than
+    /// restating them. None of them takes the platform from a job's name.
+    #[test]
+    fn the_building_skills_say_ci_confirms_and_does_not_discover() {
+        for named in [IMPLEMENTING, NEXT_TASK, ADDRESSING] {
+            let text = flowed(named);
+
+            for wording in [
+                "CI confirms; it does not discover",
+                "`verkstead transfer`",
+                "`verkstead ask`",
+                "*The devices of this cluster*",
+                "*Moving the work to another device*",
+                "is a name, not a declaration, and no device follows from it",
+            ] {
+                assert!(
+                    text.contains(wording),
+                    "{named} says CI confirms and does not discover, `{wording}` among it: \
+                     {text}"
+                );
+            }
+        }
+    }
+
+    /// And the addressing skill's failed check is run where its job ran, the
+    /// move named before anything is fixed rather than the log read and a guess
+    /// pushed.
+    #[test]
+    fn the_addressing_skill_reproduces_a_failed_check_where_it_ran() {
+        let addressing = flowed(ADDRESSING);
+
+        let failed = addressing
+            .find("**A failed check**")
+            .expect("the addressing skill has a failed-check step");
+        let fixed = addressing
+            .find("## 2. Fix the cause")
+            .expect("the addressing skill has a fix step");
+        let step = &addressing[failed..fixed];
+
+        assert!(
+            step.contains("**on the operating system the job ran on**"),
+            "the failed check is run where its job ran: {step}"
+        );
+        assert!(
+            step.contains("move there before fixing anything"),
+            "and the move is named before the fix: {step}"
+        );
+        assert!(
+            step.contains("a fix written from the log alone is a guess"),
+            "never from the log alone: {step}"
+        );
+    }
+
     /// A fix session is put inside the skill the same way every other is, and
     /// primed with the documents *and* the feedback — which is the one thing
     /// only this kind of session is told.
