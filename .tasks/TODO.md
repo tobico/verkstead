@@ -20,7 +20,7 @@ Roadmap stage: [04: Verkstead's own Question Set](docs/roadmaps/platform-placeme
 
 ## Tasks
 
-- [ ] 01: Verkstead asks about an unticked device — [details](01-verkstead-asks-about-an-unticked-device.md)
+- [x] 01: Verkstead asks about an unticked device — [details](01-verkstead-asks-about-an-unticked-device.md)
 - [ ] 02: The open Set is the wait — [details](02-the-open-set-is-the-wait.md)
 - [ ] 03: A sleeping device, and its wake — [details](03-a-sleeping-device-and-its-wake.md)
 - [ ] 04: Unticked and asleep — [details](04-unticked-and-asleep.md)

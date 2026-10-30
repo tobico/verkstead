@@ -5382,7 +5382,12 @@ added: Array<Added>,
  * Whether answering it ended the session waiting on it and carried it on in
  * a sandbox with what was added — said at the end of the same line.
  */
-carried_on: boolean, };
+carried_on: boolean, 
+/**
+ * Whether Verkstead asked it rather than an agent, which the card says
+ * (ADR-0029, *Verkstead asks with a Question Set of its own*).
+ */
+by_verkstead: boolean, };
 
 /**
  * One Question as the page draws it, with its Sub-questions nested one level
@@ -6348,7 +6353,14 @@ servers: Array<string>,
  * And the rest of what those menus offer: Repos to work alongside,
  * read-only Companions to open up, and devices to permit.
  */
-addable: AddableView, };
+addable: AddableView, 
+/**
+ * Whether Verkstead asked it rather than an agent, which the sheet says
+ * above the Questions (ADR-0029, *Verkstead asks with a Question Set of
+ * its own*). False out of [`set_view`]: whose Set it is is the record's to
+ * say, and the caller's to fill in.
+ */
+by_verkstead: boolean, };
 
 /**
  * The settings as the human has just written them.

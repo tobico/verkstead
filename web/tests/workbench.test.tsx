@@ -14201,6 +14201,39 @@ describe("a question set on the timeline", () => {
     expect(deferred.querySelector(`.${timeline.deferred}`)!.textContent).toBe("deferred");
   });
 
+  /// A set Verkstead asked itself names it as the asker, in place of the
+  /// deferred mark it is stored under: nobody is standing still behind one
+  /// either, and the asker is what the human wants to know (ADR-0029).
+  it("names Verkstead on a set it asked itself", async () => {
+    const asked: ConversationView = {
+      ...GRILLING,
+      timeline: GRILLING.timeline.map((event) =>
+        "QuestionSet" in event && event.QuestionSet.set_id === DEFERRED_SET.set_id
+          ? { QuestionSet: { ...event.QuestionSet, by_verkstead: true } }
+          : event,
+      ),
+    };
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(asked)),
+      whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+      whenever(CAPTURE_OF_IT, json(CAPTURE)),
+      whenever(SCREEN_OF_IT, json(SCREEN)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.questionSet}`);
+    const cards = [...container.querySelectorAll(`.${timeline.questionSet}`)];
+
+    expect(
+      cards.map((card) => card.querySelector(`.${timeline.asker}`)?.textContent ?? null),
+    ).toEqual([null, null, "asked by Verkstead", null]);
+    expect(cards[2]!.querySelector(`.${timeline.deferred}`)).toBeNull();
+  });
+
   /// A column of blanks would read as a Set that was answered with nothing.
   it("draws no answers at all on one nothing has been decided about", async () => {
     theGrillingSets();

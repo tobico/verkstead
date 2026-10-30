@@ -215,6 +215,7 @@ mod nudging;
 /// it is a server stood up over a stated machine, which is a test standing
 /// where a start does.
 pub mod onboarding;
+mod own_sets;
 /// What a Repo nothing has grilled arrives with in its pickers when there is no
 /// last start to copy: one account per harness order and a model per role.
 mod pairing_defaults;

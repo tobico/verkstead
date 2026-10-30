@@ -1208,6 +1208,7 @@ describe("a set on another device", () => {
     standing: { Waiting: "waiting" },
     added: [],
     carried_on: false,
+    by_verkstead: false,
   };
 
   /// The pane over that Set, drawn for the member the way the details pane

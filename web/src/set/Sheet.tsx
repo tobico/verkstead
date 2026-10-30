@@ -220,6 +220,9 @@ export function Sheet(props: {
         <Show when={props.set.branch}>
           {(branch) => <span class={styles.branch}>{branch()}</span>}
         </Show>
+        <Show when={props.set.by_verkstead}>
+          <span class={styles.asker}>Asked by Verkstead</span>
+        </Show>
         <Show when={when()}>
           {(when) => (
             <span class={when().mark} title={when().stamp}>

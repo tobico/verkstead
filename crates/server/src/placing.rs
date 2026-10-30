@@ -28,11 +28,18 @@
 //! that is asleep, or that answers and lacks the Repo, the harness or the
 //! Author, is passed over for the next.
 //!
-//! **Where no device will do, the task runs here**, and a Notice says why — see
-//! [`Unplaced`], one case for each reason, each its own sentence, because the
-//! platform is a preference rather than a condition of the work. Written at
-//! every launch that meets it, a Resume's included, since each launch asked
-//! again.
+//! **Where devices of the platform are linked and none is permitted, the human
+//! is asked** (ADR-0029, *Verkstead asks with a Question Set of its own*): a
+//! Set of Verkstead's own offering *Move to* each of them against *Run it here*,
+//! and the runner stands down. Nothing waits on it here; the answer is acted on
+//! as it is taken — see [`answered`] — and a launch after *Run it here* runs
+//! the work here without asking again.
+//!
+//! **Where no device will do otherwise, the task runs here**, and a Notice says
+//! why — see [`Unplaced`], one case for each reason, each its own sentence,
+//! because the platform is a preference rather than a condition of the work.
+//! Written at every launch that meets it, a Resume's included, since each
+//! launch asked again.
 //!
 //! **A roadmap stage's tasks are placed like any other.** Moving a stage's
 //! Conversation off its roadmap's home device leaves it in that roadmap's sight:
@@ -61,13 +68,18 @@ pub(crate) enum Placed {
 
     /// Stand down: the move is asked for, and the far end's Resume launches it.
     Moving,
+
+    /// Stand down: the human is asked where it runs, with a Question Set of
+    /// Verkstead's own, and their answer launches it — see [`answered`].
+    Asked,
 }
 
 /// What is being placed, which the Notice and both Timelines name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Work {
-    /// A task of the backlog, by its label as the list writes it.
-    Task(String),
+    /// A task of the backlog, by its number and its label as the list writes
+    /// it.
+    Task { number: u32, label: String },
 
     /// The inline run, its implementation session about to start.
     Inline,
@@ -77,7 +89,7 @@ impl Work {
     /// The work as the start of a sentence names it.
     fn named(&self) -> String {
         match self {
-            Work::Task(label) => format!("Task {label}"),
+            Work::Task { label, .. } => format!("Task {label}"),
             Work::Inline => "The inline run".to_owned(),
         }
     }
@@ -87,18 +99,50 @@ impl Work {
         let wants = platform::os_word(wants, None);
 
         match self {
-            Work::Task(label) => store::AskedBy::Task {
+            Work::Task { label, .. } => store::AskedBy::Task {
                 label: label.clone(),
                 wants,
             },
             Work::Inline => store::AskedBy::Inline { wants },
         }
     }
+
+    /// The work as the record of a Set of Verkstead's own keeps it.
+    fn placed(&self) -> store::PlacedWork {
+        match self {
+            Work::Task { number, label } => store::PlacedWork::Task {
+                number: *number,
+                label: label.clone(),
+            },
+            Work::Inline => store::PlacedWork::Inline,
+        }
+    }
+
+    /// And the work that record names.
+    fn from_placed(placed: &store::PlacedWork) -> Work {
+        match placed {
+            store::PlacedWork::Task { number, label } => Work::Task {
+                number: *number,
+                label: label.clone(),
+            },
+            store::PlacedWork::Inline => Work::Inline,
+        }
+    }
 }
 
-/// Why work that wants a platform runs here all the same, each the reason one
-/// Notice gives — and each its own case, because stage 04 asks the human about
-/// some of them rather than telling them.
+/// A member of the cluster as a Set names it and an answer moves the work to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Device {
+    /// Its Device Id.
+    id: String,
+
+    /// Its name, as the human gave it.
+    name: String,
+}
+
+/// Why work that wants a platform cannot be moved to it, each the reason one
+/// Notice gives — and each its own case, because the human is asked about one
+/// of them rather than told: see [`Unplaced::NonePermitted`].
 ///
 /// Every case is a way of there being *none*, which is what each name says.
 #[allow(clippy::enum_variant_names)]
@@ -108,8 +152,10 @@ enum Unplaced {
     /// included. Nothing to ask anybody: there is nowhere to go.
     NoneLinked,
 
-    /// Members of it are linked and none is permitted: their names.
-    NonePermitted(Vec<String>),
+    /// Members of it are linked and none is permitted: which they are, in the
+    /// order they would be tried. The one case the human is asked about rather
+    /// than told — see [`ask`].
+    NonePermitted(Vec<Device>),
 
     /// Permitted members of it, none of which can take the work: what each
     /// one's preflight found, in the Transfer dialog's words, which name it.
@@ -130,14 +176,14 @@ impl Unplaced {
 
             // A tick is advice for the tasks after this one; an inline run is
             // placed only as it starts, so there is no later one for it to help.
-            Unplaced::NonePermitted(names) => {
+            Unplaced::NonePermitted(devices) => {
                 let mut said = format!(
                     "{named} wants {wants}, but this conversation may not be transferred to {}, \
                      so it's running here.",
-                    either(names),
+                    either(&names(devices)),
                 );
 
-                if let Work::Task(_) = work {
+                if let Work::Task { .. } = work {
                     said.push_str(&format!(
                         " Tick a {wants} device under **May be transferred to** to have tasks \
                          like it moved there."
@@ -161,6 +207,11 @@ impl Unplaced {
             }
         }
     }
+}
+
+/// The devices' names, in their order.
+fn names(devices: &[Device]) -> Vec<String> {
+    devices.iter().map(|device| device.name.clone()).collect()
 }
 
 /// Names joined as a sentence says them: `X`, `X or Y`, `X, Y or Z`.
@@ -190,7 +241,7 @@ pub(crate) async fn task(
         return Placed::Here;
     };
 
-    place(state, conversation_id, Work::Task(label), wants).await
+    place(state, conversation_id, Work::Task { number, label }, wants).await
 }
 
 /// Place the inline run about to start in `conversation_id`, where the proposal
@@ -242,25 +293,293 @@ async fn place(state: &AppState, conversation_id: i64, work: Work, wants: Platfo
         return Placed::Here;
     }
 
+    // Where the human was asked about this work and said to run it here, that
+    // is where it runs — the answer's own Resume reaching this launch included.
+    if run_here(state, conversation_id, &work).await {
+        return Placed::Here;
+    }
+
     match placing(state, conversation_id, &work, wants).await {
         Ok(placed) => placed,
 
-        Err(unplaced) => {
-            tracing::info!(
-                conversation_id,
-                work = ?work,
-                wants = ?wants,
-                unplaced = ?unplaced,
-                "work that wants a platform runs here",
-            );
+        Err(Unplaced::NonePermitted(devices)) => {
+            match ask(state, conversation_id, &work, wants, &devices).await {
+                Ok(()) => {
+                    tracing::info!(
+                        conversation_id,
+                        work = ?work,
+                        wants = ?wants,
+                        "work wants a platform whose devices are linked and not permitted, so the \
+                         human is asked where it runs",
+                    );
+                    Placed::Asked
+                }
 
-            if let Err(error) =
-                store::note(&state.pool, conversation_id, &unplaced.said(&work, wants)).await
-            {
-                tracing::error!(error = ?error, conversation_id, "saying why work runs here failed");
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id, work = ?work, "asking where work runs failed, so it runs here");
+                    unplaced(
+                        state,
+                        conversation_id,
+                        &work,
+                        wants,
+                        Unplaced::NonePermitted(devices),
+                    )
+                    .await
+                }
+            }
+        }
+
+        Err(why) => unplaced(state, conversation_id, &work, wants, why).await,
+    }
+}
+
+/// Run `work` here, with a Notice saying why.
+async fn unplaced(
+    state: &AppState,
+    conversation_id: i64,
+    work: &Work,
+    wants: Platform,
+    unplaced: Unplaced,
+) -> Placed {
+    tracing::info!(
+        conversation_id,
+        work = ?work,
+        wants = ?wants,
+        unplaced = ?unplaced,
+        "work that wants a platform runs here",
+    );
+
+    if let Err(error) = store::note(&state.pool, conversation_id, &unplaced.said(work, wants)).await
+    {
+        tracing::error!(error = ?error, conversation_id, "saying why work runs here failed");
+    }
+
+    Placed::Here
+}
+
+/// Put the Question Set of Verkstead's own that asks where `work` runs, its
+/// platform's `devices` being linked and none of them permitted (ADR-0029,
+/// *Verkstead asks with a Question Set of its own*): one *Move to* for each, in
+/// the order they would be tried, and *Run it here*.
+///
+/// On the Timeline, on the badge and on a phone as any Set is. Nothing waits
+/// on it here: the answer is what launches the work — see [`answered`].
+async fn ask(
+    state: &AppState,
+    conversation_id: i64,
+    work: &Work,
+    wants: Platform,
+    devices: &[Device],
+) -> anyhow::Result<()> {
+    let conversation = store::load_conversation(&state.pool, conversation_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Conversation {conversation_id} is not there"))?;
+
+    let set = asked(
+        work,
+        wants,
+        devices,
+        &conversation.branch,
+        &conversation.repo.name,
+    );
+
+    let about = store::OwnAsking::Placing {
+        work: work.placed(),
+        wants: platform::os_word(wants, None),
+        moves: devices.iter().map(|device| device.id.clone()).collect(),
+    };
+
+    let created = store::ask_on_our_own(&state.pool, conversation_id, &set, &about)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Conversation {conversation_id} is not there"))?;
+
+    crate::push::announce(&state.pool, created.id, &set);
+    state.nudges.announce(verkstead_schema::Nudge::Set {
+        conversation: conversation_id,
+    });
+
+    Ok(())
+}
+
+/// The Set that asks where `work` runs, in ADR-0029's words: what wants the
+/// platform and why its devices cannot be used yet, a verb on each button, and
+/// a title — which is what a phone is told — naming the branch and the device.
+fn asked(
+    work: &Work,
+    wants: Platform,
+    devices: &[Device],
+    branch: &str,
+    project: &str,
+) -> verkstead_schema::QuestionSet {
+    use verkstead_schema::{Question, QuestionOption, QuestionSet};
+
+    let wants = platform::os_word(wants, None);
+    let names = names(devices);
+
+    let linked = match devices {
+        [_] => "is linked but not permitted",
+        _ => "are linked but not permitted",
+    };
+
+    let options = devices
+        .iter()
+        .map(|device| format!("Move to {}", device.name))
+        .chain(["Run it here".to_owned()])
+        .zip(1..)
+        .map(|(text, n)| QuestionOption {
+            n,
+            text,
+            recommended: false,
+            cells: Vec::new(),
+        })
+        .collect();
+
+    QuestionSet {
+        title: format!("Move {branch} to {}?", either(&names)),
+        preface: None,
+        questions: vec![Question {
+            label: QUESTION.to_owned(),
+            text: format!("{} wants {wants}. {} {linked}.", work.named(), both(&names)),
+            columns: Vec::new(),
+            options,
+            subquestions: Vec::new(),
+        }],
+        postscript: None,
+        proposal: None,
+        project: Some(project.to_owned()),
+        branch: Some(branch.to_owned()),
+        diff: None,
+        diffs: Vec::new(),
+    }
+}
+
+/// The label of the one Question a Set of Verkstead's asks.
+const QUESTION: &str = "Q1";
+
+/// Names joined as a list of all of them: `X`, `X and Y`, `X, Y, and Z`.
+fn both(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
+}
+
+/// Whether the human, asked where `work` runs, said to run it here: the newest
+/// Set of Verkstead's own about it answered with *Run it here*.
+async fn run_here(state: &AppState, conversation_id: i64, work: &Work) -> bool {
+    let own = match store::own_sets(&state.pool, conversation_id).await {
+        Ok(own) => own,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Sets Verkstead asked failed");
+            return false;
+        }
+    };
+
+    let newest = own.into_iter().rev().find_map(|own| match &own.asking {
+        store::OwnAsking::Placing {
+            work: placed,
+            moves,
+            ..
+        } if Work::from_placed(placed) == *work => Some((own.response, moves.len())),
+        store::OwnAsking::Placing { .. } => None,
+    });
+
+    matches!(
+        newest,
+        Some((Some(response), moves)) if picked(&response) == Some(moves as u32 + 1)
+    )
+}
+
+/// The Option picked on a Set of Verkstead's, where one was.
+fn picked(response: &verkstead_schema::Response) -> Option<u32> {
+    response
+        .answers
+        .iter()
+        .find(|answer| answer.label.trim() == QUESTION)
+        .and_then(|answer| answer.selected)
+}
+
+/// Act on the answer to a Set of Verkstead's own asking where work runs, in
+/// `conversation_id`: *Move to* ticks that device under **May be transferred
+/// to** and moves the work there by the ordinary **Transfer**, on Verkstead's
+/// own account, the far end's arrival launching it; *Run it here* launches it
+/// here, by the Resume a press would make.
+///
+/// An answer picking neither is the human not deciding, and nothing is guessed
+/// at: the work is left waiting, a Notice saying how it stands.
+pub(crate) async fn answered(
+    state: &AppState,
+    conversation_id: i64,
+    asking: &store::OwnAsking,
+    response: &verkstead_schema::Response,
+) {
+    let store::OwnAsking::Placing { work, wants, moves } = asking;
+    let work = Work::from_placed(work);
+
+    let picked = picked(response).and_then(|n| usize::try_from(n).ok());
+
+    match picked {
+        Some(n) if (1..=moves.len()).contains(&n) => {
+            let device = &moves[n - 1];
+
+            match crate::transfers::permit(state, conversation_id, device, true).await {
+                Ok(permitting) => tracing::info!(
+                    conversation_id,
+                    device,
+                    ?permitting,
+                    "the human picked a device for work that wants a platform, so it is ticked",
+                ),
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id, device, "ticking the device the human picked failed");
+                }
             }
 
-            Placed::Here
+            let by = match &work {
+                Work::Task { label, .. } => store::AskedBy::Task {
+                    label: label.clone(),
+                    wants: wants.clone(),
+                },
+                Work::Inline => store::AskedBy::Inline {
+                    wants: wants.clone(),
+                },
+            };
+
+            if let Err(error) = crate::transfers::asked(state, conversation_id, device, by).await {
+                tracing::error!(error = ?error, conversation_id, device, "asking for the move the human picked failed");
+            }
+        }
+
+        Some(n) if n == moves.len() + 1 => {
+            match crate::resume::resume(state, conversation_id, crate::resume::Resuming::Pressed)
+                .await
+            {
+                Ok(resumed) => tracing::info!(
+                    conversation_id,
+                    ?resumed,
+                    "the human said to run work that wants a platform here",
+                ),
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id, "starting work the human said to run here failed");
+                }
+            }
+        }
+
+        _ => {
+            let said = match work {
+                Work::Task { .. } => format!(
+                    "{} hasn't started. Press **Resume** to be asked again.",
+                    work.named()
+                ),
+                Work::Inline => {
+                    "The inline run hasn't started. Press **Resume** to start it here.".to_owned()
+                }
+            };
+
+            if let Err(error) = store::note(&state.pool, conversation_id, &said).await {
+                tracing::error!(error = ?error, conversation_id, "saying the work is still waiting failed");
+            }
         }
     }
 }
@@ -401,7 +720,10 @@ fn candidates(
         (true, false) => Err(Unplaced::NonePermitted(
             unpermitted
                 .into_iter()
-                .map(|placed| placed.member.name)
+                .map(|placed| Device {
+                    id: placed.member.device,
+                    name: placed.member.name,
+                })
                 .collect(),
         )),
     }
@@ -456,6 +778,20 @@ mod tests {
         }
     }
 
+    fn task(label: &str) -> Work {
+        Work::Task {
+            number: label.parse().unwrap(),
+            label: label.to_owned(),
+        }
+    }
+
+    fn device(name: &str) -> Device {
+        Device {
+            id: format!("{name}-id"),
+            name: name.to_owned(),
+        }
+    }
+
     fn devices(found: &[store::Member]) -> Vec<&str> {
         found.iter().map(|member| member.device.as_str()).collect()
     }
@@ -491,8 +827,14 @@ mod tests {
         assert_eq!(
             found.unwrap_err(),
             Unplaced::NonePermitted(vec![
-                "other-machine".to_owned(),
-                "unticked-machine".to_owned()
+                Device {
+                    id: "other".to_owned(),
+                    name: "other-machine".to_owned(),
+                },
+                Device {
+                    id: "unticked".to_owned(),
+                    name: "unticked-machine".to_owned(),
+                },
             ]),
         );
     }
@@ -589,13 +931,13 @@ mod tests {
     #[test]
     fn each_reason_names_the_task_and_the_platform() {
         assert_eq!(
-            Unplaced::NoneLinked.said(&Work::Task("02".to_owned()), Platform::Windows),
+            Unplaced::NoneLinked.said(&task("02"), Platform::Windows),
             "Task 02 wants Windows, but no Windows device is linked, so it's running here.",
         );
 
         assert_eq!(
-            Unplaced::NonePermitted(vec!["Ada".to_owned(), "Grace".to_owned(), "Kit".to_owned()])
-                .said(&Work::Task("02".to_owned()), Platform::MacOs),
+            Unplaced::NonePermitted(vec![device("Ada"), device("Grace"), device("Kit")])
+                .said(&task("02"), Platform::MacOs),
             "Task 02 wants macOS, but this conversation may not be transferred to Ada, Grace or \
              Kit, so it's running here. Tick a macOS device under **May be transferred to** to \
              have tasks like it moved there.",
@@ -606,7 +948,7 @@ mod tests {
                 "Ada is unreachable.".to_owned(),
                 "The repo app is not on Grace.".to_owned(),
             ])
-            .said(&Work::Task("03".to_owned()), Platform::Linux),
+            .said(&task("03"), Platform::Linux),
             "Task 03 wants Linux, but no Linux device it may be transferred to can take it, so \
              it's running here.\n\n- Ada is unreachable.\n- The repo app is not on Grace.",
         );
@@ -622,7 +964,7 @@ mod tests {
         );
 
         assert_eq!(
-            Unplaced::NonePermitted(vec!["Ada".to_owned()]).said(&Work::Inline, Platform::Windows),
+            Unplaced::NonePermitted(vec![device("Ada")]).said(&Work::Inline, Platform::Windows),
             "The inline run wants Windows, but this conversation may not be transferred to Ada, \
              so it's running here.",
         );
@@ -655,5 +997,79 @@ mod tests {
         assert!(wants_a_move("Linux (WSL)", Platform::Windows));
         assert!(wants_a_move("Linux", Platform::Windows));
         assert!(wants_a_move("FreeBSD", Platform::Linux));
+    }
+
+    /// **Verkstead's own Set names the work, the platform and the device**, in
+    /// ADR-0029's words: a *Move to* for each device in the order they would be
+    /// tried, then *Run it here*, under a title naming the branch and the
+    /// device for the phone it reaches.
+    #[test]
+    fn the_set_names_the_work_the_platform_and_each_device() {
+        let set = asked(
+            &task("03"),
+            Platform::Windows,
+            &[device("nuc-win")],
+            "rate-limiting",
+            "app",
+        );
+
+        assert_eq!(set.title, "Move rate-limiting to nuc-win?");
+        assert_eq!(set.branch.as_deref(), Some("rate-limiting"));
+        assert_eq!(set.project.as_deref(), Some("app"));
+        assert_eq!(
+            set.questions[0].text,
+            "Task 03 wants Windows. nuc-win is linked but not permitted.",
+        );
+        assert_eq!(
+            set.questions[0]
+                .options
+                .iter()
+                .map(|option| (option.n, option.text.as_str()))
+                .collect::<Vec<_>>(),
+            [(1, "Move to nuc-win"), (2, "Run it here")],
+        );
+        set.validate().expect("the Set keeps the question grammar");
+
+        let set = asked(
+            &Work::Inline,
+            Platform::Windows,
+            &[device("nuc-win"), device("nuc-2")],
+            "rate-limiting",
+            "app",
+        );
+
+        assert_eq!(set.title, "Move rate-limiting to nuc-win or nuc-2?");
+        assert_eq!(
+            set.questions[0].text,
+            "The inline run wants Windows. nuc-win and nuc-2 are linked but not permitted.",
+        );
+        assert_eq!(
+            set.questions[0]
+                .options
+                .iter()
+                .map(|option| option.text.as_str())
+                .collect::<Vec<_>>(),
+            ["Move to nuc-win", "Move to nuc-2", "Run it here"],
+        );
+        set.validate().expect("the Set keeps the question grammar");
+    }
+
+    /// Three or more names take the serial comma, as every list on a screen
+    /// does.
+    #[test]
+    fn a_list_of_every_device_takes_the_serial_comma() {
+        let names = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(both(&names(&["Ada"])), "Ada");
+        assert_eq!(both(&names(&["Ada", "Kit"])), "Ada and Kit");
+        assert_eq!(
+            both(&names(&["Ada", "Grace", "Kit"])),
+            "Ada, Grace, and Kit"
+        );
     }
 }

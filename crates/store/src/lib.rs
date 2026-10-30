@@ -48,6 +48,7 @@ mod mcp_servers;
 mod members;
 mod memos;
 mod migrations;
+mod own_sets;
 mod pairings;
 mod pauses;
 mod pending_steers;
@@ -119,7 +120,7 @@ pub use conversations::{
     Investigated, Joined, Landed, Landing, Lifecycle, Planned, Process, Queued, Rebuilding,
     Resolving, RoadmapStage, Role, RowState, SetOnTimeline, Settling, StageOf, StageStanding,
     StageStandings, Staged, Steer, Steering, Switched, Taking, TimelineEvent, Work,
-    adopted_pull_request, adopting, ask, asked_from, closable, close_conversation,
+    adopted_pull_request, adopting, ask, ask_on_our_own, asked_from, closable, close_conversation,
     conversation_at_worktree, conversation_branch, conversation_rank, conversation_ranks,
     conversations, driven_roadmaps, fill_target, follow_branch, follow_up_done, follow_up_over,
     hold_pull_request, implement_again, investigation_over, join_queue, last_batch_proposal,
@@ -161,6 +162,7 @@ pub use migrations::{
     rank_the_conversations, record_the_repo_authors, renumbered_profiles, renumbering_done,
     stamp_the_births, stamp_the_profiles,
 };
+pub use own_sets::{OwnAsking, OwnSet, PlacedWork, own_asking, own_set_ids, own_sets};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use pending_steers::{
@@ -834,6 +836,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // Which Sets were asked deferred, and which of those have been folded into a
     // prompt. It hangs off a Set for a lock's reason, said again there.
     deferrals::apply_schema(pool).await?;
+
+    // And which Sets Verkstead asked itself, and what about. It hangs off a Set
+    // for the same reason.
+    own_sets::apply_schema(pool).await?;
 
     // And which Sets' Answers have reached a session at all, which the folding
     // record cannot say of a Blocking Ask: it has no row there, because a wait

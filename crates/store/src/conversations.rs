@@ -3752,6 +3752,42 @@ pub async fn ask(
     set: &QuestionSet,
     ask: super::Ask,
 ) -> Result<Option<SetCreated>> {
+    asking(pool, conversation_id, set, ask, None).await
+}
+
+/// Put a Question Set of Verkstead's own on a Conversation's Timeline, asking
+/// about `about` — see [`super::own_sets`].
+///
+/// Stored as a Deferred Ask is, because that is what it is to everything that
+/// asks how a Set was asked: no session is idling on it, so nothing reaps,
+/// rescues or locks one over it, and nothing ages it against the clock. Its
+/// Answers are Verkstead's to act on rather than a later session's to be told
+/// about — see [`super::unfolded`], which passes it over.
+pub async fn ask_on_our_own(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    set: &QuestionSet,
+    about: &super::OwnAsking,
+) -> Result<Option<SetCreated>> {
+    asking(
+        pool,
+        conversation_id,
+        set,
+        super::Ask::Deferred,
+        Some(about),
+    )
+    .await
+}
+
+/// Either of the two above, the record of whose Set it is written in the same
+/// transaction as the Set.
+async fn asking(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    set: &QuestionSet,
+    ask: super::Ask,
+    own: Option<&super::OwnAsking>,
+) -> Result<Option<SetCreated>> {
     let body = serde_json::to_string(set).context("serialising the Question Set")?;
 
     let mut tx = super::writing(pool, "putting a Question Set").await?;
@@ -3796,6 +3832,10 @@ pub async fn ask(
 
     if ask.deferred_shaped() {
         super::deferrals::defer(&mut tx, id, ask.idled()).await?;
+    }
+
+    if let Some(own) = own {
+        super::own_sets::record(&mut tx, id, own).await?;
     }
 
     tx.commit().await.context("putting a Question Set")?;

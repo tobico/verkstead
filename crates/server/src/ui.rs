@@ -1036,6 +1036,14 @@ pub(crate) async fn set_reading(
             return Err(unavailable("The question set couldn't be read."));
         }
     };
+    // And whether Verkstead asked it, which the sheet names as its asker.
+    let by_verkstead = match store::own_asking(&state.pool, id).await {
+        Ok(own) => own.is_some(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading whether a Set is Verkstead's own failed");
+            return Err(unavailable("The question set couldn't be read."));
+        }
+    };
 
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
@@ -1063,7 +1071,10 @@ pub(crate) async fn set_reading(
     .await;
 
     let view: SetView = match view {
-        Ok(view) => view,
+        Ok(view) => SetView {
+            by_verkstead,
+            ..view
+        },
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "rendering a Question Set failed");
             return Err(unavailable("The question set couldn't be read."));
@@ -1161,6 +1172,7 @@ async fn submit_response(
     Json(match submission {
         store::Submission::Accepted(taken) => {
             crate::conversations::settle_a_proposal(&state, id, taken.proposed).await;
+            crate::own_sets::settle(&state, id, &response).await;
 
             Submitted::Accepted
         }
@@ -2718,6 +2730,15 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And which of them Verkstead asked itself, whose cards name it.
+    let own = match store::own_set_ids(&state.pool, id).await {
+        Ok(own) => own,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading which Sets are Verkstead's own failed");
+            std::collections::HashSet::new()
+        }
+    };
+
     let steer_pairings = match crate::profiles::keyed(state, steered(&timeline)).await {
         Ok(pairings) => pairings,
         Err(error) => {
@@ -2870,6 +2891,7 @@ pub(crate) async fn conversation_view(
                                 standing,
                                 set_added.remove(&asked.set_id).unwrap_or_default(),
                                 carried.contains(&asked.set_id),
+                                own.contains(&asked.set_id),
                             )
                         }
                         // A row of its own rather than an omission: the ask

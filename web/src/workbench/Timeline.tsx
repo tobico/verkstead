@@ -2325,8 +2325,18 @@ function QuestionSet(props: {
       <span class={styles.eventHead}>
         <span class={styles.what}>Question set</span>
         <span class={styles.setTitle}>{props.asked.title}</span>
-        <Show when={deferred()}>
-          <span class={styles.deferred}>deferred</span>
+        {/* Who asked, where it was Verkstead rather than the agent. In place of
+            the deferred mark, which is how Verkstead's are stored: nobody is
+            standing still behind one, and naming the asker says so. */}
+        <Show
+          when={props.asked.by_verkstead}
+          fallback={
+            <Show when={deferred()}>
+              <span class={styles.deferred}>deferred</span>
+            </Show>
+          }
+        >
+          <span class={styles.asker}>asked by Verkstead</span>
         </Show>
         <Show when={locked()}>
           <span class={styles.closed}>closed unanswered</span>

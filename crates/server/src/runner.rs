@@ -745,7 +745,7 @@ async fn backlog_again(
     // [`crate::placing`].
     if let Step::Task { number, .. } = &step
         && crate::placing::task(&state, conversation_id, working_in, *number).await
-            == crate::placing::Placed::Moving
+            != crate::placing::Placed::Here
     {
         return;
     }
@@ -1193,10 +1193,12 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
         // that is before anything is launched for it: the move runs where it
         // stands, with nothing running, and the far end's arrival presses its own
         // Resume, which launches it there — see [`crate::placing`]. The run here
-        // stands down, its registration handed to the mover.
+        // stands down, its registration handed to the mover. And where the
+        // human is asked where it runs instead, it stands down too: their
+        // answer is what launches it.
         if let Step::Task { number, .. } = &step
             && crate::placing::task(&state, conversation_id, &worktree, *number).await
-                == crate::placing::Placed::Moving
+                != crate::placing::Placed::Here
         {
             return;
         }
@@ -1532,8 +1534,9 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
     // moved to one that is before its session starts, the way a declared task
     // is: the handoff is on the record by now, so it crosses with it, and the
     // far end's arrival presses its own Resume, which launches the run there
-    // without asking again — see [`crate::placing::inline`].
-    if crate::placing::inline(&state, conversation_id).await == crate::placing::Placed::Moving {
+    // without asking again — see [`crate::placing::inline`]. Where the human is
+    // asked where it runs instead, their answer launches it.
+    if crate::placing::inline(&state, conversation_id).await != crate::placing::Placed::Here {
         return;
     }
 

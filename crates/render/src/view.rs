@@ -165,6 +165,13 @@ pub struct SetView {
     /// And the rest of what those menus offer: Repos to work alongside,
     /// read-only Companions to open up, and devices to permit.
     pub addable: crate::conversations::AddableView,
+
+    /// Whether Verkstead asked it rather than an agent, which the sheet says
+    /// above the Questions (ADR-0029, *Verkstead asks with a Question Set of
+    /// its own*). False out of [`set_view`]: whose Set it is is the record's to
+    /// say, and the caller's to fill in.
+    #[serde(default)]
+    pub by_verkstead: bool,
 }
 
 /// The Diff as the browser receives it: the HTML the server rendered, and the
@@ -412,6 +419,7 @@ pub fn set_view(
         additions,
         servers,
         addable,
+        by_verkstead: false,
     }
 }
 

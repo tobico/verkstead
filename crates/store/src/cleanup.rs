@@ -141,6 +141,7 @@ const SET_KEYED: &[&str] = &[
     "responses",
     "archivings",
     "deferrals",
+    "own_sets",
     "deliveries",
     "endings",
 ];

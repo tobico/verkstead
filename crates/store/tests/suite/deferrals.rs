@@ -12,8 +12,9 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_schema::{Answer, Question, QuestionOption, QuestionSet, Response};
 use verkstead_store::{
-    Ask, Event, Settlements, ask, insert_response, lock_set, open_database, open_set,
-    record_folded, register_repo, start_conversation, submit_response, timeline, unfolded,
+    Ask, Event, OwnAsking, PlacedWork, Settlements, ask, ask_on_our_own, insert_response, lock_set,
+    open_database, open_set, own_asking, own_set_ids, own_sets, record_folded, register_repo,
+    start_conversation, submit_response, timeline, unfolded,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -317,4 +318,49 @@ async fn only_this_conversations_deferred_answers_are_folded_into_its_prompts() 
 
     assert!(folding(&pool, mine).await.is_empty());
     assert_eq!(folding(&pool, yours).await, ["theirs".to_owned()]);
+}
+
+/// **A Set of Verkstead's own is never folded into a session's prompt**, stored
+/// as a Deferred Ask though it is: its Answers are Verkstead's to act on, and
+/// it reads back as Verkstead's, with what it asked about.
+#[tokio::test]
+async fn a_set_of_verksteads_own_is_never_folded() {
+    let (_dir, pool) = fresh_pool().await;
+    let conversation = conversation(&pool).await;
+
+    let about = OwnAsking::Placing {
+        work: PlacedWork::Task {
+            number: 3,
+            label: "03".to_owned(),
+        },
+        wants: "Windows".to_owned(),
+        moves: vec!["0011223344556677889900aabbccddee".to_owned()],
+    };
+    let own = ask_on_our_own(&pool, conversation, &set("placing"), &about)
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from")
+        .id;
+    let agents = asked(&pool, conversation, "the agent's", Ask::Deferred).await;
+
+    for answered in [own, agents] {
+        submit_response(&pool, &Settlements::new(4), answered, &picked())
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(folding(&pool, conversation).await, ["the agent's"]);
+
+    assert_eq!(own_asking(&pool, own).await.unwrap(), Some(about.clone()));
+    assert_eq!(own_asking(&pool, agents).await.unwrap(), None);
+    assert_eq!(
+        own_set_ids(&pool, conversation).await.unwrap(),
+        [own].into_iter().collect(),
+    );
+
+    let owned = own_sets(&pool, conversation).await.unwrap();
+    assert_eq!(owned.len(), 1);
+    assert_eq!(owned[0].asking, about);
+    assert_eq!(owned[0].response, Some(picked()));
+    assert!(!owned[0].locked);
 }

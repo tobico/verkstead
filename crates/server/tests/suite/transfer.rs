@@ -48,7 +48,8 @@ use sqlx::SqlitePool;
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
 use verkstead_render::{
-    ConversationEntry, ConversationView, Lifecycle, ProfileEntry, Standing, Started, TimelineEvent,
+    ConversationEntry, ConversationView, Lifecycle, ProfileEntry, QuestionSetEvent, Standing,
+    Started, TimelineEvent,
 };
 use verkstead_schema::Direction;
 use verkstead_server::attachments::Attachments;
@@ -3483,22 +3484,215 @@ async fn a_task_that_wants_a_platform_no_device_is_of_runs_here_saying_so() {
     );
 }
 
-/// **Devices of it linked, none permitted**: the Notice names them.
+/// The Question Set of Verkstead's own that `on` put on that Conversation's
+/// Timeline, once it has: its id and its card.
+async fn verksteads_set(on: &Verkstead, conversation: i64) -> QuestionSetEvent {
+    let drawn = on
+        .view_saying(conversation, |drawn| {
+            drawn.timeline.iter().any(
+                |event| matches!(event, TimelineEvent::QuestionSet(asked) if asked.by_verkstead),
+            )
+        })
+        .await;
+
+    drawn
+        .timeline
+        .into_iter()
+        .find_map(|event| match event {
+            TimelineEvent::QuestionSet(asked) if asked.by_verkstead => Some(asked),
+            _ => None,
+        })
+        .expect("the Set the view was waited for")
+}
+
+/// Answer Verkstead's Set from the viewer, picking Option `picked`, the way the
+/// sheet's **Submit** does.
+async fn picks(on: &Verkstead, set: i64, picked: u32) {
+    let said = press(
+        &on.workbench,
+        &format!("/api/ui/sets/{set}/response"),
+        Some(&format!(
+            r#"{{"answers":[{{"label":"Q1","selected":{picked}}}]}}"#
+        )),
+    )
+    .await;
+
+    assert_eq!(said, "\"Accepted\"", "the answer is taken");
+}
+
+/// **Devices of it linked, none permitted: Verkstead asks** (ADR-0029,
+/// *Verkstead asks with a Question Set of its own*). The task is launched
+/// nowhere; a Set asked by Verkstead names the task, the platform and the
+/// device, offers **Move to** it against **Run it here**, is drawn as
+/// Verkstead's on the Timeline and on its sheet, and reaches a phone with the
+/// branch and the device.
 #[tokio::test]
-async fn a_task_that_wants_a_platform_no_permitted_device_is_of_names_the_unticked_ones() {
-    let said = runs_here_saying(
+async fn a_task_whose_platform_has_no_permitted_device_puts_verksteads_own_set() {
+    let spill = tempfile::tempdir().unwrap();
+    let (service, received) = crate::push_delivery::push_service().await;
+
+    let (a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
         Across {
             ticked: false,
             ..Across::default()
         },
-        "Task 01 wants Windows",
     )
     .await;
 
+    let phone = crate::push_delivery::Device::new(&service, "take", "phone");
+    crate::push_delivery::subscribe(&a.workbench, &phone).await;
+
+    resumes(&a, conversation).await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    let branch = store::load_conversation(&a.pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is here")
+        .branch;
+
+    assert_eq!(asked.title, format!("Move {branch} to {B_MACHINE}?"));
+    assert_eq!(
+        asked.rows[0].question,
+        format!("Task 01 wants Windows. {B_MACHINE} is linked but not permitted."),
+    );
     assert!(
-        said.contains(&format!("may not be transferred to {B_MACHINE}"))
-            && said.contains("May be transferred to"),
-        "the Notice names the device nobody ticked: {said}",
+        matches!(asked.standing, Standing::Waiting(_)),
+        "and it waits on the human",
+    );
+
+    let sheet: verkstead_render::SetReading =
+        reading(&a.workbench, &format!("/api/ui/sets/{}", asked.set_id)).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+    assert!(sheet.by_verkstead, "the sheet names Verkstead as its asker");
+    assert_eq!(
+        sheet.questions[0]
+            .ask
+            .options
+            .iter()
+            .map(|option| option.text_html.as_str())
+            .collect::<Vec<_>>(),
+        [format!("Move to {B_MACHINE}").as_str(), "Run it here"],
+    );
+
+    let pushed = crate::push_delivery::pushes(&received, 1).await;
+    let notice = phone.read(&pushed[0]);
+    assert_eq!(notice["title"], asked.title.as_str(), "the phone is told");
+    assert_eq!(notice["project"], REPOSITORY);
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "nothing was moved",
+    );
+    assert!(
+        !printed_on(&a, conversation)
+            .await
+            .contains("worked task 01"),
+        "and nothing was launched while the human is asked",
+    );
+}
+
+/// **Move to** ticks the device and moves the work there, on Verkstead's own
+/// account, and the task's session starts on it.
+#[tokio::test]
+async fn move_to_ticks_the_device_and_the_task_starts_there() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    picks(&a, asked.set_id, 1).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    assert_eq!(
+        store::permitted_devices(&a.pool, conversation)
+            .await
+            .unwrap(),
+        [B],
+        "the device picked is ticked",
+    );
+
+    let went = a.notice_saying(conversation, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for task 01, which wants Windows"),
+        "the move is Verkstead's, for the task: {went}",
+    );
+
+    b.latest_capture_saying(there, "worked task 01 on B").await;
+
+    assert!(
+        !printed_on(&a, conversation)
+            .await
+            .contains("worked task 01"),
+        "and nothing here was launched for it",
+    );
+}
+
+/// **Run it here** starts the task where it is, and nothing is moved or
+/// ticked.
+#[tokio::test]
+async fn run_it_here_starts_the_task_where_it_is() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    picks(&a, asked.set_id, 2).await;
+
+    a.latest_capture_saying(conversation, "finishing on A")
+        .await;
+    assert!(
+        printed_on(&a, conversation)
+            .await
+            .contains("worked task 01 on A"),
+        "the task runs here",
+    );
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "nothing was moved",
+    );
+    assert!(
+        store::permitted_devices(&a.pool, conversation)
+            .await
+            .unwrap()
+            .is_empty(),
+        "and nothing was ticked",
+    );
+    assert_eq!(
+        a.sets_on(conversation).await,
+        [asked.set_id],
+        "and the launch the answer made asked nothing again",
     );
 }
 
@@ -3852,10 +4046,53 @@ async fn an_inline_runs_resume_launches_it_where_it_is() {
     );
 }
 
-/// **With no permitted device of the platform**, the inline run gets task 03's
-/// Notice, naming the inline run, and starts here.
+/// **With no permitted device of the platform**, the inline run is asked about
+/// as a task is, named as the inline run: **Move to** starts it there.
 #[tokio::test]
-async fn an_inline_run_with_no_permitted_device_of_its_platform_starts_here_saying_so() {
+async fn an_inline_run_with_no_permitted_device_of_its_platform_is_moved_where_the_human_picks() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) = proposed_across(
+        &["windows"],
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+        true,
+    )
+    .await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    assert_eq!(
+        asked.rows[0].question,
+        format!("The inline run wants Windows. {B_MACHINE} is linked but not permitted."),
+    );
+
+    picks(&a, asked.set_id, 1).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let went = a.notice_saying(conversation, "Transferred to").await;
+    assert!(
+        went.contains("for the inline run, which wants Windows"),
+        "the move is Verkstead's, for the inline run: {went}",
+    );
+
+    b.latest_capture_saying(there, "built inline on B").await;
+    assert!(
+        !printed_on(&a, conversation).await.contains("built inline"),
+        "and nothing here was launched for the run",
+    );
+}
+
+/// And **Run it here** starts it where it is.
+#[tokio::test]
+async fn an_inline_run_the_human_says_to_run_here_starts_here() {
     let spill = tempfile::tempdir().unwrap();
     let (a, _b, _held, conversation) = proposed_across(
         &["windows"],
@@ -3868,13 +4105,8 @@ async fn an_inline_run_with_no_permitted_device_of_its_platform_starts_here_sayi
     )
     .await;
 
-    let said = a
-        .notice_saying(conversation, "The inline run wants Windows")
-        .await;
-    assert!(
-        said.contains(&format!("may not be transferred to {B_MACHINE}")),
-        "the Notice names the device nobody ticked: {said}",
-    );
+    let asked = verksteads_set(&a, conversation).await;
+    picks(&a, asked.set_id, 2).await;
 
     a.latest_capture_saying(conversation, "built inline on A")
         .await;

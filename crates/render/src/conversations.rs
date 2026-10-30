@@ -2838,6 +2838,11 @@ pub struct QuestionSetEvent {
     /// a sandbox with what was added — said at the end of the same line.
     #[serde(default)]
     pub carried_on: bool,
+
+    /// Whether Verkstead asked it rather than an agent, which the card says
+    /// (ADR-0029, *Verkstead asks with a Question Set of its own*).
+    #[serde(default)]
+    pub by_verkstead: bool,
 }
 
 /// A Question Set the Timeline cannot draw a table for, because this build
@@ -3313,6 +3318,7 @@ pub struct AgentSession {
 /// settled has none, one that was locked unanswered never will have, and one
 /// that was answered carries them — so the one field decides both what the table
 /// says and how it reads.
+#[allow(clippy::too_many_arguments)]
 pub fn question_set_event(
     id: i64,
     at: String,
@@ -3321,6 +3327,7 @@ pub fn question_set_event(
     standing: Standing,
     added: Vec<Added>,
     carried_on: bool,
+    by_verkstead: bool,
 ) -> TimelineEvent {
     let response = match &standing {
         Standing::Answered(answered) => Some(&answered.response),
@@ -3336,6 +3343,7 @@ pub fn question_set_event(
         standing,
         added,
         carried_on,
+        by_verkstead,
     })
 }
 
