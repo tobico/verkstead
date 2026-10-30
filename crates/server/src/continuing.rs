@@ -48,6 +48,12 @@
 //! the limit, and what they made is counted from then on: the limit is there for
 //! work nobody asked for, and a human at the workbench has asked.
 //!
+//! **Only home drives a roadmap** (ADR-0029, *Home drives a roadmap across
+//! devices*). A stage worked on a device other than the one it was born on
+//! settles there and starts nothing there: its home hears it in the stage's
+//! report and carries the roadmap on — see [`reported`] — and the look here
+//! counts no roadmap it holds only copies of — see [`store::driven_roadmaps`].
+//!
 //! A roadmap that declares nothing has one ready stage at most, each of its stages
 //! standing on the one before it, so such a roadmap runs exactly as it always
 //! did: there is one scheduler rather than two.
@@ -415,6 +421,28 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
     let Some(store::StageOf { roadmap, .. }) = recorded else {
         return unrecorded(&state, &conversation, conversation_id, brought).await;
     };
+
+    // A stage away from home drives nothing here, and says nothing about its
+    // roadmap either (ADR-0029, *Home drives a roadmap across devices*). Its
+    // roadmap row crossed with it, so what this device would read is one stage
+    // recorded and the rest as unticked boxes — siblings home may already have
+    // started. Home is what carries the roadmap on, on hearing this settle in
+    // the stage's report — see [`crate::reporting`].
+    match store::away_from_home(&state.pool, conversation_id, &state.device).await {
+        Ok(None) => {}
+        Ok(Some(home)) => {
+            tracing::debug!(
+                conversation_id,
+                home = home.device,
+                "a stage away from home settled, and its home carries the roadmap on",
+            );
+            return;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a stage is away from home failed");
+            return;
+        }
+    }
 
     // And what the record says each stage of that roadmap has got to, which is
     // half of what says a stage is done — see [`stages::next_stage`]. The Repo's

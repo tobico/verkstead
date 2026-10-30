@@ -24976,6 +24976,59 @@ async fn a_settled_stage_the_roadmap_says_nothing_about_is_still_done() {
     );
 }
 
+/// **A stage away from home starts nothing where it settles** (ADR-0029, *Home
+/// drives a roadmap across devices*): the adopted stage here is made a copy of
+/// one born on another device, and it settles with stage 02 ready behind it.
+/// Home is what starts stage 02, on hearing the settle in the stage's report, so
+/// neither the settle nor a look for a free place starts it here — and nothing is
+/// said here about the roadmap either.
+#[tokio::test]
+async fn a_stage_away_from_home_settles_and_starts_nothing_here() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_at_pace(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
+        &gh_about(GREEN, "", ""),
+        *LOOKING,
+    )
+    .await;
+
+    // Born on another device, and moved here: a copy away from its home.
+    let pool = open_database(&fixture.database).await.unwrap();
+    verkstead_store::record_birth(
+        &pool,
+        fixture.id,
+        &verkstead_store::Birth {
+            device: "ff00ee11dd22cc33bb44aa5566778899".to_owned(),
+            id: 7,
+        },
+    )
+    .await
+    .unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    // The settle that follows Done, and a good many looks after it.
+    pause(Duration::from_secs(2)).await;
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "nothing was started here: stage 02 is home's to start",
+    );
+
+    let said = notices(&fixture.view().await).join("\n");
+
+    assert!(
+        !said.contains("Stage 02") && !said.contains("No stage of the roadmap"),
+        "and nothing is said here about the roadmap: {said:?}",
+    );
+}
+
 /// What `/next-stage` writes on a roadmap somebody has half-declared: the
 /// annotation as ever, and a declaration on this stage's line and no other.
 ///

@@ -6746,15 +6746,27 @@ pub struct Driven {
 ///
 /// Within a roadmap the order is the roadmap's own rather than this reading's —
 /// see the server's `stages::ready`, which answers lowest-numbered first.
-pub async fn driven_roadmaps(pool: &SqlitePool) -> Result<Vec<Driven>> {
+///
+/// **And only what was born here drives** (ADR-0029, *Home drives a roadmap
+/// across devices*). A stage moved to this device brings its roadmap row with
+/// it, and that row read as driving would have this device start the stage's
+/// siblings beside home starting them. So a row counts only where its
+/// Conversation's birth key names `here` — this device's Device Id — or where
+/// it has none, which is a database from before there were any. Home's
+/// tombstone of a stage moved away was born here and counts, and so does a
+/// stage that has come home.
+pub async fn driven_roadmaps(pool: &SqlitePool, here: &str) -> Result<Vec<Driven>> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
         "SELECT c.repo_id, r.roadmap
          FROM stage_roadmaps r
          JOIN conversations c ON c.id = r.conversation_id
+         LEFT JOIN births b ON b.conversation_id = r.conversation_id
          WHERE c.repo_id NOT IN (SELECT repo_id FROM unregistered_repos)
+           AND (b.device IS NULL OR b.device = ?)
          GROUP BY c.repo_id, r.roadmap
          ORDER BY MIN(r.conversation_id)",
     )
+    .bind(here)
     .fetch_all(pool)
     .await
     .context("reading which roadmaps Verkstead is driving")?;
