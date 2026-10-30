@@ -3697,12 +3697,27 @@ fn lacking(worktree: &Path, landing: &Landing) -> Option<String> {
     }
 
     match pending(worktree, path) {
-        Some(false) => None,
-        _ => Some(match wanted {
-            true => format!("`{}` is not committed", path.display()),
-            false => format!("taking `{}` away is not committed", path.display()),
-        }),
+        Some(false) => (),
+        _ => {
+            return Some(match wanted {
+                true => format!("`{}` is not committed", path.display()),
+                false => format!("taking `{}` away is not committed", path.display()),
+            });
+        }
     }
+
+    // And a backlog that has landed is asked what a roadmap is asked beside its
+    // landing: whether the platforms its lines name are platforms. Refused here
+    // rather than at launch, because the session that wrote the list is the one
+    // alive to put it right, and nobody who wrote it is there when a task starts.
+    // See [`crate::declarations::judge_backlog`].
+    if wanted && *path == todo() {
+        let list = std::fs::read_to_string(worktree.join(path)).ok()?;
+
+        return crate::declarations::judge_backlog(&list);
+    }
+
+    None
 }
 
 /// Whether git has any pending change for `path`, or `None` where it cannot say.
@@ -4616,6 +4631,50 @@ mod tests {
         run(path, &["commit", "-m", "chore: plan rate-limiting tasks"]);
 
         assert!(landed(path, &landing), "written and committed");
+    }
+
+    /// A committed backlog naming a platform that is not one has not landed: the
+    /// session that wrote it is refused naming the task, and fixing the line and
+    /// committing lets it through. The same landing ends a breakdown and a
+    /// stage's planning session, so this is both of theirs.
+    #[test]
+    fn a_backlog_naming_a_platform_that_is_not_one_has_not_landed() {
+        let line = |platform: &str| {
+            format!(
+                "# Rate limiting\n\n\
+                 - [ ] 01: Count — [details](01-count.md)\n\
+                 - [ ] 02: Refuse — [details](02-refuse.md) — on windows\n\
+                 - [ ] 03: Report — [details](03-report.md) — on {platform}\n",
+            )
+        };
+
+        let dir = worktree(
+            &line("freebsd"),
+            &["01-count.md", "02-refuse.md", "03-report.md"],
+        );
+        let path = dir.path();
+
+        for landing in [Step::Planning, Step::PlanningStage].map(|step| step.landing().unwrap()) {
+            let why = lacking(path, &landing).expect("a platform that is not one is refused");
+
+            assert!(why.contains("task 03"), "{why}");
+            assert!(why.contains("freebsd"), "{why}");
+            assert!(why.contains("linux, macos, windows"), "{why}");
+        }
+
+        std::fs::write(path.join(BACKLOG).join(TODO), line("macos")).unwrap();
+
+        assert!(
+            lacking(path, &Landing::Arrived(todo())).is_some(),
+            "fixed and not committed is not landed either",
+        );
+
+        run(
+            path,
+            &["commit", "-am", "chore: plan rate-limiting tasks on macos"],
+        );
+
+        assert_eq!(lacking(path, &Landing::Arrived(todo())), None);
     }
 
     /// A repository at the moment a roadmap stage's branch is made on top of the

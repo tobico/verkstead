@@ -20,7 +20,7 @@ Roadmap stage: [03: Tasks placed by platform](docs/roadmaps/platform-placement/0
 
 ## Tasks
 
-- [ ] 01: Reading a task's platform — [details](01-reading-a-tasks-platform.md)
+- [x] 01: Reading a task's platform — [details](01-reading-a-tasks-platform.md)
 - [ ] 02: Moving a task before its launch — [details](02-moving-a-task-before-its-launch.md)
 - [ ] 03: The fallback Notice — [details](03-the-fallback-notice.md)
 - [ ] 04: Placing the inline run — [details](04-placing-the-inline-run.md)
