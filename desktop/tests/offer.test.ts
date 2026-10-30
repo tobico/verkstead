@@ -25,6 +25,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   APPLICATIONS,
   asking,
+  bundle,
   CATEGORIES,
   entry,
   failure,
@@ -34,6 +35,7 @@ import {
   install,
   INSTALLING,
   KEYWORDS,
+  moveInto,
   NotInstalled,
   offered,
   type Placing,
@@ -52,6 +54,8 @@ const HOME = "/home/ada";
 const packed = (appimage: string | undefined, over: Partial<Placing> = {}): Placing => ({
   packaged: true,
   platform: "linux",
+  exe: "/tmp/.mount_Verkst/Verkstead",
+  applied: false,
   env: { HOME, ...(appimage === undefined ? {} : { APPIMAGE: appimage }) },
   ...over,
 });
@@ -115,11 +119,75 @@ describe("where a run is", () => {
       const where = placed({
         packaged: true,
         platform: "linux",
+        exe: "/tmp/.mount_Verkst/Verkstead",
+        applied: false,
         env: { APPIMAGE: "/tmp/Verkstead-x86_64.AppImage", ...(home === undefined ? {} : { HOME: home }) },
       });
 
       expect(where, String(home)).toEqual({ nowhere: expect.stringContaining("home") });
     }
+  });
+});
+
+describe("where a Mac run is", () => {
+  /// A packed bundle run from `exe`, with Electron's own answer about it.
+  const mac = (exe: string, applied: boolean, over: Partial<Placing> = {}): Placing => ({
+    packaged: true,
+    platform: "darwin",
+    env: { HOME: "/Users/ada" },
+    exe,
+    applied,
+    ...over,
+  });
+
+  /// Electron's `isInApplicationsFolder` is the whole reading: the dmg, the
+  /// Downloads folder and Gatekeeper's translocated path are all a no.
+  it("is outside Applications wherever Electron says it is not in one", () => {
+    for (const app of [
+      "/Volumes/Verkstead/Verkstead.app",
+      "/Users/ada/Downloads/Verkstead.app",
+      "/private/var/folders/xy/abc/T/AppTranslocation/1F2E/d/Verkstead.app",
+    ]) {
+      expect(placed(mac(`${app}/Contents/MacOS/Verkstead`, false)), app).toEqual({ outside: app });
+    }
+  });
+
+  it("is inside Applications where Electron says it is in one", () => {
+    expect(placed(mac("/Applications/Verkstead.app/Contents/MacOS/Verkstead", true))).toEqual({
+      inside: "/Applications/Verkstead.app",
+    });
+  });
+
+  /// `$APPIMAGE` is Linux's reading and means nothing here.
+  it("reads no $APPIMAGE", () => {
+    const where = placed(
+      mac("/Volumes/Verkstead/Verkstead.app/Contents/MacOS/Verkstead", false, {
+        env: { HOME: "/Users/ada", APPIMAGE: "/Users/ada/Applications/Verkstead-x86_64.AppImage" },
+      }),
+    );
+
+    expect(where).toEqual({ outside: "/Volumes/Verkstead/Verkstead.app" });
+  });
+
+  it("is nowhere on a checkout run, whatever Electron says", () => {
+    const where = placed(mac("/nix/store/x-electron/Electron.app/Contents/MacOS/Electron", false, { packaged: false }));
+
+    expect(where).toEqual({ nowhere: expect.stringContaining("checkout") });
+  });
+
+  it("is offered to a download run by hand, and waits out a login's start", () => {
+    const where = placed(mac("/Volumes/Verkstead/Verkstead.app/Contents/MacOS/Verkstead", false));
+
+    expect(offered(where, () => false, DEFAULTS)).toEqual({ offer: "/Volumes/Verkstead/Verkstead.app" });
+    expect(offered(where, () => true, DEFAULTS)).toEqual({ why: expect.stringContaining("login") });
+    expect(offered(where, () => false, { ...DEFAULTS, installOffer: false })).toEqual({
+      why: "the desktop settings say don't ask again",
+    });
+  });
+
+  it("names the bundle an executable is inside", () => {
+    expect(bundle("/Applications/Verkstead.app/Contents/MacOS/Verkstead")).toBe("/Applications/Verkstead.app");
+    expect(bundle("/usr/local/bin/Verkstead")).toBe("/usr/local/bin/Verkstead");
   });
 });
 
@@ -232,6 +300,27 @@ describe("the dialog", () => {
       content:
         "It couldn't be moved to ~/Applications (ENOSPC: no space left on device).\n\n" +
         "It carries on running from ~/Downloads.",
+    });
+  });
+
+  /// The Mac's words are ADR-0020's too, and name no path: a translocated app
+  /// runs from a folder nobody chose.
+  it("says a Mac's in the Mac's words", () => {
+    const mac = { platform: "darwin" as const, env: { HOME: "/Users/ada" } };
+
+    expect(asking("/Volumes/Verkstead/Verkstead.app", mac)).toEqual({
+      message: "Install Verkstead?",
+      detail:
+        "Verkstead is running from outside Applications. " +
+        "Installing moves it into Applications and opens it from there.",
+      buttons: ["Install", "Skip"],
+      defaultId: 0,
+      cancelId: 1,
+      checkboxLabel: "Don't ask again",
+    });
+    expect(failure("Moving it into Applications was cancelled.", "/Volumes/Verkstead/Verkstead.app", mac)).toEqual({
+      title: "Verkstead couldn't be installed.",
+      content: "Moving it into Applications was cancelled.\n\nIt carries on running from outside Applications.",
     });
   });
 
@@ -399,5 +488,25 @@ describe("installing", () => {
     expect(() => install(planned, machine)).toThrow(NotInstalled);
     expect(() => install(planned, machine)).toThrow(/^It couldn't be moved to ~\/Applications \(ENOENT/);
     expect(existsSync(planned.entry)).toBe(false);
+  });
+});
+
+describe("a Mac's move", () => {
+  it("is done when Electron moved the bundle", () => {
+    expect(() => moveInto(() => true)).not.toThrow();
+  });
+
+  /// The password dialog cancelled: the human pressed Install, so it is said.
+  it("says a cancelled move was cancelled", () => {
+    expect(() => moveInto(() => false)).toThrow(new NotInstalled("Moving it into Applications was cancelled."));
+  });
+
+  it("says why a move that threw could not be made", () => {
+    const move = () => {
+      throw new Error("Failed to copy app");
+    };
+
+    expect(() => moveInto(move)).toThrow(NotInstalled);
+    expect(() => moveInto(move)).toThrow("It couldn't be moved into Applications (Failed to copy app).");
   });
 });
