@@ -5392,7 +5392,8 @@ by_verkstead: boolean,
  * What its lock says, where it was locked with a line: drawn in place of
  * *closed unanswered*, which is a human's lock and not this one. Only
  * Verkstead locks with one — its own Set, settled by the device it was
- * waiting on answering.
+ * waiting on answering. Or the line beside its answer, where Verkstead
+ * acted on it and the device it named was asleep.
  */
 lock_line: string | null, };
 
@@ -6370,7 +6371,8 @@ addable: AddableView,
 by_verkstead: boolean, 
 /**
  * What its lock says, where it was locked with a line, which the sheet
- * says in place of its sentence about a Set nobody answered. `None` out
+ * says in place of its sentence about a Set nobody answered — or the line
+ * beside its answer, which the sheet says above it. `None` out
  * of [`set_view`], for [`SetView::by_verkstead`]'s reason.
  */
 lock_line: string | null, };

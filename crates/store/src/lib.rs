@@ -674,6 +674,19 @@ pub async fn lock_set_saying(
     locking(pool, settlements, set_id, Some(line)).await
 }
 
+/// Put `line` beside the answer to Set `set_id`, where acting on that answer
+/// did not go as it said: drawn where a lock's line is, the Set staying
+/// answered. See [`lock_lines`].
+///
+/// Verkstead's, where *Move to* named a device that was ticked and then did
+/// not answer, so the work waits on it under a Set of its own.
+///
+/// `false`, and nothing written, where the Set has no Response or already has
+/// a line.
+pub async fn answered_saying(pool: &SqlitePool, set_id: i64, line: &str) -> Result<bool> {
+    lock_lines::beside_answer(pool, set_id, line).await
+}
+
 /// Either of the two above, the line written in the transaction that takes the
 /// lock.
 async fn locking(

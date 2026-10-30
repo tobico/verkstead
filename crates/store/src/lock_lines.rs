@@ -13,6 +13,12 @@
 //! the Set — see [`super::own_sets`]: a lock hangs off a Set rather than being a
 //! column on it, and a fact about a lock hangs off it in turn. One row per lock
 //! that said something, and none for one that did not.
+//!
+//! **And one beside an answer Verkstead acted on**, where acting on it did not
+//! go as the answer said: *Move to nuc-win* ticked a device that then did not
+//! answer, and the work waits on it under a Set of its own. The Set stays
+//! answered and its line is drawn where a lock's would be, so the row hangs off
+//! the Set rather than off its lock.
 
 use std::collections::HashMap;
 
@@ -22,7 +28,7 @@ use sqlx::{SqliteConnection, SqlitePool};
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS lock_lines (
-             set_id INTEGER PRIMARY KEY REFERENCES archivings(set_id),
+             set_id INTEGER PRIMARY KEY REFERENCES question_sets(id),
              line   TEXT NOT NULL
          ) STRICT",
     )
@@ -50,7 +56,27 @@ pub(crate) async fn record(
     Ok(())
 }
 
-/// What Set `set_id`'s lock says, where it was locked with a line.
+/// Write down `line` beside the answer to Set `set_id`: only where it has
+/// one, and only where nothing is written for it yet. Whether it was written.
+pub(crate) async fn beside_answer(pool: &SqlitePool, set_id: i64, line: &str) -> Result<bool> {
+    let written = sqlx::query(
+        "INSERT INTO lock_lines (set_id, line)
+         SELECT ?, ?
+         WHERE EXISTS (SELECT 1 FROM responses WHERE set_id = ?)
+         ON CONFLICT (set_id) DO NOTHING",
+    )
+    .bind(set_id)
+    .bind(line)
+    .bind(set_id)
+    .execute(pool)
+    .await
+    .with_context(|| format!("writing what was said beside the answer to Question Set {set_id}"))?;
+
+    Ok(written.rows_affected() == 1)
+}
+
+/// What Set `set_id`'s lock says, or the line beside its answer, where it has
+/// one.
 pub async fn lock_line(pool: &SqlitePool, set_id: i64) -> Result<Option<String>> {
     let found: Option<(String,)> = sqlx::query_as("SELECT line FROM lock_lines WHERE set_id = ?")
         .bind(set_id)

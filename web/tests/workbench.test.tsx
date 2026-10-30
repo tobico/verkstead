@@ -14273,6 +14273,48 @@ describe("a question set on the timeline", () => {
     expect(card.textContent).not.toContain("closed unanswered");
   });
 
+  /// And one Verkstead answered for says the line beside that answer, the
+  /// device it moved the work to having been asleep (ADR-0029).
+  it("says the line beside an answer to Verkstead's own set", async () => {
+    const line = "nuc-win was permitted, and isn't awake yet.";
+    const answered = GRILLING.timeline.flatMap((event) =>
+      "QuestionSet" in event && "Answered" in event.QuestionSet.standing
+        ? [event.QuestionSet.standing]
+        : [],
+    )[0]!;
+    const asked: ConversationView = {
+      ...GRILLING,
+      timeline: GRILLING.timeline.map((event) =>
+        "QuestionSet" in event && event.QuestionSet.set_id === DEFERRED_SET.set_id
+          ? {
+              QuestionSet: {
+                ...event.QuestionSet,
+                by_verkstead: true,
+                standing: answered,
+                lock_line: line,
+              },
+            }
+          : event,
+      ),
+    };
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(asked)),
+      whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+      whenever(CAPTURE_OF_IT, json(CAPTURE)),
+      whenever(SCREEN_OF_IT, json(SCREEN)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.questionSet}`);
+    const card = [...container.querySelectorAll(`.${timeline.questionSet}`)][2]!;
+
+    expect(card.querySelector(`.${timeline.closed}`)!.textContent).toBe(line);
+  });
+
   /// A column of blanks would read as a Set that was answered with nothing.
   it("draws no answers at all on one nothing has been decided about", async () => {
     theGrillingSets();

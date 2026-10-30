@@ -2847,7 +2847,8 @@ pub struct QuestionSetEvent {
     /// What its lock says, where it was locked with a line: drawn in place of
     /// *closed unanswered*, which is a human's lock and not this one. Only
     /// Verkstead locks with one — its own Set, settled by the device it was
-    /// waiting on answering.
+    /// waiting on answering. Or the line beside its answer, where Verkstead
+    /// acted on it and the device it named was asleep.
     #[serde(default)]
     pub lock_line: Option<String>,
 }

@@ -616,11 +616,17 @@ fn picked(response: &verkstead_schema::Response) -> Option<u32> {
         .and_then(|answer| answer.selected)
 }
 
-/// Act on the answer to a Set of Verkstead's own asking where work runs, in
-/// `conversation_id`: *Move to* ticks that device under **May be transferred
-/// to** and moves the work there by the ordinary **Transfer**, on Verkstead's
-/// own account, the far end's arrival launching it; *Run it here* launches it
-/// here, by the Resume a press would make.
+/// Act on the answer to Set `set_id` of Verkstead's own asking where work runs,
+/// in `conversation_id`: *Move to* ticks that device under **May be
+/// transferred to** and moves the work there by the ordinary **Transfer**, on
+/// Verkstead's own account, the far end's arrival launching it; *Run it here*
+/// launches it here, by the Resume a press would make.
+///
+/// **A device ticked by the answer and not answering is then waited on**
+/// (ADR-0029, *A device both unticked and asleep is asked about as unticked*):
+/// a line beside the answer says it was permitted, and the asleep row's Set
+/// goes up as the wait, *Run it here* still there to press and the device's
+/// waking settling it — see [`woke`].
 ///
 /// `held` is the Set's hold on the drivers register, where it had one: a
 /// launch here is handed it, so the place passes to the run without coming
@@ -631,12 +637,16 @@ fn picked(response: &verkstead_schema::Response) -> Option<u32> {
 pub(crate) async fn answered(
     state: &AppState,
     conversation_id: i64,
+    set_id: i64,
     asking: &store::OwnAsking,
     response: &verkstead_schema::Response,
     held: Option<crate::drivers::Driving>,
 ) {
     let store::OwnAsking::Placing {
-        work, wants, moves, ..
+        work,
+        wants,
+        moves,
+        waiting_on,
     } = asking;
     let work = Work::from_placed(work);
 
@@ -656,6 +666,16 @@ pub(crate) async fn answered(
                 Err(error) => {
                     tracing::error!(error = ?error, conversation_id, device, "ticking the device the human picked failed");
                 }
+            }
+
+            if let Some(asleep) = not_awake(state, conversation_id, device).await {
+                let asleep = WaitedOn {
+                    already: waiting_on,
+                    ticked: asleep,
+                };
+
+                waited_on(state, conversation_id, set_id, &work, wants, asleep, held).await;
+                return;
             }
 
             let by = work.asked_for(wants);
@@ -690,19 +710,156 @@ pub(crate) async fn answered(
         }
 
         _ => {
-            let said = match work {
-                Work::Task { .. } => format!(
-                    "{} hasn't started. Press **Resume** to be asked again.",
-                    work.named()
-                ),
-                Work::Inline => {
-                    "The inline run hasn't started. Press **Resume** to start it here.".to_owned()
-                }
-            };
-
-            if let Err(error) = store::note(&state.pool, conversation_id, &said).await {
+            if let Err(error) =
+                store::note(&state.pool, conversation_id, &still_waiting(&work)).await
+            {
                 tracing::error!(error = ?error, conversation_id, "saying the work is still waiting failed");
             }
+        }
+    }
+}
+
+/// The device `device`, just ticked for work in `conversation_id`, where it
+/// did not answer its preflight: asleep, and so waited on rather than moved to.
+///
+/// `None` where it answered, lacking something or not, and where it could not
+/// be asked: the Transfer is asked for, and says what stands in its way.
+async fn not_awake(state: &AppState, conversation_id: i64, device: &str) -> Option<Device> {
+    let devices = state.devices.as_ref()?;
+
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(conversation) => conversation?,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the work a device was ticked for failed");
+            return None;
+        }
+    };
+
+    let config = state.settings.config();
+
+    match crate::preflight::of(Some(devices), &state.pool, &config, &conversation, device).await {
+        Ok(reading) => (unclean(&reading) == Some(Unclean::Asleep)).then(|| Device {
+            id: device.to_owned(),
+            name: reading.device,
+        }),
+        Err(refusal) => {
+            tracing::error!(
+                conversation_id,
+                device,
+                "asking a device just ticked whether it is awake failed: {}",
+                refusal.saying,
+            );
+            None
+        }
+    }
+}
+
+/// The sleeping devices the Set put after an answer waits on.
+struct WaitedOn<'a> {
+    /// Those the answered Set was waiting on already, by Device Id, where it
+    /// asked about an unticked device beside them.
+    already: &'a [String],
+
+    /// The one the answer ticked, which did not answer.
+    ticked: Device,
+}
+
+/// Wait on `asleep.ticked`, the device the answer to Set `set_id` ticked, for
+/// `work`: the answer's line says it was permitted, and the asleep row's Set
+/// goes up in the answered one's place, holding the work's place on the server
+/// from the answered one's `held` without a gap. Any the answered Set was
+/// waiting on already are waited on still, ahead of it, as they would be tried.
+///
+/// Where the Set cannot be put the work is left as an unanswered Set would
+/// leave it, a Notice saying so: a launch here would be answering for them.
+async fn waited_on(
+    state: &AppState,
+    conversation_id: i64,
+    set_id: i64,
+    work: &Work,
+    wants: &str,
+    asleep: WaitedOn<'_>,
+    held: Option<crate::drivers::Driving>,
+) {
+    let line = format!("{} was permitted, and isn't awake yet.", asleep.ticked.name);
+
+    if let Err(error) = store::answered_saying(&state.pool, set_id, &line).await {
+        tracing::error!(error = ?error, conversation_id, set_id, "saying the device picked was permitted failed");
+    }
+
+    let Some(platform) = platform::os_mark(wants) else {
+        tracing::error!(
+            conversation_id,
+            wants,
+            "the platform a Set of Verkstead's asked about is not one this build knows, so the work waits"
+        );
+        return;
+    };
+
+    let mut asleep_now = named(state, asleep.already).await;
+    asleep_now.push(asleep.ticked);
+
+    match ask(state, conversation_id, work, platform, &asleep_now, &[]).await {
+        Ok(()) => tracing::info!(
+            conversation_id,
+            work = ?work,
+            "the device the human picked is permitted now and asleep, so the work waits on it",
+        ),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, work = ?work, "asking again while the device picked is asleep failed");
+
+            if let Err(error) =
+                store::note(&state.pool, conversation_id, &still_waiting(work)).await
+            {
+                tracing::error!(error = ?error, conversation_id, "saying the work is still waiting failed");
+            }
+        }
+    }
+
+    drop(held);
+}
+
+/// The members `ids` names, as a Set names them, in that order: one no longer
+/// in the cluster is left out.
+async fn named(state: &AppState, ids: &[String]) -> Vec<Device> {
+    if ids.is_empty() {
+        return Vec::new();
+    }
+
+    let Some(devices) = state.devices.as_ref() else {
+        return Vec::new();
+    };
+
+    let members = match devices.membership().rows().await {
+        Ok(members) => members,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the members a Set of Verkstead's waits on failed");
+            return Vec::new();
+        }
+    };
+
+    ids.iter()
+        .filter_map(|id| {
+            members
+                .iter()
+                .find(|member| member.device == *id)
+                .map(|member| Device {
+                    id: member.device.clone(),
+                    name: member.name.clone(),
+                })
+        })
+        .collect()
+}
+
+/// The Notice for work an answer left waiting.
+fn still_waiting(work: &Work) -> String {
+    match work {
+        Work::Task { .. } => format!(
+            "{} hasn't started. Press **Resume** to be asked again.",
+            work.named()
+        ),
+        Work::Inline => {
+            "The inline run hasn't started. Press **Resume** to start it here.".to_owned()
         }
     }
 }

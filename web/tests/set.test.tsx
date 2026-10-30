@@ -676,6 +676,17 @@ describe("the record of a settled Set", () => {
     expect(page.textContent).not.toContain("the agent was told");
   });
 
+  /// An answer Verkstead acted on and could not carry out as it said keeps
+  /// its answer, the line beside it saying what happened instead (ADR-0029).
+  it("says the line beside an answer Verkstead acted on", async () => {
+    const line = "nuc-win was permitted, and isn't awake yet.";
+    const page = await reading({ ...ANSWERED, by_verkstead: true, lock_line: line });
+
+    expect(texts(page, `.${sheet.counterQuestion}`)).toContain(line);
+    expect(page.textContent).not.toContain("locked unanswered");
+    expect(optionRow("Counter::local").className).toBe(`${sheet.option} ${sheet.chosen}`);
+  });
+
   it("leads back to the Timeline the Set was asked on", async () => {
     // The same way out however the Set stands: settled or waiting, it is an
     // Event on one Timeline and there is nowhere else for reading it to lead.

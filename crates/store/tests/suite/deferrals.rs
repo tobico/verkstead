@@ -12,10 +12,10 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_schema::{Answer, Question, QuestionOption, QuestionSet, Response};
 use verkstead_store::{
-    Ask, Event, Locking, OwnAsking, PlacedWork, Settlements, ask, ask_on_our_own, insert_response,
-    lock_line, lock_lines, lock_set, lock_set_saying, open_database, open_set, own_asking,
-    own_set_ids, own_sets, record_folded, register_repo, start_conversation, submit_response,
-    timeline, unfolded,
+    Ask, Event, Locking, OwnAsking, PlacedWork, Settlements, answered_saying, ask, ask_on_our_own,
+    insert_response, lock_line, lock_lines, lock_set, lock_set_saying, open_database, open_set,
+    own_asking, own_set_ids, own_sets, record_folded, register_repo, start_conversation,
+    submit_response, timeline, unfolded,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -408,5 +408,38 @@ async fn a_lock_with_a_line_reads_back_with_it() {
     assert_eq!(
         lock_lines(&pool, conversation).await.unwrap(),
         [(woke, line.to_owned())].into_iter().collect(),
+    );
+}
+
+/// **An answer Verkstead acted on can carry a line too**, beside the answer
+/// rather than a lock: the device *Move to* named was ticked and did not
+/// answer. Only an answered Set takes one, and only once.
+#[tokio::test]
+async fn an_answered_set_takes_a_line_beside_its_answer() {
+    let (_dir, pool) = fresh_pool().await;
+    let conversation = conversation(&pool).await;
+    let settlements = Settlements::new(4);
+
+    let answered = asked(&pool, conversation, "answered", Ask::Deferred).await;
+    let open = asked(&pool, conversation, "open", Ask::Deferred).await;
+
+    submit_response(&pool, &settlements, answered, &picked())
+        .await
+        .unwrap();
+
+    let line = "nuc-win was permitted, and isn't awake yet.";
+
+    assert!(!answered_saying(&pool, open, line).await.unwrap());
+    assert!(answered_saying(&pool, answered, line).await.unwrap());
+    assert!(!answered_saying(&pool, answered, "again").await.unwrap());
+
+    assert_eq!(
+        lock_line(&pool, answered).await.unwrap().as_deref(),
+        Some(line)
+    );
+    assert_eq!(lock_line(&pool, open).await.unwrap(), None);
+    assert_eq!(
+        lock_lines(&pool, conversation).await.unwrap(),
+        [(answered, line.to_owned())].into_iter().collect(),
     );
 }

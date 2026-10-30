@@ -366,7 +366,7 @@ function Questions(props: {
 
   /// What its lock said, where it was locked with a line: drawn in place of
   /// the sentence about a Set nobody answered, which a lock of Verkstead's own
-  /// would make wrong twice over.
+  /// would make wrong twice over. Or what Verkstead said beside its answer.
   lockLine?: string | null;
 }): JSX.Element {
   /// A Set that settled with no Response behind it, which is the one standing
@@ -412,6 +412,11 @@ function Questions(props: {
         >
           {(line) => <p class={styles.counterQuestion}>{line()}</p>}
         </Show>
+      </Show>
+      {/* And the line beside an answer Verkstead acted on, where acting on it
+          did not go as it said: the device it named was asleep. */}
+      <Show when={props.response !== null && props.lockLine}>
+        {(line) => <p class={styles.counterQuestion}>{line()}</p>}
       </Show>
       {/* And the Set that had simply not been got to yet, which only a
           read-only sheet ever draws. */}

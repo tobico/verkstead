@@ -235,7 +235,7 @@ pub(crate) async fn settle(state: &AppState, set_id: i64, response: &Response) {
 
     match &asking {
         store::OwnAsking::Placing { .. } => {
-            crate::placing::answered(state, conversation_id, &asking, response, held).await
+            crate::placing::answered(state, conversation_id, set_id, &asking, response, held).await
         }
     }
 }
