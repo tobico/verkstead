@@ -24,7 +24,8 @@ settles.
   companions.
 - **The first reachable ticked device of that platform**; otherwise stage 04's
   Set, with the stage waiting on it taking a place as waiting on the human
-  does.
+  does. The platform is read as stage 03 reads it, through
+  `platform::os_mark`, a WSL counting as Linux.
 - **The platform is a preference**: *Run it here* starts the stage at home.
 - **The roadmap's declaration is read as it always was**, off the top of the
   chain at every start; ADR-0021's *acted on by nothing* is what this ends.

@@ -37,6 +37,10 @@ the work now is.
   nothing running, which runs where it stands.
 - **The first reachable ticked device of that platform**; two ticked and one
   asleep means the awake one.
+  A device's operating system is its member's free-text `os` word read
+  through `platform::os_mark`, never matched as a string: *Linux (WSL)* is a
+  Linux device, so `on linux` may pick a Windows machine's WSL and `on windows`
+  never does.
 - **The work stays where it is afterwards**: an undeclared task, the finish and
   the wrap-up run wherever the last move left the work.
 - **An inline run wanting one platform starts there**; wanting several, it

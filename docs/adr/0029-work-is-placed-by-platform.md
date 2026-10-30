@@ -78,7 +78,11 @@ inline run whose proposal wants one platform starts there.
 
 **The device is the first ticked device of that operating system that is
 reachable.** Where none of them is reachable, or none is ticked, the human is
-asked — see below. A roadmap's stages inherit the roadmap Conversation's ticks
+asked — see below. A device's operating system is its free-text OS word
+read through `platform::os_mark`, the one reading the sidebar's mark already
+uses, and never matched as a string: *Linux (WSL)* is a Linux device, so `on
+linux` may pick a Windows machine's WSL and `on windows` never does. A roadmap's
+stages inherit the roadmap Conversation's ticks
 through the one inheritance funnel that already carries its Pairings and
 companions.
 
