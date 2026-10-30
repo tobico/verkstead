@@ -76,9 +76,10 @@ it.** A stage is made on its roadmap's home device and moved by the ordinary
 **Transfer**; a task's session is launched after the Conversation has moved. An
 inline run whose proposal wants one platform starts there.
 
-**The device is the first ticked device of that operating system that is
-reachable.** Where none of them is reachable, or none is ticked, the human is
-asked — see below. A device's operating system is its free-text OS word
+**The device is the first permitted device of that operating system that is
+reachable**: the device the work was drafted on, and then the ticked ones — the
+same devices the agent's own call may move the work to. Where none of them is
+reachable, or none is ticked, the human is asked — see below. A device's operating system is its free-text OS word
 read through `platform::os_mark`, the one reading the sidebar's mark already
 uses, and never matched as a string: *Linux (WSL)* is a Linux device, so `on
 linux` may pick a Windows machine's WSL and `on windows` never does. A roadmap's

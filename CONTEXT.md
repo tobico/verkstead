@@ -3392,7 +3392,9 @@ copy could not write its Profile's login back to the device the account was fetc
 **Account mirror** — that a Conversation moved onto this device was taken up
 with the harness's own resume of the conversation it arrived part way through,
 or with Verkstead's own Resume and which reason it was — see **Carried
-Conversation** — or — as a **stop Notice** — what stopped driving, why, and what
+Conversation** — that a task or an inline run wanting a platform is running
+where it is, and why no device of it could take the work — see **Transfer** —
+or — as a **stop Notice** — what stopped driving, why, and what
 the evidence was. No agent wrote it and nobody pressed anything for it. It is
 what running unattended owes the human: a decision made while nobody was
 watching is one they have to be able to read afterwards.
@@ -4725,7 +4727,7 @@ retired, a decision corrected in passing — so the effort a Stage belongs to is
 Verkstead's own record rather than something worked out from the branch. A
 roadmap that runs out is the roadmap complete, whatever else is in the Worktree
 with work left in it; taking up another one is **Adopt**. See ADR-0017.
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): the platform a line names stops being acted on by nothing — a Stage that wants one is made at home, inherits the roadmap Conversation's ticks, and is moved to the first reachable ticked device of that platform before its first session, Verkstead asking with a Question Set of its own where none is; a task line in `.tasks/TODO.md` carries the same word and is placed the same way.
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): the platform a line names stops being acted on by nothing — a Stage that wants one is made at home, inherits the roadmap Conversation's ticks, and is moved to the first reachable ticked device of that platform before its first session, Verkstead asking with a Question Set of its own where none is. A task line in `.tasks/TODO.md` that carries the same word is already placed by it — see **Transfer**.
 _Avoid_: phase, milestone, epic, step (that is a backlog's)
 
 **Chain**:
