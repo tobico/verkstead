@@ -91,7 +91,7 @@ threads-required = 'num-test-threads'
 # server: see `ON_THE_PORT` in `crates/server/tests/suite/package_stores.rs`,
 # the lock that kept them apart in one process.
 #
-# In the `Rust` job these proofs skip, for want of CMake, Ninja and sccache on
+# On the `Rust` legs these proofs skip, for want of CMake, Ninja and sccache on
 # the runner — the `Package stores` job is where they run, and it runs them
 # under libtest. The group is here so that a leg stays right if the image ever
 # grows the tools, and so that a developer's own `cargo nextest run` does.
