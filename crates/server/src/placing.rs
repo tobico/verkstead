@@ -34,8 +34,10 @@
 //! every launch that meets it, a Resume's included, since each launch asked
 //! again.
 //!
-//! **A roadmap stage's tasks are held** (Set 1543, Q4): see [`held`], whose
-//! one check is what lifting the hold deletes.
+//! **A roadmap stage's tasks are placed like any other.** Moving a stage's
+//! Conversation off its roadmap's home device leaves it in that roadmap's sight:
+//! the copy reports to home and asks it before joining (ADR-0029, *Home drives a
+//! roadmap across devices*), whoever asked for the move.
 //!
 //! **An inline run is placed only where it starts** (Set 1543, Q5b): see
 //! [`inline`], asked once, as the grilling hands off. A proposal wanting
@@ -97,6 +99,9 @@ impl Work {
 /// Why work that wants a platform runs here all the same, each the reason one
 /// Notice gives — and each its own case, because stage 04 asks the human about
 /// some of them rather than telling them.
+///
+/// Every case is a way of there being *none*, which is what each name says.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Unplaced {
     /// No member of that platform is linked, this Verkstead being in no cluster
@@ -109,9 +114,6 @@ enum Unplaced {
     /// Permitted members of it, none of which can take the work: what each
     /// one's preflight found, in the Transfer dialog's words, which name it.
     NoneCanTake(Vec<String>),
-
-    /// A roadmap stage's Conversation, which is not placed — see [`held`].
-    Held { roadmap: String },
 }
 
 impl Unplaced {
@@ -157,12 +159,6 @@ impl Unplaced {
 
                 said
             }
-
-            Unplaced::Held { roadmap } => format!(
-                "{named} wants {wants}, but it's running here: this conversation is a stage \
-                 of the {roadmap} roadmap, and a stage moved off this device drops out of its \
-                 roadmap's sight."
-            ),
         }
     }
 }
@@ -246,12 +242,7 @@ async fn place(state: &AppState, conversation_id: i64, work: Work, wants: Platfo
         return Placed::Here;
     }
 
-    let placed = match held(state, conversation_id).await {
-        Some(roadmap) => Err(Unplaced::Held { roadmap }),
-        None => placing(state, conversation_id, &work, wants).await,
-    };
-
-    match placed {
+    match placing(state, conversation_id, &work, wants).await {
         Ok(placed) => placed,
 
         Err(unplaced) => {
@@ -270,28 +261,6 @@ async fn place(state: &AppState, conversation_id: i64, work: Work, wants: Platfo
             }
 
             Placed::Here
-        }
-    }
-}
-
-/// The roadmap `conversation_id` is a stage of, where it is one: **its tasks are
-/// not placed** (Set 1543, Q4).
-///
-/// Placing a task moves its Conversation, and a stage's Conversation moved off
-/// its roadmap's home device goes dark to that roadmap's scheduler until stages
-/// can be moved (stage 05). Stage 06 lifts this, and lifting it is deleting this
-/// check and the one line that asks it.
-///
-/// Any row is a stage: the Conversation that *wrote* a roadmap has one too, and
-/// it works no backlog to ask this of.
-async fn held(state: &AppState, conversation_id: i64) -> Option<String> {
-    match store::stage_roadmap(&state.pool, conversation_id).await {
-        Ok(of) => of.map(|of| of.roadmap),
-        // The same store the placing reads next, which fails the same way and
-        // runs the task here.
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether a Conversation is a roadmap stage failed");
-            None
         }
     }
 }
@@ -640,16 +609,6 @@ mod tests {
             .said(&Work::Task("03".to_owned()), Platform::Linux),
             "Task 03 wants Linux, but no Linux device it may be transferred to can take it, so \
              it's running here.\n\n- Ada is unreachable.\n- The repo app is not on Grace.",
-        );
-
-        assert_eq!(
-            Unplaced::Held {
-                roadmap: "platform-placement".to_owned()
-            }
-            .said(&Work::Task("01".to_owned()), Platform::Windows),
-            "Task 01 wants Windows, but it's running here: this conversation is a stage of the \
-             platform-placement roadmap, and a stage moved off this device drops out of its \
-             roadmap's sight.",
         );
     }
 

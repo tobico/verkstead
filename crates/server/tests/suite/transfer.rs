@@ -3522,13 +3522,14 @@ async fn a_task_no_permitted_device_can_take_says_what_each_lacks() {
     );
 }
 
-/// **A roadmap stage's tasks are held** (Set 1543, Q4): with a ticked, awake
-/// Windows device that could take it, a stage's task that wants Windows is not
-/// moved, its Notice says why, and it runs here.
+/// **A roadmap stage's task is placed like any other**, and home goes on
+/// seeing the stage (ADR-0029, *Home drives a roadmap across devices*): with a
+/// ticked, awake Windows device, a stage's task that wants Windows is moved
+/// there and worked there, and a close on that device reads at home.
 #[tokio::test]
-async fn a_roadmap_stages_task_is_not_moved_and_says_why() {
+async fn a_roadmap_stages_task_is_moved_and_home_still_sees_the_stage() {
     let spill = tempfile::tempdir().unwrap();
-    let (a, _b, _held, conversation) = planned_across(ONE_WINDOWS_TASK, spill.path()).await;
+    let (a, b, _held, conversation) = planned_across(ONE_WINDOWS_TASK, spill.path()).await;
 
     sqlx::query("INSERT INTO stage_roadmaps (conversation_id, roadmap, stage) VALUES (?, ?, ?)")
         .bind(conversation)
@@ -3540,20 +3541,51 @@ async fn a_roadmap_stages_task_is_not_moved_and_says_why() {
 
     resumes(&a, conversation).await;
 
-    let said = a.notice_saying(conversation, "Task 01 wants Windows").await;
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let went = a.notice_saying(conversation, "Transferred to").await;
     assert!(
-        said.contains("a stage of the platform-placement roadmap"),
-        "the Notice says the stage is why: {said}",
+        went.contains(B_MACHINE) && went.contains("for task 01, which wants Windows"),
+        "the stage is moved for its task: {went}",
     );
 
-    a.latest_capture_saying(conversation, "finishing on A")
-        .await;
-
-    let drawn = a.view(conversation).await;
+    b.latest_capture_saying(there, "finishing on B").await;
     assert!(
-        drawn.transferred.is_none() && drawn.transferring.is_none(),
-        "and nothing was moved",
+        printed_on(&b, there).await.contains("worked task 01 on B"),
+        "and the task is worked on the far device",
     );
+
+    let repo_id = a.repo_row(REPOSITORY).await;
+    let at_home = || async {
+        store::stage_standings(&a.pool, repo_id)
+            .await
+            .unwrap()
+            .of("platform-placement", "03")
+    };
+    assert_eq!(at_home().await, Some(store::StageStanding::InFlight));
+
+    store::set_state(&b.pool, there, store::Lifecycle::Closed)
+        .await
+        .unwrap();
+    b.nudges.announce(verkstead_schema::Nudge::Conversation {
+        conversation: there,
+    });
+
+    let deadline = Instant::now() + WAITING;
+    while at_home().await != Some(store::StageStanding::Abandoned) {
+        assert!(
+            Instant::now() < deadline,
+            "home never read the stage closed on the far device: it reads {:?}",
+            at_home().await,
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    }
 }
 
 /// **A declared task moved off its platform by hand is moved again at its next
