@@ -307,6 +307,14 @@ describe("the relaunch", () => {
     ]);
     expect(relaunched(["/tmp/.mount_x/Verkstead"])).toEqual([]);
   });
+
+  /// A login's start, opened from the tray and installed from the Desktop
+  /// page: the copy comes up with a window, not in the tray alone.
+  it("carries no --hidden, the relaunch being pressed for in a window", () => {
+    expect(relaunched(["/tmp/.mount_x/Verkstead", "--hidden", "--enable-logging"])).toEqual([
+      "--enable-logging",
+    ]);
+  });
 });
 
 describe("the dialog", () => {

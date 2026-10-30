@@ -828,7 +828,7 @@ jobs:
       # `~/Applications` both say.
       #
       # The `XDG_` directories are taken off for the run, so that every path
-      # the app reads or writes is under this home — the runner's own say
+      # the app reads or writes is under this home rather than the runner's
       # `/home/runner` — and the home is handed on to the steps after this one,
       # which run the installed copy: run from where the pack left it, the file
       # is outside Applications and puts the offer up, which nobody here would

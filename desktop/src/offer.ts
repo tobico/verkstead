@@ -58,7 +58,7 @@ import { dirname, join } from "node:path";
 import type { Placement } from "./bridge.js";
 import { absolute, dataHome, type Machine } from "./platform.js";
 import type { Settings } from "./settings.js";
-import { APP_ID, COMMENT, NAME, quoted } from "./startup.js";
+import { APP_ID, COMMENT, HIDDEN, NAME, quoted } from "./startup.js";
 import { unmounted } from "./unmounted.js";
 
 /// The flag that is the dialog's **Install** with nobody asked: outside
@@ -329,9 +329,15 @@ export function shown(path: string, { env }: Machine): string {
 
 /// The arguments the installed copy is relaunched with: this launch's own,
 /// past the executable, without [`INSTALL`] — the copy is installed, and asked
-/// again it would only say so.
+/// again it would only say so — and without [`HIDDEN`](./startup.js).
+///
+/// **A relaunch is always one somebody is at.** The launch's offer is never
+/// made on a hidden start, and an Install pressed on the Desktop page, or an
+/// **Open installed**, is pressed in a window: a login's `--hidden` carried
+/// over would bring the copy up in the tray alone, which reads as the app
+/// having quit.
 export function relaunched(argv: readonly string[]): string[] {
-  return argv.slice(1).filter((argument) => argument !== INSTALL);
+  return argv.slice(1).filter((argument) => argument !== INSTALL && argument !== HIDDEN);
 }
 
 /// What the dialog says, and the native message box's own fields for it.

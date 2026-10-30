@@ -1,6 +1,7 @@
-# Throwaway: install-on-desktop task 05 — the release's own Mac steps, run verbatim out of
-# release.yml: mount, --install out of the mount, then the shown launch and the notification
-# on the installed copy. Lives only on the `macos-pack-probe` branch and merges nowhere.
+# Throwaway: install-on-desktop review — Install pressed on the Desktop page of a Mac app with
+# its sidecar running, out of a quarantined dmg. Proves that Electron's move quits through the
+# ordinary quit path, so `will-quit` holds the exit until the old sidecar has gone, and that the
+# relaunched copy in /Applications serves. Lives only on the `macos-pack-probe` branch.
 name: Mac install-offer probe
 
 on:
@@ -12,13 +13,13 @@ permissions:
 
 jobs:
   the-offer:
-    name: The release's Mac install steps
+    name: Install pressed on the Desktop page, sidecar running
     runs-on: macos-15
     timeout-minutes: 90
     env:
       DMG: target/electron/out/Verkstead-universal.dmg
-      MOUNT: target/electron/mounted
-      APP: target/electron/mounted/Verkstead.app
+      MOUNT: /Volumes/Verkstead
+      APP: /Volumes/Verkstead/Verkstead.app
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -77,57 +78,124 @@ jobs:
           grep -E "^(Signing|Not notarizing|Notarizing|The app )" "$RUNNER_TEMP/pack.log"
           exit $status
 
-
-      - name: "release: The dmg mounts"
-        if: always()
-        timeout-minutes: 3
+      - name: Quarantine and mount the dmg as a download
         run: |
-          ruby -ryaml -e '
-            steps = YAML.load_file(".github/workflows/release.yml")["jobs"]["desktop-macos"]["steps"]
-            print steps.find { |s| s["name"] == ARGV[0] }["run"]
-          ' "The dmg mounts" > "$RUNNER_TEMP/step.sh"
-          bash -e "$RUNNER_TEMP/step.sh"
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" "$DMG"
+          hdiutil attach "$DMG" -nobrowse -mountpoint "$MOUNT"
+          ls -ld /Applications; ls -l /Applications | grep -i verkstead || echo "no Verkstead in /Applications"
+          data="$HOME/Library/Application Support/Verkstead"
+          mkdir -p "$data" "$HOME/Library/Application Support/verkstead-desktop"
+          printf '%s\n' the-probe-key > "$data/workbench.key"
+          # No offer at launch: the Desktop page's row is the way in.
+          printf '{"installOffer": false}\n' > "$data/desktop.json"
+          printf '{"installOffer": false}\n' > "$HOME/Library/Application Support/verkstead-desktop/desktop.json"
+          mkdir -p "$RUNNER_TEMP/shots"
+          cat > "$RUNNER_TEMP/cdp.mjs" <<'JS'
+          const expression = process.argv[2];
+          const targets = await (await fetch("http://127.0.0.1:9222/json")).json();
+          const page = targets.find((t) => t.type === "page" && t.url.includes("8422"));
+          if (!page) { console.log("NO PAGE", JSON.stringify(targets)); process.exit(1); }
+          const ws = new WebSocket(page.webSocketDebuggerUrl);
+          await new Promise((r) => ws.addEventListener("open", r));
+          ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate",
+            params: { expression, awaitPromise: true, returnByValue: true } }));
+          const reply = await new Promise((r) => ws.addEventListener("message", (m) => r(JSON.parse(m.data))));
+          console.log(JSON.stringify(reply.result?.result?.value ?? reply));
+          ws.close();
+          process.exit(0);
+          JS
+          cat > "$RUNNER_TEMP/watch.py" <<'PY'
+          import os, subprocess, sys, time
+          main, car = int(sys.argv[1]), int(sys.argv[2])
+          t0 = time.time(); seen = {}
+          def alive(p):
+              try: os.kill(p, 0); return True
+              except OSError: return False
+          def note(k):
+              if k not in seen:
+                  seen[k] = time.time() - t0; print(f"{seen[k]:7.2f}s {k}", flush=True)
+          while time.time() - t0 < 120:
+              if not alive(car): note("old sidecar gone")
+              if not alive(main): note("old app gone")
+              ps = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout
+              for line in ps.splitlines():
+                  if "/Applications/Verkstead.app/Contents/MacOS/Verkstead" in line and "Helper" not in line:
+                      note("new app up: " + line.strip())
+                  if "/Applications/Verkstead.app/Contents/Resources/" in line and line.rstrip().split()[1].endswith("/verkstead"):
+                      note("new sidecar up: " + line.strip())
+              time.sleep(0.05)
+          print("ORDER:", "PROVEN — the old sidecar went before the new app came up"
+                if "old sidecar gone" in seen and any(k.startswith("new app up") and v >= seen["old sidecar gone"] for k, v in seen.items())
+                else "NOT PROVEN", flush=True)
+          PY
 
-      - name: "release: The app installs itself out of the dmg into /Applications"
+      - name: Install pressed on the Desktop page, with the sidecar running
         if: always()
-        timeout-minutes: 6
+        timeout-minutes: 8
         run: |
-          ruby -ryaml -e '
-            steps = YAML.load_file(".github/workflows/release.yml")["jobs"]["desktop-macos"]["steps"]
-            print steps.find { |s| s["name"] == ARGV[0] }["run"]
-          ' "The app installs itself out of the dmg into /Applications" > "$RUNNER_TEMP/step.sh"
-          bash -e "$RUNNER_TEMP/step.sh"
+          set +e
+          log="$HOME/Library/Logs/Verkstead/verkstead.log"
+          rm -f "$log"
+          shot() { screencapture -x "$RUNNER_TEMP/shots/$1.png" || true; }
+          serving() {
+            curl --fail --silent --show-error --retry 60 --retry-delay 1 --retry-connrefused \
+              --cookie "workbench_key=the-probe-key" http://127.0.0.1:8422/ | grep -q /assets/
+          }
+          cdp() { node "$RUNNER_TEMP/cdp.mjs" "$1"; }
 
-      - name: "release: The window comes up, the icon goes into the menu bar, and the viewer is inside"
-        if: always()
-        timeout-minutes: 6
-        env:
-          VERKSTEAD_DATA_DIR: ${{ runner.temp }}/data
-        run: |
-          ruby -ryaml -e '
-            steps = YAML.load_file(".github/workflows/release.yml")["jobs"]["desktop-macos"]["steps"]
-            print steps.find { |s| s["name"] == ARGV[0] }["run"]
-          ' "The window comes up, the icon goes into the menu bar, and the viewer is inside" > "$RUNNER_TEMP/step.sh"
-          bash -e "$RUNNER_TEMP/step.sh"
+          (open "$APP" --args --remote-debugging-port=9222 > "$RUNNER_TEMP/open.log" 2>&1 &)
+          sleep 3
+          for _ in $(seq 12); do
+            osascript -e 'tell application "System Events" to tell process "CoreServicesUIAgent" to click button "Open" of window 1' 2>/dev/null && { echo "pressed Open on Gatekeeper's prompt"; break; }
+            sleep 1
+          done
+          serving && echo "the download serves" || echo "THE DOWNLOAD DOES NOT SERVE"
+          grep -n "Install Offer" "$log"
 
-      - name: "release: A notice is shown as a notification"
-        if: always()
-        timeout-minutes: 6
-        env:
-          VERKSTEAD_DATA_DIR: ${{ runner.temp }}/data
-        run: |
-          ruby -ryaml -e '
-            steps = YAML.load_file(".github/workflows/release.yml")["jobs"]["desktop-macos"]["steps"]
-            print steps.find { |s| s["name"] == ARGV[0] }["run"]
-          ' "A notice is shown as a notification" > "$RUNNER_TEMP/step.sh"
-          bash -e "$RUNNER_TEMP/step.sh"
+          main=$(grep 'is starting, at pid' "$log" | head -1 | sed 's/.*at pid //')
+          car=$(pgrep -P "$main" -f 'Contents/Resources/.*/verkstead' | head -1)
+          [ -n "$car" ] || car=$(pgrep -f 'Contents/Resources/.*/verkstead' | head -1)
+          echo "old app pid $main: $(ps -o command= -p "$main")"
+          echo "old sidecar pid $car: $(ps -o command= -p "$car")"
 
-      - name: "release: Unmount the dmg"
+          for _ in $(seq 30); do curl -s http://127.0.0.1:9222/json | grep -q 8422 && break; sleep 1; done
+          cdp 'fetch("/api/ui/onboarding/finished", {method: "POST"}).then((r) => r.status)'
+          cdp 'location.assign("/settings/desktop"), "went"'
+          sleep 6
+          cdp '(async () => { for (let i = 0; i < 40; i++) { const b = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Install"); if (b) return document.body.innerText.split("\n").filter((l) => /outside Applications/.test(l)).join(" | "); await new Promise((r) => setTimeout(r, 250)); } return "NO INSTALL ROW: " + location.pathname; })()'
+          shot row
+
+          python3 "$RUNNER_TEMP/watch.py" "$main" "$car" > "$RUNNER_TEMP/watch.log" 2>&1 &
+          watcher=$!
+          cdp '([...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Install").click(), "clicked")'
+          sleep 3
+          shot dialog
+          osascript -e 'tell application "System Events" to tell process "Verkstead" to get entire contents of window 1' 2>&1 | tr ',' '\n' | grep -i "button\|sheet\|static text" | head -20
+          pressed=no
+          for where in 'sheet 1 of window 1' 'window 1' 'window "Install Verkstead?"'; do
+            if osascript -e "tell application \"System Events\" to tell process \"Verkstead\" to click button \"Install\" of $where" 2>/dev/null; then
+              echo "pressed Install on the dialog, as button of $where"; pressed=yes; break
+            fi
+          done
+          [ "$pressed" = yes ] || echo "COULD NOT PRESS THE DIALOG"
+
+          # A password dialog would be SecurityAgent's; there should be none here.
+          sleep 2
+          osascript -e 'tell application "System Events" to get name of every process whose name is "SecurityAgent"' 2>&1
+
+          wait "$watcher"
+          echo "== timeline"; cat "$RUNNER_TEMP/watch.log"
+          serving && echo "PROVEN: the relaunched copy serves" || echo "NOT SERVING after the relaunch"
+          new=$(grep 'is starting, at pid' "$log" | tail -1 | sed 's/.*at pid //')
+          echo "the newest launch is pid $new: $(ps -o command= -p "$new")"
+          grep -q "something is already listening" "$log" && echo "THE COPY MET THE ADDRESS TAKEN" || echo "the copy never met the address taken"
+          ls -ld /Applications/Verkstead.app
+          shot after
+          echo "== log"; cat "$log"
+
+      - name: Keep the screenshots
         if: always()
-        timeout-minutes: 3
-        run: |
-          ruby -ryaml -e '
-            steps = YAML.load_file(".github/workflows/release.yml")["jobs"]["desktop-macos"]["steps"]
-            print steps.find { |s| s["name"] == ARGV[0] }["run"]
-          ' "Unmount the dmg" > "$RUNNER_TEMP/step.sh"
-          bash -e "$RUNNER_TEMP/step.sh"
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: shots
+          path: ${{ runner.temp }}/shots
