@@ -58,7 +58,10 @@ Read the feedback whole before changing anything, then go and see for yourself.
   is a guess, and one pushed for CI to try is the same guess made slower.
   Which operating system the failure needs is yours to decide from the failure
   itself: a job's name — *Rust (windows-latest)* — is a name, not a
-  declaration, and no device follows from it.
+  declaration, and no device follows from it. Only where there is no device of
+  that operating system to ask for — your prompt has no such section, or names
+  none of it — is CI all there is: say so, fix it as well as you can from here,
+  and let CI confirm it.
 - **A review finding or a comment**: read the code it is about, and the code
   around it. What is being asked for is usually smaller than it sounds and
   occasionally larger.

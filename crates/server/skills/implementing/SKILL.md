@@ -86,7 +86,9 @@ the Guide's *Moving the work to another device* says how. Pushing and reading
 CI is how a fix is confirmed, never how a platform's failure is found. Which
 operating system the work needs is yours to decide from the work itself: a
 job's name — *Rust (windows-latest)* — is a name, not a declaration, and no
-device follows from it.
+device follows from it. Only where there is no device of that operating system
+to ask for — your prompt has no such section, or names none of it — is CI all
+there is: say so, fix it as well as you can from here, and let CI confirm it.
 
 ## Then get the branch reviewed, the way this repository does it
 

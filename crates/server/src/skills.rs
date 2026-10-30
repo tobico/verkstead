@@ -3692,8 +3692,9 @@ mod tests {
     /// CI confirms; it does not discover (ADR-0029, *What the skills say*). The
     /// three skills that build say a platform's build, suite or check is run on
     /// that platform — moving where the prompt permits it and asking where it
-    /// does not — and point at the prompt's section and the Guide's rather than
-    /// restating them. None of them takes the platform from a job's name.
+    /// does not, CI alone only where there is no device of it to ask for — and
+    /// point at the prompt's section and the Guide's rather than restating
+    /// them. None of them takes the platform from a job's name.
     #[test]
     fn the_building_skills_say_ci_confirms_and_does_not_discover() {
         for named in [IMPLEMENTING, NEXT_TASK, ADDRESSING] {
@@ -3706,6 +3707,7 @@ mod tests {
                 "*The devices of this cluster*",
                 "*Moving the work to another device*",
                 "is a name, not a declaration, and no device follows from it",
+                "Only where there is no device of that operating system to ask for",
             ] {
                 assert!(
                     text.contains(wording),
