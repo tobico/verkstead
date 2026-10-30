@@ -125,8 +125,8 @@ const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8
 /// So the fix is a ruler that stretches: one factor, read from the environment,
 /// applied to everything time-shaped in this file at once. Unset is `1.0`,
 /// which is what a developer's own machine runs at; CI sets `2`, because a
-/// two-core runner building the workspace alongside is the loaded shape these
-/// flakes came from.
+/// shared four-core runner, four tests at a time and once with the workspace
+/// building alongside, is the loaded shape these flakes came from.
 ///
 /// **Uniformly, and that is not a detail.** [`BRISKLY`] keeps `grace` under
 /// `proposing` deliberately, so that a session that has said it is done is
@@ -3496,7 +3496,7 @@ impl Bench {
 /// Each one is a real server, a real repository on disk and a run of real
 /// sessions in real sandboxes, and `cargo test` will happily start every test
 /// in this file at once — which on this suite is a hundred and more benches
-/// competing for two cores. What comes out of that is not a slow run but a
+/// competing for a few cores. What comes out of that is not a slow run but a
 /// wrong one: sessions descheduled past the budgets they are being judged
 /// against, and a different test failing every time.
 ///
@@ -3511,6 +3511,10 @@ impl Bench {
 /// through, and held for the fixture's whole life. It bounds how far load can
 /// stretch the clock in the first place; [`PACE`] is what copes with the
 /// stretch that is left.
+///
+/// Under nextest, which is how CI runs this suite, every test is a process of
+/// its own and never reaches this cap: nextest's own thread count, the
+/// machine's cores, is what bounds the load there.
 static ROOM: LazyLock<Arc<tokio::sync::Semaphore>> = LazyLock::new(|| {
     let cores = std::thread::available_parallelism().map_or(1, |cores| cores.get());
 
