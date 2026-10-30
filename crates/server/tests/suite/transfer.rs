@@ -384,6 +384,24 @@ impl Verkstead {
         format!("127.0.0.1:{}", self.address.port())
     }
 
+    /// The server restarted over the same Data Directory, its sessions running
+    /// on `stub` at `pace`: a workbench of a fresh process, holding nothing in
+    /// memory, whose startup resume and stall sweep run over the store as it
+    /// stands. The Peer Listener is left as it was.
+    fn restarted(&mut self, stub: &str, spill: &Path, pace: Pace) {
+        let Routers { workbench, .. } = routers_running_sessions_answering_devices(
+            self.pool.clone(),
+            self._dir.path().to_owned(),
+            agents(stub, self._home.path(), self._dir.path(), spill).at_pace(pace),
+            gh_stub(NO_GITHUB),
+            self.cluster.clone(),
+            self.nudges.clone(),
+            probing(self._dir.path()),
+        );
+
+        self.workbench = workbench;
+    }
+
     /// The machine switched off: the listener stops answering, and every dial at
     /// it from here on is a device that is not there.
     fn stops_answering(&self) {
@@ -3291,22 +3309,18 @@ async fn planned_across_with(
     spill: &Path,
     across: Across,
 ) -> (Verkstead, Verkstead, (Holding, Holding, Holding), i64) {
-    let a = Verkstead::running_on(
-        A,
-        &works_each_task_on("A", tasks),
-        spill,
-        rescuing(),
-        across.os,
-    )
-    .await;
-    let b = Verkstead::running_on(
-        B,
-        &works_each_task_on("B", tasks),
-        spill,
-        rescuing(),
-        across.os,
-    )
-    .await;
+    planned_across_at(tasks, spill, across, rescuing()).await
+}
+
+/// And at `pace`.
+async fn planned_across_at(
+    tasks: &str,
+    spill: &Path,
+    across: Across,
+    pace: Pace,
+) -> (Verkstead, Verkstead, (Holding, Holding, Holding), i64) {
+    let a = Verkstead::running_on(A, &works_each_task_on("A", tasks), spill, pace, across.os).await;
+    let b = Verkstead::running_on(B, &works_each_task_on("B", tasks), spill, pace, across.os).await;
     let signalling = (a.signalling(), b.signalling());
 
     a.linked_to(&b.device, B_MACHINE, across.os, vec![b.at()])
@@ -3694,6 +3708,139 @@ async fn run_it_here_starts_the_task_where_it_is() {
         [asked.set_id],
         "and the launch the answer made asked nothing again",
     );
+}
+
+/// **The open Set is the wait** (ADR-0029): while it is open the Conversation
+/// is held on the drivers register — the register a place on the server is
+/// counted off — a Resume pressed meanwhile finds it already driven and asks
+/// nothing again, and settling the Set lets the place go.
+#[tokio::test]
+async fn an_open_set_holds_a_place_until_it_settles() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+
+    let asked = verksteads_set(&a, conversation).await;
+
+    // Long enough for the runner that put it to have stood down, so what is
+    // read is the Set's own hold rather than the runner's.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        a.view(conversation).await.driven,
+        "the Conversation waiting on the Set takes a place",
+    );
+
+    let pressed = press(
+        &a.workbench,
+        &format!("/api/ui/conversations/{conversation}/resume"),
+        None,
+    )
+    .await;
+    assert_eq!(pressed, "\"AlreadyDriven\"", "the Set is what drives it");
+    assert_eq!(
+        a.sets_on(conversation).await,
+        [asked.set_id],
+        "and nothing was asked twice",
+    );
+
+    picks(&a, asked.set_id, 1).await;
+
+    a.view_saying(conversation, |drawn| {
+        drawn.transferred.is_some() && !drawn.driven
+    })
+    .await;
+}
+
+/// **A restart re-finds the open Set**: the startup resume reaches the same
+/// launch, waits on the Set rather than putting a second, and holds the place
+/// again; answering it afterwards still starts the task.
+#[tokio::test]
+async fn a_restart_waits_on_the_open_set_and_its_answer_still_starts_the_task() {
+    let spill = tempfile::tempdir().unwrap();
+    let (mut a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+    let asked = verksteads_set(&a, conversation).await;
+
+    a.restarted(
+        &works_each_task_on("A", ONE_WINDOWS_TASK),
+        spill.path(),
+        rescuing(),
+    );
+
+    // And `verkstead done` relayed to the process now serving.
+    let _signalling = a.signalling();
+
+    a.view_saying(conversation, |drawn| drawn.driven).await;
+    assert_eq!(
+        a.sets_on(conversation).await,
+        [asked.set_id],
+        "the restart put no second Set",
+    );
+
+    picks(&a, asked.set_id, 2).await;
+
+    a.latest_capture_saying(conversation, "finishing on A")
+        .await;
+    assert!(
+        printed_on(&a, conversation)
+            .await
+            .contains("worked task 01 on A"),
+        "the answer starts the task here",
+    );
+    assert_eq!(a.sets_on(conversation).await, [asked.set_id]);
+}
+
+/// **The stall sweep leaves it alone**: a Conversation waiting on its
+/// placement Set is waiting on the human, not undriven, and sweep after sweep
+/// passes it over.
+#[tokio::test]
+async fn the_stall_sweep_leaves_a_conversation_waiting_on_its_set_running() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = planned_across_at(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+        Pace {
+            stalls: Duration::from_millis(100),
+            ..rescuing()
+        },
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+    verksteads_set(&a, conversation).await;
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    assert!(
+        store::stopped(&a.pool, conversation)
+            .await
+            .unwrap()
+            .is_none(),
+        "ten sweeps have passed and none stopped it",
+    );
+    assert!(a.view(conversation).await.driven);
 }
 
 /// **Permitted ones, none able to take it**: the Notice names each with what

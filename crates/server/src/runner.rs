@@ -912,6 +912,13 @@ async fn nothing_left(
 ///   when it came to push, and the halt is what reaches the human on their
 ///   phone.
 async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
+    // A run the human is still being asked where to start has not started, and
+    // its open Set is the wait — a restart reaching it included. See
+    // [`crate::placing::inline_waiting`].
+    if crate::placing::inline_waiting(&state, conversation_id).await {
+        return;
+    }
+
     let Some((_, branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
         return;
     };

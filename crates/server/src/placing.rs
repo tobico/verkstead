@@ -31,9 +31,12 @@
 //! **Where devices of the platform are linked and none is permitted, the human
 //! is asked** (ADR-0029, *Verkstead asks with a Question Set of its own*): a
 //! Set of Verkstead's own offering *Move to* each of them against *Run it here*,
-//! and the runner stands down. Nothing waits on it here; the answer is acted on
-//! as it is taken — see [`answered`] — and a launch after *Run it here* runs
-//! the work here without asking again.
+//! and the runner stands down. The open Set is the wait: it holds the
+//! Conversation on the drivers register until it settles — see
+//! [`crate::own_sets::wait`] — and any launch reaching the same work while it is
+//! open, a restart's included, waits on it again rather than asking twice. The
+//! answer is acted on as it is taken — see [`answered`] — and a launch after
+//! *Run it here* runs the work here without asking again.
 //!
 //! **Where no device will do otherwise, the task runs here**, and a Notice says
 //! why — see [`Unplaced`], one case for each reason, each its own sentence,
@@ -70,7 +73,8 @@ pub(crate) enum Placed {
     Moving,
 
     /// Stand down: the human is asked where it runs, with a Question Set of
-    /// Verkstead's own, and their answer launches it — see [`answered`].
+    /// Verkstead's own — or was already, and has not answered — and their answer
+    /// launches it — see [`answered`].
     Asked,
 }
 
@@ -294,9 +298,15 @@ async fn place(state: &AppState, conversation_id: i64, work: Work, wants: Platfo
     }
 
     // Where the human was asked about this work and said to run it here, that
-    // is where it runs — the answer's own Resume reaching this launch included.
-    if run_here(state, conversation_id, &work).await {
-        return Placed::Here;
+    // is where it runs — the answer's own launch reaching here included. And
+    // where they were asked and have not answered, the open Set is the wait.
+    match asked_before(state, conversation_id, &work).await {
+        Before::RunHere => return Placed::Here,
+        Before::Open(set_id) => {
+            crate::own_sets::wait(state, conversation_id, set_id).await;
+            return Placed::Asked;
+        }
+        Before::Nothing => {}
     }
 
     match placing(state, conversation_id, &work, wants).await {
@@ -362,8 +372,9 @@ async fn unplaced(
 /// *Verkstead asks with a Question Set of its own*): one *Move to* for each, in
 /// the order they would be tried, and *Run it here*.
 ///
-/// On the Timeline, on the badge and on a phone as any Set is. Nothing waits
-/// on it here: the answer is what launches the work — see [`answered`].
+/// On the Timeline, on the badge and on a phone as any Set is, and held on the
+/// drivers register while it is open — see [`crate::own_sets::wait`]. The
+/// answer is what launches the work — see [`answered`].
 async fn ask(
     state: &AppState,
     conversation_id: i64,
@@ -392,6 +403,8 @@ async fn ask(
     let created = store::ask_on_our_own(&state.pool, conversation_id, &set, &about)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Conversation {conversation_id} is not there"))?;
+
+    crate::own_sets::wait(state, conversation_id, created.id).await;
 
     crate::push::announce(&state.pool, created.id, &set);
     state.nudges.announce(verkstead_schema::Nudge::Set {
@@ -466,30 +479,62 @@ fn both(names: &[String]) -> String {
     }
 }
 
-/// Whether the human, asked where `work` runs, said to run it here: the newest
-/// Set of Verkstead's own about it answered with *Run it here*.
-async fn run_here(state: &AppState, conversation_id: i64, work: &Work) -> bool {
+/// What the human has already been asked about some work, as the newest Set
+/// of Verkstead's own about it stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Before {
+    /// Answered *Run it here*.
+    RunHere,
+
+    /// Neither answered nor locked: the work is waiting on it.
+    Open(i64),
+
+    /// Never asked, or answered otherwise, or locked unanswered: asked afresh.
+    Nothing,
+}
+
+/// How the newest Set of Verkstead's own about `work` stands.
+async fn asked_before(state: &AppState, conversation_id: i64, work: &Work) -> Before {
     let own = match store::own_sets(&state.pool, conversation_id).await {
         Ok(own) => own,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading the Sets Verkstead asked failed");
-            return false;
+            return Before::Nothing;
         }
     };
 
-    let newest = own.into_iter().rev().find_map(|own| match &own.asking {
-        store::OwnAsking::Placing {
-            work: placed,
-            moves,
-            ..
-        } if Work::from_placed(placed) == *work => Some((own.response, moves.len())),
-        store::OwnAsking::Placing { .. } => None,
+    let newest = own.into_iter().rev().find(|own| match &own.asking {
+        store::OwnAsking::Placing { work: placed, .. } => Work::from_placed(placed) == *work,
     });
 
-    matches!(
-        newest,
-        Some((Some(response), moves)) if picked(&response) == Some(moves as u32 + 1)
-    )
+    let Some(newest) = newest else {
+        return Before::Nothing;
+    };
+
+    let store::OwnAsking::Placing { moves, .. } = &newest.asking;
+
+    match (&newest.response, newest.locked) {
+        (Some(response), _) if picked(response) == Some(moves.len() as u32 + 1) => Before::RunHere,
+        (None, false) => Before::Open(newest.set_id),
+        _ => Before::Nothing,
+    }
+}
+
+/// Whether the inline run of `conversation_id` is waiting on a Set of
+/// Verkstead's own asking where it runs — and if so, wait on it.
+///
+/// What a Resume of the run asks before launching anything, a restart's
+/// included: a Resume never places the run, but one the human has not yet
+/// answered about has not started, and starting it here would be answering for
+/// them.
+pub(crate) async fn inline_waiting(state: &AppState, conversation_id: i64) -> bool {
+    match asked_before(state, conversation_id, &Work::Inline).await {
+        Before::Open(set_id) => {
+            crate::own_sets::wait(state, conversation_id, set_id).await;
+            true
+        }
+        Before::RunHere | Before::Nothing => false,
+    }
 }
 
 /// The Option picked on a Set of Verkstead's, where one was.
@@ -507,6 +552,10 @@ fn picked(response: &verkstead_schema::Response) -> Option<u32> {
 /// own account, the far end's arrival launching it; *Run it here* launches it
 /// here, by the Resume a press would make.
 ///
+/// `held` is the Set's hold on the drivers register, where it had one: a
+/// launch here is handed it, so the place passes to the run without coming
+/// free in between, and a move lets it go once it is asked for.
+///
 /// An answer picking neither is the human not deciding, and nothing is guessed
 /// at: the work is left waiting, a Notice saying how it stands.
 pub(crate) async fn answered(
@@ -514,6 +563,7 @@ pub(crate) async fn answered(
     conversation_id: i64,
     asking: &store::OwnAsking,
     response: &verkstead_schema::Response,
+    held: Option<crate::drivers::Driving>,
 ) {
     let store::OwnAsking::Placing { work, wants, moves } = asking;
     let work = Work::from_placed(work);
@@ -552,9 +602,18 @@ pub(crate) async fn answered(
         }
 
         Some(n) if n == moves.len() + 1 => {
-            match crate::resume::resume(state, conversation_id, crate::resume::Resuming::Pressed)
-                .await
-            {
+            // The launch takes the Set's registration over where it held one,
+            // which is also what keeps the press's own check from reading that
+            // registration as something already driving the work.
+            let resumed = match held {
+                Some(held) => crate::resume::landed(state, conversation_id, held).await,
+                None => {
+                    crate::resume::resume(state, conversation_id, crate::resume::Resuming::Pressed)
+                        .await
+                }
+            };
+
+            match resumed {
                 Ok(resumed) => tracing::info!(
                     conversation_id,
                     ?resumed,

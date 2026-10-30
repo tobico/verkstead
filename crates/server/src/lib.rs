@@ -514,6 +514,10 @@ pub(crate) struct AppState {
     /// it is the driver, and this is what it is holding it for.
     joins: joins::Joins,
 
+    /// And the open Sets of Verkstead's own being waited on, each holding a
+    /// driver registration while it is — see [`own_sets::Holds`].
+    own_holds: own_sets::Holds,
+
     /// And what each running session is to be ended on the Done signal for,
     /// where something is waiting on one — see [`done`].
     signals: done::Signals,
@@ -1653,6 +1657,7 @@ fn standing(
         followers: followers::Followers::new(),
         drivers: drivers::Drivers::new(),
         joins: joins::Joins::new(),
+        own_holds: own_sets::Holds::new(),
         signals: done::Signals::new(),
         updates,
 
