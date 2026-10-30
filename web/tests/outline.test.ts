@@ -70,7 +70,7 @@ function everySection(): SetView {
     attachments: [],
     additions: [],
     servers: [],
-    addable: { repos: [], read_only: [], devices: [], branch: "" },
+    addable: { repos: [], read_only: [], devices: [], cluster: null, branch: "" },
   };
 }
 

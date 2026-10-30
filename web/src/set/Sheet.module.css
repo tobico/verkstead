@@ -442,8 +442,6 @@
   color: var(--ink-soft);
 }
 
-/* What picking does, said once for the whole chooser — and what ticking does,
-   said the same way under the Nothing-else option. */
 /* What the work wants, under the three directions: read as the rest of the
    card's prose is, at the measure, the platform the only weight in it. */
 .directionPick .wants {
@@ -451,6 +449,69 @@
   max-width: var(--measure);
 }
 
+/* The same, on a clustered Verkstead: the *May be transferred to* ticks, headed
+   as an Attach menu's group is, a want's reason over the devices of its
+   platform. */
+.placing {
+  margin: 0.75rem 0 0;
+}
+
+.placingHead {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.wanted {
+  margin: 0.5rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.wanted .wants {
+  margin: 0;
+}
+
+/* A device with nothing to tick, said in a line where its tick would be. */
+.placed {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* One tick, drawn as the Nothing-else option's row is: the same kind of
+   control, a checkbox the viewer injects. */
+.tick {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tick input {
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.tick:has(input:checked) {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.tick:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* What picking does, said once for the whole chooser — and what ticking does,
+   said the same way under the Nothing-else option. */
 .directionPick .semantics,
 .ending .semantics {
   margin: 0.75rem 0 0;

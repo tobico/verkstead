@@ -141,6 +141,19 @@ read_only: Array<CompanionView>,
  */
 devices: Array<DeviceIdentity>, 
 /**
+ * Every device of the cluster, this one included, each with the platform
+ * its OS word marks it as and where it stands with this Conversation —
+ * which is what the direction chooser draws its ticks from, under a
+ * proposal that wants a platform.
+ *
+ * Beside `devices` rather than instead of it, because that list leaves
+ * out what is permitted already and the device the work is on, and the
+ * chooser has to tell *no Windows device is linked* from *the Windows
+ * device is permitted already*. `null` where this Verkstead is in no
+ * cluster, and on a share.
+ */
+cluster: Array<ClusterDevice> | null, 
+/**
  * What a read-write branch left blank comes to: the Conversation's own
  * branch, which is what the card's branch field is filled in with.
  */
@@ -1170,6 +1183,17 @@ parent: string,
  * where there is one — see [`Registration::author`].
  */
 author?: string, };
+
+/**
+ * One device of the cluster, as the direction chooser places the work by it.
+ */
+export type ClusterDevice = { device: DeviceIdentity, 
+/**
+ * The platform its OS word is the mark of — *Linux (WSL)* being a Linux —
+ * or `null` for a word this build has no mark for, which no proposal can
+ * want.
+ */
+platform: WantedPlatform | null, standing: DeviceStanding, };
 
 /**
  * One pull request the comment landed on.
@@ -2644,6 +2668,11 @@ version: string | null,
  * the same way rather than refusing the whole answer.
  */
 install: InstallKind | null, };
+
+/**
+ * Where one device of the cluster stands with a Conversation.
+ */
+export type DeviceStanding = "Tickable" | "Permitted" | "WorkIsHere";
 
 /**
  * The **Devices** list, as the Remote access pane reads it off this machine.

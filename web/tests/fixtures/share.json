@@ -234,6 +234,7 @@
     {
       "addable": {
         "branch": "",
+        "cluster": null,
         "devices": [],
         "read_only": [],
         "repos": []

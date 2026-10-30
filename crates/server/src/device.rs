@@ -969,6 +969,25 @@ impl Devices {
         self.reading.os()
     }
 
+    /// This device as a row among its members: its id, fingerprint, name and
+    /// OS word, read at the moment of asking.
+    ///
+    /// No addresses, where [`Self::listing`]'s carries them: reading those asks
+    /// Tailscale, and what this is for — the direction chooser placing the work
+    /// by platform — draws a name and a mark and nothing else.
+    pub(crate) fn this(&self) -> DeviceIdentity {
+        DeviceIdentity {
+            device: self.device.id().to_owned(),
+            fingerprint: self.device.fingerprint().to_owned(),
+            name: self.name(),
+            os: self.os(),
+            addresses: Vec::new(),
+            kept_by: None,
+            version: self.version(),
+            install: Some(self.install()),
+        }
+    }
+
     /// The membership itself, for the readings that are about who this device
     /// is linked to rather than about what it is.
     ///

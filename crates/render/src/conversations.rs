@@ -4576,9 +4576,50 @@ pub struct AddableView {
     /// on, and not one ticked. Empty with no cluster.
     pub devices: Vec<crate::DeviceIdentity>,
 
+    /// Every device of the cluster, this one included, each with the platform
+    /// its OS word marks it as and where it stands with this Conversation —
+    /// which is what the direction chooser draws its ticks from, under a
+    /// proposal that wants a platform.
+    ///
+    /// Beside `devices` rather than instead of it, because that list leaves
+    /// out what is permitted already and the device the work is on, and the
+    /// chooser has to tell *no Windows device is linked* from *the Windows
+    /// device is permitted already*. `null` where this Verkstead is in no
+    /// cluster, and on a share.
+    pub cluster: Option<Vec<ClusterDevice>>,
+
     /// What a read-write branch left blank comes to: the Conversation's own
     /// branch, which is what the card's branch field is filled in with.
     pub branch: String,
+}
+
+/// One device of the cluster, as the direction chooser places the work by it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ClusterDevice {
+    pub device: crate::DeviceIdentity,
+
+    /// The platform its OS word is the mark of — *Linux (WSL)* being a Linux —
+    /// or `null` for a word this build has no mark for, which no proposal can
+    /// want.
+    pub platform: Option<WantedPlatform>,
+
+    pub standing: DeviceStanding,
+}
+
+/// Where one device of the cluster stands with a Conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum DeviceStanding {
+    /// It may be ticked: the work could be permitted to move there.
+    Tickable,
+
+    /// The work may be transferred there already: it was ticked before, or it
+    /// is the device the Conversation was drafted on.
+    Permitted,
+
+    /// It is the device the work is on.
+    WorkIsHere,
 }
 
 /// And of taking a pick off again, refused by the same freezes.
