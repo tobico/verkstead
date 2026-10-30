@@ -2959,12 +2959,12 @@ impl Sessions {
         // under whichever of the two it is primed with — the carried note too,
         // because a session carried on here is told where it may go from here
         // rather than from where it came. Here for the listings above's reason,
-        // and read from this device's side: see [`crate::transfers::may_go_to`],
+        // and read from this device's side: see [`crate::transfers::cluster`],
         // and [`skills::transferable`], which says nothing on a Verkstead of one
         // device.
         let prompt = skills::transferable(
             &prompt,
-            crate::transfers::may_go_to(pool, devices, conversation_id)
+            crate::transfers::cluster(pool, devices, conversation_id)
                 .await
                 .as_ref(),
         );

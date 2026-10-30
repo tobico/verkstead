@@ -1426,7 +1426,7 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
 /// call*; ADR-0029, *Consent stays off by default, and is told*).
 ///
 /// `cluster` is read **from this device's side** — see
-/// [`crate::transfers::may_go_to`]. It opens on this device, by name, id and the
+/// [`crate::transfers::cluster`]. It opens on this device, by name, id and the
 /// OS word its Device Reading spells, which is what gives *something this
 /// platform cannot do* a referent. Then every other member, the permitted ones
 /// first: each with its id as well as its name, because a name is a hostname

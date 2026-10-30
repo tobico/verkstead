@@ -1703,7 +1703,7 @@ pub(crate) async fn transferring(state: &AppState, conversation_id: i64) -> Opti
 /// member but this device. A read that fails is `None` too, said in the log: a
 /// prompt that says nothing about moving is a session that stays, which is the
 /// way round that loses nothing.
-pub(crate) async fn may_go_to(
+pub(crate) async fn cluster(
     pool: &sqlx::SqlitePool,
     devices: Option<&crate::device::Devices>,
     conversation_id: i64,
@@ -1742,7 +1742,7 @@ pub(crate) async fn may_go_to(
     }
 }
 
-/// The cluster as [`may_go_to`] reads it from this device's side: this device,
+/// The cluster as [`cluster`] reads it from this device's side: this device,
 /// and the others in the order the prompt names them.
 pub(crate) struct Cluster {
     pub(crate) name: String,
@@ -1758,7 +1758,7 @@ pub(crate) struct Placed {
     pub(crate) permitted: bool,
 }
 
-/// [`may_go_to`]'s rule, with nothing to read: every member but `here`, the
+/// [`cluster`]'s rule, with nothing to read: every member but `here`, the
 /// permitted ones first — the drafting device, it being the one that is always
 /// there, then the ticks in the order they were made — and the rest after them
 /// by name.
