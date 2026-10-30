@@ -275,7 +275,8 @@ async fn hold(state: &AppState, conversation_id: i64) {
 /// nothing is, the chain's links and foot. What is said while it waits is said
 /// exactly as [`hold`] says it, and a home that does not answer is a wait of its
 /// own, said once, and asked again at the same pace: the stage goes on the moment
-/// home answers.
+/// home answers. A home that answers and refuses is held for the same way, and
+/// said as what it is — see [`Heard`].
 async fn held_away(
     state: &AppState,
     conversation_id: i64,
@@ -287,9 +288,9 @@ async fn held_away(
 
     let mut waiting: Option<Waiting> = None;
 
-    // What was last said, as [`hold`] keeps it — and a home that would not answer
-    // is a third thing it can have said.
-    let mut said: Option<Option<Vec<Ahead>>> = None;
+    // What was last said, as [`hold`] keeps it — and home not answering, or
+    // refusing, are two more things it can have said.
+    let mut said: Option<Heard> = None;
 
     loop {
         let answered = ask_home(state, home).await;
@@ -335,33 +336,42 @@ async fn held_away(
         }
 
         let now = match answered {
-            Ok(join) => Some(
+            Ok(join) => Heard::Ahead(
                 join.ahead
                     .into_iter()
                     .map(|ahead| Ahead {
                         stage: ahead.stage,
                         joined: ahead.joined,
                     })
-                    .collect::<Vec<_>>(),
+                    .collect(),
             ),
 
             Err(refusal) => {
                 tracing::info!(
                     conversation_id,
                     home = %home.device,
+                    answered = refusal.answered(),
                     "a stage away from home could not ask home whether it may join, and will again: {}",
                     refusal.saying,
                 );
-                None
+
+                match refusal.answered() {
+                    true => Heard::Refused(refusal.saying),
+                    false => Heard::Unanswered,
+                }
             }
         };
 
         if said.as_ref() != Some(&now) {
             match &now {
-                Some(ahead) => say(state, conversation_id, &of.roadmap, ahead).await,
-                None => {
+                Heard::Ahead(ahead) => say(state, conversation_id, &of.roadmap, ahead).await,
+                Heard::Unanswered => {
                     let named = relaying::called(state.devices.as_ref(), &home.device).await;
                     unanswered(state, conversation_id, &of.roadmap, &named).await;
+                }
+                Heard::Refused(saying) => {
+                    let named = relaying::called(state.devices.as_ref(), &home.device).await;
+                    refused(state, conversation_id, &of.roadmap, &named, saying).await;
                 }
             }
 
@@ -370,6 +380,22 @@ async fn held_away(
 
         tokio::time::sleep(state.sessions.pace().joins).await;
     }
+}
+
+/// What a stage away from home last heard from home about joining, which is what
+/// [`held_away`] says on the Timeline as it changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Heard {
+    /// Home answered, and these stages are ahead of it.
+    Ahead(Vec<Ahead>),
+
+    /// Home could not be reached, or is no longer a member.
+    Unanswered,
+
+    /// Home answered and refused, in the sentence [`relaying`] put it in — which
+    /// says the release gap where there is one, the likeliest reason a home
+    /// would not know the question.
+    Refused(String),
 }
 
 /// The most home's answer may be: a chain's worth of branch names.
@@ -911,6 +937,21 @@ async fn unanswered(state: &AppState, conversation_id: i64, roadmap: &str, home:
     let markdown = format!(
         "**Waiting to join.** Every task is done, and the finish is held until **{home}** \
          answers: it keeps the `{roadmap}` roadmap, and says when this stage joins.",
+    );
+
+    noted(state, conversation_id, &markdown).await;
+}
+
+/// Say on the Timeline that a stage away from home is waiting to join on a home
+/// that answered and refused, and what it said.
+///
+/// Still a wait rather than a refusal of the finish: the finish runs here, only
+/// home can let it in, and home is asked again until it does. What changes is
+/// that nobody is told home is not answering when it is.
+async fn refused(state: &AppState, conversation_id: i64, roadmap: &str, home: &str, saying: &str) {
+    let markdown = format!(
+        "**Waiting to join.** Every task is done, and the finish is held until **{home}** \
+         lets this stage join: it keeps the `{roadmap}` roadmap. {saying}",
     );
 
     noted(state, conversation_id, &markdown).await;

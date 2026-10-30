@@ -805,6 +805,12 @@ pub(crate) fn as_json() -> HeaderMap {
 pub struct Refusal {
     pub status: StatusCode,
     pub saying: String,
+
+    /// Whether the far end answered: refused the call, or said something this
+    /// device could not read. Unset for one that could not be reached, for one
+    /// that is no longer a member, and for this device's own trouble — see
+    /// [`Refusal::answered`].
+    answered: bool,
 }
 
 impl Refusal {
@@ -814,6 +820,7 @@ impl Refusal {
         Refusal {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             saying,
+            answered: false,
         }
     }
 
@@ -823,7 +830,29 @@ impl Refusal {
         Refusal {
             status: StatusCode::BAD_GATEWAY,
             saying,
+            answered: false,
         }
+    }
+
+    /// And a device on the other side of a link that **answered**, and refused
+    /// or said something this device cannot read. The far end's trouble as
+    /// [`Refusal::theirs`] is, and told apart from it by [`Refusal::answered`].
+    pub(crate) fn answered_by_them(saying: String) -> Refusal {
+        Refusal {
+            answered: true,
+            ..Refusal::theirs(saying)
+        }
+    }
+
+    /// Whether the far end answered rather than going unheard.
+    ///
+    /// Asked where *not answering* is a wait and *answering no* is not the same
+    /// wait: a stage away from home holds its finish either way, but says which
+    /// on its Timeline — see [`crate::joins`]. A member that answered is one a
+    /// sentence about its release may explain, which is why [`apart`] is said on
+    /// exactly these.
+    pub fn answered(&self) -> bool {
+        self.answered
     }
 
     /// Whether this is the far end's trouble rather than this device's.
@@ -877,7 +906,7 @@ pub(crate) async fn put_to(
     match devices.relay(device, call).await {
         Ok(answered) if answered.status().is_success() => Ok(answered),
 
-        Ok(answered) => Err(Refusal::theirs(
+        Ok(answered) => Err(Refusal::answered_by_them(
             apart(
                 Some(devices),
                 device,
@@ -948,7 +977,7 @@ async fn unreadable(devices: Option<&Devices>, device: &str, why: String) -> Ref
         called(devices, device).await,
     );
 
-    Refusal::theirs(apart(devices, device, said).await)
+    Refusal::answered_by_them(apart(devices, device, said).await)
 }
 
 /// What a member that answered and refused is told as: `said`, and after it the

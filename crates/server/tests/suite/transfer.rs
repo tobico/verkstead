@@ -7115,6 +7115,56 @@ async fn a_finish_away_waits_on_a_home_that_is_asleep_and_goes_on_when_it_answer
     told_at_the_finish(&told).await;
 }
 
+/// **A home that answers and refuses is said as what it is**: A's tombstone
+/// names a device that is not B, so A refuses B's ask to join, and B's Timeline
+/// says A refused rather than that A is not answering. The finish is held all
+/// the same, and goes on once A lets it in.
+#[tokio::test]
+async fn a_finish_away_refused_by_home_says_home_refused_and_goes_on_when_let_in() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    // A's tombstone pointing at a machine nobody can reach, so the trail from it
+    // never leads to B.
+    let pointing_at = |device: &str| store::Transferred {
+        device: device.to_owned(),
+        id: away.copy,
+    };
+    store::transfer_away(&away.a.pool, away.tombstone, &pointing_at(C))
+        .await
+        .unwrap();
+
+    away.finishes().await;
+
+    let said = away.b.notice_saying(away.copy, "Waiting to join").await;
+    let (machine, _) = this_machine();
+
+    assert!(
+        said.contains(&format!(
+            "held until <strong>{machine}</strong> lets this stage join"
+        )),
+        "the Timeline says home is holding it: {said}",
+    );
+    assert!(
+        said.contains("refused it: 409 Conflict"),
+        "and what home said: {said}",
+    );
+    assert!(
+        !said.contains("answers:"),
+        "rather than that home is not answering: {said}",
+    );
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(!told.exists(), "and the finish is held while home refuses");
+
+    store::transfer_away(&away.a.pool, away.tombstone, &pointing_at(B))
+        .await
+        .unwrap();
+
+    told_at_the_finish(&told).await;
+}
+
 /// **Home's queue orders the far stage by when it asked to join**, against the
 /// stages finishing at home: a home stage queued first goes first, and the far
 /// stage waits on it — said on the far Timeline — until it settles.
