@@ -31,7 +31,7 @@ stages here.
 ## Stages
 
 - [x] 01: Every device in every prompt — [brief](01-every-device-in-every-prompt.md) — no dependencies
-- [ ] 02: What the work wants, on the chooser — [brief](02-what-the-work-wants-on-the-chooser.md) — no dependencies *(in progress: `roadmaps/platform-placement/02-what-the-work-wants-on-the-chooser`)*
+- [x] 02: What the work wants, on the chooser — [brief](02-what-the-work-wants-on-the-chooser.md) — no dependencies
 - [ ] 03: Tasks placed by platform — [brief](03-tasks-placed-by-platform.md) — after 02
 - [ ] 04: Verkstead's own Question Set — [brief](04-verksteads-own-question-set.md) — after 03
 - [ ] 05: Home drives a roadmap across devices — [brief](05-home-drives-a-roadmap-across-devices.md) — no dependencies
