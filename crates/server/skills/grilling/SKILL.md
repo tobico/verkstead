@@ -56,6 +56,29 @@ proposal:
 - **`rationale` is markdown, and the human reads it.** It is shown beside the
   three choices as your reasoning for the one you picked, so write it as an
   argument rather than a label. A `proposal` without one is refused.
+- **`wants` says which platforms the work wants**, and is left out of most
+  proposals. Write an entry only where some of the work can be verified on one
+  operating system and nowhere else: code under a platform `cfg`, a platform's
+  own component — ConPTY, AppContainer, an installer, a bundle — or a suite that
+  only runs there. Naming a platform in the Brief wants nothing, and neither
+  does a change to shared code with a cross-platform suite. `platform` is
+  `linux`, `macos` or `windows`, and any other word is refused:
+
+  ```yaml
+  proposal:
+    direction: roadmap
+    rationale: |
+      …
+    wants:
+      - platform: windows
+        for: the ConPTY terminal stage and its tests
+  ```
+
+  `for` is markdown, and the human reads it: the chooser draws it beside the
+  tick of each device of that platform the work may be moved to, so finish the
+  sentence *This work wants Windows for …*. An entry without one is refused,
+  and so is a platform named twice: give each one entry, every reason in its
+  `for`. A proposal with no `wants` draws the chooser as it always has.
 - **Ask no question about whether to go ahead.** The workbench draws the
   chooser on any Set carrying a `proposal` — all three directions, yours marked
   as the recommendation, your rationale beside them — and says what picking one

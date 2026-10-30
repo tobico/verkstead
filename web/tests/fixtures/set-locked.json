@@ -2,6 +2,7 @@
   "Set": {
     "addable": {
       "branch": "solid-viewer",
+      "cluster": null,
       "devices": [],
       "read_only": [],
       "repos": []

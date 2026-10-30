@@ -51,6 +51,7 @@ import { AskText } from "./AskText";
 import { Contents, navigation } from "./Contents";
 import { Diff } from "./Diff";
 import { Postscript } from "./Postscript";
+import { Wanting } from "./Wanting";
 import styles from "./Sheet.module.css";
 import { Badge, Standing } from "./Standing";
 import { drawDiagrams } from "./diagrams";
@@ -518,6 +519,7 @@ function Chosen(props: {
             )}
           </For>
         </ul>
+        <Wanting wants={props.proposal.wants} />
         <Show when={props.picked === null}>
           <p class={styles.semantics}>
             No direction was picked, so the proposal went back to the agent.

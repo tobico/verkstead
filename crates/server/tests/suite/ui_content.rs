@@ -1649,12 +1649,28 @@ fn wrap_up_proposal() -> QuestionSet {
                         - **Inline** would be one session holding all five at once\n\
                         - **A roadmap** is more ceremony than two days of work needs\n"
                 .to_owned(),
+            wants: Vec::new(),
         }),
         project: Some("verkstead".to_owned()),
         branch: Some("usage-limits".to_owned()),
         diff: None,
         diffs: Vec::new(),
     }
+}
+
+/// The closing proposal again, wanting Windows for a part of the work that can
+/// be verified nowhere else.
+fn wanting_windows() -> QuestionSet {
+    let mut set = wrap_up_proposal();
+    set.proposal
+        .as_mut()
+        .expect("the wrap-up carries a proposal")
+        .wants
+        .push(verkstead_schema::Want {
+            platform: verkstead_schema::WantedPlatform::Windows,
+            reason: "the ConPTY stage and its `cfg(windows)` tests".to_owned(),
+        });
+    set
 }
 
 /// The human accepting it, which is picking a direction on the chooser — and
@@ -1841,6 +1857,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let (_dir, pool, app) = fresh_app().await;
     let (_, json) = answered_set(&app, &pool, &wrap_up_proposal(), &accepting_the_proposal()).await;
     write("set-proposed.json", &pinned(&json));
+
+    // The same closing Set wanting a platform, which is what puts the line
+    // saying so under the three directions.
+    let (_dir, pool, app) = fresh_app().await;
+    let (_, json) = set_json(&app, &pool, &wanting_windows()).await;
+    write("set-wanting.json", &json);
 
     // A round of a follow-up, which is one of the two kinds whose closing
     // section carries the Nothing-else option. An ordinary Set in every other
