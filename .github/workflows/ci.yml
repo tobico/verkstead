@@ -33,9 +33,10 @@ jobs:
   # only: the repository is public, and the maintainer is an individual for
   # whom a larger runner is not on the table.
   #
-  # **The budget is met.** On the last run measured (run 40986546310) the five
-  # legs took 4m45 to 7m12, where the one job had taken 20 to 25 minutes, and
-  # `timeout-minutes` is fifteen, which catches a hang rather than a slow leg.
+  # **The budget is met.** On the two runs measured (runs 40986546310 and
+  # 40988176799) the five legs took 4m45 to 8m58, where the one job had taken
+  # 20 to 25 minutes, and `timeout-minutes` is fifteen, which catches a hang
+  # rather than a slow leg.
   #
   # **The ledger.** Each lever lands as a commit of its own on one pull request
   # (#285 is the issue it closes), and its row is the run of that commit. A row
@@ -51,6 +52,7 @@ jobs:
   # | Format and clippy in `Lint`         | 40981767764 | — + 21m10 = 21m49     | —                     |
   # | nextest, one job                    | 40984244052 | 1m48 + 16m04 = 18m33  | —                     |
   # | The legs, five of them              | 40986546310 | 1m41 + 4m47 = 7m12    | 1m51 + 2m23 = 4m45    |
+  # | The same, measured again            | 40988176799 | 2m41 + 5m35 = 8m58    | 2m30 + 2m48 = 5m59    |
   #
   # What each lever came to, row by row:
   #
@@ -99,6 +101,13 @@ jobs:
   # | 4   | 2m15 + 3m01 = 5m59    |
   # | 5   | 2m31 + 3m40 = 6m45    |
   #
+  # Measured again on the next commit (run 40988176799), which changed
+  # nothing a leg runs, the legs took 5m59 to 8m58. Every build was slower, at
+  # 2m25 to 2m41, and leg 2 was again the slowest, with its tests up from 4m47
+  # to 5m35. It was the same leg because `slice` deals the same list out the
+  # same way every run, so leg 2 always draws the long-stop tests. Leg by leg,
+  # 6m50, 8m58, 5m59, 6m07 and 6m58.
+  #
   # `slice` partitioning deals the tests out one at a time across every binary,
   # so each leg gets its share of each suite rather than whole binaries, and
   # what `.config/nextest.toml` holds serial is serial per leg, each leg being
@@ -119,10 +128,9 @@ jobs:
       # A red leg does not cancel the others: what the rest of the suite says
       # is worth having from the same run.
       fail-fast: false
-      # Five legs — the ledger above says why that many, and that the slowest
-      # came in near seven. The count is said
-      # three times, and the three move together: this list, the job's name,
-      # and the `slice:` of the test step.
+      # Five legs — the ledger above says why that many, and what the slowest
+      # came in at. The count is said three times, and the three move
+      # together: this list, the job's name, and the `slice:` of the test step.
       matrix:
         partition: [1, 2, 3, 4, 5]
     steps:
@@ -213,10 +221,10 @@ jobs:
       # the tests. Every leg builds for itself: a nextest archive built once
       # and downloaded by the legs was ruled out for the reason the `Windows`
       # job ruled it out, an upload and a download on free parallel runners
-      # costing wall clock rather than saving it. The test binaries and nothing else: not `--all-targets`,
-      # which builds the server crate's `examples/` as well — developer probes
-      # that no test runs. The CLI's suite gets the `verkstead` it runs from
-      # cargo building that test target.
+      # costing wall clock rather than saving it. The test binaries and
+      # nothing else: not `--all-targets`, which builds the server crate's
+      # `examples/` as well — developer probes that no test runs. The CLI's
+      # suite gets the `verkstead` it runs from cargo building that test target.
       - name: Build
         run: cargo build --workspace --tests
 
