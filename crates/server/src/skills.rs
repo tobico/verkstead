@@ -1439,7 +1439,8 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
 /// **Every member, permitted or not.** Nothing is ticked by default, so a
 /// list of the permitted ones alone is, on most Conversations, a session never
 /// told the Windows machine it needs exists — and one never told cannot ask for
-/// it. So a device not permitted is named as one, with how to ask for it.
+/// it. So a device not permitted is named as one, and calling for it is a
+/// request the human is asked about (ADR-0029).
 ///
 /// **Said, rather than left neutral like the listings above it**, because what
 /// the call is for is not in the Brief: a list with no word on when to use it
@@ -1479,15 +1480,17 @@ pub(crate) fn transferable(prompt: &str, cluster: Option<&crate::transfers::Clus
          (id `{}`), {}. The other devices of the human's cluster, and whether this \
          Conversation's work may be moved onto each:\n\n{}\n\nWhen the work needs \
          something this platform cannot do — building or testing for another \
-         operating system, say — run `verkstead transfer <device>`, naming a \
-         permitted one by its name or its id. Accepted, this session is ended once \
-         the turn is over and the work carries on over there: the same conversation, \
-         the branch and the Worktree with it. Refused, it exits non-zero and says \
-         why, and nothing moves — pick another device or ask the human.\n\nA device \
-         not permitted yet is one the human has not ticked for this Conversation. \
-         Where the work needs one, ask for it with `verkstead ask`, saying why: the \
-         human ticks it from the Set's Attach menu, under *May be transferred to*, \
-         and once the Set is answered `verkstead transfer` can name it. `verkstead \
+         operating system, say — run `verkstead transfer <device>`, naming it by \
+         its name or its id. Accepted, this session is ended once the turn is \
+         over. To a permitted device that answers, the work carries on over there: \
+         the same conversation, the branch and the Worktree with it.\n\nTo a device \
+         not permitted yet, or permitted and not awake, the call is a request \
+         rather than a refusal: the turn ends the same way, and Verkstead asks the \
+         human with a Question Set of its own whether to move the work there. Either \
+         it moves, or this conversation carries on here with a note saying the work \
+         stays. Refused — a name that is no device's or is two devices', or a device \
+         that answers lacking something the work needs — it exits non-zero and says \
+         why, and nothing moves: pick another device or ask the human. `verkstead \
          guide` says more.\n",
         prompt.trim_end(),
         cluster.name,
@@ -1637,6 +1640,31 @@ pub(crate) fn widened(set_id: i64, title: Option<&str>, added: &[String]) -> Str
     ));
 
     note
+}
+
+/// The note a session is resumed with after the human answered **Keep it here**
+/// to the Set Verkstead asked for its own `verkstead transfer` (ADR-0029,
+/// *Verkstead asks with a Question Set of its own*).
+///
+/// [`widened`]'s occasion one along: the conversation above carried on, what
+/// changed — nothing but where the work is not going — and what to do next,
+/// which is the work it was doing, here. `title` is the Set's own, where its
+/// body could be read.
+pub(crate) fn kept(set_id: i64, title: Option<&str>) -> String {
+    let set = match title {
+        Some(title) => format!("Question Set {set_id}, *{title}*"),
+        None => format!("Question Set {set_id}"),
+    };
+
+    format!(
+        "You asked to move the work to another device, and Verkstead asked the human about it \
+         with {set}. They answered **Keep it here**: the work stays on this device, and nothing \
+         has moved. Verkstead ended the session that made the call, as an accepted call ends \
+         one, and started this one to carry it on — this is the conversation above carried on \
+         rather than a new one.\n\nCarry on with the work here. Don't call `verkstead \
+         transfer` for that device again unless something has changed; where the work still \
+         needs it, say why with `verkstead ask`.\n"
+    )
 }
 
 /// One Question Set a resumed session was idling on, said both ways round.
@@ -3695,8 +3723,9 @@ mod tests {
 
     /// CI confirms; it does not discover (ADR-0029, *What the skills say*). The
     /// three skills that build say a platform's build, suite or check is run on
-    /// that platform — moving where the prompt permits it and asking where it
-    /// does not, CI alone only where there is no device of it to ask for — and
+    /// that platform — moving where the prompt permits it, a call for one not
+    /// permitted being the ask, CI alone only where there is no device of it to
+    /// ask for — and
     /// point at the prompt's section and the Guide's rather than restating
     /// them. None of them takes the platform from a job's name.
     #[test]
@@ -3707,7 +3736,7 @@ mod tests {
             for wording in [
                 "CI confirms; it does not discover",
                 "`verkstead transfer`",
-                "`verkstead ask`",
+                "calling for one not permitted yet asks the human for it",
                 "*The devices of this cluster*",
                 "*Moving the work to another device*",
                 "is a name, not a declaration, and no device follows from it",
@@ -5442,8 +5471,8 @@ mod tests {
     }
 
     /// With nothing ticked, the Windows member is still named — not permitted
-    /// yet, and how to ask for it (ADR-0029, *Consent stays off by default, and
-    /// is told*).
+    /// yet, and that calling for it is a request the human is asked about
+    /// (ADR-0029, *Consent stays off by default, and is told*).
     #[test]
     fn a_session_with_nothing_ticked_is_told_every_device_and_how_to_ask() {
         let prompt = transferable(
@@ -5464,8 +5493,9 @@ mod tests {
         let said = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
         for phrase in [
             "This session is running on **workstation**",
-            "verkstead ask",
-            "Attach menu, under *May be transferred to*",
+            "not permitted yet, or permitted and not awake, the call is a request",
+            "Question Set of its own",
+            "carries on here with a note saying the work stays",
         ] {
             assert!(said.contains(phrase), "should say {phrase:?}: {said}");
         }

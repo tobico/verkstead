@@ -713,8 +713,8 @@ yet**. A Verkstead of one device draws no such section, and has nowhere to move
 to.
 
 Reach for it when the work needs **something this platform cannot do** —
-building or testing for another operating system, most often. Name a
-permitted device by its name, or by its id where two devices share a name:
+building or testing for another operating system, most often. Name the device
+by its name, or by its id where two devices share a name:
 
 ```
 verkstead transfer <device>
@@ -729,18 +729,23 @@ that it has the harness this session runs on.
   over there — the same conversation, in a checkout at a path of that device's.
   Say anything left to say before ending the turn; it stays on this device's
   Timeline, ahead of the move.
+- **Asked for** — a device **not permitted yet**, or one permitted and **not
+  awake**. It prints that the human is being asked and exits 0, and the session
+  is ended once this turn is over all the same. Verkstead asks the human with a
+  Question Set of its own: **Move to** that device against **Keep it here**
+  where it is not permitted, and **Keep it here** alone where it is asleep, the
+  work moving there by itself once it wakes. *Move to* ticks the device and the
+  work is carried on over there; *Keep it here* carries this conversation on
+  here, with a note saying the work stays.
 - **Refused** — it exits non-zero, says why on stderr, and nothing is moved:
-  a device the work may not go to, a name that is nobody's or two devices',
-  or what the device is missing. The session carries on. Pick another device
-  from the prompt's list, or ask the human.
+  a name that is nobody's or two devices', the device the work is on already,
+  or what an awake device is missing. The session carries on. Pick another
+  device from the prompt's list, or ask the human.
 
-**A device not permitted yet is asked for, not moved to.** The ticks are the
-human's consent, and moving to a permitted device needs no ask; moving to any
-other needs one. Where the work needs a device that is not permitted yet, ask
-for it with `verkstead ask`, saying why: the human ticks it from the Set's
-Attach menu, under *May be transferred to*. `verkstead transfer` reads the
-ticks live rather than from the prompt, so once the Set is answered it can name
-that device.
+**The ticks are the human's consent**, so a device not permitted yet is never
+moved to unasked: calling for one is the ask, and there is no need to put a Set
+of your own first. Say in the turn why the work needs it, before ending the
+turn — the human reads it on the Timeline beside Verkstead's Set.
 
 The branch, the Worktree with whatever is uncommitted in it, and the record
 all move together, so there is nothing to tidy up first.

@@ -49,6 +49,12 @@
 //! the copy reports to home and asks it before joining (ADR-0029, *Home drives a
 //! roadmap across devices*), whoever asked for the move.
 //!
+//! **The agent's own call to a device that cannot be used yet is asked about
+//! the same way** (ADR-0029, *Verkstead asks with a Question Set of its own*):
+//! `verkstead transfer` naming a device not ticked, or ticked and asleep, puts
+//! the same Set with *Keep it here* in place of *Run it here* — see [`called`]
+//! — and *Keep it here* carries the session on where it is: see [`kept`].
+//!
 //! **An inline run is placed only where it starts** (Set 1543, Q5b): see
 //! [`inline`], asked once, as the grilling hands off. A proposal wanting
 //! several platforms, or none, starts where it is and the agent moves itself
@@ -87,6 +93,11 @@ enum Work {
 
     /// The inline run, its implementation session about to start.
     Inline,
+
+    /// The session's own call to move the work, to a device that is linked and
+    /// not permitted, or permitted and asleep — see [`called`]. What it "wants"
+    /// is that device's platform, and its last Option is *Keep it here*.
+    Called,
 }
 
 impl Work {
@@ -95,6 +106,7 @@ impl Work {
         match self {
             Work::Task { label, .. } => format!("Task {label}"),
             Work::Inline => "The inline run".to_owned(),
+            Work::Called => "The work".to_owned(),
         }
     }
 
@@ -113,6 +125,10 @@ impl Work {
                 wants,
             },
             Work::Inline => store::AskedBy::Inline { wants },
+
+            // The human's answer, or the device's waking, is the consent; the
+            // move is still the one the session asked for.
+            Work::Called => store::AskedBy::Session,
         }
     }
 
@@ -124,6 +140,7 @@ impl Work {
                 label: label.clone(),
             },
             Work::Inline => store::PlacedWork::Inline,
+            Work::Called => store::PlacedWork::Called,
         }
     }
 
@@ -135,6 +152,7 @@ impl Work {
                 label: label.clone(),
             },
             store::PlacedWork::Inline => Work::Inline,
+            store::PlacedWork::Called => Work::Called,
         }
     }
 }
@@ -468,6 +486,59 @@ fn asked(
 ) -> verkstead_schema::QuestionSet {
     use verkstead_schema::{Question, QuestionOption, QuestionSet};
 
+    let (text, title) = match work {
+        Work::Called => called_saying(asleep, unpermitted, branch),
+        _ => placing_saying(work, wants, asleep, unpermitted, branch),
+    };
+
+    // *Keep it here* where the session asked for the move, the work being part
+    // way through here already; *Run it here* where Verkstead is placing work
+    // that has not started.
+    let here = match work {
+        Work::Called => "Keep it here",
+        _ => "Run it here",
+    };
+
+    let options = unpermitted
+        .iter()
+        .map(|device| format!("Move to {}", device.name))
+        .chain([here.to_owned()])
+        .zip(1..)
+        .map(|(text, n)| QuestionOption {
+            n,
+            text,
+            recommended: false,
+            cells: Vec::new(),
+        })
+        .collect();
+
+    QuestionSet {
+        title,
+        preface: None,
+        questions: vec![Question {
+            label: QUESTION.to_owned(),
+            text,
+            columns: Vec::new(),
+            options,
+            subquestions: Vec::new(),
+        }],
+        postscript: None,
+        proposal: None,
+        project: Some(project.to_owned()),
+        branch: Some(branch.to_owned()),
+        diff: None,
+        diffs: Vec::new(),
+    }
+}
+
+/// The sentence above the Options and the title, for work Verkstead is placing.
+fn placing_saying(
+    work: &Work,
+    wants: Platform,
+    asleep: &[Device],
+    unpermitted: &[Device],
+    branch: &str,
+) -> (String, String) {
     let wants = platform::os_word(wants, None);
 
     let mut text = format!("{} wants {wants}.", work.named());
@@ -504,36 +575,31 @@ fn asked(
         format!("Move {branch} to {}?", either(&names(unpermitted)))
     };
 
-    let options = unpermitted
-        .iter()
-        .map(|device| format!("Move to {}", device.name))
-        .chain(["Run it here".to_owned()])
-        .zip(1..)
-        .map(|(text, n)| QuestionOption {
-            n,
-            text,
-            recommended: false,
-            cells: Vec::new(),
-        })
-        .collect();
+    (text, title)
+}
 
-    QuestionSet {
-        title,
-        preface: None,
-        questions: vec![Question {
-            label: QUESTION.to_owned(),
-            text,
-            columns: Vec::new(),
-            options,
-            subquestions: Vec::new(),
-        }],
-        postscript: None,
-        proposal: None,
-        project: Some(project.to_owned()),
-        branch: Some(branch.to_owned()),
-        diff: None,
-        diffs: Vec::new(),
+/// The same for the session's own call, in the ADR's agent rows: the device it
+/// asked for and why the work cannot move there yet. One device, either way —
+/// a call names one — but said of each where an answer chained more.
+fn called_saying(asleep: &[Device], unpermitted: &[Device], branch: &str) -> (String, String) {
+    if !unpermitted.is_empty() {
+        let names = either(&names(unpermitted));
+
+        return (
+            format!("The agent asked to move to {names}, which is not permitted."),
+            format!("Move {branch} to {names}?"),
+        );
     }
+
+    let names = either(&names(asleep));
+
+    (
+        format!(
+            "The agent asked to move to {names}, which is not awake, and the work moves there by \
+             itself once it is."
+        ),
+        format!("Keep {branch} here, or wait for {names}?"),
+    )
 }
 
 /// The label of the one Question a Set of Verkstead's asks.
@@ -685,6 +751,10 @@ pub(crate) async fn answered(
             }
         }
 
+        Some(n) if n == moves.len() + 1 && work == Work::Called => {
+            kept(state, conversation_id, set_id, held).await;
+        }
+
         Some(n) if n == moves.len() + 1 => {
             // The launch takes the Set's registration over where it held one,
             // which is also what keeps the press's own check from reading that
@@ -717,6 +787,129 @@ pub(crate) async fn answered(
             }
         }
     }
+}
+
+/// Which way a session's call to move the work cannot be made yet, which is
+/// which row of ADR-0029's table its Set says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Request {
+    /// The device is linked, and the human has not ticked it.
+    Unpermitted,
+
+    /// The device is permitted, and did not answer its preflight.
+    Asleep,
+}
+
+/// Put the Set of Verkstead's own that asks about the session's call to move
+/// the work to `device` (ADR-0029, *Verkstead asks with a Question Set of its
+/// own*): *Move to* it against *Keep it here* where it is not permitted, and
+/// *Keep it here* alone where it is permitted and asleep, the device's waking
+/// moving the work — see [`woke`].
+///
+/// The Set's wait holds the place from here — see [`crate::own_sets::wait`] —
+/// and the session that called is ended at its turn's end by the caller. Its
+/// answer is acted on as any of these is — see [`answered`] — *Keep it here*
+/// carrying the session on where it is: see [`kept`].
+pub(crate) async fn called(
+    state: &AppState,
+    conversation_id: i64,
+    device: &store::Member,
+    request: Request,
+) -> anyhow::Result<()> {
+    let asked = [Device {
+        id: device.device.clone(),
+        name: device.name.clone(),
+    }];
+
+    let (asleep, unpermitted): (&[Device], &[Device]) = match request {
+        Request::Unpermitted => (&[], &asked),
+        Request::Asleep => (&asked, &[]),
+    };
+
+    // The platform is the device's own, which nothing on the Set says: it is
+    // what an answer ticking a device asleep asks again with.
+    let wants = platform::os_mark(&device.os).unwrap_or(Platform::HERE);
+
+    ask(
+        state,
+        conversation_id,
+        &Work::Called,
+        wants,
+        asleep,
+        unpermitted,
+    )
+    .await
+}
+
+/// The open Set of Verkstead's own about the session's call, where there is one:
+/// the newest one about a call, neither answered nor locked.
+pub(crate) async fn called_open(state: &AppState, conversation_id: i64) -> Option<i64> {
+    match asked_before(state, conversation_id, &Work::Called).await {
+        Before::Open(set_id) => Some(set_id),
+        Before::RunHere | Before::Nothing => None,
+    }
+}
+
+/// Carry the session that called on where it is, the human having answered
+/// *Keep it here* to Set `set_id` (ADR-0029): the Carried Conversation's resume
+/// with a note saying the work stays — an addition's carrying-on, on another
+/// occasion (ADR-0028; see [`crate::carrying::Occasion::Kept`]).
+///
+/// What the next launch carries on is written down first, and the session that
+/// called is ended where it is still running — an answer that beat its turn's
+/// end. The launch is handed the Set's hold, so the place passes to it without
+/// coming free in between.
+async fn kept(
+    state: &AppState,
+    conversation_id: i64,
+    set_id: i64,
+    held: Option<crate::drivers::Driving>,
+) {
+    let driving = held.unwrap_or_else(|| state.drivers.driving(conversation_id));
+
+    let written = match store::the_last_session(&state.pool, conversation_id).await {
+        Ok(Some(continued)) => {
+            let continued = store::Continued {
+                widened_by: None,
+                kept_here_by: Some(set_id),
+                ..continued
+            };
+
+            match store::continue_on_arrival(&state.pool, conversation_id, &continued).await {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id, "recording the conversation Keep it here carries on failed, so the session started for it will be re-primed instead");
+                    false
+                }
+            }
+        }
+        Ok(None) => false,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the session Keep it here carries on failed, so the session started for it will be re-primed instead");
+            false
+        }
+    };
+
+    if !written {
+        crate::carrying::instead(
+            &state.pool,
+            &state.nudges,
+            conversation_id,
+            crate::carrying::Occasion::Kept(set_id),
+            &crate::carrying::Instead::NoSession,
+        )
+        .await;
+    }
+
+    state.sessions.end(conversation_id).await;
+
+    tracing::info!(
+        conversation_id,
+        set_id,
+        "the human kept the work here, so the session that asked to move it is carried on",
+    );
+
+    crate::resume::widened(state.clone(), conversation_id, set_id, driving).await;
 }
 
 /// The device `device`, just ticked for work in `conversation_id`, where it
@@ -861,6 +1054,9 @@ fn still_waiting(work: &Work) -> String {
         Work::Inline => {
             "The inline run hasn't started. Press **Resume** to start it here.".to_owned()
         }
+        Work::Called => "The work hasn't moved, and nothing is running. Press **Resume** to \
+                         carry it on here."
+            .to_owned(),
     }
 }
 
@@ -1625,6 +1821,69 @@ mod tests {
             ["Move to nuc-2", "Run it here"],
         );
         set.validate().expect("the Set keeps the question grammar");
+    }
+
+    /// **The agent's call says the ADR's agent rows** (ADR-0029): the device it
+    /// asked for and why the work cannot move there yet, with *Keep it here* in
+    /// place of *Run it here* — beside *Move to* where the device is not
+    /// permitted, and alone where it is asleep.
+    #[test]
+    fn the_agents_call_asks_with_keep_it_here() {
+        let unticked = asked(
+            &Work::Called,
+            Platform::Windows,
+            &[],
+            &[device("nuc-win")],
+            "rate-limiting",
+            "app",
+        );
+
+        assert_eq!(unticked.title, "Move rate-limiting to nuc-win?");
+        assert_eq!(
+            unticked.questions[0].text,
+            "The agent asked to move to nuc-win, which is not permitted.",
+        );
+        assert_eq!(
+            unticked.questions[0]
+                .options
+                .iter()
+                .map(|option| option.text.as_str())
+                .collect::<Vec<_>>(),
+            ["Move to nuc-win", "Keep it here"],
+        );
+        unticked
+            .validate()
+            .expect("the Set keeps the question grammar");
+
+        let asleep = asked(
+            &Work::Called,
+            Platform::Windows,
+            &[device("nuc-win")],
+            &[],
+            "rate-limiting",
+            "app",
+        );
+
+        assert_eq!(
+            asleep.title,
+            "Keep rate-limiting here, or wait for nuc-win?"
+        );
+        assert_eq!(
+            asleep.questions[0].text,
+            "The agent asked to move to nuc-win, which is not awake, and the work moves there \
+             by itself once it is.",
+        );
+        assert_eq!(
+            asleep.questions[0]
+                .options
+                .iter()
+                .map(|option| option.text.as_str())
+                .collect::<Vec<_>>(),
+            ["Keep it here"],
+        );
+        asleep
+            .validate()
+            .expect("the Set keeps the question grammar");
     }
 
     /// Three or more names take the serial comma, as every list on a screen

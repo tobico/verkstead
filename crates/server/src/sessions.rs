@@ -3898,6 +3898,11 @@ async fn carried_on(
 
             skills::widened(set_id, title.as_deref(), &added)
         }
+        crate::carrying::Occasion::Kept(set_id) => {
+            let title = crate::answer_additions::titled(pool, set_id).await;
+
+            skills::kept(set_id, title.as_deref())
+        }
     };
 
     Carrying::On(Continuing {

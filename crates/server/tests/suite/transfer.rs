@@ -2808,8 +2808,8 @@ async fn a_session_that_asks_for_a_ticked_device_by_name_is_moved_there_and_carr
 /// **Every device, permitted or not** (ADR-0029, *Consent stays off by default,
 /// and is told*): a session launched where the work was drafted, with nothing
 /// ticked, on a cluster holding a Windows machine, is told that machine exists,
-/// that the work may not move there yet, and how to ask for it — where it was
-/// once told nothing at all.
+/// that the work may not move there yet, and that calling for it asks the human
+/// — where it was once told nothing at all.
 #[tokio::test]
 async fn a_session_with_nothing_ticked_is_told_every_device_and_how_to_ask() {
     let spill = tempfile::tempdir().unwrap();
@@ -2858,8 +2858,8 @@ async fn a_session_with_nothing_ticked_is_told_every_device_and_how_to_ask() {
 
     let said = told.split_whitespace().collect::<Vec<_>>().join(" ");
     for phrase in [
-        "verkstead ask",
-        "Attach menu, under *May be transferred to*",
+        "not permitted yet, or permitted and not awake, the call is a request",
+        "Question Set of its own",
     ] {
         assert!(said.contains(phrase), "and how to ask, {phrase:?}: {said}");
     }
@@ -2893,9 +2893,9 @@ async fn a_session_may_name_the_device_by_its_id() {
 }
 
 /// **What the call refuses, each by name, and nothing written down for any of
-/// them**: a device the human did not tick, a name two machines share, the
-/// device the work is on, a machine that does not answer, and one without a
-/// repository the work is in.
+/// them**: a name two machines share, the device the work is on, a name that is
+/// nobody's, and a device that answers without a repository the work is in. A
+/// device not ticked, or asleep, is a request instead — see below.
 #[tokio::test]
 async fn a_call_the_device_cannot_take_is_refused_saying_why_and_records_nothing() {
     let spill = tempfile::tempdir().unwrap();
@@ -2916,29 +2916,11 @@ async fn a_call_the_device_cannot_take_is_refused_saying_why_and_records_nothing
     a.grills(conversation).await;
     a.printed(conversation, "grilling").await;
 
-    // Two more machines of the cluster: one nothing answers at, and one that
-    // shares B's name.
-    let third = tempfile::tempdir().unwrap();
-    let c = Device::stated(third.path(), C).unwrap();
-    a.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
-
+    // Another machine of the cluster, which shares B's name.
     let fourth = tempfile::tempdir().unwrap();
     let twin = "1234567890abcdef1234567890abcdef";
     let d = Device::stated(fourth.path(), twin).unwrap();
     a.linked_to(&d, B_MACHINE, "Linux", Vec::new()).await;
-
-    // Off the list: nobody ticked the VM.
-    a.refused(
-        conversation,
-        "the-vm",
-        &[
-            "not a device the human has said",
-            C,
-            "verkstead ask",
-            "Attach menu, under *May be transferred to*",
-        ],
-    )
-    .await;
 
     // Two machines by that name, both named with their ids.
     a.refused(conversation, B_MACHINE, &[B, twin]).await;
@@ -2949,10 +2931,6 @@ async fn a_call_the_device_cannot_take_is_refused_saying_why_and_records_nothing
     // A name that is nobody's.
     a.refused(conversation, "the-toaster", &["no device of this cluster"])
         .await;
-
-    // Ticked, and asleep: the preflight's finding in the dialog's words.
-    assert_eq!(a.permits(conversation, C, true).await, "\"Recorded\"");
-    a.refused(conversation, C, &["the-vm is unreachable"]).await;
 
     // Ticked, awake, and without the Companion.
     assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
@@ -2972,6 +2950,10 @@ async fn a_call_the_device_cannot_take_is_refused_saying_why_and_records_nothing
     );
     assert!(drawn.working, "and the session is left running");
     assert!(b.own_rows().await.is_empty());
+    assert!(
+        a.sets_on(conversation).await.is_empty(),
+        "and nobody is asked about any of them",
+    );
 }
 
 /// **The later request wins, whoever made it**, and the Timeline names whoever
@@ -6538,6 +6520,7 @@ async fn a_pairing_on_another_harness_than_the_record_says_so_where_the_work_arr
             session_id: running.clone(),
             agent_type: store::AgentType::Grok,
             widened_by: None,
+            kept_here_by: None,
         },
     )
     .await
@@ -8922,4 +8905,278 @@ async fn a_join_away_puts_the_far_stage_at_the_top_of_homes_chain() {
     }
 
     away.home_reads(store::StageStanding::InFlight).await;
+}
+
+/// The options of a Set as its sheet draws them.
+async fn options_of(on: &Verkstead, set: i64) -> Vec<String> {
+    let sheet: verkstead_render::SetReading =
+        reading(&on.workbench, &format!("/api/ui/sets/{set}")).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+
+    assert!(sheet.by_verkstead, "the sheet names Verkstead as its asker");
+
+    sheet.questions[0]
+        .ask
+        .options
+        .iter()
+        .map(|option| option.text_html.clone())
+        .collect()
+}
+
+/// The branch of a Conversation on `on`, which a Set's title names.
+async fn branch_of(on: &Verkstead, conversation: i64) -> String {
+    store::load_conversation(&on.pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is here")
+        .branch
+}
+
+/// Wait until the session running on `on` has been ended.
+async fn ended(on: &Verkstead, conversation: i64) {
+    on.view_saying(conversation, |drawn| !drawn.working).await;
+}
+
+/// **The agent's call to a device not ticked is a request** (ADR-0029, *The
+/// agent's call becomes a request*): the call exits 0, the session is ended at
+/// its turn's end, and Verkstead's own Set asks *Move to* that device against
+/// *Keep it here*. *Move to* ticks it and the work is carried on over there.
+#[tokio::test]
+async fn a_call_to_an_unticked_device_asks_the_human_and_move_to_moves_the_work() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = drafted_running(
+        &writes_a_log_then(&calls_then_idles_at(&gate)),
+        &carries_on(),
+        spill.path(),
+        Repositories::Apart,
+    )
+    .await;
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+
+    let (status, said) = a.calls(conversation, B_MACHINE).await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "the call is a request: {said}"
+    );
+    assert_eq!(said.trim(), B_MACHINE, "naming the machine it asked for");
+
+    let asked = verksteads_set(&a, conversation).await;
+    let branch = branch_of(&a, conversation).await;
+    assert_eq!(asked.title, format!("Move {branch} to {B_MACHINE}?"));
+    assert_eq!(
+        asked.rows[0].question,
+        format!("The agent asked to move to {B_MACHINE}, which is not permitted."),
+    );
+    assert_eq!(
+        options_of(&a, asked.set_id).await,
+        [format!("Move to {B_MACHINE}"), "Keep it here".to_owned()],
+    );
+    assert_eq!(
+        store::transfer_asked(&a.pool, conversation).await.unwrap(),
+        None,
+        "nothing is moving until the human says so",
+    );
+
+    // The agent says its last words and goes idle, and is ended for them.
+    std::fs::write(&gate, "go").unwrap();
+    ended(&a, conversation).await;
+
+    let session = a.sessions_on(conversation).await[0];
+    assert!(
+        a.capture_of(conversation, session).await.contains(CLOSING),
+        "the closing words reached the record before the session was ended",
+    );
+
+    picks(&a, asked.set_id, 1).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    assert_eq!(
+        store::permitted_devices(&a.pool, conversation)
+            .await
+            .unwrap(),
+        [B],
+        "the device picked is ticked",
+    );
+
+    b.notice_saying(there, "at the agent's request").await;
+
+    let resumed = b.latest_capture_saying(there, "carried on").await;
+    assert!(
+        resumed.contains("arg=--resume"),
+        "B's session carries on the conversation A's was having: {resumed:?}",
+    );
+}
+
+/// What stands where claude goes on A for **Keep it here**: the session that
+/// makes the call the first time, and the one carrying it on after — told to
+/// resume, and saying what it was launched with.
+fn calls_then_carries_on_at(gate: &Path) -> String {
+    format!(
+        r#"
+case " $* " in
+*" --resume "*)
+{carrying}
+    ;;
+*)
+{calling}
+    ;;
+esac
+"#,
+        carrying = carries_on(),
+        calling = writes_a_log_then(&calls_then_idles_at(gate)),
+    )
+}
+
+/// **Keep it here carries the session on where it is** (ADR-0029): the
+/// conversation the agent was having is resumed on this device, with a note
+/// saying the work stays, and nothing is moved or ticked.
+#[tokio::test]
+async fn keep_it_here_carries_the_session_on_here_with_a_note() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, _b, _holding, conversation) = drafted_running(
+        &calls_then_carries_on_at(&gate),
+        &re_primed(),
+        spill.path(),
+        Repositories::Apart,
+    )
+    .await;
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+
+    assert_eq!(
+        a.calls(conversation, B_MACHINE).await.0,
+        StatusCode::ACCEPTED
+    );
+
+    let asked = verksteads_set(&a, conversation).await;
+
+    std::fs::write(&gate, "go").unwrap();
+    ended(&a, conversation).await;
+
+    picks(&a, asked.set_id, 2).await;
+
+    let resumed = a.latest_capture_saying(conversation, "carried on").await;
+    assert!(
+        resumed.contains("arg=--resume"),
+        "the conversation the agent was having is resumed here: {resumed:?}",
+    );
+
+    let note = resumed.split_whitespace().collect::<Vec<_>>().join(" ");
+    for phrase in [
+        &format!("Question Set {}", asked.set_id),
+        "They answered **Keep it here**: the work stays on this device",
+        "Carry on with the work here.",
+    ] {
+        assert!(note.contains(phrase), "the note says {phrase:?}: {note}");
+    }
+
+    a.notice_saying(
+        conversation,
+        &format!("Question set {} kept the work here", asked.set_id),
+    )
+    .await;
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "nothing was moved",
+    );
+    assert!(
+        store::permitted_devices(&a.pool, conversation)
+            .await
+            .unwrap()
+            .is_empty(),
+        "and nothing was ticked",
+    );
+}
+
+/// **A call to a ticked device asleep asks with *Keep it here* alone**, and the
+/// device answering moves the work, the Set locked with a line saying so
+/// (ADR-0029, the agent's asleep row).
+#[tokio::test]
+async fn a_call_to_a_ticked_device_asleep_waits_on_it_and_its_waking_moves_the_work() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = drafted_at(
+        &writes_a_log_then(&calls_then_idles_at(&gate)),
+        &carries_on(),
+        spill.path(),
+        Repositories::Apart,
+        true,
+        looking_for_wakes(),
+    )
+    .await;
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    // B goes to sleep.
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![NOWHERE.to_owned()])
+        .await;
+
+    assert_eq!(
+        a.calls(conversation, B_MACHINE).await.0,
+        StatusCode::ACCEPTED
+    );
+
+    let asked = verksteads_set(&a, conversation).await;
+    let branch = branch_of(&a, conversation).await;
+    assert_eq!(
+        asked.title,
+        format!("Keep {branch} here, or wait for {B_MACHINE}?")
+    );
+    assert_eq!(
+        asked.rows[0].question,
+        format!(
+            "The agent asked to move to {B_MACHINE}, which is not awake, and the work moves \
+             there by itself once it is."
+        ),
+    );
+    assert_eq!(options_of(&a, asked.set_id).await, ["Keep it here"]);
+
+    std::fs::write(&gate, "go").unwrap();
+    ended(&a, conversation).await;
+
+    // B wakes.
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let card = verksteads_set(&a, conversation).await;
+    assert!(
+        matches!(card.standing, Standing::LockedUnanswered(_)),
+        "the Set is locked: {:?}",
+        card.standing,
+    );
+    assert_eq!(
+        card.lock_line.as_deref(),
+        Some(format!("{B_MACHINE} answered, so the work moved there.").as_str()),
+    );
+
+    let resumed = b.latest_capture_saying(there, "carried on").await;
+    assert!(
+        resumed.contains("arg=--resume"),
+        "B's session carries on the conversation A's was having: {resumed:?}",
+    );
 }

@@ -743,6 +743,7 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
             session_id: "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
             agent_type: AgentType::Claude,
             widened_by: None,
+            kept_here_by: None,
         },
     )
     .await

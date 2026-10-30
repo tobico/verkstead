@@ -64,6 +64,12 @@ pub enum PlacedWork {
 
     /// The inline run, its implementation session about to start.
     Inline,
+
+    /// The session's own call, `verkstead transfer` naming a device that is
+    /// linked and not permitted, or permitted and asleep: a request rather
+    /// than a refusal (ADR-0029). Its `wants` is that device's OS word, and its
+    /// last Option is *Keep it here*, which carries the session on where it is.
+    Called,
 }
 
 /// One of a Conversation's Sets of Verkstead's own, and how it stands.

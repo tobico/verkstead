@@ -246,14 +246,15 @@ enum Command {
     /// For work this platform cannot do, such as building or testing for
     /// another operating system. The session's prompt names every device of
     /// the cluster and marks the permitted ones: those the human has ticked for
-    /// this work, and the one it was drafted on. Only those — for a device not
-    /// permitted yet, ask the human with `verkstead ask`, who can tick it from
-    /// the Set's Attach menu under *May be transferred to*. Verkstead checks the
-    /// device there and then — that it is awake, holds the repository and has
-    /// the harness. Accepted, it prints a confirmation, exits
-    /// 0, and the work moves once this session has ended, so say anything left
-    /// to say first; refused, it exits non-zero and says why on stderr, and
-    /// nothing is moved. `verkstead guide` says more.
+    /// this work, and the one it was drafted on. Verkstead checks the device
+    /// there and then — that it is awake, holds the repository and has the
+    /// harness. Accepted, it prints a confirmation, exits 0, and the work moves
+    /// once this session has ended, so say anything left to say first. A device
+    /// not permitted yet, or permitted and not awake, is asked for rather than
+    /// refused: it exits 0 as well, the session ends the same way, and the human
+    /// is asked whether the work moves there or stays here. Refused, it exits
+    /// non-zero and says why on stderr, and nothing is moved. `verkstead guide`
+    /// says more.
     Transfer {
         /// The device to move to: its name, or its id where two devices share
         /// a name.

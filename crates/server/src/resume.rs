@@ -225,6 +225,15 @@ pub(crate) async fn resume(
         return Ok(Resumed::AlreadyDriven);
     }
 
+    // A session that asked to move the work, the human still being asked about
+    // it, has had its turn: the open Set is the wait, and its answer is what
+    // starts anything — a restart reaching it holds the place again. See
+    // [`crate::placing::called`].
+    if let Some(set_id) = crate::placing::called_open(state, conversation_id).await {
+        crate::own_sets::wait(state, conversation_id, set_id).await;
+        return Ok(Resumed::AlreadyDriven);
+    }
+
     // Taken before the reading that follows it and before the spawn, for the
     // reason above. Dropped on every path out that refuses — which is what
     // leaving it to the `?` and the early returns does.
@@ -896,7 +905,9 @@ pub(crate) async fn on_arrival(state: &AppState, conversation_id: i64, from: &st
 }
 
 /// Start the work again for a session an answer ended to widen its sandbox
-/// (ADR-0028, *The carrying-on is the Carried Conversation's, on this device*).
+/// (ADR-0028, *The carrying-on is the Carried Conversation's, on this device*),
+/// or kept here after it asked to move the work (ADR-0029: *Keep it here*, see
+/// [`crate::placing`]).
 ///
 /// **An arrival's recompute on the machine the work never left.** What the
 /// session started is was written down before the old one was ended — see
