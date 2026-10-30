@@ -1249,14 +1249,16 @@ what else the machine is doing, so it has two knobs of its own.
 `VERKSTEAD_TEST_PACE` is a multiplier over everything time-shaped in it — the
 budgets a session is judged idle, rescued and ended by, how long a wait gives
 up after, and every window a test holds open to prove nothing happened. Unset
-is `1.0`. CI sets `2`, because a two-core runner building the workspace
-alongside the run cannot meet a developer's machine's budgets, and a session
+is `1.0`. CI sets `2`, because a shared four-core runner running four tests
+at a time cannot meet a developer's machine's budgets, and a session
 descheduled past one is judged by the wrong rule and fails a test that is not
 about the code. Raise it locally if the suite fails on a busy machine and passes
 on a quiet one; the file's own `PACE` explains the rest.
 
-Nothing needs setting for the concurrency: the suite caps how many fixtures stand
-at once by itself, at twice the cores it can see.
+Nothing needs setting for the concurrency: under `cargo test` the suite caps how
+many fixtures stand at once by itself, at twice the cores it can see, and under
+nextest every test is a process of its own and nextest's thread count, the
+machine's cores, does the same work.
 
 ```console
 $ scripts/soak-sessions.sh        # ten runs, pinned to two cores, under a build loop
@@ -1320,29 +1322,40 @@ one beside its own binary, in `target/debug`, and says so where there is none.
 `cargo build --workspace --tests --bins` puts it there, which is what the
 `windows-2025` job does before it runs anything.
 
-**The `windows-2025` job runs the suite through nextest, over ten legs.** Each
-leg builds the workspace for itself and runs a tenth of the tests, dealt out
-one at a time across every binary by `--partition slice:N/10`. nextest runs
+**CI runs the suite through nextest, over legs**: five `ubuntu-24.04` legs in
+the `Rust` job and ten `windows-2025` legs in the `Windows` job. Each leg builds
+the workspace for itself and runs its share of the tests, dealt out one at a
+time across every binary by `--partition slice:N/5` (or `/10`). nextest runs
 every test in a process of its own and tests from every binary at once, so a
-lock in a `static` keeps nothing in order there. What has to stay serial (the
-suites that start processes as the session account, and the registry tests) is
-held serial by `.config/nextest.toml`, which says why. The doc-tests, which
-nextest does not run, go through `cargo test --doc` on the first leg. To run
-the suite the way a leg does, install `cargo-nextest` and run:
+lock in a `static` keeps nothing in order there. What has to stay serial — on
+Windows the suites that start processes as the session account and the
+registry tests, on Linux the proofs that start a Compile Server on sccache's
+port — is held serial by `.config/nextest.toml`, which says why. The
+doc-tests, which nextest does not run, go through `cargo test --doc` on each
+job's first leg. Formatting, clippy and the generated TypeScript's drift check
+are a `Lint` job of their own, which writes `web/src/api/types.ts` with
+`cargo test -p verkstead-render` alone. The viewer's fixtures in
+`web/tests/fixtures/` are written by the server's suite, so each Linux leg
+checks its own working tree is still clean after its tests.
+
+To run the suite the way a Linux leg does, install `cargo-nextest` (the dev
+shell has not got it; CI pins 0.9.144) and run:
 
 ```console
-$ cargo build --workspace --tests --bins
-$ cargo nextest run --workspace --no-fail-fast
+$ cargo build --workspace --tests
+$ VERKSTEAD_TEST_PACE=2 cargo nextest run --workspace --partition slice:1/5 --no-fail-fast
 ```
 
-The legs are working toward a budget of ten minutes each. The job's comment in
-`.github/workflows/ci.yml` keeps the ledger of what each lever came to and says
-what is left. The job's `timeout-minutes` is fifteen, not ten. The last run
-measured took 6m03 to 10m08, so its slowest leg missed ten by eight seconds,
-on a slow runner's tests. A hard ten would fail a leg now and then for no
-fault of the code. Fifteen catches a hang without failing a leg that drew a
-slow runner. The one lever left is a larger runner, which is not free.
+Leave the `--partition` off to run all of it, and add `--bins` to the build on
+Windows, where `sessions_windows.rs` wants the `verkstead.exe` beside it.
 
+Both jobs work to the same budget: a typical leg near seven minutes, and
+`timeout-minutes: 15`, which catches a hang without failing a leg that drew a
+slow runner. Each job's comment in `.github/workflows/ci.yml` keeps the ledger
+of what each lever came to and says what is left. On Windows the last run
+measured took 6m03 to 10m08 a leg, and the one lever left there is a larger
+runner, which is not free; on Linux the next free lever is
+`VERKSTEAD_TEST_PACE`, then a sixth leg.
 
 And in `web/`, which is the Solid viewer
 ([ADR 0003](adr/0003-solid-spa-viewer.md)):

@@ -26,9 +26,113 @@ permissions:
   contents: read
 
 jobs:
+  # The workspace's suites, on Linux.
+  #
+  # **The budget: every leg under fifteen minutes, the typical one near
+  # seven**, the shape the `Windows` job below has. Free four-core runners
+  # only: the repository is public, and the maintainer is an individual for
+  # whom a larger runner is not on the table.
+  #
+  # **The budget is met.** On the two runs measured (runs 40986546310 and
+  # 40988176799) the five legs took 4m45 to 8m58, where the one job had taken
+  # 20 to 25 minutes, and `timeout-minutes` is fifteen, which catches a hang
+  # rather than a slow leg.
+  #
+  # **The ledger.** Each lever lands as a commit of its own on one pull request
+  # (#285 is the issue it closes), and its row is the run of that commit. A row
+  # gives the slowest and the fastest leg, read off the run's job timings as
+  # `build + test = job`; the job time includes a minute or so of setup. Until
+  # nextest, the build is inside `cargo test` and has no figure of its own, and
+  # until the legs there is one job, so the two columns are the same run.
+  #
+  # | Lever                               | Run         | Slowest leg           | Fastest leg           |
+  # | ----------------------------------- | ----------- | --------------------- | --------------------- |
+  # | Baseline (`main`), the one before   | 40816509002 | — + 21m50 = 24m49     | —                     |
+  # | Baseline (`main`)                   | 40952712743 | — + 18m37 = 20m40     | —                     |
+  # | Format and clippy in `Lint`         | 40981767764 | — + 21m10 = 21m49     | —                     |
+  # | nextest, one job                    | 40984244052 | 1m48 + 16m04 = 18m33  | —                     |
+  # | The legs, five of them              | 40986546310 | 1m41 + 4m47 = 7m12    | 1m51 + 2m23 = 4m45    |
+  # | The same, measured again            | 40988176799 | 2m41 + 5m35 = 8m58    | 2m30 + 2m48 = 5m59    |
+  #
+  # What each lever came to, row by row:
+  #
+  # The baseline is the last two green runs on `main` before this work,
+  # 2026-10-29. Both ran format and clippy in this job ahead of the tests,
+  # 2m17 and 1m13 of it. Of the later run's 18m37 of `cargo test`, the build
+  # was 1m56 and the server's `suite` binary alone was 876 seconds: 1888 tests
+  # run four at a time, most of them waiting on paced clocks rather than on
+  # the CPU — 72 tests of ten seconds or more account for 26 of its 53
+  # test-minutes, 44 of those in `sessions`, the slowest of them the
+  # long-stop tests at a minute or more apiece. Every other binary together
+  # came to under four minutes.
+  #
+  # Format, clippy and the drift check moved to a `Lint` job of their own (run
+  # 40981767764), where they took 3m28 between them and the drift check ran
+  # and passed. This job's test step went *up* by two and a half minutes on
+  # the same suite, so the minute and a quarter it gave away was lost in the
+  # noise between two runners: the split is worth having for what it says
+  # when it fails, not for the time.
+  #
+  # nextest in this one job, building first in a step of its own (run
+  # 40984244052), took the job to 18m33: 4614 tests across 18 binaries, every
+  # one passing, the 52 `#[ignore]`d skipped. The build was 1m48. The tests,
+  # 16m04 of wall clock, were 3,853 test-seconds four at a time — the job was
+  # waiting on its four threads, not on one binary after another, so running
+  # every binary at once bought only the two or three minutes the small
+  # binaries had taken on their own. The slowest test was the `sessions`
+  # long-stop one at 110 seconds, and 57 tests of ten seconds or more were
+  # 1,595 of the test-seconds. So more threads on one runner is not the lever:
+  # more runners is.
+  #
+  # The legs: five (run 40986546310), each building for itself and running a
+  # fifth of the tests — 923 on four of them and 922 on the fifth, the 4614
+  # of the row before. They built in 1m41 to 2m31 and tested in 2m23 to 4m47,
+  # and every leg came in under seven and a quarter minutes, the typical one
+  # near six and a half. What set the slow ones was a single test each rather
+  # than their share: leg 2 drew the 110-second opencode long-stop test and a
+  # 67-second one beside it, and leg 1 the annex flake evaluation at 70
+  # seconds. What each of the five came to:
+  #
+  # | Leg | Build + test = job    |
+  # | --- | --------------------- |
+  # | 1   | 2m28 + 3m36 = 6m46    |
+  # | 2   | 1m41 + 4m47 = 7m12    |
+  # | 3   | 1m51 + 2m23 = 4m45    |
+  # | 4   | 2m15 + 3m01 = 5m59    |
+  # | 5   | 2m31 + 3m40 = 6m45    |
+  #
+  # Measured again on the next commit (run 40988176799), which changed
+  # nothing a leg runs, the legs took 5m59 to 8m58. Every build was slower, at
+  # 2m25 to 2m41, and leg 2 was again the slowest, with its tests up from 4m47
+  # to 5m35. It was the same leg because `slice` deals the same list out the
+  # same way every run, so leg 2 always draws the long-stop tests. Leg by leg,
+  # 6m50, 8m58, 5m59, 6m07 and 6m58.
+  #
+  # `slice` partitioning deals the tests out one at a time across every binary,
+  # so each leg gets its share of each suite rather than whole binaries, and
+  # what `.config/nextest.toml` holds serial is serial per leg, each leg being
+  # a machine of its own.
+  #
+  # **If a leg goes over budget**, the next free lever is
+  # `VERKSTEAD_TEST_PACE`, which stands at two and stretches every paced
+  # clock in the sessions suite with it — the long-stop tests above are most
+  # of a minute of waiting each. It was left alone here so that a leg ran the
+  # same load shape the single job had. After it, a sixth leg.
   rust:
-    name: Rust
+    name: Rust (${{ matrix.partition }}/5)
     runs-on: ubuntu-24.04
+    # Fifteen, as the `Windows` job's: a hang is caught, and a leg that drew a
+    # slow runner is not failed for it.
+    timeout-minutes: 15
+    strategy:
+      # A red leg does not cancel the others: what the rest of the suite says
+      # is worth having from the same run.
+      fail-fast: false
+      # Five legs — the ledger above says why that many, and what the slowest
+      # came in at. The count is said three times, and the three move
+      # together: this list, the job's name, and the `slice:` of the test step.
+      matrix:
+        partition: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -38,8 +142,6 @@ jobs:
       # compile with the same rustc.
       - name: Install Rust 1.95.0
         uses: dtolnay/rust-toolchain@1.95.0
-        with:
-          components: clippy, rustfmt
 
       # Keyed on the root `Cargo.toml` as well as the action's own key, which
       # hashes the lockfile and the members' manifests but not the root, where
@@ -47,6 +149,10 @@ jobs:
       # run restores dependencies built the old way, rebuilds them all, and
       # never saves over them, because the action saves only when its key
       # misses. Every job's cache below is keyed the same way.
+      #
+      # The five legs share it, because they all build the same tree. Five
+      # legs racing to save one key is harmless: the first wins, and the rest
+      # warn that it already exists.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           key: ${{ hashFiles('Cargo.toml') }}
@@ -88,36 +194,130 @@ jobs:
             --proc /proc --dev /dev --tmpfs /tmp \
             /bin/sh -c 'echo "the sandbox surface holds"'
 
-      # Formatting and lints first: both are cheap and both fail on the kind of
-      # thing that is quicker to read than a test failure.
+      # **The suite runs through nextest rather than `cargo test`**, as the
+      # `Windows` job's does and for its reason: `cargo test` runs the
+      # workspace's test binaries one after another, so the step took as long
+      # as every suite added together, and nextest runs tests out of all of
+      # them at once, four at a time on this runner's four cores — and with
+      # nextest a leg can run a fifth of the tests, which `cargo test` has no
+      # way to say. What must not run at once is held apart by
+      # `.config/nextest.toml`, which says why.
+      #
+      # Pinned to the `Windows` job's release, unpacked and put on the `PATH`.
+      - name: Install cargo-nextest
+        run: |
+          version=0.9.144
+          into="$RUNNER_TEMP/cargo-nextest"
+          mkdir -p "$into"
+          curl -sSfL "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$version/cargo-nextest-$version-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar xz -C "$into"
+          echo "$into" >> "$GITHUB_PATH"
+
+      # The viewer is not built first. `web/dist` is gitignored and the embed
+      # that reads it is `allow_missing`, so the crates compile without it —
+      # what the viewer's own suite covers is the viewer job's business.
+      #
+      # A step of its own, so the ledger above can read the build apart from
+      # the tests. Every leg builds for itself: a nextest archive built once
+      # and downloaded by the legs was ruled out for the reason the `Windows`
+      # job ruled it out, an upload and a download on free parallel runners
+      # costing wall clock rather than saving it. The test binaries and
+      # nothing else: not `--all-targets`, which builds the server crate's
+      # `examples/` as well — developer probes that no test runs. The CLI's
+      # suite gets the `verkstead` it runs from cargo building that test target.
+      - name: Build
+        run: cargo build --workspace --tests
+
+      # To the end, whatever fails on the way: nextest stops at its first
+      # failure by default, which is a red check saying nothing about the tests
+      # it cancelled.
+      - name: Test
+        run: >
+          cargo nextest run --workspace
+          --partition slice:${{ matrix.partition }}/5 --no-fail-fast
+        env:
+          # Twice the suite's own clock for `crates/server/tests/suite/sessions.rs`,
+          # which stands real servers up and runs real sessions in real
+          # sandboxes and judges them on wall clock. A shared four-core runner
+          # is slower than a developer's machine, so a session gets descheduled
+          # past a budget it would have met there — and what comes out is a
+          # different test failing every time, none of them about the code. See
+          # `VERKSTEAD_TEST_PACE` there for why one factor over the whole file
+          # rather than a longer budget here and there.
+          VERKSTEAD_TEST_PACE: "2"
+
+      # **And the doc-tests, which nextest does not run.** The workspace has
+      # none today, so this step costs little; it is here so that the first one
+      # somebody writes runs too. On the first leg alone: they are not
+      # partitioned, so every leg would run all of them.
+      - name: Doc-tests
+        if: matrix.partition == 1
+        run: cargo test --doc --workspace
+
+      # **And whether what this leg's tests wrote is what is committed.** Four
+      # of the server's suites — `ui_content`, `onboarding`, `installing` and
+      # `nudges` — rewrite the payloads in `web/tests/fixtures/` that the
+      # viewer's own suite is fed from, and they run here, on whichever leg
+      # `slice` dealt them to, rather than in `Lint`. So a working tree that is
+      # no longer clean after the tests means a payload the server sends has
+      # changed and the committed one was not, and the viewer is being tested
+      # against a shape the server no longer sends. `types.ts` is written by one
+      # test, so a leg that ran it wrote the whole file and a leg that did not
+      # left it alone: `Lint` checks it too, where a failure says so sooner.
+      - name: Generated files are up to date
+        run: |
+          drift=$(git status --porcelain)
+          if [ -n "$drift" ]; then
+            echo "::error::Generated files drifted from what the server writes. Run 'cargo test' locally and commit the result."
+            echo "Changed by the test run:"
+            echo "$drift"
+            git diff
+            exit 1
+          fi
+
+  # The checks that read the code rather than run it: formatting, lints, and
+  # whether the committed TypeScript still matches the Rust it is generated
+  # from. A job of their own rather than steps in front of `Rust`'s tests, so
+  # that a lint failing reads as a lint failing and not as the suite, and so
+  # that neither waits on the other.
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # The same pin as every other job, for the same reason.
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: clippy, rustfmt
+
+      # A key of its own: clippy's artifacts are not the test build's, and a
+      # cache shared with `Rust` would have the two evicting each other. On the
+      # root `Cargo.toml`, as the `Rust` job's says why.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: lint-${{ hashFiles('Cargo.toml') }}
+
       - name: Format
         run: cargo fmt --all --check
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # The viewer is not built first. `web/dist` is gitignored and the embed
-      # that reads it is `allow_missing`, so the crates compile without it —
-      # what the viewer's own suite covers is the viewer job's business.
-      - name: Test
-        run: cargo test --workspace
-        env:
-          # Twice the suite's own clock for `crates/server/tests/suite/sessions.rs`,
-          # which stands real servers up and runs real sessions in real
-          # sandboxes and judges them on wall clock. This runner has two cores
-          # and is building the workspace alongside the run, so a session gets
-          # descheduled past a budget it would have met on a developer's
-          # machine — and what comes out is a different test failing every time,
-          # none of them about the code. See `VERKSTEAD_TEST_PACE` there for why
-          # one factor over the whole file rather than a longer budget here and
-          # there.
-          VERKSTEAD_TEST_PACE: "2"
+      # **The one crate whose tests write the viewer's types.** Every type on
+      # the wire is exported from `crates/render`, and ts-rs writes a type's
+      # dependencies with it, the schema's included — so this crate's tests
+      # write the whole of `web/src/api/types.ts`, in seconds. No other suite
+      # runs here: what they say is the `Rust` job's business.
+      - name: Write the generated TypeScript
+        run: cargo test -p verkstead-render
 
-      # `cargo test` writes `web/src/api/types.ts` through ts-rs — see
+      # The step above writes `web/src/api/types.ts` through ts-rs — see
       # `.cargo/config.toml`. So a working tree that is no longer clean after
-      # the run above means the committed wire types have drifted from the Rust
-      # ones they are generated from, and the viewer is compiling against a
-      # shape the server no longer sends.
+      # it means the committed wire types have drifted from the Rust ones they
+      # are generated from, and the viewer is compiling against a shape the
+      # server no longer sends.
       - name: Generated TypeScript is up to date
         run: |
           drift=$(git status --porcelain)
@@ -153,6 +353,10 @@ jobs:
   # handful of small installs does not come close. The measurement after it
   # landed is in this branch's pull request.
   #
+  # Those figures are September's. `Rust` was one job then, and grew to 20 and
+  # 25 minutes by the end of October, longer than any Windows leg had come to;
+  # it is five legs now, and its own ledger has the figures.
+  #
   # Node's six tools add one tarball, two archives and two `npm install -g`
   # runs to the setup below, and six installs of one package to the suite.
   # Python's four add one archive and one `pip install` — the runner's own
@@ -181,7 +385,7 @@ jobs:
         uses: dtolnay/rust-toolchain@1.95.0
 
       # A key of its own: this job builds one test target of one crate, and a
-      # cache shared with the `Rust` job would have the two evicting each
+      # cache shared with the `Rust` legs would have the two evicting each
       # other. And on the root `Cargo.toml`, as the `Rust` job's says why.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
@@ -1054,7 +1258,7 @@ jobs:
       # **And the doc-tests, which nextest does not run.** The workspace has
       # none today, so this step costs little. It is here so that the first one
       # somebody writes runs on this machine too, rather than being skipped
-      # without a word — the Linux job's `cargo test` runs them already. On the
+      # without a word, as the `Rust` job's first leg runs them on Linux. On the
       # first leg alone: they are not partitioned, so every leg would run all of them.
       - name: Doc-tests
         if: matrix.partition == 1

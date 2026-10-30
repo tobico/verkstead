@@ -13,7 +13,8 @@
 # unloaded wall clock. What produced the failures was *bursty* contention — the
 # suite competing with a compile that comes and goes. So this pins the suite to
 # two cores and runs a workspace build round and round on the same two, which is
-# the shape of a full `cargo test --workspace` on a two-core CI runner.
+# harsher than a CI leg is today — a leg builds first and tests after, four
+# tests at a time on four cores — and so a margin over it rather than a copy.
 #
 # About fifty minutes for the default ten runs, which is why nothing runs this
 # for you: it is a thing to do by hand before putting a change up, not a check on
