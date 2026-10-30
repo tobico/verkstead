@@ -21,4 +21,4 @@ Roadmap stage: [05: Home drives a roadmap across devices](docs/roadmaps/platform
 - [x] 01: The report — [details](01-the-report.md)
 - [x] 02: The far scheduler stands down — [details](02-the-far-scheduler-stands-down.md)
 - [x] 03: The join over the link — [details](03-the-join-over-the-link.md)
-- [ ] 04: Coming home — [details](04-coming-home.md)
+- [x] 04: Coming home — [details](04-coming-home.md)

@@ -12,10 +12,11 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Birth, JoinedAway, Lifecycle, LiveStanding, PullRequest, RoadmapStage, StageStanding,
-    Transferred, away_from_home, conversation_branch, follow, live_standing, open_database,
-    record_birth, record_pull_request, register_repo, stage_chain, stage_standings,
-    stages_away_from_home, start_conversation, start_stage, tell, told, transfer_away,
+    Birth, JoinedAway, Lifecycle, LiveStanding, PullRequest, Renaming, RoadmapStage, StageStanding,
+    Transferred, away_from_home, conversation_branch, follow, join_queue, land, live_standing,
+    open_database, queue_to_join, record_birth, record_pull_request, register_repo, set_state,
+    slice, stage_chain, stage_standings, stages_away_from_home, start_conversation, start_stage,
+    tell, told, transfer_away,
 };
 
 /// The device this database is on.
@@ -395,4 +396,88 @@ async fn a_stop_and_its_lifting_follow_the_live_copy() {
             .unwrap()
             .stopped("mvp", "01")
     );
+}
+
+/// **A stage that comes home reads as it read away**: its standing, its link in
+/// home's chain and its place in home's queue are what home already held for
+/// the tombstone, though the landing writes every Event of it again under a new
+/// id and the queue's places are issued afresh.
+///
+/// Stage 01 finishes and joins away, home hearing of the join before stage 02
+/// joins here; then 01's record comes home, twice over.
+#[tokio::test]
+async fn a_stage_that_comes_home_keeps_its_standing_and_its_places_in_the_chain_and_the_queue() {
+    let (_home_dir, home) = fresh_pool().await;
+    let home_repo = repo(&home).await;
+    let tombstone = stage(&home, home_repo, "01").await;
+    let at_home = stage(&home, home_repo, "02").await;
+
+    let (_far_dir, far) = fresh_pool().await;
+    let far_repo = repo(&far).await;
+    let away = copy(&far, far_repo, "01", tombstone).await;
+
+    // 01's tasks finished first, away — home queues the tombstone for it — and
+    // 02's after, here.
+    queue_to_join(&home, tombstone).await.unwrap();
+    queue_to_join(&home, at_home).await.unwrap();
+
+    opens(&far, far_repo, away, 12).await;
+    set_state(&far, away, Lifecycle::Wrapping).await.unwrap();
+
+    let reported = live_standing(&far, away).await.unwrap().unwrap();
+    follow(&home, tombstone, &reported).await.unwrap();
+
+    opens(&home, home_repo, at_home, 20).await;
+
+    let reads = || {
+        let home = home.clone();
+
+        async move {
+            let chain: Vec<i64> = stage_chain(&home, home_repo, "mvp")
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|link| link.conversation_id)
+                .collect();
+            let queue: Vec<i64> = join_queue(&home, home_repo, "mvp")
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|queued| queued.conversation_id)
+                .collect();
+            let standing = stage_standings(&home, home_repo)
+                .await
+                .unwrap()
+                .of("mvp", "01");
+
+            (
+                chain,
+                queue,
+                standing,
+                live_standing(&home, tombstone).await.unwrap(),
+            )
+        }
+    };
+
+    let before = reads().await;
+
+    assert_eq!(before.0, [tombstone, at_home], "01 joined first");
+    assert_eq!(before.1, [tombstone, at_home], "and queued first");
+    assert_eq!(before.3, Some(reported));
+
+    let renaming = Renaming {
+        repos: [(far_repo, home_repo)].into_iter().collect(),
+        ..Renaming::default()
+    };
+
+    for trip in ["first", "second"] {
+        let read = slice(&far, away).await.unwrap();
+        land(&home, tombstone, &read, &renaming).await.unwrap();
+
+        assert_eq!(
+            reads().await,
+            before,
+            "home reads 01 as it did before its {trip} return",
+        );
+    }
 }

@@ -436,6 +436,15 @@ async fn a_timeline_read_while_the_record_lands_again_reads_one_record() {
 async fn a_stage_queued_to_join_lands_queued_behind_what_waits_there() {
     let moved = moved("rate-limiting").await;
 
+    // The copy on the far end held no place of its own: it was handed on before
+    // its tasks there had finished. One that did keeps it, which is the reports
+    // suite's: a stage coming home.
+    sqlx::query("DELETE FROM stage_joinings WHERE conversation_id = ?")
+        .bind(moved.to)
+        .execute(&moved.there.pool)
+        .await
+        .unwrap();
+
     // Another stage already waiting on the far end, queued before the record
     // lands again — which is what a return over a busy device is.
     let theirs = repos(&moved.there.pool).await;

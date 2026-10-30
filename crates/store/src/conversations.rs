@@ -1571,6 +1571,26 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the stage joinings table")?;
 
+    // And when a stage that has come home joined its chain, which the record
+    // alone stops saying once it has moved. [`stage_chain`] orders the links by
+    // the Event their pull request hangs off, and a record landing again writes
+    // every Event under a new id — so a stage moved away and back after it
+    // joined would read as having joined last. What is kept is the Event id
+    // this device first had for the join, compared with the others' in the one
+    // sequence they are all issued from; nothing else reads it, and a stage
+    // that has never landed again has no row. Written by [`super::land`], and
+    // this device's own rather than the record's: the far end's ids are no
+    // order here. See [`super::slices::STAYS_BEHIND`].
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS stage_joined_at (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             event_id        INTEGER NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the table of when stages that came home joined")?;
+
     // The model half of a Conversation's Pairings, one row per role. A
     // table of its own for the reason the direction is one: there is no
     // migration machinery here and `conversations` is STRICT and left alone —
@@ -6574,7 +6594,9 @@ pub struct Joined {
 ///
 /// Nothing is stored for this beyond that. A join is a fact that already has a
 /// record — the pull request — and a second row saying so could come to
-/// disagree with it.
+/// disagree with it. The one exception is *when*, for a stage whose record has
+/// landed here again since it joined: the landing renumbered that Event, so the
+/// id this device first had for it is kept beside it — see [`super::land`].
 ///
 /// The **foot** of the chain is the roadmap's own branch while its pull request
 /// is unmerged, and it is not in here: it is not a stage, nothing waits on it
@@ -6599,9 +6621,10 @@ pub async fn stage_chain(pool: &SqlitePool, repo_id: i64, roadmap: &str) -> Resu
          JOIN conversations c ON c.id = r.conversation_id
          JOIN pull_requests p
            ON p.conversation_id = r.conversation_id AND p.repo_id = c.repo_id
+         LEFT JOIN stage_joined_at k ON k.conversation_id = r.conversation_id
          WHERE c.repo_id = ? AND r.roadmap = ? AND r.stage IS NOT NULL
          GROUP BY r.conversation_id
-         ORDER BY MIN(p.event_id)",
+         ORDER BY COALESCE(k.event_id, MIN(p.event_id))",
     )
     .bind(repo_id)
     .bind(roadmap)

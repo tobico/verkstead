@@ -729,6 +729,14 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
         .await
         .unwrap();
 
+    // And when it joined its chain, as a landing here keeps it: an Event id of
+    // this device's, written straight in for the same reason.
+    sqlx::query("INSERT INTO stage_joined_at (conversation_id, event_id) VALUES (?, 17)")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+
     sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, '/state/worktrees/x')")
         .bind(id)
         .execute(pool)
