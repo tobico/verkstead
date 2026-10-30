@@ -215,6 +215,7 @@ mod nudging;
 /// it is a server stood up over a stated machine, which is a test standing
 /// where a start does.
 pub mod onboarding;
+mod own_sets;
 /// What a Repo nothing has grilled arrives with in its pickers when there is no
 /// last start to copy: one account per harness order and a model per role.
 mod pairing_defaults;
@@ -512,6 +513,10 @@ pub(crate) struct AppState {
     /// than inside them, because a held stage is being driven: the run holding
     /// it is the driver, and this is what it is holding it for.
     joins: joins::Joins,
+
+    /// And the open Sets of Verkstead's own being waited on, each holding a
+    /// driver registration while it is — see [`own_sets::Holds`].
+    own_holds: own_sets::Holds,
 
     /// And what each running session is to be ended on the Done signal for,
     /// where something is waiting on one — see [`done`].
@@ -1652,6 +1657,7 @@ fn standing(
         followers: followers::Followers::new(),
         drivers: drivers::Drivers::new(),
         joins: joins::Joins::new(),
+        own_holds: own_sets::Holds::new(),
         signals: done::Signals::new(),
         updates,
 

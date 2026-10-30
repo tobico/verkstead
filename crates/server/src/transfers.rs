@@ -255,8 +255,9 @@ pub(crate) async fn asked(
 ///
 /// `verkstead done`'s pattern: nothing but the base URL says which Conversation,
 /// and what is recorded is a request the mover acts on once the session has
-/// ended. 200 with the machine's name where it is written down; 409 with the
-/// reason, and nothing written, where it is refused.
+/// ended. 200 with the machine's name where it is written down; 202 with it
+/// where the human is asked instead (ADR-0029) — see [`Called::Asked`]; 409
+/// with the reason, and nothing written, where it is refused.
 pub(crate) async fn call(
     axum::extract::State(state): axum::extract::State<AppState>,
     axum::extract::Path(conversation_id): axum::extract::Path<i64>,
@@ -266,14 +267,20 @@ pub(crate) async fn call(
     use axum::response::IntoResponse;
 
     match by_the_session(&state, conversation_id, body.trim()).await {
-        Ok(named) => {
+        Ok((named, called)) => {
             tracing::info!(
                 conversation_id,
                 named,
+                ?called,
                 "a session asked for its Conversation to be moved onto another device",
             );
 
-            (StatusCode::OK, format!("{named}\n")).into_response()
+            let status = match called {
+                Called::Moving => StatusCode::OK,
+                Called::Asked => StatusCode::ACCEPTED,
+            };
+
+            (status, format!("{named}\n")).into_response()
         }
 
         Err(why) => {
@@ -288,24 +295,40 @@ pub(crate) async fn call(
     }
 }
 
+/// What a session's call that was taken comes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Called {
+    /// Written down: the work moves once the session's turn is over.
+    Moving,
+
+    /// A request: the session's turn is over all the same, and the human is
+    /// asked with a Question Set of Verkstead's own — see
+    /// [`crate::placing::called`].
+    Asked,
+}
+
 /// Decide a session's call, and write the request down where it holds: the name
 /// of the machine it is going to, or the reason it is not.
 ///
-/// **Everything a press is refused for, and three things more.** The ticks are
-/// the consent, so a device the human did not tick — and that is not the one the
-/// work was drafted on — is refused; so is a name that is nobody's or is two
-/// machines', and the machine the work is on already. The preflight runs before
-/// the answer rather than after it, and a finding comes back in the words the
-/// Transfer dialog shows, so that the agent can pick another device or ask the
-/// human while it still has a turn to do it in.
+/// **Everything a press is refused for, and three things more**: a name that is
+/// nobody's or is two machines', the machine the work is on already, and a
+/// second call while the human is still being asked about one. The
+/// preflight runs before the answer rather than after it, and a finding comes
+/// back in the words the Transfer dialog shows, so that the agent can pick
+/// another device or ask the human while it still has a turn to do it in.
 ///
-/// A device not ticked is refused with the route the agent has to it: an ask,
-/// answered by a tick from the Set's Attach menu.
+/// **A device not ticked, or ticked and asleep, is a request rather than a
+/// refusal** (ADR-0029, *Verkstead asks with a Question Set of its own*): the
+/// ticks are the consent and a sleeping device cannot be moved to, so the human
+/// is asked — *Move to* it against *Keep it here*, or *Keep it here* alone while
+/// the device is waited on — and the session is ended at its turn's end as an
+/// accepted call's is. A device not ticked is asked about whether or not it is
+/// awake, so no preflight is made of it here.
 async fn by_the_session(
     state: &AppState,
     conversation_id: i64,
     said: &str,
-) -> Result<String, String> {
+) -> Result<(String, Called), String> {
     if state.sessions.following(conversation_id).is_none() {
         return Err(
             "there is no session running in this Conversation, so there is nothing \
@@ -341,6 +364,16 @@ async fn by_the_session(
         );
     }
 
+    // A call already taken as a request is the human's to answer, and a second
+    // one would ask them twice, or move the work out from under the first Set —
+    // see [`crate::placing::called`].
+    if let Some(set_id) = crate::placing::called_open(state, conversation_id).await {
+        return Err(format!(
+            "the human is already being asked about this work's move, in Question Set \
+             {set_id}, and their answer decides where it goes. End the turn"
+        ));
+    }
+
     let Some(devices) = state.devices.as_ref() else {
         return Err(
             "this device is in no cluster, so there is no other device to move to".to_owned(),
@@ -359,12 +392,13 @@ async fn by_the_session(
         .map_err(ours)?;
 
     if born.is_none_or(|born| born.device != device.device) && !ticked.contains(&device.device) {
-        return Err(format!(
-            "{} ({}) is not a device the human has said this work may be moved to. Pick a \
-             permitted one, or ask for this one with `verkstead ask`: the human can tick it \
-             from the Set's Attach menu, under *May be transferred to*",
-            device.name, device.device,
-        ));
+        return requested(
+            state,
+            conversation_id,
+            device,
+            crate::placing::Request::Unpermitted,
+        )
+        .await;
     }
 
     let reading = crate::preflight::of(
@@ -376,6 +410,16 @@ async fn by_the_session(
     )
     .await
     .map_err(|refusal| refusal.saying)?;
+
+    if let [verkstead_render::Lacking::Unreachable] = reading.lacks.as_slice() {
+        return requested(
+            state,
+            conversation_id,
+            device,
+            crate::placing::Request::Asleep,
+        )
+        .await;
+    }
 
     if !reading.lacks.is_empty() {
         return Err(format!(
@@ -406,7 +450,65 @@ async fn by_the_session(
         session.idle.done_waiting();
     }
 
-    Ok(device.name.clone())
+    Ok((device.name.clone(), Called::Moving))
+}
+
+/// Take a session's call to `device`, which cannot be moved to yet, as a
+/// request: the human is asked, and the session is ended once its turn is
+/// over, as an accepted call's is — see [`end_at_the_turn`].
+async fn requested(
+    state: &AppState,
+    conversation_id: i64,
+    device: &store::Member,
+    request: crate::placing::Request,
+) -> Result<(String, Called), String> {
+    crate::placing::called(state, conversation_id, device, request)
+        .await
+        .map_err(|why| format!("this device could not ask the human about the move: {why:#}"))?;
+
+    // A call clears a wait, as a Done signal does — see [`by_the_session`].
+    if let Some(session) = state.sessions.following(conversation_id) {
+        session.idle.done_waiting();
+    }
+
+    end_at_the_turn(state.clone(), conversation_id);
+
+    Ok((device.name.clone(), Called::Asked))
+}
+
+/// End the session that made a call the human is being asked about, once its
+/// turn is over: the session [`see_out`] ends for an accepted call, ended the
+/// same way, so its closing words reach the Transcript and whatever was driving
+/// it stands down.
+///
+/// **That session alone.** An answer may come first — *Keep it here* ends it
+/// and carries it on, *Move to* sees it out with a mover — and a session started
+/// after it is not this one's to end.
+fn end_at_the_turn(state: AppState, conversation_id: i64) {
+    let Some(mut session) = state.sessions.following(conversation_id) else {
+        return;
+    };
+
+    let seen = state.sessions.writing(conversation_id);
+    let idle = session.idle.clone();
+
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = session.ended() => {}
+
+            () = turn_over(&state, std::time::Instant::now(), &idle) => {
+                if state.sessions.writing(conversation_id) == seen {
+                    tracing::info!(
+                        conversation_id,
+                        "the session asked for a move the human is being asked about and its \
+                         turn is over, so it is being ended",
+                    );
+
+                    state.sessions.end(conversation_id).await;
+                }
+            }
+        }
+    });
 }
 
 /// The member of the cluster a call names, by its id or by its name — or why
@@ -857,11 +959,7 @@ async fn called_and_idle(
         }
 
         let since = *called.get_or_insert_with(std::time::Instant::now);
-
-        let owed = pace
-            .grace
-            .saturating_sub(idle.for_how_long())
-            .max(pace.grace.saturating_sub(since.elapsed()));
+        let owed = owed(state, since, idle);
 
         if owed.is_zero() {
             return;
@@ -869,6 +967,40 @@ async fn called_and_idle(
 
         tokio::time::sleep(owed.min(pace.poll)).await;
     }
+}
+
+/// Wait until a session that made its call at `since` has had its turn: idle
+/// by its backend's own reading, and for [`Pace::grace`] since the call as well
+/// as since it last printed — [`called_and_idle`]'s wait, the call being
+/// already made.
+///
+/// [`Pace::grace`]: crate::runner::Pace::grace
+async fn turn_over(state: &AppState, since: std::time::Instant, idle: &crate::sessions::Idle) {
+    let pace = state.sessions.pace();
+
+    loop {
+        let owed = owed(state, since, idle);
+
+        if owed.is_zero() {
+            return;
+        }
+
+        tokio::time::sleep(owed.min(pace.poll)).await;
+    }
+}
+
+/// How much longer a session that called at `since` is owed before its turn is
+/// taken to be over.
+fn owed(
+    state: &AppState,
+    since: std::time::Instant,
+    idle: &crate::sessions::Idle,
+) -> std::time::Duration {
+    let grace = state.sessions.pace().grace;
+
+    grace
+        .saturating_sub(idle.for_how_long())
+        .max(grace.saturating_sub(since.elapsed()))
 }
 
 /// Whether the move standing for this Conversation — to `device` — was asked
@@ -881,7 +1013,8 @@ async fn asked_by_the_session(state: &AppState, conversation_id: i64, device: &s
 }
 
 /// Whether the session running in this Conversation has asked for the work to
-/// be moved, and is to be ended at its turn's end for it.
+/// be moved, and is to be ended at its turn's end for it — a call taken as a
+/// request the human is still being asked about included.
 ///
 /// What the rescue asks before speaking: a session idling behind its own call
 /// has finished its turn on purpose, and the mover is about to end it. A store
@@ -891,7 +1024,9 @@ pub(crate) async fn called(state: &AppState, conversation_id: i64) -> bool {
     matches!(
         store::transfer_asked_by(&state.pool, conversation_id).await,
         Ok(Some((_, store::AskedBy::Session)))
-    )
+    ) || crate::placing::called_open(state, conversation_id)
+        .await
+        .is_some()
 }
 
 /// The move itself, once there is nothing left running.

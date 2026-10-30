@@ -23,17 +23,17 @@ use sqlx::SqlitePool;
 use verkstead_schema::{QuestionSet, Response};
 use verkstead_store::{
     Account, Adding, Addition, AgentType, Ask, AskedBy, Commit, CompanionMode, CompanionWorktree,
-    Continued, Decision, Edited, Lifecycle, LiveStanding, Merging, Origin, Pairing,
-    PendingAddition, PendingForm, PendingUpgrade, Process, ProfileFacts, PullRequest, Rollup,
-    Settlements, Standing, Summary, WaitingOn, add_companion, add_to_set, append_capture,
-    append_transcript, archive_conversation, ask, ask_to_transfer, attach, attach_mcp_server,
-    close_conversation, continue_on_arrival, create_profile, end_session, leave_memo, lock_set,
-    nothing_else, open_database, open_pending_steer, permit_device, pick_direction,
-    record_addressed_comments, record_backlog, record_check_rollup, record_commit,
-    record_conflict_fix_attempt, record_delivery, record_fix_attempt, record_merging,
-    record_pull_request, record_share, record_share_comment, record_standing, register_repo,
-    save_brief, save_pending_steer, set_grilling_pairing, set_process, set_target, settle_wrap_up,
-    skip_review, stamp_unseen, start_capture, start_conversation, start_grilling,
+    Continued, Decision, Edited, Lifecycle, LiveStanding, Merging, Origin, OwnAsking, Pairing,
+    PendingAddition, PendingForm, PendingUpgrade, PlacedWork, Process, ProfileFacts, PullRequest,
+    Rollup, Settlements, Standing, Summary, WaitingOn, add_companion, add_to_set, append_capture,
+    append_transcript, archive_conversation, ask, ask_on_our_own, ask_to_transfer, attach,
+    attach_mcp_server, close_conversation, continue_on_arrival, create_profile, end_session,
+    leave_memo, lock_set, lock_set_saying, nothing_else, open_database, open_pending_steer,
+    permit_device, pick_direction, record_addressed_comments, record_backlog, record_check_rollup,
+    record_commit, record_conflict_fix_attempt, record_delivery, record_fix_attempt,
+    record_merging, record_pull_request, record_share, record_share_comment, record_standing,
+    register_repo, save_brief, save_pending_steer, set_grilling_pairing, set_process, set_target,
+    settle_wrap_up, skip_review, stamp_unseen, start_capture, start_conversation, start_grilling,
     start_implementing, stop, submit_response, suggest_preview, tell, trim_conversation,
     unarchive_conversation,
 };
@@ -358,6 +358,35 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     record_delivery(pool, set).await.unwrap();
 
     ask(pool, id, &asked(), Ask::Deferred).await.unwrap();
+
+    // And one Verkstead asked itself, which is the row saying so and what it
+    // asked about.
+    let own = ask_on_our_own(
+        pool,
+        id,
+        &asked(),
+        &OwnAsking::Placing {
+            work: PlacedWork::Inline,
+            wants: "Windows".to_owned(),
+            moves: Vec::new(),
+            waiting_on: vec!["0011223344556677889900aabbccddee".to_owned()],
+        },
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation is there to ask from")
+    .id;
+
+    // And settled by the device it waited on answering, which is a lock with a
+    // line of its own.
+    lock_set_saying(
+        pool,
+        &Settlements::new(4),
+        own,
+        "nuc-win answered, so the work moved there.",
+    )
+    .await
+    .unwrap();
 
     let unanswered = ask(pool, id, &asked(), Ask::Blocking)
         .await
@@ -714,6 +743,7 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
             session_id: "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
             agent_type: AgentType::Claude,
             widened_by: None,
+            kept_here_by: None,
         },
     )
     .await

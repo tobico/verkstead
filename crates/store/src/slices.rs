@@ -330,7 +330,17 @@ const CARRIED: &[Carried] = &[
         ids: &[("set_id", Holds::Set)],
     },
     Carried {
+        table: "lock_lines",
+        found: Found::OfASet,
+        ids: &[("set_id", Holds::Set)],
+    },
+    Carried {
         table: "deferrals",
+        found: Found::OfASet,
+        ids: &[("set_id", Holds::Set)],
+    },
+    Carried {
+        table: "own_sets",
         found: Found::OfASet,
         ids: &[("set_id", Holds::Set)],
     },

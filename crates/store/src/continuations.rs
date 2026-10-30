@@ -70,6 +70,11 @@ pub struct Continued {
     /// where that is why it is being carried on rather than a move (ADR-0028).
     /// `None` is an arrival, and every row read off the record's own sessions.
     pub widened_by: Option<i64>,
+
+    /// The Question Set of Verkstead's own whose *Keep it here* ended the
+    /// session that had asked to move the work, where that is why it is being
+    /// carried on (ADR-0029). `None` everywhere else.
+    pub kept_here_by: Option<i64>,
 }
 
 /// The two tables: the conversation a launch continues, one at most per
@@ -103,6 +108,22 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
             .execute(pool)
             .await
             .context("adding the column naming the Set that widened a sandbox")?;
+    }
+
+    // And the Set whose *Keep it here* kept the work where the session had asked
+    // to move it from, the same way.
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('continued_sessions') WHERE name = ?")
+            .bind("kept_here_by")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the column naming the Set that kept the work here")?;
+
+    if there.is_none() {
+        sqlx::query("ALTER TABLE continued_sessions ADD COLUMN kept_here_by INTEGER")
+            .execute(pool)
+            .await
+            .context("adding the column naming the Set that kept the work here")?;
     }
 
     // Keyed by the Conversation and the id the Set was asked under, because that
@@ -201,8 +222,8 @@ pub async fn sets_as_they_landed(
 /// Write down that the next session launched for `conversation_id` on this device
 /// continues `continued` rather than opening one of its own.
 ///
-/// An arrival's, and an answer's that widened the sandbox — see
-/// [`Continued::widened_by`], which says which.
+/// An arrival's, an answer's that widened the sandbox, and a *Keep it here*'s —
+/// see [`Continued::widened_by`] and [`Continued::kept_here_by`], which say which.
 ///
 /// Written over whatever is there, the way an arriving row is: a Conversation
 /// that has come and gone and come back again is carrying on from the newest
@@ -214,16 +235,18 @@ pub async fn continue_on_arrival(
     continued: &Continued,
 ) -> Result<()> {
     sqlx::query(
-        "INSERT INTO continued_sessions (conversation_id, session_id, agent_type, widened_by)
-         VALUES (?, ?, ?, ?)
+        "INSERT INTO continued_sessions
+             (conversation_id, session_id, agent_type, widened_by, kept_here_by)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(conversation_id) DO UPDATE
              SET session_id = excluded.session_id, agent_type = excluded.agent_type,
-                 widened_by = excluded.widened_by",
+                 widened_by = excluded.widened_by, kept_here_by = excluded.kept_here_by",
     )
     .bind(conversation_id)
     .bind(&continued.session_id)
     .bind(continued.agent_type.word())
     .bind(continued.widened_by)
+    .bind(continued.kept_here_by)
     .execute(pool)
     .await
     .with_context(|| {
@@ -249,9 +272,9 @@ pub async fn take_up_the_conversation(
 ) -> Result<Option<Continued>> {
     let mut tx = super::writing(pool, "taking up a carried conversation").await?;
 
-    let row: Option<(String, String, Option<i64>)> = sqlx::query_as(
+    let row: Option<(String, String, Option<i64>, Option<i64>)> = sqlx::query_as(
         "DELETE FROM continued_sessions WHERE conversation_id = ?
-         RETURNING session_id, agent_type, widened_by",
+         RETURNING session_id, agent_type, widened_by, kept_here_by",
     )
     .bind(conversation_id)
     .fetch_optional(&mut *tx)
@@ -264,7 +287,7 @@ pub async fn take_up_the_conversation(
         .await
         .context("taking up a carried conversation")?;
 
-    let Some((session_id, agent_type, widened_by)) = row else {
+    let Some((session_id, agent_type, widened_by, kept_here_by)) = row else {
         return Ok(None);
     };
 
@@ -280,6 +303,7 @@ pub async fn take_up_the_conversation(
         session_id,
         agent_type,
         widened_by,
+        kept_here_by,
     }))
 }
 
@@ -357,5 +381,6 @@ pub async fn the_last_session(
         session_id,
         agent_type,
         widened_by: None,
+        kept_here_by: None,
     }))
 }

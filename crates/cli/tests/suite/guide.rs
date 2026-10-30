@@ -1070,8 +1070,9 @@ fn the_guide_says_how_to_declare_a_wait() {
 /// The agent's call (ADR-0020): a session may move its own work onto another
 /// device of the cluster, so the Guide says when to reach for it, how the device
 /// is named, what an accepted call does to the session and what a refusal asks
-/// of it — and that the prompt names every device, marks the permitted ones and
-/// says how to ask for one that is not.
+/// of it — and that the prompt names every device and marks the permitted ones,
+/// and that calling for one that is not is a request the human is asked about
+/// (ADR-0029).
 #[test]
 fn the_guide_says_how_to_move_the_work_to_another_device() {
     let guide = stdout(&run(&["guide"]));
@@ -1086,8 +1087,10 @@ fn the_guide_says_how_to_move_the_work_to_another_device() {
         "Only where they have",
         "names every other device of the cluster",
         "not permitted yet",
-        "verkstead ask",
-        "Attach menu, under *May be transferred to*",
+        "**Asked for**",
+        "**Move to** that device against **Keep it here**",
+        "with a note saying the work stays",
+        "no need to put a Set of your own first",
         "something this platform cannot do",
         "by its name, or by its id",
         "ended once this turn is over",
@@ -1120,8 +1123,8 @@ fn the_transfer_help_says_when_and_what_it_does() {
         "ticked",
         "every device",
         "not permitted yet",
-        "verkstead ask",
-        "*May be transferred to*",
+        "not awake, is asked for rather than refused",
+        "the human is asked whether the work moves there",
         "exits non-zero",
         "once this session has ended",
         "verkstead guide",

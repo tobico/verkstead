@@ -71,6 +71,8 @@ function everySection(): SetView {
     additions: [],
     servers: [],
     addable: { repos: [], read_only: [], devices: [], cluster: null, branch: "" },
+    by_verkstead: false,
+    lock_line: null,
   };
 }
 

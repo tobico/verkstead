@@ -1143,6 +1143,9 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // No stage here is ever away from home, so the look for a report owed finds
     // nothing whenever it fires; a server's own pace is as good as any.
     reports: Pace::default().reports,
+    // Nothing here is placed on another device, so no Set of Verkstead's ever
+    // waits on one asleep; a server's own pace is as good as any.
+    wakes: Pace::default().wakes,
     // And longer than any of these run for again, for the stall sweep's reason
     // one sweep along: every fixture that reaches Done has a pull request
     // nothing has merged, which is exactly what the sweep after Done goes and

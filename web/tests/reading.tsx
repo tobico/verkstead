@@ -38,6 +38,8 @@ function row(id: string): QuestionSetEvent {
     standing: { Waiting: "waiting" },
     added: [],
     carried_on: false,
+    by_verkstead: false,
+    lock_line: null,
   };
 }
 

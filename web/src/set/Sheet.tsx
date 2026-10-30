@@ -220,6 +220,9 @@ export function Sheet(props: {
         <Show when={props.set.branch}>
           {(branch) => <span class={styles.branch}>{branch()}</span>}
         </Show>
+        <Show when={props.set.by_verkstead}>
+          <span class={styles.asker}>Asked by Verkstead</span>
+        </Show>
         <Show when={when()}>
           {(when) => (
             <span class={when().mark} title={when().stamp}>
@@ -298,6 +301,7 @@ export function Sheet(props: {
           proposal={props.set.proposal}
           attachments={props.set.attachments}
           additions={settledChips(props.set.additions, props.set.addable.branch)}
+          lockLine={props.set.lock_line}
         />
       </Show>
     </>
@@ -359,6 +363,11 @@ function Questions(props: {
 
   /// And what was added with them, drawn as chips after the files.
   additions: Added[];
+
+  /// What its lock said, where it was locked with a line: drawn in place of
+  /// the sentence about a Set nobody answered, which a lock of Verkstead's own
+  /// would make wrong twice over. Or what Verkstead said beside its answer.
+  lockLine?: string | null;
 }): JSX.Element {
   /// A Set that settled with no Response behind it, which is the one standing
   /// that was never answered by anybody.
@@ -392,10 +401,22 @@ function Questions(props: {
           the head of the page, about the Set as a whole, not under the
           Questions. */}
       <Show when={orphaned()}>
-        <p class={styles.counterQuestion}>
-          This question set was locked unanswered. Nobody answered it, and the
-          agent was told it was locked.
-        </p>
+        <Show
+          when={props.lockLine}
+          fallback={
+            <p class={styles.counterQuestion}>
+              This question set was locked unanswered. Nobody answered it, and
+              the agent was told it was locked.
+            </p>
+          }
+        >
+          {(line) => <p class={styles.counterQuestion}>{line()}</p>}
+        </Show>
+      </Show>
+      {/* And the line beside an answer Verkstead acted on, where acting on it
+          did not go as it said: the device it named was asleep. */}
+      <Show when={props.response !== null && props.lockLine}>
+        {(line) => <p class={styles.counterQuestion}>{line()}</p>}
       </Show>
       {/* And the Set that had simply not been got to yet, which only a
           read-only sheet ever draws. */}

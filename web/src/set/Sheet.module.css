@@ -47,6 +47,11 @@
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
+/* Who asked, where it was Verkstead rather than the agent. */
+.meta .asker {
+  font-weight: 500;
+}
+
 /* The far end of the line, whichever of the two the standing puts there. The
    badge's own half of this is in `Standing.module.css`, which is where the
    badge is. */

@@ -863,18 +863,7 @@ pub(crate) async fn widened_with(
     pool: &sqlx::SqlitePool,
     set_id: i64,
 ) -> (Option<String>, Vec<String>) {
-    let title = match store::load_set(pool, set_id).await {
-        Ok(Some(stored)) => stored
-            .set
-            .readable(set_id)
-            .ok()
-            .map(|set| set.title.clone()),
-        Ok(None) => None,
-        Err(error) => {
-            tracing::error!(error = ?error, set_id, "reading the title of the Set a widened session is told about failed");
-            None
-        }
-    };
+    let title = titled(pool, set_id).await;
 
     let (added, repos) = match tokio::try_join!(
         store::set_additions(pool, set_id),
@@ -918,6 +907,24 @@ pub(crate) async fn widened_with(
         .collect();
 
     (title, added)
+}
+
+/// The title of Set `set_id`, where its body can be read: what a note carrying a
+/// session on names the Set by beside its id. A read that fails is said in the
+/// log and costs the note the title.
+pub(crate) async fn titled(pool: &sqlx::SqlitePool, set_id: i64) -> Option<String> {
+    match store::load_set(pool, set_id).await {
+        Ok(Some(stored)) => stored
+            .set
+            .readable(set_id)
+            .ok()
+            .map(|set| set.title.clone()),
+        Ok(None) => None,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id, "reading the title of the Set a carried-on session is told about failed");
+            None
+        }
+    }
 }
 
 /// A Repo by its registered name, or its id where it has none now.

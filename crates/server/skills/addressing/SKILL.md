@@ -51,10 +51,10 @@ Read the feedback whole before changing anything, then go and see for yourself.
   named, **on the operating system the job ran on**, and read the real failure.
   A CI log says which command failed; the repository says how to run it. Where
   that operating system is not this device's, move there before fixing
-  anything: `verkstead transfer` to a device of it where your prompt's *The
-  devices of this cluster* marks one permitted, and `verkstead ask` for one
-  where it marks none — the Guide's *Moving the work to another device* says
-  how. **CI confirms; it does not discover**: a fix written from the log alone
+  anything: `verkstead transfer` to a device of it that your prompt's *The
+  devices of this cluster* names, permitted or not — calling for one not
+  permitted yet asks the human for it — and the Guide's *Moving the work to
+  another device* says how. **CI confirms; it does not discover**: a fix written from the log alone
   is a guess, and one pushed for CI to try is the same guess made slower.
   Which operating system the failure needs is yours to decide from the failure
   itself: a job's name — *Rust (windows-latest)* — is a name, not a

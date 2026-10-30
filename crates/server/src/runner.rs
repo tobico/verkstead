@@ -252,6 +252,15 @@ pub struct Pace {
     /// home the moment it is made, and home coming back is heard on its Nudge
     /// stream. What this catches is a home that answered neither.
     pub reports: Duration,
+
+    /// And how often a sleeping device that an open placement Set of
+    /// Verkstead's is waiting on is asked whether it is awake — see
+    /// [`crate::own_sets::wait`].
+    ///
+    /// The backstop rather than the pace, as [`Pace::reports`] is: a dial
+    /// finding a member answering hurries the look. What this catches is a
+    /// machine that woke while nothing here happened to dial it.
+    pub wakes: Duration,
 }
 
 impl Default for Pace {
@@ -266,6 +275,7 @@ impl Default for Pace {
             stalls: crate::stalls::SWEPT_EVERY,
             places: crate::places::LOOKED_AT_EVERY,
             reports: crate::reporting::LOOKED_AT_EVERY,
+            wakes: crate::own_sets::WAKES_LOOKED_FOR_EVERY,
             joins: crate::joins::LOOKED_AT_EVERY,
             merges: crate::merges::SWEPT_EVERY,
             cleanup: crate::cleanup::SWEPT_EVERY,
@@ -745,7 +755,7 @@ async fn backlog_again(
     // [`crate::placing`].
     if let Step::Task { number, .. } = &step
         && crate::placing::task(&state, conversation_id, working_in, *number).await
-            == crate::placing::Placed::Moving
+            != crate::placing::Placed::Here
     {
         return;
     }
@@ -912,6 +922,13 @@ async fn nothing_left(
 ///   when it came to push, and the halt is what reaches the human on their
 ///   phone.
 async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
+    // A run the human is still being asked where to start has not started, and
+    // its open Set is the wait — a restart reaching it included. See
+    // [`crate::placing::inline_waiting`].
+    if crate::placing::inline_waiting(&state, conversation_id).await {
+        return;
+    }
+
     let Some((_, branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
         return;
     };
@@ -1193,10 +1210,12 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
         // that is before anything is launched for it: the move runs where it
         // stands, with nothing running, and the far end's arrival presses its own
         // Resume, which launches it there — see [`crate::placing`]. The run here
-        // stands down, its registration handed to the mover.
+        // stands down, its registration handed to the mover. And where the
+        // human is asked where it runs instead, it stands down too: their
+        // answer is what launches it.
         if let Step::Task { number, .. } = &step
             && crate::placing::task(&state, conversation_id, &worktree, *number).await
-                == crate::placing::Placed::Moving
+                != crate::placing::Placed::Here
         {
             return;
         }
@@ -1532,8 +1551,9 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
     // moved to one that is before its session starts, the way a declared task
     // is: the handoff is on the record by now, so it crosses with it, and the
     // far end's arrival presses its own Resume, which launches the run there
-    // without asking again — see [`crate::placing::inline`].
-    if crate::placing::inline(&state, conversation_id).await == crate::placing::Placed::Moving {
+    // without asking again — see [`crate::placing::inline`]. Where the human is
+    // asked where it runs instead, their answer launches it.
+    if crate::placing::inline(&state, conversation_id).await != crate::placing::Placed::Here {
         return;
     }
 
