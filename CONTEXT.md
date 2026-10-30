@@ -1502,8 +1502,9 @@ What the desktop app keeps about the machine it is running on, and the
 **Desktop** section at the top of the settings page that draws them: **When the
 window is closed** — keep running in the tray, ask before quitting, or quit,
 keeping running being the default — **Show tray icon**, and **notifications**,
-on by default so that a fresh install is told about a Set with nothing pressed.
-A JSON file of
+on by default so that a fresh install is told about a Set with nothing pressed;
+and a fourth key the page draws no control for, `installOffer`, which the
+**Install Offer**'s **Don't ask again** turns off. A JSON file of
 Electron's own under its user data, beside the one the window's place is
 remembered in, rather than anything the server was ever told (ADR-0020):
 whether this machine's Verkstead keeps running when its window is closed is a

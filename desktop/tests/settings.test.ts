@@ -45,7 +45,12 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("what is set comes back", () => {
   it("reads back what was set", () => {
-    const chosen: Settings = { whenClosed: "ask", trayIcon: false, notifications: false };
+    const chosen: Settings = {
+      whenClosed: "ask",
+      trayIcon: false,
+      notifications: false,
+      installOffer: false,
+    };
 
     set(file, chosen);
 
@@ -54,7 +59,7 @@ describe("what is set comes back", () => {
 
   it("reads back every position", () => {
     for (const whenClosed of POSITIONS) {
-      set(file, { whenClosed, trayIcon: true, notifications: true });
+      set(file, { whenClosed, trayIcon: true, notifications: true, installOffer: true });
 
       expect(settings(file).whenClosed, whenClosed).toBe(whenClosed);
     }
@@ -65,12 +70,13 @@ describe("what is set comes back", () => {
   it("makes the directory it keeps the file in", () => {
     const deeper = join(dir, "not", "made", "yet", FILE);
 
-    set(deeper, { whenClosed: "quit", trayIcon: false, notifications: false });
+    set(deeper, { whenClosed: "quit", trayIcon: false, notifications: false, installOffer: true });
 
     expect(settings(deeper)).toEqual({
       whenClosed: "quit",
       trayIcon: false,
       notifications: false,
+      installOffer: true,
     });
   });
 
@@ -78,7 +84,7 @@ describe("what is set comes back", () => {
   /// machine's settings are hand-edited in when somebody is working out what
   /// the app is doing.
   it("writes the file as readable JSON", () => {
-    set(file, { whenClosed: "ask", trayIcon: false, notifications: true });
+    set(file, { whenClosed: "ask", trayIcon: false, notifications: true, installOffer: false });
 
     const written = readFileSync(file, "utf8");
 
@@ -88,15 +94,22 @@ describe("what is set comes back", () => {
       whenClosed: "ask",
       trayIcon: false,
       notifications: true,
+      installOffer: false,
     });
   });
 });
 
 describe("a machine that has not been told", () => {
   /// The ordinary first run: keep running in the tray, there is a tray to keep
-  /// running in, and a Set waiting is told with nothing pressed.
-  it("keeps running in the tray with an icon shown, and notifies", () => {
-    expect(DEFAULTS).toEqual({ whenClosed: "tray", trayIcon: true, notifications: true });
+  /// running in, a Set waiting is told with nothing pressed, and a download is
+  /// offered its install.
+  it("keeps running in the tray with an icon shown, notifies, and offers the install", () => {
+    expect(DEFAULTS).toEqual({
+      whenClosed: "tray",
+      trayIcon: true,
+      notifications: true,
+      installOffer: true,
+    });
   });
 
   /// A machine that has never written the file notifies: the settings answer
@@ -137,6 +150,9 @@ describe("a file that is not what this wrote", () => {
       ['{"whenClosed": "quit"}', { ...DEFAULTS, whenClosed: "quit" }],
       ['{"trayIcon": false}', { ...DEFAULTS, trayIcon: false }],
       ['{"notifications": false}', { ...DEFAULTS, notifications: false }],
+      ['{"installOffer": false}', { ...DEFAULTS, installOffer: false }],
+      ['{"installOffer": "no"}', DEFAULTS],
+      ['{"installOffer": false, "trayIcon": "off"}', { ...DEFAULTS, installOffer: false }],
       ['{"whenClosed": "minimise", "trayIcon": false}', { ...DEFAULTS, trayIcon: false }],
       ['{"whenClosed": "ask", "trayIcon": "yes"}', { ...DEFAULTS, whenClosed: "ask" }],
       ['{"trayIcon": false, "notifications": "off"}', { ...DEFAULTS, trayIcon: false }],
@@ -236,6 +252,9 @@ describe("a set that arrived over the bridge", () => {
   /// app's settings — no more than a position it has never heard of is.
   it("refuses a key this app has no setting for", () => {
     expect(changed({ colour: "green" })).toBeUndefined();
+    // The dialog's box is what turns the offer off, and nothing on the page
+    // does — see the note on `changed`.
+    expect(changed({ installOffer: false })).toBeUndefined();
     expect(changed({ trayIcon: false, colour: "green" })).toBeUndefined();
   });
 

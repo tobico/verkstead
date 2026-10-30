@@ -140,10 +140,10 @@ const AUTOSTART = "autostart";
 
 /// What the entry calls Verkstead, which is what a Startup Applications list
 /// draws beside its checkbox — and what the tray app's entry called it.
-const NAME = "Verkstead";
+export const NAME = "Verkstead";
 
 /// And what it says underneath, where the desktop shows one.
-const COMMENT = "The workbench, in the system tray";
+export const COMMENT = "The workbench, in the system tray";
 
 /// Why there is nothing worth registering from a checkout.
 ///

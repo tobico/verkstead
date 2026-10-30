@@ -24,8 +24,9 @@
 //! rather than a sequence of conveniences: the log file, so that every line
 //! below it is in the file somebody will be asked to send; then the lock, so
 //! that a second launch is the first window brought forward and never a second
-//! sidecar; then the address, which the lock is what makes an unambiguous
-//! question; then the binary; and only then a child. Everything before the
+//! sidecar; then the **Install Offer**, so that a download hands over to its
+//! installed copy having started nothing; then the address, which the lock is
+//! what makes an unambiguous question; then the binary; and only then a child. Everything before the
 //! child is an app that can refuse having made nothing at all.
 //!
 //! **And it holds the notices stream for the rest of the run**, drawing each
@@ -43,7 +44,7 @@
 //! [`hidden`](./startup.js) is that whole reading, and the registration it was
 //! read out of is rewritten here at every launch while there is one.
 
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { app, BrowserWindow, dialog, ipcMain, Notification } from "electron";
@@ -72,6 +73,19 @@ import { takeOver as takeOverAgent } from "./launchd.js";
 import { heard, keep, type Kept, say } from "./log.js";
 import { grey, shortcuts } from "./menu.js";
 import { hold, type Notice, opens, showing } from "./notices.js";
+import {
+  asking,
+  failure,
+  HICOLOR,
+  install as installTo,
+  INSTALL,
+  INSTALLING,
+  NotInstalled,
+  offered,
+  placed,
+  plan,
+  relaunched,
+} from "./offer.js";
 import { dataDir, logDir } from "./platform.js";
 import { GUIDE, ISSUES } from "./roles.js";
 import { takeOver as takeOverValue } from "./runkey.js";
@@ -89,7 +103,7 @@ import {
 import { taken } from "./taken.js";
 import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
-import { APPDIR, stripped, unmounted } from "./unmounted.js";
+import { APPDIR, type Environment, stripped, unmounted } from "./unmounted.js";
 import {
   alive,
   ASKING,
@@ -436,6 +450,71 @@ function noticed({ window, visit }: Opened, arrived: Notice, on: boolean): void 
   say(`a notice is shown — ${arrived.title}`);
 }
 
+/// Install the AppImage at `from` and relaunch from the copy — the **Install
+/// Offer**'s **Install**, and `--install`'s — answering whether this launch is
+/// over.
+///
+/// **What the move and the writes are is [`offer.ts`](./offer.js)'s**; what is
+/// here is the reads of the running image it needs, the failure dialog, and the
+/// relaunch. Nothing has been started yet — the sidecar comes after this — so
+/// handing over is an exit and nothing more, and Electron's relaunch waits for
+/// this process to have gone before the copy starts, which is what lets the
+/// copy take the lock.
+///
+/// **A failure carries on from where it is** (ADR-0020): the dialog says why,
+/// and this launch goes on serving out of the download.
+async function installing(from: string, machine: { platform: NodeJS.Platform; env: Environment }): Promise<boolean> {
+  // The icon set, read out of the mount this run came from: the only place the
+  // icons are, and gone once the app runs from anywhere else.
+  const appdir = machine.env[APPDIR];
+  let found: string[] = [];
+  if (appdir !== undefined) {
+    try {
+      found = readdirSync(join(appdir, HICOLOR), { recursive: true, encoding: "utf8" });
+    } catch (trouble) {
+      say(`the image's icons could not be listed, so none are installed — ${String(trouble)}`);
+    }
+  }
+
+  const planned = plan(from, machine, appdir, found);
+  if (planned === undefined) {
+    say("there is nowhere on this machine to install to, so this launch carries on");
+    return false;
+  }
+
+  say(`installing ${from} as ${planned.file}, with ${planned.entry} and ${planned.icons.length} icons`);
+
+  try {
+    installTo(planned, machine);
+  } catch (trouble) {
+    if (!(trouble instanceof NotInstalled)) {
+      throw trouble;
+    }
+    say(`the install did not happen, so this launch carries on from ${from} — ${trouble.message}`);
+    await app.whenReady();
+    const told = failure(trouble.message, from, machine);
+    dialog.showErrorBox(told.title, told.content);
+    return false;
+  }
+
+  // The copy is relaunched with the environment this run was given rather than
+  // the one its mount made of it — the same reading the sidecar is handed, see
+  // [`unmounted`]. The copy's own runtime puts its own mount in front again.
+  const passed = unmounted(machine.env);
+  for (const variable of stripped(machine.env, passed)) {
+    if (passed[variable] === undefined) {
+      delete process.env[variable];
+    } else {
+      process.env[variable] = passed[variable];
+    }
+  }
+
+  say(`installed, so this launch hands over to ${planned.file}`);
+  app.relaunch({ execPath: planned.file, args: relaunched(process.argv) });
+  app.exit(0);
+  return true;
+}
+
 async function run(): Promise<void> {
   // The one read of the process's own platform and environment, made first
   // because everything below is a function of these two values — and the
@@ -537,6 +616,119 @@ async function run(): Promise<void> {
   app.on("before-quit", () => {
     quitting = true;
   });
+
+  // Electron's own user data, which is this machine's and never the server's:
+  // where the window sits and what closing it means are facts about the desk in
+  // front of the human, so both are kept beside what Electron keeps here rather
+  // than in `config.yaml` (ADR-0020). Read here, ahead of the offer below, whose
+  // **Don't ask again** is kept in the same file.
+  const userData = app.getPath("userData");
+  const desk = join(userData, DESKTOP);
+
+  // **Launch on Startup**, which is the one setting on the Desktop page that is
+  // not in that file at all: the platform's own registration is the state (Set
+  // 846 Q9a), and what is read off this process for it is whether this is a
+  // packed app, where its executable is and what `$APPIMAGE` says. The
+  // login-item API is handed in rather than reached for, so that the two arms
+  // this machine will never take are still arms vitest runs. Made here because
+  // whether this launch is a hidden one is what the offer asks it — making it
+  // reads nothing, and every reading is made where it is asked.
+  const registering: Registering = {
+    packaged: app.isPackaged,
+    exe: process.execPath,
+    ...machine,
+  };
+
+  // Four reads of the one call and one write of the other, each of them
+  // mechanical: which of them a platform is asked, and what its answer comes to,
+  // is `startup.ts`'s — including the one this file cannot make look the same on
+  // both, `openAtLogin` being Windows' answer about a value named after the
+  // AppUserModelId rather than about the one this app writes.
+  const login: LoginItem = {
+    registered: () => app.getLoginItemSettings().openAtLogin,
+
+    // Which is why Windows is handed its own list instead: every Run value that
+    // would start this executable at a sign-in, Verkstead's own among them.
+    // Undefined on a Mac, which carries no such list.
+    values: () => app.getLoginItemSettings().launchItems ?? [],
+
+    // The Mac's own account of this launch, which is what it has instead of the
+    // flag the other two carry on their command lines.
+    openedAtLogin: () => app.getLoginItemSettings().wasOpenedAtLogin,
+
+    // And what macOS 13's `SMAppService` says about the registration beside
+    // `openAtLogin`: a human who switched Verkstead off in System Settings is
+    // `requires-approval`, which is a registration that starts nothing.
+    status: () => app.getLoginItemSettings().status,
+
+    register: (asked) => app.setLoginItemSettings(asked),
+  };
+
+  const starts = startup(registering, login);
+
+  // **The Install Offer** (ADR-0020, *Amended: a download offers to install
+  // itself*): after the lock, so that an installed copy already running has
+  // been handed the launch before any dialog could be drawn, and before the
+  // port probe and the sidecar, so that nothing has been started when this
+  // launch hands over to the copy. `--install` is its Install with nobody
+  // asked; everything else is [`offered`]'s to decide, and every no is said.
+  const here = placed({ packaged: app.isPackaged, ...machine });
+
+  if (process.argv.includes(INSTALL)) {
+    if ("outside" in here) {
+      say(`${INSTALL} asks for an install with nobody asked`);
+      if (await installing(here.outside, machine)) {
+        return;
+      }
+    } else {
+      say(
+        `${INSTALL} asks for an install, and there is nothing to do — ` +
+          ("inside" in here ? `it already runs from ${here.inside}` : here.nowhere),
+      );
+    }
+  } else {
+    const offer = offered(
+      here,
+      () => hidden(process.argv, settings(desk), starts.atLogin()),
+      settings(desk),
+    );
+
+    if ("why" in offer) {
+      say(`no Install Offer — ${offer.why}`);
+    } else {
+      // The message box wants a ready app, and nothing below this needs the
+      // app not to be: `whenReady` is awaited again further down and answers at
+      // once.
+      await app.whenReady();
+      say(`this run is ${offer.offer}, outside Applications, so it offers to install itself`);
+
+      // **A timer ticks while the box is up, and it is load-bearing.** Measured
+      // on the packed AppImage under Electron 43.7.5 on X11: the box closed at
+      // the press, and the promise it answers with resolved only when something
+      // else next woke the main process — some 30 seconds after launch, or never
+      // — because this early in a launch nothing else is running to. A tick
+      // every tenth of a second is that something, so the press is acted on at
+      // once. `showMessageBoxSync` would need no timer and cannot say whether the
+      // box was ticked.
+      const awake = setInterval(() => undefined, 100);
+      const answer = await dialog
+        .showMessageBox(asking(offer.offer, machine))
+        .finally(() => clearInterval(awake));
+
+      if (answer.checkboxChecked) {
+        say("Don't ask again is ticked, so the offer is not made again");
+        set(desk, { ...settings(desk), installOffer: false });
+      }
+
+      if (answer.response === INSTALLING) {
+        if (await installing(offer.offer, machine)) {
+          return;
+        }
+      } else {
+        say("the offer is skipped, and this launch carries on from where it is");
+      }
+    }
+  }
 
   if (await taken(HOST, PORT)) {
     say(`something is already listening on ${ADDRESS}, so there is nothing to start`);
@@ -779,13 +971,6 @@ async function run(): Promise<void> {
     say("there is nowhere on this machine for a Data Directory, so there is no key to read");
   }
 
-  // Electron's own user data, which is this machine's and never the server's:
-  // where the window sits and what closing it means are facts about the desk in
-  // front of the human, so both are kept beside what Electron keeps here rather
-  // than in `config.yaml` (ADR-0020).
-  const userData = app.getPath("userData");
-  const desk = join(userData, DESKTOP);
-
   // And whether the Update the last run handed over to landed: a start on
   // another version than the one remembered is an install that failed
   // quietly, which this device's row is told as its trouble line — the server
@@ -818,43 +1003,6 @@ async function run(): Promise<void> {
     platform: machine.platform,
   };
 
-  // **Launch on Startup**, which is the one setting on the Desktop page that is
-  // not in that file at all: the platform's own registration is the state (Set
-  // 846 Q9a), and what is read off this process for it is whether this is a
-  // packed app, where its executable is and what `$APPIMAGE` says. The
-  // login-item API is handed in rather than reached for, so that the two arms
-  // this machine will never take are still arms vitest runs.
-  const registering: Registering = {
-    packaged: app.isPackaged,
-    exe: process.execPath,
-    ...machine,
-  };
-
-  // Four reads of the one call and one write of the other, each of them
-  // mechanical: which of them a platform is asked, and what its answer comes to,
-  // is `startup.ts`'s — including the one this file cannot make look the same on
-  // both, `openAtLogin` being Windows' answer about a value named after the
-  // AppUserModelId rather than about the one this app writes.
-  const login: LoginItem = {
-    registered: () => app.getLoginItemSettings().openAtLogin,
-
-    // Which is why Windows is handed its own list instead: every Run value that
-    // would start this executable at a sign-in, Verkstead's own among them.
-    // Undefined on a Mac, which carries no such list.
-    values: () => app.getLoginItemSettings().launchItems ?? [],
-
-    // The Mac's own account of this launch, which is what it has instead of the
-    // flag the other two carry on their command lines.
-    openedAtLogin: () => app.getLoginItemSettings().wasOpenedAtLogin,
-
-    // And what macOS 13's `SMAppService` says about the registration beside
-    // `openAtLogin`: a human who switched Verkstead off in System Settings is
-    // `requires-approval`, which is a registration that starts nothing.
-    status: () => app.getLoginItemSettings().status,
-
-    register: (asked) => app.setLoginItemSettings(asked),
-  };
-
   // The tray app's own registrations, taken over once — before anything below
   // reads this app's, because on a machine that had that app they are what the
   // human asked for and the API has never heard of either. The launch agent on a
@@ -863,8 +1011,6 @@ async function run(): Promise<void> {
   // from the version this ships in onwards.
   takeOverAgent(registering, login);
   takeOverValue(registering, login);
-
-  const starts = startup(registering, login);
 
   // And the registration rewritten while there is one, which is what heals an
   // app that was moved: the entry a login reads names where the app used to be,

@@ -464,6 +464,15 @@ plus this build directory, which breaks the next time either moves — so the
 whole path is written and under vitest, and the writing is what is refused. Its
 account is CONTEXT.md's **Desktop Settings** and **Startup Registration**.
 
+**And a packed AppImage run from outside `~/Applications` offers to install
+itself** before its sidecar starts — the **Install Offer**, never on a checkout
+run or a `--hidden` start. `--install` is its **Install** with nobody asked,
+which is how to try the move without a dialog; **Don't ask again** is
+`installOffer: false` in that same `desktop.json`, and deleting the key asks
+again. There is no `/dev/fuse` in a session here, so the packed file is run with
+`APPIMAGE_EXTRACT_AND_RUN=1`, which sets `$APPIMAGE` and `$APPDIR` the way the
+mount does.
+
 **And every notice the phones get is a notification on this desk**, drawn by
 the app rather than by Web Push, which Electron cannot do: it ships without
 Google's push client, so a subscribe inside the window is refused however many

@@ -32,8 +32,10 @@ Sandbox Configuration.
 **`Verkstead-x86_64.AppImage`**, on a Linux desktop: that same server started
 from an icon, the workbench in a window of its own and a tray icon beside it —
 or no icon at all where the desktop has no tray host, and the window is there
-just the same. Make it executable and run it; sessions want the distribution's
-`bubblewrap` package installed, since it cannot ride inside an AppImage.
+just the same. Make it executable, run it, and press **Install**: it moves
+itself to `~/Applications`, adds itself to the applications menu and starts
+again from there. Sessions want the distribution's `bubblewrap` package
+installed, since it cannot ride inside an AppImage.
 
 **`Verkstead-universal.dmg`**, on a Mac: one download for Apple silicon and
 Intel alike, the workbench in a window, a tile in the Dock and an icon in the
