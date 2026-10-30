@@ -18,7 +18,6 @@ jobs:
       DMG: target/electron/out/Verkstead-universal.dmg
       MOUNT: /Volumes/Verkstead
       APP: /Volumes/Verkstead/Verkstead.app
-      VERKSTEAD_DATA_DIR: ${{ runner.temp }}/data
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -87,8 +86,11 @@ jobs:
           ls -l "$MOUNT"
           xattr -l "$APP" || true
           ls -ld /Applications
-          mkdir -p "$VERKSTEAD_DATA_DIR"
-          printf '%s\n' the-probe-key > "$VERKSTEAD_DATA_DIR/workbench.key"
+          # `open` hands the app launchd's environment rather than this shell's,
+          # so the key goes into the default Data Directory.
+          data="$HOME/Library/Application Support/Verkstead"
+          mkdir -p "$data"
+          printf '%s\n' the-probe-key > "$data/workbench.key"
           mkdir -p "$RUNNER_TEMP/shots"
           cat > "$RUNNER_TEMP/lib.sh" <<'SH'
           log="$HOME/Library/Logs/Verkstead/verkstead.log"
