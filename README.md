@@ -39,7 +39,8 @@ installed, since it cannot ride inside an AppImage.
 
 **`Verkstead-universal.dmg`**, on a Mac: one download for Apple silicon and
 Intel alike, the workbench in a window, a tile in the Dock and an icon in the
-menu bar. Drag **Verkstead** into Applications and open it. The app is signed
+menu bar. Open **Verkstead** from the image and press **Install**: it moves
+itself into Applications and opens again from there. The app is signed
 and notarized by Apple ([ADR-0027](docs/adr/0027-cluster-updates.md)), so the
 first launch asks only whether to open an app downloaded from the Internet:
 click **Open**, and it does not ask again.

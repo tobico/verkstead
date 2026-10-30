@@ -8,6 +8,15 @@
 //! left alone. One rule rather than Downloads by path: a human who keeps their
 //! AppImages in `~/bin` sees the offer once and ticks **Don't ask again**.
 //!
+//! On a Mac it is Electron's own `isInApplicationsFolder` answering no — which
+//! it does from the dmg, from Downloads, from the Desktop and from the path
+//! Gatekeeper translocates a quarantined app to — and **Install there is
+//! Electron's `moveToApplicationsFolder`** into `/Applications`, which moves the
+//! bundle, trashes a copy that was there, asks for the administrator's password
+//! where the folder wants one, and quits and relaunches on its own. Neither call
+//! can be made from a module vitest runs, so the first is handed in as a value
+//! and the second as a function — see [`Placing`] and [`moveInto`].
+//!
 //! **Never on a checkout run and never on a hidden start**, each said for its
 //! own reason — see [`offered`]. A login's start has nobody at a window that
 //! never came up, so the offer waits for the next launch somebody is at. And
@@ -72,6 +81,15 @@ export const KEYWORDS = "agent;coding;sessions;workbench;";
 export interface Placing extends Machine {
   /// Whether this is a packed app rather than a checkout run: `app.isPackaged`.
   packaged: boolean;
+
+  /// The executable running: `process.execPath`, which on a Mac is inside the
+  /// bundle Install moves.
+  exe: string;
+
+  /// Whether the bundle is in an Applications folder:
+  /// `app.isInApplicationsFolder()`, which Electron answers on a Mac alone and
+  /// which is read on a Mac alone — false elsewhere, where nothing asks it.
+  applied: boolean;
 }
 
 /// Where this run is, and whether there is anything to install.
@@ -104,8 +122,13 @@ export function placed(placing: Placing): Placed {
     return { nowhere: "the Windows download is the installer, so there is nothing to install" };
   }
 
+  if (placing.platform === "darwin") {
+    const app = bundle(placing.exe);
+    return placing.applied ? { inside: app } : { outside: app };
+  }
+
   if (placing.platform !== "linux") {
-    return { nowhere: `there is no Install Offer on ${placing.platform} yet` };
+    return { nowhere: `there is no Install Offer on ${placing.platform}` };
   }
 
   const running = absolute(placing.env.APPIMAGE);
@@ -119,6 +142,16 @@ export function placed(placing: Placing): Placed {
   }
 
   return running.startsWith(`${dir}/`) ? { inside: running } : { outside: running };
+}
+
+/// The bundle a Mac executable at `exe` is inside —
+/// `<bundle>/Contents/MacOS/<name>` — or the executable itself where it is in
+/// no bundle, which is only ever a log line's worth of difference.
+export function bundle(exe: string): string {
+  const parts = exe.split("/");
+  return parts.length > 3 && parts.at(-2) === "MacOS" && parts.at(-3) === "Contents"
+    ? parts.slice(0, -3).join("/")
+    : exe;
 }
 
 /// Whether this launch puts the offer up: the file it would install, or why it
@@ -292,15 +325,22 @@ export const INSTALLING = 0;
 /// The offer, for the file at `from`: the question, a sentence naming where it
 /// runs from and what installing does, **Install** against **Skip**, and the
 /// box. The words are ADR-0020's.
+///
+/// **A Mac's sentence names no path**: the one a translocated app runs from is
+/// a randomised folder nobody chose, and Applications is the one place the
+/// human knows by name.
 export function asking(from: string, machine: Machine): Asking {
   const into = applications(machine);
 
   return {
     message: "Install Verkstead?",
     detail:
-      `Verkstead is running from ${shown(dirname(from), machine)}. ` +
-      `Installing moves it to ${into === undefined ? APPLICATIONS : shown(into, machine)}, ` +
-      "adds it to your applications menu, and restarts it from there.",
+      machine.platform === "darwin"
+        ? "Verkstead is running from outside Applications. " +
+          "Installing moves it into Applications and opens it from there."
+        : `Verkstead is running from ${shown(dirname(from), machine)}. ` +
+          `Installing moves it to ${into === undefined ? APPLICATIONS : shown(into, machine)}, ` +
+          "adds it to your applications menu, and restarts it from there.",
     buttons: ["Install", "Skip"],
     defaultId: INSTALLING,
     cancelId: 1,
@@ -313,13 +353,37 @@ export function asking(from: string, machine: Machine): Asking {
 export function failure(why: string, from: string, machine: Machine): { title: string; content: string } {
   return {
     title: "Verkstead couldn't be installed.",
-    content: `${why}\n\nIt carries on running from ${shown(dirname(from), machine)}.`,
+    content: `${why}\n\nIt carries on running from ${
+      machine.platform === "darwin" ? "outside Applications" : shown(dirname(from), machine)
+    }.`,
   };
 }
 
 /// An install that stopped part of the way, and the sentence a human is shown
 /// for it — the step that failed, with what the system said.
 export class NotInstalled extends Error {}
+
+/// A Mac's Install: `move`, which is `app.moveToApplicationsFolder`, made and
+/// its answer read.
+///
+/// **True is the app on its way out**: Electron has moved the bundle and is
+/// quitting this process to relaunch the copy. **False is the password dialog
+/// cancelled**, and a throw is a move that could not be made — both a
+/// [`NotInstalled`] worded for the failure dialog rather than a silent skip
+/// (ADR-0020): the human pressed Install.
+export function moveInto(move: () => boolean): void {
+  let moved: boolean;
+  try {
+    moved = move();
+  } catch (trouble) {
+    const said = trouble instanceof Error ? trouble.message : String(trouble);
+    throw new NotInstalled(`It couldn't be moved into Applications (${said}).`);
+  }
+
+  if (!moved) {
+    throw new NotInstalled("Moving it into Applications was cancelled.");
+  }
+}
 
 /// Do what `plan` says: the icons, the move, then the entry.
 ///

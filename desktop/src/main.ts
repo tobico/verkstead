@@ -80,6 +80,7 @@ import {
   install as installTo,
   INSTALL,
   INSTALLING,
+  moveInto,
   NotInstalled,
   offered,
   placed,
@@ -450,11 +451,17 @@ function noticed({ window, visit }: Opened, arrived: Notice, on: boolean): void 
   say(`a notice is shown — ${arrived.title}`);
 }
 
-/// Install the AppImage at `from` and relaunch from the copy — the **Install
+/// Install the app at `from` and relaunch from the copy — the **Install
 /// Offer**'s **Install**, and `--install`'s — answering whether this launch is
 /// over.
 ///
-/// **What the move and the writes are is [`offer.ts`](./offer.js)'s**; what is
+/// **On a Mac the whole of it is Electron's** `moveToApplicationsFolder`, which
+/// moves the bundle into `/Applications` and quits and relaunches on its own;
+/// what is here is its answer read, by [`moveInto`], and the failure dialog.
+/// Its conflict handler is left to its default, which trashes a copy that was
+/// there.
+///
+/// **On Linux what the move and the writes are is [`offer.ts`](./offer.js)'s**; what is
 /// here is the reads of the running image it needs, the failure dialog, and the
 /// relaunch. Nothing has been started yet — the sidecar comes after this — so
 /// handing over is an exit and nothing more, and Electron's relaunch waits for
@@ -464,6 +471,25 @@ function noticed({ window, visit }: Opened, arrived: Notice, on: boolean): void 
 /// **A failure carries on from where it is** (ADR-0020): the dialog says why,
 /// and this launch goes on serving out of the download.
 async function installing(from: string, machine: { platform: NodeJS.Platform; env: Environment }): Promise<boolean> {
+  if (machine.platform === "darwin") {
+    // After ready, as the rest of Electron's AppKit is: the move may put up
+    // the administrator's password dialog.
+    await app.whenReady();
+    say(`installing ${from} into /Applications`);
+
+    try {
+      moveInto(() => app.moveToApplicationsFolder());
+    } catch (trouble) {
+      return failed(trouble, from, machine);
+    }
+
+    // Electron has moved the bundle and relaunches the copy once this process
+    // has gone — so it goes, with nothing started.
+    say("installed, so this launch hands over to the copy in /Applications");
+    app.exit(0);
+    return true;
+  }
+
   // The icon set, read out of the mount this run came from: the only place the
   // icons are, and gone once the app runs from anywhere else.
   const appdir = machine.env[APPDIR];
@@ -487,14 +513,7 @@ async function installing(from: string, machine: { platform: NodeJS.Platform; en
   try {
     installTo(planned, machine);
   } catch (trouble) {
-    if (!(trouble instanceof NotInstalled)) {
-      throw trouble;
-    }
-    say(`the install did not happen, so this launch carries on from ${from} — ${trouble.message}`);
-    await app.whenReady();
-    const told = failure(trouble.message, from, machine);
-    dialog.showErrorBox(told.title, told.content);
-    return false;
+    return failed(trouble, from, machine);
   }
 
   // The copy is relaunched with the environment this run was given rather than
@@ -513,6 +532,23 @@ async function installing(from: string, machine: { platform: NodeJS.Platform; en
   app.relaunch({ execPath: planned.file, args: relaunched(process.argv) });
   app.exit(0);
   return true;
+}
+
+/// An install that did not happen: said in the log and in the failure dialog,
+/// and this launch carries on from where it is (ADR-0020).
+async function failed(
+  trouble: unknown,
+  from: string,
+  machine: { platform: NodeJS.Platform; env: Environment },
+): Promise<false> {
+  if (!(trouble instanceof NotInstalled)) {
+    throw trouble;
+  }
+  say(`the install did not happen, so this launch carries on from ${from} — ${trouble.message}`);
+  await app.whenReady();
+  const told = failure(trouble.message, from, machine);
+  dialog.showErrorBox(told.title, told.content);
+  return false;
 }
 
 async function run(): Promise<void> {
@@ -672,7 +708,12 @@ async function run(): Promise<void> {
   // port probe and the sidecar, so that nothing has been started when this
   // launch hands over to the copy. `--install` is its Install with nobody
   // asked; everything else is [`offered`]'s to decide, and every no is said.
-  const here = placed({ packaged: app.isPackaged, ...machine });
+  const here = placed({
+    packaged: app.isPackaged,
+    exe: process.execPath,
+    applied: machine.platform === "darwin" && app.isInApplicationsFolder(),
+    ...machine,
+  });
 
   if (process.argv.includes(INSTALL)) {
     if ("outside" in here) {
