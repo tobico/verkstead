@@ -94,7 +94,9 @@ pub mod updating;
 pub mod workbench;
 
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Poll, ready};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -115,6 +117,7 @@ use rustls::{
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, UnixTime};
 use sqlx::SqlitePool;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
@@ -185,6 +188,21 @@ const HANDSHAKE: Duration = Duration::from_secs(10);
 /// mend — a machine out of descriptors — and retrying it flat out is a runtime
 /// spent on nothing.
 const AGAIN: Duration = Duration::from_secs(1);
+
+/// How long a connection being closed goes on being read from — see
+/// [`Lingering`].
+///
+/// Long enough for a refusal to have crossed any link a call would work over,
+/// and short enough that a caller who never stops sending costs this process
+/// two seconds of a task rather than an upload's worth.
+const LINGERING: Duration = Duration::from_secs(2);
+
+/// And how much of what a closing connection is still sent is read and thrown
+/// away before it is closed regardless.
+///
+/// The same bound by bytes rather than by time: a caller on loopback can send
+/// gigabytes in [`LINGERING`], and none of them are for anybody.
+const MOST_LINGERED_OVER: usize = 4 * 1024 * 1024;
 
 /// The peer listener: a socket taken, with this device's certificate standing
 /// behind it.
@@ -1069,6 +1087,7 @@ impl Connected<IncomingStream<'_, Handshaken>> for Caller {
     fn connect_info(stream: IncomingStream<'_, Handshaken>) -> Caller {
         let presented = stream
             .io()
+            .secured
             .get_ref()
             .1
             .peer_certificates()
@@ -1286,6 +1305,123 @@ struct Handshaken {
     completed: mpsc::Receiver<(TlsStream<TcpStream>, SocketAddr)>,
 }
 
+/// A secured connection that, when it is closed, goes on reading for a moment
+/// before it lets go.
+///
+/// **Because a refusal made before the request was read is otherwise lost.** A
+/// route that refuses a body over its limit answers having read only part of
+/// it, and the caller is still sending the rest. A socket closed with bytes it
+/// has not read is reset rather than closed, and Windows throws away whatever
+/// the caller had received and not yet read when that reset arrives — the
+/// answer included. What the caller is left with is a connection that broke
+/// partway through, where it should have had `413`.
+///
+/// So the close is a lingering one, the way a web server's is: the write half
+/// is shut — which is the answer's end, said — and what still arrives is read
+/// and thrown away until the caller stops, [`LINGERING`] has passed, or
+/// [`MOST_LINGERED_OVER`] has been read, by which time the caller has had the
+/// answer off its own socket. A caller that closed first is not waited on at
+/// all: its end-of-stream is the first thing read.
+struct Lingering {
+    secured: TlsStream<TcpStream>,
+    closing: Option<Closing>,
+}
+
+/// Where a lingering close has got to.
+struct Closing {
+    shut: bool,
+    thrown_away: usize,
+    until: Pin<Box<tokio::time::Sleep>>,
+}
+
+impl Lingering {
+    fn over(secured: TlsStream<TcpStream>) -> Lingering {
+        Lingering {
+            secured,
+            closing: None,
+        }
+    }
+}
+
+impl AsyncRead for Lingering {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.secured).poll_read(context, buf)
+    }
+}
+
+impl AsyncWrite for Lingering {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.secured).poll_write(context, buf)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.secured).poll_write_vectored(context, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.secured.is_write_vectored()
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.secured).poll_flush(context)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let this = &mut *self;
+        let closing = this.closing.get_or_insert_with(|| Closing {
+            shut: false,
+            thrown_away: 0,
+            until: Box::pin(tokio::time::sleep(LINGERING)),
+        });
+
+        if !closing.shut {
+            ready!(Pin::new(&mut this.secured).poll_shutdown(context))?;
+            closing.shut = true;
+        }
+
+        let mut scratch = [0; 8 * 1024];
+
+        while closing.thrown_away < MOST_LINGERED_OVER {
+            let mut read = ReadBuf::new(&mut scratch);
+
+            match Pin::new(&mut this.secured).poll_read(context, &mut read) {
+                Poll::Ready(Ok(())) if !read.filled().is_empty() => {
+                    closing.thrown_away += read.filled().len();
+                }
+
+                // The caller has stopped, or its end has gone: either way
+                // there is nothing left to keep the connection open for.
+                Poll::Ready(_) => return Poll::Ready(Ok(())),
+
+                Poll::Pending => {
+                    ready!(closing.until.as_mut().poll(context));
+                    return Poll::Ready(Ok(()));
+                }
+            }
+        }
+
+        Poll::Ready(Ok(()))
+    }
+}
+
 impl Handshaken {
     /// Start accepting on `socket`, securing what arrives with `presenting`
     /// and giving each caller `handshake` to get through it in.
@@ -1309,7 +1445,7 @@ impl Handshaken {
 }
 
 impl axum::serve::Listener for Handshaken {
-    type Io = TlsStream<TcpStream>;
+    type Io = Lingering;
 
     /// Where the caller dialled from. What a route will want to know about a
     /// peer is which device it is, and that is the certificate rather than the
@@ -1319,7 +1455,7 @@ impl axum::serve::Listener for Handshaken {
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
         match self.completed.recv().await {
-            Some(connection) => connection,
+            Some((secured, from)) => (Lingering::over(secured), from),
 
             // The accepting task holds the other end for as long as it runs,
             // and it only ever returns when this end has gone — so this is
