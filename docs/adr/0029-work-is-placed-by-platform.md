@@ -115,9 +115,12 @@ and waiting is not one of them:
 | No device of it linked | *Stage 03 wants Windows. No Windows device is linked.* | none — a Notice, and the work runs here |
 
 **A device both unticked and asleep is asked about as unticked.** *Move to
-nuc-win* ticks it, and what follows is the asleep case: the Set is locked, its
-line saying the device was permitted, and the asleep row's Set goes up in its
-place as the wait, so *Run it here* or *Keep it here* is still there to press.
+nuc-win* ticks it, and what follows is the asleep case: the Set keeps its
+answer, with a line beside it saying the device was permitted, and the asleep
+row's Set goes up in its place as the wait, so *Run it here* or *Keep it here*
+is still there to press. *Locked* was written first. It could not be: the
+Response is stored before the handler acting on it runs, and an answered Set
+takes no lock. So a Set's line is drawn on an answered Set as on a locked one.
 
 **A device that answers before the human does settles the Set itself**: the
 move runs and the Set is locked, its line saying the device answered, because
@@ -137,6 +140,30 @@ work stays. A refusal that told the agent to ask with `verkstead ask` was
 offered and turned down; the Attach menu route stays as it was. The words are
 `docs/copy.md`'s: a verb on the button, a full sentence naming the device above
 it, and the notification naming the branch and the device.
+
+**Four more were settled when the stage that builds this was planned** (Set
+1547):
+
+- **One *Move to* for each unticked device** of the platform, in the order
+  placement would try them, against the one *Run it here* (Q2).
+- **A ticked device asleep and an unticked one awake are one Set saying
+  both** (Q3): the sleeping one moving the work by itself once it wakes, the
+  other linked but not permitted, with *Move to* the unticked one against *Run
+  it here*.
+- **A permitted device awake but lacking the Repo, a companion or the harness
+  stays a Notice** naming what it lacks, and the work runs here (Q4). Only a
+  sleeping one is asked about, whatever the awake ones lack.
+- **The wait asks the sleeping device itself, on a paced clock** (Q5): every
+  half minute, and sooner when a member is heard answering. Nothing in the
+  cluster says *a device woke*, so the wait has to ask. A device answering
+  cleanly settles the Set, as above.
+
+**The agent's call is answered 202, not 200.** The Set goes up as the call is
+taken rather than after the turn, and the session is ended once its turn is
+over. An answer that lands before then is acted on all the same: *Keep it here*
+ends the session itself, and *Move to* hands it to the ordinary mover. *Keep it
+here* is the Carried Conversation's resume with a note of its own, beside the
+one an Addition's carrying-on is given.
 
 ## Home drives a roadmap across devices
 

@@ -25,4 +25,4 @@ Roadmap stage: [04: Verkstead's own Question Set](docs/roadmaps/platform-placeme
 - [x] 03: A sleeping device, and its wake — [details](03-a-sleeping-device-and-its-wake.md)
 - [x] 04: Unticked and asleep — [details](04-unticked-and-asleep.md)
 - [x] 05: The agent's request — [details](05-the-agents-request.md)
-- [ ] 06: The words on the record — [details](06-the-words-on-the-record.md)
+- [x] 06: The words on the record — [details](06-the-words-on-the-record.md)

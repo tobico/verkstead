@@ -673,8 +673,20 @@ compose page, held with the rest of the page and sent with the draft; on a saved
 draft's composer; and in the *Transfer to…* dialog afterwards, where ticking one
 changes the list and moves nothing. Nothing is ticked by default.
 **The ticks are the consent.** Nothing asks the human again when the agent calls
-for a move, so the list is the whole of their say in one — and a **Transfer** the
-human presses ignores it entirely.
+for a move to an awake ticked device, so the list is the whole of their say in
+one — and a **Transfer** the human presses ignores it entirely.
+**The call on a device that cannot be used yet is a request, not a refusal**
+(ADR-0029, *Verkstead asks with a Question Set of its own*). `verkstead
+transfer` naming a device that is linked but not ticked, or ticked and asleep, is
+accepted. The Set goes up as the call is taken, a **Question Set** of
+Verkstead's own, and the session ends at its turn's end. On an unticked device
+it offers *Move to* that device against *Keep it here*; on a sleeping one,
+*Keep it here* alone, and the device answering moves the work by itself.
+*Move to* ticks the device and moves the work. *Keep it here* carries the
+session on where it is, a **Carried Conversation** with a note saying the work
+stays. A name that is nobody's or two devices', this device, a device that
+answers lacking something, and a Verkstead in no cluster are still refused, in
+the words they were before.
 **The drafting device is always permitted and is never a tick**: the device in
 the Conversation's **Birth Key**, so a session that has moved can always come
 home. The device the work is on now is not offered either, being where the work
@@ -696,7 +708,7 @@ stays off by default, and is told*): the prompt of a session on a Conversation
 of a clustered Verkstead names the device it runs on, with its OS word, and
 every other member with whether it is permitted — so a session with nothing
 ticked still knows the Windows machine exists, and asks the human for it.
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)), stage by stage of the platform-placement roadmap: an agent's call on a device that is linked but not ticked, or ticked but asleep, becomes a Question Set of Verkstead's own rather than a refusal; and a roadmap's Stages inherit the roadmap Conversation's ticks.
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)), by stage 06 of the platform-placement roadmap: a roadmap's Stages inherit the roadmap Conversation's ticks.
 _Avoid_: allowed device, whitelist, target list
 
 **Carried Conversation**:
@@ -860,6 +872,12 @@ line, and the Notice names the Set rather than a move. The memory switch is no
 reason here — the Conversation's own home holds the log either way — and the other
 four still are. What the answer added is an **Addition**; see there for which of
 them restart the agent.
+**And *Keep it here* is the third** (ADR-0029). An agent's `verkstead transfer`
+to a device that is not permitted or not awake ends its session at the turn's
+end and puts a **Question Set** of Verkstead's own. Answered *Keep it here*, the
+session is carried on where it is, the same way as the second occasion. The row
+names the Set, and the note says the human kept the work on this device and
+nothing moved.
 _Avoid_: resumed session (that is ambiguous with Verkstead's **Resume**),
 rehydrate, replay, continuation
 
@@ -3381,7 +3399,7 @@ _Avoid_: commit message (the summary is its body, not the whole), description,
 gate summary (the gate is gone), changelog entry
 
 **Notice**:
-The one kind of Event Verkstead writes on its own account: which Stages it
+The Event Verkstead writes on its own account to say what it did: which Stages it
 started and where each of their branches went, that a ready Stage waited for a
 place, that a roadmap has no Stage left to run, that the roadmap on the record
 is not on the branch to read, that a branch wrote no single roadmap so no Stage
@@ -3416,7 +3434,13 @@ at the press, in the same words.
 Nothing to do about one, however much it says. A Notice is written after the
 fact and stays on the record for ever; what a stopped run is waiting on is that
 it is **Stopped**, and what answers that is **Resume**.
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): the one thing Verkstead writes on its own account gains a second — a Question Set of its own, asked where declared work wants a device that is asleep or not yet permitted, Verkstead named as the asker, and left open as the wait for a sleeping device, which settles it by answering.
+**It is not Verkstead's only voice.** Where there *is* something to decide, it
+asks instead, with a **Question Set** of its own (ADR-0029, *Verkstead asks with
+a Question Set of its own*). It asks where declared work wants a device that is
+asleep or not yet permitted, and where an agent calls `verkstead transfer` on
+one. For declared work a Notice still says the rest: no device of the platform
+linked at all, or only ones awake and lacking the Repo, a companion or the
+harness. There the work runs here, and the Notice says why.
 _Avoid_: log line, info event, message, alert
 
 **Transcript**:
@@ -5884,12 +5908,22 @@ _Avoid_: sync/async ask, hard/soft question, urgent question
 ## Question Sets
 
 **Question Set**:
-A batch of Questions submitted together by one agent, with a Preface and a
-title. The unit that lands on a Conversation's Timeline, gets answered, and is
+A batch of Questions submitted together by one agent, or by Verkstead itself,
+with a Preface and a title. The unit that lands on a Conversation's Timeline, gets answered, and is
 locked. Reached through the Conversation it was asked from and nowhere else:
 a second way in would be a second thing to keep true. While it waits, its sheet
 is also where the work is widened: an **Addition** picked at any Answer, or a
 **Set-level Attachment** put at the comment box (ADR-0028).
+**A Set may be Verkstead's own** (ADR-0029, *Verkstead asks with a Question Set
+of its own*). Verkstead asks one where declared work wants a device that is
+asleep or not yet permitted, and where an agent's `verkstead transfer` names
+one. It is drawn *asked by Verkstead* on the Timeline and the sheet, and it
+reaches the phone as any open Set does. Its Options are what the human can do:
+*Move to* each unpermitted device, against *Run it here* (or *Keep it here*,
+on the agent's call). No agent waits on it, so **a handler of Verkstead's
+settles it** the moment the Response is stored, from either way a Response
+comes in, and runs the Option picked. While it is open it holds the work's
+place, and for a sleeping device it is the wait: no Option means *wait*.
 _Avoid_: request, batch, ticket
 
 **Unreadable**:
@@ -6097,6 +6131,13 @@ history, and no place of its own to browse: a locked Set stays on the Timeline
 it was asked from, saying what became of it, and takes no Response ever again.
 Locking one by hand is the single irreversible act in the workbench, which is
 why it is the single one confirmed in as many words. Nothing leaves a Timeline.
+**A lock may carry a line** saying what settled the Set, drawn under it on the
+card and the sheet. Only Verkstead writes one, on a Set of its own. When a
+sleeping device answers before the human does, the move runs and the Set is
+locked with *nuc-win answered, so the work moved there.* An answered Set can
+carry a line too. *Move to* a device that is both unticked and asleep leaves
+the Set answered, not locked, with *nuc-win was permitted, and isn't awake
+yet.* beside the answer, and the asleep Set goes up in its place.
 _Avoid_: archived (**Archived** is a Conversation coming off the sidebar, which
 is reversible and about a list rather than about a Set), filed, history, log
 
