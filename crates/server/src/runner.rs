@@ -740,6 +740,16 @@ async fn backlog_again(
         false => Vec::new(),
     };
 
+    // And placed as the loop places it: a Resume is a launch of the task like
+    // any other, so one moved back by hand is moved again — see
+    // [`crate::placing`].
+    if let Step::Task { number, .. } = &step
+        && crate::placing::task(&state, conversation_id, working_in, *number).await
+            == crate::placing::Placed::Moving
+    {
+        return;
+    }
+
     tracing::info!(conversation_id, step = ?step, "a stopped run is being taken up again");
 
     let Some(session) = launch_in_turn(&state, conversation_id, Prompt::NextTask { joining }).await
@@ -1178,6 +1188,18 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
             true => crate::joins::let_in(&state, conversation_id).await,
             false => Vec::new(),
         };
+
+        // And a task that declares a platform this device is not is moved to one
+        // that is before anything is launched for it: the move runs where it
+        // stands, with nothing running, and the far end's arrival presses its own
+        // Resume, which launches it there — see [`crate::placing`]. The run here
+        // stands down, its registration handed to the mover.
+        if let Step::Task { number, .. } = &step
+            && crate::placing::task(&state, conversation_id, &worktree, *number).await
+                == crate::placing::Placed::Moving
+        {
+            return;
+        }
 
         tracing::info!(conversation_id, step = ?step, "a fresh session is starting on the next step");
 

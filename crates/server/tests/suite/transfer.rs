@@ -188,16 +188,28 @@ impl Verkstead {
     /// 07's — but a device taking work in needs what a served one has: a Data
     /// Directory, which is where an arriving Conversation's attached files land.
     async fn running(id: &str, stub: &str, spill: &Path) -> Verkstead {
-        Verkstead::standing(id, Some(stub), spill, Pace::default()).await
+        Verkstead::standing(id, Some(stub), spill, Pace::default(), B_OS).await
     }
 
     /// The same at `pace`, for the one test that needs a session spoken to
     /// sooner than a server would.
     async fn running_at(id: &str, stub: &str, spill: &Path, pace: Pace) -> Verkstead {
-        Verkstead::standing(id, Some(stub), spill, pace).await
+        Verkstead::standing(id, Some(stub), spill, pace, B_OS).await
     }
 
-    async fn standing(id: &str, stub: Option<&str>, spill: &Path, pace: Pace) -> Verkstead {
+    /// And the same with B running `os` rather than [`B_OS`], for the tests about
+    /// work placed by the platform it wants.
+    async fn running_on(id: &str, stub: &str, spill: &Path, pace: Pace, os: &str) -> Verkstead {
+        Verkstead::standing(id, Some(stub), spill, pace, os).await
+    }
+
+    async fn standing(
+        id: &str,
+        stub: Option<&str>,
+        spill: &Path,
+        pace: Pace,
+        b_os: &str,
+    ) -> Verkstead {
         let dir = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
@@ -232,7 +244,7 @@ impl Verkstead {
         // reading its identity again on taking up its stream finds that row as
         // it stands — see [`B_MACHINE`].
         let reading = if id == B {
-            reading.calling_itself(B_MACHINE, B_OS)
+            reading.calling_itself(B_MACHINE, b_os)
         } else {
             reading
         };
@@ -299,6 +311,55 @@ impl Verkstead {
 
         Holding(tokio::spawn(async move {
             cluster.stay_fresh(nudges).await;
+        }))
+    }
+
+    /// Stand in for `verkstead done` for every session on this device, until
+    /// the handle is dropped.
+    ///
+    /// A stub cannot reach the server it belongs to — the router is driven with
+    /// `oneshot` and has no socket — so what it does instead is leave a `done`
+    /// marker in its Conversation's own directory, which a sandbox sees as
+    /// `/tmp/verkstead`, and this posts the signal over the agent API the way the
+    /// CLI would. Until the server takes it, which is what an agent does with a
+    /// refusal. See `tests/suite/sessions.rs`, whose relay this is.
+    fn signalling(&self) -> Holding {
+        let app = self.workbench.clone();
+        let handoffs = self._dir.path().join("handoffs");
+
+        Holding(tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(LOOKING).await;
+
+                let marked: Vec<(i64, PathBuf)> = std::fs::read_dir(&handoffs)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .filter_map(|entry| {
+                        let id = entry.file_name().to_str()?.parse::<i64>().ok()?;
+                        let marker = entry.path().join("done");
+                        marker.exists().then_some((id, marker))
+                    })
+                    .collect();
+
+                for (id, marker) in marked {
+                    let response = app
+                        .clone()
+                        .oneshot(
+                            Request::builder()
+                                .method("POST")
+                                .uri(format!("/conversations/{id}/api/v1/done"))
+                                .body(Body::empty())
+                                .unwrap(),
+                        )
+                        .await
+                        .unwrap();
+
+                    if response.status() == StatusCode::OK {
+                        let _ = std::fs::remove_file(&marker);
+                    }
+                }
+            }
         }))
     }
 
@@ -3110,6 +3171,260 @@ async fn a_backlog_step_that_made_the_call_stands_down_and_carries_on_over_there
             .contains("- [ ] 01: count the requests"),
         "and the step it carries on is the one A's session was working",
     );
+}
+
+/// The backlog [`works_each_task_on`] plans by default: three tasks, the second
+/// of which wants Windows.
+const THREE_TASKS: &str = "- [ ] 01: Count — [details](01-count.md)\\n- [ ] 02: Limit — \
+                           [details](02-limit.md) — on windows\\n- [ ] 03: Report — \
+                           [details](03-report.md)\\n";
+
+/// What stands where claude goes for **a backlog worked across two devices**:
+/// the grilling commits `tasks` as its backlog — lines for `printf`, each task
+/// with a file beside it — and every session sent for a step ticks the next
+/// box, commits, says which task it worked and on which machine, and signals;
+/// or, with every box ticked, says it is finishing and stays up.
+fn works_each_task_on(machine: &str, tasks: &str) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-task/SKILL.md*)
+    next=
+    out=
+    while IFS= read -r line; do
+        case "$line" in
+        "- [ ] "*)
+            if [ -z "$next" ]; then
+                rest=${{line#- \[ \] }}
+                next=${{rest%%:*}}
+                line="- [x] $rest"
+            fi
+            ;;
+        esac
+        out="$out$line
+"
+    done < .tasks/TODO.md
+
+    if [ -z "$next" ]; then
+        printf 'finishing on {machine}\r\n'
+        sleep 300
+    fi
+
+    printf '%s' "$out" > .tasks/TODO.md
+    git commit --quiet -am "feat: task $next"
+    printf 'worked task %s on {machine}\r\n' "$next"
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*)
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n{tasks}' > .tasks/TODO.md
+    for task in 01-count 02-limit 03-report; do printf '# %s\n' "$task" > .tasks/$task.md; done
+    git add .tasks
+    git commit --quiet -m 'chore: plan the rate limiter'
+    printf 'grilling\r\n'
+    ;;
+esac
+"#,
+    )
+}
+
+/// What B calls its operating system in the tests about placing work: a word
+/// whose mark is Windows' without being the word itself, as a real one is.
+const WINDOWS: &str = "Windows 11";
+
+/// Two devices, A on Linux and B on Windows with B ticked, and a Conversation on
+/// A whose grilling committed `tasks` as its backlog, and a task list picked —
+/// with the Resume that starts working it still to press.
+///
+/// Every session on either device signals as `verkstead done` would, and every
+/// stream either holds is held for as long as the handles are.
+async fn planned_across(
+    tasks: &str,
+    spill: &Path,
+) -> (Verkstead, Verkstead, (Holding, Holding, Holding), i64) {
+    let a = Verkstead::running_on(
+        A,
+        &works_each_task_on("A", tasks),
+        spill,
+        rescuing(),
+        WINDOWS,
+    )
+    .await;
+    let b = Verkstead::running_on(
+        B,
+        &works_each_task_on("B", tasks),
+        spill,
+        rescuing(),
+        WINDOWS,
+    )
+    .await;
+    let signalling = (a.signalling(), b.signalling());
+
+    a.linked_to(&b.device, B_MACHINE, WINDOWS, vec![b.at()])
+        .await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    a.repo().await;
+    b.repo().await;
+
+    let account = a.account().await;
+    let holding = b.holding();
+    b.profile_called(ACCOUNT).await;
+
+    let conversation = a.drafting_under(&account).await;
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert!(matches!(
+        store::pick_direction(&a.pool, conversation, Direction::TaskList)
+            .await
+            .unwrap(),
+        store::Directing::Writing,
+    ));
+    store::start_implementing(&a.pool, conversation)
+        .await
+        .unwrap();
+
+    (a, b, (signalling.0, signalling.1, holding), conversation)
+}
+
+/// Press **Resume** on that Conversation on this device: the one standing way
+/// into working a backlog.
+async fn resumes(on: &Verkstead, conversation: i64) {
+    let resumed = press(
+        &on.workbench,
+        &format!("/api/ui/conversations/{conversation}/resume"),
+        None,
+    )
+    .await;
+
+    assert_eq!(resumed, "\"Resumed\"", "the backlog is worked");
+}
+
+/// **A task that wants Windows is moved there before its session starts**, and
+/// the work stays there (ADR-0029, *Placing declared work*). Worked on a Linux
+/// device with a Windows member ticked: task 01 runs here, the Conversation
+/// moves before 02's session starts, 02 and then 03 run on the far device, and
+/// nothing moves it back. Both Timelines name the task and the device.
+#[tokio::test]
+async fn a_task_that_wants_windows_is_moved_there_and_the_work_stays() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) = planned_across(THREE_TASKS, spill.path()).await;
+
+    resumes(&a, conversation).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    // Task 01 was worked here, and nothing here was ever launched for 02.
+    let mut worked_here = String::new();
+    for event in a.sessions_on(conversation).await {
+        worked_here.push_str(&a.capture_of(conversation, event).await);
+    }
+    assert!(
+        worked_here.contains("worked task 01 on A"),
+        "the undeclared first task runs where the work is: {worked_here:?}",
+    );
+    assert!(
+        !worked_here.contains("task 02") && !worked_here.contains("finishing"),
+        "and the move is made before 02's session starts: {worked_here:?}",
+    );
+
+    let went = a.notice_saying(conversation, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for task 02, which wants Windows"),
+        "the source names the task and the device: {went}",
+    );
+
+    let came = b.notice_saying(there, "Transferred to").await;
+    assert!(
+        came.contains(B_MACHINE) && came.contains("for task 02, which wants Windows"),
+        "and so does the far end: {came}",
+    );
+
+    // 02 and then 03 run on B, and the finish after them: the work stays where
+    // the move left it.
+    b.latest_capture_saying(there, "finishing on B").await;
+
+    let mut worked_there = String::new();
+    for event in b.sessions_on(there).await {
+        worked_there.push_str(&b.capture_of(there, event).await);
+    }
+    assert!(
+        worked_there.contains("worked task 02 on B")
+            && worked_there.contains("worked task 03 on B"),
+        "the declared task and the undeclared one after it run on the far device: \
+         {worked_there:?}",
+    );
+
+    let drawn = b.view(there).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "and nothing moves the work back",
+    );
+}
+
+/// One task, wanting Linux: what the device the work was drafted on runs.
+const ONE_LINUX_TASK: &str = "- [ ] 01: Count — [details](01-count.md) — on linux\\n";
+
+/// **A declared task moved off its platform by hand is moved again at its next
+/// launch**, a Resume's included — and the drafting device counts as permitted
+/// without a tick. Pressed onto the Windows device with nothing running, the
+/// arrival's own Resume there finds a task that wants Linux and sends the work
+/// home, where it is worked; nothing on the Windows device ever launched it.
+#[tokio::test]
+async fn a_declared_task_moved_off_its_platform_by_hand_is_moved_again_at_its_resume() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) = planned_across(ONE_LINUX_TASK, spill.path()).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let back = a
+        .notice_saying(conversation, "for task 01, which wants Linux")
+        .await;
+    assert!(
+        back.contains(B_MACHINE),
+        "the work comes home from the Windows device for the task: {back}",
+    );
+
+    let worked = a
+        .latest_capture_saying(conversation, "finishing on A")
+        .await;
+    let mut worked_here = String::new();
+    for event in a.sessions_on(conversation).await {
+        worked_here.push_str(&a.capture_of(conversation, event).await);
+    }
+    assert!(
+        worked_here.contains("worked task 01 on A"),
+        "and the task is worked here, the finish after it: {worked_here:?} then {worked:?}",
+    );
+
+    let there = b.own_rows().await[0].id;
+    let went = b
+        .notice_saying(there, "for task 01, which wants Linux")
+        .await;
+    assert!(
+        went.starts_with("<p>Transferred to"),
+        "the Windows device says why the work left it: {went}",
+    );
+
+    for event in b.sessions_on(there).await {
+        let said = b.capture_of(there, event).await;
+        assert!(
+            !said.contains("on B"),
+            "nothing on the Windows device was launched for the task: {said:?}",
+        );
+    }
 }
 
 /// **The source is marked only once the far end has confirmed**, and what it

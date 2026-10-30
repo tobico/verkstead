@@ -2641,15 +2641,19 @@ mod tests {
         );
     }
 
-    /// Nothing places a task by its platform yet, and the skill says so rather
-    /// than promising a move the backlog does not make.
+    /// A task is placed by its platform before its session starts, and the
+    /// skill says so — and that the move is Verkstead's rather than a session's.
     #[test]
-    fn the_breakdown_skill_says_a_task_platform_is_recorded_not_acted_on() {
+    fn the_breakdown_skill_says_a_task_platform_moves_the_work() {
         let breaking_down = flowed(BREAKING_DOWN);
 
         assert!(
-            breaking_down.contains("recorded rather than acted on"),
-            "a task line's platform is recorded and not yet acted on: {breaking_down}"
+            breaking_down.contains("before that task's session starts, it moves the work"),
+            "Verkstead moves a declared task before it starts: {breaking_down}"
+        );
+        assert!(
+            breaking_down.contains("No session moves itself for a declared task."),
+            "and the session working it does not: {breaking_down}"
         );
     }
 

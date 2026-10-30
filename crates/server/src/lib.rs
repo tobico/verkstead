@@ -248,6 +248,9 @@ pub mod pipe;
 /// The look that starts a roadmap stage which waited for a place the whole
 /// server has, made as one comes free.
 mod places;
+/// Moving a task of the backlog to the platform its line declares, before its
+/// session starts (ADR-0029).
+mod placing;
 /// Where a directory of Verkstead's own goes when nobody has said: the
 /// platform's own place for the Data Directory, and the environment values it
 /// is resolved out of.

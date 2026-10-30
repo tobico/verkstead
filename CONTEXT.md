@@ -641,7 +641,21 @@ comes home lands on its tombstone like any return and keeps the places home
 held for it, first in the queue to join and in the chain where it joined, so
 the round trip moves nothing; from there it reports to nobody, and its settle
 starts what stood on it right there.
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): Verkstead itself moves work that declares a platform, before launching the task, the inline run or the Stage that wants it, to the first reachable ticked device of that operating system.
+**And Verkstead asks for one itself, for a task that wants another platform**
+(ADR-0029, *Placing declared work*). A line of `.tasks/TODO.md` that says `on
+linux`, `on macos` or `on windows` after its link is placed before every launch
+of that task, a **Resume** included: where the device the work is on is not of
+that platform, the Conversation is moved to the first permitted device of it —
+the drafting device and then the ticks, in that order — whose **Preflight**
+holds nothing, read by its member's OS word through the sidebar's own mark, so a
+*Linux (WSL)* member is a Linux device. Nothing is running at that moment, so
+the move runs where it stands and the far end's arrival launches the task. Both
+Timelines name the task and the platform it wants beside the device, and the
+agent never calls `verkstead transfer` for it. **The work stays where the move
+left it**: the next undeclared task, the finish and the wrap-up run there, and
+nothing moves it home. Where no permitted device of that platform can take it,
+the task runs where it is.
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): Verkstead itself moves the inline run or the Stage that declares a platform, before launching it, to the first reachable ticked device of that operating system.
 _Avoid_: migrate, hand off, sync, failover
 
 **Permitted Device**:
