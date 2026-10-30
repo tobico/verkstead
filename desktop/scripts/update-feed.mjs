@@ -260,8 +260,10 @@ let run;
 /// for the start to find it didn't land.
 function launch(name, feedUrl, remembered) {
   const home = join(work, name);
-  const installed = join(home, "app", IMAGE);
-  mkdirSync(join(home, "app"), { recursive: true });
+  // Installed, in a home of the run's own: an image anywhere else is outside
+  // Applications and puts the Install Offer up, which nobody here answers.
+  const installed = join(home, "Applications", IMAGE);
+  mkdirSync(join(home, "Applications"), { recursive: true });
   copyFileSync(low, installed);
   chmodSync(installed, 0o755);
   if (zeroing) {
@@ -287,6 +289,7 @@ function launch(name, feedUrl, remembered) {
     ...process.env,
     VERKSTEAD_DATA_DIR: data,
     VERKSTEAD_UPDATE_FEED: feedUrl,
+    HOME: home,
     XDG_STATE_HOME: join(home, "state"),
     XDG_CONFIG_HOME: join(home, "config"),
     XDG_CACHE_HOME: join(home, "cache"),

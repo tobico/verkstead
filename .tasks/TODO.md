@@ -23,4 +23,4 @@ vocabulary.
 - [x] 02: The offer, on a Mac — [details](02-the-offer-on-a-mac.md)
 - [x] 03: A newer Verkstead is already installed — [details](03-a-newer-verkstead-is-already-installed.md)
 - [x] 04: Install from the Desktop page — [details](04-install-from-the-desktop-page.md)
-- [ ] 05: Proven in the release — [details](05-proven-in-the-release.md)
+- [x] 05: Proven in the release — [details](05-proven-in-the-release.md)

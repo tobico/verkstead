@@ -467,7 +467,9 @@ account is CONTEXT.md's **Desktop Settings** and **Startup Registration**.
 **And a packed AppImage run from outside `~/Applications` offers to install
 itself** before its sidecar starts — the **Install Offer**, never on a checkout
 run or a `--hidden` start. `--install` is its **Install** with nobody asked,
-which is how to try the move without a dialog; **Don't ask again** is
+which is how to try the move without a dialog, and how the release's Linux
+and Mac legs install the file they upload before running it
+([Releasing](releasing.md)); **Don't ask again** is
 `installOffer: false` in that same `desktop.json`, and deleting the key asks
 again. There is no `/dev/fuse` in a session here, so the packed file is run with
 `APPIMAGE_EXTRACT_AND_RUN=1`, which sets `$APPIMAGE` and `$APPDIR` the way the

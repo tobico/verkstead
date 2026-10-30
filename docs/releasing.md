@@ -301,10 +301,26 @@ what an AppImage promises about glibc and a bundle about macOS 12, an exe gets
 from the C runtime Windows itself ships.
 
 Each desktop leg then asserts the artifact itself rather than what was lying
-beside it: the AppImage is run as the file that is uploaded, the dmg is mounted
-and run out of the mount, and the exe is installed silently, with `/S`, and
-everything afterwards asked of the install it left. What they assert is the
-same three things — it starts, it serves a document with the viewer's bundle named in it, and its own
+beside it, installed the way a downloader installs it and everything afterwards
+asked of the install it left. The exe is installed silently, with `/S`. The
+AppImage and the dmg install themselves through the **Install Offer**, with
+`--install` standing in for the **Install** nobody on a runner can press
+([ADR-0020](adr/0020-electron-desktop.md), *Amended: a download offers to
+install itself*). The AppImage is copied into the `Downloads` of a home of the
+leg's own and started from there: the leg passes once the file is in
+`~/Applications`, executable, and gone from `Downloads`, the desktop entry under
+`~/.local/share/applications` names it, the icon set is under
+`~/.local/share/icons/hicolor`, and the relaunched copy's log says it runs from
+`~/Applications` and its server answers. The app in the mounted dmg moves itself
+into `/Applications`: the relaunched process is running out of
+`/Applications/Verkstead.app` rather than out of the mount or a translocated
+folder, LaunchServices holds the bundle there, and it serves. A leg that cannot
+install fails, with a line naming what was not found, rather than skipping —
+and it could not go on regardless: an app run from outside Applications puts
+the offer up, and nobody is there to answer it. The update's run installs its
+images into a home of its own for the same reason.
+
+What each leg asserts of the install is the same three things — it starts, it serves a document with the viewer's bundle named in it, and its own
 log says an icon went up — and each of them is bounded, because the failures
 these apps draw are dialogs and a dialog nobody dismisses would hold a runner
 for six hours. The Linux leg mounts the file before it reads anything out of it,

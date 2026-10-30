@@ -809,8 +809,139 @@ jobs:
               ;;
           esac
 
+      # **And the download installs itself, the way it does for a human who
+      # saved it** — the **Install Offer** (ADR-0020, *Amended: a download
+      # offers to install itself*), with `--install` standing in for the press
+      # of **Install** nobody on a runner can make. The uploaded file, copied
+      # into the `Downloads` of a home of this step's own, and started from
+      # there with the Data Directory the leg already says: it moves itself to
+      # `~/Applications`, writes its desktop entry, copies its icon set out of
+      # its mount, and relaunches from the copy, which comes up and serves.
+      #
+      # **Every answer is read off the file system and the log**, because the
+      # launch asked for the install ends and the copy is a process nothing
+      # here started: the copy says where it runs from — the one rule the offer
+      # goes by being `$APPIMAGE` under `~/Applications` — and that it opened
+      # its window, and the server it started answers. **A failed install
+      # fails here** rather than skipping: the launch then carries on serving
+      # out of the download, which the copy's line and the file's absence from
+      # `~/Applications` both say.
+      #
+      # The `XDG_` directories are taken off for the run, so that every path
+      # the app reads or writes is under this home rather than the runner's
+      # `/home/runner` — and the home is handed on to the steps after this one,
+      # which run the installed copy: run from where the pack left it, the file
+      # is outside Applications and puts the offer up, which nobody here would
+      # answer.
+      #
+      # **Bounded**, as every launch in this leg is, and the copy stopped and
+      # its address let go of before the step ends, so that the next step can
+      # start a server of its own on it.
+      - name: The download installs itself into the home it was saved in
+        timeout-minutes: 5
+        env:
+          VERKSTEAD_DATA_DIR: ${{ runner.temp }}/data
+          INSTALLING: ${{ runner.temp }}/installing
+        run: |
+          home="$INSTALLING"
+          download="$home/Downloads/Verkstead-x86_64.AppImage"
+          installed="$home/Applications/Verkstead-x86_64.AppImage"
+          entry="$home/.local/share/applications/net.tobico.Verkstead.desktop"
+          icons="$home/.local/share/icons/hicolor"
+          log="$home/.local/state/verkstead/verkstead.log"
+          mkdir -p "$home/Downloads"
+          cp "$APPIMAGE" "$download"
+          chmod +x "$download"
+
+          # The key, for the reason the window's step below gives.
+          key=the-key-this-leg-states
+          mkdir -p "$VERKSTEAD_DATA_DIR"
+          printf '%s\n' "$key" > "$VERKSTEAD_DATA_DIR/workbench.key"
+
+          Xvfb :97 -screen 0 1024x768x24 &
+          screen=$!
+          export DISPLAY=:97
+          for _ in $(seq 50); do
+            if [ -e /tmp/.X11-unix/X97 ]; then
+              break
+            fi
+            sleep 0.2
+          done
+          eval "$(dbus-launch --sh-syntax)"
+
+          env -u XDG_CONFIG_HOME -u XDG_DATA_HOME -u XDG_STATE_HOME -u XDG_CACHE_HOME \
+            HOME="$home" "$download" --install &
+          launch=$!
+
+          # The copy's own word that it is the copy, and that its window is up —
+          # which comes after its server answered.
+          for _ in $(seq 300); do
+            if grep -qF "it already runs from $installed" "$log" 2> /dev/null &&
+              grep -q "the window is opening on" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+          document=$(curl --fail --silent --show-error \
+            --retry 10 --retry-delay 1 --retry-connrefused \
+            --cookie "workbench_key=$key" \
+            http://127.0.0.1:8422/ || true)
+
+          # The last start the log says is the copy's — or, where nothing was
+          # installed, the download's still serving. Either is stopped, and
+          # waited out, along with the launch asked for the install.
+          copy=$(grep -o 'is starting, at pid [0-9]*' "$log" 2> /dev/null | tail -1 | grep -o '[0-9]*$' || true)
+          kill "$launch" ${copy:+"$copy"} 2> /dev/null || true
+          for _ in $(seq 100); do
+            if ! curl --silent --output /dev/null http://127.0.0.1:8422/; then
+              break
+            fi
+            sleep 0.2
+          done
+          kill "$screen" "$DBUS_SESSION_BUS_PID" || true
+          cat "$log" 2> /dev/null || echo "There is no log at $log."
+
+          if [ ! -x "$installed" ]; then
+            echo "::error::There is no executable $installed after the install."
+            ls -la "$home" "$home/Applications" 2> /dev/null || true
+            exit 1
+          fi
+          if [ -e "$download" ]; then
+            echo "::error::The download is still at $download after the install."
+            exit 1
+          fi
+          if ! grep -qF "Exec=\"$installed\"" "$entry" 2> /dev/null; then
+            echo "::error::No desktop entry at $entry names $installed."
+            cat "$entry" 2> /dev/null || true
+            exit 1
+          fi
+          if [ -z "$(find "$icons" -path '*/apps/net.tobico.Verkstead.*' 2> /dev/null)" ]; then
+            echo "::error::There is no net.tobico.Verkstead icon under $icons."
+            exit 1
+          fi
+          for said in "it already runs from $installed" "the window is opening on"; do
+            if ! grep -qF "$said" "$log" 2> /dev/null; then
+              echo "::error::The app's log does not say \"$said\"."
+              exit 1
+            fi
+          done
+          case "$document" in
+            */assets/*) ;;
+            *)
+              echo "::error::The installed copy served no document with the viewer's bundle in it."
+              printf '%s\n' "$document"
+              exit 1
+              ;;
+          esac
+          find "$icons" -type f
+
+          echo "INSTALLED_HOME=$home" >> "$GITHUB_ENV"
+          echo "INSTALLED=$installed" >> "$GITHUB_ENV"
+
       # What a human downloads this file for, asserted on one run of the file
-      # itself: a window, an icon in the tray, and the viewer behind both.
+      # itself: a window, an icon in the tray, and the viewer behind both. Run
+      # as the step above installed it, in the home it was installed into, which
+      # is the run a downloader has every time after the first.
       #
       # **A screen, deliberately.** This app *is* a window — there is no
       # headless path to fall back on — so a run without a display is a run
@@ -874,7 +1005,7 @@ jobs:
           # a kill would reach, and the app and its server would outlive this
           # step and hold the address the next step starts on.
           eval "$(dbus-launch --sh-syntax)"
-          ./"$APPIMAGE" &
+          HOME="$INSTALLED_HOME" "$INSTALLED" &
           app=$!
           document=$(curl --fail --silent --show-error \
             --retry 10 --retry-delay 1 --retry-connrefused \
@@ -1586,9 +1717,103 @@ jobs:
           done
           echo "Both menu bar template files are in $resources."
 
-      # What a human downloads this file for, asserted on one run of the app out
-      # of the mount: a window, an icon in the menu bar, and the viewer behind
-      # both.
+      # **The app installs itself out of the mount, the way a download does** —
+      # the **Install Offer** (ADR-0020, *Amended: a download offers to install
+      # itself*), with `--install` standing in for the press of **Install**
+      # nobody on a runner can make. Which is Electron's own
+      # `moveToApplicationsFolder`: the bundle copied out of the read-only
+      # image into `/Applications`, and the copy relaunched through `open`.
+      # Every step after this one runs that copy, as a downloader's every
+      # launch after the first does — and none of them could run the app out
+      # of the mount, where it would put the offer up for nobody to answer.
+      #
+      # **Asserted of the relaunched process**, which nothing here started:
+      # the app's log says its pid, and `ps` says what that pid is running —
+      # under `/Applications`, and not out of the randomised folder Gatekeeper
+      # translocates a quarantined download to, which is the one path that
+      # would still be outside. And LaunchServices holds the bundle where it
+      # landed, which is how the notification centre finds the app — see the
+      # notification's step. **A failed install fails here** rather than
+      # skipping: the launch then carries on serving out of the mount, and the
+      # last start the log says is that one.
+      #
+      # `open` hands the copy launchd's environment rather than this step's,
+      # so it serves out of the default Data Directory, and the key goes there.
+      # Bounded, and the copy stopped and its address let go of before the step
+      # ends, so that the next step can start a server of its own on it.
+      - name: The app installs itself out of the dmg into /Applications
+        timeout-minutes: 5
+        run: |
+          log="$HOME/Library/Logs/Verkstead/verkstead.log"
+          rm -f "$log"
+          installed=/Applications/Verkstead.app
+
+          key=the-key-this-leg-states
+          data="$HOME/Library/Application Support/Verkstead"
+          mkdir -p "$data"
+          printf '%s\n' "$key" > "$data/workbench.key"
+
+          "$APP/Contents/MacOS/Verkstead" --install &
+          launch=$!
+
+          for _ in $(seq 300); do
+            if grep -qF "it already runs from $installed" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+          document=$(curl --fail --silent --show-error \
+            --retry 20 --retry-delay 1 --retry-connrefused \
+            --cookie "workbench_key=$key" \
+            http://127.0.0.1:8422/ || true)
+
+          copy=$(grep -o 'is starting, at pid [0-9]*' "$log" 2> /dev/null | tail -1 | grep -o '[0-9]*$' || true)
+          running=$(ps -p "${copy:-0}" -o comm= || true)
+          registered=$(/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+            -dump | grep -F "$installed" || true)
+
+          kill "$launch" ${copy:+"$copy"} 2> /dev/null || true
+          for _ in $(seq 100); do
+            if ! curl --silent --output /dev/null http://127.0.0.1:8422/; then
+              break
+            fi
+            sleep 0.2
+          done
+          cat "$log" 2> /dev/null || echo "There is no log at $log."
+
+          if [ ! -x "$installed/Contents/MacOS/Verkstead" ]; then
+            echo "::error::There is no $installed after the install."
+            exit 1
+          fi
+          if ! grep -qF "it already runs from $installed" "$log" 2> /dev/null; then
+            echo "::error::The app's log does not say \"it already runs from $installed\"."
+            exit 1
+          fi
+          echo "The relaunched copy, pid $copy, is running $running."
+          case "$running" in
+            "$installed/Contents/MacOS/"*) ;;
+            *)
+              echo "::error::The relaunched app is not running out of $installed."
+              exit 1
+              ;;
+          esac
+          if [ -z "$registered" ]; then
+            echo "::error::LaunchServices has no record of $installed."
+            exit 1
+          fi
+          printf '%s\n' "$registered" | head -5
+          case "$document" in
+            */assets/*) ;;
+            *)
+              echo "::error::The installed app served no document with the viewer's bundle in it."
+              printf '%s\n' "$document"
+              exit 1
+              ;;
+          esac
+
+      # What a human downloads this file for, asserted on one run of the app as
+      # the step above installed it: a window, an icon in the menu bar, and the
+      # viewer behind both.
       #
       # **No screen to arrange**, which is the one place this is shorter than the
       # AppImage's assertion: a macOS runner is a logged-in session with a window
@@ -1632,7 +1857,7 @@ jobs:
           mkdir -p "$VERKSTEAD_DATA_DIR"
           printf '%s\n' "$key" > "$VERKSTEAD_DATA_DIR/workbench.key"
 
-          "$APP/Contents/MacOS/Verkstead" &
+          /Applications/Verkstead.app/Contents/MacOS/Verkstead &
           app=$!
           document=$(curl --fail --silent --show-error \
             --retry 20 --retry-delay 1 --retry-connrefused \
@@ -1683,8 +1908,8 @@ jobs:
 
       # **And a notice reaches the desktop as a notification** — the stream the
       # sidecar holds open to the app, a Set asked, and the notification drawn —
-      # asserted on the app out of the mount as the AppImage's leg asserts it on
-      # the file, and for the same reasons: started `--hidden`, so no window is
+      # asserted on the installed app as the AppImage's leg asserts it on the
+      # file, and for the same reasons: started `--hidden`, so no window is
       # in front to make the notice redundant, and the Set asked by the binary
       # inside the bundle from a Conversation over this checkout.
       #
@@ -1695,7 +1920,7 @@ jobs:
       # So the line saying it was shown, the absence of that refusal, and
       # `usernoted` presenting it are all read. Measured on macos-15: an ad-hoc
       # bundle installed in `/Applications` is presented, and the same bundle
-      # run out of the mounted image is refused — so it is installed first.
+      # run out of the mounted image is refused — so it runs installed.
       - name: A notice is shown as a notification
         timeout-minutes: 5
         env:
@@ -1705,17 +1930,13 @@ jobs:
           rm -f "$log"
           key=$(cat "$VERKSTEAD_DATA_DIR/workbench.key")
 
-          # Installed the way a downloader installs it, by copying it out of
-          # the image into `/Applications` — which is where LaunchServices
-          # learns the bundle's identifier. The notification centre finds an
-          # app through that record, and run straight out of the mount it has
-          # none: `usernoted` answers "LSApplicationRecord failed to find
-          # net.tobico.Verkstead" and Electron's `failed` says the app is not
-          # allowed to notify.
+          # The copy the install step put in `/Applications`, which is where
+          # LaunchServices learned the bundle's identifier. The notification
+          # centre finds an app through that record, and run straight out of
+          # the mount it has none: `usernoted` answers "LSApplicationRecord
+          # failed to find net.tobico.Verkstead" and Electron's `failed` says
+          # the app is not allowed to notify.
           installed=/Applications/Verkstead.app
-          ditto "$APP" "$installed"
-          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
-            -f "$installed"
 
           "$installed/Contents/MacOS/Verkstead" --hidden &
           app=$!
