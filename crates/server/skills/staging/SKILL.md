@@ -88,6 +88,13 @@ the declarations rather than a substitute for them.
   after what it stands on. Most want none and say nothing, and a platform is
   recorded and shown rather than acted on: nothing places a stage by it yet.
 
+**A line wants a platform only where its work can be verified nowhere else**:
+code under a platform `cfg`, a platform's own component — ConPTY,
+AppContainer, an installer, a bundle — or a suite that only runs on that
+operating system. Naming a platform in prose declares nothing, and a change to
+shared code with a cross-platform suite declares nothing: it is verified
+wherever it stands, and CI confirms the rest.
+
 **Every line carries a declaration or none of them does.** A roadmap that
 declares on some lines and not others is refused at this session's
 `verkstead done`, because a bare line there cannot be told from a forgotten

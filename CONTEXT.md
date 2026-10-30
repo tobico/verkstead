@@ -651,7 +651,12 @@ cluster is taken off every Conversation's list by the unlink itself.
 transferred to* on a waiting Question Set's Attach menu ticks the device when
 the Set is answered, and restarts nothing, `verkstead transfer` reading the
 list live (ADR-0028).
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)), stage by stage of the platform-placement roadmap: every session is told every device of the cluster, permitted or not; an agent's call on a device that is linked but not ticked, or ticked but asleep, becomes a Question Set of Verkstead's own rather than a refusal; the closing Proposal's `wants` draws the ticks on the chooser; and a roadmap's Stages inherit the roadmap Conversation's ticks.
+**Every session is told every device, permitted or not** (ADR-0029, *Consent
+stays off by default, and is told*): the prompt of a session on a Conversation
+of a clustered Verkstead names the device it runs on, with its OS word, and
+every other member with whether it is permitted — so a session with nothing
+ticked still knows the Windows machine exists, and asks the human for it.
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)), stage by stage of the platform-placement roadmap: an agent's call on a device that is linked but not ticked, or ticked but asleep, becomes a Question Set of Verkstead's own rather than a refusal; the closing Proposal's `wants` draws the ticks on the chooser; and a roadmap's Stages inherit the roadmap Conversation's ticks.
 _Avoid_: allowed device, whitelist, target list
 
 **Carried Conversation**:
