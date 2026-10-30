@@ -196,6 +196,45 @@ pub(crate) enum Brought {
     /// roadmap's chain rather than anything that settled — see
     /// [`crate::places`].
     Look,
+
+    /// A stage worked on another device **reported** settling to this one, its
+    /// home, and this is its tombstone — see [`crate::peer::reports`]. A settle
+    /// in every way but where it is said: nobody opens a tombstone, so what a
+    /// settle would say on its Timeline is collected instead, and handed back for
+    /// the live copy to say on its own — see [`reported`].
+    Report,
+}
+
+tokio::task_local! {
+    /// What a reading brought about by a report would have said on the tombstone,
+    /// in the order it said it — see [`reported`].
+    static HEARD: std::cell::RefCell<Vec<String>>;
+}
+
+/// Carry the roadmap on from a tombstone whose live copy has just reported
+/// settling, exactly as a settle here would, and hand back what it would have
+/// said on the tombstone's Timeline (ADR-0029, *Home drives a roadmap across
+/// devices*).
+pub(crate) async fn reported(state: AppState, tombstone: i64) -> Vec<String> {
+    HEARD
+        .scope(std::cell::RefCell::new(Vec::new()), async move {
+            reading(state, tombstone, Brought::Report).await;
+
+            HEARD.with(std::cell::RefCell::take)
+        })
+        .await
+}
+
+/// Keep `markdown` for the copy to say, which is where a report's sentences go.
+fn heard(markdown: &str) {
+    let kept = HEARD.try_with(|heard| heard.borrow_mut().push(markdown.to_owned()));
+
+    if kept.is_err() {
+        tracing::error!(
+            said = markdown,
+            "a reading brought about by a report said something outside the report",
+        );
+    }
 }
 
 impl Brought {
@@ -221,11 +260,22 @@ impl Brought {
     async fn not_started(self, state: &AppState, conversation_id: i64, markdown: &str) {
         match self {
             Self::Settle => say(state, conversation_id, markdown).await,
+            Self::Report => heard(markdown),
             Self::Look => tracing::debug!(
                 conversation_id,
                 said = markdown,
                 "a look for a free place started nothing, and says so in the log alone",
             ),
+        }
+    }
+
+    /// Say on `conversation_id`'s Timeline that a stage has started, which a
+    /// settle and a look both say — it happened, and it happens once — and a
+    /// report hands back for the live copy to say instead.
+    async fn started(self, state: &AppState, conversation_id: i64, markdown: &str) {
+        match self {
+            Self::Settle | Self::Look => say(state, conversation_id, markdown).await,
+            Self::Report => heard(markdown),
         }
     }
 
@@ -268,6 +318,7 @@ impl Brought {
     async fn held(self, state: &AppState, conversation_id: i64, held: &stages::Held, full: bool) {
         match (self, held) {
             (Self::Settle, _) => say(state, conversation_id, held.said()).await,
+            (Self::Report, _) => heard(held.said()),
             (Self::Look, stages::Held::Server(_)) if full => {
                 say(state, conversation_id, held.said()).await;
             }
@@ -556,7 +607,7 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
             // finds it complete again — a device told each time would be told
             // about a milestone that happened weeks ago, every time anything on
             // the machine finished.
-            if brought == Brought::Settle {
+            if brought != Brought::Look {
                 crate::push::told(
                     &state.pool,
                     conversation_id,
@@ -921,7 +972,7 @@ async fn start(
         // completing is only told about once: the author is missing until
         // somebody fills it in, and a look finds it missing again every
         // [`crate::Pace::places`] until they do.
-        if brought == Brought::Settle {
+        if brought != Brought::Look {
             crate::push::told(
                 &state.pool,
                 settled,
@@ -1252,16 +1303,17 @@ async fn start(
     // branch it is on was nobody's choice but this; and on the settled one,
     // because that is where the human was watching when it happened.
     say(state, id, &begun(&stage, &branch, &stands)).await;
-    say(
-        state,
-        settled,
-        &format!(
-            "Stage {} of the `{}` roadmap, *{}*, has started as a conversation of its own on \
-             `{branch}`.",
-            stage.label, stage.roadmap, stage.title,
-        ),
-    )
-    .await;
+    brought
+        .started(
+            state,
+            settled,
+            &format!(
+                "Stage {} of the `{}` roadmap, *{}*, has started as a conversation of its own \
+                 on `{branch}`.",
+                stage.label, stage.roadmap, stage.title,
+            ),
+        )
+        .await;
 
     tracing::info!(
         settled,

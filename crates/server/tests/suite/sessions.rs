@@ -1140,6 +1140,9 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // firing under a test about anything else would put a Conversation on the
     // sidebar it never asked for. The ones that are about it keep [`LOOKING`].
     places: paced(Duration::from_secs(600)),
+    // No stage here is ever away from home, so the look for a report owed finds
+    // nothing whenever it fires; a server's own pace is as good as any.
+    reports: Pace::default().reports,
     // And longer than any of these run for again, for the stall sweep's reason
     // one sweep along: every fixture that reaches Done has a pull request
     // nothing has merged, which is exactly what the sweep after Done goes and

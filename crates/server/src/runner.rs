@@ -244,6 +244,14 @@ pub struct Pace {
     /// what ordinarily brings a look about is a place coming free, which this
     /// says nothing about and does not wait for.
     pub places: Duration,
+
+    /// And how often a stage away from home looks for a report its home has not
+    /// taken yet — see [`crate::reporting`].
+    ///
+    /// The backstop rather than the pace, as [`Pace::places`] is: a move is told
+    /// home the moment it is made, and home coming back is heard on its Nudge
+    /// stream. What this catches is a home that answered neither.
+    pub reports: Duration,
 }
 
 impl Default for Pace {
@@ -257,6 +265,7 @@ impl Default for Pace {
             long_stop: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
             places: crate::places::LOOKED_AT_EVERY,
+            reports: crate::reporting::LOOKED_AT_EVERY,
             joins: crate::joins::LOOKED_AT_EVERY,
             merges: crate::merges::SWEPT_EVERY,
             cleanup: crate::cleanup::SWEPT_EVERY,

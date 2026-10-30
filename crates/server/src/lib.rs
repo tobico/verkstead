@@ -283,6 +283,7 @@ pub mod remote;
 mod renames;
 pub mod replicating;
 mod reply;
+mod reporting;
 mod repos;
 /// Speaking to a session that has gone idle without asking anything.
 mod rescues;
@@ -1800,6 +1801,11 @@ fn standing(
     // so every device holds the cluster's Authors, Agent Profiles, Instructions
     // and MCP servers (ADR-0028) — see [`replicating`].
     replicating::pulling(&state);
+
+    // And the stages this device holds away from their home, each telling that
+    // device where it stands, on the same channel again and on a slow clock for
+    // a home that was asleep — see [`reporting`] (ADR-0029).
+    reporting::reporting(&state);
 
     // And what this device forwards, on the same channel again: a member's
     // `ports` Nudge is that Conversation's ports read over the link and held on

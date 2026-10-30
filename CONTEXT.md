@@ -432,9 +432,12 @@ ranks and one birth key. Both ride out on the sidebar row, and both are opaque t
 everything that reads them.
 **And beside it, the mark saying a copy is not the live one**: the device holding
 the record and the id it goes by there, written on the copy the work has left. A
-Conversation wearing it is a **tombstone** — nothing writes to it, the Merged List
-does not draw it, and its own URL leads to wherever the work is now, whether or
-not the device holding it is answering. It is kept rather than deleted so that
+Conversation wearing it is a **tombstone** — the Merged List does not draw it,
+and its own URL leads to wherever the work is now, whether or not the device
+holding it is answering. Nothing works on it; a **Stage**'s tombstone follows its
+live copy's standing, which that copy reports to its home — the device the stage
+was born on — so the roadmap is read there as it always was (ADR-0029, *Home
+drives a roadmap across devices*). It is kept rather than deleted so that
 every link anybody kept still leads to the work and so that a transfer back has a
 row to replace under the id it already had. A forwarding stub with no record
 behind it was the recommendation; keeping the copy was the human's call.

@@ -739,6 +739,9 @@ pub const STAYS_BEHIND: &[&str] = &[
     // has made yet.
     "transferred",
     "transfers",
+    // And what this device last told a stage's home, which is this copy's
+    // bookkeeping: the far end owes home its own report, starting from none.
+    "stage_reports",
     // And which session a launch here carries on from, which is this device's own
     // reading of an arrival: it is written in the leg after the record lands, out
     // of what landed — see [`super::continuations`].

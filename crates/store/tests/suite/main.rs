@@ -33,6 +33,7 @@ mod process;
 mod profiles;
 mod push;
 mod ranks;
+mod reports;
 mod repos;
 mod settling;
 mod shares;

@@ -322,6 +322,44 @@ pub struct CameFrom {
     pub asked: MovedFor,
 }
 
+/// A stage away from home telling home where it stands (ADR-0029, *Home drives
+/// a roadmap across devices*).
+///
+/// **The whole standing rather than the move that changed it** — the four facts
+/// a roadmap reads of a stage — so home writes its tombstone the same way
+/// however many times it is told, and a report the far end could not be sure
+/// landed is simply sent again.
+///
+/// **Addressed by the Birth Key**, which is the one name home and the far end
+/// share for the work: home's own id for it, and this device's id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageReport {
+    /// The stage, by the key it was born under on home.
+    pub born: BirthKey,
+
+    /// The state its live copy is in.
+    pub state: crate::Lifecycle,
+
+    /// Whether it has ever moved to Done.
+    pub done: bool,
+
+    /// Whether it has ever moved to Wrapping.
+    pub wrapped: bool,
+
+    /// And whether it is stopped.
+    pub stopped: bool,
+}
+
+/// What home answers a report with: what it would have said on the stage's
+/// Timeline about carrying the roadmap on, for the copy to say on its own —
+/// nobody opens a tombstone.
+///
+/// Empty where the report settled nothing, which is most of them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageReported {
+    pub said: Vec<String>,
+}
+
 /// Who a move was made for: the human's press on *Transfer to…*, or the
 /// session's own `verkstead transfer` (ADR-0020, *The agent's call*).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

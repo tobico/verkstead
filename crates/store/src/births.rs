@@ -20,7 +20,9 @@
 //! has handed its Conversation on keeps its copy as a tombstone: the mark names
 //! the device that has the live record and the id it goes by over there, so old
 //! links still land on the work and a transfer back has somewhere to put itself.
-//! Nothing writes to a Conversation wearing one.
+//! Nothing works on a Conversation wearing one; what is written to it is a
+//! stage's standing, reported by its live copy so the roadmap at home reads true
+//! — see [`super::reports`].
 //!
 //! **Two tables beside `conversations` rather than columns on it**, which is
 //! what every fact about a Conversation that is not one string has been: that
