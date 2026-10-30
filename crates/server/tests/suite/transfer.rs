@@ -3243,12 +3243,44 @@ async fn planned_across(
     tasks: &str,
     spill: &Path,
 ) -> (Verkstead, Verkstead, (Holding, Holding, Holding), i64) {
+    planned_across_with(tasks, spill, Across::default()).await
+}
+
+/// How B stands in [`planned_across_with`], which is what decides whether a task
+/// that wants Windows can be placed on it.
+struct Across {
+    /// The OS word B goes by.
+    os: &'static str,
+
+    /// Whether the Conversation may be transferred to B.
+    ticked: bool,
+
+    /// Whether B holds the repository the work is in.
+    holds_the_repo: bool,
+}
+
+impl Default for Across {
+    fn default() -> Across {
+        Across {
+            os: WINDOWS,
+            ticked: true,
+            holds_the_repo: true,
+        }
+    }
+}
+
+/// [`planned_across`] with B standing as `across` says.
+async fn planned_across_with(
+    tasks: &str,
+    spill: &Path,
+    across: Across,
+) -> (Verkstead, Verkstead, (Holding, Holding, Holding), i64) {
     let a = Verkstead::running_on(
         A,
         &works_each_task_on("A", tasks),
         spill,
         rescuing(),
-        WINDOWS,
+        across.os,
     )
     .await;
     let b = Verkstead::running_on(
@@ -3256,26 +3288,30 @@ async fn planned_across(
         &works_each_task_on("B", tasks),
         spill,
         rescuing(),
-        WINDOWS,
+        across.os,
     )
     .await;
     let signalling = (a.signalling(), b.signalling());
 
-    a.linked_to(&b.device, B_MACHINE, WINDOWS, vec![b.at()])
+    a.linked_to(&b.device, B_MACHINE, across.os, vec![b.at()])
         .await;
 
     let (machine, os) = this_machine();
     b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
 
     a.repo().await;
-    b.repo().await;
+    if across.holds_the_repo {
+        b.repo().await;
+    }
 
     let account = a.account().await;
     let holding = b.holding();
     b.profile_called(ACCOUNT).await;
 
     let conversation = a.drafting_under(&account).await;
-    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+    if across.ticked {
+        assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+    }
 
     a.grills(conversation).await;
     a.printed(conversation, "grilling").await;
@@ -3376,6 +3412,134 @@ async fn a_task_that_wants_windows_is_moved_there_and_the_work_stays() {
 
 /// One task, wanting Linux: what the device the work was drafted on runs.
 const ONE_LINUX_TASK: &str = "- [ ] 01: Count — [details](01-count.md) — on linux\\n";
+
+/// One task, wanting Windows.
+const ONE_WINDOWS_TASK: &str = "- [ ] 01: Count — [details](01-count.md) — on windows\\n";
+
+/// Work [`ONE_WINDOWS_TASK`] on A with B standing as `across` says, and hand back
+/// the Notice that says why the task ran here, once A has worked it and gone on
+/// to the finish — having moved nothing.
+async fn runs_here_saying(across: Across, saying: &str) -> String {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) =
+        planned_across_with(ONE_WINDOWS_TASK, spill.path(), across).await;
+
+    resumes(&a, conversation).await;
+
+    let said = a.notice_saying(conversation, saying).await;
+
+    a.latest_capture_saying(conversation, "finishing on A")
+        .await;
+
+    let mut worked_here = String::new();
+    for event in a.sessions_on(conversation).await {
+        worked_here.push_str(&a.capture_of(conversation, event).await);
+    }
+    assert!(
+        worked_here.contains("worked task 01 on A"),
+        "the task runs here: {worked_here:?}",
+    );
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "and nothing was moved",
+    );
+
+    said
+}
+
+/// **No device of the platform linked**: the task runs here, and a Notice says
+/// it wanted Windows and there is none.
+#[tokio::test]
+async fn a_task_that_wants_a_platform_no_device_is_of_runs_here_saying_so() {
+    let said = runs_here_saying(
+        Across {
+            os: "Linux",
+            ..Across::default()
+        },
+        "Task 01 wants Windows",
+    )
+    .await;
+
+    assert!(
+        said.contains("no Windows device is linked"),
+        "the Notice says there is none: {said}",
+    );
+}
+
+/// **Devices of it linked, none permitted**: the Notice names them.
+#[tokio::test]
+async fn a_task_that_wants_a_platform_no_permitted_device_is_of_names_the_unticked_ones() {
+    let said = runs_here_saying(
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+        "Task 01 wants Windows",
+    )
+    .await;
+
+    assert!(
+        said.contains(&format!("may not be transferred to {B_MACHINE}"))
+            && said.contains("May be transferred to"),
+        "the Notice names the device nobody ticked: {said}",
+    );
+}
+
+/// **Permitted ones, none able to take it**: the Notice names each with what
+/// its preflight found, in the Transfer dialog's words.
+#[tokio::test]
+async fn a_task_no_permitted_device_can_take_says_what_each_lacks() {
+    let said = runs_here_saying(
+        Across {
+            holds_the_repo: false,
+            ..Across::default()
+        },
+        "Task 01 wants Windows",
+    )
+    .await;
+
+    assert!(
+        said.contains("can take it")
+            && said.contains(&format!("The repo {REPOSITORY} is not on {B_MACHINE}.")),
+        "the Notice says what the ticked device lacks: {said}",
+    );
+}
+
+/// **A roadmap stage's tasks are held** (Set 1543, Q4): with a ticked, awake
+/// Windows device that could take it, a stage's task that wants Windows is not
+/// moved, its Notice says why, and it runs here.
+#[tokio::test]
+async fn a_roadmap_stages_task_is_not_moved_and_says_why() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = planned_across(ONE_WINDOWS_TASK, spill.path()).await;
+
+    sqlx::query("INSERT INTO stage_roadmaps (conversation_id, roadmap, stage) VALUES (?, ?, ?)")
+        .bind(conversation)
+        .bind("platform-placement")
+        .bind("03")
+        .execute(&a.pool)
+        .await
+        .unwrap();
+
+    resumes(&a, conversation).await;
+
+    let said = a.notice_saying(conversation, "Task 01 wants Windows").await;
+    assert!(
+        said.contains("a stage of the platform-placement roadmap"),
+        "the Notice says the stage is why: {said}",
+    );
+
+    a.latest_capture_saying(conversation, "finishing on A")
+        .await;
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "and nothing was moved",
+    );
+}
 
 /// **A declared task moved off its platform by hand is moved again at its next
 /// launch**, a Resume's included — and the drafting device counts as permitted

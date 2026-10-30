@@ -476,7 +476,7 @@ fn known(members: &[store::Member]) -> String {
 
 /// One finding of the preflight, in the words the Transfer dialog draws it in —
 /// see `lacking` in `web/src/workbench/Transfer.tsx`.
-fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String {
+pub(crate) fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String {
     use verkstead_render::{AgentType, Lacking, PairingRole};
 
     match lacking {
