@@ -19,4 +19,4 @@ Roadmap stage: [02: What the work wants, on the chooser](docs/roadmaps/platform-
 
 - [x] 01: `wants` on the proposal, drawn as a line — [details](01-wants-on-the-proposal.md)
 - [x] 02: The ticks under the chooser — [details](02-the-ticks-under-the-chooser.md)
-- [ ] 03: The grilling skill and the vocabulary — [details](03-the-grilling-skill-and-the-vocabulary.md)
+- [x] 03: The grilling skill and the vocabulary — [details](03-the-grilling-skill-and-the-vocabulary.md)

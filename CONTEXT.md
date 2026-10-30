@@ -650,13 +650,16 @@ cluster is taken off every Conversation's list by the unlink itself.
 **A tick can also come with an answer**: an **Addition** picked under *May be
 transferred to* on a waiting Question Set's Attach menu ticks the device when
 the Set is answered, and restarts nothing, `verkstead transfer` reading the
-list live (ADR-0028).
+list live (ADR-0028). The same ticks are drawn in the open under the Direction
+chooser of a **Proposal** that `wants` a platform, devices of that platform
+first with the reason beside them, and picked and applied at Submit just as
+an Addition is (ADR-0029).
 **Every session is told every device, permitted or not** (ADR-0029, *Consent
 stays off by default, and is told*): the prompt of a session on a Conversation
 of a clustered Verkstead names the device it runs on, with its OS word, and
 every other member with whether it is permitted — so a session with nothing
 ticked still knows the Windows machine exists, and asks the human for it.
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)), stage by stage of the platform-placement roadmap: an agent's call on a device that is linked but not ticked, or ticked but asleep, becomes a Question Set of Verkstead's own rather than a refusal; the closing Proposal's `wants` draws the ticks on the chooser; and a roadmap's Stages inherit the roadmap Conversation's ticks.
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)), stage by stage of the platform-placement roadmap: an agent's call on a device that is linked but not ticked, or ticked but asleep, becomes a Question Set of Verkstead's own rather than a refusal; and a roadmap's Stages inherit the roadmap Conversation's ticks.
 _Avoid_: allowed device, whitelist, target list
 
 **Carried Conversation**:
@@ -4351,7 +4354,15 @@ producing the picked Direction's artifact, and coming back is another Set,
 with a fresh Proposal if it wants the Direction reconsidered. The Direction is
 still never the agent's to change: it proceeds on the pick or argues by
 proposing again.
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): a Proposal gains `wants`, the platforms the work wants with a reason each, and the chooser draws the *May be transferred to* ticks under the Directions, devices of a wanted platform first.
+
+A Proposal may carry `wants`: the platforms the work wants, `linux`, `macos` or
+`windows`, each with the reason it wants it, written only where some of the
+work can be verified on that operating system and nowhere else (ADR-0029).
+The chooser then draws the **Permitted Device** ticks under the Directions —
+devices of a wanted platform first, the reason beside them, and a line saying
+the work will run where it is when the cluster has none — and, on a Verkstead
+in no cluster, the wants as a line of prose. A Proposal wanting nothing is
+drawn without either.
 _Avoid_: wrap-up request, handover, recommendation (that is the part, not the
 whole), final question
 
