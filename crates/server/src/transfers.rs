@@ -310,8 +310,9 @@ enum Called {
 /// Decide a session's call, and write the request down where it holds: the name
 /// of the machine it is going to, or the reason it is not.
 ///
-/// **Everything a press is refused for, and two things more**: a name that is
-/// nobody's or is two machines', and the machine the work is on already. The
+/// **Everything a press is refused for, and three things more**: a name that is
+/// nobody's or is two machines', the machine the work is on already, and a
+/// second call while the human is still being asked about one. The
 /// preflight runs before the answer rather than after it, and a finding comes
 /// back in the words the Transfer dialog shows, so that the agent can pick
 /// another device or ask the human while it still has a turn to do it in.
@@ -361,6 +362,16 @@ async fn by_the_session(
                     a closed one has no work left to move"
                 .to_owned(),
         );
+    }
+
+    // A call already taken as a request is the human's to answer, and a second
+    // one would ask them twice, or move the work out from under the first Set —
+    // see [`crate::placing::called`].
+    if let Some(set_id) = crate::placing::called_open(state, conversation_id).await {
+        return Err(format!(
+            "the human is already being asked about this work's move, in Question Set \
+             {set_id}, and their answer decides where it goes. End the turn"
+        ));
     }
 
     let Some(devices) = state.devices.as_ref() else {

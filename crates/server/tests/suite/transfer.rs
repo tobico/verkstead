@@ -8983,6 +8983,32 @@ async fn a_call_to_an_unticked_device_asks_the_human_and_move_to_moves_the_work(
         "nothing is moving until the human says so",
     );
 
+    // A second call while the human is being asked is refused, and asks
+    // nothing more.
+    let (status, said) = a.calls(conversation, B_MACHINE).await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a second call is refused: {said}"
+    );
+    assert!(
+        said.contains(&format!(
+            "already being asked about this work's move, in Question Set {}",
+            asked.set_id
+        )),
+        "naming the Set that is asking: {said}",
+    );
+    assert_eq!(
+        a.view(conversation)
+            .await
+            .timeline
+            .iter()
+            .filter(|event| matches!(event, TimelineEvent::QuestionSet(set) if set.by_verkstead))
+            .count(),
+        1,
+        "and no second Set goes up",
+    );
+
     // The agent says its last words and goes idle, and is ended for them.
     std::fs::write(&gate, "go").unwrap();
     ended(&a, conversation).await;
