@@ -2764,7 +2764,12 @@ async fn a_call_the_device_cannot_take_is_refused_saying_why_and_records_nothing
     a.refused(
         conversation,
         "the-vm",
-        &["not a device the human has said", C],
+        &[
+            "not a device the human has said",
+            C,
+            "verkstead ask",
+            "Attach menu, under *May be transferred to*",
+        ],
     )
     .await;
 

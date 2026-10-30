@@ -295,6 +295,9 @@ pub(crate) async fn call(
 /// the answer rather than after it, and a finding comes back in the words the
 /// Transfer dialog shows, so that the agent can pick another device or ask the
 /// human while it still has a turn to do it in.
+///
+/// A device not ticked is refused with the route the agent has to it: an ask,
+/// answered by a tick from the Set's Attach menu.
 async fn by_the_session(
     state: &AppState,
     conversation_id: i64,
@@ -354,9 +357,9 @@ async fn by_the_session(
 
     if born.is_none_or(|born| born.device != device.device) && !ticked.contains(&device.device) {
         return Err(format!(
-            "{} ({}) is not a device the human has said this work may be moved to — they tick \
-             those under *May be transferred to* in the Transfer dialog. Pick one that is, or \
-             ask them",
+            "{} ({}) is not a device the human has said this work may be moved to. Pick a \
+             permitted one, or ask for this one with `verkstead ask`: the human can tick it \
+             from the Set's Attach menu, under *May be transferred to*",
             device.name, device.device,
         ));
     }

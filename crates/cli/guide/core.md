@@ -704,12 +704,17 @@ asked with `verkstead ask`.
 
 A Verkstead can be one device of a cluster, and the human can let a session
 move its work onto another of them. **Only where they have**: a session's
-prompt names the devices it may move to, each with its name, its id and its
-operating system, and a session whose prompt names none may move nowhere.
+prompt says which device it is running on and that device's operating system,
+then names every other device of the cluster — each with its name, its id and
+its operating system — and marks which of them this Conversation's work may be
+moved to. A device is **permitted** where the human ticked it for this
+Conversation, or where the work was drafted; the rest are **not permitted
+yet**. A Verkstead of one device draws no such section, and has nowhere to move
+to.
 
 Reach for it when the work needs **something this platform cannot do** —
-building or testing for another operating system, most often. Name the device
-by its name, or by its id where two devices share a name:
+building or testing for another operating system, most often. Name a
+permitted device by its name, or by its id where two devices share a name:
 
 ```
 verkstead transfer <device>
@@ -728,6 +733,14 @@ that it has the harness this session runs on.
   a device the work may not go to, a name that is nobody's or two devices',
   or what the device is missing. The session carries on. Pick another device
   from the prompt's list, or ask the human.
+
+**A device not permitted yet is asked for, not moved to.** The ticks are the
+human's consent, and moving to a permitted device needs no ask; moving to any
+other needs one. Where the work needs a device that is not permitted yet, ask
+for it with `verkstead ask`, saying why: the human ticks it from the Set's
+Attach menu, under *May be transferred to*. `verkstead transfer` reads the
+ticks live rather than from the prompt, so once the Set is answered it can name
+that device.
 
 The branch, the Worktree with whatever is uncommitted in it, and the record
 all move together, so there is nothing to tidy up first.
