@@ -738,9 +738,15 @@ async fn the_press_tells_this_devices_other_workbenches_too() {
     let over_here = a.workbench();
     let mut page = Listening::open(&over_here).await;
 
-    unlink(&a.workbench(), B).await;
+    // Heard while the press is still going, as a page hears it. The press says
+    // Devices a dozen times over as its pieces land, and a listener that waited
+    // for the answer before reading would find the backlog run over and the
+    // stream ended — which tells a browser to read everything back, and tells
+    // this test nothing.
+    let pressed_on = a.workbench();
+    let (heard, _) = tokio::join!(page.nudge(), unlink(&pressed_on, B));
 
-    assert_eq!(page.nudge().await, Nudge::Devices);
+    assert_eq!(heard, Nudge::Devices);
     assert!(
         listing(&over_here).await.members.is_empty(),
         "and what it reads back is the cluster without the device that has gone",
