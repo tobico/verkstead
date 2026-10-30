@@ -6873,6 +6873,73 @@ async fn a_report_from_a_device_not_holding_the_work_is_refused() {
     );
 }
 
+/// **A stage moved on from the device it was first moved to still reports
+/// home**: A's tombstone names C, which handed its copy on to B. A asks C where
+/// the work went, follows it to B, takes B's report, and points its tombstone at
+/// B from then on.
+#[tokio::test]
+async fn a_stage_moved_on_a_second_time_still_reports_home() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), C).await;
+
+    // C: the device the stage was first moved to, holding a tombstone of its own
+    // that says the work went on to B.
+    let c = Verkstead::running_at(C, "exit 0", spill.path(), reporting()).await;
+
+    away.a
+        .linked_to(&c.device, "the-desktop", "Linux", vec![c.at()])
+        .await;
+
+    let (machine, os) = this_machine();
+    c.linked_to(&away.a.device, &machine, &os, vec![away.a.at()])
+        .await;
+
+    let ours = c.repo().await;
+    let passed_on = staged(
+        &c,
+        REPOSITORY,
+        "roadmaps/rate-limiting/01-counter",
+        &ours,
+        None,
+    )
+    .await;
+
+    store::record_birth(
+        &c.pool,
+        passed_on,
+        &store::Birth {
+            device: A.to_owned(),
+            id: away.tombstone,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::transfer_away(
+        &c.pool,
+        passed_on,
+        &store::Transferred {
+            device: B.to_owned(),
+            id: away.copy,
+        },
+    )
+    .await
+    .unwrap();
+
+    away.moves(store::Lifecycle::Closed).await;
+
+    away.home_reads(store::StageStanding::Abandoned).await;
+
+    assert_eq!(
+        store::transferred(&away.a.pool, away.tombstone)
+            .await
+            .unwrap()
+            .map(|mark| (mark.device, mark.id)),
+        Some((B.to_owned(), away.copy)),
+        "and home's tombstone names where the work is now",
+    );
+}
+
 /// The pace a stage away from home asks home at, briskly: a wait to join is
 /// looked at again within the test rather than ten seconds later.
 fn joining() -> Pace {

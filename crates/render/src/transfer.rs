@@ -411,6 +411,29 @@ pub struct ChainLink {
     pub branch: String,
 }
 
+/// Home asking a device where its copy of a stage went, when the stage is
+/// reported on by a device home's tombstone does not name (ADR-0029, *Home
+/// drives a roadmap across devices*).
+///
+/// A stage moved on from the device it was first moved to leaves home's
+/// tombstone naming that first device, which is the one the move away from home
+/// was made by. So home follows the marks: the device its tombstone names says
+/// where its own copy went, and so on, until they lead to the caller or run out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageWhereabouts {
+    /// The stage, by the key it was born under on home.
+    pub born: BirthKey,
+}
+
+/// The answer: the device the asked device's copy was handed on to and the id
+/// it goes by there, or `null` where that copy was handed on to nobody — or
+/// where the asked device holds no copy at all.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HandedOn {
+    pub device: String,
+    pub id: i64,
+}
+
 /// What home answers a report with: what it would have said on the stage's
 /// Timeline about carrying the roadmap on, for the copy to say on its own —
 /// nobody opens a tombstone.
