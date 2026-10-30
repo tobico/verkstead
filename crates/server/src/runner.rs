@@ -740,6 +740,16 @@ async fn backlog_again(
         false => Vec::new(),
     };
 
+    // And placed as the loop places it: a Resume is a launch of the task like
+    // any other, so one moved back by hand is moved again — see
+    // [`crate::placing`].
+    if let Step::Task { number, .. } = &step
+        && crate::placing::task(&state, conversation_id, working_in, *number).await
+            == crate::placing::Placed::Moving
+    {
+        return;
+    }
+
     tracing::info!(conversation_id, step = ?step, "a stopped run is being taken up again");
 
     let Some(session) = launch_in_turn(&state, conversation_id, Prompt::NextTask { joining }).await
@@ -1179,6 +1189,18 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
             false => Vec::new(),
         };
 
+        // And a task that declares a platform this device is not is moved to one
+        // that is before anything is launched for it: the move runs where it
+        // stands, with nothing running, and the far end's arrival presses its own
+        // Resume, which launches it there — see [`crate::placing`]. The run here
+        // stands down, its registration handed to the mover.
+        if let Step::Task { number, .. } = &step
+            && crate::placing::task(&state, conversation_id, &worktree, *number).await
+                == crate::placing::Placed::Moving
+        {
+            return;
+        }
+
         tracing::info!(conversation_id, step = ?step, "a fresh session is starting on the next step");
 
         let Some(started) =
@@ -1505,6 +1527,15 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 
     crate::conversations::hand_over(&state, conversation_id).await;
     crate::conversations::grilling_over(&state, conversation_id).await;
+
+    // And an inline run whose proposal wants one platform this device is not is
+    // moved to one that is before its session starts, the way a declared task
+    // is: the handoff is on the record by now, so it crosses with it, and the
+    // far end's arrival presses its own Resume, which launches the run there
+    // without asking again — see [`crate::placing::inline`].
+    if crate::placing::inline(&state, conversation_id).await == crate::placing::Placed::Moving {
+        return;
+    }
 
     let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing).await else {
         return;
@@ -3697,12 +3728,27 @@ fn lacking(worktree: &Path, landing: &Landing) -> Option<String> {
     }
 
     match pending(worktree, path) {
-        Some(false) => None,
-        _ => Some(match wanted {
-            true => format!("`{}` is not committed", path.display()),
-            false => format!("taking `{}` away is not committed", path.display()),
-        }),
+        Some(false) => (),
+        _ => {
+            return Some(match wanted {
+                true => format!("`{}` is not committed", path.display()),
+                false => format!("taking `{}` away is not committed", path.display()),
+            });
+        }
     }
+
+    // And a backlog that has landed is asked what a roadmap is asked beside its
+    // landing: whether the platforms its lines name are platforms. Refused here
+    // rather than at launch, because the session that wrote the list is the one
+    // alive to put it right, and nobody who wrote it is there when a task starts.
+    // See [`crate::declarations::judge_backlog`].
+    if wanted && *path == todo() {
+        let list = std::fs::read_to_string(worktree.join(path)).ok()?;
+
+        return crate::declarations::judge_backlog(&list);
+    }
+
+    None
 }
 
 /// Whether git has any pending change for `path`, or `None` where it cannot say.
@@ -4616,6 +4662,50 @@ mod tests {
         run(path, &["commit", "-m", "chore: plan rate-limiting tasks"]);
 
         assert!(landed(path, &landing), "written and committed");
+    }
+
+    /// A committed backlog naming a platform that is not one has not landed: the
+    /// session that wrote it is refused naming the task, and fixing the line and
+    /// committing lets it through. The same landing ends a breakdown and a
+    /// stage's planning session, so this is both of theirs.
+    #[test]
+    fn a_backlog_naming_a_platform_that_is_not_one_has_not_landed() {
+        let line = |platform: &str| {
+            format!(
+                "# Rate limiting\n\n\
+                 - [ ] 01: Count — [details](01-count.md)\n\
+                 - [ ] 02: Refuse — [details](02-refuse.md) — on windows\n\
+                 - [ ] 03: Report — [details](03-report.md) — on {platform}\n",
+            )
+        };
+
+        let dir = worktree(
+            &line("freebsd"),
+            &["01-count.md", "02-refuse.md", "03-report.md"],
+        );
+        let path = dir.path();
+
+        for landing in [Step::Planning, Step::PlanningStage].map(|step| step.landing().unwrap()) {
+            let why = lacking(path, &landing).expect("a platform that is not one is refused");
+
+            assert!(why.contains("task 03"), "{why}");
+            assert!(why.contains("freebsd"), "{why}");
+            assert!(why.contains("linux, macos, windows"), "{why}");
+        }
+
+        std::fs::write(path.join(BACKLOG).join(TODO), line("macos")).unwrap();
+
+        assert!(
+            lacking(path, &Landing::Arrived(todo())).is_some(),
+            "fixed and not committed is not landed either",
+        );
+
+        run(
+            path,
+            &["commit", "-am", "chore: plan rate-limiting tasks on macos"],
+        );
+
+        assert_eq!(lacking(path, &Landing::Arrived(todo())), None);
     }
 
     /// A repository at the moment a roadmap stage's branch is made on top of the

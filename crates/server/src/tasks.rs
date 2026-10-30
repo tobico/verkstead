@@ -213,7 +213,8 @@ pub(crate) fn files(backlog: &Path) -> HashMap<u32, String> {
 }
 
 /// One entry of the list as the runner needs it: the number it answers to, the
-/// label the list writes that number as, and whether its box is ticked.
+/// label the list writes that number as, whether its box is ticked, and the
+/// platform it wants.
 ///
 /// [`checklist::Entry`] borrows the line it was read off, and the runner reads
 /// the list, drops it, and then goes and does something about what it said.
@@ -222,6 +223,10 @@ pub(crate) struct Listed {
     pub(crate) number: u32,
     pub(crate) label: String,
     pub(crate) checked: bool,
+
+    /// The platform the line declares after its link, or `None` where it
+    /// declares none — see [`crate::declarations::wants`].
+    pub(crate) platform: Option<crate::platform::Platform>,
 }
 
 /// The entries of the backlog in `backlog`, in the list's own order, or `None`
@@ -244,6 +249,7 @@ pub(crate) fn entries(backlog: &Path) -> Option<Vec<Listed>> {
                 number: entry.number,
                 label: entry.label.to_owned(),
                 checked: entry.checked,
+                platform: crate::declarations::wants(entry.after),
             })
             .collect(),
     )

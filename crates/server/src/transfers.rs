@@ -226,7 +226,10 @@ pub(crate) async fn transfer(
 /// A request that already named this device already has a mover seeing the
 /// session out, so none is started beside it — that one reads who asked at its
 /// commit point, which is where the Timeline's wording is settled.
-async fn asked(
+///
+/// Also how Verkstead asks on its own account, placing a task or an inline run
+/// that wants another platform — see [`crate::placing`].
+pub(crate) async fn asked(
     state: &AppState,
     conversation_id: i64,
     device: &str,
@@ -473,7 +476,7 @@ fn known(members: &[store::Member]) -> String {
 
 /// One finding of the preflight, in the words the Transfer dialog draws it in —
 /// see `lacking` in `web/src/workbench/Transfer.tsx`.
-fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String {
+pub(crate) fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String {
     use verkstead_render::{AgentType, Lacking, PairingRole};
 
     match lacking {
@@ -1186,6 +1189,8 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
     let asked = match by {
         store::AskedBy::Human => MovedFor::Human,
         store::AskedBy::Session => MovedFor::Session,
+        store::AskedBy::Task { label, wants } => MovedFor::Task { label, wants },
+        store::AskedBy::Inline { wants } => MovedFor::Inline { wants },
     };
 
     // What this copy has to say for itself from here, which is where the work
@@ -1197,9 +1202,9 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         state,
         conversation_id,
         &format!(
-            "Transferred to **{named}** at {whose} request. This is a copy, and every link to \
-             it leads to the live conversation on that device.",
-            whose = asked.whose(),
+            "Transferred to **{named}** {why}. This is a copy, and every link to it leads to \
+             the live conversation on that device.",
+            why = asked.why(),
         ),
     )
     .await;
@@ -1762,7 +1767,7 @@ pub(crate) struct Placed {
 /// permitted ones first — the drafting device, it being the one that is always
 /// there, then the ticks in the order they were made — and the rest after them
 /// by name.
-fn placed_among(
+pub(crate) fn placed_among(
     here: &str,
     born: Option<&str>,
     ticked: &[String],

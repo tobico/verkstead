@@ -101,8 +101,10 @@ operating system. Naming a platform in prose declares nothing, and a change to
 shared code with a cross-platform suite declares nothing: it is verified
 wherever it stands, and CI confirms the rest.
 
-A task line's platform is recorded rather than acted on: nothing places a task
-by it yet.
+Verkstead acts on a task line's platform: before that task's session starts, it
+moves the work to a permitted device of that platform — the device the work was
+drafted on, or one the human ticked — and the work stays there for the tasks
+after it. No session moves itself for a declared task.
 
 <task-file-template>
 # NN. <Task title>

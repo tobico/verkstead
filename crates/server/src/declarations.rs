@@ -28,9 +28,18 @@
 //! holds none, which is what keeps the two apart from that side; from this side
 //! what keeps them apart is that nothing inside an annotation is read at all.
 //!
-//! Nothing here is a backlog's. `.tasks/TODO.md` has no dependencies — the order
-//! is the dependency — and the one line reader stays the one line reader: a task
-//! list's tail is whatever it always was.
+//! **A backlog shares the reading and none of the roadmap's judging.** A task
+//! line in `.tasks/TODO.md` declares the platform it wants after its link, as a
+//! stage line does — see [ADR-0029](../../../../docs/adr/0029-work-is-placed-by-platform.md)
+//! — and [`wants`] is [`read`] applied to that tail, the platform alone. A task
+//! list has no dependencies — the order is the dependency — so it has no
+//! all-or-nothing rule: a backlog declaring on some lines and not others is still
+//! a backlog, `on windows` as a line's whole tail declares, and a bare line wants
+//! no platform. What a backlog is judged on is the one thing left, whether its
+//! platforms are platforms, and that judging is the landing's — see
+//! [`judge_backlog`], which refuses the `verkstead done` of the session that wrote
+//! the list, that being the session alive to put it right. Nothing refuses at
+//! launch: a word that got past the landing reads there as no platform.
 
 use crate::checklist;
 use crate::platform::Platform;
@@ -258,6 +267,48 @@ fn matching(word: &str) -> Option<Platform> {
         .find_map(|(named, platform)| is(word, named).then_some(*platform))
 }
 
+/// The three words there are, as a refusal lists them: `linux, macos, windows`.
+fn platforms() -> String {
+    PLATFORMS
+        .iter()
+        .map(|(word, _)| *word)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The platform a backlog's task line wants, read off `after` — the raw tail of
+/// the line — and matched to one of the three, or `None` where it names none.
+///
+/// The reading alone: see the module docs for why a backlog has none of a
+/// roadmap's all-or-nothing rule. A word that is not a platform reads as none
+/// here, because by the time anything asks this the backlog has landed and
+/// [`judge_backlog`] has had its say about it.
+pub(crate) fn wants(after: &str) -> Option<Platform> {
+    read(after).platform.and_then(matching)
+}
+
+/// Why `list` — a whole `.tasks/TODO.md` — is refused, or `None` where every
+/// platform its lines name is one of the three.
+///
+/// The one fault a backlog can have, said in the words [`judge`] refuses a
+/// roadmap's platform in, made into a task's sentence. The first line naming a
+/// word that is not one, in the list's own order, so a backlog with two of them
+/// is refused over the same one every time it signals.
+pub(crate) fn judge_backlog(list: &str) -> Option<String> {
+    list.lines().filter_map(checklist::entry).find_map(|entry| {
+        let word = read(entry.after).platform?;
+
+        matching(word).is_none().then(|| {
+            format!(
+                "task {} of the backlog says on {word}, which isn't a platform. A platform is \
+                 one of {}",
+                entry.label,
+                platforms(),
+            )
+        })
+    })
+}
+
 /// What `list` — a whole `ROADMAP.md` — declares, judged as one thing.
 ///
 /// All or nothing, because a bare line in a declaring roadmap is a root and a
@@ -335,11 +386,7 @@ pub(crate) fn judge(roadmap: &str, list: &str) -> Judgement {
                 "stage {} of the {roadmap} roadmap says on {word}, which isn't a platform. A \
                  platform is one of {}",
                 entry.label,
-                PLATFORMS
-                    .iter()
-                    .map(|(word, _)| *word)
-                    .collect::<Vec<_>>()
-                    .join(", "),
+                platforms(),
             ));
         }
     }
@@ -612,6 +659,70 @@ mod tests {
         // `no` on its own is not the root's wording, there being nothing to say
         // it was about dependencies at all.
         assert_eq!(read("— no").stands_on, None);
+    }
+
+    /// A backlog's line, as the breaking-down skill writes it, with `tail` after
+    /// its link.
+    fn task(tail: &str) -> String {
+        format!("- [ ] 03: Title — [details](03-x.md){tail}")
+    }
+
+    /// A task line's platform, read off the tail the line reader hands back.
+    fn task_wants(tail: &str) -> Option<Platform> {
+        let line = task(tail);
+        let entry = checklist::entry(&line).expect("a task line is an entry");
+
+        wants(entry.after)
+    }
+
+    /// A task line declares its platform as a stage line does, in whatever case
+    /// it was typed, and a bare line wants none.
+    #[test]
+    fn a_task_line_wants_the_platform_after_its_link() {
+        assert_eq!(task_wants(" — on windows"), Some(Platform::Windows));
+        assert_eq!(task_wants(" — On Windows"), Some(Platform::Windows));
+        assert_eq!(task_wants(" — on linux"), Some(Platform::Linux));
+        assert_eq!(task_wants(""), None);
+
+        // An annotation is no declaration on a task line either.
+        assert_eq!(task_wants(" *(in progress: `on windows`)*"), None);
+        assert_eq!(
+            task_wants(" *(in progress: `x`, on windows)* — on macos"),
+            Some(Platform::MacOs),
+        );
+
+        // And a word that is not a platform reads as none: the landing has
+        // already refused it, and nothing refuses at launch.
+        assert_eq!(task_wants(" — on freebsd"), None);
+    }
+
+    /// A backlog has no all-or-nothing rule: declaring on one line and not the
+    /// others is still a backlog, with nothing to refuse.
+    #[test]
+    fn a_backlog_declaring_on_one_line_only_is_not_refused() {
+        let list = "# Tasks\n\n\
+            - [ ] 01: One — [details](01-one.md)\n\
+            - [ ] 02: Two — [details](02-two.md) — on windows\n\
+            - [x] 03: Three — [details](03-three.md) *(in progress: `x`)*\n";
+
+        assert_eq!(judge_backlog(list), None);
+        assert_eq!(judge_backlog("# Nothing planned\n"), None);
+    }
+
+    /// A word that is not a platform is refused naming the task, the word and the
+    /// three there are.
+    #[test]
+    fn a_backlog_naming_a_platform_that_is_not_one_is_refused_naming_the_task() {
+        let list = "# Tasks\n\n\
+            - [ ] 01: One — [details](01-one.md) — on linux\n\
+            - [ ] 02: Two — [details](02-two.md)\n\
+            - [ ] 03: Three — [details](03-three.md) — on freebsd\n";
+
+        let why = judge_backlog(list).expect("a platform that is not one is refused");
+
+        assert!(why.contains("task 03"), "{why}");
+        assert!(why.contains("on freebsd"), "{why}");
+        assert!(why.contains("linux, macos, windows"), "{why}");
     }
 
     /// A roadmap's lines, as `staging` writes them: the heading, the prose above

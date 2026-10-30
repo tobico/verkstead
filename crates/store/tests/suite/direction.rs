@@ -17,11 +17,13 @@
 use std::path::Path;
 
 use sqlx::SqlitePool;
-use verkstead_schema::{Direction, Proposal, Question, QuestionOption, QuestionSet, Response};
+use verkstead_schema::{
+    Direction, Proposal, Question, QuestionOption, QuestionSet, Response, Want, WantedPlatform,
+};
 use verkstead_store::{
     Ask, Directing, Event, Implementing, Lifecycle, Proposed, Settlements, Submission, ask,
-    load_conversation, open_database, pick_direction, record_handoff, register_repo, save_brief,
-    start_conversation, start_grilling, start_implementing, submit_response, timeline,
+    load_conversation, open_database, pick_direction, picked_wants, record_handoff, register_repo,
+    save_brief, start_conversation, start_grilling, start_implementing, submit_response, timeline,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -784,5 +786,85 @@ async fn a_conversation_caught_choosing_a_direction_comes_out_closed() {
         moves(&pool, id).await,
         [Lifecycle::Grilling, Lifecycle::Closed],
         "the retired move is off the Timeline and the close is on it",
+    );
+}
+
+/// **What the picked proposal wants is read off the Set it was picked on**
+/// (ADR-0029, *Placing declared work*): the newest proposal picked on, an
+/// earlier pick's wants and a proposal sent back without a pick counting for
+/// nothing, and an ordinary Set never.
+#[tokio::test]
+async fn the_picked_proposals_wants_are_the_ones_read() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(
+        picked_wants(&pool, id).await.unwrap(),
+        [],
+        "nothing picked wants nothing",
+    );
+
+    let wanting = |platforms: &[WantedPlatform]| {
+        let mut set = proposing(Direction::Inline);
+        set.proposal.as_mut().unwrap().wants = platforms
+            .iter()
+            .map(|platform| Want {
+                platform: *platform,
+                reason: "Its installer is an MSI.".to_owned(),
+            })
+            .collect();
+        set
+    };
+
+    let first = ask(&pool, id, &wanting(&[WantedPlatform::Linux]), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
+    answer(&pool, first.id).await;
+
+    assert_eq!(
+        picked_wants(&pool, id).await.unwrap(),
+        [WantedPlatform::Linux]
+    );
+
+    let second = ask(
+        &pool,
+        id,
+        &wanting(&[WantedPlatform::Windows]),
+        Ask::Blocking,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    answer(&pool, second.id).await;
+
+    // Sent back without a pick, and an ordinary Set after it: neither is a
+    // proposal picked on.
+    let sent_back = ask(&pool, id, &wanting(&[WantedPlatform::Macos]), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
+    answered(
+        &pool,
+        sent_back.id,
+        &Response::from_yaml("answers:\n  - label: Q14\n    unanswered: true\n").unwrap(),
+    )
+    .await;
+
+    let plain = ask(&pool, id, &ordinary(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
+    answered(
+        &pool,
+        plain.id,
+        &Response::from_yaml("answers:\n  - label: Q14\n    unanswered: true\n").unwrap(),
+    )
+    .await;
+
+    assert_eq!(
+        picked_wants(&pool, id).await.unwrap(),
+        [WantedPlatform::Windows],
+        "the latest pick's proposal is the one read",
     );
 }

@@ -11364,6 +11364,116 @@ async fn a_store_and_nudge_ask_whose_session_died_is_folded_in_and_nothing_is_ty
     );
 }
 
+/// A backlog of one task that wants Windows, whose step session falls over the
+/// first time it is launched and works the task once the test has said
+/// `mended` — every step session writing its task's number to `launches` as it
+/// starts.
+fn a_windows_task_dying_once(launches: &Path) -> String {
+    format!(
+        r#"
+case "$1" in
+{CODEX_GRILLING_MODEL})
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: Count — [details](01-count.md) — on windows\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    printf '===== %s\n' "${{number:-finish}}" >> {launches}
+    if [ ! -f /tmp/verkstead/mended ]; then
+        printf 'gh: the connection dropped\n'
+        exit 1
+    fi
+    if [ -n "$number" ]; then
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: $number"
+        : > /tmp/verkstead/done
+    fi
+    sleep 300
+    ;;
+esac
+"#,
+        launches = quoted(launches),
+    )
+}
+
+/// **A task that wants a platform, on a Verkstead in no cluster, runs here** —
+/// and says so, at every launch: the Resume that reaches the same task again
+/// writes its Notice again rather than nothing, because each launch asked again
+/// where the task wants to be (ADR-0029, *Placing declared work*).
+#[tokio::test]
+async fn a_task_wanting_a_platform_with_no_cluster_runs_here_saying_so_at_every_launch() {
+    let spill = tempfile::tempdir().unwrap();
+    let launches = spill.path().join("launches");
+
+    let fixture =
+        grilling_spilling_on_codex(spill, &a_windows_task_dying_once(&launches), PULL_REQUEST)
+            .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let proposal = fixture.ask_stored(PROPOSING).await;
+    assert_eq!(
+        fixture.pick(proposal, "task-list").await,
+        Submitted::Accepted
+    );
+
+    // The task launched here, where it fell over.
+    until_written_by(&launches, 1).await;
+
+    let wanting = |view: &ConversationView| -> Vec<String> {
+        notices(view)
+            .into_iter()
+            .filter(|notice| notice.contains("Task 01 wants Windows"))
+            .collect()
+    };
+
+    fixture
+        .until(|view| {
+            notices(view)
+                .iter()
+                .any(|notice| notice.contains("the connection dropped"))
+                .then_some(())
+        })
+        .await;
+
+    let first = wanting(&fixture.view().await);
+    assert_eq!(first.len(), 1, "one Notice for the one launch: {first:?}");
+    assert!(
+        first[0].contains("no Windows device is linked"),
+        "and it says there is nowhere to go: {first:?}",
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("mended"), "").unwrap();
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    // The same task launched again, here, and said again.
+    let launched = until_written_by(&launches, 2).await;
+    assert_eq!(
+        prompts(&launched)
+            .iter()
+            .map(|launch| launch.trim())
+            .collect::<Vec<_>>(),
+        ["01", "01"],
+    );
+
+    let again = wanting(&fixture.view().await);
+    assert_eq!(
+        again.len(),
+        2,
+        "the Resume's launch writes its own Notice: {again:?}",
+    );
+}
+
 /// A Response to a `--deferred` Set types nothing, on the backend that stores
 /// every ask as much as anywhere else.
 ///
