@@ -103,7 +103,7 @@ jobs:
           gatekeeper() {
             # The first-launch "downloaded from the Internet" prompt, pressed
             # Open where it is up: the human's own one-time press.
-            for _ in $(seq 20); do
+            for _ in $(seq 12); do
               if osascript -e 'tell application "System Events" to tell process "CoreServicesUIAgent" to click button "Open" of window 1' 2>/dev/null; then
                 echo "pressed Open on Gatekeeper's prompt"; return 0
               fi
@@ -111,6 +111,8 @@ jobs:
             done
             echo "no Gatekeeper prompt was seen"
           }
+          # `open` waits on Gatekeeper's prompt, so it is never waited on here.
+          launch() { (open "$APP" "$@" > "$RUNNER_TEMP/open.log" 2>&1 &); sleep 3; gatekeeper; cat "$RUNNER_TEMP/open.log"; }
           pids() { pgrep -f "Verkstead.app/Contents/MacOS/Verkstead" || true; }
           stop() { for p in $(pids); do kill "$p"; done; sleep 3; for p in $(pids); do kill -9 "$p"; done; true; }
           where() { for p in $(pids); do ps -o pid=,command= -p "$p"; done; }
@@ -126,8 +128,7 @@ jobs:
           set +e
           . "$LIB"
           rm -f "$log"
-          open "$APP"
-          gatekeeper
+          launch
           for _ in $(seq 60); do grep -q "offers to install itself" "$log" 2>/dev/null && break; sleep 1; done
           sleep 3
           shot dialog
@@ -147,9 +148,8 @@ jobs:
           set +e
           . "$LIB"
           rm -f "$log"
-          open "$APP" --args --install
-          gatekeeper
-          for _ in $(seq 90); do [ "$(grep -c 'is starting, at pid' "$log" 2>/dev/null)" -ge 2 ] && break; sleep 1; done
+          launch --args --install
+          for _ in $(seq 90); do [ "$(grep -c 'is starting, at pid' "$log" 2>/dev/null || true)" -ge 2 ] 2>/dev/null && break; sleep 1; done
           serving && echo "PROVEN: the relaunched app serves" || echo "NOT SERVING after --install"
           shot installed
           echo "== processes"; where
@@ -186,10 +186,10 @@ jobs:
           ls -ld /Applications
           [ -d "$APP" ] || hdiutil attach "$DMG" -nobrowse -mountpoint "$MOUNT"
           rm -f "$log"
-          open "$APP" --args --install
-          gatekeeper
+          launch --args --install
           for i in $(seq 40); do
             shot "auth-$i"
+            [ "$i" = 5 ] && { echo "== SecurityAgent"; ax SecurityAgent; echo "== Verkstead"; ax Verkstead; }
             if osascript -e 'tell application "System Events" to tell process "SecurityAgent" to click button "Cancel" of window 1' 2>/dev/null; then
               echo "pressed Cancel on the password dialog"; break
             fi
