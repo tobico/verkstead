@@ -157,3 +157,32 @@ export function deviceShown(
       ?.identity ?? null
   );
 }
+
+/// The sessions running on a device, as an Update's confirm card names them
+/// for being stopped and resumed (ADR-0027, *A confirm card names the sessions
+/// that will be stopped*): *the session on rate-limiting*, *the sessions on
+/// rate-limiting and 2 drafts* — each branch by name and the drafts counted.
+/// `null` with none running.
+///
+/// Here rather than on the Remote access pane because the Desktop page's
+/// Install says the same of this device's: installing quits the app, and the
+/// server with it.
+export function sessionsOn(branches: string[], drafts: number): string | null {
+  const count = branches.length + drafts;
+  if (count === 0) return null;
+
+  const named = [
+    ...branches,
+    ...(drafts === 0 ? [] : [drafts === 1 ? "a draft" : `${drafts} drafts`]),
+  ];
+  const sessions = count === 1 ? "the session" : "the sessions";
+
+  return `${sessions} on ${listed(named)}`;
+}
+
+/// `a`, `a and b`, `a, b and c`.
+export function listed(names: string[]): string {
+  if (names.length < 2) return names.join("");
+
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}

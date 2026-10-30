@@ -1,5 +1,6 @@
-# Throwaway: install-on-desktop task 03 — a newer Verkstead already installed, on a real Mac.
-# Lives only on the `macos-pack-probe` branch and merges nowhere.
+# Throwaway: install-on-desktop task 05 — the release's own Mac steps, run verbatim out of
+# release.yml: mount, --install out of the mount, then the shown launch and the notification
+# on the installed copy. Lives only on the `macos-pack-probe` branch and merges nowhere.
 name: Mac install-offer probe
 
 on:
@@ -11,13 +12,13 @@ permissions:
 
 jobs:
   the-offer:
-    name: The Install Offer, out of a quarantined dmg
+    name: The release's Mac install steps
     runs-on: macos-15
     timeout-minutes: 90
     env:
       DMG: target/electron/out/Verkstead-universal.dmg
-      MOUNT: /Volumes/Verkstead
-      APP: /Volumes/Verkstead/Verkstead.app
+      MOUNT: target/electron/mounted
+      APP: target/electron/mounted/Verkstead.app
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -76,139 +77,57 @@ jobs:
           grep -E "^(Signing|Not notarizing|Notarizing|The app )" "$RUNNER_TEMP/pack.log"
           exit $status
 
-      # A browser's download: quarantined, then mounted the way a double-click
-      # mounts it, at /Volumes.
-      - name: Quarantine and mount the dmg as a download
-        run: |
-          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" "$DMG"
-          xattr -l "$DMG"
-          hdiutil attach "$DMG" -nobrowse -mountpoint "$MOUNT"
-          ls -l "$MOUNT"
-          xattr -l "$APP" || true
-          ls -ld /Applications
-          # `open` hands the app launchd's environment rather than this shell's,
-          # so the key goes into the default Data Directory.
-          data="$HOME/Library/Application Support/Verkstead"
-          mkdir -p "$data"
-          printf '%s\n' the-probe-key > "$data/workbench.key"
-          mkdir -p "$RUNNER_TEMP/shots"
-          cat > "$RUNNER_TEMP/lib.sh" <<'SH'
-          log="$HOME/Library/Logs/Verkstead/verkstead.log"
-          shot() { screencapture -x "$RUNNER_TEMP/shots/$1.png" || true; }
-          ax() { osascript -e "tell application \"System Events\" to tell process \"$1\" to get {name, title} of every UI element of window 1" 2>&1; }
-          serving() {
-            curl --fail --silent --show-error --retry 60 --retry-delay 1 --retry-connrefused \
-              --cookie "workbench_key=the-probe-key" http://127.0.0.1:8422/ | grep -q /assets/
-          }
-          gatekeeper() {
-            # The first-launch "downloaded from the Internet" prompt, pressed
-            # Open where it is up: the human's own one-time press.
-            for _ in $(seq 12); do
-              if osascript -e 'tell application "System Events" to tell process "CoreServicesUIAgent" to click button "Open" of window 1' 2>/dev/null; then
-                echo "pressed Open on Gatekeeper's prompt"; return 0
-              fi
-              sleep 1
-            done
-            echo "no Gatekeeper prompt was seen"
-          }
-          # `open` waits on Gatekeeper's prompt, so it is never waited on here.
-          launch() { (open "$APP" "$@" > "$RUNNER_TEMP/open.log" 2>&1 &); sleep 3; gatekeeper; cat "$RUNNER_TEMP/open.log"; }
-          pids() { pgrep -f "Verkstead.app/Contents/MacOS/Verkstead" || true; }
-          stop() { for p in $(pids); do kill "$p"; done; sleep 3; for p in $(pids); do kill -9 "$p"; done; true; }
-          where() { for p in $(pids); do ps -o pid=,command= -p "$p"; done; }
-          SH
-          echo "LIB=$RUNNER_TEMP/lib.sh" >> "$GITHUB_ENV"
 
-      # Each arm seeds /Applications/Verkstead.app as a copy of the mounted app
-      # whose CFBundleShortVersionString says $1, quarantine stripped (an edited
-      # Info.plist fails assessment, and a direct exec is all that runs it).
-      - name: Helpers for a seeded install
-        run: |
-          cat >> "$LIB" <<'SH'
-          seed() {
-            stop
-            sudo rm -rf /Applications/Verkstead.app
-            [ -d "$APP" ] || hdiutil attach "$DMG" -nobrowse -mountpoint "$MOUNT"
-            ditto "$APP" /Applications/Verkstead.app
-            xattr -dr com.apple.quarantine /Applications/Verkstead.app
-            plutil -replace CFBundleShortVersionString -string "$1" /Applications/Verkstead.app/Contents/Info.plist
-            echo "seeded /Applications/Verkstead.app at $(plutil -extract CFBundleShortVersionString raw /Applications/Verkstead.app/Contents/Info.plist)"
-            rm -f "$log"
-          }
-          offered() { for _ in $(seq 60); do grep -q "offers to install itself" "$log" 2>/dev/null && break; sleep 1; done; sleep 3; }
-          press() { osascript -e "tell application \"System Events\" to tell process \"Verkstead\" to click button \"$1\" of window 1" && echo "pressed $1"; }
-          relaunched() {
-            for _ in $(seq 90); do [ "$(grep -c 'is starting, at pid' "$log" 2>/dev/null || true)" -ge 2 ] 2>/dev/null && break; sleep 1; done
-            serving && echo "PROVEN: the relaunched app serves" || echo "NOT SERVING after the relaunch"
-            pid=$(grep 'is starting, at pid' "$log" | tail -1 | sed 's/.*at pid //')
-            exe=$(ps -o command= -p "$pid")
-            echo "relaunched pid $pid runs $exe"
-            case "$exe" in /Applications/Verkstead.app/*) echo "PROVEN: it runs from /Applications" ;; *) echo "NOT under /Applications" ;; esac
-            echo "installed version now: $(plutil -extract CFBundleShortVersionString raw /Applications/Verkstead.app/Contents/Info.plist)"
-          }
-          SH
-
-      - name: More helpers
-        run: |
-          cat >> "$LIB" <<'SH'
-          resign() {
-            codesign --force --deep --sign - --preserve-metadata=entitlements /Applications/Verkstead.app 2>&1 | tail -2
-            codesign --verify --deep --verbose=1 /Applications/Verkstead.app 2>&1 | tail -2
-          }
-          why() {
-            echo "== processes"; ps -axo pid,ppid,command | grep -i verkstead | grep -v grep
-            echo "== system log"
-            log show --last 3m --style compact --predicate 'process == "kernel" OR subsystem == "com.apple.MobileFileIntegrity" OR process == "amfid" OR process == "syspolicyd" OR eventMessage CONTAINS[c] "verkstead"' 2>/dev/null | grep -iv "sandbox\|tccd" | tail -40
-          }
-          SH
-
-      # The control: is a copy with an edited Info.plist one the kernel runs?
-      - name: Control — the edited copy, exec'd directly
+      - name: "release: The dmg mounts"
         if: always()
-        timeout-minutes: 4
+        timeout-minutes: 3
         run: |
-          set +e
-          . "$LIB"
-          seed 99.0.0
-          codesign --verify --deep --verbose=1 /Applications/Verkstead.app 2>&1 | tail -2
-          (/Applications/Verkstead.app/Contents/MacOS/Verkstead > "$RUNNER_TEMP/direct.log" 2>&1 &)
-          sleep 10
-          echo "== direct output"; head -20 "$RUNNER_TEMP/direct.log"
-          grep -q "is starting" "$log" && echo "THE EDITED COPY RUNS" || echo "THE EDITED COPY DOES NOT RUN"
-          why
-          stop
+          ruby -ryaml -e '
+            steps = YAML.load_file(".github/workflows/release.yml")["jobs"]["desktop-macos"]["steps"]
+            print steps.find { |s| s["name"] == ARGV[0] }["run"]
+          ' "The dmg mounts" > "$RUNNER_TEMP/step.sh"
+          bash -e "$RUNNER_TEMP/step.sh"
 
-      - name: A newer one, re-signed, and Open installed hands over to it
+      - name: "release: The app installs itself out of the dmg into /Applications"
         if: always()
         timeout-minutes: 6
         run: |
-          set +e
-          . "$LIB"
-          seed 99.0.0
-          resign
-          rm -f "$log"
-          launch
-          offered
-          press Install
-          for _ in $(seq 30); do grep -q "open it instead" "$log" 2>/dev/null && break; sleep 1; done
-          sleep 3
-          press "Open installed"
-          relaunched
-          echo "== log"; cat "$log"
-          why
-          stop
+          ruby -ryaml -e '
+            steps = YAML.load_file(".github/workflows/release.yml")["jobs"]["desktop-macos"]["steps"]
+            print steps.find { |s| s["name"] == ARGV[0] }["run"]
+          ' "The app installs itself out of the dmg into /Applications" > "$RUNNER_TEMP/step.sh"
+          bash -e "$RUNNER_TEMP/step.sh"
 
-      - name: A newer one, re-signed, and --install opens it
+      - name: "release: The window comes up, the icon goes into the menu bar, and the viewer is inside"
         if: always()
         timeout-minutes: 6
+        env:
+          VERKSTEAD_DATA_DIR: ${{ runner.temp }}/data
         run: |
-          set +e
-          . "$LIB"
-          seed 99.0.0
-          resign
-          rm -f "$log"
-          launch --args --install
-          relaunched
-          echo "== log"; cat "$log"
-          why
-          stop
+          ruby -ryaml -e '
+            steps = YAML.load_file(".github/workflows/release.yml")["jobs"]["desktop-macos"]["steps"]
+            print steps.find { |s| s["name"] == ARGV[0] }["run"]
+          ' "The window comes up, the icon goes into the menu bar, and the viewer is inside" > "$RUNNER_TEMP/step.sh"
+          bash -e "$RUNNER_TEMP/step.sh"
+
+      - name: "release: A notice is shown as a notification"
+        if: always()
+        timeout-minutes: 6
+        env:
+          VERKSTEAD_DATA_DIR: ${{ runner.temp }}/data
+        run: |
+          ruby -ryaml -e '
+            steps = YAML.load_file(".github/workflows/release.yml")["jobs"]["desktop-macos"]["steps"]
+            print steps.find { |s| s["name"] == ARGV[0] }["run"]
+          ' "A notice is shown as a notification" > "$RUNNER_TEMP/step.sh"
+          bash -e "$RUNNER_TEMP/step.sh"
+
+      - name: "release: Unmount the dmg"
+        if: always()
+        timeout-minutes: 3
+        run: |
+          ruby -ryaml -e '
+            steps = YAML.load_file(".github/workflows/release.yml")["jobs"]["desktop-macos"]["steps"]
+            print steps.find { |s| s["name"] == ARGV[0] }["run"]
+          ' "Unmount the dmg" > "$RUNNER_TEMP/step.sh"
+          bash -e "$RUNNER_TEMP/step.sh"

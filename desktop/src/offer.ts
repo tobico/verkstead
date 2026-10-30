@@ -55,6 +55,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import type { Placement } from "./bridge.js";
 import { absolute, dataHome, type Machine } from "./platform.js";
 import type { Settings } from "./settings.js";
 import { APP_ID, COMMENT, NAME, quoted } from "./startup.js";
@@ -168,6 +169,14 @@ export function bundle(exe: string): string {
   return parts.length > 3 && parts.at(-2) === "MacOS" && parts.at(-3) === "Contents"
     ? parts.slice(0, -3).join("/")
     : exe;
+}
+
+/// Where this run is from, as the Desktop page's Install row is drawn from it:
+/// outside, and the path written the way the dialog writes it, or not outside
+/// at all — an app already installed, a checkout run, and a platform with no
+/// offer alike.
+export function placement(where: Placed, machine: Machine): Placement {
+  return "outside" in where ? { outside: true, from: shown(where.outside, machine) } : { outside: false };
 }
 
 /// Whether this launch puts the offer up: the file it would install, or why it
@@ -345,18 +354,24 @@ export const INSTALLING = 0;
 /// **A Mac's sentence names no path**: the one a translocated app runs from is
 /// a randomised folder nobody chose, and Applications is the one place the
 /// human knows by name.
-export function asking(from: string, machine: Machine): Asking {
+///
+/// **Pressed on the Desktop page, it says one more sentence** where sessions
+/// are running on this device: `stopping`, the page's own words for them, read
+/// the way the Update card reads them — the install quits the app and the
+/// server with it. With none, the dialog is the launch's own.
+export function asking(from: string, machine: Machine, stopping?: string): Asking {
   const into = applications(machine);
+  const more = stopping === undefined || stopping === "" ? "" : ` ${stopping}`;
 
   return {
     message: "Install Verkstead?",
     detail:
-      machine.platform === "darwin"
+      (machine.platform === "darwin"
         ? "Verkstead is running from outside Applications. " +
           "Installing moves it into Applications and opens it from there."
         : `Verkstead is running from ${shown(dirname(from), machine)}. ` +
           `Installing moves it to ${into === undefined ? APPLICATIONS : shown(into, machine)}, ` +
-          "adds it to your applications menu, and restarts it from there.",
+          "adds it to your applications menu, and restarts it from there.") + more,
     buttons: ["Install", "Skip"],
     defaultId: INSTALLING,
     cancelId: 1,

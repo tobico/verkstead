@@ -247,6 +247,8 @@ function theApp(platform: string): Head[] {
     startup: () => Promise.resolve(registered),
     register: () => Promise.resolve(registered),
     notifiable: () => Promise.resolve(true),
+    placed: () => Promise.resolve({ outside: false }),
+    install: () => Promise.resolve({}),
     head: (worn: Head) => {
       pushed.push(worn);
     },

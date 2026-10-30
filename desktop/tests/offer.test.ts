@@ -47,6 +47,7 @@ import {
   OPENING,
   type Placing,
   placed,
+  placement,
   plan,
   relaunched,
   shortVersion,
@@ -200,6 +201,43 @@ describe("where a Mac run is", () => {
   });
 });
 
+/// What the Desktop page's Install row is drawn from: the same reading, said
+/// over the bridge.
+describe("where a run is, as the Desktop page reads it", () => {
+  const machine = { platform: "linux" as const, env: { HOME } };
+
+  it("is outside, from the path written the dialog's way, run from Downloads", () => {
+    const where = placed(packed("/home/ada/Downloads/Verkstead-x86_64.AppImage"));
+
+    expect(placement(where, machine)).toEqual({
+      outside: true,
+      from: "~/Downloads/Verkstead-x86_64.AppImage",
+    });
+  });
+
+  it("is not outside once installed, on a checkout run, or on Windows", () => {
+    for (const where of [
+      placed(packed("/home/ada/Applications/Verkstead-x86_64.AppImage")),
+      placed(packed("/home/ada/Downloads/Verkstead-x86_64.AppImage", { packaged: false })),
+      placed(packed(undefined, { platform: "win32" })),
+    ]) {
+      expect(placement(where, machine), JSON.stringify(where)).toEqual({ outside: false });
+    }
+  });
+
+  it("names a Mac's bundle", () => {
+    const mac = { platform: "darwin" as const, env: { HOME: "/Users/ada" } };
+    const where = placed({
+      packaged: true,
+      exe: "/Volumes/Verkstead/Verkstead.app/Contents/MacOS/Verkstead",
+      applied: false,
+      ...mac,
+    });
+
+    expect(placement(where, mac)).toEqual({ outside: true, from: "/Volumes/Verkstead/Verkstead.app" });
+  });
+});
+
 describe("whether the offer is made", () => {
   const download = placed(packed("/home/ada/Downloads/Verkstead-x86_64.AppImage"));
 
@@ -331,6 +369,29 @@ describe("the dialog", () => {
       title: "Verkstead couldn't be installed.",
       content: "Moving it into Applications was cancelled.\n\nIt carries on running from outside Applications.",
     });
+  });
+
+  /// Pressed on the Desktop page with sessions running, the page's sentence
+  /// about them follows the dialog's own; with none, it is the launch's dialog.
+  it("says the page's sentence about the sessions running, after its own", () => {
+    const stopping = "The sessions on rate-limiting and a draft will be stopped and resumed.";
+
+    expect(asking("/home/ada/Downloads/Verkstead-x86_64.AppImage", machine, stopping).detail).toBe(
+      "Verkstead is running from ~/Downloads. Installing moves it to ~/Applications, " +
+        "adds it to your applications menu, and restarts it from there. " +
+        stopping,
+    );
+    expect(
+      asking("/Volumes/Verkstead/Verkstead.app", { platform: "darwin", env: { HOME: "/Users/ada" } }, stopping)
+        .detail,
+    ).toBe(
+      "Verkstead is running from outside Applications. " +
+        "Installing moves it into Applications and opens it from there. " +
+        stopping,
+    );
+    expect(asking("/media/usb/Verkstead.AppImage", machine, "")).toEqual(
+      asking("/media/usb/Verkstead.AppImage", machine),
+    );
   });
 
   it("writes a path under the home from ~", () => {

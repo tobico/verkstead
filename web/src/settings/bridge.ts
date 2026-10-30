@@ -62,6 +62,33 @@ export const NAME = "verkstead";
 /// literal the two sides meet at, so the two suites pin it on both.
 export const OPEN = "verkstead:open";
 
+/// The channels the Install row is drawn from and pressed on — `PLACED` and
+/// `INSTALLS` in `desktop/src/bridge.ts`, said again here for [`OPEN`]'s
+/// reason: the page never names them, and the two suites pin them on both
+/// sides.
+export const PLACED = "verkstead:placed";
+export const INSTALLS = "verkstead:install";
+
+/// Where the app runs from, as the Install row is drawn from it (ADR-0020,
+/// *Amended: a download offers to install itself*) — the app's own Install
+/// Offer reading, so a checkout run and an installed app are both *not
+/// outside*.
+export interface Placement {
+  /// Whether it runs from outside Applications, which is all that draws the
+  /// row.
+  readonly outside: boolean;
+
+  /// And where from, where it does — written from `~` under the home.
+  readonly from?: string;
+}
+
+/// What a press of Install came to, where the app is still running to say:
+/// nothing installed, and the reason where it failed. An Install that went
+/// ahead relaunches the app, and nothing answers it.
+export interface Pressed {
+  readonly failed?: string;
+}
+
 /// The platform a Mac reads as, which is the one the close radio is not drawn
 /// on: closing a window there leaves the application running in the Dock, and
 /// that is the platform's own answer rather than a position on any radio.
@@ -203,6 +230,14 @@ export interface Bridge {
   /// the one that says no, and the switch says so under it.
   notifiable(): Promise<boolean>;
 
+  /// Where the app runs from — whether outside Applications, and where.
+  placed(): Promise<Placement>;
+
+  /// Press **Install**: the app's own dialog, with `stopping` said after its
+  /// sentence where sessions are running on this device. Answers where nothing
+  /// was installed.
+  install(stopping?: string): Promise<Pressed>;
+
   /// Say what the head is drawn in and how tall its band stands, so that the
   /// window's controls overlay is the same strip of paper the head beneath it is.
   ///
@@ -258,6 +293,8 @@ function shaped(held: unknown): held is Bridge {
     typeof reached.startup === "function" &&
     typeof reached.register === "function" &&
     typeof reached.notifiable === "function" &&
+    typeof reached.placed === "function" &&
+    typeof reached.install === "function" &&
     typeof reached.head === "function" &&
     typeof reached.where === "function" &&
     typeof reached.opening === "function"

@@ -13,7 +13,7 @@
 //! nothing here is a page with no Desktop section, and that is the whole
 //! mechanism.
 //!
-//! **What is in this file is what crosses**: the name, the nine channels, and
+//! **What is in this file is what crosses**: the name, the eleven channels, and
 //! the shape. It holds no behaviour and touches no disk on purpose — the
 //! preload imports it, so everything it imports is loaded inside the window,
 //! and what the app *does* about each of them is `main.ts`'s while what they
@@ -22,7 +22,7 @@
 //! height are [`decorations.ts`](./decorations.js)'s, and what the open
 //! Conversation can go to is [`where.ts`](./where.js)'s.
 //!
-//! **And six of the nine go one way while the last three go others.** Everything
+//! **And eight of the eleven go one way while the last three go others.** Everything
 //! the page *asks* is an `invoke` and comes back answered; the head and what the
 //! open Conversation can go to are things the page *says* — the app cannot know
 //! what the viewer resolved its tokens to, nor what the record it is drawing
@@ -140,11 +140,49 @@ export const NOTIFIABLE = "verkstead:notifiable";
 /// `window.ts`, which is what keeps count.
 export const OPEN = "verkstead:open";
 
+/// The channel **where this run is from** is asked on: whether the app runs
+/// from outside Applications, which is what draws the Install row on the
+/// Desktop page, and where from where it does.
+///
+/// The Install Offer's own reading — [`placed`](./offer.js) — asked again
+/// rather than decided twice (ADR-0020, *Amended: a download offers to install
+/// itself*), so a checkout run, an app already installed and a platform with no
+/// offer all answer *not outside*, and draw no row.
+export const PLACED = "verkstead:placed";
+
+/// And the channel **Install** on that row is pressed on, carrying the
+/// sentence the page says about the sessions running on this device — see
+/// [`Bridge.install`].
+///
+/// **It answers only where the app is still here to.** The press raises the
+/// launch's own dialog, and an Install that went ahead relaunches the app, so
+/// what comes back is a Skip, a Keep this one or a failure — see [`Pressed`].
+export const INSTALLS = "verkstead:install";
+
+/// Where this run is from, as the page draws it.
+export interface Placement {
+  /// Whether it runs from outside Applications — which is what the row is drawn
+  /// for, and the whole of what a browser, a phone and an installed app lack.
+  readonly outside: boolean;
+
+  /// And where from, as a human reads it, where it is outside: the AppImage's
+  /// path written from `~`, or the bundle's on a Mac.
+  readonly from?: string;
+}
+
+/// What a press of **Install** came to, where the app is still here to say:
+/// nothing installed, and why where it failed — the failure dialog's own
+/// sentence, which the row says under its button.
+export interface Pressed {
+  readonly failed?: string;
+}
+
 /// What `window.verkstead` is, where there is one.
 ///
-/// Nine acts and one value, which is the whole of what the page needs: what
+/// Eleven acts and one value, which is the whole of what the page needs: what
 /// machine this is, the settings read and written, the log file opened, the
 /// startup registration read and written, whether notifications can be shown,
+/// where this run is from and Install pressed,
 /// the head's colours and height said, what the open Conversation can go to
 /// said, and a clicked notification's path heard. Everything the page *asks* is
 /// asynchronous, because everything but the platform is a question for the
@@ -189,6 +227,18 @@ export interface Bridge {
 
   /// Whether this desktop can show a notification at all — see [`NOTIFIABLE`].
   notifiable(): Promise<boolean>;
+
+  /// Where this run is from — see [`PLACED`].
+  placed(): Promise<Placement>;
+
+  /// Press **Install**: the launch's own dialog, with `stopping` after its
+  /// sentence where sessions are running on this device — the page's words for
+  /// them, which only the page can say, the server being what knows them.
+  ///
+  /// Answers where nothing was installed: a Skip, a Keep this one, or a failure
+  /// with its reason. An Install that went ahead is the app relaunching from
+  /// Applications, and nothing answers it.
+  install(stopping?: string): Promise<Pressed>;
 
   /// Say what the head is drawn in, how tall its band stands and where the row
   /// inside it is, so that the controls overlay is the same strip of paper the
