@@ -22,9 +22,11 @@ is told, and either press does what it says.
   ([ADR-0029](../../adr/0029-work-is-placed-by-platform.md), *Verkstead asks
   with a Question Set of its own*): an open Set already draws *Blocked on you*,
   reaches a phone, and has the Attach menu's tick.
-- **The words are the ADR's table**, by `docs/copy.md`: a verb on the button,
-  a full sentence naming the device above it, the notification naming the
-  branch and the device.
+- **The words are the ADR's table**, every row of it — the agent's call on a
+  sleeping ticked device included, and an unticked sleeping one asked about as
+  unticked and then waited on with the asleep row's Set — by `docs/copy.md`: a
+  verb on the button, a full sentence naming the device above it, the
+  notification naming the branch and the device.
 - **A waking device settles the Set itself** — the move runs and the Set is
   locked, its line saying the device answered — because the tick already was
   the consent.

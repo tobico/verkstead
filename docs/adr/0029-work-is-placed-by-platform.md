@@ -105,8 +105,14 @@ and waiting is not one of them:
 | --- | --- | --- |
 | Ticked, asleep | *Stage 03 wants Windows. nuc-win is not awake, and the work moves there by itself once it is.* | **Run it here** |
 | Linked, not ticked | *Stage 03 wants Windows. nuc-win is linked but not permitted.* | **Move to nuc-win** · **Run it here** |
-| The agent's call on either | *The agent asked to move to nuc-win, which is not permitted.* | **Move to nuc-win** · **Keep it here** |
+| The agent's call, not ticked | *The agent asked to move to nuc-win, which is not permitted.* | **Move to nuc-win** · **Keep it here** |
+| The agent's call, ticked but asleep | *The agent asked to move to nuc-win, which is not awake, and the work moves there by itself once it is.* | **Keep it here** |
 | No device of it linked | *Stage 03 wants Windows. No Windows device is linked.* | none — a Notice, and the work runs here |
+
+**A device both unticked and asleep is asked about as unticked.** *Move to
+nuc-win* ticks it, and what follows is the asleep case: the Set is locked, its
+line saying the device was permitted, and the asleep row's Set goes up in its
+place as the wait, so *Run it here* or *Keep it here* is still there to press.
 
 **A device that answers before the human does settles the Set itself**: the
 move runs and the Set is locked, its line saying the device answered, because
