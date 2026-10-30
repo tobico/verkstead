@@ -26,6 +26,36 @@ permissions:
   contents: read
 
 jobs:
+  # The workspace's suites, on Linux.
+  #
+  # **The budget: every leg under fifteen minutes, the typical one near
+  # seven**, the shape the `Windows` job below has. Free four-core runners
+  # only: the repository is public, and the maintainer is an individual for
+  # whom a larger runner is not on the table.
+  #
+  # **The ledger.** Each lever lands as a commit of its own on one pull request
+  # (#285 is the issue it closes), and its row is the run of that commit. A row
+  # gives the slowest and the fastest leg, read off the run's job timings as
+  # `build + test = job`; the job time includes a minute or so of setup. Until
+  # nextest, the build is inside `cargo test` and has no figure of its own, and
+  # until the legs there is one job, so the two columns are the same run.
+  #
+  # | Lever                               | Run         | Slowest leg           | Fastest leg           |
+  # | ----------------------------------- | ----------- | --------------------- | --------------------- |
+  # | Baseline (`main`), the one before   | 40816509002 | — + 21m50 = 24m49     | —                     |
+  # | Baseline (`main`)                   | 40952712743 | — + 18m37 = 20m40     | —                     |
+  #
+  # What each lever came to, row by row:
+  #
+  # The baseline is the last two green runs on `main` before this work,
+  # 2026-10-29. Both ran format and clippy in this job ahead of the tests,
+  # 2m17 and 1m13 of it. Of the later run's 18m37 of `cargo test`, the build
+  # was 1m56 and the server's `suite` binary alone was 876 seconds: 1888 tests
+  # run four at a time, most of them waiting on paced clocks rather than on
+  # the CPU — 72 tests of ten seconds or more account for 26 of its 53
+  # test-minutes, 44 of those in `sessions`, the slowest of them the
+  # long-stop tests at a minute or more apiece. Every other binary together
+  # came to under four minutes.
   rust:
     name: Rust
     runs-on: ubuntu-24.04
@@ -38,8 +68,6 @@ jobs:
       # compile with the same rustc.
       - name: Install Rust 1.95.0
         uses: dtolnay/rust-toolchain@1.95.0
-        with:
-          components: clippy, rustfmt
 
       # Keyed on the root `Cargo.toml` as well as the action's own key, which
       # hashes the lockfile and the members' manifests but not the root, where
@@ -88,14 +116,6 @@ jobs:
             --proc /proc --dev /dev --tmpfs /tmp \
             /bin/sh -c 'echo "the sandbox surface holds"'
 
-      # Formatting and lints first: both are cheap and both fail on the kind of
-      # thing that is quicker to read than a test failure.
-      - name: Format
-        run: cargo fmt --all --check
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
       # The viewer is not built first. `web/dist` is gitignored and the embed
       # that reads it is `allow_missing`, so the crates compile without it —
       # what the viewer's own suite covers is the viewer job's business.
@@ -113,11 +133,49 @@ jobs:
           # there.
           VERKSTEAD_TEST_PACE: "2"
 
-      # `cargo test` writes `web/src/api/types.ts` through ts-rs — see
+  # The checks that read the code rather than run it: formatting, lints, and
+  # whether the committed TypeScript still matches the Rust it is generated
+  # from. A job of their own rather than steps in front of `Rust`'s tests, so
+  # that a lint failing reads as a lint failing and not as the suite, and so
+  # that neither waits on the other.
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # The same pin as every other job, for the same reason.
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: clippy, rustfmt
+
+      # A key of its own: clippy's artifacts are not the test build's, and a
+      # cache shared with `Rust` would have the two evicting each other. On the
+      # root `Cargo.toml`, as the `Rust` job's says why.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: lint-${{ hashFiles('Cargo.toml') }}
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # **The one crate whose tests write the viewer's types.** Every type on
+      # the wire is exported from `crates/render`, and ts-rs writes a type's
+      # dependencies with it, the schema's included — so this crate's tests
+      # write the whole of `web/src/api/types.ts`, in seconds. No other suite
+      # runs here: what they say is the `Rust` job's business.
+      - name: Write the generated TypeScript
+        run: cargo test -p verkstead-render
+
+      # The step above writes `web/src/api/types.ts` through ts-rs — see
       # `.cargo/config.toml`. So a working tree that is no longer clean after
-      # the run above means the committed wire types have drifted from the Rust
-      # ones they are generated from, and the viewer is compiling against a
-      # shape the server no longer sends.
+      # it means the committed wire types have drifted from the Rust ones they
+      # are generated from, and the viewer is compiling against a shape the
+      # server no longer sends.
       - name: Generated TypeScript is up to date
         run: |
           drift=$(git status --porcelain)
