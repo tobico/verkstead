@@ -739,6 +739,9 @@ pub const STAYS_BEHIND: &[&str] = &[
     // has made yet.
     "transferred",
     "transfers",
+    // And what this device last told a stage's home, which is this copy's
+    // bookkeeping: the far end owes home its own report, starting from none.
+    "stage_reports",
     // And which session a launch here carries on from, which is this device's own
     // reading of an arrival: it is written in the leg after the record lands, out
     // of what landed — see [`super::continuations`].
@@ -747,6 +750,10 @@ pub const STAYS_BEHIND: &[&str] = &[
     // device's arithmetic rather than anything about the work: the far end issues
     // its own ids and writes its own map as the record lands over there.
     "landed_sets",
+    // And when a stage that has landed here again joined its chain, which is an
+    // Event id of this device's: the far end's sequence is no order here, and
+    // keeps its own — see [`Held`].
+    "stage_joined_at",
     // The two tables a Verkstead of before kept a stopped Conversation in.
     // Nothing writes either any more and the stop itself crosses on the row —
     // see [`Marks`].
@@ -1090,6 +1097,8 @@ pub async fn land(
 ) -> Result<()> {
     let mut tx = super::writing(pool, "taking a Conversation's record in").await?;
 
+    let held = held(&mut tx, conversation_id).await?;
+
     super::cleanup::cleared(&mut tx, conversation_id).await?;
 
     let mut landing = Landing {
@@ -1114,6 +1123,7 @@ pub async fn land(
     }
 
     stand(&mut tx, conversation_id, &slice.marks, &landing.events).await?;
+    held.kept(&mut tx, conversation_id).await?;
 
     // And the Set half of the arithmetic written down, which is the one part of it
     // anything after this transaction has to know. A resumed agent asks after its
@@ -1129,6 +1139,84 @@ pub async fn land(
         .context("taking a Conversation's record in")?;
 
     Ok(())
+}
+
+/// What this device held of a stage's places before its record landed again:
+/// where it is in its roadmap's queue to join, and when it joined the chain.
+///
+/// **A return keeps both** (ADR-0029, *Home drives a roadmap across devices*).
+/// The landing issues the queue's places and the Timeline's ids afresh, and the
+/// queue and the chain are ordered by exactly those — so a stage that came home
+/// would otherwise have moved to the back of the one and the top of the other,
+/// overtaking stages that finished and joined after it. A stage that never
+/// queued here or never joined holds nothing to keep, and lands the way any
+/// record does.
+struct Held {
+    /// Its place in the queue to join.
+    place: Option<i64>,
+}
+
+/// Read [`Held`] before the record here is taken out, writing down when the
+/// stage joined where only the Event about to be renumbered says so.
+async fn held(tx: &mut sqlx::SqliteConnection, conversation_id: i64) -> Result<Held> {
+    let place: Option<(i64,)> =
+        sqlx::query_as("SELECT place FROM stage_joinings WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("reading Conversation {conversation_id}'s place in the queue to join")
+            })?;
+
+    // The Event `stage_chain` reads a join's order off, which is the first pull
+    // request in the Conversation's own Repo. Once only: a second landing finds
+    // the first's id kept and leaves it.
+    sqlx::query(
+        "INSERT OR IGNORE INTO stage_joined_at (conversation_id, event_id)
+         SELECT p.conversation_id, MIN(p.event_id)
+         FROM pull_requests p
+         JOIN conversations c ON c.id = p.conversation_id AND c.repo_id = p.repo_id
+         WHERE p.conversation_id = ?
+         GROUP BY p.conversation_id",
+    )
+    .bind(conversation_id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("keeping when Conversation {conversation_id} joined its chain"))?;
+
+    Ok(Held {
+        place: place.map(|(place,)| place),
+    })
+}
+
+impl Held {
+    /// Put the stage back in the queue at the place it held, whatever the
+    /// landing gave it — or did not, the copy that sent it never having
+    /// queued over there.
+    async fn kept(&self, tx: &mut sqlx::SqliteConnection, conversation_id: i64) -> Result<()> {
+        let Some(place) = self.place else {
+            return Ok(());
+        };
+
+        sqlx::query("DELETE FROM stage_joinings WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("taking the place Conversation {conversation_id} landed with")
+            })?;
+
+        sqlx::query("INSERT INTO stage_joinings (place, conversation_id) VALUES (?, ?)")
+            .bind(place)
+            .bind(conversation_id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("putting Conversation {conversation_id} back in its place to join")
+            })?;
+
+        Ok(())
+    }
 }
 
 /// What a landing renumbers against as it walks.

@@ -244,6 +244,14 @@ pub struct Pace {
     /// what ordinarily brings a look about is a place coming free, which this
     /// says nothing about and does not wait for.
     pub places: Duration,
+
+    /// And how often a stage away from home looks for a report its home has not
+    /// taken yet — see [`crate::reporting`].
+    ///
+    /// The backstop rather than the pace, as [`Pace::places`] is: a move is told
+    /// home the moment it is made, and home coming back is heard on its Nudge
+    /// stream. What this catches is a home that answered neither.
+    pub reports: Duration,
 }
 
 impl Default for Pace {
@@ -257,6 +265,7 @@ impl Default for Pace {
             long_stop: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
             places: crate::places::LOOKED_AT_EVERY,
+            reports: crate::reporting::LOOKED_AT_EVERY,
             joins: crate::joins::LOOKED_AT_EVERY,
             merges: crate::merges::SWEPT_EVERY,
             cleanup: crate::cleanup::SWEPT_EVERY,
@@ -725,12 +734,9 @@ async fn backlog_again(
     // And what it is let in *to* is read the moment it is let in, which is the
     // other half of the join: the chain is Verkstead's to say and the rebase is
     // the session's to do, so the branches this one goes on top of are carried
-    // in the prompt — see [`crate::joins::joining`].
+    // in the prompt — see [`crate::joins::let_in`].
     let joining = match step == Step::Finish {
-        true => {
-            crate::joins::hold(&state, conversation_id).await;
-            crate::joins::joining(&state, conversation_id).await
-        }
+        true => crate::joins::let_in(&state, conversation_id).await,
         false => Vec::new(),
     };
 
@@ -1167,12 +1173,9 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
         // Then the chain itself, read the moment the stage is let in and carried
         // in the finish session's prompt: the rebase onto the top of it comes
         // before anything is pushed, and it is the session's to run — see
-        // [`crate::joins::joining`].
+        // [`crate::joins::let_in`].
         let joining = match step == Step::Finish {
-            true => {
-                crate::joins::hold(&state, conversation_id).await;
-                crate::joins::joining(&state, conversation_id).await
-            }
+            true => crate::joins::let_in(&state, conversation_id).await,
             false => Vec::new(),
         };
 
@@ -3950,7 +3953,7 @@ enum Prompt {
     /// not: the finish is where a stage joins its roadmap's chain, and the
     /// rebase comes before the push. Empty on every task session, and on the
     /// finish of anything that is not a stage with a chain under it — see
-    /// [`crate::joins::joining`], which reads it, and [`skills::joining`], which
+    /// [`crate::joins::let_in`], which reads it, and [`skills::joining`], which
     /// is what it is said in.
     NextTask {
         /// Every branch this one is joining above, bottom to top.

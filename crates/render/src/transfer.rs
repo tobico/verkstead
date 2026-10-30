@@ -322,6 +322,128 @@ pub struct CameFrom {
     pub asked: MovedFor,
 }
 
+/// A stage away from home telling home where it stands (ADR-0029, *Home drives
+/// a roadmap across devices*).
+///
+/// **The whole standing rather than the move that changed it** — the four facts
+/// a roadmap reads of a stage — so home writes its tombstone the same way
+/// however many times it is told, and a report the far end could not be sure
+/// landed is simply sent again.
+///
+/// **Addressed by the Birth Key**, which is the one name home and the far end
+/// share for the work: home's own id for it, and this device's id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageReport {
+    /// The stage, by the key it was born under on home.
+    pub born: BirthKey,
+
+    /// The state its live copy is in.
+    pub state: crate::Lifecycle,
+
+    /// Whether it has ever moved to Done.
+    pub done: bool,
+
+    /// Whether it has ever moved to Wrapping.
+    pub wrapped: bool,
+
+    /// And whether it is stopped.
+    pub stopped: bool,
+
+    /// And the pull request it joined its roadmap's chain with, once its finish
+    /// has opened one: what puts it in home's chain.
+    #[serde(default)]
+    pub joined: Option<StageJoined>,
+}
+
+/// The pull request a stage away from home opened as it joined its roadmap's
+/// chain, and the branch it joined with as its record names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageJoined {
+    pub branch: String,
+    pub number: i64,
+    pub title: String,
+    pub url: String,
+    pub base: Option<String>,
+}
+
+/// A stage away from home at its finish, asking home whether it may join its
+/// roadmap's chain (ADR-0029, *Home drives a roadmap across devices*).
+///
+/// Asked of home because the chain and the queue are home's: the stage is
+/// queued there on its tombstone, the first time it asks, and every later ask
+/// keeps that place.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageJoining {
+    /// The stage, by the key it was born under on home.
+    pub born: BirthKey,
+}
+
+/// Home's answer: what the stage is still waiting on, and the chain it would
+/// join on top of.
+///
+/// Nothing in `ahead` is the stage let in, and `chain` and `foot` are then the
+/// chain to rebase onto — every link home holds, bottom to top, with which of
+/// them have merged left for the far device's git to read.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageJoin {
+    pub ahead: Vec<StageAhead>,
+    pub chain: Vec<ChainLink>,
+
+    /// The branch the stage was cut from, where that was another stage's or the
+    /// roadmap's own rather than the default branch.
+    pub foot: Option<String>,
+}
+
+/// One stage a stage at its finish is waiting on, by its label, and whether it
+/// has joined the chain already or is still to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageAhead {
+    pub stage: String,
+    pub joined: bool,
+}
+
+/// One link of a roadmap's chain as home reads it: its Conversation there, its
+/// label, and its branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChainLink {
+    pub conversation: i64,
+    pub stage: String,
+    pub branch: String,
+}
+
+/// Home asking a device where its copy of a stage went, when the stage is
+/// reported on by a device home's tombstone does not name (ADR-0029, *Home
+/// drives a roadmap across devices*).
+///
+/// A stage moved on from the device it was first moved to leaves home's
+/// tombstone naming that first device, which is the one the move away from home
+/// was made by. So home follows the marks: the device its tombstone names says
+/// where its own copy went, and so on, until they lead to the caller or run out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageWhereabouts {
+    /// The stage, by the key it was born under on home.
+    pub born: BirthKey,
+}
+
+/// The answer: the device the asked device's copy was handed on to and the id
+/// it goes by there, or `null` where that copy was handed on to nobody — or
+/// where the asked device holds no copy at all.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HandedOn {
+    pub device: String,
+    pub id: i64,
+}
+
+/// What home answers a report with: what it would have said on the stage's
+/// Timeline about carrying the roadmap on, for the copy to say on its own —
+/// nobody opens a tombstone.
+///
+/// Empty where the report settled nothing, which is most of them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageReported {
+    pub said: Vec<String>,
+}
+
 /// Who a move was made for: the human's press on *Transfer to…*, or the
 /// session's own `verkstead transfer` (ADR-0020, *The agent's call*).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

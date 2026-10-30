@@ -50,15 +50,29 @@
 //! reason [`crate::drivers`] is read that way: the hold is a task of this
 //! process, and a server that has just come back is holding nothing at all. The
 //! resume that takes the stage up again is what finds it held a second time.
+//!
+//! **A stage away from home asks home** (ADR-0029, *Home drives a roadmap across
+//! devices*). The chain, the queue and the standings are its home's — the device
+//! it was born on, which keeps a tombstone of it — and every one of them read
+//! here would be read off the wrong database. So the hold puts the question to
+//! home over the link instead — see [`asked`], home's half, and
+//! [`crate::peer::chains`] — and home queues the tombstone, answers what is
+//! ahead, and once nothing is, the chain to join on top of. Which branches have
+//! merged is still git's reading, made here as it always is. A home that does
+//! not answer is waited for, said on the Timeline, and never a refusal: the
+//! finish runs here, and only home can let it in.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use verkstead_render::{BirthKey, ChainLink, StageAhead, StageJoin, StageJoining};
 use verkstead_schema::Nudge;
 
 use crate::AppState;
+use crate::peer::chains::CHAINS;
+use crate::relaying::{self, Call, Streamed, as_json};
 use crate::skills;
 use crate::store;
 use crate::worktrees;
@@ -149,6 +163,30 @@ impl Drop for Waiting {
     }
 }
 
+/// Hold this Conversation's finish until it may join its roadmap's chain, and
+/// answer with the chain it joins — [`hold`] and then [`joining`], or, for a
+/// stage away from home, the same two asked of home — see [`held_away`].
+///
+/// What both of the places a finish session is launched from call, in front of
+/// the launch.
+pub(crate) async fn let_in(state: &AppState, conversation_id: i64) -> Vec<skills::Link> {
+    match store::away_from_home(&state.pool, conversation_id, &state.device).await {
+        Ok(Some(home)) => return held_away(state, conversation_id, &home).await,
+        Ok(None) => {}
+
+        // [`hold`]'s reasoning: a record that will not be read is not one saying
+        // the stage is away, and the reading here is the one there is.
+        Err(error) => tracing::error!(
+            error = ?error,
+            conversation_id,
+            "reading whether a stage is away from home failed",
+        ),
+    }
+
+    hold(state, conversation_id).await;
+    joining(state, conversation_id).await
+}
+
 /// Hold this Conversation's finish until every stage already in its roadmap's
 /// chain has settled, and say on the Timeline what it is waiting on.
 ///
@@ -157,7 +195,7 @@ impl Drop for Waiting {
 /// not a stage returns at once and is never marked as waiting: an ordinary
 /// feature's backlog joins no chain.
 ///
-/// Called with the run's own driver registration still held, which is what
+/// Called — through [`let_in`] — with the run's own driver registration still held, which is what
 /// keeps a held stage from reading as one standing still — see
 /// [`crate::drivers`]. A Conversation that has stopped while it waited returns
 /// too, the launch behind this advancing nothing past a stop.
@@ -166,7 +204,7 @@ impl Drop for Waiting {
 /// it releases and says so in the log: a run held for ever on a database that
 /// will not answer is a Conversation nothing could move, and everything else
 /// the run is about to do asks the same database.
-pub(crate) async fn hold(state: &AppState, conversation_id: i64) {
+async fn hold(state: &AppState, conversation_id: i64) {
     let Some(of) = stage(state, conversation_id).await else {
         return;
     };
@@ -229,6 +267,224 @@ pub(crate) async fn hold(state: &AppState, conversation_id: i64) {
     }
 }
 
+/// [`hold`] and [`joining`] for a stage away from home: the same wait and the
+/// same chain, asked of home over the link.
+///
+/// Home answers what is ahead of the stage in *its* chain and *its* queue — the
+/// tombstone being what is queued there, the first time this asks — and, once
+/// nothing is, the chain's links and foot. What is said while it waits is said
+/// exactly as [`hold`] says it, and a home that does not answer is a wait of its
+/// own, said once, and asked again at the same pace: the stage goes on the moment
+/// home answers. A home that answers and refuses is held for the same way, and
+/// said as what it is — see [`Heard`].
+async fn held_away(
+    state: &AppState,
+    conversation_id: i64,
+    home: &store::Birth,
+) -> Vec<skills::Link> {
+    let Some(of) = stage(state, conversation_id).await else {
+        return Vec::new();
+    };
+
+    let mut waiting: Option<Waiting> = None;
+
+    // What was last said, as [`hold`] keeps it — and home not answering, or
+    // refusing, are two more things it can have said.
+    let mut said: Option<Heard> = None;
+
+    loop {
+        let answered = ask_home(state, home).await;
+
+        if let Ok(join) = &answered {
+            if join.ahead.is_empty() {
+                let chain: Vec<store::Joined> = join
+                    .chain
+                    .iter()
+                    .map(|link| store::Joined {
+                        conversation_id: link.conversation,
+                        stage: link.stage.clone(),
+                        branch: link.branch.clone(),
+                    })
+                    .collect();
+
+                let named = chain
+                    .iter()
+                    .map(|link| link.branch.clone())
+                    .chain(join.foot.clone())
+                    .collect();
+
+                // Home's ids, so the stage's own link is home's tombstone.
+                return below(
+                    home.id,
+                    &chain,
+                    join.foot.as_deref(),
+                    &landed(state, &of, named).await,
+                );
+            }
+        }
+
+        if crate::stopping::stopped(state, conversation_id).await {
+            tracing::info!(
+                conversation_id,
+                "the run has stopped, so there is nothing left waiting to join",
+            );
+            return Vec::new();
+        }
+
+        if waiting.is_none() {
+            waiting = Some(state.joins.hold(conversation_id));
+        }
+
+        let now = match answered {
+            Ok(join) => Heard::Ahead(
+                join.ahead
+                    .into_iter()
+                    .map(|ahead| Ahead {
+                        stage: ahead.stage,
+                        joined: ahead.joined,
+                    })
+                    .collect(),
+            ),
+
+            Err(refusal) => {
+                tracing::info!(
+                    conversation_id,
+                    home = %home.device,
+                    answered = refusal.answered(),
+                    "a stage away from home could not ask home whether it may join, and will again: {}",
+                    refusal.saying,
+                );
+
+                match refusal.answered() {
+                    true => Heard::Refused(refusal.saying),
+                    false => Heard::Unanswered,
+                }
+            }
+        };
+
+        if said.as_ref() != Some(&now) {
+            match &now {
+                Heard::Ahead(ahead) => say(state, conversation_id, &of.roadmap, ahead).await,
+                Heard::Unanswered => {
+                    let named = relaying::called(state.devices.as_ref(), &home.device).await;
+                    unanswered(state, conversation_id, &of.roadmap, &named).await;
+                }
+                Heard::Refused(saying) => {
+                    let named = relaying::called(state.devices.as_ref(), &home.device).await;
+                    refused(state, conversation_id, &of.roadmap, &named, saying).await;
+                }
+            }
+
+            said = Some(now);
+        }
+
+        tokio::time::sleep(state.sessions.pace().joins).await;
+    }
+}
+
+/// What a stage away from home last heard from home about joining, which is what
+/// [`held_away`] says on the Timeline as it changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Heard {
+    /// Home answered, and these stages are ahead of it.
+    Ahead(Vec<Ahead>),
+
+    /// Home could not be reached, or is no longer a member.
+    Unanswered,
+
+    /// Home answered and refused, in the sentence [`relaying`] put it in — which
+    /// says the release gap where there is one, the likeliest reason a home
+    /// would not know the question.
+    Refused(String),
+}
+
+/// The most home's answer may be: a chain's worth of branch names.
+const MOST_AN_ANSWER_IS: usize = 256 * 1024;
+
+/// Put the question to home: may this stage join, and onto what.
+async fn ask_home(state: &AppState, home: &store::Birth) -> Result<StageJoin, relaying::Refusal> {
+    let asking = StageJoining {
+        born: BirthKey {
+            device: home.device.clone(),
+            id: home.id,
+        },
+    };
+
+    relaying::word_from::<StageJoin>(
+        state.devices.as_ref(),
+        &home.device,
+        Call {
+            method: reqwest::Method::POST,
+            onwards: CHAINS.to_owned(),
+            headers: as_json(),
+            body: Streamed::saying(serde_json::to_vec(&asking).unwrap_or_default()),
+        },
+        MOST_AN_ANSWER_IS,
+    )
+    .await
+}
+
+/// Home's half of [`held_away`]: queue the tombstone, and answer what is ahead
+/// of it and the chain it would join.
+///
+/// The tombstone takes the place a stage at home takes as its tasks finish, and
+/// keeps it — so a stage away from home is ordered against the stages finishing
+/// here by when it first asked. Whatever place the record carried across to the
+/// far device is that device's, and nothing there reads it.
+///
+/// The readings are [`hold`]'s and [`joining`]'s own, made of the tombstone, and
+/// fail the same way: a record that will not be read answers nothing ahead.
+pub(crate) async fn asked(state: &AppState, tombstone: i64) -> StageJoin {
+    let Some(of) = stage(state, tombstone).await else {
+        return StageJoin::default();
+    };
+
+    if let Err(error) = store::queue_to_join(&state.pool, tombstone).await {
+        tracing::error!(
+            error = ?error,
+            tombstone,
+            "taking a stage away from home its place in the queue to join failed",
+        );
+    }
+
+    let ahead = ahead_of(state, &of, tombstone).await;
+
+    let chain = match store::stage_chain(&state.pool, of.repo_id, &of.roadmap).await {
+        Ok(chain) => chain,
+        Err(error) => {
+            tracing::error!(error = ?error, tombstone, "reading the chain a stage away from home is joining failed");
+            Vec::new()
+        }
+    };
+
+    let foot = match store::stacks_on(&state.pool, tombstone).await {
+        Ok(stands_on) => stands_on.flatten(),
+        Err(error) => {
+            tracing::error!(error = ?error, tombstone, "reading what a stage away from home was cut from failed");
+            None
+        }
+    };
+
+    StageJoin {
+        ahead: ahead
+            .into_iter()
+            .map(|ahead| StageAhead {
+                stage: ahead.stage,
+                joined: ahead.joined,
+            })
+            .collect(),
+        chain: chain
+            .into_iter()
+            .map(|link| ChainLink {
+                conversation: link.conversation_id,
+                stage: link.stage,
+                branch: link.branch,
+            })
+            .collect(),
+        foot,
+    }
+}
+
 /// What the finish session is told the chain is: every branch this stage's own
 /// goes on top of, bottom to top, with the branch it joins above last.
 ///
@@ -266,7 +522,7 @@ pub(crate) async fn hold(state: &AppState, conversation_id: i64) {
 /// chain — and it costs the rebase rather than the finish, which is the safe way
 /// round: the branch is where it was cut from, and that is where it was going to
 /// be rebased to.
-pub(crate) async fn joining(state: &AppState, conversation_id: i64) -> Vec<skills::Link> {
+async fn joining(state: &AppState, conversation_id: i64) -> Vec<skills::Link> {
     let Some(of) = stage(state, conversation_id).await else {
         return Vec::new();
     };
@@ -653,7 +909,12 @@ async fn say(state: &AppState, conversation_id: i64, roadmap: &str, ahead: &[Ahe
         which = listed(&ahead.iter().map(why).collect::<Vec<_>>()),
     );
 
-    match store::note(&state.pool, conversation_id, &markdown).await {
+    noted(state, conversation_id, &markdown).await;
+}
+
+/// Put a wait to join on the Timeline.
+async fn noted(state: &AppState, conversation_id: i64, markdown: &str) {
+    match store::note(&state.pool, conversation_id, markdown).await {
         Ok(true) => state.nudges.announce(Nudge::Conversation {
             conversation: conversation_id,
         }),
@@ -665,6 +926,35 @@ async fn say(state: &AppState, conversation_id: i64, roadmap: &str, ahead: &[Ahe
             tracing::error!(error = ?error, conversation_id, "saying that a stage was waiting to join failed")
         }
     }
+}
+
+/// Say on the Timeline that a stage away from home is waiting to join on a home
+/// that is not answering.
+///
+/// The same label as every other wait to join, and the same nothing for the
+/// human to do: home is asked again until it answers.
+async fn unanswered(state: &AppState, conversation_id: i64, roadmap: &str, home: &str) {
+    let markdown = format!(
+        "**Waiting to join.** Every task is done, and the finish is held until **{home}** \
+         answers: it keeps the `{roadmap}` roadmap, and says when this stage joins.",
+    );
+
+    noted(state, conversation_id, &markdown).await;
+}
+
+/// Say on the Timeline that a stage away from home is waiting to join on a home
+/// that answered and refused, and what it said.
+///
+/// Still a wait rather than a refusal of the finish: the finish runs here, only
+/// home can let it in, and home is asked again until it does. What changes is
+/// that nobody is told home is not answering when it is.
+async fn refused(state: &AppState, conversation_id: i64, roadmap: &str, home: &str, saying: &str) {
+    let markdown = format!(
+        "**Waiting to join.** Every task is done, and the finish is held until **{home}** \
+         lets this stage join: it keeps the `{roadmap}` roadmap. {saying}",
+    );
+
+    noted(state, conversation_id, &markdown).await;
 }
 
 /// One stage being waited on, and what it is being waited on for.

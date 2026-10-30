@@ -1140,6 +1140,9 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // firing under a test about anything else would put a Conversation on the
     // sidebar it never asked for. The ones that are about it keep [`LOOKING`].
     places: paced(Duration::from_secs(600)),
+    // No stage here is ever away from home, so the look for a report owed finds
+    // nothing whenever it fires; a server's own pace is as good as any.
+    reports: Pace::default().reports,
     // And longer than any of these run for again, for the stall sweep's reason
     // one sweep along: every fixture that reaches Done has a pull request
     // nothing has merged, which is exactly what the sweep after Done goes and
@@ -24974,6 +24977,117 @@ async fn a_settled_stage_the_roadmap_says_nothing_about_is_still_done() {
     assert!(
         index.contains("- [ ] 01: Count the requests — [brief](01-counter.md)\n"),
         "stage 01's line is exactly as the roadmap was written: {index:?}",
+    );
+}
+
+/// **A stage away from home starts nothing where it settles** (ADR-0029, *Home
+/// drives a roadmap across devices*): the adopted stage here is made a copy of
+/// one born on another device, and it settles with stage 02 ready behind it.
+/// Home is what starts stage 02, on hearing the settle in the stage's report, so
+/// neither the settle nor a look for a free place starts it here — and nothing is
+/// said here about the roadmap either.
+#[tokio::test]
+async fn a_stage_away_from_home_settles_and_starts_nothing_here() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_at_pace(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
+        &gh_about(GREEN, "", ""),
+        *LOOKING,
+    )
+    .await;
+
+    // Past its join first: a stage away from home asks home whether it may join,
+    // and the home named below is nowhere, so it would wait on it for ever.
+    fixture
+        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .await;
+
+    // Born on another device, and moved here: a copy away from its home.
+    let pool = open_database(&fixture.database).await.unwrap();
+    verkstead_store::record_birth(
+        &pool,
+        fixture.id,
+        &verkstead_store::Birth {
+            device: "ff00ee11dd22cc33bb44aa5566778899".to_owned(),
+            id: 7,
+        },
+    )
+    .await
+    .unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    // The settle that follows Done, and a good many looks after it.
+    pause(Duration::from_secs(2)).await;
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "nothing was started here: stage 02 is home's to start",
+    );
+
+    let said = notices(&fixture.view().await).join("\n");
+
+    assert!(
+        !said.contains("Stage 02") && !said.contains("No stage of the roadmap"),
+        "and nothing is said here about the roadmap: {said:?}",
+    );
+}
+
+/// **A stage that came home drives its roadmap here again** (ADR-0029, *Home
+/// drives a roadmap across devices*): the adopted stage here was moved to
+/// another device and back — its tombstone's mark written and taken off again,
+/// as a return does — and it settles with stage 02 ready behind it. It is a
+/// stage at home rather than a copy away from it, so its settle starts stage 02
+/// here, and nothing is owed to any home about it.
+#[tokio::test]
+async fn a_stage_that_came_home_settles_and_starts_the_next_here() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Away and home again: the mark a move leaves on the copy it left, and the
+    // return taking it off. Its birth key never named anywhere but here.
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    verkstead_store::transfer_away(
+        &pool,
+        fixture.id,
+        &verkstead_store::Transferred {
+            device: "ff00ee11dd22cc33bb44aa5566778899".to_owned(),
+            id: 7,
+        },
+    )
+    .await
+    .unwrap();
+    verkstead_store::live_here(&pool, fixture.id).await.unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let next = stage_of(&fixture).await;
+
+    assert_eq!(
+        next.branch, "roadmaps/rate-limiting/02-refusing",
+        "the settle here starts the stage that stood on it",
+    );
+
+    assert_eq!(
+        verkstead_store::told(&pool, fixture.id).await.unwrap(),
+        None,
+        "and nothing was reported anywhere: this is its home",
     );
 }
 

@@ -432,11 +432,15 @@ ranks and one birth key. Both ride out on the sidebar row, and both are opaque t
 everything that reads them.
 **And beside it, the mark saying a copy is not the live one**: the device holding
 the record and the id it goes by there, written on the copy the work has left. A
-Conversation wearing it is a **tombstone** — nothing writes to it, the Merged List
-does not draw it, and its own URL leads to wherever the work is now, whether or
-not the device holding it is answering. It is kept rather than deleted so that
-every link anybody kept still leads to the work and so that a transfer back has a
-row to replace under the id it already had. A forwarding stub with no record
+Conversation wearing it is a **tombstone** — the Merged List does not draw it,
+and its own URL leads to wherever the work is now, whether or not the device
+holding it is answering. Nothing works on it; a **Stage**'s tombstone follows its
+live copy's standing, which that copy reports to its home — the device the stage
+was born on — so the roadmap is read there as it always was (ADR-0029, *Home
+drives a roadmap across devices*), and a Stage that comes home keeps the places
+in its roadmap's queue and chain the tombstone held. It is kept rather than
+deleted so that every link anybody kept still leads to the work and so that a
+transfer back has a row to replace under the id it already had. A forwarding stub with no record
 behind it was the recommendation; keeping the copy was the human's call.
 _Avoid_: global id, UUID, canonical id, origin, the stub
 
@@ -625,7 +629,19 @@ waits for that word, and a launch that has been decided but has not reached the
 register yet is waited for too. The account is written back before the slice and the bundle
 leave, or the far end would launch under a login the source had not finished
 returning.
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): Verkstead itself moves work that declares a platform, before launching the task, the inline run or the Stage that wants it, to the first reachable ticked device of that operating system; and a Stage moved away reports its lifecycle to its home device, whose tombstone follows it.
+**A Stage moved away is still driven from home** (ADR-0029, *Home drives a
+roadmap across devices*) — the device it was born on, which holds its roadmap.
+The live copy reports every lifecycle move to home, which writes it onto the
+tombstone, so the roadmap's standings, places and chain are read there as they
+always were; the far device starts nothing of a roadmap that is not its own; and
+a finish over there asks home whether it may join and onto which branch,
+waiting — said on the Timeline — while home is not answering. The work stays
+where it is: the finish and the wrap-up run on the far device. A Stage that
+comes home lands on its tombstone like any return and keeps the places home
+held for it, first in the queue to join and in the chain where it joined, so
+the round trip moves nothing; from there it reports to nobody, and its settle
+starts what stood on it right there.
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): Verkstead itself moves work that declares a platform, before launching the task, the inline run or the Stage that wants it, to the first reachable ticked device of that operating system.
 _Avoid_: migrate, hand off, sync, failover
 
 **Permitted Device**:

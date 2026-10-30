@@ -68,6 +68,7 @@ pub mod ranks;
 /// the newest write winning and a removal final (ADR-0028). Public as a module
 /// because a kind is declared by whoever owns it — see [`replicated::Kind`].
 pub mod replicated;
+mod reports;
 mod repos;
 mod session_endings;
 mod session_names;
@@ -184,6 +185,10 @@ pub use pull_requests::{
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
     store_subscription, vapid_keys,
+};
+pub use reports::{
+    Followed, JoinedAway, LiveStanding, away_from_home, follow, live_standing,
+    stages_away_from_home, tell, told,
 };
 pub use repos::{
     ConflictResolution, Repo, Repointing, Unregistering, load_repo, recorded_repos, register_repo,
@@ -868,6 +873,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // And the move somebody has pressed for and nothing has made yet, which
     // hangs off a Conversation the same way — see [`transfers`].
     transfers::apply_schema(pool).await?;
+
+    // And what a stage away from home last told its home, which hangs off the
+    // Conversation beside those two — see [`reports`].
+    reports::apply_schema(pool).await?;
 
     // And what each Repo was last grilled with, so a Conversation started on
     // it arrives with every picker filled. After the Conversations only for

@@ -6548,3 +6548,790 @@ async fn transcripts(pool: &SqlitePool) -> Vec<String> {
 
     rows.into_iter().map(|(line,)| line).collect()
 }
+
+/// **A stage away from home reports to it** (ADR-0029, *Home drives a roadmap
+/// across devices*): the stage `rate-limiting` 01, born on A and worked on B,
+/// with A holding its tombstone and the roadmap.
+///
+/// Set down in both stores by hand rather than moved by a press, because what is
+/// under test is what happens *after* a move — the move itself is everything
+/// above this. A holds a branch with the roadmap on it, so a settle reported
+/// there has a stage 02 to start.
+struct Away {
+    a: Verkstead,
+    b: Verkstead,
+
+    /// A's tombstone of the stage.
+    tombstone: i64,
+
+    /// And B's live copy of it.
+    copy: i64,
+}
+
+/// The roadmap A's stage is a stage of: two stages, the second standing on the
+/// first by the roadmap's own order.
+const AWAY_ROADMAP: &str = "# Rate limiting roadmap\n\n## Stages\n\n- [ ] 01: Count the requests — [brief](01-counter.md)\n- [ ] 02: Refuse the rest — [brief](02-refusing.md)\n";
+
+/// The pace a stage away from home looks again at, briskly: a home that did not
+/// answer is tried again within the test rather than a minute later.
+fn reporting() -> Pace {
+    Pace {
+        reports: Duration::from_millis(200),
+        ..Pace::default()
+    }
+}
+
+/// Stand [`Away`] up, with the tombstone's live record named as being on
+/// `live_on` — B, unless a test is about a device that does not hold the work.
+async fn away(spill: &Path, live_on: &str) -> Away {
+    let a = Verkstead::running_at(A, "exit 0", spill, reporting()).await;
+    let b = Verkstead::running_at(B, "exit 0", spill, reporting()).await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let branch = "roadmaps/rate-limiting/01-counter";
+
+    // A's repository, with the stage's branch carrying the roadmap and a worktree
+    // checked out on it: where the tombstone was being worked before it moved.
+    let theirs = a.repo().await;
+    git(&theirs, &["checkout", "-b", branch]);
+    let roadmap = theirs.join("docs/roadmaps/rate-limiting");
+    std::fs::create_dir_all(&roadmap).unwrap();
+    std::fs::write(roadmap.join("ROADMAP.md"), AWAY_ROADMAP).unwrap();
+    std::fs::write(roadmap.join("01-counter.md"), "# 01. Count the requests\n").unwrap();
+    std::fs::write(roadmap.join("02-refusing.md"), "# 02. Refuse the rest\n").unwrap();
+    git(&theirs, &["add", "-A"]);
+    git(&theirs, &["commit", "-m", "plan the rate-limiting roadmap"]);
+    git(&theirs, &["checkout", "main"]);
+
+    let worktree = a.elsewhere.path().join("01-counter");
+    git(
+        &theirs,
+        &["worktree", "add", worktree.to_str().unwrap(), branch],
+    );
+
+    // The account its work ran under at home, which is what the stage after it
+    // inherits and runs under.
+    let account = a.account().await;
+    let tombstone = staged(&a, REPOSITORY, branch, &worktree, Some(&account)).await;
+
+    let ours = b.repo().await;
+    let copy = staged(&b, REPOSITORY, branch, &ours, None).await;
+
+    store::record_birth(
+        &b.pool,
+        copy,
+        &store::Birth {
+            device: A.to_owned(),
+            id: tombstone,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::transfer_away(
+        &a.pool,
+        tombstone,
+        &store::Transferred {
+            device: live_on.to_owned(),
+            id: copy,
+        },
+    )
+    .await
+    .unwrap();
+
+    Away {
+        a,
+        b,
+        tombstone,
+        copy,
+    }
+}
+
+/// Stage 01 of `rate-limiting` on `branch`, recorded on `on` and run under
+/// `under` where it says one — a Pairing being chosen while drafting or never.
+async fn staged(
+    on: &Verkstead,
+    repo: &str,
+    branch: &str,
+    worktree: &Path,
+    under: Option<&str>,
+) -> i64 {
+    staged_as(on, repo, branch, worktree, under, "01", None).await
+}
+
+/// [`staged`], as stage `label` and standing on `stacks_on` where it says one.
+async fn staged_as(
+    on: &Verkstead,
+    repo: &str,
+    branch: &str,
+    worktree: &Path,
+    under: Option<&str>,
+    label: &str,
+    stacks_on: Option<&str>,
+) -> i64 {
+    let repo_id = on.repo_row(repo).await;
+
+    let id = store::start_conversation(&on.pool, repo_id, branch, on.device.id(), None)
+        .await
+        .unwrap()
+        .unwrap();
+
+    if let Some(profile) = under {
+        assert_eq!(
+            store::set_implementation_pairing(&on.pool, id, profile, None)
+                .await
+                .unwrap(),
+            store::Chosen::Chosen,
+        );
+    }
+
+    store::start_stage(
+        &on.pool,
+        id,
+        "c0ffee",
+        worktree,
+        stacks_on,
+        store::RoadmapStage {
+            roadmap: "rate-limiting",
+            label,
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    id
+}
+
+impl Away {
+    /// Move B's copy on to `state`, as a move there does: the row, the line on
+    /// its Timeline, and the Nudge.
+    async fn moves(&self, state: store::Lifecycle) {
+        store::set_state(&self.b.pool, self.copy, state)
+            .await
+            .unwrap();
+
+        self.b
+            .nudges
+            .announce(verkstead_schema::Nudge::Conversation {
+                conversation: self.copy,
+            });
+    }
+
+    /// What A's standings say of stage 01.
+    async fn at_home(&self) -> Option<store::StageStanding> {
+        let repo_id = self.a.repo_row(REPOSITORY).await;
+
+        store::stage_standings(&self.a.pool, repo_id)
+            .await
+            .unwrap()
+            .of("rate-limiting", "01")
+    }
+
+    /// Wait for A's standings to say `standing` of stage 01.
+    async fn home_reads(&self, standing: store::StageStanding) {
+        let deadline = Instant::now() + WAITING;
+
+        while self.at_home().await != Some(standing) {
+            assert!(
+                Instant::now() < deadline,
+                "home never read stage 01 as {standing:?}: it reads {:?}",
+                self.at_home().await,
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
+    /// And check A's standings go on saying `standing` for a few of B's looks.
+    async fn home_still_reads(&self, standing: store::StageStanding) {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+
+        assert_eq!(self.at_home().await, Some(standing));
+    }
+}
+
+/// **A stage closed on the far device reads abandoned at home**: B's copy closes
+/// before it ever wrapped up, B tells A, and A's standings — which read the
+/// tombstone — say so.
+#[tokio::test]
+async fn a_stage_closed_on_the_far_device_reads_abandoned_at_home() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), B).await;
+
+    assert_eq!(away.at_home().await, Some(store::StageStanding::InFlight));
+
+    away.moves(store::Lifecycle::Closed).await;
+
+    away.home_reads(store::StageStanding::Abandoned).await;
+}
+
+/// **A stage that settles on the far device starts, at home, the stage that
+/// stood on it** — and the far copy's Timeline says what home started, nobody
+/// opening the tombstone it would otherwise have been said on.
+#[tokio::test]
+async fn a_stage_that_settles_away_starts_the_next_at_home_and_says_so_where_it_settled() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), B).await;
+
+    away.moves(store::Lifecycle::Done).await;
+
+    away.home_reads(store::StageStanding::Settled).await;
+
+    let started = away
+        .b
+        .notice_saying(away.copy, "has started as a conversation of its own")
+        .await;
+
+    assert!(
+        started.contains("Stage 02"),
+        "the far copy says home started stage 02: {started}",
+    );
+
+    let deadline = Instant::now() + WAITING;
+
+    loop {
+        let rows = away.a.own_rows().await;
+
+        if rows
+            .iter()
+            .any(|row| row.branch == "roadmaps/rate-limiting/02-refusing")
+        {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "home never started stage 02: {:?}",
+            rows.iter().map(|row| &row.branch).collect::<Vec<_>>(),
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    }
+
+    assert!(
+        !away
+            .a
+            .notices(away.tombstone)
+            .await
+            .iter()
+            .any(|notice| notice.contains("has started as a conversation of its own")),
+        "and the tombstone, which nobody opens, is not where it was said",
+    );
+}
+
+/// **A move made while home is asleep reaches home's tombstone once home
+/// answers**: B's copy closes with A unreachable, and nothing is lost — the
+/// report is still owed, and goes the next time B looks after A is back.
+#[tokio::test]
+async fn a_move_made_while_home_is_asleep_reaches_it_once_home_answers() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), B).await;
+
+    // A, as B knows it, answering nowhere: the lid shut.
+    let (machine, os) = this_machine();
+    away.b
+        .linked_to(
+            &away.a.device,
+            &machine,
+            &os,
+            vec!["127.0.0.1:9".to_owned()],
+        )
+        .await;
+
+    away.moves(store::Lifecycle::Closed).await;
+
+    away.home_still_reads(store::StageStanding::InFlight).await;
+
+    // And A answering again.
+    away.b
+        .linked_to(&away.a.device, &machine, &os, vec![away.a.at()])
+        .await;
+
+    away.home_reads(store::StageStanding::Abandoned).await;
+}
+
+/// **A report from a device that does not hold the live record is refused**: A's
+/// tombstone says the work is on C, so what B says of it is not written.
+#[tokio::test]
+async fn a_report_from_a_device_not_holding_the_work_is_refused() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), C).await;
+
+    away.moves(store::Lifecycle::Closed).await;
+
+    away.home_still_reads(store::StageStanding::InFlight).await;
+
+    assert_eq!(
+        store::told(&away.b.pool, away.copy).await.unwrap(),
+        None,
+        "and B holds the report as still owed, home having taken nothing",
+    );
+}
+
+/// **A stage moved on from the device it was first moved to still reports
+/// home**: A's tombstone names C, which handed its copy on to B. A asks C where
+/// the work went, follows it to B, takes B's report, and points its tombstone at
+/// B from then on.
+#[tokio::test]
+async fn a_stage_moved_on_a_second_time_still_reports_home() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), C).await;
+
+    // C: the device the stage was first moved to, holding a tombstone of its own
+    // that says the work went on to B.
+    let c = Verkstead::running_at(C, "exit 0", spill.path(), reporting()).await;
+
+    away.a
+        .linked_to(&c.device, "the-desktop", "Linux", vec![c.at()])
+        .await;
+
+    let (machine, os) = this_machine();
+    c.linked_to(&away.a.device, &machine, &os, vec![away.a.at()])
+        .await;
+
+    let ours = c.repo().await;
+    let passed_on = staged(
+        &c,
+        REPOSITORY,
+        "roadmaps/rate-limiting/01-counter",
+        &ours,
+        None,
+    )
+    .await;
+
+    store::record_birth(
+        &c.pool,
+        passed_on,
+        &store::Birth {
+            device: A.to_owned(),
+            id: away.tombstone,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::transfer_away(
+        &c.pool,
+        passed_on,
+        &store::Transferred {
+            device: B.to_owned(),
+            id: away.copy,
+        },
+    )
+    .await
+    .unwrap();
+
+    away.moves(store::Lifecycle::Closed).await;
+
+    away.home_reads(store::StageStanding::Abandoned).await;
+
+    assert_eq!(
+        store::transferred(&away.a.pool, away.tombstone)
+            .await
+            .unwrap()
+            .map(|mark| (mark.device, mark.id)),
+        Some((B.to_owned(), away.copy)),
+        "and home's tombstone names where the work is now",
+    );
+}
+
+/// The pace a stage away from home asks home at, briskly: a wait to join is
+/// looked at again within the test rather than ten seconds later.
+fn joining() -> Pace {
+    Pace {
+        joins: Duration::from_millis(200),
+        ..reporting()
+    }
+}
+
+/// What stands where claude goes on **B** for a stage at its finish: the finish
+/// session's prompt written to `told`, which is what says what it was told about
+/// the chain.
+fn finishes_telling(told: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-task/SKILL.md*)
+    printf '%s\n' "$2" > '{told}'
+    printf 'finishing the stage\r\n'
+    ;;
+esac
+sleep 300
+"#,
+        told = told.display(),
+    )
+}
+
+/// [`Away`] at its finish: B's copy holds a backlog with every box ticked, on a
+/// branch cut from the roadmap's own, and a Resume on B is what reaches the
+/// finish. Home's tombstone says it stands on the roadmap's branch; B's copy
+/// says nothing of what it stands on, so a chain the finish is told that names
+/// that branch can only have come from home.
+async fn finishing_away(spill: &Path, told: &Path) -> Away {
+    let a = Verkstead::running_at(A, "exit 0", spill, joining()).await;
+    let b = Verkstead::running_at(B, &finishes_telling(told), spill, joining()).await;
+
+    // Each device's account saved before the two are linked: once they are, each
+    // mirrors the other's Profiles, and the second to save its own under the same
+    // name would find the name taken.
+    let at_home = a.account().await;
+    let here = b.account().await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let branch = "roadmaps/rate-limiting/01-counter";
+
+    // A's repository registered, which is all home needs of it: the work is not
+    // there.
+    a.repo().await;
+    let tombstone = staged_as(
+        &a,
+        REPOSITORY,
+        branch,
+        &a.elsewhere.path().join("01-counter"),
+        Some(&at_home),
+        "01",
+        Some("rate-limiting"),
+    )
+    .await;
+
+    // B's repository: the roadmap's branch, which nothing has merged, and the
+    // stage's cut from it with its backlog worked through.
+    let ours = b.repo().await;
+    git(&ours, &["checkout", "-b", "rate-limiting"]);
+    let roadmap = ours.join("docs/roadmaps/rate-limiting");
+    std::fs::create_dir_all(&roadmap).unwrap();
+    std::fs::write(roadmap.join("ROADMAP.md"), AWAY_ROADMAP).unwrap();
+    git(&ours, &["add", "-A"]);
+    git(&ours, &["commit", "-m", "plan the rate-limiting roadmap"]);
+    git(&ours, &["checkout", "-b", branch]);
+    std::fs::create_dir_all(ours.join(".tasks")).unwrap();
+    std::fs::write(
+        ours.join(".tasks/TODO.md"),
+        "# Count the requests\n\n## Tasks\n\n- [x] 01: count them — [details](01-count.md)\n",
+    )
+    .unwrap();
+    std::fs::write(ours.join(".tasks/01-count.md"), "# 01. count them\n").unwrap();
+    git(&ours, &["add", "-A"]);
+    git(&ours, &["commit", "-m", "feat: count the requests"]);
+    git(&ours, &["checkout", "main"]);
+
+    let worktree = b.elsewhere.path().join("01-counter");
+    git(
+        &ours,
+        &["worktree", "add", worktree.to_str().unwrap(), branch],
+    );
+
+    let copy = staged(&b, REPOSITORY, branch, &worktree, Some(&here)).await;
+
+    store::record_birth(
+        &b.pool,
+        copy,
+        &store::Birth {
+            device: A.to_owned(),
+            id: tombstone,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::transfer_away(
+        &a.pool,
+        tombstone,
+        &store::Transferred {
+            device: B.to_owned(),
+            id: copy,
+        },
+    )
+    .await
+    .unwrap();
+
+    Away {
+        a,
+        b,
+        tombstone,
+        copy,
+    }
+}
+
+impl Away {
+    /// Take B's copy up, which finds every box ticked: the next step is its
+    /// finish, and the join in front of it.
+    async fn finishes(&self) {
+        let resumed = press(
+            &self.b.workbench,
+            &format!("/api/ui/conversations/{}/resume", self.copy),
+            None,
+        )
+        .await;
+
+        assert_eq!(resumed, "\"Resumed\"", "the copy is taken up");
+    }
+
+    /// The Conversations in home's queue to join, in order.
+    async fn queued_at_home(&self) -> Vec<i64> {
+        let repo_id = self.a.repo_row(REPOSITORY).await;
+
+        store::join_queue(&self.a.pool, repo_id, "rate-limiting")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|queued| queued.conversation_id)
+            .collect()
+    }
+}
+
+/// What B's finish session was told, once it has been launched.
+async fn told_at_the_finish(told: &Path) -> String {
+    let deadline = Instant::now() + WAITING;
+
+    loop {
+        if let Ok(said) = std::fs::read_to_string(told) {
+            return said;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "B's finish session was never launched",
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    }
+}
+
+/// **A stage that joins on the far device opens its pull request against the
+/// branch home named**: B asks A, A queues its tombstone and answers the chain,
+/// and B's finish session is told to rebase onto it and open against it.
+#[tokio::test]
+async fn a_stage_that_joins_away_opens_its_pull_request_against_the_branch_home_named() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    away.finishes().await;
+
+    let prompt = told_at_the_finish(&told).await;
+    let chain = prompt
+        .split_once("# The chain this stage joins")
+        .unwrap_or_else(|| panic!("the finish was told no chain: {prompt}"))
+        .1;
+
+    assert!(
+        chain.contains("open the pull request against `rate-limiting`"),
+        "the pull request opens against the branch home named: {chain}",
+    );
+
+    assert_eq!(
+        away.queued_at_home().await,
+        [away.tombstone],
+        "and home queued its tombstone when the far stage asked",
+    );
+}
+
+/// **With home asleep, the far finish is held** and the Timeline says it is
+/// waiting on home; it goes on when home answers.
+#[tokio::test]
+async fn a_finish_away_waits_on_a_home_that_is_asleep_and_goes_on_when_it_answers() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    // A, as B knows it, answering nowhere: the lid shut.
+    let (machine, os) = this_machine();
+    away.b
+        .linked_to(
+            &away.a.device,
+            &machine,
+            &os,
+            vec!["127.0.0.1:9".to_owned()],
+        )
+        .await;
+
+    away.finishes().await;
+
+    let said = away.b.notice_saying(away.copy, "Waiting to join").await;
+
+    assert!(
+        said.contains(&format!("held until <strong>{machine}</strong> answers")),
+        "the Timeline says it is waiting on home: {said}",
+    );
+    assert!(
+        away.b.view(away.copy).await.waiting_to_join,
+        "under the same label as every wait to join",
+    );
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        !told.exists(),
+        "and no finish session was launched while home was asleep",
+    );
+
+    // And A answering again.
+    away.b
+        .linked_to(&away.a.device, &machine, &os, vec![away.a.at()])
+        .await;
+
+    told_at_the_finish(&told).await;
+}
+
+/// **A home that answers and refuses is said as what it is**: A's tombstone
+/// names a device that is not B, so A refuses B's ask to join, and B's Timeline
+/// says A refused rather than that A is not answering. The finish is held all
+/// the same, and goes on once A lets it in.
+#[tokio::test]
+async fn a_finish_away_refused_by_home_says_home_refused_and_goes_on_when_let_in() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    // A's tombstone pointing at a machine nobody can reach, so the trail from it
+    // never leads to B.
+    let pointing_at = |device: &str| store::Transferred {
+        device: device.to_owned(),
+        id: away.copy,
+    };
+    store::transfer_away(&away.a.pool, away.tombstone, &pointing_at(C))
+        .await
+        .unwrap();
+
+    away.finishes().await;
+
+    let said = away.b.notice_saying(away.copy, "Waiting to join").await;
+    let (machine, _) = this_machine();
+
+    assert!(
+        said.contains(&format!(
+            "held until <strong>{machine}</strong> lets this stage join"
+        )),
+        "the Timeline says home is holding it: {said}",
+    );
+    assert!(
+        said.contains("refused it: 409 Conflict"),
+        "and what home said: {said}",
+    );
+    assert!(
+        !said.contains("answers:"),
+        "rather than that home is not answering: {said}",
+    );
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(!told.exists(), "and the finish is held while home refuses");
+
+    store::transfer_away(&away.a.pool, away.tombstone, &pointing_at(B))
+        .await
+        .unwrap();
+
+    told_at_the_finish(&told).await;
+}
+
+/// **Home's queue orders the far stage by when it asked to join**, against the
+/// stages finishing at home: a home stage queued first goes first, and the far
+/// stage waits on it — said on the far Timeline — until it settles.
+#[tokio::test]
+async fn home_queues_the_far_stage_behind_a_home_stage_whose_tasks_finished_first() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    let first = staged_as(
+        &away.a,
+        REPOSITORY,
+        "roadmaps/rate-limiting/02-refusing",
+        &away.a.elsewhere.path().join("02-refusing"),
+        None,
+        "02",
+        None,
+    )
+    .await;
+    store::queue_to_join(&away.a.pool, first).await.unwrap();
+
+    away.finishes().await;
+
+    let said = away.b.notice_saying(away.copy, "Waiting to join").await;
+
+    assert!(
+        said.contains("stage 02 finished its tasks before this one and hasn't joined yet"),
+        "the far Timeline says which home stage is in front of it: {said}",
+    );
+    assert_eq!(
+        away.queued_at_home().await,
+        [first, away.tombstone],
+        "and home queued the far stage behind it",
+    );
+    assert!(!told.exists(), "the turn is not the far stage's yet");
+
+    store::set_state(&away.a.pool, first, store::Lifecycle::Done)
+        .await
+        .unwrap();
+
+    told_at_the_finish(&told).await;
+}
+
+/// **The next stage to join at home joins on top of the far stage's branch**:
+/// the pull request the far finish opened is reported home, and home's chain —
+/// what a finish at home is told to rebase onto — gains it at the top.
+#[tokio::test]
+async fn a_join_away_puts_the_far_stage_at_the_top_of_homes_chain() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), B).await;
+
+    let repo_id = away.b.repo_row(REPOSITORY).await;
+    let branch = "roadmaps/rate-limiting/01-counter";
+
+    store::record_pull_request(
+        &away.b.pool,
+        away.copy,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Count the requests".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some(branch.to_owned()),
+            base: Some("rate-limiting".to_owned()),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    away.b
+        .nudges
+        .announce(verkstead_schema::Nudge::Conversation {
+            conversation: away.copy,
+        });
+
+    let home_repo = away.a.repo_row(REPOSITORY).await;
+    let deadline = Instant::now() + WAITING;
+
+    loop {
+        let chain = store::stage_chain(&away.a.pool, home_repo, "rate-limiting")
+            .await
+            .unwrap();
+
+        if let Some(top) = chain.last() {
+            assert_eq!(
+                (top.conversation_id, top.branch.as_str()),
+                (away.tombstone, branch),
+                "the far stage is the top of home's chain, on its branch",
+            );
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "home's chain never gained the far stage",
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    }
+
+    away.home_reads(store::StageStanding::InFlight).await;
+}

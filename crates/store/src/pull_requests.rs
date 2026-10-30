@@ -585,7 +585,7 @@ async fn taking_one_up(
 ///
 /// The look is inside the caller's transaction, so that the answer still holds
 /// when the insert acts on it. The unique index is what settles it either way.
-async fn record(
+pub(crate) async fn record(
     tx: &mut Transaction<'static, Sqlite>,
     conversation_id: i64,
     repo_id: i64,
