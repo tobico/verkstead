@@ -630,6 +630,11 @@ enum Before {
 }
 
 /// How the newest Set of Verkstead's own about `work` stands.
+///
+/// **A task's only within the round of building now under way.** A task is
+/// known by its number, and a Conversation sent back to be built works a fresh
+/// backlog numbered from `01` again: task 03 answered *Run it here* last round
+/// is not this round's task 03 — see [`store::building_since`].
 async fn asked_before(state: &AppState, conversation_id: i64, work: &Work) -> Before {
     let own = match store::own_sets(&state.pool, conversation_id).await {
         Ok(own) => own,
@@ -639,8 +644,24 @@ async fn asked_before(state: &AppState, conversation_id: i64, work: &Work) -> Be
         }
     };
 
-    let newest = own.into_iter().rev().find(|own| match &own.asking {
-        store::OwnAsking::Placing { work: placed, .. } => Work::from_placed(placed) == *work,
+    let since = match work {
+        Work::Task { .. } => match store::building_since(&state.pool, conversation_id).await {
+            Ok(since) => since,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, "reading when this round of building began failed");
+                return Before::Nothing;
+            }
+        },
+        Work::Inline | Work::Called => None,
+    };
+
+    let newest = own.into_iter().rev().find(|own| {
+        since.is_none_or(|since| own.event_id > since)
+            && match &own.asking {
+                store::OwnAsking::Placing { work: placed, .. } => {
+                    Work::from_placed(placed) == *work
+                }
+            }
     });
 
     let Some(newest) = newest else {

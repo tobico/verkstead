@@ -164,7 +164,9 @@ pub use migrations::{
     rank_the_conversations, record_the_repo_authors, renumbered_profiles, renumbering_done,
     stamp_the_births, stamp_the_profiles,
 };
-pub use own_sets::{OwnAsking, OwnSet, PlacedWork, own_asking, own_set_ids, own_sets};
+pub use own_sets::{
+    OwnAsking, OwnSet, PlacedWork, building_since, own_asking, own_set_ids, own_sets,
+};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use pending_steers::{

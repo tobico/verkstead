@@ -77,6 +77,10 @@ pub enum PlacedWork {
 pub struct OwnSet {
     pub set_id: i64,
 
+    /// The Timeline Event it hangs on, which says when it was asked against
+    /// the rest of the Timeline — see [`building_since`].
+    pub event_id: i64,
+
     pub asking: OwnAsking,
 
     /// What the human said to it, where they have answered.
@@ -156,8 +160,8 @@ pub async fn own_set_ids(pool: &SqlitePool, conversation_id: i64) -> Result<Hash
 /// One Conversation's Sets of Verkstead's own, oldest first, each with how it
 /// stands.
 pub async fn own_sets(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<OwnSet>> {
-    let rows: Vec<(i64, String, Option<String>, bool)> = sqlx::query_as(
-        "SELECT o.set_id, o.asking, r.body, a.set_id IS NOT NULL
+    let rows: Vec<(i64, i64, String, Option<String>, bool)> = sqlx::query_as(
+        "SELECT o.set_id, s.event_id, o.asking, r.body, a.set_id IS NOT NULL
          FROM own_sets o
          JOIN set_events s ON s.set_id = o.set_id
          JOIN timeline_events e ON e.id = s.event_id
@@ -172,9 +176,10 @@ pub async fn own_sets(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Own
     .with_context(|| format!("reading Conversation {conversation_id}'s Sets of Verkstead's own"))?;
 
     rows.into_iter()
-        .map(|(set_id, asking, response, locked)| {
+        .map(|(set_id, event_id, asking, response, locked)| {
             Ok(OwnSet {
                 set_id,
+                event_id,
                 asking: serde_json::from_str(&asking)
                     .with_context(|| format!("reading what Question Set {set_id} asks about"))?,
                 response: response
@@ -187,4 +192,32 @@ pub async fn own_sets(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Own
             })
         })
         .collect()
+}
+
+/// The Timeline Event the round of building now under way began at: the newest
+/// move into Implementing, or `None` where the Conversation has never made one.
+///
+/// What a placing Set's answer about a task is good for. A backlog's tasks are
+/// numbered from `01`, and a Conversation sent back to be built works a fresh
+/// backlog numbered from `01` again — see [`super::implement_again`] — so a
+/// *Run it here* answered about task 03 of the last one says nothing about task
+/// 03 of this one.
+pub async fn building_since(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
+    let moved = super::Event::Moved(super::Lifecycle::Implementing);
+
+    let found: Option<(i64,)> = sqlx::query_as(
+        "SELECT MAX(id) FROM timeline_events
+         WHERE conversation_id = ? AND kind = ? AND body = ?
+         HAVING MAX(id) IS NOT NULL",
+    )
+    .bind(conversation_id)
+    .bind(moved.kind())
+    .bind(super::Lifecycle::Implementing.stored())
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("reading when Conversation {conversation_id}'s round of building began")
+    })?;
+
+    Ok(found.map(|(id,)| id))
 }

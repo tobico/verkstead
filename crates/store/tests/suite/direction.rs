@@ -21,9 +21,10 @@ use verkstead_schema::{
     Direction, Proposal, Question, QuestionOption, QuestionSet, Response, Want, WantedPlatform,
 };
 use verkstead_store::{
-    Ask, Directing, Event, Implementing, Lifecycle, Proposed, Settlements, Submission, ask,
-    load_conversation, open_database, pick_direction, picked_wants, record_handoff, register_repo,
-    save_brief, start_conversation, start_grilling, start_implementing, submit_response, timeline,
+    Ask, Directing, Event, Implementing, Lifecycle, OwnAsking, PlacedWork, Proposed, Settlements,
+    Submission, ask, ask_on_our_own, building_since, load_conversation, open_database, own_sets,
+    pick_direction, picked_wants, record_handoff, register_repo, save_brief, start_conversation,
+    start_grilling, start_implementing, submit_response, timeline,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -301,6 +302,55 @@ async fn a_grillings_tail_landing_is_what_starts_the_work() {
             "and the pick still stands: it is what the work is being built as",
         );
     }
+}
+
+/// **A round of building begins at the move into Implementing**, which is what
+/// a Set of Verkstead's own about a task is read against (ADR-0029): a backlog
+/// numbered from `01` again is another round, and its task 03 is not the last
+/// one's. None before the work is first built, and a Set asked after the move
+/// hangs on a later Event than the move.
+#[tokio::test]
+async fn a_round_of_building_begins_at_the_move_into_implementing() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(building_since(&pool, id).await.unwrap(), None);
+
+    pick_direction(&pool, id, Direction::TaskList)
+        .await
+        .unwrap();
+    start_implementing(&pool, id).await.unwrap();
+
+    let since = building_since(&pool, id)
+        .await
+        .unwrap()
+        .expect("the move into Implementing is on the Timeline");
+
+    ask_on_our_own(
+        &pool,
+        id,
+        &proposing(Direction::TaskList),
+        &OwnAsking::Placing {
+            work: PlacedWork::Task {
+                number: 3,
+                label: "03".to_owned(),
+            },
+            wants: "Windows".to_owned(),
+            moves: Vec::new(),
+            waiting_on: Vec::new(),
+        },
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation is there to ask from");
+
+    let own = own_sets(&pool, id).await.unwrap();
+    assert_eq!(own.len(), 1);
+    assert!(
+        own[0].event_id > since,
+        "the Set is asked after the round began: {} against {since}",
+        own[0].event_id,
+    );
 }
 
 /// Nothing but a grilling has a tail to land. A Conversation that has moved on —
