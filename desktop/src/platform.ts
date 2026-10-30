@@ -99,9 +99,6 @@ function platformsOwn({ platform, env }: Machine): string | undefined {
   }
 }
 
-/// The XDG reading a Unix directory gets: the variable where it is set to an
-/// absolute path, and `$HOME/<under>` where it is not — the specification's own
-/// fallback, and what most machines have.
 /// Where the desktop's own data goes for this human — `$XDG_DATA_HOME` where it
 /// names an absolute path and `~/.local/share` otherwise, the specification's
 /// own reading — which is where an installed app's desktop entry and icons are
@@ -112,6 +109,9 @@ export function dataHome({ env }: Machine): string | undefined {
   return xdg(env.XDG_DATA_HOME, env.HOME, join(".local", "share"));
 }
 
+/// The XDG reading a Unix directory gets: the variable where it is set to an
+/// absolute path, and `$HOME/<under>` where it is not — the specification's own
+/// fallback, and what most machines have.
 function xdg(variable: string | undefined, home: string | undefined, under: string): string | undefined {
   const said = absolute(variable);
   if (said !== undefined) {
