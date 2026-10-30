@@ -2601,7 +2601,8 @@ mod tests {
             ] {
                 assert!(
                     text.contains(wording),
-                    "{named} says when a line declares a platform, `{wording}` among                      it: {text}"
+                    "{named} says when a line declares a platform, `{wording}` among it: \
+                     {text}"
                 );
             }
         }
