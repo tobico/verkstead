@@ -1,0 +1,212 @@
+# Throwaway: install-on-desktop task 02 — the Install Offer on a real Mac.
+# Lives only on the `macos-pack-probe` branch and merges nowhere.
+name: Mac install-offer probe
+
+on:
+  push:
+    branches: [macos-pack-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  the-offer:
+    name: The Install Offer, out of a quarantined dmg
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      DMG: target/electron/out/Verkstead-universal.dmg
+      MOUNT: /Volumes/Verkstead
+      APP: /Volumes/Verkstead/Verkstead.app
+      VERKSTEAD_DATA_DIR: ${{ runner.temp }}/data
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Set up the viewer
+        uses: ./.github/actions/setup-pnpm-project
+
+      - name: Build the viewer
+        working-directory: web
+        env:
+          NODE_OPTIONS: --max-old-space-size=5120
+        run: pnpm build
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: macos-dmg-leg
+
+      - name: Build both halves of the sidecar
+        run: |
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked --no-default-features \
+              --package verkstead-cli --target "$target"
+          done
+          mkdir -p sidecar
+          cp target/aarch64-apple-darwin/release/verkstead sidecar/verkstead-macos-arm64
+          cp target/x86_64-apple-darwin/release/verkstead sidecar/verkstead-macos-x64
+
+      - name: Set up the desktop app
+        uses: ./.github/actions/setup-pnpm-project
+        with:
+          project: desktop
+
+      # The release's own pack step, verbatim: signed and notarized, so the
+      # dmg is what a downloader gets and Gatekeeper treats it as one.
+      - name: Pack the app
+        working-directory: desktop
+        env:
+          ARM64: ${{ github.workspace }}/sidecar/verkstead-macos-arm64
+          X64: ${{ github.workspace }}/sidecar/verkstead-macos-x64
+          CERTIFICATE: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          ruby -ryaml -e '
+            steps = YAML.load_file("../.github/workflows/release.yml")["jobs"]["desktop-macos"]["steps"]
+            print steps.find { |s| s["name"] == "Pack the app" }["run"]
+          ' > "$RUNNER_TEMP/pack.sh"
+          bash -e -o pipefail "$RUNNER_TEMP/pack.sh" > "$RUNNER_TEMP/pack.log" 2>&1
+          status=$?
+          grep -E "^(Signing|Not notarizing|Notarizing|The app )" "$RUNNER_TEMP/pack.log"
+          exit $status
+
+      # A browser's download: quarantined, then mounted the way a double-click
+      # mounts it, at /Volumes.
+      - name: Quarantine and mount the dmg as a download
+        run: |
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" "$DMG"
+          xattr -l "$DMG"
+          hdiutil attach "$DMG" -nobrowse -mountpoint "$MOUNT"
+          ls -l "$MOUNT"
+          xattr -l "$APP" || true
+          ls -ld /Applications
+          mkdir -p "$VERKSTEAD_DATA_DIR"
+          printf '%s\n' the-probe-key > "$VERKSTEAD_DATA_DIR/workbench.key"
+          mkdir -p "$RUNNER_TEMP/shots"
+          cat > "$RUNNER_TEMP/lib.sh" <<'SH'
+          log="$HOME/Library/Logs/Verkstead/verkstead.log"
+          shot() { screencapture -x "$RUNNER_TEMP/shots/$1.png" || true; }
+          ax() { osascript -e "tell application \"System Events\" to tell process \"$1\" to get {name, title} of every UI element of window 1" 2>&1; }
+          serving() {
+            curl --fail --silent --show-error --retry 60 --retry-delay 1 --retry-connrefused \
+              --cookie "workbench_key=the-probe-key" http://127.0.0.1:8422/ | grep -q /assets/
+          }
+          gatekeeper() {
+            # The first-launch "downloaded from the Internet" prompt, pressed
+            # Open where it is up: the human's own one-time press.
+            for _ in $(seq 20); do
+              if osascript -e 'tell application "System Events" to tell process "CoreServicesUIAgent" to click button "Open" of window 1' 2>/dev/null; then
+                echo "pressed Open on Gatekeeper's prompt"; return 0
+              fi
+              sleep 1
+            done
+            echo "no Gatekeeper prompt was seen"
+          }
+          pids() { pgrep -f "Verkstead.app/Contents/MacOS/Verkstead" || true; }
+          stop() { for p in $(pids); do kill "$p"; done; sleep 3; for p in $(pids); do kill -9 "$p"; done; true; }
+          where() { for p in $(pids); do ps -o pid=,command= -p "$p"; done; }
+          SH
+          echo "LIB=$RUNNER_TEMP/lib.sh" >> "$GITHUB_ENV"
+
+      # A shown launch out of the dmg: the dialog is up, and says ADR-0020's
+      # words; Skip carries on, and the app serves from where it is.
+      - name: The dialog shows, and Skip carries on
+        if: always()
+        timeout-minutes: 6
+        run: |
+          set +e
+          . "$LIB"
+          rm -f "$log"
+          open "$APP"
+          gatekeeper
+          for _ in $(seq 60); do grep -q "offers to install itself" "$log" 2>/dev/null && break; sleep 1; done
+          sleep 3
+          shot dialog
+          echo "== the dialog"; ax Verkstead
+          osascript -e 'tell application "System Events" to tell process "Verkstead" to click button "Skip" of window 1'
+          serving && echo "PROVEN: Skip carries on, and the app serves" || echo "NOT SERVING after Skip"
+          where
+          echo "== log"; cat "$log"
+          stop
+
+      # Install with nobody asked, out of the (translocated) dmg: the bundle is
+      # moved into /Applications and the app comes back from there.
+      - name: --install moves it into /Applications and it comes back from there
+        if: always()
+        timeout-minutes: 6
+        run: |
+          set +e
+          . "$LIB"
+          rm -f "$log"
+          open "$APP" --args --install
+          gatekeeper
+          for _ in $(seq 90); do [ "$(grep -c 'is starting, at pid' "$log" 2>/dev/null)" -ge 2 ] && break; sleep 1; done
+          serving && echo "PROVEN: the relaunched app serves" || echo "NOT SERVING after --install"
+          shot installed
+          echo "== processes"; where
+          echo "== log"; cat "$log"
+          pid=$(grep 'is starting, at pid' "$log" | tail -1 | sed 's/.*at pid //')
+          exe=$(ps -o command= -p "$pid")
+          echo "relaunched pid $pid runs $exe"
+          case "$exe" in
+            /Applications/Verkstead.app/*) echo "PROVEN: the relaunched app runs from /Applications" ;;
+            *) echo "NOT under /Applications" ;;
+          esac
+          case "$exe" in *AppTranslocation*) echo "TRANSLOCATED" ;; *) echo "PROVEN: not translocated" ;; esac
+          first=$(grep 'is starting, at pid' "$log" | head -1)
+          echo "the launch out of the dmg: $first"
+          grep "installing" "$log"
+          ls -la /Applications | grep -i verkstead
+          xattr -l /Applications/Verkstead.app
+          hdiutil info | grep -A2 -i verkstead
+          stop
+
+      # A move that could not be made: /Applications made unwritable, so the
+      # move asks for the administrator's password, which is cancelled — and the
+      # failure dialog says so, and the app carries on serving.
+      - name: A cancelled move shows the failure dialog, and the app carries on
+        if: always()
+        timeout-minutes: 8
+        run: |
+          set +e
+          . "$LIB"
+          stop
+          sudo rm -rf /Applications/Verkstead.app
+          sudo chown root:wheel /Applications
+          sudo chmod 755 /Applications
+          ls -ld /Applications
+          [ -d "$APP" ] || hdiutil attach "$DMG" -nobrowse -mountpoint "$MOUNT"
+          rm -f "$log"
+          open "$APP" --args --install
+          gatekeeper
+          for i in $(seq 40); do
+            shot "auth-$i"
+            if osascript -e 'tell application "System Events" to tell process "SecurityAgent" to click button "Cancel" of window 1' 2>/dev/null; then
+              echo "pressed Cancel on the password dialog"; break
+            fi
+            grep -q "the install did not happen" "$log" 2>/dev/null && break
+            sleep 2
+          done
+          for _ in $(seq 30); do grep -q "the install did not happen" "$log" 2>/dev/null && break; sleep 1; done
+          sleep 3
+          shot failure
+          echo "== the failure dialog"; ax Verkstead
+          osascript -e 'tell application "System Events" to tell process "Verkstead" to click button 1 of window 1'
+          serving && echo "PROVEN: after the failure the app carries on serving" || echo "NOT SERVING after the failure"
+          where
+          echo "== log"; cat "$log"
+          stop
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: shots
+          path: ${{ runner.temp }}/shots
