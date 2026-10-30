@@ -227,8 +227,8 @@ pub(crate) async fn transfer(
 /// session out, so none is started beside it — that one reads who asked at its
 /// commit point, which is where the Timeline's wording is settled.
 ///
-/// Also how Verkstead asks on its own account, placing a task that wants
-/// another platform — see [`crate::placing`].
+/// Also how Verkstead asks on its own account, placing a task or an inline run
+/// that wants another platform — see [`crate::placing`].
 pub(crate) async fn asked(
     state: &AppState,
     conversation_id: i64,
@@ -1190,6 +1190,7 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         store::AskedBy::Human => MovedFor::Human,
         store::AskedBy::Session => MovedFor::Session,
         store::AskedBy::Task { label, wants } => MovedFor::Task { label, wants },
+        store::AskedBy::Inline { wants } => MovedFor::Inline { wants },
     };
 
     // What this copy has to say for itself from here, which is where the work

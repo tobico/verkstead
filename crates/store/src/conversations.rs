@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use sqlx::SqlitePool;
-use verkstead_schema::{Direction, QuestionSet, SetCreated};
+use verkstead_schema::{Direction, QuestionSet, SetCreated, WantedPlatform};
 
 use super::wrap_up::{WaitingOn, settled_when};
 
@@ -2883,6 +2883,55 @@ async fn worktree(pool: &SqlitePool, id: i64) -> Result<Option<std::path::PathBu
 /// moment ago or one nobody has picked on at all.
 pub async fn picked_direction(pool: &SqlitePool, id: i64) -> Result<Option<Direction>> {
     direction(pool, id).await
+}
+
+/// The platforms the proposal the human picked a direction on wants (ADR-0029,
+/// *Placing declared work*): none where it wants none, or where nothing has
+/// been picked on a proposal at all.
+///
+/// The newest Set on the Conversation's Timeline carrying a proposal whose
+/// Response picked a direction, because a later pick supersedes an earlier one
+/// — see [`pick_direction`] — and the `wants` are the picked proposal's own.
+/// Read off the Set rather than recorded beside the pick, because the Set is
+/// where they were written, and it is already the record of that decision.
+pub async fn picked_wants(pool: &SqlitePool, id: i64) -> Result<Vec<WantedPlatform>> {
+    let answered: Vec<(i64,)> = sqlx::query_as(
+        "SELECT q.id
+         FROM question_sets q
+         JOIN set_events s ON s.set_id = q.id
+         JOIN timeline_events e ON e.id = s.event_id
+         JOIN responses r ON r.set_id = q.id
+         WHERE e.conversation_id = ?
+         ORDER BY q.id DESC",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("looking for the proposal picked on Conversation {id}"))?;
+
+    for (set_id,) in answered {
+        let Some(super::StoredSet {
+            set: super::Asked::Set(set),
+            ..
+        }) = super::load_set(pool, set_id).await?
+        else {
+            continue;
+        };
+
+        let Some(proposal) = set.proposal else {
+            continue;
+        };
+
+        let picked = super::load_response(pool, set_id)
+            .await?
+            .is_some_and(|stored| stored.response.direction.is_some());
+
+        if picked {
+            return Ok(proposal.wants.iter().map(|want| want.platform).collect());
+        }
+    }
+
+    Ok(Vec::new())
 }
 
 /// How a Conversation's work is to be built, if the human has chosen yet.

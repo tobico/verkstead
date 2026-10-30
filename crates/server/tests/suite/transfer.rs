@@ -131,6 +131,13 @@ const BRIEF: &str = "# Rate limiting\n\nThe API has none.\n";
 /// would need an account.
 const NO_GITHUB: &str = "exit 1";
 
+/// And one that answers for a branch nothing was opened on, in the words the
+/// real one uses.
+const NO_PULL_REQUEST: &str = r#"
+printf 'no pull requests found for branch "%s"\n' "$3" >&2
+exit 1
+"#;
+
 /// How long one address has to answer here, rather than the two seconds a
 /// running server gives one.
 const PATIENCE: Duration = Duration::from_millis(300);
@@ -188,19 +195,26 @@ impl Verkstead {
     /// 07's — but a device taking work in needs what a served one has: a Data
     /// Directory, which is where an arriving Conversation's attached files land.
     async fn running(id: &str, stub: &str, spill: &Path) -> Verkstead {
-        Verkstead::standing(id, Some(stub), spill, Pace::default(), B_OS).await
+        Verkstead::standing(id, Some(stub), spill, Pace::default(), B_OS, NO_GITHUB).await
     }
 
     /// The same at `pace`, for the one test that needs a session spoken to
     /// sooner than a server would.
     async fn running_at(id: &str, stub: &str, spill: &Path, pace: Pace) -> Verkstead {
-        Verkstead::standing(id, Some(stub), spill, pace, B_OS).await
+        Verkstead::standing(id, Some(stub), spill, pace, B_OS, NO_GITHUB).await
     }
 
     /// And the same with B running `os` rather than [`B_OS`], for the tests about
     /// work placed by the platform it wants.
     async fn running_on(id: &str, stub: &str, spill: &Path, pace: Pace, os: &str) -> Verkstead {
-        Verkstead::standing(id, Some(stub), spill, pace, os).await
+        Verkstead::standing(id, Some(stub), spill, pace, os, NO_GITHUB).await
+    }
+
+    /// And the same with a `gh` that finds no pull request on the branch, for
+    /// the tests about an inline run: what a Resume of one asks GitHub before
+    /// it launches anything.
+    async fn building_on(id: &str, stub: &str, spill: &Path, pace: Pace, os: &str) -> Verkstead {
+        Verkstead::standing(id, Some(stub), spill, pace, os, NO_PULL_REQUEST).await
     }
 
     async fn standing(
@@ -209,6 +223,7 @@ impl Verkstead {
         spill: &Path,
         pace: Pace,
         b_os: &str,
+        gh: &str,
     ) -> Verkstead {
         let dir = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
@@ -272,7 +287,7 @@ impl Verkstead {
                 pool.clone(),
                 dir.path().to_owned(),
                 agents(stub, home.path(), dir.path(), spill).at_pace(pace),
-                gh_stub(NO_GITHUB),
+                gh_stub(gh),
                 cluster.clone(),
                 nudges.clone(),
                 probing(dir.path()),
@@ -3589,6 +3604,254 @@ async fn a_declared_task_moved_off_its_platform_by_hand_is_moved_again_at_its_re
             "nothing on the Windows device was launched for the task: {said:?}",
         );
     }
+}
+
+/// What stands where claude goes for **an inline run worked across two
+/// devices**: the implementation session builds the work, says on which machine,
+/// and signals; the grilling writes its handoff and, where it `idles`, signals
+/// and idles on as one waiting on its proposal does, or otherwise ends at once.
+fn builds_inline_on(machine: &str, idles: bool) -> String {
+    let grilling = match idles {
+        true => "    : > /tmp/verkstead/done\n    printf 'grilling\\r\\n'\n    sleep 300",
+        false => "    printf 'grilling\\r\\n'",
+    };
+
+    format!(
+        r#"
+case "$2" in
+*implementing/SKILL.md*)
+    printf 'built\n' > built.md
+    git add built.md
+    git commit --quiet -m 'feat: build it inline'
+    printf 'built inline on {machine}\r\n'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*)
+    printf '# What we settled\n\nA counter.\n' > /tmp/verkstead/handoff.md
+{grilling}
+    ;;
+esac
+"#,
+    )
+}
+
+/// A grilling's closing proposal of an inline run, wanting `wants` — each a
+/// platform's word, as a proposal spells it.
+fn proposing_inline(wants: &[&str]) -> String {
+    let mut yaml = "title: Ready to build the rate limiter\nquestions:\n  - label: Q9\n    \
+                    text: Anything still open?\n    options:\n      - n: 1\n        text: \
+                    Nothing\n      - n: 2\n        text: Yes\nproposal:\n  direction: inline\n  \
+                    rationale: One change.\n"
+        .to_owned();
+
+    if !wants.is_empty() {
+        yaml.push_str("  wants:\n");
+        for platform in wants {
+            yaml.push_str(&format!(
+                "    - platform: {platform}\n      for: Its installer is built there.\n"
+            ));
+        }
+    }
+
+    yaml
+}
+
+/// Two devices as [`planned_across_with`] stands them, and a Conversation on A
+/// whose grilling put [`proposing_inline`] wanting `wants` and had Inline picked
+/// on it — the grilling idling on, where it `idles`, so that the pick hands off.
+async fn proposed_across(
+    wants: &[&str],
+    spill: &Path,
+    across: Across,
+    idles: bool,
+) -> (Verkstead, Verkstead, (Holding, Holding, Holding), i64) {
+    let a = Verkstead::building_on(
+        A,
+        &builds_inline_on("A", idles),
+        spill,
+        rescuing(),
+        across.os,
+    )
+    .await;
+    let b = Verkstead::building_on(
+        B,
+        &builds_inline_on("B", idles),
+        spill,
+        rescuing(),
+        across.os,
+    )
+    .await;
+    let signalling = (a.signalling(), b.signalling());
+
+    a.linked_to(&b.device, B_MACHINE, across.os, vec![b.at()])
+        .await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    a.repo().await;
+    if across.holds_the_repo {
+        b.repo().await;
+    }
+
+    let account = a.account().await;
+    let holding = b.holding();
+    b.profile_called(ACCOUNT).await;
+
+    let conversation = a.drafting_under(&account).await;
+    if across.ticked {
+        assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+    }
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+    if !idles {
+        a.view_saying(conversation, |drawn| !drawn.working).await;
+    }
+
+    let set = a.asks(conversation, &proposing_inline(wants)).await;
+    a.answers(
+        conversation,
+        set,
+        "answers:\n  - label: Q9\n    selected: 1\ndirection: inline\n",
+    )
+    .await;
+
+    (a, b, (signalling.0, signalling.1, holding), conversation)
+}
+
+/// Everything the sessions on that Conversation printed on `on`.
+async fn printed_on(on: &Verkstead, conversation: i64) -> String {
+    let mut printed = String::new();
+    for event in on.sessions_on(conversation).await {
+        printed.push_str(&on.capture_of(conversation, event).await);
+    }
+    printed
+}
+
+/// **An inline run whose proposal wants Windows starts there** (ADR-0029,
+/// *Placing declared work*): picked on a Linux device with a Windows member
+/// ticked, the Conversation moves as the grilling hands off, the implementation
+/// session starts on the Windows device, and both Timelines name the inline run.
+#[tokio::test]
+async fn an_inline_run_that_wants_windows_starts_there() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) =
+        proposed_across(&["windows"], spill.path(), Across::default(), true).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let went = a.notice_saying(conversation, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for the inline run, which wants Windows"),
+        "the source names the inline run and the device: {went}",
+    );
+
+    let came = b.notice_saying(there, "Transferred to").await;
+    assert!(
+        came.contains("for the inline run, which wants Windows"),
+        "and so does the far end: {came}",
+    );
+
+    b.latest_capture_saying(there, "built inline on B").await;
+
+    let worked_here = printed_on(&a, conversation).await;
+    assert!(
+        !worked_here.contains("built inline"),
+        "nothing here was launched for the run: {worked_here:?}",
+    );
+}
+
+/// **A proposal wanting several platforms, or none, starts where it is**, and
+/// the agent moves itself as the work needs.
+#[tokio::test]
+async fn an_inline_run_wanting_several_platforms_or_none_starts_here() {
+    for wants in [&["linux", "windows"][..], &[]] {
+        let spill = tempfile::tempdir().unwrap();
+        let (a, _b, _held, conversation) =
+            proposed_across(wants, spill.path(), Across::default(), true).await;
+
+        a.latest_capture_saying(conversation, "built inline on A")
+            .await;
+
+        let drawn = a.view(conversation).await;
+        assert!(
+            drawn.transferred.is_none() && drawn.transferring.is_none(),
+            "a proposal wanting {wants:?} moves nothing",
+        );
+        assert!(
+            !a.notices(conversation)
+                .await
+                .iter()
+                .any(|notice| notice.contains("The inline run wants")),
+            "and has nothing to say about where it runs",
+        );
+    }
+}
+
+/// **A Resume of an inline run never places it** (Set 1543, Q5b): on a Linux
+/// device, with a Windows one ticked and a proposal that wanted Windows, the
+/// implementation session launches here and nothing moves.
+#[tokio::test]
+async fn an_inline_runs_resume_launches_it_where_it_is() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) =
+        proposed_across(&["windows"], spill.path(), Across::default(), false).await;
+
+    store::start_implementing(&a.pool, conversation)
+        .await
+        .unwrap();
+
+    resumes(&a, conversation).await;
+
+    a.latest_capture_saying(conversation, "built inline on A")
+        .await;
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "and nothing was moved",
+    );
+}
+
+/// **With no permitted device of the platform**, the inline run gets task 03's
+/// Notice, naming the inline run, and starts here.
+#[tokio::test]
+async fn an_inline_run_with_no_permitted_device_of_its_platform_starts_here_saying_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = proposed_across(
+        &["windows"],
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+        true,
+    )
+    .await;
+
+    let said = a
+        .notice_saying(conversation, "The inline run wants Windows")
+        .await;
+    assert!(
+        said.contains(&format!("may not be transferred to {B_MACHINE}")),
+        "the Notice names the device nobody ticked: {said}",
+    );
+
+    a.latest_capture_saying(conversation, "built inline on A")
+        .await;
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "and nothing was moved",
+    );
 }
 
 /// **The source is marked only once the far end has confirmed**, and what it

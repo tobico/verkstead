@@ -23,9 +23,9 @@
 //!
 //! **And it says who asked**: the human's press, or the session's own call to
 //! `verkstead transfer` (ADR-0020, *The agent's call*), or Verkstead placing a
-//! task that wants another platform (ADR-0029). Whichever asked last is
-//! the request that stands, and it is what the Timeline names once the move is
-//! made — which is why the mark hands it back, read in the same transaction.
+//! task or an inline run that wants another platform (ADR-0029). Whichever
+//! asked last is the request that stands, and it is what the Timeline names
+//! once the move is made — which is why the mark hands it back, read in the same transaction.
 //!
 //! **And it is forgotten by whatever acts on it** — by the move that landed, or
 //! by the move that failed and stopped the Conversation instead. A request left
@@ -86,6 +86,11 @@ pub enum AskedBy {
     /// work*): the task's label as the list writes it, and the word for the
     /// platform as a screen draws it.
     Task { label: String, wants: String },
+
+    /// Verkstead itself, placing an inline run whose proposal wants exactly
+    /// one platform before its implementation session starts: the word for
+    /// the platform as a screen draws it.
+    Inline { wants: String },
 }
 
 impl AskedBy {
@@ -97,6 +102,7 @@ impl AskedBy {
             AskedBy::Human => "human".to_owned(),
             AskedBy::Session => "session".to_owned(),
             AskedBy::Task { label, wants } => format!("task:{wants}:{label}"),
+            AskedBy::Inline { wants } => format!("inline:{wants}"),
         }
     }
 
@@ -107,6 +113,12 @@ impl AskedBy {
         {
             return AskedBy::Task {
                 label: label.to_owned(),
+                wants: wants.to_owned(),
+            };
+        }
+
+        if let Some(wants) = column.strip_prefix("inline:") {
+            return AskedBy::Inline {
                 wants: wants.to_owned(),
             };
         }

@@ -655,7 +655,14 @@ agent never calls `verkstead transfer` for it. **The work stays where the move
 left it**: the next undeclared task, the finish and the wrap-up run there, and
 nothing moves it home. Where no permitted device of that platform can take it,
 the task runs where it is.
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): Verkstead itself moves the inline run or the Stage that declares a platform, before launching it, to the first reachable ticked device of that operating system.
+**And for an inline run whose proposal wants exactly one platform**, placed the
+same way as the grilling hands off, before the implementation session starts:
+the handoff is on the record by then and crosses with it, and the Timelines name
+the inline run rather than a task. A proposal wanting several platforms, or
+none, starts where it is and the agent moves itself as the work needs; and a
+**Resume** of the run never places it, since once it has started where it is is
+the agent's and the human's to decide.
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)), by stage 06 of the platform-placement roadmap: Verkstead itself moves the Stage that declares a platform, before launching it, to the first reachable ticked device of that operating system.
 _Avoid_: migrate, hand off, sync, failover
 
 **Permitted Device**:

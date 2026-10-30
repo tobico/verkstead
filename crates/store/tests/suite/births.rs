@@ -345,3 +345,32 @@ async fn a_move_made_for_a_task_is_read_back_as_the_tasks() {
         "and so does the mark that spends it",
     );
 }
+
+/// And one asked to place an inline run is read back as the inline run's.
+#[tokio::test]
+async fn a_move_made_for_an_inline_run_is_read_back_as_the_inline_runs() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool).await;
+    let conversation = start(&pool, repo, "inline-run").await;
+
+    let onwards = Transferred {
+        device: ANOTHER_DEVICE.to_owned(),
+        id: 7,
+    };
+    let placing = AskedBy::Inline {
+        wants: "Windows".to_owned(),
+    };
+
+    ask_to_transfer(&pool, conversation, &onwards.device, placing.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        transfer_asked_by(&pool, conversation).await.unwrap(),
+        Some((onwards.device.clone(), placing.clone())),
+    );
+    assert_eq!(
+        transfer_made(&pool, conversation, &onwards).await.unwrap(),
+        Marked::Marked { by: placing },
+    );
+}

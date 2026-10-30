@@ -1,5 +1,6 @@
-//! Moving a task of the backlog to the platform its line declares, before its
-//! session starts (ADR-0029, *Placing declared work*).
+//! Moving a task of the backlog to the platform its line declares, or an inline
+//! run to the one platform its proposal wants, before its session starts
+//! (ADR-0029, *Placing declared work*).
 //!
 //! **Verkstead moves declared work; the agent never calls `verkstead transfer`
 //! for it.** A line of `.tasks/TODO.md` may say `on windows` after its link —
@@ -35,6 +36,12 @@
 //!
 //! **A roadmap stage's tasks are held** (Set 1543, Q4): see [`held`], whose
 //! one check is what lifting the hold deletes.
+//!
+//! **An inline run is placed only where it starts** (Set 1543, Q5b): see
+//! [`inline`], asked once, as the grilling hands off. A proposal wanting
+//! several platforms, or none, starts where it is and the agent moves itself
+//! as the work needs; and a Resume of the run never asks, because once it has
+//! started, where it is is the agent's and the human's to decide.
 
 use std::future::Future;
 use std::path::Path;
@@ -54,7 +61,40 @@ pub(crate) enum Placed {
     Moving,
 }
 
-/// Why a task that wants a platform runs here all the same, each the reason one
+/// What is being placed, which the Notice and both Timelines name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Work {
+    /// A task of the backlog, by its label as the list writes it.
+    Task(String),
+
+    /// The inline run, its implementation session about to start.
+    Inline,
+}
+
+impl Work {
+    /// The work as the start of a sentence names it.
+    fn named(&self) -> String {
+        match self {
+            Work::Task(label) => format!("Task {label}"),
+            Work::Inline => "The inline run".to_owned(),
+        }
+    }
+
+    /// Who the move is asked by: Verkstead, for this work.
+    fn asking(&self, wants: Platform) -> store::AskedBy {
+        let wants = platform::os_word(wants, None);
+
+        match self {
+            Work::Task(label) => store::AskedBy::Task {
+                label: label.clone(),
+                wants,
+            },
+            Work::Inline => store::AskedBy::Inline { wants },
+        }
+    }
+}
+
+/// Why work that wants a platform runs here all the same, each the reason one
 /// Notice gives — and each its own case, because stage 04 asks the human about
 /// some of them rather than telling them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,28 +115,40 @@ enum Unplaced {
 }
 
 impl Unplaced {
-    /// The Notice, naming the task by its label and the platform as the human
-    /// writes it.
-    fn said(&self, label: &str, wants: Platform) -> String {
+    /// The Notice, naming the work — a task by its label — and the platform as
+    /// the human writes it.
+    fn said(&self, work: &Work, wants: Platform) -> String {
         let wants = platform::os_word(wants, None);
+        let named = work.named();
 
         match self {
             Unplaced::NoneLinked => format!(
-                "Task {label} wants {wants}, but no {wants} device is linked, so it's running \
-                 here."
+                "{named} wants {wants}, but no {wants} device is linked, so it's running here."
             ),
 
-            Unplaced::NonePermitted(names) => format!(
-                "Task {label} wants {wants}, but this conversation may not be transferred to {}, \
-                 so it's running here. Tick a {wants} device under **May be transferred to** to \
-                 have tasks like it moved there.",
-                either(names),
-            ),
+            // A tick is advice for the tasks after this one; an inline run is
+            // placed only as it starts, so there is no later one for it to help.
+            Unplaced::NonePermitted(names) => {
+                let mut said = format!(
+                    "{named} wants {wants}, but this conversation may not be transferred to {}, \
+                     so it's running here.",
+                    either(names),
+                );
+
+                if let Work::Task(_) = work {
+                    said.push_str(&format!(
+                        " Tick a {wants} device under **May be transferred to** to have tasks \
+                         like it moved there."
+                    ));
+                }
+
+                said
+            }
 
             Unplaced::NoneCanTake(found) => {
                 let mut said = format!(
-                    "Task {label} wants {wants}, but no {wants} device it may be transferred to \
-                     can take it, so it's running here.\n"
+                    "{named} wants {wants}, but no {wants} device it may be transferred to can \
+                     take it, so it's running here.\n"
                 );
 
                 for finding in found {
@@ -107,7 +159,7 @@ impl Unplaced {
             }
 
             Unplaced::Held { roadmap } => format!(
-                "Task {label} wants {wants}, but it's running here: this conversation is a stage \
+                "{named} wants {wants}, but it's running here: this conversation is a stage \
                  of the {roadmap} roadmap, and a stage moved off this device drops out of its \
                  roadmap's sight."
             ),
@@ -142,6 +194,47 @@ pub(crate) async fn task(
         return Placed::Here;
     };
 
+    place(state, conversation_id, Work::Task(label), wants).await
+}
+
+/// Place the inline run about to start in `conversation_id`, where the proposal
+/// the human picked it on wants exactly one platform.
+///
+/// Asked once, as the grilling hands off, and never by a Resume of the run —
+/// see the module's *placed only where it starts*.
+pub(crate) async fn inline(state: &AppState, conversation_id: i64) -> Placed {
+    let wanted = match store::picked_wants(&state.pool, conversation_id).await {
+        Ok(wanted) => wanted,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what the picked proposal wants failed, so the inline run starts here");
+            return Placed::Here;
+        }
+    };
+
+    let Some(wants) = the_one(&wanted) else {
+        return Placed::Here;
+    };
+
+    place(state, conversation_id, Work::Inline, wants).await
+}
+
+/// The platform a proposal wanting exactly one wants. Several, or none, is
+/// work that starts where it is, the agent moving itself as it needs.
+fn the_one(wanted: &[verkstead_schema::WantedPlatform]) -> Option<Platform> {
+    use verkstead_schema::WantedPlatform;
+
+    match wanted {
+        [WantedPlatform::Linux] => Some(Platform::Linux),
+        [WantedPlatform::Macos] => Some(Platform::MacOs),
+        [WantedPlatform::Windows] => Some(Platform::Windows),
+        _ => None,
+    }
+}
+
+/// Place `work`, which wants `wants`: here where this device is of it, moved
+/// where a device of it can take the work, and here with a Notice saying why
+/// where none can.
+async fn place(state: &AppState, conversation_id: i64, work: Work, wants: Platform) -> Placed {
     // What this device is: its member row's word in a cluster, and the word it
     // would join one with where it is in none.
     let here = match state.devices.as_ref() {
@@ -155,7 +248,7 @@ pub(crate) async fn task(
 
     let placed = match held(state, conversation_id).await {
         Some(roadmap) => Err(Unplaced::Held { roadmap }),
-        None => placing(state, conversation_id, &label, wants).await,
+        None => placing(state, conversation_id, &work, wants).await,
     };
 
     match placed {
@@ -164,16 +257,16 @@ pub(crate) async fn task(
         Err(unplaced) => {
             tracing::info!(
                 conversation_id,
-                task = label,
+                work = ?work,
                 wants = ?wants,
                 unplaced = ?unplaced,
-                "a task that wants a platform runs here",
+                "work that wants a platform runs here",
             );
 
             if let Err(error) =
-                store::note(&state.pool, conversation_id, &unplaced.said(&label, wants)).await
+                store::note(&state.pool, conversation_id, &unplaced.said(&work, wants)).await
             {
-                tracing::error!(error = ?error, conversation_id, "saying why a task runs here failed");
+                tracing::error!(error = ?error, conversation_id, "saying why work runs here failed");
             }
 
             Placed::Here
@@ -208,7 +301,7 @@ async fn held(state: &AppState, conversation_id: i64) -> Option<String> {
 async fn placing(
     state: &AppState,
     conversation_id: i64,
-    label: &str,
+    work: &Work,
     wants: Platform,
 ) -> Result<Placed, Unplaced> {
     let Some(devices) = state.devices.as_ref() else {
@@ -230,7 +323,7 @@ async fn placing(
         Ok((.., None)) => return Ok(Placed::Here),
 
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, task = label, "reading where a task that wants a platform could go failed, so it runs here");
+            tracing::error!(error = ?error, conversation_id, work = ?work, "reading where work that wants a platform could go failed, so it runs here");
             return Ok(Placed::Here);
         }
     };
@@ -273,7 +366,7 @@ async fn placing(
                     tracing::error!(
                         conversation_id,
                         device = member.device,
-                        "the preflight of a device a task could go to failed: {}",
+                        "the preflight of a device work could go to failed: {}",
                         refusal.saying,
                     );
                     Some(vec![format!(
@@ -286,31 +379,23 @@ async fn placing(
     })
     .await?;
 
-    let asked = crate::transfers::asked(
-        state,
-        conversation_id,
-        &chosen.device,
-        store::AskedBy::Task {
-            label: label.to_owned(),
-            wants: platform::os_word(wants, None),
-        },
-    )
-    .await;
+    let asked =
+        crate::transfers::asked(state, conversation_id, &chosen.device, work.asking(wants)).await;
 
     match asked {
         Ok(()) => {
             tracing::info!(
                 conversation_id,
-                task = label,
+                work = ?work,
                 device = chosen.device,
-                "a task wants another platform, so the Conversation is being moved before it is \
+                "work wants another platform, so the Conversation is being moved before it is \
                  launched",
             );
             Ok(Placed::Moving)
         }
 
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, task = label, "asking for a task's move failed, so it runs here");
+            tracing::error!(error = ?error, conversation_id, work = ?work, "asking for the move failed, so the work runs here");
             Ok(Placed::Here)
         }
     }
@@ -535,13 +620,13 @@ mod tests {
     #[test]
     fn each_reason_names_the_task_and_the_platform() {
         assert_eq!(
-            Unplaced::NoneLinked.said("02", Platform::Windows),
+            Unplaced::NoneLinked.said(&Work::Task("02".to_owned()), Platform::Windows),
             "Task 02 wants Windows, but no Windows device is linked, so it's running here.",
         );
 
         assert_eq!(
             Unplaced::NonePermitted(vec!["Ada".to_owned(), "Grace".to_owned(), "Kit".to_owned()])
-                .said("02", Platform::MacOs),
+                .said(&Work::Task("02".to_owned()), Platform::MacOs),
             "Task 02 wants macOS, but this conversation may not be transferred to Ada, Grace or \
              Kit, so it's running here. Tick a macOS device under **May be transferred to** to \
              have tasks like it moved there.",
@@ -552,7 +637,7 @@ mod tests {
                 "Ada is unreachable.".to_owned(),
                 "The repo app is not on Grace.".to_owned(),
             ])
-            .said("03", Platform::Linux),
+            .said(&Work::Task("03".to_owned()), Platform::Linux),
             "Task 03 wants Linux, but no Linux device it may be transferred to can take it, so \
              it's running here.\n\n- Ada is unreachable.\n- The repo app is not on Grace.",
         );
@@ -561,10 +646,42 @@ mod tests {
             Unplaced::Held {
                 roadmap: "platform-placement".to_owned()
             }
-            .said("01", Platform::Windows),
+            .said(&Work::Task("01".to_owned()), Platform::Windows),
             "Task 01 wants Windows, but it's running here: this conversation is a stage of the \
              platform-placement roadmap, and a stage moved off this device drops out of its \
              roadmap's sight.",
+        );
+    }
+
+    /// The inline run is named as itself, and is given no advice about ticking
+    /// for a later run it will never have.
+    #[test]
+    fn the_inline_runs_notice_names_the_inline_run() {
+        assert_eq!(
+            Unplaced::NoneLinked.said(&Work::Inline, Platform::Windows),
+            "The inline run wants Windows, but no Windows device is linked, so it's running here.",
+        );
+
+        assert_eq!(
+            Unplaced::NonePermitted(vec!["Ada".to_owned()]).said(&Work::Inline, Platform::Windows),
+            "The inline run wants Windows, but this conversation may not be transferred to Ada, \
+             so it's running here.",
+        );
+    }
+
+    /// Only a proposal wanting exactly one platform is placed.
+    #[test]
+    fn only_a_proposal_wanting_one_platform_is_placed() {
+        use verkstead_schema::WantedPlatform;
+
+        assert_eq!(the_one(&[WantedPlatform::Windows]), Some(Platform::Windows));
+        assert_eq!(the_one(&[WantedPlatform::Macos]), Some(Platform::MacOs));
+        assert_eq!(the_one(&[WantedPlatform::Linux]), Some(Platform::Linux));
+
+        assert_eq!(the_one(&[]), None);
+        assert_eq!(
+            the_one(&[WantedPlatform::Linux, WantedPlatform::Windows]),
+            None
         );
     }
 

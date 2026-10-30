@@ -1528,6 +1528,15 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
     crate::conversations::hand_over(&state, conversation_id).await;
     crate::conversations::grilling_over(&state, conversation_id).await;
 
+    // And an inline run whose proposal wants one platform this device is not is
+    // moved to one that is before its session starts, the way a declared task
+    // is: the handoff is on the record by now, so it crosses with it, and the
+    // far end's arrival presses its own Resume, which launches the run there
+    // without asking again — see [`crate::placing::inline`].
+    if crate::placing::inline(&state, conversation_id).await == crate::placing::Placed::Moving {
+        return;
+    }
+
     let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing).await else {
         return;
     };

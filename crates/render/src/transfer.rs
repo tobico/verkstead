@@ -314,9 +314,9 @@ pub struct ProfileAcross {
 ///
 /// **And who asked for it, said so that a far end older than the reason still
 /// reads the arrival.** The wire carries the two reasons there always were,
-/// and a move Verkstead made for a task beside them — see [`MovedFor::Task`] —
-/// so an end that predates a task's move reads the field it knows and drops the
-/// one it does not.
+/// and a move Verkstead made for a task or an inline run beside them — see
+/// [`MovedFor::Task`] and [`MovedFor::Inline`] — so an end that predates such a
+/// move reads the field it knows and drops the one it does not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "Arriving", into = "Arriving")]
 pub struct CameFrom {
@@ -451,8 +451,8 @@ pub struct StageReported {
 
 /// Who a move was made for: the human's press on *Transfer to…*, the session's
 /// own `verkstead transfer` (ADR-0020, *The agent's call*), or Verkstead placing
-/// a task that declares the platform it wants (ADR-0029, *Placing declared
-/// work*).
+/// a task or an inline run that declares the platform it wants (ADR-0029,
+/// *Placing declared work*).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum MovedFor {
     #[default]
@@ -465,6 +465,12 @@ pub enum MovedFor {
         label: String,
         wants: String,
     },
+
+    /// An inline run whose proposal wants one platform: the word for it as a
+    /// screen draws it.
+    Inline {
+        wants: String,
+    },
 }
 
 impl MovedFor {
@@ -475,6 +481,7 @@ impl MovedFor {
             MovedFor::Human => "at your request".to_owned(),
             MovedFor::Session => "at the agent's request".to_owned(),
             MovedFor::Task { label, wants } => format!("for task {label}, which wants {wants}"),
+            MovedFor::Inline { wants } => format!("for the inline run, which wants {wants}"),
         }
     }
 }
@@ -486,7 +493,9 @@ impl MovedFor {
 /// move goes as the agent's beside a `task` field an older end ignores: the
 /// platform it was placed by is a line the agent breaking the work down wrote,
 /// and no press of the human's, so *the agent's request* is the nearer of the
-/// two sentences such an end has to say it with.
+/// two sentences such an end has to say it with. An inline run's goes the same
+/// way beside an `inline` field, its platform being the grilling agent's
+/// proposal.
 #[derive(Serialize, Deserialize)]
 struct Arriving {
     device: String,
@@ -496,6 +505,9 @@ struct Arriving {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     task: Option<Placing>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    inline: Option<String>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -513,10 +525,11 @@ struct Placing {
 
 impl From<Arriving> for CameFrom {
     fn from(arriving: Arriving) -> CameFrom {
-        let asked = match (arriving.task, arriving.asked) {
-            (Some(Placing { label, wants }), _) => MovedFor::Task { label, wants },
-            (None, Asker::Human) => MovedFor::Human,
-            (None, Asker::Session) => MovedFor::Session,
+        let asked = match (arriving.task, arriving.inline, arriving.asked) {
+            (Some(Placing { label, wants }), ..) => MovedFor::Task { label, wants },
+            (None, Some(wants), _) => MovedFor::Inline { wants },
+            (None, None, Asker::Human) => MovedFor::Human,
+            (None, None, Asker::Session) => MovedFor::Session,
         };
 
         CameFrom {
@@ -528,16 +541,20 @@ impl From<Arriving> for CameFrom {
 
 impl From<CameFrom> for Arriving {
     fn from(came: CameFrom) -> Arriving {
-        let (asked, task) = match came.asked {
-            MovedFor::Human => (Asker::Human, None),
-            MovedFor::Session => (Asker::Session, None),
-            MovedFor::Task { label, wants } => (Asker::Session, Some(Placing { label, wants })),
+        let (asked, task, inline) = match came.asked {
+            MovedFor::Human => (Asker::Human, None, None),
+            MovedFor::Session => (Asker::Session, None, None),
+            MovedFor::Task { label, wants } => {
+                (Asker::Session, Some(Placing { label, wants }), None)
+            }
+            MovedFor::Inline { wants } => (Asker::Session, None, Some(wants)),
         };
 
         Arriving {
             device: came.device,
             asked,
             task,
+            inline,
         }
     }
 }
@@ -783,6 +800,32 @@ mod tests {
         let older: Older = serde_json::from_value(wire).unwrap();
 
         assert_eq!(older.device, "aa00");
+        assert_eq!(older.asked, OlderAsker::Session);
+    }
+
+    /// An inline run's move crosses whole too, and to an older end as the
+    /// agent's request.
+    #[test]
+    fn an_inline_runs_move_reads_back_as_the_inline_runs() {
+        let inline = CameFrom {
+            device: "aa00".to_owned(),
+            asked: MovedFor::Inline {
+                wants: "Windows".to_owned(),
+            },
+        };
+        let wire = serde_json::to_value(&inline).unwrap();
+
+        assert_eq!(
+            serde_json::from_value::<CameFrom>(wire.clone()).unwrap(),
+            inline
+        );
+        assert_eq!(
+            inline.asked.why(),
+            "for the inline run, which wants Windows",
+            "the Timeline names the inline run and the platform",
+        );
+
+        let older: Older = serde_json::from_value(wire).unwrap();
         assert_eq!(older.asked, OlderAsker::Session);
     }
 
