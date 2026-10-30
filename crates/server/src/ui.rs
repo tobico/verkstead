@@ -1181,7 +1181,7 @@ async fn submit_response(
     Json(match submission {
         store::Submission::Accepted(taken) => {
             crate::conversations::settle_a_proposal(&state, id, taken.proposed).await;
-            crate::own_sets::settle(&state, id, &response).await;
+            crate::own_sets::settle(&state, id, &response);
 
             Submitted::Accepted
         }

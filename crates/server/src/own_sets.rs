@@ -203,10 +203,25 @@ async fn standing(
 /// Act on `response`, just taken for Set `set_id`, where the Set is Verkstead's
 /// own. An agent's Set is left alone.
 ///
+/// **On a task of its own rather than in the press's request.** Acting on an
+/// answer can dial the device it ticked, or wait for a session to end, and a
+/// press is owed its reply once the Response is stored. A request is also
+/// dropped when its client goes away — a phone losing signal — and an answer
+/// stored and then acted on only part way, its hold already let go, would leave
+/// the work with nothing running and nothing said.
+///
 /// The Set's hold on the drivers register is handed to whatever acts on the
 /// answer, and let go once it has: a launch here takes the place over from it,
 /// and a move frees it.
-pub(crate) async fn settle(state: &AppState, set_id: i64, response: &Response) {
+pub(crate) fn settle(state: &AppState, set_id: i64, response: &Response) {
+    let state = state.clone();
+    let response = response.clone();
+
+    tokio::spawn(async move { settling(&state, set_id, &response).await });
+}
+
+/// [`settle`]'s work, on the task it spawns.
+async fn settling(state: &AppState, set_id: i64, response: &Response) {
     let asking = match store::own_asking(&state.pool, set_id).await {
         Ok(Some(asking)) => asking,
         Ok(None) => return,
