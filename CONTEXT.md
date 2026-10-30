@@ -625,6 +625,7 @@ waits for that word, and a launch that has been decided but has not reached the
 register yet is waited for too. The account is written back before the slice and the bundle
 leave, or the far end would launch under a login the source had not finished
 returning.
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): Verkstead itself moves work that declares a platform, before launching the task, the inline run or the Stage that wants it, to the first reachable ticked device of that operating system; and a Stage moved away reports its lifecycle to its home device, whose tombstone follows it.
 _Avoid_: migrate, hand off, sync, failover
 
 **Permitted Device**:
@@ -650,6 +651,7 @@ cluster is taken off every Conversation's list by the unlink itself.
 transferred to* on a waiting Question Set's Attach menu ticks the device when
 the Set is answered, and restarts nothing, `verkstead transfer` reading the
 list live (ADR-0028).
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)), stage by stage of the platform-placement roadmap: every session is told every device of the cluster, permitted or not; an agent's call on a device that is linked but not ticked, or ticked but asleep, becomes a Question Set of Verkstead's own rather than a refusal; the closing Proposal's `wants` draws the ticks on the chooser; and a roadmap's Stages inherit the roadmap Conversation's ticks.
 _Avoid_: allowed device, whitelist, target list
 
 **Carried Conversation**:
@@ -3367,6 +3369,7 @@ at the press, in the same words.
 Nothing to do about one, however much it says. A Notice is written after the
 fact and stays on the record for ever; what a stopped run is waiting on is that
 it is **Stopped**, and what answers that is **Resume**.
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): the one thing Verkstead writes on its own account gains a second — a Question Set of its own, asked where declared work wants a device that is asleep or not yet permitted, with two Options and Verkstead named as the asker.
 _Avoid_: log line, info event, message, alert
 
 **Transcript**:
@@ -4343,6 +4346,7 @@ producing the picked Direction's artifact, and coming back is another Set,
 with a fresh Proposal if it wants the Direction reconsidered. The Direction is
 still never the agent's to change: it proceeds on the pick or argues by
 proposing again.
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): a Proposal gains `wants`, the platforms the work wants with a reason each, and the chooser draws the *May be transferred to* ticks under the Directions, devices of a wanted platform first.
 _Avoid_: wrap-up request, handover, recommendation (that is the part, not the
 whole), final question
 
@@ -4668,6 +4672,7 @@ retired, a decision corrected in passing — so the effort a Stage belongs to is
 Verkstead's own record rather than something worked out from the branch. A
 roadmap that runs out is the roadmap complete, whatever else is in the Worktree
 with work left in it; taking up another one is **Adopt**. See ADR-0017.
+**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): the platform a line names stops being acted on by nothing — a Stage that wants one is made at home, inherits the roadmap Conversation's ticks, and is moved to the first reachable ticked device of that platform before its first session, Verkstead asking with a Question Set of its own where none is; a task line in `.tasks/TODO.md` carries the same word and is placed the same way.
 _Avoid_: phase, milestone, epic, step (that is a backlog's)
 
 **Chain**:
