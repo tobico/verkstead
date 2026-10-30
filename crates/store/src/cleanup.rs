@@ -139,6 +139,7 @@ const EVENT_KEYED: &[&str] = &[
 /// this Conversation's, and there is nobody else it could be left holding.
 const SET_KEYED: &[&str] = &[
     "responses",
+    "lock_lines",
     "archivings",
     "deferrals",
     "own_sets",

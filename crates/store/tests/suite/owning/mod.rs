@@ -28,12 +28,12 @@ use verkstead_store::{
     Rollup, Settlements, Standing, Summary, WaitingOn, add_companion, add_to_set, append_capture,
     append_transcript, archive_conversation, ask, ask_on_our_own, ask_to_transfer, attach,
     attach_mcp_server, close_conversation, continue_on_arrival, create_profile, end_session,
-    leave_memo, lock_set, nothing_else, open_database, open_pending_steer, permit_device,
-    pick_direction, record_addressed_comments, record_backlog, record_check_rollup, record_commit,
-    record_conflict_fix_attempt, record_delivery, record_fix_attempt, record_merging,
-    record_pull_request, record_share, record_share_comment, record_standing, register_repo,
-    save_brief, save_pending_steer, set_grilling_pairing, set_process, set_target, settle_wrap_up,
-    skip_review, stamp_unseen, start_capture, start_conversation, start_grilling,
+    leave_memo, lock_set, lock_set_saying, nothing_else, open_database, open_pending_steer,
+    permit_device, pick_direction, record_addressed_comments, record_backlog, record_check_rollup,
+    record_commit, record_conflict_fix_attempt, record_delivery, record_fix_attempt,
+    record_merging, record_pull_request, record_share, record_share_comment, record_standing,
+    register_repo, save_brief, save_pending_steer, set_grilling_pairing, set_process, set_target,
+    settle_wrap_up, skip_review, stamp_unseen, start_capture, start_conversation, start_grilling,
     start_implementing, stop, submit_response, suggest_preview, tell, trim_conversation,
     unarchive_conversation,
 };
@@ -361,15 +361,29 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
 
     // And one Verkstead asked itself, which is the row saying so and what it
     // asked about.
-    ask_on_our_own(
+    let own = ask_on_our_own(
         pool,
         id,
         &asked(),
         &OwnAsking::Placing {
             work: PlacedWork::Inline,
             wants: "Windows".to_owned(),
-            moves: vec!["0011223344556677889900aabbccddee".to_owned()],
+            moves: Vec::new(),
+            waiting_on: vec!["0011223344556677889900aabbccddee".to_owned()],
         },
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation is there to ask from")
+    .id;
+
+    // And settled by the device it waited on answering, which is a lock with a
+    // line of its own.
+    lock_set_saying(
+        pool,
+        &Settlements::new(4),
+        own,
+        "nuc-win answered, so the work moved there.",
     )
     .await
     .unwrap();

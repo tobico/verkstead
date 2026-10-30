@@ -23,8 +23,8 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
-use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
+use sqlx::{SqliteConnection, SqlitePool};
 use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
@@ -44,6 +44,7 @@ mod deliveries;
 mod endings;
 mod escalations;
 mod joins;
+mod lock_lines;
 mod mcp_servers;
 mod members;
 mod memos;
@@ -143,6 +144,7 @@ pub use joins::{
     held_join_count, held_joins, hold_join, let_go_of_expired_joins, let_go_of_join,
     refuse_asked_join,
 };
+pub use lock_lines::{lock_line, lock_lines};
 pub use mcp_servers::{
     attach_mcp_server, attach_mcp_server_to_draft, detach_mcp_server, detach_mcp_server_from_draft,
     mcp_servers,
@@ -654,16 +656,54 @@ pub async fn lock_set(
     settlements: &Settlements,
     set_id: i64,
 ) -> Result<Locking> {
+    locking(pool, settlements, set_id, None).await
+}
+
+/// Close a Set the way [`lock_set`] does, the lock carrying `line` — what
+/// happened that closed it, which the sheet and the Timeline say in place of
+/// the human's lock's own sentence. See [`lock_lines`].
+///
+/// Verkstead's, where something settles one of its own Sets without anybody
+/// answering it: the device it was waiting on answered, say.
+pub async fn lock_set_saying(
+    pool: &SqlitePool,
+    settlements: &Settlements,
+    set_id: i64,
+    line: &str,
+) -> Result<Locking> {
+    locking(pool, settlements, set_id, Some(line)).await
+}
+
+/// Either of the two above, the line written in the transaction that takes the
+/// lock.
+async fn locking(
+    pool: &SqlitePool,
+    settlements: &Settlements,
+    set_id: i64,
+    line: Option<&str>,
+) -> Result<Locking> {
     if !set_exists(pool, set_id).await? {
         return Ok(Locking::NoSuchSet);
     }
 
-    let Some(locked) = insert_lock(pool, set_id).await? else {
+    let mut tx = writing(pool, "locking a Question Set").await?;
+
+    let Some(locked) = insert_lock(&mut tx, set_id).await? else {
+        drop(tx);
+
         return Ok(match load_response(pool, set_id).await? {
             Some(_) => Locking::AlreadyAnswered,
             None => Locking::AlreadyLocked,
         });
     };
+
+    if let Some(line) = line {
+        lock_lines::record(&mut tx, set_id, line).await?;
+    }
+
+    tx.commit()
+        .await
+        .with_context(|| format!("locking Question Set {set_id}"))?;
 
     settlements.announce(settled_set(pool, set_id).await?);
 
@@ -840,6 +880,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // And which Sets Verkstead asked itself, and what about. It hangs off a Set
     // for the same reason.
     own_sets::apply_schema(pool).await?;
+
+    // And what a lock said, where it said something: Verkstead's, closing one
+    // of its own Sets. It hangs off the lock for the same reason again.
+    lock_lines::apply_schema(pool).await?;
 
     // And which Sets' Answers have reached a session at all, which the folding
     // record cannot say of a Blocking Ask: it has no row there, because a wait
@@ -1187,7 +1231,7 @@ pub async fn insert_response_with_checkouts(
 /// been locked. Guarded inside the statement for the reason
 /// [`insert_response`] is — an answered Set must not also become a locked
 /// one.
-async fn insert_lock(pool: &SqlitePool, set_id: i64) -> Result<Option<SetLocked>> {
+async fn insert_lock(connection: &mut SqliteConnection, set_id: i64) -> Result<Option<SetLocked>> {
     let row: Option<(String,)> = sqlx::query_as(
         "INSERT INTO archivings (set_id, archived_at)
          SELECT ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -1197,7 +1241,7 @@ async fn insert_lock(pool: &SqlitePool, set_id: i64) -> Result<Option<SetLocked>
     )
     .bind(set_id)
     .bind(set_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *connection)
     .await
     .with_context(|| format!("locking Question Set {set_id}"))?;
 

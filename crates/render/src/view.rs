@@ -172,6 +172,12 @@ pub struct SetView {
     /// say, and the caller's to fill in.
     #[serde(default)]
     pub by_verkstead: bool,
+
+    /// What its lock says, where it was locked with a line, which the sheet
+    /// says in place of its sentence about a Set nobody answered. `None` out
+    /// of [`set_view`], for [`SetView::by_verkstead`]'s reason.
+    #[serde(default)]
+    pub lock_line: Option<String>,
 }
 
 /// The Diff as the browser receives it: the HTML the server rendered, and the
@@ -420,6 +426,7 @@ pub fn set_view(
         servers,
         addable,
         by_verkstead: false,
+        lock_line: None,
     }
 }
 

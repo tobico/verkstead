@@ -30,7 +30,8 @@ use verkstead_schema::Response;
 #[serde(tag = "asking", rename_all = "snake_case")]
 pub enum OwnAsking {
     /// Where work that wants a platform is to run, there being devices of that
-    /// platform linked and none this Conversation may be moved to.
+    /// platform linked and none it can be moved to yet: none this Conversation
+    /// may be moved to, or the ones it may be all asleep.
     ///
     /// Its Options are one *Move to* per device of `moves`, in that order, and
     /// then *Run it here*.
@@ -43,6 +44,13 @@ pub enum OwnAsking {
         /// The Device Ids the *Move to* Options name, in the order they are
         /// offered.
         moves: Vec<String>,
+
+        /// The Device Ids of the permitted devices that were asleep, in the
+        /// order they are tried: the first of them to answer cleanly while the
+        /// Set is open takes the work, and the Set is locked saying so. Empty
+        /// where none was, and on a Set recorded before there were any.
+        #[serde(default)]
+        waiting_on: Vec<String>,
     },
 }
 

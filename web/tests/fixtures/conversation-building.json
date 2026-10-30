@@ -159,6 +159,7 @@
         "by_verkstead": false,
         "carried_on": false,
         "id": 12,
+        "lock_line": null,
         "rows": [
           {
             "answer": "",

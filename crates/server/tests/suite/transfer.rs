@@ -3291,6 +3291,10 @@ struct Across {
 
     /// Whether B holds the repository the work is in.
     holds_the_repo: bool,
+
+    /// Whether B is asleep: A holds it at an address nothing answers on, until
+    /// [`wakes`] puts its real one back.
+    asleep: bool,
 }
 
 impl Default for Across {
@@ -3299,9 +3303,13 @@ impl Default for Across {
             os: WINDOWS,
             ticked: true,
             holds_the_repo: true,
+            asleep: false,
         }
     }
 }
+
+/// Where nothing answers: a machine asleep, as a dial at it finds it.
+const NOWHERE: &str = "127.0.0.1:9";
 
 /// [`planned_across`] with B standing as `across` says.
 async fn planned_across_with(
@@ -3323,7 +3331,12 @@ async fn planned_across_at(
     let b = Verkstead::running_on(B, &works_each_task_on("B", tasks), spill, pace, across.os).await;
     let signalling = (a.signalling(), b.signalling());
 
-    a.linked_to(&b.device, B_MACHINE, across.os, vec![b.at()])
+    let reached_at = if across.asleep {
+        NOWHERE.to_owned()
+    } else {
+        b.at()
+    };
+    a.linked_to(&b.device, B_MACHINE, across.os, vec![reached_at])
         .await;
 
     let (machine, os) = this_machine();
@@ -3707,6 +3720,237 @@ async fn run_it_here_starts_the_task_where_it_is() {
         a.sets_on(conversation).await,
         [asked.set_id],
         "and the launch the answer made asked nothing again",
+    );
+}
+
+/// B, asleep on A as [`Across::asleep`] left it, waking: A holds it at its real
+/// address again.
+async fn wakes(a: &Verkstead, b: &Verkstead) {
+    a.linked_to(&b.device, B_MACHINE, WINDOWS, vec![b.at()])
+        .await;
+}
+
+/// The pace a sleeping device is looked for at in these tests, rather than a
+/// server's half a minute.
+fn looking_for_wakes() -> Pace {
+    Pace {
+        wakes: Duration::from_millis(200),
+        ..rescuing()
+    }
+}
+
+/// **A ticked device asleep puts the asleep Set** (ADR-0029, the asleep row):
+/// it says the work moves there by itself once the device is awake, offers
+/// *Run it here* alone, and pressing that starts the task here.
+#[tokio::test]
+async fn a_ticked_device_asleep_puts_the_asleep_set_and_run_it_here_starts_the_task() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            asleep: true,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    let branch = store::load_conversation(&a.pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is here")
+        .branch;
+
+    assert_eq!(
+        asked.title,
+        format!("Run {branch} here, or wait for {B_MACHINE}?"),
+    );
+    assert_eq!(
+        asked.rows[0].question,
+        format!(
+            "Task 01 wants Windows. {B_MACHINE} is not awake, and the work moves there by \
+             itself once it is."
+        ),
+    );
+
+    let sheet: verkstead_render::SetReading =
+        reading(&a.workbench, &format!("/api/ui/sets/{}", asked.set_id)).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+    assert_eq!(
+        sheet.questions[0]
+            .ask
+            .options
+            .iter()
+            .map(|option| option.text_html.as_str())
+            .collect::<Vec<_>>(),
+        ["Run it here"],
+        "waiting is not an Option: the open Set is the wait",
+    );
+
+    assert!(
+        !printed_on(&a, conversation)
+            .await
+            .contains("worked task 01"),
+        "nothing was launched while the device sleeps",
+    );
+
+    picks(&a, asked.set_id, 1).await;
+
+    a.latest_capture_saying(conversation, "finishing on A")
+        .await;
+    assert!(
+        printed_on(&a, conversation)
+            .await
+            .contains("worked task 01 on A"),
+        "Run it here starts the task here",
+    );
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "and nothing was moved",
+    );
+}
+
+/// **The sleeping device answering settles the Set itself** (ADR-0029): the
+/// work moves there by the ordinary Transfer, the task starts on it, and the
+/// Set is locked with a line saying the device answered, on its card and on
+/// its sheet, in place of the human's lock's words.
+#[tokio::test]
+async fn the_sleeping_device_answering_moves_the_work_and_locks_the_set_saying_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) = planned_across_at(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            asleep: true,
+            ..Across::default()
+        },
+        looking_for_wakes(),
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+    let asked = verksteads_set(&a, conversation).await;
+
+    // Asked a few times over, and still asleep.
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    assert!(
+        a.view(conversation).await.transferred.is_none(),
+        "nothing moves while the device sleeps",
+    );
+
+    wakes(&a, &b).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let went = a.notice_saying(conversation, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for task 01, which wants Windows"),
+        "the move is Verkstead's, for the task: {went}",
+    );
+
+    b.latest_capture_saying(there, "worked task 01 on B").await;
+
+    let line = format!("{B_MACHINE} answered, so the work moved there.");
+
+    let card = verksteads_set(&a, conversation).await;
+    assert_eq!(card.set_id, asked.set_id);
+    assert!(
+        matches!(card.standing, Standing::LockedUnanswered(_)),
+        "the Set is locked: {:?}",
+        card.standing,
+    );
+    assert_eq!(card.lock_line.as_deref(), Some(line.as_str()));
+
+    let sheet: verkstead_render::SetReading =
+        reading(&a.workbench, &format!("/api/ui/sets/{}", asked.set_id)).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+    assert_eq!(sheet.lock_line.as_deref(), Some(line.as_str()));
+
+    assert!(
+        !printed_on(&a, conversation)
+            .await
+            .contains("worked task 01"),
+        "and nothing here was launched for it",
+    );
+}
+
+/// **Asleep and unticked together are one Set** (Set 1547, Q3): a ticked
+/// device asleep and another of the platform linked and unticked put one Set
+/// saying both, offering *Move to* the unticked one against *Run it here*.
+#[tokio::test]
+async fn a_ticked_device_asleep_beside_an_unticked_one_puts_one_set_saying_both() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            asleep: true,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    record_member(
+        &a.pool,
+        &Linking {
+            device: "c0ffee00c0ffee00c0ffee00c0ffee00".to_owned(),
+            name: "nuc-2".to_owned(),
+            os: WINDOWS.to_owned(),
+            addresses: vec![NOWHERE.to_owned()],
+            fingerprint: "nuc-2-print".to_owned(),
+            kept_by: None,
+            version: Some(RUNNING.to_owned()),
+            install: Some("Binary".to_owned()),
+        },
+    )
+    .await
+    .unwrap();
+
+    resumes(&a, conversation).await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    let branch = store::load_conversation(&a.pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is here")
+        .branch;
+
+    assert_eq!(asked.title, format!("Move {branch} to nuc-2?"));
+    assert_eq!(
+        asked.rows[0].question,
+        format!(
+            "Task 01 wants Windows. {B_MACHINE} is not awake, and the work moves there by \
+             itself once it is. nuc-2 is linked but not permitted."
+        ),
+    );
+
+    let sheet: verkstead_render::SetReading =
+        reading(&a.workbench, &format!("/api/ui/sets/{}", asked.set_id)).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+    assert_eq!(
+        sheet.questions[0]
+            .ask
+            .options
+            .iter()
+            .map(|option| option.text_html.as_str())
+            .collect::<Vec<_>>(),
+        ["Move to nuc-2", "Run it here"],
     );
 }
 

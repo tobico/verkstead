@@ -14234,6 +14234,45 @@ describe("a question set on the timeline", () => {
     expect(cards[2]!.querySelector(`.${timeline.deferred}`)).toBeNull();
   });
 
+  /// And one its lock said something about says that where a human's lock
+  /// says it was closed unanswered: the device it waited on answered, and the
+  /// work moved there (ADR-0029).
+  it("says what the lock on Verkstead's own set said", async () => {
+    const line = "nuc-win answered, so the work moved there.";
+    const asked: ConversationView = {
+      ...GRILLING,
+      timeline: GRILLING.timeline.map((event) =>
+        "QuestionSet" in event && event.QuestionSet.set_id === DEFERRED_SET.set_id
+          ? {
+              QuestionSet: {
+                ...event.QuestionSet,
+                by_verkstead: true,
+                standing: { LockedUnanswered: "2026-08-03T09:07:11.000Z" },
+                lock_line: line,
+              },
+            }
+          : event,
+      ),
+    };
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(asked)),
+      whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+      whenever(CAPTURE_OF_IT, json(CAPTURE)),
+      whenever(SCREEN_OF_IT, json(SCREEN)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.questionSet}`);
+    const card = [...container.querySelectorAll(`.${timeline.questionSet}`)][2]!;
+
+    expect(card.querySelector(`.${timeline.closed}`)!.textContent).toBe(line);
+    expect(card.textContent).not.toContain("closed unanswered");
+  });
+
   /// A column of blanks would read as a Set that was answered with nothing.
   it("draws no answers at all on one nothing has been decided about", async () => {
     theGrillingSets();

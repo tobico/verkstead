@@ -100,7 +100,12 @@ impl Work {
 
     /// Who the move is asked by: Verkstead, for this work.
     fn asking(&self, wants: Platform) -> store::AskedBy {
-        let wants = platform::os_word(wants, None);
+        self.asked_for(&platform::os_word(wants, None))
+    }
+
+    /// The same, the platform written as the human writes it.
+    fn asked_for(&self, wants: &str) -> store::AskedBy {
+        let wants = wants.to_owned();
 
         match self {
             Work::Task { label, .. } => store::AskedBy::Task {
@@ -157,12 +162,23 @@ enum Unplaced {
     NoneLinked,
 
     /// Members of it are linked and none is permitted: which they are, in the
-    /// order they would be tried. The one case the human is asked about rather
-    /// than told — see [`ask`].
+    /// order they would be tried. One of the two cases the human is asked about
+    /// rather than told — see [`ask`].
     NonePermitted(Vec<Device>),
 
-    /// Permitted members of it, none of which can take the work: what each
-    /// one's preflight found, in the Transfer dialog's words, which name it.
+    /// Permitted members of it, none able to take the work and at least one of
+    /// them asleep: those, in the order they are tried, and the members of it
+    /// nobody permitted, which the same Set asks about. The other case the
+    /// human is asked about — and the one that settles itself, the first of
+    /// the sleeping ones to wake taking the work.
+    Asleep {
+        asleep: Vec<Device>,
+        unpermitted: Vec<Device>,
+    },
+
+    /// Permitted members of it, every one awake and none of which can take the
+    /// work: what each one's preflight found, in the Transfer dialog's words,
+    /// which name it.
     NoneCanTake(Vec<String>),
 }
 
@@ -195,6 +211,18 @@ impl Unplaced {
                 }
 
                 said
+            }
+
+            Unplaced::Asleep { asleep, .. } => {
+                let awake = match asleep.as_slice() {
+                    [_] => "isn't awake",
+                    _ => "aren't awake",
+                };
+
+                format!(
+                    "{named} wants {wants}, but {} {awake}, so it's running here.",
+                    either(&names(asleep)),
+                )
             }
 
             Unplaced::NoneCanTake(found) => {
@@ -312,14 +340,24 @@ async fn place(state: &AppState, conversation_id: i64, work: Work, wants: Platfo
     match placing(state, conversation_id, &work, wants).await {
         Ok(placed) => placed,
 
-        Err(Unplaced::NonePermitted(devices)) => {
-            match ask(state, conversation_id, &work, wants, &devices).await {
+        Err(why @ (Unplaced::NonePermitted(_) | Unplaced::Asleep { .. })) => {
+            let (asleep, unpermitted) = match &why {
+                Unplaced::NonePermitted(unpermitted) => (&[][..], unpermitted.as_slice()),
+                Unplaced::Asleep {
+                    asleep,
+                    unpermitted,
+                } => (asleep.as_slice(), unpermitted.as_slice()),
+                _ => unreachable!("matched as one of the two above"),
+            };
+
+            match ask(state, conversation_id, &work, wants, asleep, unpermitted).await {
                 Ok(()) => {
                     tracing::info!(
                         conversation_id,
                         work = ?work,
                         wants = ?wants,
-                        "work wants a platform whose devices are linked and not permitted, so the \
+                        unplaced = ?why,
+                        "work wants a platform none of whose devices can be used yet, so the \
                          human is asked where it runs",
                     );
                     Placed::Asked
@@ -327,14 +365,7 @@ async fn place(state: &AppState, conversation_id: i64, work: Work, wants: Platfo
 
                 Err(error) => {
                     tracing::error!(error = ?error, conversation_id, work = ?work, "asking where work runs failed, so it runs here");
-                    unplaced(
-                        state,
-                        conversation_id,
-                        &work,
-                        wants,
-                        Unplaced::NonePermitted(devices),
-                    )
-                    .await
+                    unplaced(state, conversation_id, &work, wants, why).await
                 }
             }
         }
@@ -367,20 +398,24 @@ async fn unplaced(
     Placed::Here
 }
 
-/// Put the Question Set of Verkstead's own that asks where `work` runs, its
-/// platform's `devices` being linked and none of them permitted (ADR-0029,
-/// *Verkstead asks with a Question Set of its own*): one *Move to* for each, in
-/// the order they would be tried, and *Run it here*.
+/// Put the Question Set of Verkstead's own that asks where `work` runs, none of
+/// its platform's devices able to take it yet (ADR-0029, *Verkstead asks with a
+/// Question Set of its own*): the permitted ones `asleep`, and the `unpermitted`
+/// ones linked. One *Move to* for each unpermitted one, in the order they would
+/// be tried, and *Run it here*; nothing for a sleeping one, which the work moves
+/// to by itself once it wakes.
 ///
 /// On the Timeline, on the badge and on a phone as any Set is, and held on the
-/// drivers register while it is open — see [`crate::own_sets::wait`]. The
-/// answer is what launches the work — see [`answered`].
+/// drivers register while it is open — see [`crate::own_sets::wait`], which is
+/// also what watches for a sleeping one waking. The answer is what launches the
+/// work otherwise — see [`answered`].
 async fn ask(
     state: &AppState,
     conversation_id: i64,
     work: &Work,
     wants: Platform,
-    devices: &[Device],
+    asleep: &[Device],
+    unpermitted: &[Device],
 ) -> anyhow::Result<()> {
     let conversation = store::load_conversation(&state.pool, conversation_id)
         .await?
@@ -389,15 +424,19 @@ async fn ask(
     let set = asked(
         work,
         wants,
-        devices,
+        asleep,
+        unpermitted,
         &conversation.branch,
         &conversation.repo.name,
     );
 
+    let ids = |devices: &[Device]| devices.iter().map(|device| device.id.clone()).collect();
+
     let about = store::OwnAsking::Placing {
         work: work.placed(),
         wants: platform::os_word(wants, None),
-        moves: devices.iter().map(|device| device.id.clone()).collect(),
+        moves: ids(unpermitted),
+        waiting_on: ids(asleep),
     };
 
     let created = store::ask_on_our_own(&state.pool, conversation_id, &set, &about)
@@ -417,24 +456,55 @@ async fn ask(
 /// The Set that asks where `work` runs, in ADR-0029's words: what wants the
 /// platform and why its devices cannot be used yet, a verb on each button, and
 /// a title — which is what a phone is told — naming the branch and the device.
+///
+/// The sleeping devices first, then the unpermitted ones, where it is both.
 fn asked(
     work: &Work,
     wants: Platform,
-    devices: &[Device],
+    asleep: &[Device],
+    unpermitted: &[Device],
     branch: &str,
     project: &str,
 ) -> verkstead_schema::QuestionSet {
     use verkstead_schema::{Question, QuestionOption, QuestionSet};
 
     let wants = platform::os_word(wants, None);
-    let names = names(devices);
 
-    let linked = match devices {
-        [_] => "is linked but not permitted",
-        _ => "are linked but not permitted",
+    let mut text = format!("{} wants {wants}.", work.named());
+
+    if !asleep.is_empty() {
+        let names = names(asleep);
+
+        text.push_str(&match asleep {
+            [_] => format!(
+                " {} is not awake, and the work moves there by itself once it is.",
+                names[0],
+            ),
+            _ => format!(
+                " {} are not awake, and the work moves by itself to the first of them that is.",
+                both(&names),
+            ),
+        });
+    }
+
+    if !unpermitted.is_empty() {
+        let linked = match unpermitted {
+            [_] => "is linked but not permitted",
+            _ => "are linked but not permitted",
+        };
+
+        text.push_str(&format!(" {} {linked}.", both(&names(unpermitted))));
+    }
+
+    // Naming the device a press would move the work to, where there is one, and
+    // the one it is waiting on otherwise.
+    let title = if unpermitted.is_empty() {
+        format!("Run {branch} here, or wait for {}?", either(&names(asleep)))
+    } else {
+        format!("Move {branch} to {}?", either(&names(unpermitted)))
     };
 
-    let options = devices
+    let options = unpermitted
         .iter()
         .map(|device| format!("Move to {}", device.name))
         .chain(["Run it here".to_owned()])
@@ -448,11 +518,11 @@ fn asked(
         .collect();
 
     QuestionSet {
-        title: format!("Move {branch} to {}?", either(&names)),
+        title,
         preface: None,
         questions: vec![Question {
             label: QUESTION.to_owned(),
-            text: format!("{} wants {wants}. {} {linked}.", work.named(), both(&names)),
+            text,
             columns: Vec::new(),
             options,
             subquestions: Vec::new(),
@@ -565,7 +635,9 @@ pub(crate) async fn answered(
     response: &verkstead_schema::Response,
     held: Option<crate::drivers::Driving>,
 ) {
-    let store::OwnAsking::Placing { work, wants, moves } = asking;
+    let store::OwnAsking::Placing {
+        work, wants, moves, ..
+    } = asking;
     let work = Work::from_placed(work);
 
     let picked = picked(response).and_then(|n| usize::try_from(n).ok());
@@ -586,15 +658,7 @@ pub(crate) async fn answered(
                 }
             }
 
-            let by = match &work {
-                Work::Task { label, .. } => store::AskedBy::Task {
-                    label: label.clone(),
-                    wants: wants.clone(),
-                },
-                Work::Inline => store::AskedBy::Inline {
-                    wants: wants.clone(),
-                },
-            };
+            let by = work.asked_for(wants);
 
             if let Err(error) = crate::transfers::asked(state, conversation_id, device, by).await {
                 tracing::error!(error = ?error, conversation_id, device, "asking for the move the human picked failed");
@@ -643,6 +707,112 @@ pub(crate) async fn answered(
     }
 }
 
+/// Whether a sleeping device Set `set_id` of Verkstead's is waiting on has
+/// woken and taken the work, settling the Set: one look, made by the Set's
+/// wait — see [`crate::own_sets::wait`].
+///
+/// The devices are asked in the order they were tried, and the first whose
+/// preflight comes back clean takes the work (ADR-0029, *A device that answers
+/// before the human does settles the Set itself*): the Set is locked with a
+/// line saying that device answered, and the move is asked for by the ordinary
+/// **Transfer** on Verkstead's account, the tick already being the consent. The
+/// Set's hold on the drivers register is let go once it has been.
+///
+/// `true` where the Set is settled, by this or by anything else — answered or
+/// locked before the lock here could be taken — and there is nothing left to
+/// wait on. A device still asleep, or awake and lacking something, is `false`:
+/// the human may yet wake it or put it right, and *Run it here* is still there
+/// to press.
+pub(crate) async fn woke(
+    state: &AppState,
+    conversation_id: i64,
+    set_id: i64,
+    asking: &store::OwnAsking,
+) -> bool {
+    let store::OwnAsking::Placing {
+        work,
+        wants,
+        waiting_on,
+        ..
+    } = asking;
+    let work = Work::from_placed(work);
+
+    let Some(devices) = state.devices.as_ref() else {
+        return false;
+    };
+
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return true,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the work a sleeping device is awaited for failed");
+            return false;
+        }
+    };
+
+    let config = state.settings.config();
+
+    let mut answered = None;
+
+    for device in waiting_on {
+        match crate::preflight::of(Some(devices), &state.pool, &config, &conversation, device).await
+        {
+            Ok(reading) if reading.lacks.is_empty() => {
+                answered = Some((device, reading.device));
+                break;
+            }
+            Ok(_) => {}
+            Err(refusal) => tracing::error!(
+                conversation_id,
+                device,
+                "asking a sleeping device whether it is awake failed: {}",
+                refusal.saying,
+            ),
+        }
+    }
+
+    let Some((device, name)) = answered else {
+        return false;
+    };
+
+    let line = format!("{name} answered, so the work moved there.");
+
+    match store::lock_set_saying(&state.pool, &state.settlements, set_id, &line).await {
+        Ok(store::Locking::Locked(_)) => {}
+
+        // Settled some other way first — the human's answer is acted on where it
+        // was taken, and their lock is theirs.
+        Ok(_) => return true,
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, set_id, "locking a Set the device it waited on answered failed, so the work stays waiting");
+            return false;
+        }
+    }
+
+    state.nudges.announce(verkstead_schema::Nudge::Set {
+        conversation: conversation_id,
+    });
+
+    let held = state.own_holds.take(set_id);
+
+    match crate::transfers::asked(state, conversation_id, device, work.asked_for(wants)).await {
+        Ok(()) => tracing::info!(
+            conversation_id,
+            work = ?work,
+            device,
+            "a sleeping device the work was waiting on answered, so the work is being moved there",
+        ),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, device, "asking for the move to a device that woke failed");
+        }
+    }
+
+    drop(held);
+
+    true
+}
+
 /// Move the Conversation to the first permitted device of `wants` that can take
 /// it, or say why there is none.
 async fn placing(
@@ -675,7 +845,7 @@ async fn placing(
         }
     };
 
-    let candidates = candidates(
+    let (candidates, unpermitted) = candidates(
         devices.id(),
         born.as_ref().map(|born| born.device.as_str()),
         &ticked,
@@ -699,15 +869,7 @@ async fn placing(
             )
             .await
             {
-                Ok(reading) if reading.lacks.is_empty() => None,
-
-                Ok(reading) => Some(
-                    reading
-                        .lacks
-                        .iter()
-                        .map(|lacking| crate::transfers::lacks(lacking, &reading.device))
-                        .collect(),
-                ),
+                Ok(reading) => unclean(&reading),
 
                 Err(refusal) => {
                     tracing::error!(
@@ -716,15 +878,16 @@ async fn placing(
                         "the preflight of a device work could go to failed: {}",
                         refusal.saying,
                     );
-                    Some(vec![format!(
+                    Some(Unclean::Lacks(vec![format!(
                         "{} couldn't be asked what it has: {}",
                         member.name, refusal.saying,
-                    )])
+                    )]))
                 }
             }
         }
     })
-    .await?;
+    .await
+    .map_err(|found| none_clean(found, unpermitted))?;
 
     let asked =
         crate::transfers::asked(state, conversation_id, &chosen.device, work.asking(wants)).await;
@@ -758,6 +921,9 @@ fn wants_a_move(here: &str, wants: Platform) -> bool {
 /// tried: the permitted ones — the drafting device, then the ticks — whose OS
 /// word is that platform's, never `here`.
 ///
+/// And beside them the members of that platform nobody permitted, which a Set
+/// asking about the permitted ones being asleep asks about too.
+///
 /// `Err` where there are none, saying which: no member of that platform at
 /// all, or members of it that nobody permitted.
 fn candidates(
@@ -766,51 +932,112 @@ fn candidates(
     ticked: &[String],
     members: Vec<store::Member>,
     wants: Platform,
-) -> Result<Vec<store::Member>, Unplaced> {
+) -> Result<(Vec<store::Member>, Vec<Device>), Unplaced> {
     let (permitted, unpermitted): (Vec<_>, Vec<_>) =
         crate::transfers::placed_among(here, born, ticked, members)
             .into_iter()
             .filter(|placed| platform::os_mark(&placed.member.os) == Some(wants))
             .partition(|placed| placed.permitted);
 
+    let unpermitted: Vec<Device> = unpermitted
+        .into_iter()
+        .map(|placed| Device {
+            id: placed.member.device,
+            name: placed.member.name,
+        })
+        .collect();
+
     match (permitted.is_empty(), unpermitted.is_empty()) {
-        (false, _) => Ok(permitted.into_iter().map(|placed| placed.member).collect()),
+        (false, _) => Ok((
+            permitted.into_iter().map(|placed| placed.member).collect(),
+            unpermitted,
+        )),
         (true, true) => Err(Unplaced::NoneLinked),
-        (true, false) => Err(Unplaced::NonePermitted(
-            unpermitted
-                .into_iter()
-                .map(|placed| Device {
-                    id: placed.member.device,
-                    name: placed.member.name,
-                })
+        (true, false) => Err(Unplaced::NonePermitted(unpermitted)),
+    }
+}
+
+/// Why a permitted device cannot take the work, as its preflight reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Unclean {
+    /// It did not answer: asleep, which settles itself by its waking.
+    Asleep,
+
+    /// It answered, lacking these, in the Transfer dialog's words.
+    Lacks(Vec<String>),
+}
+
+/// What a preflight's `reading` stands in the way of the work, or `None` where
+/// nothing does.
+fn unclean(reading: &verkstead_render::Preflight) -> Option<Unclean> {
+    use verkstead_render::Lacking;
+
+    match reading.lacks.as_slice() {
+        [] => None,
+        [Lacking::Unreachable] => Some(Unclean::Asleep),
+        lacks => Some(Unclean::Lacks(
+            lacks
+                .iter()
+                .map(|lacking| crate::transfers::lacks(lacking, &reading.device))
                 .collect(),
         )),
     }
+}
+
+/// Why none of the permitted devices can take the work, out of what each one
+/// `found`: asleep where any of them is, the human being asked about those and
+/// the `unpermitted` ones together; and otherwise what each one lacks.
+fn none_clean(found: Vec<(&store::Member, Unclean)>, unpermitted: Vec<Device>) -> Unplaced {
+    let asleep: Vec<Device> = found
+        .iter()
+        .filter(|(_, unclean)| *unclean == Unclean::Asleep)
+        .map(|(member, _)| Device {
+            id: member.device.clone(),
+            name: member.name.clone(),
+        })
+        .collect();
+
+    if !asleep.is_empty() {
+        return Unplaced::Asleep {
+            asleep,
+            unpermitted,
+        };
+    }
+
+    Unplaced::NoneCanTake(
+        found
+            .into_iter()
+            .flat_map(|(_, unclean)| match unclean {
+                Unclean::Asleep => Vec::new(),
+                Unclean::Lacks(lacks) => lacks,
+            })
+            .collect(),
+    )
 }
 
 /// The first of `candidates` that `found` finds nothing in the way of, asked in
 /// turn rather than all at once: the first clean answer is the whole of what is
 /// wanted, and a device later in the list is no reason to wake one earlier.
 ///
-/// `Err` where every one found something, saying what.
+/// `Err` where every one found something, saying what of each.
 async fn first_clean<'a, F, Answering>(
     candidates: &'a [store::Member],
     mut found: F,
-) -> Result<&'a store::Member, Unplaced>
+) -> Result<&'a store::Member, Vec<(&'a store::Member, Unclean)>>
 where
     F: FnMut(&'a store::Member) -> Answering,
-    Answering: Future<Output = Option<Vec<String>>>,
+    Answering: Future<Output = Option<Unclean>>,
 {
     let mut findings = Vec::new();
 
     for member in candidates {
         match found(member).await {
             None => return Ok(member),
-            Some(said) => findings.extend(said),
+            Some(unclean) => findings.push((member, unclean)),
         }
     }
 
-    Err(Unplaced::NoneCanTake(findings))
+    Err(findings)
 }
 
 #[cfg(test)]
@@ -866,7 +1093,8 @@ mod tests {
             vec![member("ticked", "Windows"), member("born", "Windows 11")],
             Platform::Windows,
         )
-        .unwrap();
+        .unwrap()
+        .0;
 
         assert_eq!(devices(&found), ["born", "ticked"]);
     }
@@ -931,16 +1159,51 @@ mod tests {
         let ticked = ["wsl".to_owned(), "windows".to_owned(), "mac".to_owned()];
 
         assert_eq!(
-            devices(&candidates(HERE, None, &ticked, members(), Platform::Linux).unwrap()),
+            devices(
+                &candidates(HERE, None, &ticked, members(), Platform::Linux)
+                    .unwrap()
+                    .0
+            ),
             ["wsl"],
         );
         assert_eq!(
-            devices(&candidates(HERE, None, &ticked, members(), Platform::Windows).unwrap()),
+            devices(
+                &candidates(HERE, None, &ticked, members(), Platform::Windows)
+                    .unwrap()
+                    .0
+            ),
             ["windows"],
         );
         assert_eq!(
-            devices(&candidates(HERE, None, &ticked, members(), Platform::MacOs).unwrap()),
+            devices(
+                &candidates(HERE, None, &ticked, members(), Platform::MacOs)
+                    .unwrap()
+                    .0
+            ),
             ["mac"],
+        );
+    }
+
+    /// And the members of the platform nobody ticked come back beside the
+    /// permitted ones, for a Set about a sleeping one to ask about too.
+    #[test]
+    fn the_unticked_members_come_back_beside_the_candidates() {
+        let (found, unticked) = candidates(
+            HERE,
+            None,
+            &["ticked".to_owned()],
+            vec![member("ticked", "Windows"), member("unticked", "Windows")],
+            Platform::Windows,
+        )
+        .unwrap();
+
+        assert_eq!(devices(&found), ["ticked"]);
+        assert_eq!(
+            unticked,
+            [Device {
+                id: "unticked".to_owned(),
+                name: "unticked-machine".to_owned(),
+            }],
         );
     }
 
@@ -961,7 +1224,7 @@ mod tests {
             asked.push(member.device.clone());
             async move {
                 (member.device != "clean" && member.device != "after")
-                    .then(|| vec![format!("{} lacks", member.device)])
+                    .then(|| Unclean::Lacks(vec![format!("{} lacks", member.device)]))
             }
         })
         .await;
@@ -970,18 +1233,48 @@ mod tests {
         assert_eq!(asked, ["asleep", "lacking", "clean"]);
     }
 
-    /// And none clean is nowhere to go, with what each one found.
+    /// And none clean, every one awake, is nowhere to go, with what each one
+    /// found.
     #[tokio::test]
-    async fn no_clean_device_is_nowhere_to_go() {
-        let candidates = vec![member("asleep", "Windows"), member("lacking", "Windows")];
+    async fn no_clean_device_awake_is_nowhere_to_go() {
+        let candidates = vec![member("one", "Windows"), member("other", "Windows")];
+
+        let found = first_clean(&candidates, |member| async move {
+            Some(Unclean::Lacks(vec![format!("{} found", member.device)]))
+        })
+        .await
+        .unwrap_err();
 
         assert_eq!(
-            first_clean(&candidates, |member| async move {
-                Some(vec![format!("{} found", member.device)])
+            none_clean(found, vec![device("unticked")]),
+            Unplaced::NoneCanTake(vec!["one found".to_owned(), "other found".to_owned()]),
+        );
+    }
+
+    /// **One of them asleep is the human asked** (Set 1547, Q4): the sleeping
+    /// ones, whatever the awake ones lack, and the unticked ones beside them.
+    #[tokio::test]
+    async fn a_sleeping_device_among_none_clean_is_asked_about() {
+        let candidates = vec![member("lacking", "Windows"), member("asleep", "Windows")];
+
+        let found = first_clean(&candidates, |member| async move {
+            Some(match member.device.as_str() {
+                "asleep" => Unclean::Asleep,
+                _ => Unclean::Lacks(vec!["lacking found".to_owned()]),
             })
-            .await
-            .unwrap_err(),
-            Unplaced::NoneCanTake(vec!["asleep found".to_owned(), "lacking found".to_owned()]),
+        })
+        .await
+        .unwrap_err();
+
+        assert_eq!(
+            none_clean(found, vec![device("unticked")]),
+            Unplaced::Asleep {
+                asleep: vec![Device {
+                    id: "asleep".to_owned(),
+                    name: "asleep-machine".to_owned(),
+                }],
+                unpermitted: vec![device("unticked")],
+            },
         );
     }
 
@@ -1067,6 +1360,7 @@ mod tests {
         let set = asked(
             &task("03"),
             Platform::Windows,
+            &[],
             &[device("nuc-win")],
             "rate-limiting",
             "app",
@@ -1092,6 +1386,7 @@ mod tests {
         let set = asked(
             &Work::Inline,
             Platform::Windows,
+            &[],
             &[device("nuc-win"), device("nuc-2")],
             "rate-limiting",
             "app",
@@ -1109,6 +1404,68 @@ mod tests {
                 .map(|option| option.text.as_str())
                 .collect::<Vec<_>>(),
             ["Move to nuc-win", "Move to nuc-2", "Run it here"],
+        );
+        set.validate().expect("the Set keeps the question grammar");
+    }
+
+    /// **A sleeping device is waited on, not offered** (ADR-0029, the asleep
+    /// row): the Set says the work moves there by itself once it is awake, and
+    /// *Run it here* is its one Option.
+    #[test]
+    fn the_asleep_set_offers_run_it_here_alone() {
+        let set = asked(
+            &task("03"),
+            Platform::Windows,
+            &[device("nuc-win")],
+            &[],
+            "rate-limiting",
+            "app",
+        );
+
+        assert_eq!(set.title, "Run rate-limiting here, or wait for nuc-win?");
+        assert_eq!(
+            set.questions[0].text,
+            "Task 03 wants Windows. nuc-win is not awake, and the work moves there by itself \
+             once it is.",
+        );
+        assert_eq!(
+            set.questions[0]
+                .options
+                .iter()
+                .map(|option| (option.n, option.text.as_str()))
+                .collect::<Vec<_>>(),
+            [(1, "Run it here")],
+        );
+        set.validate().expect("the Set keeps the question grammar");
+    }
+
+    /// **Asleep and unticked together are one Set saying both** (Set 1547, Q3):
+    /// the sleeping one moving by itself, the other not permitted, with *Move
+    /// to* the unticked one against *Run it here*.
+    #[test]
+    fn asleep_and_unticked_together_are_one_set_saying_both() {
+        let set = asked(
+            &task("03"),
+            Platform::Windows,
+            &[device("nuc-win")],
+            &[device("nuc-2")],
+            "rate-limiting",
+            "app",
+        );
+
+        assert_eq!(set.title, "Move rate-limiting to nuc-2?");
+        assert_eq!(
+            set.questions[0].text,
+            "Task 03 wants Windows. nuc-win is not awake, and the work moves there by itself \
+             once it is. nuc-2 is linked but not permitted.",
+        );
+        assert_eq!(
+            set.questions[0]
+                .options
+                .iter()
+                .map(|option| option.text.as_str())
+                .collect::<Vec<_>>(),
+            ["Move to nuc-2", "Run it here"],
         );
         set.validate().expect("the Set keeps the question grammar");
     }

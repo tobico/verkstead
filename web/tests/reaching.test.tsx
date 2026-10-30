@@ -1209,6 +1209,7 @@ describe("a set on another device", () => {
     added: [],
     carried_on: false,
     by_verkstead: false,
+    lock_line: null,
   };
 
   /// The pane over that Set, drawn for the member the way the details pane

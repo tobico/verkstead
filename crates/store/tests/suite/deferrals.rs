@@ -12,9 +12,10 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_schema::{Answer, Question, QuestionOption, QuestionSet, Response};
 use verkstead_store::{
-    Ask, Event, OwnAsking, PlacedWork, Settlements, ask, ask_on_our_own, insert_response, lock_set,
-    open_database, open_set, own_asking, own_set_ids, own_sets, record_folded, register_repo,
-    start_conversation, submit_response, timeline, unfolded,
+    Ask, Event, Locking, OwnAsking, PlacedWork, Settlements, ask, ask_on_our_own, insert_response,
+    lock_line, lock_lines, lock_set, lock_set_saying, open_database, open_set, own_asking,
+    own_set_ids, own_sets, record_folded, register_repo, start_conversation, submit_response,
+    timeline, unfolded,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -335,6 +336,7 @@ async fn a_set_of_verksteads_own_is_never_folded() {
         },
         wants: "Windows".to_owned(),
         moves: vec!["0011223344556677889900aabbccddee".to_owned()],
+        waiting_on: vec!["ffeeddccbbaa99887766554433221100".to_owned()],
     };
     let own = ask_on_our_own(&pool, conversation, &set("placing"), &about)
         .await
@@ -363,4 +365,48 @@ async fn a_set_of_verksteads_own_is_never_folded() {
     assert_eq!(owned[0].asking, about);
     assert_eq!(owned[0].response, Some(picked()));
     assert!(!owned[0].locked);
+}
+
+/// **A lock Verkstead takes carries its line**, read back by the Set and by
+/// the Conversation; a human's lock carries none, and a Set already answered
+/// takes no lock and so no line.
+#[tokio::test]
+async fn a_lock_with_a_line_reads_back_with_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let conversation = conversation(&pool).await;
+    let settlements = Settlements::new(4);
+
+    let woke = asked(&pool, conversation, "woke", Ask::Deferred).await;
+    let pressed = asked(&pool, conversation, "pressed", Ask::Deferred).await;
+    let answered = asked(&pool, conversation, "answered", Ask::Deferred).await;
+
+    let line = "nuc-win answered, so the work moved there.";
+
+    assert!(matches!(
+        lock_set_saying(&pool, &settlements, woke, line)
+            .await
+            .unwrap(),
+        Locking::Locked(_),
+    ));
+    assert!(matches!(
+        lock_set(&pool, &settlements, pressed).await.unwrap(),
+        Locking::Locked(_),
+    ));
+    submit_response(&pool, &settlements, answered, &picked())
+        .await
+        .unwrap();
+    assert_eq!(
+        lock_set_saying(&pool, &settlements, answered, line)
+            .await
+            .unwrap(),
+        Locking::AlreadyAnswered,
+    );
+
+    assert_eq!(lock_line(&pool, woke).await.unwrap().as_deref(), Some(line));
+    assert_eq!(lock_line(&pool, pressed).await.unwrap(), None);
+    assert_eq!(lock_line(&pool, answered).await.unwrap(), None);
+    assert_eq!(
+        lock_lines(&pool, conversation).await.unwrap(),
+        [(woke, line.to_owned())].into_iter().collect(),
+    );
 }

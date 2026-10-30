@@ -252,6 +252,15 @@ pub struct Pace {
     /// home the moment it is made, and home coming back is heard on its Nudge
     /// stream. What this catches is a home that answered neither.
     pub reports: Duration,
+
+    /// And how often a sleeping device that an open placement Set of
+    /// Verkstead's is waiting on is asked whether it is awake — see
+    /// [`crate::own_sets::wait`].
+    ///
+    /// The backstop rather than the pace, as [`Pace::reports`] is: a dial
+    /// finding a member answering hurries the look. What this catches is a
+    /// machine that woke while nothing here happened to dial it.
+    pub wakes: Duration,
 }
 
 impl Default for Pace {
@@ -266,6 +275,7 @@ impl Default for Pace {
             stalls: crate::stalls::SWEPT_EVERY,
             places: crate::places::LOOKED_AT_EVERY,
             reports: crate::reporting::LOOKED_AT_EVERY,
+            wakes: crate::own_sets::WAKES_LOOKED_FOR_EVERY,
             joins: crate::joins::LOOKED_AT_EVERY,
             merges: crate::merges::SWEPT_EVERY,
             cleanup: crate::cleanup::SWEPT_EVERY,

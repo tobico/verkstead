@@ -118,7 +118,7 @@ use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, UnixTime};
 use sqlx::SqlitePool;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::server::TlsStream;
 use verkstead_render::{DeviceIdentity, LinkedDevice};
@@ -499,6 +499,11 @@ pub fn members_only(routes: Router, members: Members) -> Router {
 #[derive(Debug, Clone)]
 pub struct Members {
     recorded: Recorded,
+
+    /// Told whenever a dial finds a member answering, which is what a wait on a
+    /// sleeping device listens for between its own looks — see
+    /// [`Members::answered`].
+    answering: Arc<Notify>,
 }
 
 /// Where a membership's answers come from.
@@ -527,6 +532,7 @@ impl Members {
     pub fn none() -> Members {
         Members {
             recorded: Recorded::Stated(0),
+            answering: Arc::default(),
         }
     }
 
@@ -535,6 +541,7 @@ impl Members {
     pub fn stated(linked: usize) -> Members {
         Members {
             recorded: Recorded::Stated(linked),
+            answering: Arc::default(),
         }
     }
 
@@ -546,6 +553,7 @@ impl Members {
     pub fn recorded(pool: SqlitePool) -> Members {
         Members {
             recorded: Recorded::InTheStore(pool),
+            answering: Arc::default(),
         }
     }
 
@@ -804,13 +812,19 @@ impl Members {
         &self,
         linking: &verkstead_store::Linking,
     ) -> Result<bool> {
-        match &self.recorded {
+        let brought = match &self.recorded {
             Recorded::InTheStore(pool) => verkstead_store::refresh_member(pool, linking)
                 .await
                 .with_context(|| format!("recording what device {} says it is", linking.device)),
 
             Recorded::Stated(_) => Ok(true),
+        };
+
+        if let Ok(true) = brought {
+            self.answering.notify_waiters();
         }
+
+        brought
     }
 
     /// And mark one as answering nothing, which is what a dial that reached none
@@ -833,13 +847,29 @@ impl Members {
     /// which is what a dial that got through without reading its identity
     /// does — see [`verkstead_store::member_answering`].
     pub(crate) async fn answering(&self, device: &str) -> Result<()> {
-        match &self.recorded {
+        let marked = match &self.recorded {
             Recorded::InTheStore(pool) => verkstead_store::member_answering(pool, device)
                 .await
                 .with_context(|| format!("marking device {device} as answering again")),
 
             Recorded::Stated(_) => Ok(()),
-        }
+        };
+
+        self.answering.notify_waiters();
+
+        marked
+    }
+
+    /// Resolves the next time a dial finds a member answering — one dimmed
+    /// coming back, or any whose identity is read afresh.
+    ///
+    /// **A hurry, never the whole of a wait.** Something dials a member only
+    /// when the cluster is doing something, and a machine that wakes while
+    /// nothing here asks after it is found by whatever waits on it looking for
+    /// itself. What this saves is the rest of that wait, where something else
+    /// happened to find it first — see [`crate::own_sets::wait`].
+    pub(crate) fn answered(&self) -> tokio::sync::futures::Notified<'_> {
+        self.answering.notified()
     }
 
     /// And write down where one is reached directly, which is what a Keeper

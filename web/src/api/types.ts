@@ -5387,7 +5387,14 @@ carried_on: boolean,
  * Whether Verkstead asked it rather than an agent, which the card says
  * (ADR-0029, *Verkstead asks with a Question Set of its own*).
  */
-by_verkstead: boolean, };
+by_verkstead: boolean, 
+/**
+ * What its lock says, where it was locked with a line: drawn in place of
+ * *closed unanswered*, which is a human's lock and not this one. Only
+ * Verkstead locks with one — its own Set, settled by the device it was
+ * waiting on answering.
+ */
+lock_line: string | null, };
 
 /**
  * One Question as the page draws it, with its Sub-questions nested one level
@@ -6360,7 +6367,13 @@ addable: AddableView,
  * its own*). False out of [`set_view`]: whose Set it is is the record's to
  * say, and the caller's to fill in.
  */
-by_verkstead: boolean, };
+by_verkstead: boolean, 
+/**
+ * What its lock says, where it was locked with a line, which the sheet
+ * says in place of its sentence about a Set nobody answered. `None` out
+ * of [`set_view`], for [`SetView::by_verkstead`]'s reason.
+ */
+lock_line: string | null, };
 
 /**
  * The settings as the human has just written them.

@@ -135,6 +135,7 @@
           "by_verkstead": false,
           "carried_on": false,
           "id": 12,
+          "lock_line": null,
           "rows": [
             {
               "answer": "",
@@ -257,6 +258,7 @@
       "diff": [],
       "ending": null,
       "id": 5,
+      "lock_line": null,
       "postscript_html": null,
       "preface_html": "<p>We settled all four questions. Here is what I think we build.</p>\n",
       "project": "verkstead",

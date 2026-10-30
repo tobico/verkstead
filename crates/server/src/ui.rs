@@ -1044,6 +1044,14 @@ pub(crate) async fn set_reading(
             return Err(unavailable("The question set couldn't be read."));
         }
     };
+    // And what its lock says, where it was locked with a line.
+    let lock_line = match store::lock_line(&state.pool, id).await {
+        Ok(line) => line,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading what a Set's lock says failed");
+            return Err(unavailable("The question set couldn't be read."));
+        }
+    };
 
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
@@ -1073,6 +1081,7 @@ pub(crate) async fn set_reading(
     let view: SetView = match view {
         Ok(view) => SetView {
             by_verkstead,
+            lock_line,
             ..view
         },
         Err(error) => {
@@ -2739,6 +2748,16 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And what the locks that said something said, drawn in place of the
+    // human's lock's own words.
+    let mut lock_lines = match store::lock_lines(&state.pool, id).await {
+        Ok(lines) => lines,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what the Sets' locks say failed");
+            HashMap::new()
+        }
+    };
+
     let steer_pairings = match crate::profiles::keyed(state, steered(&timeline)).await {
         Ok(pairings) => pairings,
         Err(error) => {
@@ -2892,6 +2911,7 @@ pub(crate) async fn conversation_view(
                                 set_added.remove(&asked.set_id).unwrap_or_default(),
                                 carried.contains(&asked.set_id),
                                 own.contains(&asked.set_id),
+                                lock_lines.remove(&asked.set_id),
                             )
                         }
                         // A row of its own rather than an omission: the ask

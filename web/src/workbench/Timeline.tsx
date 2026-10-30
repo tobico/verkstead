@@ -2338,8 +2338,16 @@ function QuestionSet(props: {
         >
           <span class={styles.asker}>asked by Verkstead</span>
         </Show>
+        {/* What its lock said, where it said something: Verkstead's, settling
+            its own Set. In place of the human's lock's words, which would be
+            wrong about it. */}
         <Show when={locked()}>
-          <span class={styles.closed}>closed unanswered</span>
+          <Show
+            when={props.asked.lock_line}
+            fallback={<span class={styles.closed}>closed unanswered</span>}
+          >
+            {(line) => <span class={styles.closed}>{line()}</span>}
+          </Show>
         </Show>
         {/* And a Set still waiting says so in the disc the sidebar says it in,
             at the right edge of the title's line — the same mark, in the same

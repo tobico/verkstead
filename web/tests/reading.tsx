@@ -39,6 +39,7 @@ function row(id: string): QuestionSetEvent {
     added: [],
     carried_on: false,
     by_verkstead: false,
+    lock_line: null,
   };
 }
 

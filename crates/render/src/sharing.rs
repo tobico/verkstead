@@ -777,6 +777,7 @@ mod tests {
             added: Vec::new(),
             carried_on: false,
             by_verkstead: false,
+            lock_line: None,
         })
     }
 

@@ -2843,6 +2843,13 @@ pub struct QuestionSetEvent {
     /// (ADR-0029, *Verkstead asks with a Question Set of its own*).
     #[serde(default)]
     pub by_verkstead: bool,
+
+    /// What its lock says, where it was locked with a line: drawn in place of
+    /// *closed unanswered*, which is a human's lock and not this one. Only
+    /// Verkstead locks with one — its own Set, settled by the device it was
+    /// waiting on answering.
+    #[serde(default)]
+    pub lock_line: Option<String>,
 }
 
 /// A Question Set the Timeline cannot draw a table for, because this build
@@ -3328,6 +3335,7 @@ pub fn question_set_event(
     added: Vec<Added>,
     carried_on: bool,
     by_verkstead: bool,
+    lock_line: Option<String>,
 ) -> TimelineEvent {
     let response = match &standing {
         Standing::Answered(answered) => Some(&answered.response),
@@ -3344,6 +3352,7 @@ pub fn question_set_event(
         added,
         carried_on,
         by_verkstead,
+        lock_line,
     })
 }
 

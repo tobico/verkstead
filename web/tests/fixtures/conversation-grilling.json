@@ -153,6 +153,7 @@
         "by_verkstead": false,
         "carried_on": false,
         "id": 6,
+        "lock_line": null,
         "rows": [
           {
             "answer": "In-process, per instance.",
@@ -227,6 +228,7 @@
         "by_verkstead": false,
         "carried_on": false,
         "id": 7,
+        "lock_line": null,
         "rows": [
           {
             "answer": "",
@@ -273,6 +275,7 @@
         "by_verkstead": false,
         "carried_on": false,
         "id": 8,
+        "lock_line": null,
         "rows": [
           {
             "answer": "",

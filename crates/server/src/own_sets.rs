@@ -16,12 +16,22 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::sync::broadcast;
+use tokio::time::{Interval, MissedTickBehavior};
 use verkstead_schema::Response;
 
 use crate::drivers::Driving;
 use crate::{AppState, store};
+
+/// How often a sleeping device an open Set is waiting on is asked whether it is
+/// awake, where nothing hurries the look: **half a minute**.
+///
+/// A device woken by the human is usually woken to take this work, so the
+/// wait it is spared is the one they would notice; and each look is a dial at
+/// a machine that may still not answer, so it is not made every second.
+pub(crate) const WAKES_LOOKED_FOR_EVERY: Duration = Duration::from_secs(30);
 
 /// The open Sets of Verkstead's own being waited on, each holding a driver
 /// registration for its Conversation.
@@ -45,7 +55,7 @@ impl Holds {
     }
 
     /// Let go of Set `set_id`'s registration, handing it to the caller.
-    fn take(&self, set_id: i64) -> Option<Driving> {
+    pub(crate) fn take(&self, set_id: i64) -> Option<Driving> {
         self.holds().remove(&set_id)
     }
 }
@@ -57,6 +67,12 @@ impl Holds {
 /// the answer so that a launch here takes the place over without a gap. Locked
 /// unanswered, nothing is acted on and it is simply let go — heard off the
 /// settlements, which every lock and every answer announces.
+///
+/// **And a Set waiting on a sleeping device looks for it waking** — on
+/// [`Pace::wakes`](crate::Pace), and sooner where a dial finds a member
+/// answering — and the device answering cleanly settles the Set: see
+/// [`crate::placing::woke`]. The wait is the one place this is done, so a
+/// restart's resume reaching the Set again looks for the device again too.
 ///
 /// A Set already held is left as it is.
 pub(crate) async fn wait(state: &AppState, conversation_id: i64, set_id: i64) {
@@ -81,11 +97,44 @@ pub(crate) async fn wait(state: &AppState, conversation_id: i64, set_id: i64) {
         return;
     }
 
+    // What it asks about, where that is a sleeping device to look for.
+    let waking = match store::own_asking(&state.pool, set_id).await {
+        Ok(Some(asking)) => match &asking {
+            store::OwnAsking::Placing { waiting_on, .. } if !waiting_on.is_empty() => Some(asking),
+            store::OwnAsking::Placing { .. } => None,
+        },
+        Ok(None) => None,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id, "reading what a Set of Verkstead's waits on failed, so no device is looked for");
+            None
+        }
+    };
+
     let state = state.clone();
 
     tokio::spawn(async move {
+        let mut looks = tokio::time::interval(state.sessions.pace().wakes);
+        looks.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        // The first tick is now, and the device was asked as the Set went up.
+        looks.tick().await;
+
         loop {
-            match settlements.recv().await {
+            let received = tokio::select! {
+                received = settlements.recv() => received,
+
+                () = next_look(&state, &mut looks), if waking.is_some() => {
+                    let asking = waking.as_ref().expect("looked for only where there is one");
+
+                    if crate::placing::woke(&state, conversation_id, set_id, asking).await {
+                        return;
+                    }
+
+                    continue;
+                }
+            };
+
+            match received {
                 Ok(settled) if settled.set_id != set_id => continue,
                 Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => return,
@@ -106,6 +155,22 @@ pub(crate) async fn wait(state: &AppState, conversation_id: i64, set_id: i64) {
             }
         }
     });
+}
+
+/// The next moment to look for a sleeping device again: the paced clock's next
+/// tick, or a dial finding a member answering, whichever is first.
+async fn next_look(state: &AppState, looks: &mut Interval) {
+    let answered = async {
+        match state.devices.as_ref() {
+            Some(devices) => devices.membership().answered().await,
+            None => std::future::pending().await,
+        }
+    };
+
+    tokio::select! {
+        _ = looks.tick() => {}
+        () = answered => {}
+    }
 }
 
 /// Whether Set `set_id` is neither answered nor locked.
