@@ -44,6 +44,7 @@
 //! [`hidden`](./startup.js) is that whole reading, and the registration it was
 //! read out of is rewritten here at every launch while there is one.
 
+import { spawn } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -621,11 +622,22 @@ async function superseded(
 /// The copy is relaunched with the environment this run was given rather than
 /// the one its mount made of it — the same reading the sidecar is handed, see
 /// [`unmounted`]. The copy's own runtime puts its own mount in front again.
-/// At launch nothing has been started yet, so the exit is all there is to stop,
-/// and Electron's relaunch waits for this process to have gone, which is what
-/// lets the copy take the lock. Pressed on the Desktop page, the sidecar is
-/// running, and the quit is [`departing`]'s.
+/// At launch nothing has been started yet, so the exit is all there is to stop.
+/// Pressed on the Desktop page, the sidecar is running, and the quit is
+/// [`departing`]'s.
+///
+/// **A run out of an AppImage starts the copy itself**, detached, as
+/// electron-updater starts an Update's image, rather than through Electron's
+/// relaunch. That relaunch is made by a helper process running this run's own
+/// Electron out of the mount, after this process has gone — and with it the
+/// runtime's FUSE mount, so on a runner with FUSE the copy never started and
+/// logged nothing (Release run 41245808128). `--appimage-extract-and-run`,
+/// whose extracted tree outlives the exit, hid it. Started this way the copy
+/// comes up while this run still holds the lock, so it is told this pid and
+/// waits it out — see [`waitOut`]. Elsewhere Electron's relaunch waits for
+/// this process to have gone, which is what lets the copy take the lock.
 function handOver(exe: string, machine: { platform: NodeJS.Platform; env: Environment }): void {
+  const mounted = machine.env[APPDIR] !== undefined;
   const passed = unmounted(machine.env);
   for (const variable of stripped(machine.env, passed)) {
     if (passed[variable] === undefined) {
@@ -637,11 +649,24 @@ function handOver(exe: string, machine: { platform: NodeJS.Platform; env: Enviro
 
   // Told before the relaunch is asked for, which takes this environment as it
   // stands — see [`departing`].
-  if (child !== undefined) {
+  if (child !== undefined || mounted) {
     process.env[RELAUNCH] = String(process.pid);
   }
 
-  app.relaunch({ execPath: exe, args: relaunched(process.argv) });
+  if (mounted) {
+    const copy = spawn(exe, relaunched(process.argv), {
+      env: process.env,
+      stdio: "ignore",
+      detached: true,
+    });
+    copy.on("error", (trouble: unknown) => {
+      say(`${exe} could not be started — ${String(trouble)}`);
+    });
+    copy.unref();
+  } else {
+    app.relaunch({ execPath: exe, args: relaunched(process.argv) });
+  }
+
   if (child === undefined) {
     app.exit(0);
   } else {
@@ -827,7 +852,7 @@ async function run(): Promise<void> {
   // this launch's to read and nobody's after it, the sidecar included.
   const replaced = await waitOut(machine.env, { alive, taken: () => taken(HOST, PORT) });
   if (replaced !== undefined) {
-    say(`this launch replaces an app that updated itself, and waited ${replaced} ms for it to go`);
+    say(`this launch replaces an app that handed over to it, and waited ${replaced} ms for it to go`);
   }
   delete machine.env[RELAUNCH];
 
