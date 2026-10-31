@@ -189,8 +189,12 @@ impl Verkstead {
 
     /// How it dials, for the questions that are about a call rather than about
     /// a press.
+    ///
+    /// At the ordinary patience, not [`PATIENCE`]: every such call is to a
+    /// member that is there, and one cut short on a slow machine reads as that
+    /// member answering at none of its addresses.
     fn peers(&self) -> Peers {
-        Peers::of(self.device.clone(), self.members.clone()).waiting(PATIENCE)
+        Peers::of(self.device.clone(), self.members.clone())
     }
 
     /// What it says about itself, which is what an announcement carries.
