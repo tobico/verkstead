@@ -493,7 +493,7 @@ await until(`Verkstead ${HIGH} to say it started`, async () =>
 const written = said();
 for (const wanted of [
   `Verkstead ${HIGH} is downloaded, so the app quits and starts it`,
-  "this launch replaces an app that updated itself",
+  "this launch replaces an app that handed over to it",
 ]) {
   if (!written.includes(wanted)) {
     fail(`The app's log does not say "${wanted}".`);

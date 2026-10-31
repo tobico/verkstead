@@ -852,7 +852,7 @@ async function run(): Promise<void> {
   // this launch's to read and nobody's after it, the sidecar included.
   const replaced = await waitOut(machine.env, { alive, taken: () => taken(HOST, PORT) });
   if (replaced !== undefined) {
-    say(`this launch replaces an app that updated itself, and waited ${replaced} ms for it to go`);
+    say(`this launch replaces an app that handed over to it, and waited ${replaced} ms for it to go`);
   }
   delete machine.env[RELAUNCH];
 
