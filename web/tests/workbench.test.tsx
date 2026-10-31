@@ -17279,6 +17279,8 @@ const ROADMAP_PANE: RoadmapPane = {
     // makes this the pane as it has always looked.
     stands_on: null,
     platform: null,
+    // And every stage here, on this device.
+    device: null,
     html:
       stage.number === "04"
         ? null
@@ -17587,6 +17589,43 @@ describe("the stage list opened", () => {
 
     expect(said.previousElementSibling!.tagName).toBe("H2");
     expect(said.closest(`.${documents.document}`)).toBeNull();
+  });
+
+  /// And the device a stage is on wherever that is not this one, after its
+  /// platform — whoever moved it there, so a stage with no platform that was
+  /// moved by hand names its device too.
+  it("names the device a stage is on after its platform", async () => {
+    theStaged(
+      {},
+      whenever(
+        THE_ROADMAP,
+        json({
+          ...DECLARING,
+          stages: DECLARING.stages.map((stage, at) => ({
+            ...stage,
+            device: [null, "studio", null, "nuc-win"][at]!,
+          })),
+        } satisfies RoadmapPane),
+      ),
+    );
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.declares}`);
+
+    expect(
+      [...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`)].map(
+        (section) => section.querySelector(`.${documents.declares}`)!.textContent,
+      ),
+    ).toEqual([
+      "Stands on nothing",
+      "Stands on 01 · studio",
+      "Stands on 01, 02",
+      "Stands on 03 · on windows · nuc-win",
+    ]);
   });
 
   /// And a roadmap whose lines declare nothing — which is every roadmap written

@@ -6384,6 +6384,7 @@ impl StageStanding {
 pub struct StageStandings {
     stages: HashMap<String, HashMap<String, Held>>,
     planners: HashMap<String, StageStanding>,
+    away: HashMap<i64, String>,
 }
 
 impl StageStandings {
@@ -6427,6 +6428,26 @@ impl StageStandings {
     /// by the old tools, which is a stage with no Conversation to name.
     pub fn conversation(&self, roadmap: &str, label: &str) -> Option<i64> {
         self.held(roadmap, label).map(|held| held.conversation_id)
+    }
+
+    /// And **the device** that stage is on, by the name its member goes by,
+    /// wherever that is not here: read off this copy's tombstone of the stage —
+    /// the mark naming the device holding the live record — whoever moved it
+    /// there, a placement or a human's Transfer.
+    ///
+    /// `None` is a stage here, one with no row, and one moved to a device that is
+    /// no longer a member, there being no name left to say.
+    pub fn device(&self, roadmap: &str, label: &str) -> Option<&str> {
+        self.away
+            .get(&self.conversation(roadmap, label)?)
+            .map(String::as_str)
+    }
+
+    /// And the same with Conversation `conversation_id` on the device named
+    /// `device`, for the readings' tests — see [`StageStandings::from_rows`].
+    pub fn with_device(mut self, conversation_id: i64, device: &str) -> Self {
+        self.away.insert(conversation_id, device.to_owned());
+        self
     }
 
     /// What the record says about **the roadmap's own Conversation** — the one
@@ -6646,6 +6667,23 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
             None => standings.plan(&roadmap, standing),
         }
     }
+
+    // Where any of them has been moved to, by the name its member goes by: the
+    // tombstone names the device, and the membership names that.
+    let away: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT t.conversation_id, m.name
+         FROM transferred t
+         JOIN stage_roadmaps r ON r.conversation_id = t.conversation_id
+         JOIN conversations c ON c.id = t.conversation_id
+         JOIN members m ON m.device = t.device
+         WHERE c.repo_id = ? AND r.stage IS NOT NULL",
+    )
+    .bind(repo_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading which devices Repo {repo_id}'s roadmap stages are on"))?;
+
+    standings.away = away.into_iter().collect();
 
     Ok(standings)
 }

@@ -1753,6 +1753,10 @@ fn opened(
                     .as_ref()
                     .and_then(|declared| declared.platform)
                     .map(str::to_owned),
+                // Off the record rather than the line, and so whatever the
+                // roadmap declares: a stage moved by hand is on its device all
+                // the same.
+                device: record.device(name, entry.label).map(str::to_owned),
                 // Absent only where the roadmap names a brief nobody wrote, or
                 // one that will not be read. Both are the same nothing to draw,
                 // and the pane says so in words.
@@ -4225,6 +4229,43 @@ Turns this askance clone into Verkstead.
 
         assert_eq!(pane.stages[0].stands_on, Some(Vec::new()));
         assert_eq!(pane.stages[1].platform.as_deref(), Some("freebsd"));
+    }
+
+    /// The device a stage is on, wherever that is not here: off the record's
+    /// tombstone rather than the line, so a stage moved by hand names its device
+    /// as one the platform placed does, and a stage here says nothing more.
+    #[test]
+    fn the_pane_names_the_device_a_stage_is_on() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) — after 01 — on windows\n\
+             - [ ] 03: Implementation — [brief](03-implementation.md) — after 01\n",
+        );
+
+        let record = store::StageStandings::from_rows([
+            ("mvp", "01", store::StageStanding::Settled, false, 1),
+            ("mvp", "02", store::StageStanding::InFlight, false, 2),
+            ("mvp", "03", store::StageStanding::InFlight, false, 3),
+        ])
+        .with_device(2, "nuc-win")
+        .with_device(3, "studio");
+
+        let pane = repo.opened_with("mvp", &record).unwrap();
+
+        assert_eq!(
+            pane.stages[0].device, None,
+            "a stage here says nothing more"
+        );
+        assert_eq!(pane.stages[1].platform.as_deref(), Some("windows"));
+        assert_eq!(pane.stages[1].device.as_deref(), Some("nuc-win"));
+        assert_eq!(
+            pane.stages[2].platform, None,
+            "one with no platform, moved by hand,",
+        );
+        assert_eq!(pane.stages[2].device.as_deref(), Some("studio"));
     }
 
     /// The renderer in the page is loaded for the pane rather than for a stage,

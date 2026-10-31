@@ -56,6 +56,10 @@ function anchor(stage: StageDocument): string {
 /// A platform on its own is drawn on its own: within a roadmap that declares,
 /// such a line is undeclared, and saying so is the refusal's business rather than
 /// this pane's.
+///
+/// And last, the device the stage is on wherever that is not this one, by its
+/// name: off the record rather than the line, so a stage moved by hand names its
+/// device whatever its line declared.
 function declares(stage: StageDocument): string | undefined {
   const said: string[] = [];
 
@@ -75,6 +79,10 @@ function declares(stage: StageDocument): string | undefined {
   // the thing the human has to fix.
   if (stage.platform) {
     said.push(`on ${stage.platform}`);
+  }
+
+  if (stage.device) {
+    said.push(stage.device);
   }
 
   return said.length > 0 ? said.join(" · ") : undefined;

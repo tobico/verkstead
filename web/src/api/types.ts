@@ -6933,14 +6933,20 @@ stands_on: Array<string> | null,
  * windows` — or `null` where it names none, and null throughout a roadmap
  * that declares on no line at all, for the reason above.
  *
- * Shown beside what the stage stands on and acted on by nothing: placing a
- * stage on a device that matches is a follow-up once cluster mode has
- * landed. Independent of the line above it — a line of a declaring roadmap
- * whose whole tail is a platform is undeclared with a platform, because a
- * forgotten declaration hiding behind one is what the all-or-nothing rule
- * is for.
+ * Shown beside what the stage stands on, and what places the stage on a
+ * device of that platform when it starts. Independent of the line above
+ * it — a line of a declaring roadmap whose whole tail is a platform is
+ * undeclared with a platform, because a forgotten declaration hiding
+ * behind one is what the all-or-nothing rule is for.
  */
 platform: string | null, 
+/**
+ * The device the stage is on, by the name its member goes by, wherever
+ * that is not this one — `nuc-win` — or `null` for a stage here. Read off
+ * this device's tombstone of the stage, whoever moved it there, so a stage
+ * moved by hand names its device too, platform or none.
+ */
+device: string | null, 
 /**
  * The brief rendered and sanitized, or `null` where there is nothing to
  * render. Unlike a task's, that is not the ordinary end of a stage's life
