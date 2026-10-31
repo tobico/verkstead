@@ -17622,9 +17622,9 @@ describe("the stage list opened", () => {
       ),
     ).toEqual([
       "Stands on nothing",
-      "Stands on 01 · studio",
+      "Stands on 01 · running on studio",
       "Stands on 01, 02",
-      "Stands on 03 · on windows · nuc-win",
+      "Stands on 03 · on windows · running on nuc-win",
     ]);
   });
 

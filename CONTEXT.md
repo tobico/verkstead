@@ -4540,7 +4540,7 @@ the roadmap writes them, and `no dependencies` is a root. The line may name a
 **platform** as well, `on windows`. Verkstead reads all of it, and the roadmap's
 details pane says what each stage stands on, names its platform where it has
 one, and names the device it is on wherever that is not home — *on windows ·
-nuc-win* — read off home's tombstone of it, so a Stage moved by hand names its
+running on nuc-win* — read off home's tombstone of it, so a Stage moved by hand names its
 device too. **The roadmap is scheduled by what it declares, and placed by its
 platforms**: a Stage that declares one is made at home as every Stage is, and
 moved by the ordinary **Transfer** to the first permitted device of that
