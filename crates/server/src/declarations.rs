@@ -79,11 +79,10 @@ pub(crate) struct Reading<'a> {
     /// or `None` where it named none.
     ///
     /// There are three words it can be, `linux`, `macos` and `windows`, and this
-    /// is not where they are checked: see the module docs. Read, recorded and
-    /// shown, and acted on by nothing — placing a stage on a device that matches
-    /// is a follow-up once cluster mode has landed, and cluster mode's own
-    /// free-text *Linux (WSL)* for drawing an icon beside a hostname is a
-    /// different thing that neither of them should be made to serve.
+    /// is not where they are checked: see the module docs. What places the stage
+    /// as it starts — see [`crate::placing::stage`] — matched against a
+    /// device's OS word through [`crate::platform::os_mark`] rather than as a
+    /// string, so a *Linux (WSL)* member is a Linux device.
     pub(crate) platform: Option<&'a str>,
 }
 

@@ -8158,7 +8158,19 @@ async fn away(spill: &Path, live_on: &str) -> Away {
     let a = Verkstead::running_at(A, "exit 0", spill, reporting()).await;
     let b = Verkstead::running_at(B, "exit 0", spill, reporting()).await;
 
-    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+    away_between(a, b, B_OS, AWAY_ROADMAP, live_on).await
+}
+
+/// [`away`] between `a` and `b`, with B linked to A as running `b_os` and the
+/// roadmap on stage 01's branch being `roadmap`.
+async fn away_between(
+    a: Verkstead,
+    b: Verkstead,
+    b_os: &str,
+    roadmap_md: &str,
+    live_on: &str,
+) -> Away {
+    a.linked_to(&b.device, B_MACHINE, b_os, vec![b.at()]).await;
 
     let (machine, os) = this_machine();
     b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
@@ -8171,9 +8183,10 @@ async fn away(spill: &Path, live_on: &str) -> Away {
     git(&theirs, &["checkout", "-b", branch]);
     let roadmap = theirs.join("docs/roadmaps/rate-limiting");
     std::fs::create_dir_all(&roadmap).unwrap();
-    std::fs::write(roadmap.join("ROADMAP.md"), AWAY_ROADMAP).unwrap();
+    std::fs::write(roadmap.join("ROADMAP.md"), roadmap_md).unwrap();
     std::fs::write(roadmap.join("01-counter.md"), "# 01. Count the requests\n").unwrap();
     std::fs::write(roadmap.join("02-refusing.md"), "# 02. Refuse the rest\n").unwrap();
+    std::fs::write(roadmap.join("03-reporting.md"), "# 03. Report\n").unwrap();
     git(&theirs, &["add", "-A"]);
     git(&theirs, &["commit", "-m", "plan the rate-limiting roadmap"]);
     git(&theirs, &["checkout", "main"]);
@@ -8392,6 +8405,137 @@ async fn a_stage_that_settles_away_starts_the_next_at_home_and_says_so_where_it_
             .iter()
             .any(|notice| notice.contains("has started as a conversation of its own")),
         "and the tombstone, which nobody opens, is not where it was said",
+    );
+}
+
+/// A roadmap whose second stage wants Windows, and whose third stands on it.
+const WINDOWS_STAGE_ROADMAP: &str = "# Rate limiting roadmap\n\n## Stages\n\n\
+     - [ ] 01: Count the requests — [brief](01-counter.md) — no dependencies\n\
+     - [ ] 02: Refuse the rest — [brief](02-refusing.md) — after 01 — on windows\n\
+     - [ ] 03: Report — [brief](03-reporting.md) — after 02\n";
+
+/// What stands where claude goes for **a stage planned wherever it was placed**:
+/// a planning session says which stage it plans and on which machine, and stays
+/// up; anything else exits.
+fn plans_stages_on(machine: &str) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-stage*)
+    printf 'planning %s on {machine}\r\n' "$(git branch --show-current)"
+    sleep 300
+    ;;
+esac
+exit 0
+"#,
+    )
+}
+
+/// **A stage that wants Windows is made at home and moved there before its
+/// planning starts** (ADR-0029, *Placing declared work*), end to end: stage 01
+/// settles on the Windows device, home starts stage 02 — `on windows` — and
+/// moves it to the Windows device its roadmap may be transferred to, where its
+/// planning session runs; and when it settles there, home starts stage 03,
+/// which wants nothing, and plans it at home.
+#[tokio::test]
+async fn a_stage_that_wants_windows_is_planned_there_and_home_starts_the_one_after() {
+    let spill = tempfile::tempdir().unwrap();
+    let a =
+        Verkstead::running_on(A, &plans_stages_on("A"), spill.path(), reporting(), WINDOWS).await;
+    let b =
+        Verkstead::running_on(B, &plans_stages_on("B"), spill.path(), reporting(), WINDOWS).await;
+
+    let away = away_between(a, b, WINDOWS, WINDOWS_STAGE_ROADMAP, B).await;
+    let _holding = away.b.holding();
+    away.b.profile_called(ACCOUNT).await;
+
+    // The roadmap's tick, which its stages inherit.
+    store::permit_device(&away.a.pool, away.tombstone, B)
+        .await
+        .unwrap();
+
+    away.moves(store::Lifecycle::Done).await;
+
+    let started = away.b.notice_saying(away.copy, "Stage 02 of the").await;
+    assert!(
+        started.contains(&format!(
+            "It wants Windows, so it's moving to <strong>{B_MACHINE}</strong>."
+        )),
+        "the roadmap's Notice names the device the stage went to: {started}",
+    );
+
+    // Made at home, and moved: home holds the tombstone.
+    let stage_02 = away
+        .a
+        .own_rows()
+        .await
+        .into_iter()
+        .find(|row| row.branch == "roadmaps/rate-limiting/02-refusing")
+        .expect("home made stage 02")
+        .id;
+
+    let there = away
+        .a
+        .view_saying(stage_02, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let went = away.a.notice_saying(stage_02, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for stage 02, which wants Windows"),
+        "the stage's Timeline names the stage and the device: {went}",
+    );
+    assert!(
+        away.a.sessions_on(stage_02).await.is_empty(),
+        "and nothing ran at home before it moved",
+    );
+
+    away.b
+        .printed(there, "planning roadmaps/rate-limiting/02-refusing on B")
+        .await;
+
+    // Settling on the Windows device, it reports home, and home starts the stage
+    // that stands on it, here.
+    store::set_state(&away.b.pool, there, store::Lifecycle::Done)
+        .await
+        .unwrap();
+    away.b
+        .nudges
+        .announce(verkstead_schema::Nudge::Conversation {
+            conversation: there,
+        });
+
+    let deadline = Instant::now() + WAITING;
+    let stage_03 = loop {
+        if let Some(row) = away
+            .a
+            .own_rows()
+            .await
+            .into_iter()
+            .find(|row| row.branch == "roadmaps/rate-limiting/03-reporting")
+        {
+            break row.id;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "home never started stage 03 once stage 02 settled away",
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    };
+
+    away.a
+        .printed(
+            stage_03,
+            "planning roadmaps/rate-limiting/03-reporting on A",
+        )
+        .await;
+    assert!(
+        away.a.view(stage_03).await.transferring.is_none(),
+        "and a stage wanting no platform stays at home",
     );
 }
 

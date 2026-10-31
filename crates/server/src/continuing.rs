@@ -1331,16 +1331,19 @@ async fn start(
     // branch it is on was nobody's choice but this; and on the settled one,
     // because that is where the human was watching when it happened.
     say(state, id, &begun(&stage, &branch, &stands)).await;
+
+    // And where it runs, its line declaring a platform: placed once, here, before
+    // its planning session starts and before the roadmap is told it started, so
+    // that what the roadmap is told names the device it went to (ADR-0029,
+    // *Placing declared work*). After the stage's own Notices, which cross with
+    // it where it moves.
+    let placed = match stage.platform {
+        Some(wants) => crate::placing::stage(state, id, &stage.label, wants).await,
+        None => crate::placing::Placed::Here,
+    };
+
     brought
-        .started(
-            state,
-            settled,
-            &format!(
-                "Stage {} of the `{}` roadmap, *{}*, has started as a conversation of its own \
-                 on `{branch}`.",
-                stage.label, stage.roadmap, stage.title,
-            ),
-        )
+        .started(state, settled, &started_where(&stage, &branch, &placed))
         .await;
 
     tracing::info!(
@@ -1372,6 +1375,13 @@ async fn start(
     // reloaded.
     state.nudges.announce(Nudge::Conversations);
 
+    // Moving, the far end's arrival plans it, by the Resume it presses for
+    // itself; asked about, the human's answer does. Neither is this device's to
+    // launch, and nothing here is driving it.
+    if placed != crate::placing::Placed::Here {
+        return;
+    }
+
     // Taken here rather than by the planning, which is started from more than one
     // place and takes the registration from all of them — see
     // [`crate::runner::plan_stage`].
@@ -1383,6 +1393,30 @@ async fn start(
         cut_from,
         driving,
     ));
+}
+
+/// What the roadmap is told about `stage` starting on `branch`, and where it
+/// was `placed`.
+fn started_where(stage: &Stage, branch: &str, placed: &crate::placing::Placed) -> String {
+    let started = format!(
+        "Stage {} of the `{}` roadmap, *{}*, has started as a conversation of its own on \
+         `{branch}`.",
+        stage.label, stage.roadmap, stage.title,
+    );
+
+    let wants = stage
+        .platform
+        .map(|wants| crate::platform::os_word(wants, None));
+
+    match (placed, wants) {
+        (crate::placing::Placed::Moving { to }, Some(wants)) => {
+            format!("{started} It wants {wants}, so it's moving to **{to}**.")
+        }
+        (crate::placing::Placed::Asked, Some(wants)) => {
+            format!("{started} It wants {wants}, and waits for you to say where it runs.")
+        }
+        _ => started,
+    }
 }
 
 /// Where a stage's branch starts, and why it starts there.

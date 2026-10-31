@@ -1326,6 +1326,7 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         store::AskedBy::Session => MovedFor::Session,
         store::AskedBy::Task { label, wants } => MovedFor::Task { label, wants },
         store::AskedBy::Inline { wants } => MovedFor::Inline { wants },
+        store::AskedBy::Stage { label, wants } => MovedFor::Stage { label, wants },
     };
 
     // What this copy has to say for itself from here, which is where the work

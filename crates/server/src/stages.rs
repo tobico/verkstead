@@ -578,6 +578,12 @@ pub(crate) struct Stage {
 
     /// And the brief itself, which is what the stage's Conversation starts from.
     pub(crate) brief: String,
+
+    /// The platform its line declares — `on windows` — which is where the stage
+    /// is placed as it starts (ADR-0029, *Placing declared work*), or `None`
+    /// where it declares none. Read in the same reading as the rest of it,
+    /// off the top of the chain, and never kept: the stage is placed once.
+    pub(crate) platform: Option<crate::platform::Platform>,
 }
 
 impl Stage {
@@ -934,6 +940,7 @@ pub(crate) fn next_stage(
             label: entry.label.to_owned(),
             title: entry.title.to_owned(),
             brief: markdown,
+            platform: declarations::wants(entry.after),
         });
     }
 
@@ -2485,6 +2492,7 @@ fn offered(
         title: entry.title.to_owned(),
         brief_path,
         brief,
+        platform: declarations::wants(entry.after),
     };
 
     let branch = stage.branch();
@@ -4364,6 +4372,7 @@ Turns this askance clone into Verkstead.
             title: "Wrap-up".to_owned(),
             brief_path: "docs/roadmaps/mvp/04.md".to_owned(),
             brief: "# 04.\n".to_owned(),
+            platform: None,
         };
 
         assert_eq!(stage.branch(), "roadmaps/mvp/04");
@@ -5604,6 +5613,28 @@ Turns this askance clone into Verkstead.
         );
 
         assert_eq!(stage.label, "02");
+        assert_eq!(
+            stage.platform,
+            Some(crate::platform::Platform::Windows),
+            "and the stage carries the platform its line declares, which places it",
+        );
+    }
+
+    /// A line that declares no platform is a stage that wants none.
+    #[test]
+    fn a_stage_declaring_no_platform_wants_none() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) — after 01\n",
+        );
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+
+        let stage = only(repo.next("mvp", "grilling"), "stage 02 is the one left");
+
+        assert_eq!(stage.platform, None);
     }
 
     /// The end of a roadmap, which is where the whole pipeline stops of its own

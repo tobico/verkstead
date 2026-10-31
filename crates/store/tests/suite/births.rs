@@ -374,3 +374,34 @@ async fn a_move_made_for_an_inline_run_is_read_back_as_the_inline_runs() {
         Marked::Marked { by: placing },
     );
 }
+
+/// And one asked to place a roadmap stage is read back as that stage's.
+#[tokio::test]
+async fn a_move_made_for_a_stage_is_read_back_as_the_stages() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool).await;
+    let conversation = start(&pool, repo, "roadmaps/mvp/06-windows").await;
+
+    let onwards = Transferred {
+        device: ANOTHER_DEVICE.to_owned(),
+        id: 7,
+    };
+    let placing = AskedBy::Stage {
+        label: "06".to_owned(),
+        wants: "Windows".to_owned(),
+    };
+
+    ask_to_transfer(&pool, conversation, &onwards.device, placing.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        transfer_asked_by(&pool, conversation).await.unwrap(),
+        Some((onwards.device.clone(), placing.clone())),
+        "the request says which stage it is for",
+    );
+    assert_eq!(
+        transfer_made(&pool, conversation, &onwards).await.unwrap(),
+        Marked::Marked { by: placing },
+    );
+}
