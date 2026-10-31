@@ -367,10 +367,35 @@ impl Drop for Compiling {
     /// covers the other case: a size the human changed, where the old server is
     /// replaced while Verkstead carries on, and where nothing else would ever
     /// tell it to go.
+    ///
+    /// **And waited for until its port is free**, because the process waited
+    /// for is the wrapper the server was started in rather than the server: on
+    /// Linux it goes when bwrap goes, by `--die-with-parent`, but a moment
+    /// later than that. A server started again inside that moment — a new
+    /// Worktree, a Clear — finds the port held, says "Address in use" and
+    /// exits, and every session after it starts one of its own.
     fn drop(&mut self) {
         self.server.ended();
+
+        let began = std::time::Instant::now();
+
+        while std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, SCCACHE_PORT)).is_err()
+            && began.elapsed() < LETTING_GO
+        {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 }
+
+/// The port the Compile Server listens on, which is sccache's own default:
+/// nothing tells it another, and nothing tells a session's client one either.
+const SCCACHE_PORT: u16 = 4226;
+
+/// How long a stopped Compile Server is given to let go of [`SCCACHE_PORT`]
+/// before the next is started regardless. Bounded because the port held by
+/// something else entirely is no reason for a session to wait forever: that
+/// next server then fails to start, which is said, and sessions fall back.
+const LETTING_GO: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl BuildCache {
     /// The cache at `configured`, or at the XDG cache directory where nothing
