@@ -309,6 +309,8 @@ static UNHURRIED: LazyLock<Pace> = LazyLock::new(|| Pace {
     long_stop: Duration::from_secs(600),
     stalls: Duration::from_secs(600),
     places: Duration::from_secs(600),
+    reports: Duration::from_secs(600),
+    wakes: Duration::from_secs(600),
     merges: Duration::from_secs(600),
     cleanup: Duration::from_secs(600),
     evicting: Duration::from_secs(600),

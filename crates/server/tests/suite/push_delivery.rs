@@ -53,7 +53,7 @@ const SETTLING: Duration = Duration::from_millis(300);
 
 /// One push, as the push service received it.
 #[derive(Debug, Clone)]
-struct Received {
+pub(crate) struct Received {
     /// The last segment of the path it was posted to, which is the device it
     /// was meant for.
     device: String,
@@ -64,7 +64,7 @@ struct Received {
 
 /// A device as its browser would have described it, plus the private half the
 /// browser would have kept — which is what lets a test read a push back.
-struct Device {
+pub(crate) struct Device {
     name: String,
     endpoint: String,
     secret: SecretKey,
@@ -73,7 +73,7 @@ struct Device {
 
 impl Device {
     /// A device whose push service will answer `verdict` for it.
-    fn new(service: &str, verdict: &str, name: &str) -> Self {
+    pub(crate) fn new(service: &str, verdict: &str, name: &str) -> Self {
         // Deterministic rather than random, so a failure names the same device
         // twice running. Sixteen bytes because that is what the auth secret is.
         let auth: Vec<u8> = name.bytes().cycle().take(16).collect();
@@ -96,7 +96,7 @@ impl Device {
     }
 
     /// Read a push meant for this device, as its service worker would.
-    fn read(&self, push: &Received) -> serde_json::Value {
+    pub(crate) fn read(&self, push: &Received) -> serde_json::Value {
         let plain = web_push_native::decrypt(
             push.body.clone(),
             &self.secret,
@@ -113,7 +113,7 @@ impl Device {
 /// The path says what it should answer: `take` accepts, `gone` and `missing`
 /// are the two ways a service says a subscription is finished with, and `flaky`
 /// is a service having a bad day.
-async fn push_service() -> (String, Arc<Mutex<Vec<Received>>>) {
+pub(crate) async fn push_service() -> (String, Arc<Mutex<Vec<Received>>>) {
     let received = Arc::new(Mutex::new(Vec::new()));
 
     let app = Router::new()
@@ -201,7 +201,7 @@ async fn body_text(response: axum::response::Response) -> String {
 }
 
 /// Put a device on the list, the way the page does.
-async fn subscribe(app: &Router, device: &Device) {
+pub(crate) async fn subscribe(app: &Router, device: &Device) {
     let args = serde_json::json!({
         "endpoint": device.endpoint,
         "p256dh": device.p256dh(),
@@ -302,7 +302,7 @@ async fn lock(app: &Router, id: i64) {
 }
 
 /// Wait until the push service has taken `count` pushes, then hand them over.
-async fn pushes(received: &Arc<Mutex<Vec<Received>>>, count: usize) -> Vec<Received> {
+pub(crate) async fn pushes(received: &Arc<Mutex<Vec<Received>>>, count: usize) -> Vec<Received> {
     let deadline = tokio::time::Instant::now() + PATIENCE;
 
     loop {

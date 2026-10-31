@@ -141,6 +141,19 @@ read_only: Array<CompanionView>,
  */
 devices: Array<DeviceIdentity>, 
 /**
+ * Every device of the cluster, this one included, each with the platform
+ * its OS word marks it as and where it stands with this Conversation —
+ * which is what the direction chooser draws its ticks from, under a
+ * proposal that wants a platform.
+ *
+ * Beside `devices` rather than instead of it, because that list leaves
+ * out what is permitted already and the device the work is on, and the
+ * chooser has to tell *no Windows device is linked* from *the Windows
+ * device is permitted already*. `null` where this Verkstead is in no
+ * cluster, and on a share.
+ */
+cluster: Array<ClusterDevice> | null, 
+/**
  * What a read-write branch left blank comes to: the Conversation's own
  * branch, which is what the card's branch field is filled in with.
  */
@@ -1170,6 +1183,17 @@ parent: string,
  * where there is one — see [`Registration::author`].
  */
 author?: string, };
+
+/**
+ * One device of the cluster, as the direction chooser places the work by it.
+ */
+export type ClusterDevice = { device: DeviceIdentity, 
+/**
+ * The platform its OS word is the mark of — *Linux (WSL)* being a Linux —
+ * or `null` for a word this build has no mark for, which no proposal can
+ * want.
+ */
+platform: WantedPlatform | null, standing: DeviceStanding, };
 
 /**
  * One pull request the comment landed on.
@@ -2644,6 +2668,11 @@ version: string | null,
  * the same way rather than refusing the whole answer.
  */
 install: InstallKind | null, };
+
+/**
+ * Where one device of the cluster stands with a Conversation.
+ */
+export type DeviceStanding = "Tickable" | "Permitted" | "WorkIsHere";
 
 /**
  * The **Devices** list, as the Remote access pane reads it off this machine.
@@ -5116,7 +5145,13 @@ direction: Direction,
 /**
  * Why, rendered and sanitized by the server on the way out.
  */
-rationale_html: string, };
+rationale_html: string, 
+/**
+ * The platforms the work wants, each with its reason, in the order the
+ * agent wrote them. Empty where it wants none, and the chooser then draws
+ * nothing for them.
+ */
+wants: Array<WantView>, };
 
 /**
  * The agent's prose, rendered.
@@ -5347,7 +5382,20 @@ added: Array<Added>,
  * Whether answering it ended the session waiting on it and carried it on in
  * a sandbox with what was added — said at the end of the same line.
  */
-carried_on: boolean, };
+carried_on: boolean, 
+/**
+ * Whether Verkstead asked it rather than an agent, which the card says
+ * (ADR-0029, *Verkstead asks with a Question Set of its own*).
+ */
+by_verkstead: boolean, 
+/**
+ * What its lock says, where it was locked with a line: drawn in place of
+ * *closed unanswered*, which is a human's lock and not this one. Only
+ * Verkstead locks with one — its own Set, settled by the device it was
+ * waiting on answering. Or the line beside its answer, where Verkstead
+ * acted on it and the device it named was asleep.
+ */
+lock_line: string | null, };
 
 /**
  * One Question as the page draws it, with its Sub-questions nested one level
@@ -6313,7 +6361,21 @@ servers: Array<string>,
  * And the rest of what those menus offer: Repos to work alongside,
  * read-only Companions to open up, and devices to permit.
  */
-addable: AddableView, };
+addable: AddableView, 
+/**
+ * Whether Verkstead asked it rather than an agent, which the sheet says
+ * above the Questions (ADR-0029, *Verkstead asks with a Question Set of
+ * its own*). False out of [`set_view`]: whose Set it is is the record's to
+ * say, and the caller's to fill in.
+ */
+by_verkstead: boolean, 
+/**
+ * What its lock says, where it was locked with a line, which the sheet
+ * says in place of its sentence about a Set nobody answered — or the line
+ * beside its answer, which the sheet says above it. `None` out
+ * of [`set_view`], for [`SetView::by_verkstead`]'s reason.
+ */
+lock_line: string | null, };
 
 /**
  * The settings as the human has just written them.
@@ -6871,14 +6933,20 @@ stands_on: Array<string> | null,
  * windows` — or `null` where it names none, and null throughout a roadmap
  * that declares on no line at all, for the reason above.
  *
- * Shown beside what the stage stands on and acted on by nothing: placing a
- * stage on a device that matches is a follow-up once cluster mode has
- * landed. Independent of the line above it — a line of a declaring roadmap
- * whose whole tail is a platform is undeclared with a platform, because a
- * forgotten declaration hiding behind one is what the all-or-nothing rule
- * is for.
+ * Shown beside what the stage stands on, and what places the stage on a
+ * device of that platform when it starts. Independent of the line above
+ * it — a line of a declaring roadmap whose whole tail is a platform is
+ * undeclared with a platform, because a forgotten declaration hiding
+ * behind one is what the all-or-nothing rule is for.
  */
 platform: string | null, 
+/**
+ * The device the stage is on, by the name its member goes by, wherever
+ * that is not this one — `nuc-win` — or `null` for a stage here. Read off
+ * this device's tombstone of the stage, whoever moved it there, so a stage
+ * moved by hand names its device too, platform or none.
+ */
+device: string | null, 
 /**
  * The brief rendered and sanitized, or `null` where there is nothing to
  * render. Unlike a task's, that is not the ordinary end of a stage's life
@@ -8151,6 +8219,27 @@ export type Violation = {
  * the Set as a whole.
  */
 label?: string | null, message: string, };
+
+/**
+ * One platform the proposal wants, and why, as the chooser draws it.
+ */
+export type WantView = { platform: WantedPlatform, 
+/**
+ * The reason, rendered and sanitized as the rationale is — inline, because
+ * it finishes a sentence the chooser starts.
+ */
+for_html: string, };
+
+/**
+ * The three platforms work can want, in the words a stage line's `on <os>`
+ * spells them.
+ *
+ * The schema's own rather than the server's `Platform`, because this crate is
+ * built for wasm and cannot reach it; the server maps one onto the other where
+ * it needs to. An enum, so a fourth word is refused when the Set is read, as a
+ * fourth direction is.
+ */
+export type WantedPlatform = "linux" | "macos" | "windows";
 
 /**
  * And what a watcher says back up it.

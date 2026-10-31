@@ -23,8 +23,9 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use verkstead_render::{
-    AddableView, Added, AdditionMade, AdditionRemoved, AdditionView, CompanionAddition,
-    CompanionMode, CompanionUpgrade, ConversationSteered, Pick, SteerCompanionRefusal,
+    AddableView, Added, AdditionMade, AdditionRemoved, AdditionView, ClusterDevice,
+    CompanionAddition, CompanionMode, CompanionUpgrade, ConversationSteered, DeviceStanding, Pick,
+    SteerCompanionRefusal,
 };
 use verkstead_schema::Response;
 
@@ -862,18 +863,7 @@ pub(crate) async fn widened_with(
     pool: &sqlx::SqlitePool,
     set_id: i64,
 ) -> (Option<String>, Vec<String>) {
-    let title = match store::load_set(pool, set_id).await {
-        Ok(Some(stored)) => stored
-            .set
-            .readable(set_id)
-            .ok()
-            .map(|set| set.title.clone()),
-        Ok(None) => None,
-        Err(error) => {
-            tracing::error!(error = ?error, set_id, "reading the title of the Set a widened session is told about failed");
-            None
-        }
-    };
+    let title = titled(pool, set_id).await;
 
     let (added, repos) = match tokio::try_join!(
         store::set_additions(pool, set_id),
@@ -917,6 +907,24 @@ pub(crate) async fn widened_with(
         .collect();
 
     (title, added)
+}
+
+/// The title of Set `set_id`, where its body can be read: what a note carrying a
+/// session on names the Set by beside its id. A read that fails is said in the
+/// log and costs the note the title.
+pub(crate) async fn titled(pool: &sqlx::SqlitePool, set_id: i64) -> Option<String> {
+    match store::load_set(pool, set_id).await {
+        Ok(Some(stored)) => stored
+            .set
+            .readable(set_id)
+            .ok()
+            .map(|set| set.title.clone()),
+        Ok(None) => None,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id, "reading the title of the Set a carried-on session is told about failed");
+            None
+        }
+    }
 }
 
 /// A Repo by its registered name, or its id where it has none now.
@@ -1013,29 +1021,52 @@ pub(crate) async fn addable(state: &AppState, conversation: i64) -> Result<Addab
         }
     }
 
-    // Every member but the ones the agent may already go to — the drafting
-    // device, always, and the ticked — and never this one, which is where the
-    // work is.
-    let devices = match state.devices.as_ref() {
-        None => Vec::new(),
+    // The whole cluster, each device with where it stands, which is what the
+    // direction chooser ticks — in no cluster, nothing. And out of it what the
+    // menus offer: every member but the ones the agent may already go to — the
+    // drafting device, always, and the ticked — and never this one, which is
+    // where the work is.
+    let (devices, cluster) = match state.devices.as_ref() {
+        None => (Vec::new(), None),
         Some(devices) => {
             let born = store::birth(&state.pool, conversation).await?;
             let permitted = store::permitted_devices(&state.pool, conversation).await?;
+            let members = devices.membership().rows().await?;
 
-            devices
-                .membership()
-                .rows()
-                .await?
-                .iter()
-                .filter(|member| {
-                    member.device != devices.id()
-                        && born
+            // This device first, which is where the work is, and then every
+            // member in the order the membership lists them.
+            let here = ClusterDevice {
+                platform: crate::platform::os_mark(&devices.os()).map(wanted),
+                device: devices.this(),
+                standing: DeviceStanding::WorkIsHere,
+            };
+            let cluster: Vec<ClusterDevice> = std::iter::once(here)
+                .chain(members.iter().map(|member| {
+                    ClusterDevice {
+                        device: crate::device::presenting(member),
+                        platform: crate::platform::os_mark(&member.os).map(wanted),
+                        standing: if born
                             .as_ref()
-                            .is_none_or(|born| born.device != member.device)
-                        && !permitted.contains(&member.device)
-                })
-                .map(crate::device::presenting)
-                .collect()
+                            .is_some_and(|born| born.device == member.device)
+                            || permitted.contains(&member.device)
+                        {
+                            DeviceStanding::Permitted
+                        } else {
+                            DeviceStanding::Tickable
+                        },
+                    }
+                }))
+                .collect();
+
+            let tickable = cluster
+                .iter()
+                .filter(|member| member.standing == DeviceStanding::Tickable)
+                .map(|member| member.device.clone())
+                .collect();
+
+            // A device with no members is in no cluster: there is nowhere
+            // else for the work to go.
+            (tickable, (!members.is_empty()).then_some(cluster))
         }
     };
 
@@ -1043,8 +1074,18 @@ pub(crate) async fn addable(state: &AppState, conversation: i64) -> Result<Addab
         repos,
         read_only,
         devices,
+        cluster,
         branch: record.branch,
     })
+}
+
+/// The schema's word for a platform, which is what a proposal wants by.
+fn wanted(platform: crate::platform::Platform) -> verkstead_schema::WantedPlatform {
+    match platform {
+        crate::platform::Platform::Linux => verkstead_schema::WantedPlatform::Linux,
+        crate::platform::Platform::MacOs => verkstead_schema::WantedPlatform::Macos,
+        crate::platform::Platform::Windows => verkstead_schema::WantedPlatform::Windows,
+    }
 }
 
 /// Whether a Repo is on the Conversation already: `Some(None)` for its own,

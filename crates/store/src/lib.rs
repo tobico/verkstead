@@ -23,8 +23,8 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
-use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
+use sqlx::{SqliteConnection, SqlitePool};
 use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
@@ -44,10 +44,12 @@ mod deliveries;
 mod endings;
 mod escalations;
 mod joins;
+mod lock_lines;
 mod mcp_servers;
 mod members;
 mod memos;
 mod migrations;
+mod own_sets;
 mod pairings;
 mod pauses;
 mod pending_steers;
@@ -68,6 +70,7 @@ pub mod ranks;
 /// the newest write winning and a removal final (ADR-0028). Public as a module
 /// because a kind is declared by whoever owns it — see [`replicated::Kind`].
 pub mod replicated;
+mod reports;
 mod repos;
 mod session_endings;
 mod session_names;
@@ -118,16 +121,16 @@ pub use conversations::{
     Investigated, Joined, Landed, Landing, Lifecycle, Planned, Process, Queued, Rebuilding,
     Resolving, RoadmapStage, Role, RowState, SetOnTimeline, Settling, StageOf, StageStanding,
     StageStandings, Staged, Steer, Steering, Switched, Taking, TimelineEvent, Work,
-    adopted_pull_request, adopting, ask, asked_from, closable, close_conversation,
+    adopted_pull_request, adopting, ask, ask_on_our_own, asked_from, closable, close_conversation,
     conversation_at_worktree, conversation_branch, conversation_rank, conversation_ranks,
     conversations, driven_roadmaps, fill_target, follow_branch, follow_up_done, follow_up_over,
     hold_pull_request, implement_again, investigation_over, join_queue, last_batch_proposal,
     last_proposal, load_conversation, note, open_set, opened_at, pick_direction, picked_direction,
-    process, queue_to_join, rank_conversation, record_backlog, record_handoff, record_roadmap,
-    recorded_conversations, recorded_worktrees, reinvent_branch, rename_branch, resolve_conflicts,
-    roadmap_planner, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
-    set_implementation_pairing, set_process, set_review_pairing, set_state, set_target,
-    settle_naming, skip_review, stacks_on, stage_chain, stage_roadmap, stage_standings,
+    picked_wants, process, queue_to_join, rank_conversation, record_backlog, record_handoff,
+    record_roadmap, recorded_conversations, recorded_worktrees, reinvent_branch, rename_branch,
+    resolve_conflicts, roadmap_planner, save_brief, set_asked_from, set_base_commit,
+    set_grilling_pairing, set_implementation_pairing, set_process, set_review_pairing, set_state,
+    set_target, settle_naming, skip_review, stacks_on, stage_chain, stage_roadmap, stage_standings,
     start_adoption, start_conversation, start_grilling, start_implementing, start_investigating,
     start_stage, start_tinkering, start_unnamed_conversation, state, steer_conversation,
     switch_repo, take_up, target, timeline, unfinished_conversations, waiting, work_on_repo,
@@ -141,6 +144,7 @@ pub use joins::{
     held_join_count, held_joins, hold_join, let_go_of_expired_joins, let_go_of_join,
     refuse_asked_join,
 };
+pub use lock_lines::{lock_line, lock_lines};
 pub use mcp_servers::{
     attach_mcp_server, attach_mcp_server_to_draft, detach_mcp_server, detach_mcp_server_from_draft,
     mcp_servers,
@@ -159,6 +163,9 @@ pub use memos::{
 pub use migrations::{
     rank_the_conversations, record_the_repo_authors, renumbered_profiles, renumbering_done,
     stamp_the_births, stamp_the_profiles,
+};
+pub use own_sets::{
+    OwnAsking, OwnSet, PlacedWork, building_since, own_asking, own_set_ids, own_sets,
 };
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
@@ -184,6 +191,10 @@ pub use pull_requests::{
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
     store_subscription, vapid_keys,
+};
+pub use reports::{
+    Followed, JoinedAway, LiveStanding, away_from_home, follow, live_standing,
+    stages_away_from_home, tell, told,
 };
 pub use repos::{
     ConflictResolution, Repo, Repointing, Unregistering, load_repo, recorded_repos, register_repo,
@@ -647,16 +658,67 @@ pub async fn lock_set(
     settlements: &Settlements,
     set_id: i64,
 ) -> Result<Locking> {
+    locking(pool, settlements, set_id, None).await
+}
+
+/// Close a Set the way [`lock_set`] does, the lock carrying `line` — what
+/// happened that closed it, which the sheet and the Timeline say in place of
+/// the human's lock's own sentence. See [`lock_lines`].
+///
+/// Verkstead's, where something settles one of its own Sets without anybody
+/// answering it: the device it was waiting on answered, say.
+pub async fn lock_set_saying(
+    pool: &SqlitePool,
+    settlements: &Settlements,
+    set_id: i64,
+    line: &str,
+) -> Result<Locking> {
+    locking(pool, settlements, set_id, Some(line)).await
+}
+
+/// Put `line` beside the answer to Set `set_id`, where acting on that answer
+/// did not go as it said: drawn where a lock's line is, the Set staying
+/// answered. See [`lock_lines`].
+///
+/// Verkstead's, where *Move to* named a device that was ticked and then did
+/// not answer, so the work waits on it under a Set of its own.
+///
+/// `false`, and nothing written, where the Set has no Response or already has
+/// a line.
+pub async fn answered_saying(pool: &SqlitePool, set_id: i64, line: &str) -> Result<bool> {
+    lock_lines::beside_answer(pool, set_id, line).await
+}
+
+/// Either of the two above, the line written in the transaction that takes the
+/// lock.
+async fn locking(
+    pool: &SqlitePool,
+    settlements: &Settlements,
+    set_id: i64,
+    line: Option<&str>,
+) -> Result<Locking> {
     if !set_exists(pool, set_id).await? {
         return Ok(Locking::NoSuchSet);
     }
 
-    let Some(locked) = insert_lock(pool, set_id).await? else {
+    let mut tx = writing(pool, "locking a Question Set").await?;
+
+    let Some(locked) = insert_lock(&mut tx, set_id).await? else {
+        drop(tx);
+
         return Ok(match load_response(pool, set_id).await? {
             Some(_) => Locking::AlreadyAnswered,
             None => Locking::AlreadyLocked,
         });
     };
+
+    if let Some(line) = line {
+        lock_lines::record(&mut tx, set_id, line).await?;
+    }
+
+    tx.commit()
+        .await
+        .with_context(|| format!("locking Question Set {set_id}"))?;
 
     settlements.announce(settled_set(pool, set_id).await?);
 
@@ -830,6 +892,14 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // prompt. It hangs off a Set for a lock's reason, said again there.
     deferrals::apply_schema(pool).await?;
 
+    // And which Sets Verkstead asked itself, and what about. It hangs off a Set
+    // for the same reason.
+    own_sets::apply_schema(pool).await?;
+
+    // And what a lock said, where it said something: Verkstead's, closing one
+    // of its own Sets. It hangs off the lock for the same reason again.
+    lock_lines::apply_schema(pool).await?;
+
     // And which Sets' Answers have reached a session at all, which the folding
     // record cannot say of a Blocking Ask: it has no row there, because a wait
     // that ends delivers what it was holding — and one that is killed does not.
@@ -868,6 +938,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // And the move somebody has pressed for and nothing has made yet, which
     // hangs off a Conversation the same way — see [`transfers`].
     transfers::apply_schema(pool).await?;
+
+    // And what a stage away from home last told its home, which hangs off the
+    // Conversation beside those two — see [`reports`].
+    reports::apply_schema(pool).await?;
 
     // And what each Repo was last grilled with, so a Conversation started on
     // it arrives with every picker filled. After the Conversations only for
@@ -1172,7 +1246,7 @@ pub async fn insert_response_with_checkouts(
 /// been locked. Guarded inside the statement for the reason
 /// [`insert_response`] is — an answered Set must not also become a locked
 /// one.
-async fn insert_lock(pool: &SqlitePool, set_id: i64) -> Result<Option<SetLocked>> {
+async fn insert_lock(connection: &mut SqliteConnection, set_id: i64) -> Result<Option<SetLocked>> {
     let row: Option<(String,)> = sqlx::query_as(
         "INSERT INTO archivings (set_id, archived_at)
          SELECT ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -1182,7 +1256,7 @@ async fn insert_lock(pool: &SqlitePool, set_id: i64) -> Result<Option<SetLocked>
     )
     .bind(set_id)
     .bind(set_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *connection)
     .await
     .with_context(|| format!("locking Question Set {set_id}"))?;
 

@@ -17,11 +17,14 @@
 use std::path::Path;
 
 use sqlx::SqlitePool;
-use verkstead_schema::{Direction, Proposal, Question, QuestionOption, QuestionSet, Response};
+use verkstead_schema::{
+    Direction, Proposal, Question, QuestionOption, QuestionSet, Response, Want, WantedPlatform,
+};
 use verkstead_store::{
-    Ask, Directing, Event, Implementing, Lifecycle, Proposed, Settlements, Submission, ask,
-    load_conversation, open_database, pick_direction, record_handoff, register_repo, save_brief,
-    start_conversation, start_grilling, start_implementing, submit_response, timeline,
+    Ask, Directing, Event, Implementing, Lifecycle, OwnAsking, PlacedWork, Proposed, Settlements,
+    Submission, ask, ask_on_our_own, building_since, load_conversation, open_database, own_sets,
+    pick_direction, picked_wants, record_handoff, register_repo, save_brief, start_conversation,
+    start_grilling, start_implementing, submit_response, timeline,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -102,6 +105,7 @@ fn proposing(direction: Direction) -> QuestionSet {
         proposal: Some(Proposal {
             direction,
             rationale: "Six changes, each independently testable.".to_owned(),
+            wants: Vec::new(),
         }),
         project: None,
         branch: None,
@@ -298,6 +302,55 @@ async fn a_grillings_tail_landing_is_what_starts_the_work() {
             "and the pick still stands: it is what the work is being built as",
         );
     }
+}
+
+/// **A round of building begins at the move into Implementing**, which is what
+/// a Set of Verkstead's own about a task is read against (ADR-0029): a backlog
+/// numbered from `01` again is another round, and its task 03 is not the last
+/// one's. None before the work is first built, and a Set asked after the move
+/// hangs on a later Event than the move.
+#[tokio::test]
+async fn a_round_of_building_begins_at_the_move_into_implementing() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(building_since(&pool, id).await.unwrap(), None);
+
+    pick_direction(&pool, id, Direction::TaskList)
+        .await
+        .unwrap();
+    start_implementing(&pool, id).await.unwrap();
+
+    let since = building_since(&pool, id)
+        .await
+        .unwrap()
+        .expect("the move into Implementing is on the Timeline");
+
+    ask_on_our_own(
+        &pool,
+        id,
+        &proposing(Direction::TaskList),
+        &OwnAsking::Placing {
+            work: PlacedWork::Task {
+                number: 3,
+                label: "03".to_owned(),
+            },
+            wants: "Windows".to_owned(),
+            moves: Vec::new(),
+            waiting_on: Vec::new(),
+        },
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation is there to ask from");
+
+    let own = own_sets(&pool, id).await.unwrap();
+    assert_eq!(own.len(), 1);
+    assert!(
+        own[0].event_id > since,
+        "the Set is asked after the round began: {} against {since}",
+        own[0].event_id,
+    );
 }
 
 /// Nothing but a grilling has a tail to land. A Conversation that has moved on —
@@ -783,5 +836,85 @@ async fn a_conversation_caught_choosing_a_direction_comes_out_closed() {
         moves(&pool, id).await,
         [Lifecycle::Grilling, Lifecycle::Closed],
         "the retired move is off the Timeline and the close is on it",
+    );
+}
+
+/// **What the picked proposal wants is read off the Set it was picked on**
+/// (ADR-0029, *Placing declared work*): the newest proposal picked on, an
+/// earlier pick's wants and a proposal sent back without a pick counting for
+/// nothing, and an ordinary Set never.
+#[tokio::test]
+async fn the_picked_proposals_wants_are_the_ones_read() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(
+        picked_wants(&pool, id).await.unwrap(),
+        [],
+        "nothing picked wants nothing",
+    );
+
+    let wanting = |platforms: &[WantedPlatform]| {
+        let mut set = proposing(Direction::Inline);
+        set.proposal.as_mut().unwrap().wants = platforms
+            .iter()
+            .map(|platform| Want {
+                platform: *platform,
+                reason: "Its installer is an MSI.".to_owned(),
+            })
+            .collect();
+        set
+    };
+
+    let first = ask(&pool, id, &wanting(&[WantedPlatform::Linux]), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
+    answer(&pool, first.id).await;
+
+    assert_eq!(
+        picked_wants(&pool, id).await.unwrap(),
+        [WantedPlatform::Linux]
+    );
+
+    let second = ask(
+        &pool,
+        id,
+        &wanting(&[WantedPlatform::Windows]),
+        Ask::Blocking,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    answer(&pool, second.id).await;
+
+    // Sent back without a pick, and an ordinary Set after it: neither is a
+    // proposal picked on.
+    let sent_back = ask(&pool, id, &wanting(&[WantedPlatform::Macos]), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
+    answered(
+        &pool,
+        sent_back.id,
+        &Response::from_yaml("answers:\n  - label: Q14\n    unanswered: true\n").unwrap(),
+    )
+    .await;
+
+    let plain = ask(&pool, id, &ordinary(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
+    answered(
+        &pool,
+        plain.id,
+        &Response::from_yaml("answers:\n  - label: Q14\n    unanswered: true\n").unwrap(),
+    )
+    .await;
+
+    assert_eq!(
+        picked_wants(&pool, id).await.unwrap(),
+        [WantedPlatform::Windows],
+        "the latest pick's proposal is the one read",
     );
 }

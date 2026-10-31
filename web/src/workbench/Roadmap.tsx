@@ -48,14 +48,21 @@ function anchor(stage: StageDocument): string {
 /// What the stage's own line in `ROADMAP.md` declared, in words: what it stands
 /// on, and the platform it wants where it names one.
 ///
-/// Nothing at all where the line declared neither, which is every line of every
+/// Neither where the line declared neither, which is every line of every
 /// roadmap written before there was anything to declare — the server judges the
 /// whole file before it reads a line of it, so such a roadmap arrives with
-/// nothing declared on any line and its pane reads exactly as it always did.
+/// nothing declared on any line.
 ///
 /// A platform on its own is drawn on its own: within a roadmap that declares,
 /// such a line is undeclared, and saying so is the refusal's business rather than
 /// this pane's.
+///
+/// And last, the device the stage is on wherever that is not this one — *running
+/// on nuc-win* — off the record rather than the line, so a stage moved by hand
+/// names its device whatever its line declared, in an undeclared roadmap too.
+/// Said as where it runs rather than bare, because a bare name after *Stands on
+/// 01* reads as one more stage it stands on. Nothing at all only where there is
+/// none of the three to say.
 function declares(stage: StageDocument): string | undefined {
   const said: string[] = [];
 
@@ -75,6 +82,10 @@ function declares(stage: StageDocument): string | undefined {
   // the thing the human has to fix.
   if (stage.platform) {
     said.push(`on ${stage.platform}`);
+  }
+
+  if (stage.device) {
+    said.push(`running on ${stage.device}`);
   }
 
   return said.length > 0 ? said.join(" · ") : undefined;

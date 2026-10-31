@@ -49,13 +49,22 @@ pub(crate) enum Occasion {
     /// Answering this Set added to the sandbox, so the session waiting on it was
     /// ended to be carried on in a wider one.
     Widened(i64),
+
+    /// This Set of Verkstead's own, asked for the session's call to move the
+    /// work, was answered *Keep it here*: the session that called was ended for
+    /// the move and is carried on where it is (ADR-0029).
+    Kept(i64),
 }
 
 impl Occasion {
     /// The occasion a row of the record names — see
     /// [`store::Continued::widened_by`].
     pub(crate) fn of(continued: &store::Continued) -> Self {
-        continued.widened_by.map_or(Self::Arrived, Self::Widened)
+        match (continued.widened_by, continued.kept_here_by) {
+            (Some(set), _) => Self::Widened(set),
+            (None, Some(set)) => Self::Kept(set),
+            (None, None) => Self::Arrived,
+        }
     }
 
     /// The opening clause both outcomes say it in.
@@ -65,6 +74,10 @@ impl Occasion {
             Self::Widened(set) => format!(
                 "Answering question set {set} added to the sandbox, so the session waiting on \
                  it was ended part way through"
+            ),
+            Self::Kept(set) => format!(
+                "Question set {set} kept the work here, so the session that asked to move it was \
+                 ended part way through"
             ),
         }
     }
@@ -142,6 +155,11 @@ impl Instead {
                      the record to carry on from. What starts now is Verkstead's own resume, \
                      primed from this timeline."
                 ),
+                Occasion::Kept(set) => format!(
+                    "Question set {set} kept the work here, and there's no session on the record \
+                     to carry on from. What starts now is Verkstead's own resume, primed from \
+                     this timeline."
+                ),
             };
         };
 
@@ -178,11 +196,15 @@ impl Instead {
                 harness = harness.word(),
             ),
 
-            Self::NoRecord(harness) if matches!(occasion, Occasion::Widened(_)) => format!(
-                "{harness}'s record of that conversation isn't where {harness} looks for it under \
-                 this worktree's path",
-                harness = harness.word(),
-            ),
+            Self::NoRecord(harness)
+                if matches!(occasion, Occasion::Widened(_) | Occasion::Kept(_)) =>
+            {
+                format!(
+                    "{harness}'s record of that conversation isn't where {harness} looks for it \
+                     under this worktree's path",
+                    harness = harness.word(),
+                )
+            }
 
             Self::NoRecord(harness) => format!(
                 "{harness}'s record of that conversation isn't on this device under this \
@@ -273,6 +295,7 @@ pub(crate) async fn carried_on(
     let from = match occasion {
         Occasion::Arrived => " from the record the memory sync brought over",
         Occasion::Widened(_) => " in the wider sandbox",
+        Occasion::Kept(_) => "",
     };
 
     noted(
@@ -401,6 +424,26 @@ mod tests {
         assert!(
             said.contains("question set 7") && said.contains("no session on the record"),
             "a widened sandbox with nothing to carry on says both: {said:?}",
+        );
+    }
+
+    /// **And *Keep it here* names its question set and keeps the work where it
+    /// is**: nothing moved and nothing arrived (ADR-0029).
+    #[test]
+    fn keeping_the_work_here_names_the_question_set_and_no_move() {
+        let said = Instead::NoRecord(AgentType::Claude).saying(Occasion::Kept(9));
+
+        assert!(
+            said.contains("Question set 9 kept the work here"),
+            "the question set is named: {said:?}",
+        );
+        assert!(
+            said.contains("isn't where claude looks for it"),
+            "and the record is looked for where the work never left: {said:?}",
+        );
+        assert!(
+            !said.contains("arrived") && !said.contains("memory sync"),
+            "and no move is claimed: {said:?}"
         );
     }
 }

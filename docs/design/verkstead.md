@@ -395,6 +395,19 @@ flowchart LR
   than an answer's. See [ADR-0028](../adr/0028-adding-from-an-answer.md),
   which amends ADR-0021 (declared MCP servers) and extends ADR-0020's
   *Transfer*.
+- **Verkstead asks with a question set of its own** (*settled 2026-10-30,
+  building platform-placement stage 04*). Verkstead used to speak only in
+  notices. Now, where work that wants a platform finds that platform's device
+  linked but not permitted, or permitted but asleep, it puts a set of its own,
+  drawn *asked by Verkstead*. The set offers *Move to* each unpermitted device
+  against *Run it here*, and a handler of Verkstead's runs whichever is
+  pressed. An agent's `verkstead transfer` to such a device is the same set
+  with *Keep it here* in place of *Run it here*: a request rather than a
+  refusal. The open set holds the work's place and is the wait for a sleeping
+  device. That device answering moves the work and locks the set with a line
+  saying so. No device of the platform linked at all is still a notice, and
+  the work runs here. See
+  [ADR-0029](../adr/0029-work-is-placed-by-platform.md).
 - **Wrap-up phase, per PR.** After a PR opens: the agent re-reviews the PR in
   a fresh context and raises a question set for any issues it finds;
   meanwhile Verkstead monitors the CI run and dispatches fix sessions on

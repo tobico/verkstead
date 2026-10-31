@@ -482,6 +482,7 @@ const ADDABLE: AddableView = {
     },
   ],
   devices: [LAPTOP, VM],
+  cluster: null,
   branch: "rate-limiter",
 };
 

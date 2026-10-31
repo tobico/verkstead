@@ -8,7 +8,7 @@
 //! really sends, and the pick this page puts on the wire is checked against the
 //! Response the store really recorded.
 
-import { fireEvent, waitFor } from "@solidjs/testing-library";
+import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The page's own vocabulary, both ways: the hashed names to query the page by,
@@ -17,16 +17,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/App.module.css";
 import sheet from "../src/set/Sheet.module.css";
 import stylesheet from "../src/set/Sheet.module.css?raw";
-import type { Direction, Submitted } from "../src/api/types";
+import type {
+  AdditionView,
+  ClusterDevice,
+  Direction,
+  SetView,
+  Submitted,
+} from "../src/api/types";
+import pill from "../src/Attaching.module.css";
 import contents from "../src/set/Contents.module.css";
 import submitting from "../src/set/Answering.module.css";
 import { draftKey } from "../src/set/filling";
 import { answering, sent, texts } from "./reading";
-import { json, readable } from "./serving";
+import { json, readable, whenever } from "./serving";
 import { slidPress } from "./sliding";
 import proposed from "./fixtures/set-proposed.json" with { type: "json" };
 import proposing from "./fixtures/set-proposing.json" with { type: "json" };
 import waiting from "./fixtures/set-answering.json" with { type: "json" };
+import wanting from "./fixtures/set-wanting.json" with { type: "json" };
 
 /// The renderer is a page's own doing and none of these fixtures has a Diagram;
 /// mocked so nothing here loads megabytes of mermaid.
@@ -34,6 +42,9 @@ vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
 const PROPOSING = readable(proposing);
 const PROPOSED = readable(proposed);
+
+/// The same closing Set wanting Windows, for the ConPTY stage.
+const WANTING = readable(wanting);
 
 /// An ordinary Set, which carries no proposal and so has no chooser on it.
 const ORDINARY = readable(waiting);
@@ -153,6 +164,27 @@ describe("the chooser on a Set that carries a proposal", () => {
     expect(said, "and how to disagree, which is the whole way back").toContain(
       "sends it back",
     );
+  });
+
+  it("says which platform the work wants and why, under the directions", async () => {
+    const { page } = await answering(WANTING);
+
+    const line = page.querySelector(`.${sheet.directionPick} .${sheet.wants}`);
+    expect(line, "a proposal wanting a platform says so").toBeTruthy();
+    expect(line!.textContent).toBe(
+      "This work wants Windows for the ConPTY stage and its cfg(windows) tests.",
+    );
+    expect(
+      line!.querySelector("code")?.textContent,
+      "the reason is the agent's markdown, rendered",
+    ).toBe("cfg(windows)");
+  });
+
+  it("says nothing about platforms where the proposal wants none", async () => {
+    const { page } = await answering(PROPOSING);
+
+    expect(page.querySelector(`.${sheet.directionPick}`)).toBeTruthy();
+    expect(page.querySelector(`.${sheet.wants}`)).toBeNull();
   });
 
   it("is not drawn at all on an ordinary Set", async () => {
@@ -366,3 +398,201 @@ function declares(selectors: string): string {
   ).toBeGreaterThan(-1);
   return stylesheet.slice(at, stylesheet.indexOf("\n  }", at));
 }
+
+/// One device of the cluster, as the server places it.
+function member(
+  name: string,
+  os: string,
+  platform: ClusterDevice["platform"],
+  standing: ClusterDevice["standing"],
+): ClusterDevice {
+  return {
+    device: {
+      device: name.padEnd(32, "0"),
+      fingerprint: "AA:BB",
+      name,
+      os,
+      addresses: [],
+      kept_by: null,
+      version: null,
+      install: null,
+    },
+    platform,
+    standing,
+  };
+}
+
+const HERE = member("tower", "Linux", "linux", "WorkIsHere");
+const NUC = member("nuc-win", "Windows", "windows", "Tickable");
+const LAPTOP = member("the-laptop", "Linux (WSL)", "linux", "Tickable");
+
+/// A Set placed on a cluster of those, with what was picked on it.
+function clustered(
+  set: SetView,
+  cluster: ClusterDevice[],
+  additions: AdditionView[] = [],
+): SetView {
+  return { ...set, additions, addable: { ...set.addable, cluster } };
+}
+
+/// The *May be transferred to* group on the chooser, where there is one.
+function placing(page: ParentNode): HTMLElement | null {
+  return page.querySelector<HTMLElement>(
+    `.${sheet.directionPick} [role="group"]`,
+  );
+}
+
+/// The ticks in it, by the device each names.
+function ticks(page: ParentNode): Array<[string, boolean]> {
+  return [
+    ...(placing(page)?.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"]',
+    ) ?? []),
+  ].map((tick) => [tick.closest("label")!.textContent!.trim(), tick.checked]);
+}
+
+/// The POSTs to one path, with their bodies.
+function writes(
+  fetching: Awaited<ReturnType<typeof answering>>["fetching"],
+  path: string,
+): unknown[] {
+  return fetching.mock.calls
+    .filter(([asked, init]) => String(asked) === path && init?.method === "POST")
+    .map(([, init]) => JSON.parse(String(init?.body ?? "{}")) as unknown);
+}
+
+describe("the ticks under the chooser", () => {
+  it("draws the wanted platform's devices first, with the reason, then the others", async () => {
+    const { page } = await answering(clustered(WANTING, [HERE, LAPTOP, NUC]));
+
+    const group = placing(page);
+    expect(group, "a clustered Verkstead draws ticks").toBeTruthy();
+    expect(screen.getByRole("group", { name: "May be transferred to" })).toBe(
+      group,
+    );
+    expect(ticks(page)).toEqual([
+      ["nuc-win", false],
+      ["the-laptop", false],
+    ]);
+
+    const wanted = group!.querySelector(`.${sheet.wanted}`)!;
+    expect(wanted.querySelector(`.${sheet.wants}`)!.textContent).toBe(
+      "Windows for the ConPTY stage and its cfg(windows) tests",
+    );
+    expect(wanted.textContent).toContain("nuc-win");
+    expect(
+      page.querySelector(`.${sheet.directionPick} > div > p.${sheet.wants}`),
+      "and not the line of prose besides",
+    ).toBeNull();
+  });
+
+  it("says where the cluster has no device of the wanted platform, with nothing to tick", async () => {
+    const { page } = await answering(clustered(WANTING, [HERE, LAPTOP]));
+
+    const wanted = placing(page)!.querySelector(`.${sheet.wanted}`)!;
+    expect(wanted.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(wanted.querySelector(`.${sheet.placed}`)!.textContent).toBe(
+      "No Windows device is linked to this one, so the work will run where it is.",
+    );
+    expect(ticks(page)).toEqual([["the-laptop", false]]);
+  });
+
+  it("names a wanted device that is permitted already, or where the work is, with no tick", async () => {
+    const permitted = await answering(
+      clustered(WANTING, [
+        HERE,
+        { ...NUC, standing: "Permitted" },
+      ]),
+    );
+    expect(ticks(permitted.page)).toEqual([]);
+    expect(
+      placing(permitted.page)!.querySelector(`.${sheet.placed}`)!.textContent,
+    ).toBe("The work may already be transferred to nuc-win.");
+
+    const here = await answering(
+      clustered(WANTING, [
+        { ...NUC, standing: "WorkIsHere" },
+        { ...HERE, standing: "Permitted" },
+      ]),
+    );
+    expect(ticks(here.page)).toEqual([]);
+    expect(
+      placing(here.page)!.querySelector(`.${sheet.placed}`)!.textContent,
+    ).toBe("The work is on nuc-win.");
+  });
+
+  it("draws only the line of prose in no cluster", async () => {
+    const { page } = await answering(WANTING);
+
+    expect(WANTING.addable.cluster).toBeNull();
+    expect(placing(page)).toBeNull();
+    expect(page.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(page.querySelector(`.${sheet.wants}`)!.textContent).toBe(
+      "This work wants Windows for the ConPTY stage and its cfg(windows) tests.",
+    );
+  });
+
+  it("draws the chooser as before where the proposal wants nothing", async () => {
+    const { page } = await answering(clustered(PROPOSING, [HERE, NUC]));
+
+    expect(placing(page)).toBeNull();
+    expect(page.querySelector(`.${sheet.wants}`)).toBeNull();
+  });
+
+  it("records a tick under no label, as the comment box's menu does", async () => {
+    const path = `/api/ui/sets/${WANTING.id}/additions`;
+    const { page, fetching } = await answering(
+      clustered(WANTING, [HERE, NUC]),
+      whenever(path, json("Answered"), "POST"),
+    );
+
+    fireEvent.click(
+      placing(page)!.querySelector<HTMLInputElement>('input[type="checkbox"]')!,
+    );
+
+    await waitFor(() =>
+      expect(writes(fetching, path)).toEqual([
+        { label: null, pick: { Device: { device: NUC.device.device } } },
+      ]),
+    );
+    await waitFor(() =>
+      expect(placing(page)!.textContent).toContain(
+        "This question set has been answered, so what it adds is settled.",
+      ),
+    );
+  });
+
+  it("draws a device picked at the comment box as ticked, and not again as its chip", async () => {
+    const remove = `/api/ui/sets/${WANTING.id}/additions/5/remove`;
+    const { page, fetching } = await answering(
+      clustered(
+        WANTING,
+        [HERE, NUC, LAPTOP],
+        [
+          {
+            id: 5,
+            label: null,
+            added: { Device: { device: NUC.device.device, name: "nuc-win" } },
+            state: "Pending",
+          },
+        ],
+      ),
+      whenever(remove, json("Removed"), "POST"),
+    );
+
+    expect(ticks(page)).toEqual([
+      ["nuc-win", true],
+      ["the-laptop", false],
+    ]);
+    expect(
+      screen.queryByRole("list", { name: "Attached to the question set" })
+        ?.querySelectorAll(`.${pill.server}`).length ?? 0,
+      "no chip for what the chooser draws",
+    ).toBe(0);
+
+    fireEvent.click(
+      placing(page)!.querySelector<HTMLInputElement>('input[type="checkbox"]')!,
+    );
+    await waitFor(() => expect(writes(fetching, remove)).toEqual([{}]));
+  });
+});

@@ -1140,6 +1140,12 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // firing under a test about anything else would put a Conversation on the
     // sidebar it never asked for. The ones that are about it keep [`LOOKING`].
     places: paced(Duration::from_secs(600)),
+    // No stage here is ever away from home, so the look for a report owed finds
+    // nothing whenever it fires; a server's own pace is as good as any.
+    reports: Pace::default().reports,
+    // Nothing here is placed on another device, so no Set of Verkstead's ever
+    // waits on one asleep; a server's own pace is as good as any.
+    wakes: Pace::default().wakes,
     // And longer than any of these run for again, for the stall sweep's reason
     // one sweep along: every fixture that reaches Done has a pull request
     // nothing has merged, which is exactly what the sweep after Done goes and
@@ -11358,6 +11364,116 @@ async fn a_store_and_nudge_ask_whose_session_died_is_folded_in_and_nothing_is_ty
         nudges_about(&fixture, set).await.is_empty(),
         "and nothing was typed at anything: the session the Answers belonged to \
          had gone, and the one the press started reads them off its prompt",
+    );
+}
+
+/// A backlog of one task that wants Windows, whose step session falls over the
+/// first time it is launched and works the task once the test has said
+/// `mended` — every step session writing its task's number to `launches` as it
+/// starts.
+fn a_windows_task_dying_once(launches: &Path) -> String {
+    format!(
+        r#"
+case "$1" in
+{CODEX_GRILLING_MODEL})
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: Count — [details](01-count.md) — on windows\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    printf '===== %s\n' "${{number:-finish}}" >> {launches}
+    if [ ! -f /tmp/verkstead/mended ]; then
+        printf 'gh: the connection dropped\n'
+        exit 1
+    fi
+    if [ -n "$number" ]; then
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: $number"
+        : > /tmp/verkstead/done
+    fi
+    sleep 300
+    ;;
+esac
+"#,
+        launches = quoted(launches),
+    )
+}
+
+/// **A task that wants a platform, on a Verkstead in no cluster, runs here** —
+/// and says so, at every launch: the Resume that reaches the same task again
+/// writes its Notice again rather than nothing, because each launch asked again
+/// where the task wants to be (ADR-0029, *Placing declared work*).
+#[tokio::test]
+async fn a_task_wanting_a_platform_with_no_cluster_runs_here_saying_so_at_every_launch() {
+    let spill = tempfile::tempdir().unwrap();
+    let launches = spill.path().join("launches");
+
+    let fixture =
+        grilling_spilling_on_codex(spill, &a_windows_task_dying_once(&launches), PULL_REQUEST)
+            .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let proposal = fixture.ask_stored(PROPOSING).await;
+    assert_eq!(
+        fixture.pick(proposal, "task-list").await,
+        Submitted::Accepted
+    );
+
+    // The task launched here, where it fell over.
+    until_written_by(&launches, 1).await;
+
+    let wanting = |view: &ConversationView| -> Vec<String> {
+        notices(view)
+            .into_iter()
+            .filter(|notice| notice.contains("Task 01 wants Windows"))
+            .collect()
+    };
+
+    fixture
+        .until(|view| {
+            notices(view)
+                .iter()
+                .any(|notice| notice.contains("the connection dropped"))
+                .then_some(())
+        })
+        .await;
+
+    let first = wanting(&fixture.view().await);
+    assert_eq!(first.len(), 1, "one Notice for the one launch: {first:?}");
+    assert!(
+        first[0].contains("no Windows device is linked"),
+        "and it says there is nowhere to go: {first:?}",
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("mended"), "").unwrap();
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    // The same task launched again, here, and said again.
+    let launched = until_written_by(&launches, 2).await;
+    assert_eq!(
+        prompts(&launched)
+            .iter()
+            .map(|launch| launch.trim())
+            .collect::<Vec<_>>(),
+        ["01", "01"],
+    );
+
+    let again = wanting(&fixture.view().await);
+    assert_eq!(
+        again.len(),
+        2,
+        "the Resume's launch writes its own Notice: {again:?}",
     );
 }
 
@@ -24974,6 +25090,117 @@ async fn a_settled_stage_the_roadmap_says_nothing_about_is_still_done() {
     assert!(
         index.contains("- [ ] 01: Count the requests — [brief](01-counter.md)\n"),
         "stage 01's line is exactly as the roadmap was written: {index:?}",
+    );
+}
+
+/// **A stage away from home starts nothing where it settles** (ADR-0029, *Home
+/// drives a roadmap across devices*): the adopted stage here is made a copy of
+/// one born on another device, and it settles with stage 02 ready behind it.
+/// Home is what starts stage 02, on hearing the settle in the stage's report, so
+/// neither the settle nor a look for a free place starts it here — and nothing is
+/// said here about the roadmap either.
+#[tokio::test]
+async fn a_stage_away_from_home_settles_and_starts_nothing_here() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_at_pace(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
+        &gh_about(GREEN, "", ""),
+        *LOOKING,
+    )
+    .await;
+
+    // Past its join first: a stage away from home asks home whether it may join,
+    // and the home named below is nowhere, so it would wait on it for ever.
+    fixture
+        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .await;
+
+    // Born on another device, and moved here: a copy away from its home.
+    let pool = open_database(&fixture.database).await.unwrap();
+    verkstead_store::record_birth(
+        &pool,
+        fixture.id,
+        &verkstead_store::Birth {
+            device: "ff00ee11dd22cc33bb44aa5566778899".to_owned(),
+            id: 7,
+        },
+    )
+    .await
+    .unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    // The settle that follows Done, and a good many looks after it.
+    pause(Duration::from_secs(2)).await;
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "nothing was started here: stage 02 is home's to start",
+    );
+
+    let said = notices(&fixture.view().await).join("\n");
+
+    assert!(
+        !said.contains("Stage 02") && !said.contains("No stage of the roadmap"),
+        "and nothing is said here about the roadmap: {said:?}",
+    );
+}
+
+/// **A stage that came home drives its roadmap here again** (ADR-0029, *Home
+/// drives a roadmap across devices*): the adopted stage here was moved to
+/// another device and back — its tombstone's mark written and taken off again,
+/// as a return does — and it settles with stage 02 ready behind it. It is a
+/// stage at home rather than a copy away from it, so its settle starts stage 02
+/// here, and nothing is owed to any home about it.
+#[tokio::test]
+async fn a_stage_that_came_home_settles_and_starts_the_next_here() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Away and home again: the mark a move leaves on the copy it left, and the
+    // return taking it off. Its birth key never named anywhere but here.
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    verkstead_store::transfer_away(
+        &pool,
+        fixture.id,
+        &verkstead_store::Transferred {
+            device: "ff00ee11dd22cc33bb44aa5566778899".to_owned(),
+            id: 7,
+        },
+    )
+    .await
+    .unwrap();
+    verkstead_store::live_here(&pool, fixture.id).await.unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let next = stage_of(&fixture).await;
+
+    assert_eq!(
+        next.branch, "roadmaps/rate-limiting/02-refusing",
+        "the settle here starts the stage that stood on it",
+    );
+
+    assert_eq!(
+        verkstead_store::told(&pool, fixture.id).await.unwrap(),
+        None,
+        "and nothing was reported anywhere: this is its home",
     );
 }
 
@@ -39235,6 +39462,103 @@ async fn a_stage_inherits_the_no_review_its_roadmap_was_grilled_with() {
             .and_then(|pairing| pairing.profile.name.clone()),
         Some("implementation".to_owned()),
         "with the roles beside it inherited as they always were",
+    );
+}
+
+/// And a stage a settle starts may be moved wherever its roadmap may: the
+/// *May be transferred to* ticks, and the device the roadmap was drafted on
+/// where that is not this one (ADR-0029, *Placing declared work*).
+///
+/// The roadmap's drafting device is permitted by its birth key rather than a
+/// tick, and the stage's birth key is this device's — so without the tick a
+/// roadmap that had itself moved would give its stages one device fewer.
+#[tokio::test]
+async fn a_stage_inherits_where_its_roadmap_may_be_transferred_to() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_unreviewed(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    const NUC_WIN: &str = "11111111111111111111111111111111";
+    const DRAFTED_ON: &str = "22222222222222222222222222222222";
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    verkstead_store::permit_device(&pool, fixture.id, NUC_WIN)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE births SET device = ? WHERE conversation_id = ?")
+        .bind(DRAFTED_ON)
+        .bind(fixture.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+
+    assert_eq!(
+        stage.permitted,
+        vec![NUC_WIN, DRAFTED_ON],
+        "the roadmap's tick, and the device it was drafted on",
+    );
+    assert_eq!(
+        verkstead_store::permitted_devices(&pool, stage.id)
+            .await
+            .unwrap(),
+        vec![NUC_WIN, DRAFTED_ON],
+    );
+}
+
+/// And a stage whose line declares this device's own platform starts its
+/// planning here exactly as an undeclared one does: nothing moved, and nothing
+/// said about where it runs (ADR-0029, *Placing declared work*).
+#[tokio::test]
+async fn a_stage_wanting_this_devices_platform_is_planned_here_unmoved() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let here =
+        verkstead_server::platform::os_word(verkstead_server::platform::Platform::HERE, None)
+            .to_lowercase();
+    let stages = format!(
+        r#"- [ ] 01: Count the requests — [brief](01-counter.md) — no dependencies — on {here}\n- [ ] 02: Refuse the rest — [brief](02-refusing.md) — after 01\n"#
+    );
+
+    let fixture = grilling_unreviewed(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, &stages, "", ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+
+    let prompt = until_written(&planning).await;
+    assert!(
+        prompt.contains("/verkstead/skills/next-stage/SKILL.md"),
+        "the stage is planned here: {prompt:?}",
+    );
+    assert!(
+        stage.transferring.is_none() && stage.transferred.is_none(),
+        "and is not moved anywhere",
+    );
+
+    let carried_on = said_by(&fixture).await;
+    assert!(
+        carried_on.contains("has started as a conversation of its own")
+            && !carried_on.contains("It wants"),
+        "the roadmap's Notice says nothing about where it runs: {carried_on:?}",
     );
 }
 

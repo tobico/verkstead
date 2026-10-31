@@ -192,7 +192,7 @@ async fn look(state: &AppState) {
         return;
     }
 
-    let driving = match store::driven_roadmaps(&state.pool).await {
+    let driving = match store::driven_roadmaps(&state.pool, &state.device).await {
         Ok(driving) => driving,
         Err(error) => {
             tracing::error!(error = ?error, "listing the roadmaps to look for a waiting stage among failed");

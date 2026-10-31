@@ -86,8 +86,25 @@ zero-padded numbers.
 
 - [ ] 01: <title> — [details](01-<slug>.md)
 - [ ] 02: <title> — [details](02-<slug>.md)
+- [ ] 03: <title> — [details](03-<slug>.md) — on windows
 - ...
 </todo-template>
+
+**A task line may say the platform it wants**, after the link: `— on linux`,
+`— on macos` or `— on windows`. That is all a task line declares — the order is
+the dependency, so there is no `after` — and most lines declare nothing.
+
+**A line wants a platform only where its work can be verified nowhere else**:
+code under a platform `cfg`, a platform's own component — ConPTY,
+AppContainer, an installer, a bundle — or a suite that only runs on that
+operating system. Naming a platform in prose declares nothing, and a change to
+shared code with a cross-platform suite declares nothing: it is verified
+wherever it stands, and CI confirms the rest.
+
+Verkstead acts on a task line's platform: before that task's session starts, it
+moves the work to a permitted device of that platform — the device the work was
+drafted on, or one the human ticked — and the work stays there for the tasks
+after it. No session moves itself for a declared task.
 
 <task-file-template>
 # NN. <Task title>

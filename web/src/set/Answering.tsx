@@ -67,6 +67,8 @@ import type {
   AnswerAttachmentRemoved,
   AskView,
   AttachmentView,
+  ClusterDevice,
+  DeviceIdentity,
   Direction,
   Ending,
   OptionView,
@@ -94,6 +96,7 @@ import { rowPress } from "../rows";
 import styles from "./Answering.module.css";
 import { AskText } from "./AskText";
 import { Postscript } from "./Postscript";
+import { Placing, Wanting, ticking } from "./Wanting";
 // The question vocabulary, defined once for the form and the record alike —
 // every class below that a settled Set also draws comes from here.
 import page from "./Sheet.module.css";
@@ -224,6 +227,12 @@ export function Answering(props: {
     set: () => props.id,
     picked: () => props.additions,
     mirroring: () => props.addable.branch,
+    ticking: () =>
+      props.proposal === null
+        ? []
+        : ticking(props.proposal.wants, props.addable.cluster).map(
+            (member) => member.device.device,
+          ),
   });
 
   // The cards *Add a server…* and a repo's row open, one each for the whole
@@ -436,6 +445,19 @@ export function Answering(props: {
         {(proposal) => (
           <Choosing
             proposal={proposal()}
+            cluster={props.addable.cluster}
+            ticked={(device) => additions.devices().includes(device)}
+            tick={(device, ticked) =>
+              ticked
+                ? additions.pick(
+                    null,
+                    { Device: { device: device.device } },
+                    device.name,
+                    CHOOSER,
+                  )
+                : additions.untick(device.device, CHOOSER)
+            }
+            refused={() => additions.refused(CHOOSER)}
             picked={() => sheet.direction}
             pick={(direction) =>
               setSheet("direction", (held) =>
@@ -584,6 +606,15 @@ export function Answering(props: {
 /// wants one.
 function Choosing(props: {
   proposal: ProposalView;
+  /// The cluster the work could be placed on, or `null` in none — see
+  /// [`Placing`].
+  cluster: ClusterDevice[] | null;
+  /// Whether a device is picked on the set, wherever it was picked.
+  ticked: (device: string) => boolean;
+  /// A tick, or the tick taken off.
+  tick: (device: DeviceIdentity, ticked: boolean) => void;
+  /// What came back refused from either.
+  refused: () => string | null;
   picked: () => Direction | null;
   /// A click, which picks the direction — or clears the choice, when it landed
   /// on the direction already picked.
@@ -647,6 +678,22 @@ function Choosing(props: {
             }}
           </For>
         </ul>
+        {/* What the work wants: ticks where there is a cluster to place it
+            on, and the line of prose where there is none. */}
+        <Show
+          when={props.proposal.wants.length > 0 && props.cluster}
+          fallback={<Wanting wants={props.proposal.wants} />}
+        >
+          {(cluster) => (
+            <Placing
+              wants={props.proposal.wants}
+              cluster={cluster()}
+              ticked={props.ticked}
+              tick={props.tick}
+              refused={props.refused}
+            />
+          )}
+        </Show>
         <p class={page.semantics}>
           Picking a direction accepts the proposal and the agent gets on with
           it. Anything else, your own answer included, sends it back for
@@ -1282,12 +1329,28 @@ type Picking = {
   devices: () => string[];
 
   /// Pick something at one question's menu, or at the comment box's, with
-  /// what a failure to reach the server calls it.
-  pick: (label: string | null, pick: Picked, called: string) => void;
+  /// what a failure to reach the server calls it — and, where it is not the
+  /// label's own, the place a refusal of it is said.
+  pick: (
+    label: string | null,
+    pick: Picked,
+    called: string,
+    at?: Place,
+  ) => void;
+
+  /// Take a device picked on the set off it again, wherever it was picked,
+  /// saying a refusal at `at`.
+  untick: (device: string, at: Place) => void;
 
   /// And what could not be done there.
-  refused: (label: string | null) => string | null;
+  refused: (at: Place) => string | null;
 };
+
+/// Where a refusal is said: under one question, at the comment box where
+/// `null`, or under the direction chooser's ticks — which pick under no label,
+/// as the comment box does, and say what came back under themselves.
+export const CHOOSER: unique symbol = Symbol("chooser");
+type Place = string | null | typeof CHOOSER;
 
 /// The whole of that, made once by the sheet.
 ///
@@ -1302,26 +1365,30 @@ function picking(what: {
 
   /// What a read-write branch picked with no name comes to.
   mirroring: () => string;
+
+  /// The devices the direction chooser draws a tick for, whose additions the
+  /// comment box draws no chip for: one device, shown once.
+  ticking: () => string[];
 }): Picking {
   const queries = useQueryClient();
   const device = useDevice();
 
   const [refusals, setRefusals] = createSignal<
-    Array<{ label: string | null; said: string }>
+    Array<{ at: Place; said: string }>
   >([]);
 
   // Which picks have a press in flight, by what was picked for a pick and by
   // the row's id for a ×: the one thing either can be truly disabled for.
   const [working, setWorking] = createSignal<Array<string | number>>([]);
 
-  const say = (label: string | null, said: string | null) =>
+  const say = (at: Place, said: string | null) =>
     setRefusals((held) => [
-      ...held.filter((one) => one.label !== label),
-      ...(said === null ? [] : [{ label, said }]),
+      ...held.filter((one) => one.at !== at),
+      ...(said === null ? [] : [{ at, said } as { at: Place; said: string }]),
     ]);
 
   const settle = (
-    label: string | null,
+    at: Place,
     key: string | number,
     made: Promise<AdditionMade | AdditionRemoved>,
     failed: string,
@@ -1331,7 +1398,7 @@ function picking(what: {
     void made
       .then(async (outcome) => {
         say(
-          label,
+          at,
           typeof outcome !== "string" || outcome === "Removed"
             ? null
             : ADDITION_REFUSAL[outcome],
@@ -1341,33 +1408,58 @@ function picking(what: {
       })
       .catch((error: unknown) =>
         say(
-          label,
+          at,
           `${failed} ${error instanceof Error ? error.message : String(error)}`,
         ),
       )
       .finally(() => setWorking((was) => was.filter((one) => one !== key)));
   };
 
-  const pick = (label: string | null, picked: Picked, called: string) =>
+  const pick = (
+    label: string | null,
+    picked: Picked,
+    called: string,
+    at: Place = label,
+  ) =>
     settle(
-      label,
+      at,
       JSON.stringify(picked),
       addToSet(device(), what.set(), { label, pick: picked }),
       `${called} couldn't be added.`,
     );
 
-  const forget = (addition: AdditionView) =>
+  const forget = (addition: AdditionView, at: Place = addition.label) =>
     settle(
-      addition.label,
+      at,
       addition.id,
       removeFromSet(device(), what.set(), addition.id),
       "That couldn't be removed.",
     );
 
+  const untick = (ticked: string, at: Place) => {
+    const addition = what
+      .picked()
+      .find(
+        (addition) =>
+          addition.state === "Pending" &&
+          "Device" in addition.added &&
+          addition.added.Device.device === ticked,
+      );
+
+    if (addition !== undefined) forget(addition, at);
+  };
+
+  /// Whether the direction chooser draws this addition as a tick, which only a
+  /// device picked under no label can be.
+  const ticked = (addition: AdditionView) =>
+    addition.label === null &&
+    "Device" in addition.added &&
+    what.ticking().includes(addition.added.Device.device);
+
   const chips = (label: string | null): Array<Chip> =>
     what
       .picked()
-      .filter((addition) => addition.label === label)
+      .filter((addition) => addition.label === label && !ticked(addition))
       .map((addition) =>
         // Struck as it crossed on a transfer: drawn as the record has it, with
         // nothing to take off.
@@ -1407,8 +1499,8 @@ function picking(what: {
     repos,
     devices,
     pick,
-    refused: (label) =>
-      refusals().find((one) => one.label === label)?.said ?? null,
+    untick,
+    refused: (at) => refusals().find((one) => one.at === at)?.said ?? null,
   };
 }
 

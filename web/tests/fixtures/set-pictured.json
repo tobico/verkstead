@@ -2,6 +2,7 @@
   "Set": {
     "addable": {
       "branch": "solid-viewer",
+      "cluster": null,
       "devices": [],
       "read_only": [],
       "repos": []
@@ -9,6 +10,7 @@
     "additions": [],
     "attachments": [],
     "branch": "solid-viewer",
+    "by_verkstead": false,
     "conversation": 1,
     "diagrams": false,
     "diff": [
@@ -25,6 +27,7 @@
     ],
     "ending": null,
     "id": 1,
+    "lock_line": null,
     "postscript_html": null,
     "preface_html": "<p><code>POST /v1/messages</code> has no rate limit.</p>\n<ul>\n<li>one client sent 40k requests in a minute</li>\n<li>the queue was backed up for twenty</li>\n</ul>\n",
     "project": "verkstead",

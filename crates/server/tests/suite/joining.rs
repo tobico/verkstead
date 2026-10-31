@@ -2789,8 +2789,11 @@ async fn a_keepers_start_with_its_box_gone_forgets_its_annex_on_every_member() {
         probed: annex::Probed::NoDistro,
         ..Boxed::of(&annex, KEEPER_AT)
     });
+    // The laptop is dialled at the ordinary patience, not [`PATIENCE`]: it is
+    // there, and a dial cut short on a slow machine writes the drop down as owed
+    // rather than telling it, so its page would hear nothing.
     let annexed = Annexed::of(gone.clone(), keeper.settings());
-    annexed.started(&keeper.devices().waiting(PATIENCE)).await;
+    annexed.started(&keeper.devices()).await;
 
     let ids = |view: DevicesView| -> Vec<String> {
         view.members

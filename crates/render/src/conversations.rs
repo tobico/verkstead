@@ -14,7 +14,7 @@
 //! first Event would have had to be taken apart to hold the second.
 
 use serde::{Deserialize, Serialize};
-use verkstead_schema::Direction;
+use verkstead_schema::{Direction, WantedPlatform};
 
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
@@ -1428,6 +1428,22 @@ pub struct ProposalView {
 
     /// Why, rendered and sanitized by the server on the way out.
     pub rationale_html: String,
+
+    /// The platforms the work wants, each with its reason, in the order the
+    /// agent wrote them. Empty where it wants none, and the chooser then draws
+    /// nothing for them.
+    pub wants: Vec<WantView>,
+}
+
+/// One platform the proposal wants, and why, as the chooser draws it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct WantView {
+    pub platform: WantedPlatform,
+
+    /// The reason, rendered and sanitized as the rationale is — inline, because
+    /// it finishes a sentence the chooser starts.
+    pub for_html: String,
 }
 
 /// A Conversation's worktree: where it is, and whether it is still there.
@@ -1837,13 +1853,18 @@ pub struct StageDocument {
     /// windows` — or `null` where it names none, and null throughout a roadmap
     /// that declares on no line at all, for the reason above.
     ///
-    /// Shown beside what the stage stands on and acted on by nothing: placing a
-    /// stage on a device that matches is a follow-up once cluster mode has
-    /// landed. Independent of the line above it — a line of a declaring roadmap
-    /// whose whole tail is a platform is undeclared with a platform, because a
-    /// forgotten declaration hiding behind one is what the all-or-nothing rule
-    /// is for.
+    /// Shown beside what the stage stands on, and what places the stage on a
+    /// device of that platform when it starts. Independent of the line above
+    /// it — a line of a declaring roadmap whose whole tail is a platform is
+    /// undeclared with a platform, because a forgotten declaration hiding
+    /// behind one is what the all-or-nothing rule is for.
     pub platform: Option<String>,
+
+    /// The device the stage is on, by the name its member goes by, wherever
+    /// that is not this one — `nuc-win` — or `null` for a stage here. Read off
+    /// this device's tombstone of the stage, whoever moved it there, so a stage
+    /// moved by hand names its device too, platform or none.
+    pub device: Option<String>,
 
     /// The brief rendered and sanitized, or `null` where there is nothing to
     /// render. Unlike a task's, that is not the ordinary end of a stage's life
@@ -1872,6 +1893,10 @@ pub struct StageSource {
     /// written down.
     pub stands_on: Option<Vec<String>>,
     pub platform: Option<String>,
+
+    /// The device it is on where that is not here — see
+    /// [`StageDocument::device`].
+    pub device: Option<String>,
 
     /// The markdown, or `None` where the brief the entry names is not there to
     /// read.
@@ -2822,6 +2847,19 @@ pub struct QuestionSetEvent {
     /// a sandbox with what was added — said at the end of the same line.
     #[serde(default)]
     pub carried_on: bool,
+
+    /// Whether Verkstead asked it rather than an agent, which the card says
+    /// (ADR-0029, *Verkstead asks with a Question Set of its own*).
+    #[serde(default)]
+    pub by_verkstead: bool,
+
+    /// What its lock says, where it was locked with a line: drawn in place of
+    /// *closed unanswered*, which is a human's lock and not this one. Only
+    /// Verkstead locks with one — its own Set, settled by the device it was
+    /// waiting on answering. Or the line beside its answer, where Verkstead
+    /// acted on it and the device it named was asleep.
+    #[serde(default)]
+    pub lock_line: Option<String>,
 }
 
 /// A Question Set the Timeline cannot draw a table for, because this build
@@ -3213,6 +3251,14 @@ pub fn proposal_view(proposal: &verkstead_schema::Proposal) -> ProposalView {
     ProposalView {
         direction: proposal.direction,
         rationale_html: crate::markdown::to_html(&proposal.rationale),
+        wants: proposal
+            .wants
+            .iter()
+            .map(|want| WantView {
+                platform: want.platform,
+                for_html: crate::markdown::to_inline_html(&want.reason),
+            })
+            .collect(),
     }
 }
 
@@ -3289,6 +3335,7 @@ pub struct AgentSession {
 /// settled has none, one that was locked unanswered never will have, and one
 /// that was answered carries them — so the one field decides both what the table
 /// says and how it reads.
+#[allow(clippy::too_many_arguments)]
 pub fn question_set_event(
     id: i64,
     at: String,
@@ -3297,6 +3344,8 @@ pub fn question_set_event(
     standing: Standing,
     added: Vec<Added>,
     carried_on: bool,
+    by_verkstead: bool,
+    lock_line: Option<String>,
 ) -> TimelineEvent {
     let response = match &standing {
         Standing::Answered(answered) => Some(&answered.response),
@@ -3312,6 +3361,8 @@ pub fn question_set_event(
         standing,
         added,
         carried_on,
+        by_verkstead,
+        lock_line,
     })
 }
 
@@ -3604,6 +3655,7 @@ pub fn roadmap_pane(name: String, title: String, read: Vec<StageSource>) -> Road
             state: stage.state,
             stands_on: stage.stands_on,
             platform: stage.platform,
+            device: stage.device,
             html: stage
                 .markdown
                 .as_deref()
@@ -4552,9 +4604,50 @@ pub struct AddableView {
     /// on, and not one ticked. Empty with no cluster.
     pub devices: Vec<crate::DeviceIdentity>,
 
+    /// Every device of the cluster, this one included, each with the platform
+    /// its OS word marks it as and where it stands with this Conversation —
+    /// which is what the direction chooser draws its ticks from, under a
+    /// proposal that wants a platform.
+    ///
+    /// Beside `devices` rather than instead of it, because that list leaves
+    /// out what is permitted already and the device the work is on, and the
+    /// chooser has to tell *no Windows device is linked* from *the Windows
+    /// device is permitted already*. `null` where this Verkstead is in no
+    /// cluster, and on a share.
+    pub cluster: Option<Vec<ClusterDevice>>,
+
     /// What a read-write branch left blank comes to: the Conversation's own
     /// branch, which is what the card's branch field is filled in with.
     pub branch: String,
+}
+
+/// One device of the cluster, as the direction chooser places the work by it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ClusterDevice {
+    pub device: crate::DeviceIdentity,
+
+    /// The platform its OS word is the mark of — *Linux (WSL)* being a Linux —
+    /// or `null` for a word this build has no mark for, which no proposal can
+    /// want.
+    pub platform: Option<WantedPlatform>,
+
+    pub standing: DeviceStanding,
+}
+
+/// Where one device of the cluster stands with a Conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum DeviceStanding {
+    /// It may be ticked: the work could be permitted to move there.
+    Tickable,
+
+    /// The work may be transferred there already: it was ticked before, or it
+    /// is the device the Conversation was drafted on.
+    Permitted,
+
+    /// It is the device the work is on.
+    WorkIsHere,
 }
 
 /// And of taking a pick off again, refused by the same freezes.

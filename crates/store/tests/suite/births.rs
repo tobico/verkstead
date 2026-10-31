@@ -27,7 +27,7 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     AskedBy, Birth, Marked, Transferred, ask_to_transfer, birth, conversations, open_database,
     record_birth, register_repo, stamp_the_births, start_conversation, transfer_asked,
-    transfer_away, transfer_made, transferred,
+    transfer_asked_by, transfer_away, transfer_made, transferred,
 };
 
 /// The device every Conversation started here is drafted on, named the way a
@@ -309,5 +309,99 @@ async fn the_mark_is_written_only_while_the_request_still_names_that_device() {
         None,
         "and the request is spent in the transaction that marked it, so nothing \
          between the two reads this as a move still to make",
+    );
+}
+
+/// A move Verkstead asked for to place a task is read back as that task's, with
+/// the platform it wants, by the mark that spends it — and by the request while
+/// it stands, which is not the session's call.
+#[tokio::test]
+async fn a_move_made_for_a_task_is_read_back_as_the_tasks() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool).await;
+    let conversation = start(&pool, repo, "task-runner").await;
+
+    let onwards = Transferred {
+        device: ANOTHER_DEVICE.to_owned(),
+        id: 7,
+    };
+    let placing = AskedBy::Task {
+        label: "02".to_owned(),
+        wants: "Windows".to_owned(),
+    };
+
+    ask_to_transfer(&pool, conversation, &onwards.device, placing.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        transfer_asked_by(&pool, conversation).await.unwrap(),
+        Some((onwards.device.clone(), placing.clone())),
+        "the request says which task it is for",
+    );
+    assert_eq!(
+        transfer_made(&pool, conversation, &onwards).await.unwrap(),
+        Marked::Marked { by: placing },
+        "and so does the mark that spends it",
+    );
+}
+
+/// And one asked to place an inline run is read back as the inline run's.
+#[tokio::test]
+async fn a_move_made_for_an_inline_run_is_read_back_as_the_inline_runs() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool).await;
+    let conversation = start(&pool, repo, "inline-run").await;
+
+    let onwards = Transferred {
+        device: ANOTHER_DEVICE.to_owned(),
+        id: 7,
+    };
+    let placing = AskedBy::Inline {
+        wants: "Windows".to_owned(),
+    };
+
+    ask_to_transfer(&pool, conversation, &onwards.device, placing.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        transfer_asked_by(&pool, conversation).await.unwrap(),
+        Some((onwards.device.clone(), placing.clone())),
+    );
+    assert_eq!(
+        transfer_made(&pool, conversation, &onwards).await.unwrap(),
+        Marked::Marked { by: placing },
+    );
+}
+
+/// And one asked to place a roadmap stage is read back as that stage's.
+#[tokio::test]
+async fn a_move_made_for_a_stage_is_read_back_as_the_stages() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool).await;
+    let conversation = start(&pool, repo, "roadmaps/mvp/06-windows").await;
+
+    let onwards = Transferred {
+        device: ANOTHER_DEVICE.to_owned(),
+        id: 7,
+    };
+    let placing = AskedBy::Stage {
+        label: "06".to_owned(),
+        wants: "Windows".to_owned(),
+    };
+
+    ask_to_transfer(&pool, conversation, &onwards.device, placing.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        transfer_asked_by(&pool, conversation).await.unwrap(),
+        Some((onwards.device.clone(), placing.clone())),
+        "the request says which stage it is for",
+    );
+    assert_eq!(
+        transfer_made(&pool, conversation, &onwards).await.unwrap(),
+        Marked::Marked { by: placing },
     );
 }

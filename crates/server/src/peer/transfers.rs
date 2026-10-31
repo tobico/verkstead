@@ -452,13 +452,13 @@ pub(crate) async fn arrived(
         &state.pool,
         id,
         &format!(
-            "Transferred to **{here}** from **{named}** at {whose} request. The branch, the \
-             worktree, anything uncommitted in it, and the record above came with it.",
+            "Transferred to **{here}** from **{named}** {why}. The branch, the worktree, \
+             anything uncommitted in it, and the record above came with it.",
             here = state
                 .devices
                 .as_ref()
                 .map_or_else(crate::platform::hostname, |devices| devices.name()),
-            whose = from.asked.whose(),
+            why = from.asked.why(),
         ),
     )
     .await;

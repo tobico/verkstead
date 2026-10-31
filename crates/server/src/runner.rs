@@ -244,6 +244,23 @@ pub struct Pace {
     /// what ordinarily brings a look about is a place coming free, which this
     /// says nothing about and does not wait for.
     pub places: Duration,
+
+    /// And how often a stage away from home looks for a report its home has not
+    /// taken yet — see [`crate::reporting`].
+    ///
+    /// The backstop rather than the pace, as [`Pace::places`] is: a move is told
+    /// home the moment it is made, and home coming back is heard on its Nudge
+    /// stream. What this catches is a home that answered neither.
+    pub reports: Duration,
+
+    /// And how often a sleeping device that an open placement Set of
+    /// Verkstead's is waiting on is asked whether it is awake — see
+    /// [`crate::own_sets::wait`].
+    ///
+    /// The backstop rather than the pace, as [`Pace::reports`] is: a dial
+    /// finding a member answering hurries the look. What this catches is a
+    /// machine that woke while nothing here happened to dial it.
+    pub wakes: Duration,
 }
 
 impl Default for Pace {
@@ -257,6 +274,8 @@ impl Default for Pace {
             long_stop: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
             places: crate::places::LOOKED_AT_EVERY,
+            reports: crate::reporting::LOOKED_AT_EVERY,
+            wakes: crate::own_sets::WAKES_LOOKED_FOR_EVERY,
             joins: crate::joins::LOOKED_AT_EVERY,
             merges: crate::merges::SWEPT_EVERY,
             cleanup: crate::cleanup::SWEPT_EVERY,
@@ -687,6 +706,13 @@ async fn backlog_again(
         // opened nothing, so what an empty backlog means there is that the run
         // has not started rather than that it is over.
         if let Some(cut_from) = stage_to_plan(&state, conversation_id, working_in, base).await {
+            // A stage the human is still being asked where to start has not
+            // started, and its open Set is the wait — a restart reaching it
+            // included. See [`crate::placing::stage_waiting`].
+            if crate::placing::stage_waiting(&state, conversation_id).await {
+                return;
+            }
+
             tracing::info!(
                 conversation_id,
                 "a stage's backlog was never planned, so the planning is being run again",
@@ -725,14 +751,22 @@ async fn backlog_again(
     // And what it is let in *to* is read the moment it is let in, which is the
     // other half of the join: the chain is Verkstead's to say and the rebase is
     // the session's to do, so the branches this one goes on top of are carried
-    // in the prompt — see [`crate::joins::joining`].
+    // in the prompt — see [`crate::joins::let_in`].
     let joining = match step == Step::Finish {
-        true => {
-            crate::joins::hold(&state, conversation_id).await;
-            crate::joins::joining(&state, conversation_id).await
-        }
+        true => crate::joins::let_in(&state, conversation_id).await,
         false => Vec::new(),
     };
+
+    // And placed as the loop places it: a Resume is a launch of the task like
+    // any other, so one moved back by hand is moved again — see
+    // [`crate::placing`].
+    if let Step::Task { number, .. } = &step
+        && !crate::placing::task(&state, conversation_id, working_in, *number)
+            .await
+            .here()
+    {
+        return;
+    }
 
     tracing::info!(conversation_id, step = ?step, "a stopped run is being taken up again");
 
@@ -896,6 +930,13 @@ async fn nothing_left(
 ///   when it came to push, and the halt is what reaches the human on their
 ///   phone.
 async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
+    // A run the human is still being asked where to start has not started, and
+    // its open Set is the wait — a restart reaching it included. See
+    // [`crate::placing::inline_waiting`].
+    if crate::placing::inline_waiting(&state, conversation_id).await {
+        return;
+    }
+
     let Some((_, branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
         return;
     };
@@ -1167,14 +1208,26 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
         // Then the chain itself, read the moment the stage is let in and carried
         // in the finish session's prompt: the rebase onto the top of it comes
         // before anything is pushed, and it is the session's to run — see
-        // [`crate::joins::joining`].
+        // [`crate::joins::let_in`].
         let joining = match step == Step::Finish {
-            true => {
-                crate::joins::hold(&state, conversation_id).await;
-                crate::joins::joining(&state, conversation_id).await
-            }
+            true => crate::joins::let_in(&state, conversation_id).await,
             false => Vec::new(),
         };
+
+        // And a task that declares a platform this device is not is moved to one
+        // that is before anything is launched for it: the move runs where it
+        // stands, with nothing running, and the far end's arrival presses its own
+        // Resume, which launches it there — see [`crate::placing`]. The run here
+        // stands down, its registration handed to the mover. And where the
+        // human is asked where it runs instead, it stands down too: their
+        // answer is what launches it.
+        if let Step::Task { number, .. } = &step
+            && !crate::placing::task(&state, conversation_id, &worktree, *number)
+                .await
+                .here()
+        {
+            return;
+        }
 
         tracing::info!(conversation_id, step = ?step, "a fresh session is starting on the next step");
 
@@ -1502,6 +1555,16 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 
     crate::conversations::hand_over(&state, conversation_id).await;
     crate::conversations::grilling_over(&state, conversation_id).await;
+
+    // And an inline run whose proposal wants one platform this device is not is
+    // moved to one that is before its session starts, the way a declared task
+    // is: the handoff is on the record by now, so it crosses with it, and the
+    // far end's arrival presses its own Resume, which launches the run there
+    // without asking again — see [`crate::placing::inline`]. Where the human is
+    // asked where it runs instead, their answer launches it.
+    if !crate::placing::inline(&state, conversation_id).await.here() {
+        return;
+    }
 
     let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing).await else {
         return;
@@ -3694,12 +3757,27 @@ fn lacking(worktree: &Path, landing: &Landing) -> Option<String> {
     }
 
     match pending(worktree, path) {
-        Some(false) => None,
-        _ => Some(match wanted {
-            true => format!("`{}` is not committed", path.display()),
-            false => format!("taking `{}` away is not committed", path.display()),
-        }),
+        Some(false) => (),
+        _ => {
+            return Some(match wanted {
+                true => format!("`{}` is not committed", path.display()),
+                false => format!("taking `{}` away is not committed", path.display()),
+            });
+        }
     }
+
+    // And a backlog that has landed is asked what a roadmap is asked beside its
+    // landing: whether the platforms its lines name are platforms. Refused here
+    // rather than at launch, because the session that wrote the list is the one
+    // alive to put it right, and nobody who wrote it is there when a task starts.
+    // See [`crate::declarations::judge_backlog`].
+    if wanted && *path == todo() {
+        let list = std::fs::read_to_string(worktree.join(path)).ok()?;
+
+        return crate::declarations::judge_backlog(&list);
+    }
+
+    None
 }
 
 /// Whether git has any pending change for `path`, or `None` where it cannot say.
@@ -3950,7 +4028,7 @@ enum Prompt {
     /// not: the finish is where a stage joins its roadmap's chain, and the
     /// rebase comes before the push. Empty on every task session, and on the
     /// finish of anything that is not a stage with a chain under it — see
-    /// [`crate::joins::joining`], which reads it, and [`skills::joining`], which
+    /// [`crate::joins::let_in`], which reads it, and [`skills::joining`], which
     /// is what it is said in.
     NextTask {
         /// Every branch this one is joining above, bottom to top.
@@ -4613,6 +4691,50 @@ mod tests {
         run(path, &["commit", "-m", "chore: plan rate-limiting tasks"]);
 
         assert!(landed(path, &landing), "written and committed");
+    }
+
+    /// A committed backlog naming a platform that is not one has not landed: the
+    /// session that wrote it is refused naming the task, and fixing the line and
+    /// committing lets it through. The same landing ends a breakdown and a
+    /// stage's planning session, so this is both of theirs.
+    #[test]
+    fn a_backlog_naming_a_platform_that_is_not_one_has_not_landed() {
+        let line = |platform: &str| {
+            format!(
+                "# Rate limiting\n\n\
+                 - [ ] 01: Count — [details](01-count.md)\n\
+                 - [ ] 02: Refuse — [details](02-refuse.md) — on windows\n\
+                 - [ ] 03: Report — [details](03-report.md) — on {platform}\n",
+            )
+        };
+
+        let dir = worktree(
+            &line("freebsd"),
+            &["01-count.md", "02-refuse.md", "03-report.md"],
+        );
+        let path = dir.path();
+
+        for landing in [Step::Planning, Step::PlanningStage].map(|step| step.landing().unwrap()) {
+            let why = lacking(path, &landing).expect("a platform that is not one is refused");
+
+            assert!(why.contains("task 03"), "{why}");
+            assert!(why.contains("freebsd"), "{why}");
+            assert!(why.contains("linux, macos, windows"), "{why}");
+        }
+
+        std::fs::write(path.join(BACKLOG).join(TODO), line("macos")).unwrap();
+
+        assert!(
+            lacking(path, &Landing::Arrived(todo())).is_some(),
+            "fixed and not committed is not landed either",
+        );
+
+        run(
+            path,
+            &["commit", "-am", "chore: plan rate-limiting tasks on macos"],
+        );
+
+        assert_eq!(lacking(path, &Landing::Arrived(todo())), None);
     }
 
     /// A repository at the moment a roadmap stage's branch is made on top of the

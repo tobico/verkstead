@@ -150,8 +150,10 @@
       "QuestionSet": {
         "added": [],
         "at": "2026-08-03T09:07:11.000Z",
+        "by_verkstead": false,
         "carried_on": false,
         "id": 6,
+        "lock_line": null,
         "rows": [
           {
             "answer": "In-process, per instance.",
@@ -223,8 +225,10 @@
       "QuestionSet": {
         "added": [],
         "at": "2026-08-03T09:07:11.000Z",
+        "by_verkstead": false,
         "carried_on": false,
         "id": 7,
+        "lock_line": null,
         "rows": [
           {
             "answer": "",
@@ -268,8 +272,10 @@
       "QuestionSet": {
         "added": [],
         "at": "2026-08-03T09:07:11.000Z",
+        "by_verkstead": false,
         "carried_on": false,
         "id": 8,
+        "lock_line": null,
         "rows": [
           {
             "answer": "",
@@ -314,7 +320,7 @@
         "at": "2026-08-03T09:07:11.000Z",
         "id": 9,
         "set_id": 4,
-        "why": "unknown field `accepted_by`, expected `direction` or `rationale` at line 6 column 17"
+        "why": "unknown field `accepted_by`, expected one of `direction`, `rationale`, `wants` at line 6 column 17"
       }
     }
   ],

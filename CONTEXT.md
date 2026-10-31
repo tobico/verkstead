@@ -432,11 +432,15 @@ ranks and one birth key. Both ride out on the sidebar row, and both are opaque t
 everything that reads them.
 **And beside it, the mark saying a copy is not the live one**: the device holding
 the record and the id it goes by there, written on the copy the work has left. A
-Conversation wearing it is a **tombstone** — nothing writes to it, the Merged List
-does not draw it, and its own URL leads to wherever the work is now, whether or
-not the device holding it is answering. It is kept rather than deleted so that
-every link anybody kept still leads to the work and so that a transfer back has a
-row to replace under the id it already had. A forwarding stub with no record
+Conversation wearing it is a **tombstone** — the Merged List does not draw it,
+and its own URL leads to wherever the work is now, whether or not the device
+holding it is answering. Nothing works on it; a **Stage**'s tombstone follows its
+live copy's standing, which that copy reports to its home — the device the stage
+was born on — so the roadmap is read there as it always was (ADR-0029, *Home
+drives a roadmap across devices*), and a Stage that comes home keeps the places
+in its roadmap's queue and chain the tombstone held. It is kept rather than
+deleted so that every link anybody kept still leads to the work and so that a
+transfer back has a row to replace under the id it already had. A forwarding stub with no record
 behind it was the recommendation; keeping the copy was the human's call.
 _Avoid_: global id, UUID, canonical id, origin, the stub
 
@@ -625,6 +629,49 @@ waits for that word, and a launch that has been decided but has not reached the
 register yet is waited for too. The account is written back before the slice and the bundle
 leave, or the far end would launch under a login the source had not finished
 returning.
+**A Stage moved away is still driven from home** (ADR-0029, *Home drives a
+roadmap across devices*) — the device it was born on, which holds its roadmap.
+The live copy reports every lifecycle move to home, which writes it onto the
+tombstone, so the roadmap's standings, places and chain are read there as they
+always were; the far device starts nothing of a roadmap that is not its own; and
+a finish over there asks home whether it may join and onto which branch,
+waiting — said on the Timeline — while home is not answering. The work stays
+where it is: the finish and the wrap-up run on the far device. A Stage that
+comes home lands on its tombstone like any return and keeps the places home
+held for it, first in the queue to join and in the chain where it joined, so
+the round trip moves nothing; from there it reports to nobody, and its settle
+starts what stood on it right there.
+**And Verkstead asks for one itself, for a task that wants another platform**
+(ADR-0029, *Placing declared work*). A line of `.tasks/TODO.md` that says `on
+linux`, `on macos` or `on windows` after its link is placed before every launch
+of that task, a **Resume** included: where the device the work is on is not of
+that platform, the Conversation is moved to the first permitted device of it —
+the drafting device and then the ticks, in that order — whose **Preflight**
+holds nothing, read by its member's OS word through the sidebar's own mark, so a
+*Linux (WSL)* member is a Linux device. Nothing is running at that moment, so
+the move runs where it stands and the far end's arrival launches the task. Both
+Timelines name the task and the platform it wants beside the device, and the
+agent never calls `verkstead transfer` for it. **The work stays where the move
+left it**: the next undeclared task, the finish and the wrap-up run there, and
+nothing moves it home. Where no permitted device of that platform can take it,
+Verkstead asks or the task runs where it is — see **Notice**.
+**And for an inline run whose proposal wants exactly one platform**, placed the
+same way as the grilling hands off, before the implementation session starts:
+the handoff is on the record by then and crosses with it, and the Timelines name
+the inline run rather than a task. A proposal wanting several platforms, or
+none, starts where it is and the agent moves itself as the work needs; and a
+**Resume** of the run never places it, since once it has started where it is is
+the agent's and the human's to decide.
+**And for a Stage whose line declares a platform**, placed as it starts, whether
+a settle started it or *Continue a roadmap* did: made and recorded at home as
+every Stage is, then moved to the first permitted device of that platform whose
+**Preflight** holds nothing, before its planning session launches — the far
+end's arrival plans it, and home keeps the tombstone and drives it from there,
+as above. The roadmap's Notice saying the Stage started names the device it is
+moving to, and both Timelines name the Stage and the platform it wants. **Placed
+once, where it starts**, as an inline run is: a **Resume** never places it
+again, so a Stage moved home by hand stays home, and its declared tasks are
+still placed one by one as any task is.
 _Avoid_: migrate, hand off, sync, failover
 
 **Permitted Device**:
@@ -635,8 +682,20 @@ compose page, held with the rest of the page and sent with the draft; on a saved
 draft's composer; and in the *Transfer to…* dialog afterwards, where ticking one
 changes the list and moves nothing. Nothing is ticked by default.
 **The ticks are the consent.** Nothing asks the human again when the agent calls
-for a move, so the list is the whole of their say in one — and a **Transfer** the
-human presses ignores it entirely.
+for a move to an awake ticked device, so the list is the whole of their say in
+one — and a **Transfer** the human presses ignores it entirely.
+**The call on a device that cannot be used yet is a request, not a refusal**
+(ADR-0029, *Verkstead asks with a Question Set of its own*). `verkstead
+transfer` naming a device that is linked but not ticked, or ticked and asleep, is
+accepted. The Set goes up as the call is taken, a **Question Set** of
+Verkstead's own, and the session ends at its turn's end. On an unticked device
+it offers *Move to* that device against *Keep it here*; on a sleeping one,
+*Keep it here* alone, and the device answering moves the work by itself.
+*Move to* ticks the device and moves the work. *Keep it here* carries the
+session on where it is, a **Carried Conversation** with a note saying the work
+stays. A name that is nobody's or two devices', this device, a device that
+answers lacking something, and a Verkstead in no cluster are still refused, in
+the words they were before.
 **The drafting device is always permitted and is never a tick**: the device in
 the Conversation's **Birth Key**, so a session that has moved can always come
 home. The device the work is on now is not offered either, being where the work
@@ -649,7 +708,21 @@ cluster is taken off every Conversation's list by the unlink itself.
 **A tick can also come with an answer**: an **Addition** picked under *May be
 transferred to* on a waiting Question Set's Attach menu ticks the device when
 the Set is answered, and restarts nothing, `verkstead transfer` reading the
-list live (ADR-0028).
+list live (ADR-0028). The same ticks are drawn in the open under the Direction
+chooser of a **Proposal** that `wants` a platform, devices of that platform
+first with the reason beside them, and picked and applied at Submit just as
+an Addition is (ADR-0029).
+**Every session is told every device, permitted or not** (ADR-0029, *Consent
+stays off by default, and is told*): the prompt of a session on a Conversation
+of a clustered Verkstead names the device it runs on, with its OS word, and
+every other member with whether it is permitted — so a session with nothing
+ticked still knows the Windows machine exists, and asks the human for it.
+**A roadmap's Stages inherit the roadmap Conversation's ticks** as each one
+starts, through the one funnel that carries its Pairings and companions — and
+its drafting device too, where that is not home: a Stage's **Birth Key** is
+home's, so the device the roadmap was permitted by its own birth key would
+otherwise be lost to it. Home is never written as a tick. A draft pressed into
+the first Stage by *Continue a roadmap* is that Stage, and keeps its own ticks.
 _Avoid_: allowed device, whitelist, target list
 
 **Carried Conversation**:
@@ -813,6 +886,12 @@ line, and the Notice names the Set rather than a move. The memory switch is no
 reason here — the Conversation's own home holds the log either way — and the other
 four still are. What the answer added is an **Addition**; see there for which of
 them restart the agent.
+**And *Keep it here* is the third** (ADR-0029). An agent's `verkstead transfer`
+to a device that is not permitted or not awake ends its session at the turn's
+end and puts a **Question Set** of Verkstead's own. Answered *Keep it here*, the
+session is carried on where it is, the same way as the second occasion. The row
+names the Set, and the note says the human kept the work on this device and
+nothing moved.
 _Avoid_: resumed session (that is ambiguous with Verkstead's **Resume**),
 rehydrate, replay, continuation
 
@@ -3354,8 +3433,10 @@ _Avoid_: commit message (the summary is its body, not the whole), description,
 gate summary (the gate is gone), changelog entry
 
 **Notice**:
-The one kind of Event Verkstead writes on its own account: which Stages it
-started and where each of their branches went, that a ready Stage waited for a
+The Event Verkstead writes on its own account to say what it did: which Stages it
+started and where each of their branches went — and, for a Stage declaring a
+platform, the device it is moving to, or that it waits on the human to say where
+it runs, or why it runs here — that a ready Stage waited for a
 place, that a roadmap has no Stage left to run, that the roadmap on the record
 is not on the branch to read, that a branch wrote no single roadmap so no Stage
 was started, that the roadmap declares badly so nothing of it was started, that
@@ -3365,7 +3446,10 @@ copy could not write its Profile's login back to the device the account was fetc
 **Account mirror** — that a Conversation moved onto this device was taken up
 with the harness's own resume of the conversation it arrived part way through,
 or with Verkstead's own Resume and which reason it was — see **Carried
-Conversation** — or — as a **stop Notice** — what stopped driving, why, and what
+Conversation** — that a task, an inline run or a Stage wanting a platform is
+running where it is, and why no device of it could take the work — see
+**Transfer** —
+or — as a **stop Notice** — what stopped driving, why, and what
 the evidence was. No agent wrote it and nobody pressed anything for it. It is
 what running unattended owes the human: a decision made while nobody was
 watching is one they have to be able to read afterwards.
@@ -3387,6 +3471,13 @@ at the press, in the same words.
 Nothing to do about one, however much it says. A Notice is written after the
 fact and stays on the record for ever; what a stopped run is waiting on is that
 it is **Stopped**, and what answers that is **Resume**.
+**It is not Verkstead's only voice.** Where there *is* something to decide, it
+asks instead, with a **Question Set** of its own (ADR-0029, *Verkstead asks with
+a Question Set of its own*). It asks where declared work wants a device that is
+asleep or not yet permitted, and where an agent calls `verkstead transfer` on
+one. For declared work a Notice still says the rest: no device of the platform
+linked at all, or only ones awake and lacking the Repo, a companion or the
+harness. There the work runs here, and the Notice says why.
 _Avoid_: log line, info event, message, alert
 
 **Transcript**:
@@ -4363,6 +4454,15 @@ producing the picked Direction's artifact, and coming back is another Set,
 with a fresh Proposal if it wants the Direction reconsidered. The Direction is
 still never the agent's to change: it proceeds on the pick or argues by
 proposing again.
+
+A Proposal may carry `wants`: the platforms the work wants, `linux`, `macos` or
+`windows`, each with the reason it wants it, written only where some of the
+work can be verified on that operating system and nowhere else (ADR-0029).
+The chooser then draws the **Permitted Device** ticks under the Directions —
+devices of a wanted platform first, the reason beside them, and a line saying
+the work will run where it is when the cluster has none — and, on a Verkstead
+in no cluster, the wants as a line of prose. A Proposal wanting nothing is
+drawn without either.
 _Avoid_: wrap-up request, handover, recommendation (that is the part, not the
 whole), final question
 
@@ -4458,10 +4558,17 @@ roadmap* is the human asking, and may start one sooner.
 brief: `after 01, 03` names other stages of the same roadmap by their labels as
 the roadmap writes them, and `no dependencies` is a root. The line may name a
 **platform** as well, `on windows`. Verkstead reads all of it, and the roadmap's
-details pane says what each stage stands on and names its platform where it has
-one. **The roadmap is scheduled by what it declares** — the platform alone is
-read and shown and acted on by nothing, placing a Stage on a device that matches
-it being a follow-up once cluster mode has landed. Every line of a declaring
+details pane says what each stage stands on, names its platform where it has
+one, and names the device it is on wherever that is not home — *on windows ·
+running on nuc-win* — read off home's tombstone of it, so a Stage moved by hand names its
+device too. **The roadmap is scheduled by what it declares, and placed by its
+platforms**: a Stage that declares one is made at home as every Stage is, and
+moved by the ordinary **Transfer** to the first permitted device of that
+platform able to take it before its first session starts. Where the devices of
+it are asleep or not permitted, Verkstead asks with a **Question Set** of its
+own, the Stage taking a place while it waits on the human; where none is linked,
+or none awake can take it, the Stage runs at home and a **Notice** says why. It
+is **placed once, where it starts** — see **Transfer**. Every line of a declaring
 roadmap carries a declaration, a bare line there being a root and a forgotten
 declaration at once — and **a roadmap declaring nothing at all is one run
 strictly in order**, which is every roadmap written before this and is read
@@ -5844,12 +5951,22 @@ _Avoid_: sync/async ask, hard/soft question, urgent question
 ## Question Sets
 
 **Question Set**:
-A batch of Questions submitted together by one agent, with a Preface and a
-title. The unit that lands on a Conversation's Timeline, gets answered, and is
+A batch of Questions submitted together by one agent, or by Verkstead itself,
+with a Preface and a title. The unit that lands on a Conversation's Timeline, gets answered, and is
 locked. Reached through the Conversation it was asked from and nowhere else:
 a second way in would be a second thing to keep true. While it waits, its sheet
 is also where the work is widened: an **Addition** picked at any Answer, or a
 **Set-level Attachment** put at the comment box (ADR-0028).
+**A Set may be Verkstead's own** (ADR-0029, *Verkstead asks with a Question Set
+of its own*). Verkstead asks one where declared work wants a device that is
+asleep or not yet permitted, and where an agent's `verkstead transfer` names
+one. It is drawn *asked by Verkstead* on the Timeline and the sheet, and it
+reaches the phone as any open Set does. Its Options are what the human can do:
+*Move to* each unpermitted device, against *Run it here* (or *Keep it here*,
+on the agent's call). No agent waits on it, so **a handler of Verkstead's
+settles it** the moment the Response is stored, from either way a Response
+comes in, and runs the Option picked. While it is open it holds the work's
+place, and for a sleeping device it is the wait: no Option means *wait*.
 _Avoid_: request, batch, ticket
 
 **Unreadable**:
@@ -6057,6 +6174,13 @@ history, and no place of its own to browse: a locked Set stays on the Timeline
 it was asked from, saying what became of it, and takes no Response ever again.
 Locking one by hand is the single irreversible act in the workbench, which is
 why it is the single one confirmed in as many words. Nothing leaves a Timeline.
+**A lock may carry a line** saying what settled the Set, drawn under it on the
+card and the sheet. Only Verkstead writes one, on a Set of its own. When a
+sleeping device answers before the human does, the move runs and the Set is
+locked with *nuc-win answered, so the work moved there.* An answered Set can
+carry a line too. *Move to* a device that is both unticked and asleep leaves
+the Set answered, not locked, with *nuc-win was permitted, and isn't awake
+yet.* beside the answer, and the asleep Set goes up in its place.
 _Avoid_: archived (**Archived** is a Conversation coming off the sidebar, which
 is reversible and about a list rather than about a Set), filed, history, log
 

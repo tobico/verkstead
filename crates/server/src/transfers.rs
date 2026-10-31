@@ -226,7 +226,10 @@ pub(crate) async fn transfer(
 /// A request that already named this device already has a mover seeing the
 /// session out, so none is started beside it — that one reads who asked at its
 /// commit point, which is where the Timeline's wording is settled.
-async fn asked(
+///
+/// Also how Verkstead asks on its own account, placing a task or an inline run
+/// that wants another platform — see [`crate::placing`].
+pub(crate) async fn asked(
     state: &AppState,
     conversation_id: i64,
     device: &str,
@@ -252,8 +255,9 @@ async fn asked(
 ///
 /// `verkstead done`'s pattern: nothing but the base URL says which Conversation,
 /// and what is recorded is a request the mover acts on once the session has
-/// ended. 200 with the machine's name where it is written down; 409 with the
-/// reason, and nothing written, where it is refused.
+/// ended. 200 with the machine's name where it is written down; 202 with it
+/// where the human is asked instead (ADR-0029) — see [`Called::Asked`]; 409
+/// with the reason, and nothing written, where it is refused.
 pub(crate) async fn call(
     axum::extract::State(state): axum::extract::State<AppState>,
     axum::extract::Path(conversation_id): axum::extract::Path<i64>,
@@ -263,14 +267,20 @@ pub(crate) async fn call(
     use axum::response::IntoResponse;
 
     match by_the_session(&state, conversation_id, body.trim()).await {
-        Ok(named) => {
+        Ok((named, called)) => {
             tracing::info!(
                 conversation_id,
                 named,
+                ?called,
                 "a session asked for its Conversation to be moved onto another device",
             );
 
-            (StatusCode::OK, format!("{named}\n")).into_response()
+            let status = match called {
+                Called::Moving => StatusCode::OK,
+                Called::Asked => StatusCode::ACCEPTED,
+            };
+
+            (status, format!("{named}\n")).into_response()
         }
 
         Err(why) => {
@@ -285,21 +295,40 @@ pub(crate) async fn call(
     }
 }
 
+/// What a session's call that was taken comes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Called {
+    /// Written down: the work moves once the session's turn is over.
+    Moving,
+
+    /// A request: the session's turn is over all the same, and the human is
+    /// asked with a Question Set of Verkstead's own — see
+    /// [`crate::placing::called`].
+    Asked,
+}
+
 /// Decide a session's call, and write the request down where it holds: the name
 /// of the machine it is going to, or the reason it is not.
 ///
-/// **Everything a press is refused for, and three things more.** The ticks are
-/// the consent, so a device the human did not tick — and that is not the one the
-/// work was drafted on — is refused; so is a name that is nobody's or is two
-/// machines', and the machine the work is on already. The preflight runs before
-/// the answer rather than after it, and a finding comes back in the words the
-/// Transfer dialog shows, so that the agent can pick another device or ask the
-/// human while it still has a turn to do it in.
+/// **Everything a press is refused for, and three things more**: a name that is
+/// nobody's or is two machines', the machine the work is on already, and a
+/// second call while the human is still being asked about one. The
+/// preflight runs before the answer rather than after it, and a finding comes
+/// back in the words the Transfer dialog shows, so that the agent can pick
+/// another device or ask the human while it still has a turn to do it in.
+///
+/// **A device not ticked, or ticked and asleep, is a request rather than a
+/// refusal** (ADR-0029, *Verkstead asks with a Question Set of its own*): the
+/// ticks are the consent and a sleeping device cannot be moved to, so the human
+/// is asked — *Move to* it against *Keep it here*, or *Keep it here* alone while
+/// the device is waited on — and the session is ended at its turn's end as an
+/// accepted call's is. A device not ticked is asked about whether or not it is
+/// awake, so no preflight is made of it here.
 async fn by_the_session(
     state: &AppState,
     conversation_id: i64,
     said: &str,
-) -> Result<String, String> {
+) -> Result<(String, Called), String> {
     if state.sessions.following(conversation_id).is_none() {
         return Err(
             "there is no session running in this Conversation, so there is nothing \
@@ -335,6 +364,16 @@ async fn by_the_session(
         );
     }
 
+    // A call already taken as a request is the human's to answer, and a second
+    // one would ask them twice, or move the work out from under the first Set —
+    // see [`crate::placing::called`].
+    if let Some(set_id) = crate::placing::called_open(state, conversation_id).await {
+        return Err(format!(
+            "the human is already being asked about this work's move, in Question Set \
+             {set_id}, and their answer decides where it goes. End the turn"
+        ));
+    }
+
     let Some(devices) = state.devices.as_ref() else {
         return Err(
             "this device is in no cluster, so there is no other device to move to".to_owned(),
@@ -353,12 +392,13 @@ async fn by_the_session(
         .map_err(ours)?;
 
     if born.is_none_or(|born| born.device != device.device) && !ticked.contains(&device.device) {
-        return Err(format!(
-            "{} ({}) is not a device the human has said this work may be moved to — they tick \
-             those under *May be transferred to* in the Transfer dialog. Pick one that is, or \
-             ask them",
-            device.name, device.device,
-        ));
+        return requested(
+            state,
+            conversation_id,
+            device,
+            crate::placing::Request::Unpermitted,
+        )
+        .await;
     }
 
     let reading = crate::preflight::of(
@@ -370,6 +410,16 @@ async fn by_the_session(
     )
     .await
     .map_err(|refusal| refusal.saying)?;
+
+    if let [verkstead_render::Lacking::Unreachable] = reading.lacks.as_slice() {
+        return requested(
+            state,
+            conversation_id,
+            device,
+            crate::placing::Request::Asleep,
+        )
+        .await;
+    }
 
     if !reading.lacks.is_empty() {
         return Err(format!(
@@ -400,7 +450,65 @@ async fn by_the_session(
         session.idle.done_waiting();
     }
 
-    Ok(device.name.clone())
+    Ok((device.name.clone(), Called::Moving))
+}
+
+/// Take a session's call to `device`, which cannot be moved to yet, as a
+/// request: the human is asked, and the session is ended once its turn is
+/// over, as an accepted call's is — see [`end_at_the_turn`].
+async fn requested(
+    state: &AppState,
+    conversation_id: i64,
+    device: &store::Member,
+    request: crate::placing::Request,
+) -> Result<(String, Called), String> {
+    crate::placing::called(state, conversation_id, device, request)
+        .await
+        .map_err(|why| format!("this device could not ask the human about the move: {why:#}"))?;
+
+    // A call clears a wait, as a Done signal does — see [`by_the_session`].
+    if let Some(session) = state.sessions.following(conversation_id) {
+        session.idle.done_waiting();
+    }
+
+    end_at_the_turn(state.clone(), conversation_id);
+
+    Ok((device.name.clone(), Called::Asked))
+}
+
+/// End the session that made a call the human is being asked about, once its
+/// turn is over: the session [`see_out`] ends for an accepted call, ended the
+/// same way, so its closing words reach the Transcript and whatever was driving
+/// it stands down.
+///
+/// **That session alone.** An answer may come first — *Keep it here* ends it
+/// and carries it on, *Move to* sees it out with a mover — and a session started
+/// after it is not this one's to end.
+fn end_at_the_turn(state: AppState, conversation_id: i64) {
+    let Some(mut session) = state.sessions.following(conversation_id) else {
+        return;
+    };
+
+    let seen = state.sessions.writing(conversation_id);
+    let idle = session.idle.clone();
+
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = session.ended() => {}
+
+            () = turn_over(&state, std::time::Instant::now(), &idle) => {
+                if state.sessions.writing(conversation_id) == seen {
+                    tracing::info!(
+                        conversation_id,
+                        "the session asked for a move the human is being asked about and its \
+                         turn is over, so it is being ended",
+                    );
+
+                    state.sessions.end(conversation_id).await;
+                }
+            }
+        }
+    });
 }
 
 /// The member of the cluster a call names, by its id or by its name — or why
@@ -470,7 +578,7 @@ fn known(members: &[store::Member]) -> String {
 
 /// One finding of the preflight, in the words the Transfer dialog draws it in —
 /// see `lacking` in `web/src/workbench/Transfer.tsx`.
-fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String {
+pub(crate) fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String {
     use verkstead_render::{AgentType, Lacking, PairingRole};
 
     match lacking {
@@ -851,11 +959,7 @@ async fn called_and_idle(
         }
 
         let since = *called.get_or_insert_with(std::time::Instant::now);
-
-        let owed = pace
-            .grace
-            .saturating_sub(idle.for_how_long())
-            .max(pace.grace.saturating_sub(since.elapsed()));
+        let owed = owed(state, since, idle);
 
         if owed.is_zero() {
             return;
@@ -863,6 +967,40 @@ async fn called_and_idle(
 
         tokio::time::sleep(owed.min(pace.poll)).await;
     }
+}
+
+/// Wait until a session that made its call at `since` has had its turn: idle
+/// by its backend's own reading, and for [`Pace::grace`] since the call as well
+/// as since it last printed — [`called_and_idle`]'s wait, the call being
+/// already made.
+///
+/// [`Pace::grace`]: crate::runner::Pace::grace
+async fn turn_over(state: &AppState, since: std::time::Instant, idle: &crate::sessions::Idle) {
+    let pace = state.sessions.pace();
+
+    loop {
+        let owed = owed(state, since, idle);
+
+        if owed.is_zero() {
+            return;
+        }
+
+        tokio::time::sleep(owed.min(pace.poll)).await;
+    }
+}
+
+/// How much longer a session that called at `since` is owed before its turn is
+/// taken to be over.
+fn owed(
+    state: &AppState,
+    since: std::time::Instant,
+    idle: &crate::sessions::Idle,
+) -> std::time::Duration {
+    let grace = state.sessions.pace().grace;
+
+    grace
+        .saturating_sub(idle.for_how_long())
+        .max(grace.saturating_sub(since.elapsed()))
 }
 
 /// Whether the move standing for this Conversation — to `device` — was asked
@@ -875,7 +1013,8 @@ async fn asked_by_the_session(state: &AppState, conversation_id: i64, device: &s
 }
 
 /// Whether the session running in this Conversation has asked for the work to
-/// be moved, and is to be ended at its turn's end for it.
+/// be moved, and is to be ended at its turn's end for it — a call taken as a
+/// request the human is still being asked about included.
 ///
 /// What the rescue asks before speaking: a session idling behind its own call
 /// has finished its turn on purpose, and the mover is about to end it. A store
@@ -885,7 +1024,9 @@ pub(crate) async fn called(state: &AppState, conversation_id: i64) -> bool {
     matches!(
         store::transfer_asked_by(&state.pool, conversation_id).await,
         Ok(Some((_, store::AskedBy::Session)))
-    )
+    ) || crate::placing::called_open(state, conversation_id)
+        .await
+        .is_some()
 }
 
 /// The move itself, once there is nothing left running.
@@ -1183,6 +1324,9 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
     let asked = match by {
         store::AskedBy::Human => MovedFor::Human,
         store::AskedBy::Session => MovedFor::Session,
+        store::AskedBy::Task { label, wants } => MovedFor::Task { label, wants },
+        store::AskedBy::Inline { wants } => MovedFor::Inline { wants },
+        store::AskedBy::Stage { label, wants } => MovedFor::Stage { label, wants },
     };
 
     // What this copy has to say for itself from here, which is where the work
@@ -1194,9 +1338,9 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         state,
         conversation_id,
         &format!(
-            "Transferred to **{named}** at {whose} request. This is a copy, and every link to \
-             it leads to the live conversation on that device.",
-            whose = asked.whose(),
+            "Transferred to **{named}** {why}. This is a copy, and every link to it leads to \
+             the live conversation on that device.",
+            why = asked.why(),
         ),
     )
     .await;
@@ -1685,26 +1829,27 @@ pub(crate) async fn transferring(state: &AppState, conversation_id: i64) -> Opti
     Some(relaying::called(state.devices.as_ref(), &device).await)
 }
 
-/// The devices a session of this Conversation, running here, may move its work
-/// onto — what its prompt names (ADR-0020, *The agent's call*).
+/// The devices of the cluster as a session of this Conversation, running here,
+/// is told them — what its prompt names (ADR-0020, *The agent's call*; ADR-0029,
+/// *Consent stays off by default, and is told*).
 ///
-/// The rule [`by_the_session`] refuses a call by, read from this device's side
-/// before there is a call: the ticks and the drafting device, less this one. So
-/// a session carried on at the far end is told it may go home, and a session
-/// still where the work was drafted, with nothing ticked, is told of nowhere.
+/// This device by its name, id and OS word, and every other member with whether
+/// the work may move there by the rule [`by_the_session`] refuses a call by,
+/// read from this device's side before there is a call: the ticks and the
+/// drafting device, less this one. So a session carried on at the far end is
+/// told it may go home, and a session still where the work was drafted, with
+/// nothing ticked, is told every device and that it may go to none of them.
 ///
-/// A device that is not a member any more is not named, there being no name or
-/// OS to name it by and no call that could reach it. A read that fails is an
-/// empty list, said in the log: a prompt that says nothing about moving is a
-/// session that stays, which is the way round that loses nothing.
-pub(crate) async fn may_go_to(
+/// `None` where there is nothing to tell: a Verkstead with no cluster, or no
+/// member but this device. A read that fails is `None` too, said in the log: a
+/// prompt that says nothing about moving is a session that stays, which is the
+/// way round that loses nothing.
+pub(crate) async fn cluster(
     pool: &sqlx::SqlitePool,
     devices: Option<&crate::device::Devices>,
     conversation_id: i64,
-) -> Vec<store::Member> {
-    let Some(devices) = devices else {
-        return Vec::new();
-    };
+) -> Option<Cluster> {
+    let devices = devices?;
 
     let read = async {
         anyhow::Ok((
@@ -1715,44 +1860,82 @@ pub(crate) async fn may_go_to(
     };
 
     match read.await {
-        Ok((born, ticked, members)) => permitted_among(
-            devices.id(),
-            born.as_ref().map(|born| born.device.as_str()),
-            &ticked,
-            members,
-        ),
+        Ok((born, ticked, members)) => {
+            let members = placed_among(
+                devices.id(),
+                born.as_ref().map(|born| born.device.as_str()),
+                &ticked,
+                members,
+            );
+
+            (!members.is_empty()).then(|| Cluster {
+                name: devices.name(),
+                id: devices.id().to_owned(),
+                os: devices.os(),
+                members,
+            })
+        }
 
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading where this Conversation's work may be moved failed, so its session is told of nowhere");
-            Vec::new()
+            None
         }
     }
 }
 
-/// [`may_go_to`]'s rule, with nothing to read: the drafting device first, it
-/// being the one that is always there, then the ticks in the order they were
-/// made — and never `here`.
-fn permitted_among(
+/// The cluster as [`cluster`] reads it from this device's side: this device,
+/// and the others in the order the prompt names them.
+pub(crate) struct Cluster {
+    pub(crate) name: String,
+    pub(crate) id: String,
+    pub(crate) os: String,
+    pub(crate) members: Vec<Placed>,
+}
+
+/// A member of the cluster other than this device, and whether this
+/// Conversation's work may be moved onto it.
+pub(crate) struct Placed {
+    pub(crate) member: store::Member,
+    pub(crate) permitted: bool,
+}
+
+/// [`cluster`]'s rule, with nothing to read: every member but `here`, the
+/// permitted ones first — the drafting device, it being the one that is always
+/// there, then the ticks in the order they were made — and the rest after them
+/// by name.
+pub(crate) fn placed_among(
     here: &str,
     born: Option<&str>,
     ticked: &[String],
     members: Vec<store::Member>,
-) -> Vec<store::Member> {
+) -> Vec<Placed> {
     let order = born
         .into_iter()
         .chain(ticked.iter().map(String::as_str))
         .filter(|device| *device != here);
 
-    let mut members = members;
-    let mut permitted = Vec::new();
+    let mut members: Vec<store::Member> = members
+        .into_iter()
+        .filter(|member| member.device != here)
+        .collect();
+    let mut placed = Vec::new();
 
     for device in order {
         if let Some(at) = members.iter().position(|member| member.device == device) {
-            permitted.push(members.remove(at));
+            placed.push(Placed {
+                member: members.remove(at),
+                permitted: true,
+            });
         }
     }
 
-    permitted
+    members.sort_by(|a, b| (&a.name, &a.device).cmp(&(&b.name, &b.device)));
+    placed.extend(members.into_iter().map(|member| Placed {
+        member,
+        permitted: false,
+    }));
+
+    placed
 }
 
 #[cfg(test)]
@@ -1777,36 +1960,49 @@ mod tests {
         }
     }
 
-    fn named(permitted: &[store::Member]) -> Vec<&str> {
-        permitted
+    fn named(placed: &[Placed]) -> Vec<(&str, bool)> {
+        placed
             .iter()
-            .map(|member| member.name.as_str())
+            .map(|placed| (placed.member.name.as_str(), placed.permitted))
             .collect()
     }
 
-    /// On the drafting device with nothing ticked, the list is empty — which is
-    /// what makes the prompt say nothing about moving.
+    /// On the drafting device with nothing ticked, every other member is named
+    /// and none is permitted — by name, and never this device.
     #[test]
-    fn nothing_ticked_where_the_work_was_drafted_is_nowhere_to_go() {
-        let members = vec![member("b", "vm", "Windows"), member("c", "laptop", "macOS")];
+    fn nothing_ticked_where_the_work_was_drafted_names_every_member_unpermitted() {
+        let members = vec![
+            member("c", "vm", "Windows"),
+            member("b", "laptop", "macOS"),
+            member("a", "workstation", "Linux"),
+        ];
 
-        assert!(permitted_among("a", Some("a"), &[], members).is_empty());
+        assert_eq!(
+            named(&placed_among("a", Some("a"), &[], members)),
+            vec![("laptop", false), ("vm", false)],
+        );
     }
 
-    /// The ticks, in the order they were made, and never a device that has
-    /// left the cluster.
+    /// The ticks, in the order they were made, then the rest by name — and
+    /// never a device that has left the cluster.
     #[test]
-    fn the_ticks_are_named_in_order_and_only_while_they_are_members() {
+    fn the_ticks_are_named_in_order_before_the_rest() {
         let members = vec![
             member("b", "vm", "Windows"),
             member("c", "laptop", "macOS"),
             member("d", "vm", "Linux (WSL)"),
+            member("e", "box", "Linux"),
         ];
         let ticked = ["d".to_owned(), "gone".to_owned(), "b".to_owned()];
 
         assert_eq!(
-            named(&permitted_among("a", Some("a"), &ticked, members)),
-            vec!["vm", "vm"],
+            named(&placed_among("a", Some("a"), &ticked, members)),
+            vec![
+                ("vm", true),
+                ("vm", true),
+                ("box", false),
+                ("laptop", false)
+            ],
         );
     }
 
@@ -1817,12 +2013,13 @@ mod tests {
         let members = vec![
             member("a", "workstation", "Linux"),
             member("c", "laptop", "macOS"),
+            member("d", "desk", "Windows"),
         ];
         let ticked = ["b".to_owned(), "c".to_owned()];
 
         assert_eq!(
-            named(&permitted_among("b", Some("a"), &ticked, members)),
-            vec!["workstation", "laptop"],
+            named(&placed_among("b", Some("a"), &ticked, members)),
+            vec![("workstation", true), ("laptop", true), ("desk", false)],
         );
     }
 

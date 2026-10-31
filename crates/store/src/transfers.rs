@@ -22,9 +22,10 @@
 //! machine until then, so there is nothing to take back.
 //!
 //! **And it says who asked**: the human's press, or the session's own call to
-//! `verkstead transfer` (ADR-0020, *The agent's call*). Whichever asked last is
-//! the request that stands, and it is what the Timeline names once the move is
-//! made — which is why the mark hands it back, read in the same transaction.
+//! `verkstead transfer` (ADR-0020, *The agent's call*), or Verkstead placing a
+//! task or an inline run that wants another platform (ADR-0029). Whichever
+//! asked last is the request that stands, and it is what the Timeline names
+//! once the move is made — which is why the mark hands it back, read in the same transaction.
 //!
 //! **And it is forgotten by whatever acts on it** — by the move that landed, or
 //! by the move that failed and stopped the Conversation instead. A request left
@@ -71,7 +72,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 }
 
 /// Who asked for a Conversation to be moved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AskedBy {
     /// The human, pressing *Transfer to…*.
     Human,
@@ -79,17 +80,66 @@ pub enum AskedBy {
     /// The session running in the Conversation, through `verkstead transfer` —
     /// to a device the human ticked, or the one the work was drafted on.
     Session,
+
+    /// Verkstead itself, placing a task of the backlog that declares the
+    /// platform it wants before launching it (ADR-0029, *Placing declared
+    /// work*): the task's label as the list writes it, and the word for the
+    /// platform as a screen draws it.
+    Task { label: String, wants: String },
+
+    /// Verkstead itself, placing an inline run whose proposal wants exactly
+    /// one platform before its implementation session starts: the word for
+    /// the platform as a screen draws it.
+    Inline { wants: String },
+
+    /// Verkstead itself, placing a roadmap stage whose line declares the
+    /// platform it wants before its first session starts: the stage's label as
+    /// the roadmap writes it, and the word for the platform as a screen draws
+    /// it.
+    Stage { label: String, wants: String },
 }
 
 impl AskedBy {
-    fn column(self) -> &'static str {
+    /// The column's word. A task's is one word too, its two parts after it: the
+    /// platform word has no colon in it, so the first colon after it is the
+    /// one the label starts after, whatever the label holds.
+    fn column(&self) -> String {
         match self {
-            AskedBy::Human => "human",
-            AskedBy::Session => "session",
+            AskedBy::Human => "human".to_owned(),
+            AskedBy::Session => "session".to_owned(),
+            AskedBy::Task { label, wants } => format!("task:{wants}:{label}"),
+            AskedBy::Inline { wants } => format!("inline:{wants}"),
+            AskedBy::Stage { label, wants } => format!("stage:{wants}:{label}"),
         }
     }
 
     fn read(column: &str) -> AskedBy {
+        if let Some((wants, label)) = column
+            .strip_prefix("task:")
+            .and_then(|task| task.split_once(':'))
+        {
+            return AskedBy::Task {
+                label: label.to_owned(),
+                wants: wants.to_owned(),
+            };
+        }
+
+        if let Some((wants, label)) = column
+            .strip_prefix("stage:")
+            .and_then(|stage| stage.split_once(':'))
+        {
+            return AskedBy::Stage {
+                label: label.to_owned(),
+                wants: wants.to_owned(),
+            };
+        }
+
+        if let Some(wants) = column.strip_prefix("inline:") {
+            return AskedBy::Inline {
+                wants: wants.to_owned(),
+            };
+        }
+
         match column {
             "session" => AskedBy::Session,
             _ => AskedBy::Human,

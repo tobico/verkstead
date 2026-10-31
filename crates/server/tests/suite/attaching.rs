@@ -1493,7 +1493,7 @@ mod additions {
     use super::*;
     use verkstead_render::{
         AddableView, Added, AdditionMade, AdditionRemoved, AdditionState, AdditionView,
-        CompanionMode,
+        CompanionMode, DeviceStanding,
     };
 
     fn declaring(dir: &tempfile::TempDir, names: &[&str]) {
@@ -2355,5 +2355,162 @@ mod additions {
             said[0].contains("verkstead transfer the-laptop"),
             "{said:?}"
         );
+    }
+
+    const DESKTOP: &str = "33333333333333333333333333333333";
+
+    /// A closing Set wanting Windows, asked of a grilling with a Windows
+    /// member in the cluster.
+    const WANTING_WINDOWS: &str = r#"
+title: Ready to build it
+questions:
+  - label: Q9
+    text: Anything you want changed?
+proposal:
+  direction: task-list
+  rationale: Five changes that barely touch each other.
+  wants:
+    - platform: windows
+      for: the ConPTY stage
+"#;
+
+    /// The chooser's tick and its pick go in one Submit: the Windows device
+    /// is permitted, and the Response carries both the direction and the
+    /// device, named, at the set level where an addition under no label goes.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_tick_on_the_chooser_and_a_pick_go_in_one_submit() {
+        let (_dir, app, pool, id, _set) = clustered().await;
+        store::record_member(
+            &pool,
+            &store::Linking {
+                device: DESKTOP.to_owned(),
+                name: "nuc-win".to_owned(),
+                os: "Windows".to_owned(),
+                addresses: vec!["192.168.1.32".to_owned()],
+                fingerprint: format!("AA:BB:CC:DD:{DESKTOP}"),
+                kept_by: None,
+                version: None,
+                install: None,
+            },
+        )
+        .await
+        .unwrap();
+        store::set_state(&pool, id, store::Lifecycle::Grilling)
+            .await
+            .unwrap();
+        let set = verkstead_schema::QuestionSet::from_yaml(WANTING_WINDOWS).unwrap();
+        let set = store::ask(&pool, id, &set, store::Ask::Blocking)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+
+        let cluster = addable(&app, set)
+            .await
+            .cluster
+            .expect("this Verkstead is in a cluster");
+        let windows: Vec<(String, DeviceStanding)> = cluster
+            .iter()
+            .filter(|member| member.platform == Some(verkstead_schema::WantedPlatform::Windows))
+            .map(|member| (member.device.device.clone(), member.standing))
+            .collect();
+        assert_eq!(windows, [(DESKTOP.to_owned(), DeviceStanding::Tickable)]);
+
+        picked(picking(&app, set, None, device(DESKTOP)).await);
+        assert_eq!(
+            post::<serde_json::Value>(
+                &app,
+                &format!("/api/ui/sets/{set}/response"),
+                &serde_json::json!({
+                    "answers": [{ "label": "Q9", "unanswered": true }],
+                    "direction": "roadmap",
+                }),
+            )
+            .await,
+            serde_json::json!("Accepted"),
+        );
+
+        assert_eq!(
+            store::permitted_devices(&pool, id).await.unwrap(),
+            [DESKTOP]
+        );
+
+        let response = handed(&app, id, set).await;
+        assert_eq!(
+            response.direction,
+            Some(verkstead_schema::Direction::Roadmap)
+        );
+        assert_eq!(response.added.len(), 1, "{:?}", response.added);
+        assert!(
+            response.added[0].contains("nuc-win"),
+            "{:?}",
+            response.added
+        );
+
+        let standing: Vec<(String, DeviceStanding)> = addable(&app, set)
+            .await
+            .cluster
+            .unwrap()
+            .into_iter()
+            .map(|member| (member.device.device, member.standing))
+            .collect();
+        assert!(
+            standing.contains(&(DESKTOP.to_owned(), DeviceStanding::Permitted)),
+            "and the chooser now says it is permitted: {standing:?}",
+        );
+    }
+
+    /// The cluster says where each member stands, this device first and the
+    /// rest as the membership lists them: this one is where the work is, a
+    /// permitted one is permitted, and *Linux (WSL)* is a Linux.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_cluster_says_where_each_device_stands() {
+        let (_dir, app, pool, id, set) = clustered().await;
+        store::permit_device(&pool, id, VM).await.unwrap();
+        store::record_member(
+            &pool,
+            &store::Linking {
+                device: DESKTOP.to_owned(),
+                name: "nuc-wsl".to_owned(),
+                os: "Linux (WSL)".to_owned(),
+                addresses: vec!["192.168.1.32".to_owned()],
+                fingerprint: format!("AA:BB:CC:DD:{DESKTOP}"),
+                kept_by: None,
+                version: None,
+                install: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let cluster: Vec<_> = addable(&app, set)
+            .await
+            .cluster
+            .expect("this Verkstead is in a cluster")
+            .into_iter()
+            .map(|member| (member.device.device, member.platform, member.standing))
+            .collect();
+
+        let linux = Some(verkstead_schema::WantedPlatform::Linux);
+        assert_eq!(
+            cluster,
+            [
+                (THIS_DEVICE.to_owned(), linux, DeviceStanding::WorkIsHere),
+                (DESKTOP.to_owned(), linux, DeviceStanding::Tickable),
+                (LAPTOP.to_owned(), linux, DeviceStanding::Tickable),
+                (VM.to_owned(), linux, DeviceStanding::Permitted),
+            ],
+        );
+    }
+
+    /// And in no cluster there is none to draw ticks from.
+    #[tokio::test]
+    async fn with_no_cluster_there_is_no_cluster_to_tick() {
+        let (_elsewhere, _dir, app, pool, id) = drafting().await;
+        let set = asked(&pool, id).await;
+
+        assert_eq!(addable(&app, set).await.cluster, None);
     }
 }

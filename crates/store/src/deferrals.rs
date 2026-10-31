@@ -203,6 +203,10 @@ pub(crate) fn kind(idled: Option<bool>) -> Ask {
 /// folding is for; one whose session is still there is folded only if it dies
 /// before it fetches, because folding is recorded rather than worked out.
 ///
+/// Never one of Verkstead's own, stored as a Deferred Ask though it is: its
+/// Answers are Verkstead's to act on, and a session told about them would be
+/// told about a question nobody put to it — see [`super::own_sets`].
+///
 /// Answered only. An unanswered one is still waiting on the human and one they
 /// closed unanswered is a decision they declined to make, and neither has
 /// anything to fold.
@@ -215,6 +219,7 @@ pub async fn unfolded(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Unf
          JOIN timeline_events e ON e.id = s.event_id
          JOIN responses r ON r.set_id = q.id
          WHERE e.conversation_id = ? AND d.folded_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM own_sets o WHERE o.set_id = q.id)
          ORDER BY q.id",
     )
     .bind(conversation_id)

@@ -311,32 +311,272 @@ pub struct ProfileAcross {
 /// how every other call over this link names a device — see [`ProfileAcross`].
 /// The gate has already settled that the caller is a member; this says *which*
 /// member, and what it is for is a sentence with a machine's name in it.
+///
+/// **And who asked for it, said so that a far end older than the reason still
+/// reads the arrival.** The wire carries the two reasons there always were,
+/// and a move Verkstead made for a task or an inline run beside them — see
+/// [`MovedFor::Task`] and [`MovedFor::Inline`] — so an end that predates such a
+/// move reads the field it knows and drops the one it does not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "Arriving", into = "Arriving")]
 pub struct CameFrom {
     /// The **Device Id** of the machine the work was moved off.
     pub device: String,
 
-    /// And who asked for the move, which the arrival's Notice names. Absent is
-    /// a sender from before a session could ask, which was always the human.
-    #[serde(default)]
+    /// And who asked for the move, which the arrival's Notice names.
     pub asked: MovedFor,
 }
 
-/// Who a move was made for: the human's press on *Transfer to…*, or the
-/// session's own `verkstead transfer` (ADR-0020, *The agent's call*).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// A stage away from home telling home where it stands (ADR-0029, *Home drives
+/// a roadmap across devices*).
+///
+/// **The whole standing rather than the move that changed it** — the four facts
+/// a roadmap reads of a stage — so home writes its tombstone the same way
+/// however many times it is told, and a report the far end could not be sure
+/// landed is simply sent again.
+///
+/// **Addressed by the Birth Key**, which is the one name home and the far end
+/// share for the work: home's own id for it, and this device's id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageReport {
+    /// The stage, by the key it was born under on home.
+    pub born: BirthKey,
+
+    /// The state its live copy is in.
+    pub state: crate::Lifecycle,
+
+    /// Whether it has ever moved to Done.
+    pub done: bool,
+
+    /// Whether it has ever moved to Wrapping.
+    pub wrapped: bool,
+
+    /// And whether it is stopped.
+    pub stopped: bool,
+
+    /// And the pull request it joined its roadmap's chain with, once its finish
+    /// has opened one: what puts it in home's chain.
+    #[serde(default)]
+    pub joined: Option<StageJoined>,
+}
+
+/// The pull request a stage away from home opened as it joined its roadmap's
+/// chain, and the branch it joined with as its record names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageJoined {
+    pub branch: String,
+    pub number: i64,
+    pub title: String,
+    pub url: String,
+    pub base: Option<String>,
+}
+
+/// A stage away from home at its finish, asking home whether it may join its
+/// roadmap's chain (ADR-0029, *Home drives a roadmap across devices*).
+///
+/// Asked of home because the chain and the queue are home's: the stage is
+/// queued there on its tombstone, the first time it asks, and every later ask
+/// keeps that place.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageJoining {
+    /// The stage, by the key it was born under on home.
+    pub born: BirthKey,
+}
+
+/// Home's answer: what the stage is still waiting on, and the chain it would
+/// join on top of.
+///
+/// Nothing in `ahead` is the stage let in, and `chain` and `foot` are then the
+/// chain to rebase onto — every link home holds, bottom to top, with which of
+/// them have merged left for the far device's git to read.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageJoin {
+    pub ahead: Vec<StageAhead>,
+    pub chain: Vec<ChainLink>,
+
+    /// The branch the stage was cut from, where that was another stage's or the
+    /// roadmap's own rather than the default branch.
+    pub foot: Option<String>,
+}
+
+/// One stage a stage at its finish is waiting on, by its label, and whether it
+/// has joined the chain already or is still to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageAhead {
+    pub stage: String,
+    pub joined: bool,
+}
+
+/// One link of a roadmap's chain as home reads it: its Conversation there, its
+/// label, and its branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChainLink {
+    pub conversation: i64,
+    pub stage: String,
+    pub branch: String,
+}
+
+/// Home asking a device where its copy of a stage went, when the stage is
+/// reported on by a device home's tombstone does not name (ADR-0029, *Home
+/// drives a roadmap across devices*).
+///
+/// A stage moved on from the device it was first moved to leaves home's
+/// tombstone naming that first device, which is the one the move away from home
+/// was made by. So home follows the marks: the device its tombstone names says
+/// where its own copy went, and so on, until they lead to the caller or run out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageWhereabouts {
+    /// The stage, by the key it was born under on home.
+    pub born: BirthKey,
+}
+
+/// The answer: the device the asked device's copy was handed on to and the id
+/// it goes by there, or `null` where that copy was handed on to nobody — or
+/// where the asked device holds no copy at all.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HandedOn {
+    pub device: String,
+    pub id: i64,
+}
+
+/// What home answers a report with: what it would have said on the stage's
+/// Timeline about carrying the roadmap on, for the copy to say on its own —
+/// nobody opens a tombstone.
+///
+/// Empty where the report settled nothing, which is most of them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageReported {
+    pub said: Vec<String>,
+}
+
+/// Who a move was made for: the human's press on *Transfer to…*, the session's
+/// own `verkstead transfer` (ADR-0020, *The agent's call*), or Verkstead placing
+/// a task or an inline run that declares the platform it wants (ADR-0029,
+/// *Placing declared work*).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum MovedFor {
+    #[default]
+    Human,
+    Session,
+
+    /// A task of the backlog: its label as the list writes it, and the word for
+    /// the platform it wants as a screen draws it.
+    Task {
+        label: String,
+        wants: String,
+    },
+
+    /// An inline run whose proposal wants one platform: the word for it as a
+    /// screen draws it.
+    Inline {
+        wants: String,
+    },
+
+    /// A roadmap stage whose line declares a platform: its label as the
+    /// roadmap writes it, and the word for the platform as a screen draws it.
+    Stage {
+        label: String,
+        wants: String,
+    },
+}
+
+impl MovedFor {
+    /// Why the Timeline says the move was made, as the end of a sentence that
+    /// began with where the work went.
+    pub fn why(&self) -> String {
+        match self {
+            MovedFor::Human => "at your request".to_owned(),
+            MovedFor::Session => "at the agent's request".to_owned(),
+            MovedFor::Task { label, wants } => format!("for task {label}, which wants {wants}"),
+            MovedFor::Inline { wants } => format!("for the inline run, which wants {wants}"),
+            MovedFor::Stage { label, wants } => format!("for stage {label}, which wants {wants}"),
+        }
+    }
+}
+
+/// [`CameFrom`] as it crosses.
+///
+/// **`asked` is only ever the two words the first ends knew**, absent being a
+/// sender from before a session could ask, which was always the human. A task's
+/// move goes as the agent's beside a `task` field an older end ignores: the
+/// platform it was placed by is a line the agent breaking the work down wrote,
+/// and no press of the human's, so *the agent's request* is the nearer of the
+/// two sentences such an end has to say it with. An inline run's goes the same
+/// way beside an `inline` field, its platform being the grilling agent's
+/// proposal, and a stage's beside a `stage` field, its platform being the line
+/// the agent writing the roadmap gave it.
+#[derive(Serialize, Deserialize)]
+struct Arriving {
+    device: String,
+
+    #[serde(default)]
+    asked: Asker,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    task: Option<Placing>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    inline: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stage: Option<Placing>,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+enum Asker {
     #[default]
     Human,
     Session,
 }
 
-impl MovedFor {
-    /// Whose request the Timeline says the move was made at.
-    pub fn whose(self) -> &'static str {
-        match self {
-            MovedFor::Human => "your",
-            MovedFor::Session => "the agent's",
+#[derive(Serialize, Deserialize)]
+struct Placing {
+    label: String,
+    wants: String,
+}
+
+impl From<Arriving> for CameFrom {
+    fn from(arriving: Arriving) -> CameFrom {
+        let asked = match (
+            arriving.task,
+            arriving.inline,
+            arriving.stage,
+            arriving.asked,
+        ) {
+            (Some(Placing { label, wants }), ..) => MovedFor::Task { label, wants },
+            (None, Some(wants), ..) => MovedFor::Inline { wants },
+            (None, None, Some(Placing { label, wants }), _) => MovedFor::Stage { label, wants },
+            (None, None, None, Asker::Human) => MovedFor::Human,
+            (None, None, None, Asker::Session) => MovedFor::Session,
+        };
+
+        CameFrom {
+            device: arriving.device,
+            asked,
+        }
+    }
+}
+
+impl From<CameFrom> for Arriving {
+    fn from(came: CameFrom) -> Arriving {
+        let (asked, task, inline, stage) = match came.asked {
+            MovedFor::Human => (Asker::Human, None, None, None),
+            MovedFor::Session => (Asker::Session, None, None, None),
+            MovedFor::Task { label, wants } => {
+                (Asker::Session, Some(Placing { label, wants }), None, None)
+            }
+            MovedFor::Inline { wants } => (Asker::Session, None, Some(wants), None),
+            MovedFor::Stage { label, wants } => {
+                (Asker::Session, None, None, Some(Placing { label, wants }))
+            }
+        };
+
+        Arriving {
+            device: came.device,
+            asked,
+            task,
+            inline,
+            stage,
         }
     }
 }
@@ -526,4 +766,126 @@ pub struct UntrackedFile {
     /// there is no attribute to read and no index form to write, so what arrives
     /// is what was there.
     pub bytes: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The arrival as an end from before a task could be placed declared it,
+    /// word for word.
+    #[derive(Deserialize)]
+    struct Older {
+        device: String,
+        #[serde(default)]
+        asked: OlderAsker,
+    }
+
+    #[derive(Debug, Default, PartialEq, Deserialize)]
+    enum OlderAsker {
+        #[default]
+        Human,
+        Session,
+    }
+
+    fn task() -> CameFrom {
+        CameFrom {
+            device: "aa00".to_owned(),
+            asked: MovedFor::Task {
+                label: "02".to_owned(),
+                wants: "Windows".to_owned(),
+            },
+        }
+    }
+
+    /// A task's move crosses whole to an end that knows the reason.
+    #[test]
+    fn a_tasks_move_reads_back_as_the_task() {
+        let wire = serde_json::to_string(&task()).unwrap();
+
+        assert_eq!(serde_json::from_str::<CameFrom>(&wire).unwrap(), task());
+        assert_eq!(
+            task().asked.why(),
+            "for task 02, which wants Windows",
+            "the Timeline names the task and the platform",
+        );
+    }
+
+    /// And to an end that predates it, as the agent's request: the `asked` it
+    /// knows holds a word it knows.
+    #[test]
+    fn an_older_end_reads_a_tasks_move_as_the_agents() {
+        let wire = serde_json::to_value(task()).unwrap();
+
+        assert_eq!(wire["asked"], "Session");
+
+        let older: Older = serde_json::from_value(wire).unwrap();
+
+        assert_eq!(older.device, "aa00");
+        assert_eq!(older.asked, OlderAsker::Session);
+    }
+
+    /// An inline run's move crosses whole too, and to an older end as the
+    /// agent's request.
+    #[test]
+    fn an_inline_runs_move_reads_back_as_the_inline_runs() {
+        let inline = CameFrom {
+            device: "aa00".to_owned(),
+            asked: MovedFor::Inline {
+                wants: "Windows".to_owned(),
+            },
+        };
+        let wire = serde_json::to_value(&inline).unwrap();
+
+        assert_eq!(
+            serde_json::from_value::<CameFrom>(wire.clone()).unwrap(),
+            inline
+        );
+        assert_eq!(
+            inline.asked.why(),
+            "for the inline run, which wants Windows",
+            "the Timeline names the inline run and the platform",
+        );
+
+        let older: Older = serde_json::from_value(wire).unwrap();
+        assert_eq!(older.asked, OlderAsker::Session);
+    }
+
+    /// A stage's move crosses whole too, and to an older end as the agent's
+    /// request.
+    #[test]
+    fn a_stages_move_reads_back_as_the_stages() {
+        let stage = CameFrom {
+            device: "aa00".to_owned(),
+            asked: MovedFor::Stage {
+                label: "06".to_owned(),
+                wants: "Windows".to_owned(),
+            },
+        };
+        let wire = serde_json::to_value(&stage).unwrap();
+
+        assert_eq!(
+            serde_json::from_value::<CameFrom>(wire.clone()).unwrap(),
+            stage
+        );
+        assert_eq!(
+            stage.asked.why(),
+            "for stage 06, which wants Windows",
+            "the Timeline names the stage and the platform",
+        );
+
+        let older: Older = serde_json::from_value(wire).unwrap();
+        assert_eq!(older.asked, OlderAsker::Session);
+    }
+
+    /// An older sender's arrival reads as it always did, absent `asked` and all.
+    #[test]
+    fn an_older_senders_arrival_reads_as_it_did() {
+        let came: CameFrom = serde_json::from_str(r#"{"device":"aa00"}"#).unwrap();
+        assert_eq!(came.asked, MovedFor::Human);
+
+        let came: CameFrom =
+            serde_json::from_str(r#"{"device":"aa00","asked":"Session"}"#).unwrap();
+        assert_eq!(came.asked, MovedFor::Session);
+    }
 }

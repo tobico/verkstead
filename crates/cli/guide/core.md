@@ -704,8 +704,13 @@ asked with `verkstead ask`.
 
 A Verkstead can be one device of a cluster, and the human can let a session
 move its work onto another of them. **Only where they have**: a session's
-prompt names the devices it may move to, each with its name, its id and its
-operating system, and a session whose prompt names none may move nowhere.
+prompt says which device it is running on and that device's operating system,
+then names every other device of the cluster — each with its name, its id and
+its operating system — and marks which of them this Conversation's work may be
+moved to. A device is **permitted** where the human ticked it for this
+Conversation, or where the work was drafted; the rest are **not permitted
+yet**. A Verkstead of one device draws no such section, and has nowhere to move
+to.
 
 Reach for it when the work needs **something this platform cannot do** —
 building or testing for another operating system, most often. Name the device
@@ -724,10 +729,23 @@ that it has the harness this session runs on.
   over there — the same conversation, in a checkout at a path of that device's.
   Say anything left to say before ending the turn; it stays on this device's
   Timeline, ahead of the move.
+- **Asked for** — a device **not permitted yet**, or one permitted and **not
+  awake**. It prints that the human is being asked and exits 0, and the session
+  is ended once this turn is over all the same. Verkstead asks the human with a
+  Question Set of its own: **Move to** that device against **Keep it here**
+  where it is not permitted, and **Keep it here** alone where it is asleep, the
+  work moving there by itself once it wakes. *Move to* ticks the device and the
+  work is carried on over there; *Keep it here* carries this conversation on
+  here, with a note saying the work stays.
 - **Refused** — it exits non-zero, says why on stderr, and nothing is moved:
-  a device the work may not go to, a name that is nobody's or two devices',
-  or what the device is missing. The session carries on. Pick another device
-  from the prompt's list, or ask the human.
+  a name that is nobody's or two devices', the device the work is on already,
+  or what an awake device is missing. The session carries on. Pick another
+  device from the prompt's list, or ask the human.
+
+**The ticks are the human's consent**, so a device not permitted yet is never
+moved to unasked: calling for one is the ask, and there is no need to put a Set
+of your own first. Say in the turn why the work needs it, before ending the
+turn — the human reads it on the Timeline beside Verkstead's Set.
 
 The branch, the Worktree with whatever is uncommitted in it, and the record
 all move together, so there is nothing to tidy up first.

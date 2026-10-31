@@ -23,18 +23,19 @@ use sqlx::SqlitePool;
 use verkstead_schema::{QuestionSet, Response};
 use verkstead_store::{
     Account, Adding, Addition, AgentType, Ask, AskedBy, Commit, CompanionMode, CompanionWorktree,
-    Continued, Decision, Edited, Lifecycle, Merging, Origin, Pairing, PendingAddition, PendingForm,
-    PendingUpgrade, Process, ProfileFacts, PullRequest, Rollup, Settlements, Standing, Summary,
-    WaitingOn, add_companion, add_to_set, append_capture, append_transcript, archive_conversation,
-    ask, ask_to_transfer, attach, attach_mcp_server, close_conversation, continue_on_arrival,
-    create_profile, end_session, leave_memo, lock_set, nothing_else, open_database,
-    open_pending_steer, permit_device, pick_direction, record_addressed_comments, record_backlog,
-    record_check_rollup, record_commit, record_conflict_fix_attempt, record_delivery,
-    record_fix_attempt, record_merging, record_pull_request, record_share, record_share_comment,
-    record_standing, register_repo, save_brief, save_pending_steer, set_grilling_pairing,
-    set_process, set_target, settle_wrap_up, skip_review, stamp_unseen, start_capture,
-    start_conversation, start_grilling, start_implementing, stop, submit_response, suggest_preview,
-    trim_conversation, unarchive_conversation,
+    Continued, Decision, Edited, Lifecycle, LiveStanding, Merging, Origin, OwnAsking, Pairing,
+    PendingAddition, PendingForm, PendingUpgrade, PlacedWork, Process, ProfileFacts, PullRequest,
+    Rollup, Settlements, Standing, Summary, WaitingOn, add_companion, add_to_set, append_capture,
+    append_transcript, archive_conversation, ask, ask_on_our_own, ask_to_transfer, attach,
+    attach_mcp_server, close_conversation, continue_on_arrival, create_profile, end_session,
+    leave_memo, lock_set, lock_set_saying, nothing_else, open_database, open_pending_steer,
+    permit_device, pick_direction, record_addressed_comments, record_backlog, record_check_rollup,
+    record_commit, record_conflict_fix_attempt, record_delivery, record_fix_attempt,
+    record_merging, record_pull_request, record_share, record_share_comment, record_standing,
+    register_repo, save_brief, save_pending_steer, set_grilling_pairing, set_process, set_target,
+    settle_wrap_up, skip_review, stamp_unseen, start_capture, start_conversation, start_grilling,
+    start_implementing, stop, submit_response, suggest_preview, tell, trim_conversation,
+    unarchive_conversation,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -357,6 +358,35 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     record_delivery(pool, set).await.unwrap();
 
     ask(pool, id, &asked(), Ask::Deferred).await.unwrap();
+
+    // And one Verkstead asked itself, which is the row saying so and what it
+    // asked about.
+    let own = ask_on_our_own(
+        pool,
+        id,
+        &asked(),
+        &OwnAsking::Placing {
+            work: PlacedWork::Inline,
+            wants: "Windows".to_owned(),
+            moves: Vec::new(),
+            waiting_on: vec!["0011223344556677889900aabbccddee".to_owned()],
+        },
+    )
+    .await
+    .unwrap()
+    .expect("the Conversation is there to ask from")
+    .id;
+
+    // And settled by the device it waited on answering, which is a lock with a
+    // line of its own.
+    lock_set_saying(
+        pool,
+        &Settlements::new(4),
+        own,
+        "nuc-win answered, so the work moved there.",
+    )
+    .await
+    .unwrap();
 
     let unanswered = ask(pool, id, &asked(), Ask::Blocking)
         .await
@@ -686,6 +716,22 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
         .await
         .unwrap();
 
+    // And what a stage away from home last told its home, which is the same kind
+    // of row again: bookkeeping about this copy, which goes with it.
+    tell(
+        pool,
+        id,
+        &LiveStanding {
+            state: Lifecycle::Closed,
+            done: false,
+            wrapped: false,
+            stopped: false,
+            joined: None,
+        },
+    )
+    .await
+    .unwrap();
+
     // And the conversation a session launched here would carry on from, which is
     // the same kind of row again: it is written when work arrives and spent by the
     // first launch after it, so nothing could have left one on a Conversation that
@@ -697,6 +743,7 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
             session_id: "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
             agent_type: AgentType::Claude,
             widened_by: None,
+            kept_here_by: None,
         },
     )
     .await
@@ -707,6 +754,14 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
     // another device's and is not a key here, so this is written straight in the
     // way the marks above are.
     sqlx::query("INSERT INTO landed_sets (conversation_id, was, landed_as) VALUES (?, 41, 903)")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // And when it joined its chain, as a landing here keeps it: an Event id of
+    // this device's, written straight in for the same reason.
+    sqlx::query("INSERT INTO stage_joined_at (conversation_id, event_id) VALUES (?, 17)")
         .bind(id)
         .execute(pool)
         .await

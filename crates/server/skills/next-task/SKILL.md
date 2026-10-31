@@ -42,6 +42,19 @@ Work test-first where tests are appropriate: a failing test, the change that
 passes it, then the tidying. Run the repository's tests and fix what you break —
 a green branch is part of the work rather than a bonus on top of it.
 
+**CI confirms; it does not discover.** Where a build, a suite or a check this
+task has to pass runs only on another operating system, run it there before
+pushing: move the work to a device of that operating system with
+`verkstead transfer` to one your prompt's *The devices of this cluster* names,
+permitted or not — calling for one not permitted yet asks the human for it —
+and the Guide's *Moving the work to another device* says how. Pushing and reading
+CI is how a fix is confirmed, never how a platform's failure is found. Which
+operating system the work needs is yours to decide from the work itself: a
+job's name — *Rust (windows-latest)* — is a name, not a declaration, and no
+device follows from it. Only where there is no device of that operating system
+to ask for — your prompt has no such section, or names none of it — is CI all
+there is: say so, fix it as well as you can from here, and let CI confirm it.
+
 Keep the scope to this task's acceptance criteria. Work the next task's slice
 into this one and the session after yours will be reading a task file for work
 that has already been done.

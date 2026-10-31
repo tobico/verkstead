@@ -121,6 +121,7 @@ async fn the_last_session_is_the_one_to_carry_on_from() {
             session_id: "22222222-2222-4222-8222-222222222222".to_owned(),
             agent_type: AgentType::Claude,
             widened_by: None,
+            kept_here_by: None,
         }),
         "the newest of them, rather than the first: an older one is a conversation \
          somebody had already left",
@@ -171,6 +172,7 @@ async fn taking_the_conversation_up_spends_it() {
         session_id: "44444444-4444-4444-8444-444444444444".to_owned(),
         agent_type: AgentType::Claude,
         widened_by: None,
+        kept_here_by: None,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -211,6 +213,7 @@ async fn asking_whether_there_is_a_conversation_to_carry_on_does_not_spend_it() 
         session_id: "77777777-7777-4777-8777-777777777777".to_owned(),
         agent_type: AgentType::Claude,
         widened_by: None,
+        kept_here_by: None,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -244,6 +247,7 @@ async fn a_conversation_carried_on_for_an_answer_names_its_set() {
         session_id: "88888888-8888-4888-8888-888888888888".to_owned(),
         agent_type: AgentType::Claude,
         widened_by: Some(12),
+        kept_here_by: None,
     };
 
     continue_on_arrival(&pool, id, &continued).await.unwrap();
@@ -252,6 +256,29 @@ async fn a_conversation_carried_on_for_an_answer_names_its_set() {
         take_up_the_conversation(&pool, id).await.unwrap(),
         Some(continued),
         "the Set comes back with the session it widened",
+    );
+}
+
+/// **And a row *Keep it here* wrote names its Set**, which parts the note from
+/// both of the others (ADR-0029): the agent is told the work stays where it is.
+#[tokio::test]
+async fn a_conversation_kept_here_names_its_set() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    let continued = Continued {
+        session_id: "99999999-9999-4999-8999-999999999999".to_owned(),
+        agent_type: AgentType::Claude,
+        widened_by: None,
+        kept_here_by: Some(14),
+    };
+
+    continue_on_arrival(&pool, id, &continued).await.unwrap();
+
+    assert_eq!(
+        take_up_the_conversation(&pool, id).await.unwrap(),
+        Some(continued),
+        "the Set comes back with the session it kept here",
     );
 }
 
@@ -287,6 +314,7 @@ async fn coming_back_again_carries_on_from_the_newer_session() {
                 session_id: session.to_owned(),
                 agent_type: AgentType::Claude,
                 widened_by: None,
+                kept_here_by: None,
             },
         )
         .await

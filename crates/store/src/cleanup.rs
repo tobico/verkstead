@@ -139,8 +139,10 @@ const EVENT_KEYED: &[&str] = &[
 /// this Conversation's, and there is nobody else it could be left holding.
 const SET_KEYED: &[&str] = &[
     "responses",
+    "lock_lines",
     "archivings",
     "deferrals",
+    "own_sets",
     "deliveries",
     "endings",
 ];
@@ -200,6 +202,7 @@ const CONVERSATION_KEYED: &[&str] = &[
     "stage_branches",
     "stage_roadmaps",
     "stage_joinings",
+    "stage_joined_at",
     "pairing_models",
     "skipped_roles",
     "adoptions",
@@ -219,6 +222,9 @@ const CONVERSATION_KEYED: &[&str] = &[
     // with the row for the reason the two above it do: what it names is a device
     // this Conversation is not going to reach any more.
     "transfers",
+    // And what a stage away from home last told its home, which is about the
+    // copy this row is: nothing is owed about a Conversation that is gone.
+    "stage_reports",
     // And the session a launch here would carry on from, which goes with the row
     // for the same reason again: it names a conversation nothing on this device
     // is going to resume.

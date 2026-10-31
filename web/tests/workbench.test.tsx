@@ -14201,6 +14201,120 @@ describe("a question set on the timeline", () => {
     expect(deferred.querySelector(`.${timeline.deferred}`)!.textContent).toBe("deferred");
   });
 
+  /// A set Verkstead asked itself names it as the asker, in place of the
+  /// deferred mark it is stored under: nobody is standing still behind one
+  /// either, and the asker is what the human wants to know (ADR-0029).
+  it("names Verkstead on a set it asked itself", async () => {
+    const asked: ConversationView = {
+      ...GRILLING,
+      timeline: GRILLING.timeline.map((event) =>
+        "QuestionSet" in event && event.QuestionSet.set_id === DEFERRED_SET.set_id
+          ? { QuestionSet: { ...event.QuestionSet, by_verkstead: true } }
+          : event,
+      ),
+    };
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(asked)),
+      whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+      whenever(CAPTURE_OF_IT, json(CAPTURE)),
+      whenever(SCREEN_OF_IT, json(SCREEN)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.questionSet}`);
+    const cards = [...container.querySelectorAll(`.${timeline.questionSet}`)];
+
+    expect(
+      cards.map((card) => card.querySelector(`.${timeline.asker}`)?.textContent ?? null),
+    ).toEqual([null, null, "asked by Verkstead", null]);
+    expect(cards[2]!.querySelector(`.${timeline.deferred}`)).toBeNull();
+  });
+
+  /// And one its lock said something about says that where a human's lock
+  /// says it was closed unanswered: the device it waited on answered, and the
+  /// work moved there (ADR-0029).
+  it("says what the lock on Verkstead's own set said", async () => {
+    const line = "nuc-win answered, so the work moved there.";
+    const asked: ConversationView = {
+      ...GRILLING,
+      timeline: GRILLING.timeline.map((event) =>
+        "QuestionSet" in event && event.QuestionSet.set_id === DEFERRED_SET.set_id
+          ? {
+              QuestionSet: {
+                ...event.QuestionSet,
+                by_verkstead: true,
+                standing: { LockedUnanswered: "2026-08-03T09:07:11.000Z" },
+                lock_line: line,
+              },
+            }
+          : event,
+      ),
+    };
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(asked)),
+      whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+      whenever(CAPTURE_OF_IT, json(CAPTURE)),
+      whenever(SCREEN_OF_IT, json(SCREEN)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.questionSet}`);
+    const card = [...container.querySelectorAll(`.${timeline.questionSet}`)][2]!;
+
+    expect(card.querySelector(`.${timeline.closed}`)!.textContent).toBe(line);
+    expect(card.textContent).not.toContain("closed unanswered");
+  });
+
+  /// And one Verkstead answered for says the line beside that answer, the
+  /// device it moved the work to having been asleep (ADR-0029).
+  it("says the line beside an answer to Verkstead's own set", async () => {
+    const line = "nuc-win was permitted, and isn't awake yet.";
+    const answered = GRILLING.timeline.flatMap((event) =>
+      "QuestionSet" in event && "Answered" in event.QuestionSet.standing
+        ? [event.QuestionSet.standing]
+        : [],
+    )[0]!;
+    const asked: ConversationView = {
+      ...GRILLING,
+      timeline: GRILLING.timeline.map((event) =>
+        "QuestionSet" in event && event.QuestionSet.set_id === DEFERRED_SET.set_id
+          ? {
+              QuestionSet: {
+                ...event.QuestionSet,
+                by_verkstead: true,
+                standing: answered,
+                lock_line: line,
+              },
+            }
+          : event,
+      ),
+    };
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(asked)),
+      whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+      whenever(CAPTURE_OF_IT, json(CAPTURE)),
+      whenever(SCREEN_OF_IT, json(SCREEN)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.questionSet}`);
+    const card = [...container.querySelectorAll(`.${timeline.questionSet}`)][2]!;
+
+    expect(card.querySelector(`.${timeline.closed}`)!.textContent).toBe(line);
+  });
+
   /// A column of blanks would read as a Set that was answered with nothing.
   it("draws no answers at all on one nothing has been decided about", async () => {
     theGrillingSets();
@@ -17165,6 +17279,8 @@ const ROADMAP_PANE: RoadmapPane = {
     // makes this the pane as it has always looked.
     stands_on: null,
     platform: null,
+    // And every stage here, on this device.
+    device: null,
     html:
       stage.number === "04"
         ? null
@@ -17473,6 +17589,43 @@ describe("the stage list opened", () => {
 
     expect(said.previousElementSibling!.tagName).toBe("H2");
     expect(said.closest(`.${documents.document}`)).toBeNull();
+  });
+
+  /// And the device a stage is on wherever that is not this one, after its
+  /// platform — whoever moved it there, so a stage with no platform that was
+  /// moved by hand names its device too.
+  it("names the device a stage is on after its platform", async () => {
+    theStaged(
+      {},
+      whenever(
+        THE_ROADMAP,
+        json({
+          ...DECLARING,
+          stages: DECLARING.stages.map((stage, at) => ({
+            ...stage,
+            device: [null, "studio", null, "nuc-win"][at]!,
+          })),
+        } satisfies RoadmapPane),
+      ),
+    );
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.declares}`);
+
+    expect(
+      [...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`)].map(
+        (section) => section.querySelector(`.${documents.declares}`)!.textContent,
+      ),
+    ).toEqual([
+      "Stands on nothing",
+      "Stands on 01 · running on studio",
+      "Stands on 01, 02",
+      "Stands on 03 · on windows · running on nuc-win",
+    ]);
   });
 
   /// And a roadmap whose lines declare nothing — which is every roadmap written

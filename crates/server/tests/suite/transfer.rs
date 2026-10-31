@@ -48,7 +48,8 @@ use sqlx::SqlitePool;
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
 use verkstead_render::{
-    ConversationEntry, ConversationView, Lifecycle, ProfileEntry, Standing, Started, TimelineEvent,
+    ConversationEntry, ConversationView, Lifecycle, ProfileEntry, QuestionSetEvent, Standing,
+    Started, TimelineEvent,
 };
 use verkstead_schema::Direction;
 use verkstead_server::attachments::Attachments;
@@ -131,6 +132,13 @@ const BRIEF: &str = "# Rate limiting\n\nThe API has none.\n";
 /// would need an account.
 const NO_GITHUB: &str = "exit 1";
 
+/// And one that answers for a branch nothing was opened on, in the words the
+/// real one uses.
+const NO_PULL_REQUEST: &str = r#"
+printf 'no pull requests found for branch "%s"\n' "$3" >&2
+exit 1
+"#;
+
 /// How long one address has to answer here, rather than the two seconds a
 /// running server gives one.
 const PATIENCE: Duration = Duration::from_millis(300);
@@ -188,16 +196,36 @@ impl Verkstead {
     /// 07's — but a device taking work in needs what a served one has: a Data
     /// Directory, which is where an arriving Conversation's attached files land.
     async fn running(id: &str, stub: &str, spill: &Path) -> Verkstead {
-        Verkstead::standing(id, Some(stub), spill, Pace::default()).await
+        Verkstead::standing(id, Some(stub), spill, Pace::default(), B_OS, NO_GITHUB).await
     }
 
     /// The same at `pace`, for the one test that needs a session spoken to
     /// sooner than a server would.
     async fn running_at(id: &str, stub: &str, spill: &Path, pace: Pace) -> Verkstead {
-        Verkstead::standing(id, Some(stub), spill, pace).await
+        Verkstead::standing(id, Some(stub), spill, pace, B_OS, NO_GITHUB).await
     }
 
-    async fn standing(id: &str, stub: Option<&str>, spill: &Path, pace: Pace) -> Verkstead {
+    /// And the same with B running `os` rather than [`B_OS`], for the tests about
+    /// work placed by the platform it wants.
+    async fn running_on(id: &str, stub: &str, spill: &Path, pace: Pace, os: &str) -> Verkstead {
+        Verkstead::standing(id, Some(stub), spill, pace, os, NO_GITHUB).await
+    }
+
+    /// And the same with a `gh` that finds no pull request on the branch, for
+    /// the tests about an inline run: what a Resume of one asks GitHub before
+    /// it launches anything.
+    async fn building_on(id: &str, stub: &str, spill: &Path, pace: Pace, os: &str) -> Verkstead {
+        Verkstead::standing(id, Some(stub), spill, pace, os, NO_PULL_REQUEST).await
+    }
+
+    async fn standing(
+        id: &str,
+        stub: Option<&str>,
+        spill: &Path,
+        pace: Pace,
+        b_os: &str,
+        gh: &str,
+    ) -> Verkstead {
         let dir = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
@@ -232,7 +260,7 @@ impl Verkstead {
         // reading its identity again on taking up its stream finds that row as
         // it stands — see [`B_MACHINE`].
         let reading = if id == B {
-            reading.calling_itself(B_MACHINE, B_OS)
+            reading.calling_itself(B_MACHINE, b_os)
         } else {
             reading
         };
@@ -260,7 +288,7 @@ impl Verkstead {
                 pool.clone(),
                 dir.path().to_owned(),
                 agents(stub, home.path(), dir.path(), spill).at_pace(pace),
-                gh_stub(NO_GITHUB),
+                gh_stub(gh),
                 cluster.clone(),
                 nudges.clone(),
                 probing(dir.path()),
@@ -302,9 +330,76 @@ impl Verkstead {
         }))
     }
 
+    /// Stand in for `verkstead done` for every session on this device, until
+    /// the handle is dropped.
+    ///
+    /// A stub cannot reach the server it belongs to — the router is driven with
+    /// `oneshot` and has no socket — so what it does instead is leave a `done`
+    /// marker in its Conversation's own directory, which a sandbox sees as
+    /// `/tmp/verkstead`, and this posts the signal over the agent API the way the
+    /// CLI would. Until the server takes it, which is what an agent does with a
+    /// refusal. See `tests/suite/sessions.rs`, whose relay this is.
+    fn signalling(&self) -> Holding {
+        let app = self.workbench.clone();
+        let handoffs = self._dir.path().join("handoffs");
+
+        Holding(tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(LOOKING).await;
+
+                let marked: Vec<(i64, PathBuf)> = std::fs::read_dir(&handoffs)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .filter_map(|entry| {
+                        let id = entry.file_name().to_str()?.parse::<i64>().ok()?;
+                        let marker = entry.path().join("done");
+                        marker.exists().then_some((id, marker))
+                    })
+                    .collect();
+
+                for (id, marker) in marked {
+                    let response = app
+                        .clone()
+                        .oneshot(
+                            Request::builder()
+                                .method("POST")
+                                .uri(format!("/conversations/{id}/api/v1/done"))
+                                .body(Body::empty())
+                                .unwrap(),
+                        )
+                        .await
+                        .unwrap();
+
+                    if response.status() == StatusCode::OK {
+                        let _ = std::fs::remove_file(&marker);
+                    }
+                }
+            }
+        }))
+    }
+
     /// The one address it advertises.
     fn at(&self) -> String {
         format!("127.0.0.1:{}", self.address.port())
+    }
+
+    /// The server restarted over the same Data Directory, its sessions running
+    /// on `stub` at `pace`: a workbench of a fresh process, holding nothing in
+    /// memory, whose startup resume and stall sweep run over the store as it
+    /// stands. The Peer Listener is left as it was.
+    fn restarted(&mut self, stub: &str, spill: &Path, pace: Pace) {
+        let Routers { workbench, .. } = routers_running_sessions_answering_devices(
+            self.pool.clone(),
+            self._dir.path().to_owned(),
+            agents(stub, self._home.path(), self._dir.path(), spill).at_pace(pace),
+            gh_stub(NO_GITHUB),
+            self.cluster.clone(),
+            self.nudges.clone(),
+            probing(self._dir.path()),
+        );
+
+        self.workbench = workbench;
     }
 
     /// The machine switched off: the listener stops answering, and every dial at
@@ -1395,6 +1490,18 @@ fn refreshes_its_login_at(gate: &Path, token: &str) -> String {
     format!(
         "printf '{{\"claudeAiOauth\":{{\"accessToken\":\"%s\"}}}}' '{token}' \
 > \"$HOME/.claude/.credentials.json\"\nprintf 'refreshed the login\\r\\n'\n{}",
+        waits_at(gate),
+    )
+}
+
+/// What stands where claude goes for a session whose **prompt** is what is being
+/// read: it prints every argument it was launched with, then waits at `gate`
+/// like [`waits_at`].
+fn says_its_prompt_and_waits_at(gate: &Path) -> String {
+    format!(
+        r#"
+for word in "$@"; do printf 'arg=%s\r\n' "$word"; done
+{}"#,
         waits_at(gate),
     )
 }
@@ -2667,25 +2774,95 @@ async fn a_session_that_asks_for_a_ticked_device_by_name_is_moved_there_and_carr
     );
 
     // And it is told where it may go from B: home to A, which drafted the work,
-    // and on to the VM that was ticked — each by name, id and OS — and not to B,
-    // which is where it is.
+    // and on to the VM that was ticked — each by name, id and OS — and B named
+    // as where it is rather than as somewhere to go.
     let (machine, os) = this_machine();
     assert!(
-        resumed.contains(&format!("**{machine}** (id `{A}`), {os}.")),
+        resumed.contains(&format!("- **{machine}** (id `{A}`), {os} — permitted.")),
         "B's session is told it may go home to A: {resumed:?}",
     );
     assert!(
-        resumed.contains(&format!("**the-vm** (id `{C}`), Windows 11.")),
+        resumed.contains(&format!("- **the-vm** (id `{C}`), Windows 11 — permitted.")),
         "and on to the ticked VM: {resumed:?}",
     );
     assert!(
-        !resumed.contains(&format!("(id `{B}`)")),
-        "and not to B, where it is: {resumed:?}",
+        resumed
+            .split("This session is running on **")
+            .nth(1)
+            .and_then(|head| head.lines().next())
+            .is_some_and(|head| head.contains(&format!("** (id `{B}`), "))),
+        "and that it is on B: {resumed:?}",
+    );
+    assert!(
+        !resumed
+            .lines()
+            .any(|line| line.starts_with("- **") && line.contains(&format!("(id `{B}`)"))),
+        "and not that it may go to B, where it is: {resumed:?}",
     );
     assert!(
         resumed.contains("verkstead transfer <device>"),
         "{resumed:?}"
     );
+}
+
+/// **Every device, permitted or not** (ADR-0029, *Consent stays off by default,
+/// and is told*): a session launched where the work was drafted, with nothing
+/// ticked, on a cluster holding a Windows machine, is told that machine exists,
+/// that the work may not move there yet, and that calling for it asks the human
+/// — where it was once told nothing at all.
+#[tokio::test]
+async fn a_session_with_nothing_ticked_is_told_every_device_and_how_to_ask() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, _b, _holding, conversation) = drafted_running(
+        &says_its_prompt_and_waits_at(&gate),
+        &re_primed(),
+        spill.path(),
+        Repositories::Apart,
+    )
+    .await;
+
+    let third = tempfile::tempdir().unwrap();
+    let c = Device::stated(third.path(), C).unwrap();
+    a.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
+
+    assert!(
+        a.view(conversation).await.permitted.is_empty(),
+        "nothing is ticked",
+    );
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+    let told = a.capture(conversation).await.expect("the session printed");
+    std::fs::write(&gate, "go").unwrap();
+
+    let (machine, os) = this_machine();
+    assert!(
+        told.contains(&format!(
+            "This session is running on **{machine}** (id `{A}`), {os}."
+        )),
+        "the session is told the device it is on: {told:?}",
+    );
+    assert!(
+        told.contains(&format!(
+            "- **the-vm** (id `{C}`), Windows 11 — not permitted yet."
+        )),
+        "and the Windows machine, which it may not move to yet: {told:?}",
+    );
+    assert!(
+        told.contains(&format!(
+            "- **{B_MACHINE}** (id `{B}`), {B_OS} — not permitted yet."
+        )),
+        "and every other member the same way: {told:?}",
+    );
+
+    let said = told.split_whitespace().collect::<Vec<_>>().join(" ");
+    for phrase in [
+        "not permitted yet, or permitted and not awake, the call is a request",
+        "Question Set of its own",
+    ] {
+        assert!(said.contains(phrase), "and how to ask, {phrase:?}: {said}");
+    }
 }
 
 /// **By its id as well as its name**, which is what an agent retries with when
@@ -2716,9 +2893,9 @@ async fn a_session_may_name_the_device_by_its_id() {
 }
 
 /// **What the call refuses, each by name, and nothing written down for any of
-/// them**: a device the human did not tick, a name two machines share, the
-/// device the work is on, a machine that does not answer, and one without a
-/// repository the work is in.
+/// them**: a name two machines share, the device the work is on, a name that is
+/// nobody's, and a device that answers without a repository the work is in. A
+/// device not ticked, or asleep, is a request instead — see below.
 #[tokio::test]
 async fn a_call_the_device_cannot_take_is_refused_saying_why_and_records_nothing() {
     let spill = tempfile::tempdir().unwrap();
@@ -2739,24 +2916,11 @@ async fn a_call_the_device_cannot_take_is_refused_saying_why_and_records_nothing
     a.grills(conversation).await;
     a.printed(conversation, "grilling").await;
 
-    // Two more machines of the cluster: one nothing answers at, and one that
-    // shares B's name.
-    let third = tempfile::tempdir().unwrap();
-    let c = Device::stated(third.path(), C).unwrap();
-    a.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
-
+    // Another machine of the cluster, which shares B's name.
     let fourth = tempfile::tempdir().unwrap();
     let twin = "1234567890abcdef1234567890abcdef";
     let d = Device::stated(fourth.path(), twin).unwrap();
     a.linked_to(&d, B_MACHINE, "Linux", Vec::new()).await;
-
-    // Off the list: nobody ticked the VM.
-    a.refused(
-        conversation,
-        "the-vm",
-        &["not a device the human has said", C],
-    )
-    .await;
 
     // Two machines by that name, both named with their ids.
     a.refused(conversation, B_MACHINE, &[B, twin]).await;
@@ -2767,10 +2931,6 @@ async fn a_call_the_device_cannot_take_is_refused_saying_why_and_records_nothing
     // A name that is nobody's.
     a.refused(conversation, "the-toaster", &["no device of this cluster"])
         .await;
-
-    // Ticked, and asleep: the preflight's finding in the dialog's words.
-    assert_eq!(a.permits(conversation, C, true).await, "\"Recorded\"");
-    a.refused(conversation, C, &["the-vm is unreachable"]).await;
 
     // Ticked, awake, and without the Companion.
     assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
@@ -2790,6 +2950,10 @@ async fn a_call_the_device_cannot_take_is_refused_saying_why_and_records_nothing
     );
     assert!(drawn.working, "and the session is left running");
     assert!(b.own_rows().await.is_empty());
+    assert!(
+        a.sets_on(conversation).await.is_empty(),
+        "and nobody is asked about any of them",
+    );
 }
 
 /// **The later request wins, whoever made it**, and the Timeline names whoever
@@ -3022,6 +3186,1499 @@ async fn a_backlog_step_that_made_the_call_stands_down_and_carries_on_over_there
             .unwrap()
             .contains("- [ ] 01: count the requests"),
         "and the step it carries on is the one A's session was working",
+    );
+}
+
+/// The backlog [`works_each_task_on`] plans by default: three tasks, the second
+/// of which wants Windows.
+const THREE_TASKS: &str = "- [ ] 01: Count — [details](01-count.md)\\n- [ ] 02: Limit — \
+                           [details](02-limit.md) — on windows\\n- [ ] 03: Report — \
+                           [details](03-report.md)\\n";
+
+/// What stands where claude goes for **a backlog worked across two devices**:
+/// the grilling commits `tasks` as its backlog — lines for `printf`, each task
+/// with a file beside it — and every session sent for a step ticks the next
+/// box, commits, says which task it worked and on which machine, and signals;
+/// or, with every box ticked, says it is finishing and stays up.
+fn works_each_task_on(machine: &str, tasks: &str) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-task/SKILL.md*)
+    next=
+    out=
+    while IFS= read -r line; do
+        case "$line" in
+        "- [ ] "*)
+            if [ -z "$next" ]; then
+                rest=${{line#- \[ \] }}
+                next=${{rest%%:*}}
+                line="- [x] $rest"
+            fi
+            ;;
+        esac
+        out="$out$line
+"
+    done < .tasks/TODO.md
+
+    if [ -z "$next" ]; then
+        printf 'finishing on {machine}\r\n'
+        sleep 300
+    fi
+
+    printf '%s' "$out" > .tasks/TODO.md
+    git commit --quiet -am "feat: task $next"
+    printf 'worked task %s on {machine}\r\n' "$next"
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*)
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n{tasks}' > .tasks/TODO.md
+    for task in 01-count 02-limit 03-report; do printf '# %s\n' "$task" > .tasks/$task.md; done
+    git add .tasks
+    git commit --quiet -m 'chore: plan the rate limiter'
+    printf 'grilling\r\n'
+    ;;
+esac
+"#,
+    )
+}
+
+/// What B calls its operating system in the tests about placing work: a word
+/// whose mark is Windows' without being the word itself, as a real one is.
+const WINDOWS: &str = "Windows 11";
+
+/// Two devices, A on Linux and B on Windows with B ticked, and a Conversation on
+/// A whose grilling committed `tasks` as its backlog, and a task list picked —
+/// with the Resume that starts working it still to press.
+///
+/// Every session on either device signals as `verkstead done` would, and every
+/// stream either holds is held for as long as the handles are.
+async fn planned_across(
+    tasks: &str,
+    spill: &Path,
+) -> (Verkstead, Verkstead, (Holding, Holding, Holding), i64) {
+    planned_across_with(tasks, spill, Across::default()).await
+}
+
+/// How B stands in [`planned_across_with`], which is what decides whether a task
+/// that wants Windows can be placed on it.
+struct Across {
+    /// The OS word B goes by.
+    os: &'static str,
+
+    /// Whether the Conversation may be transferred to B.
+    ticked: bool,
+
+    /// Whether B holds the repository the work is in.
+    holds_the_repo: bool,
+
+    /// Whether B is asleep: A holds it at an address nothing answers on, until
+    /// [`wakes`] puts its real one back.
+    asleep: bool,
+}
+
+impl Default for Across {
+    fn default() -> Across {
+        Across {
+            os: WINDOWS,
+            ticked: true,
+            holds_the_repo: true,
+            asleep: false,
+        }
+    }
+}
+
+/// Where nothing answers: a machine asleep, as a dial at it finds it.
+const NOWHERE: &str = "127.0.0.1:9";
+
+/// [`planned_across`] with B standing as `across` says.
+async fn planned_across_with(
+    tasks: &str,
+    spill: &Path,
+    across: Across,
+) -> (Verkstead, Verkstead, (Holding, Holding, Holding), i64) {
+    planned_across_at(tasks, spill, across, rescuing()).await
+}
+
+/// And at `pace`.
+async fn planned_across_at(
+    tasks: &str,
+    spill: &Path,
+    across: Across,
+    pace: Pace,
+) -> (Verkstead, Verkstead, (Holding, Holding, Holding), i64) {
+    let a = Verkstead::running_on(A, &works_each_task_on("A", tasks), spill, pace, across.os).await;
+    let b = Verkstead::running_on(B, &works_each_task_on("B", tasks), spill, pace, across.os).await;
+    let signalling = (a.signalling(), b.signalling());
+
+    let reached_at = if across.asleep {
+        NOWHERE.to_owned()
+    } else {
+        b.at()
+    };
+    a.linked_to(&b.device, B_MACHINE, across.os, vec![reached_at])
+        .await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    a.repo().await;
+    if across.holds_the_repo {
+        b.repo().await;
+    }
+
+    let account = a.account().await;
+    let holding = b.holding();
+    b.profile_called(ACCOUNT).await;
+
+    let conversation = a.drafting_under(&account).await;
+    if across.ticked {
+        assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+    }
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert!(matches!(
+        store::pick_direction(&a.pool, conversation, Direction::TaskList)
+            .await
+            .unwrap(),
+        store::Directing::Writing,
+    ));
+    store::start_implementing(&a.pool, conversation)
+        .await
+        .unwrap();
+
+    (a, b, (signalling.0, signalling.1, holding), conversation)
+}
+
+/// Press **Resume** on that Conversation on this device: the one standing way
+/// into working a backlog.
+async fn resumes(on: &Verkstead, conversation: i64) {
+    let resumed = press(
+        &on.workbench,
+        &format!("/api/ui/conversations/{conversation}/resume"),
+        None,
+    )
+    .await;
+
+    assert_eq!(resumed, "\"Resumed\"", "the backlog is worked");
+}
+
+/// **A task that wants Windows is moved there before its session starts**, and
+/// the work stays there (ADR-0029, *Placing declared work*). Worked on a Linux
+/// device with a Windows member ticked: task 01 runs here, the Conversation
+/// moves before 02's session starts, 02 and then 03 run on the far device, and
+/// nothing moves it back. Both Timelines name the task and the device.
+#[tokio::test]
+async fn a_task_that_wants_windows_is_moved_there_and_the_work_stays() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) = planned_across(THREE_TASKS, spill.path()).await;
+
+    resumes(&a, conversation).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    // Task 01 was worked here, and nothing here was ever launched for 02.
+    let mut worked_here = String::new();
+    for event in a.sessions_on(conversation).await {
+        worked_here.push_str(&a.capture_of(conversation, event).await);
+    }
+    assert!(
+        worked_here.contains("worked task 01 on A"),
+        "the undeclared first task runs where the work is: {worked_here:?}",
+    );
+    assert!(
+        !worked_here.contains("task 02") && !worked_here.contains("finishing"),
+        "and the move is made before 02's session starts: {worked_here:?}",
+    );
+
+    let went = a.notice_saying(conversation, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for task 02, which wants Windows"),
+        "the source names the task and the device: {went}",
+    );
+
+    let came = b.notice_saying(there, "Transferred to").await;
+    assert!(
+        came.contains(B_MACHINE) && came.contains("for task 02, which wants Windows"),
+        "and so does the far end: {came}",
+    );
+
+    // 02 and then 03 run on B, and the finish after them: the work stays where
+    // the move left it.
+    b.latest_capture_saying(there, "finishing on B").await;
+
+    let mut worked_there = String::new();
+    for event in b.sessions_on(there).await {
+        worked_there.push_str(&b.capture_of(there, event).await);
+    }
+    assert!(
+        worked_there.contains("worked task 02 on B")
+            && worked_there.contains("worked task 03 on B"),
+        "the declared task and the undeclared one after it run on the far device: \
+         {worked_there:?}",
+    );
+
+    let drawn = b.view(there).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "and nothing moves the work back",
+    );
+}
+
+/// One task, wanting Linux: what the device the work was drafted on runs.
+const ONE_LINUX_TASK: &str = "- [ ] 01: Count — [details](01-count.md) — on linux\\n";
+
+/// One task, wanting Windows.
+const ONE_WINDOWS_TASK: &str = "- [ ] 01: Count — [details](01-count.md) — on windows\\n";
+
+/// Work [`ONE_WINDOWS_TASK`] on A with B standing as `across` says, and hand back
+/// the Notice that says why the task ran here, once A has worked it and gone on
+/// to the finish — having moved nothing.
+async fn runs_here_saying(across: Across, saying: &str) -> String {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) =
+        planned_across_with(ONE_WINDOWS_TASK, spill.path(), across).await;
+
+    resumes(&a, conversation).await;
+
+    let said = a.notice_saying(conversation, saying).await;
+
+    a.latest_capture_saying(conversation, "finishing on A")
+        .await;
+
+    let mut worked_here = String::new();
+    for event in a.sessions_on(conversation).await {
+        worked_here.push_str(&a.capture_of(conversation, event).await);
+    }
+    assert!(
+        worked_here.contains("worked task 01 on A"),
+        "the task runs here: {worked_here:?}",
+    );
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "and nothing was moved",
+    );
+
+    said
+}
+
+/// **No device of the platform linked**: the task runs here, and a Notice says
+/// it wanted Windows and there is none.
+#[tokio::test]
+async fn a_task_that_wants_a_platform_no_device_is_of_runs_here_saying_so() {
+    let said = runs_here_saying(
+        Across {
+            os: "Linux",
+            ..Across::default()
+        },
+        "Task 01 wants Windows",
+    )
+    .await;
+
+    assert!(
+        said.contains("no Windows device is linked"),
+        "the Notice says there is none: {said}",
+    );
+}
+
+/// The Question Set of Verkstead's own that `on` put on that Conversation's
+/// Timeline, once it has: its id and its card.
+async fn verksteads_set(on: &Verkstead, conversation: i64) -> QuestionSetEvent {
+    let drawn = on
+        .view_saying(conversation, |drawn| {
+            drawn.timeline.iter().any(
+                |event| matches!(event, TimelineEvent::QuestionSet(asked) if asked.by_verkstead),
+            )
+        })
+        .await;
+
+    drawn
+        .timeline
+        .into_iter()
+        .find_map(|event| match event {
+            TimelineEvent::QuestionSet(asked) if asked.by_verkstead => Some(asked),
+            _ => None,
+        })
+        .expect("the Set the view was waited for")
+}
+
+/// Answer Verkstead's Set from the viewer, picking Option `picked`, the way the
+/// sheet's **Submit** does.
+async fn picks(on: &Verkstead, set: i64, picked: u32) {
+    let said = press(
+        &on.workbench,
+        &format!("/api/ui/sets/{set}/response"),
+        Some(&format!(
+            r#"{{"answers":[{{"label":"Q1","selected":{picked}}}]}}"#
+        )),
+    )
+    .await;
+
+    assert_eq!(said, "\"Accepted\"", "the answer is taken");
+}
+
+/// **Devices of it linked, none permitted: Verkstead asks** (ADR-0029,
+/// *Verkstead asks with a Question Set of its own*). The task is launched
+/// nowhere; a Set asked by Verkstead names the task, the platform and the
+/// device, offers **Move to** it against **Run it here**, is drawn as
+/// Verkstead's on the Timeline and on its sheet, and reaches a phone with the
+/// branch and the device.
+#[tokio::test]
+async fn a_task_whose_platform_has_no_permitted_device_puts_verksteads_own_set() {
+    let spill = tempfile::tempdir().unwrap();
+    let (service, received) = crate::push_delivery::push_service().await;
+
+    let (a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    let phone = crate::push_delivery::Device::new(&service, "take", "phone");
+    crate::push_delivery::subscribe(&a.workbench, &phone).await;
+
+    resumes(&a, conversation).await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    let branch = store::load_conversation(&a.pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is here")
+        .branch;
+
+    assert_eq!(asked.title, format!("Move {branch} to {B_MACHINE}?"));
+    assert_eq!(
+        asked.rows[0].question,
+        format!("Task 01 wants Windows. {B_MACHINE} is linked but not permitted."),
+    );
+    assert!(
+        matches!(asked.standing, Standing::Waiting(_)),
+        "and it waits on the human",
+    );
+
+    let sheet: verkstead_render::SetReading =
+        reading(&a.workbench, &format!("/api/ui/sets/{}", asked.set_id)).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+    assert!(sheet.by_verkstead, "the sheet names Verkstead as its asker");
+    assert_eq!(
+        sheet.questions[0]
+            .ask
+            .options
+            .iter()
+            .map(|option| option.text_html.as_str())
+            .collect::<Vec<_>>(),
+        [format!("Move to {B_MACHINE}").as_str(), "Run it here"],
+    );
+
+    let pushed = crate::push_delivery::pushes(&received, 1).await;
+    let notice = phone.read(&pushed[0]);
+    assert_eq!(notice["title"], asked.title.as_str(), "the phone is told");
+    assert_eq!(notice["project"], REPOSITORY);
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "nothing was moved",
+    );
+    assert!(
+        !printed_on(&a, conversation)
+            .await
+            .contains("worked task 01"),
+        "and nothing was launched while the human is asked",
+    );
+}
+
+/// **Move to** ticks the device and moves the work there, on Verkstead's own
+/// account, and the task's session starts on it.
+#[tokio::test]
+async fn move_to_ticks_the_device_and_the_task_starts_there() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    picks(&a, asked.set_id, 1).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    assert_eq!(
+        store::permitted_devices(&a.pool, conversation)
+            .await
+            .unwrap(),
+        [B],
+        "the device picked is ticked",
+    );
+
+    let went = a.notice_saying(conversation, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for task 01, which wants Windows"),
+        "the move is Verkstead's, for the task: {went}",
+    );
+
+    b.latest_capture_saying(there, "worked task 01 on B").await;
+
+    assert!(
+        !printed_on(&a, conversation)
+            .await
+            .contains("worked task 01"),
+        "and nothing here was launched for it",
+    );
+}
+
+/// **Run it here** starts the task where it is, and nothing is moved or
+/// ticked.
+#[tokio::test]
+async fn run_it_here_starts_the_task_where_it_is() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    picks(&a, asked.set_id, 2).await;
+
+    a.latest_capture_saying(conversation, "finishing on A")
+        .await;
+    assert!(
+        printed_on(&a, conversation)
+            .await
+            .contains("worked task 01 on A"),
+        "the task runs here",
+    );
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "nothing was moved",
+    );
+    assert!(
+        store::permitted_devices(&a.pool, conversation)
+            .await
+            .unwrap()
+            .is_empty(),
+        "and nothing was ticked",
+    );
+    assert_eq!(
+        a.sets_on(conversation).await,
+        [asked.set_id],
+        "and the launch the answer made asked nothing again",
+    );
+}
+
+/// B, asleep on A as [`Across::asleep`] left it, waking: A holds it at its real
+/// address again.
+async fn wakes(a: &Verkstead, b: &Verkstead) {
+    a.linked_to(&b.device, B_MACHINE, WINDOWS, vec![b.at()])
+        .await;
+}
+
+/// The pace a sleeping device is looked for at in these tests, rather than a
+/// server's half a minute.
+fn looking_for_wakes() -> Pace {
+    Pace {
+        wakes: Duration::from_millis(200),
+        ..rescuing()
+    }
+}
+
+/// **A ticked device asleep puts the asleep Set** (ADR-0029, the asleep row):
+/// it says the work moves there by itself once the device is awake, offers
+/// *Run it here* alone, and pressing that starts the task here.
+#[tokio::test]
+async fn a_ticked_device_asleep_puts_the_asleep_set_and_run_it_here_starts_the_task() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            asleep: true,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    let branch = store::load_conversation(&a.pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is here")
+        .branch;
+
+    assert_eq!(
+        asked.title,
+        format!("Run {branch} here, or wait for {B_MACHINE}?"),
+    );
+    assert_eq!(
+        asked.rows[0].question,
+        format!(
+            "Task 01 wants Windows. {B_MACHINE} is not awake, and the work moves there by \
+             itself once it is."
+        ),
+    );
+
+    let sheet: verkstead_render::SetReading =
+        reading(&a.workbench, &format!("/api/ui/sets/{}", asked.set_id)).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+    assert_eq!(
+        sheet.questions[0]
+            .ask
+            .options
+            .iter()
+            .map(|option| option.text_html.as_str())
+            .collect::<Vec<_>>(),
+        ["Run it here"],
+        "waiting is not an Option: the open Set is the wait",
+    );
+
+    assert!(
+        !printed_on(&a, conversation)
+            .await
+            .contains("worked task 01"),
+        "nothing was launched while the device sleeps",
+    );
+
+    picks(&a, asked.set_id, 1).await;
+
+    a.latest_capture_saying(conversation, "finishing on A")
+        .await;
+    assert!(
+        printed_on(&a, conversation)
+            .await
+            .contains("worked task 01 on A"),
+        "Run it here starts the task here",
+    );
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "and nothing was moved",
+    );
+}
+
+/// **The sleeping device answering settles the Set itself** (ADR-0029): the
+/// work moves there by the ordinary Transfer, the task starts on it, and the
+/// Set is locked with a line saying the device answered, on its card and on
+/// its sheet, in place of the human's lock's words.
+#[tokio::test]
+async fn the_sleeping_device_answering_moves_the_work_and_locks_the_set_saying_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) = planned_across_at(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            asleep: true,
+            ..Across::default()
+        },
+        looking_for_wakes(),
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+    let asked = verksteads_set(&a, conversation).await;
+
+    // Asked a few times over, and still asleep.
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    assert!(
+        a.view(conversation).await.transferred.is_none(),
+        "nothing moves while the device sleeps",
+    );
+
+    wakes(&a, &b).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let went = a.notice_saying(conversation, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for task 01, which wants Windows"),
+        "the move is Verkstead's, for the task: {went}",
+    );
+
+    b.latest_capture_saying(there, "worked task 01 on B").await;
+
+    let line = format!("{B_MACHINE} answered, so the work moved there.");
+
+    let card = verksteads_set(&a, conversation).await;
+    assert_eq!(card.set_id, asked.set_id);
+    assert!(
+        matches!(card.standing, Standing::LockedUnanswered(_)),
+        "the Set is locked: {:?}",
+        card.standing,
+    );
+    assert_eq!(card.lock_line.as_deref(), Some(line.as_str()));
+
+    let sheet: verkstead_render::SetReading =
+        reading(&a.workbench, &format!("/api/ui/sets/{}", asked.set_id)).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+    assert_eq!(sheet.lock_line.as_deref(), Some(line.as_str()));
+
+    assert!(
+        !printed_on(&a, conversation)
+            .await
+            .contains("worked task 01"),
+        "and nothing here was launched for it",
+    );
+}
+
+/// **Asleep and unticked together are one Set** (Set 1547, Q3): a ticked
+/// device asleep and another of the platform linked and unticked put one Set
+/// saying both, offering *Move to* the unticked one against *Run it here*.
+#[tokio::test]
+async fn a_ticked_device_asleep_beside_an_unticked_one_puts_one_set_saying_both() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            asleep: true,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    record_member(
+        &a.pool,
+        &Linking {
+            device: "c0ffee00c0ffee00c0ffee00c0ffee00".to_owned(),
+            name: "nuc-2".to_owned(),
+            os: WINDOWS.to_owned(),
+            addresses: vec![NOWHERE.to_owned()],
+            fingerprint: "nuc-2-print".to_owned(),
+            kept_by: None,
+            version: Some(RUNNING.to_owned()),
+            install: Some("Binary".to_owned()),
+        },
+    )
+    .await
+    .unwrap();
+
+    resumes(&a, conversation).await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    let branch = store::load_conversation(&a.pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is here")
+        .branch;
+
+    assert_eq!(asked.title, format!("Move {branch} to nuc-2?"));
+    assert_eq!(
+        asked.rows[0].question,
+        format!(
+            "Task 01 wants Windows. {B_MACHINE} is not awake, and the work moves there by \
+             itself once it is. nuc-2 is linked but not permitted."
+        ),
+    );
+
+    let sheet: verkstead_render::SetReading =
+        reading(&a.workbench, &format!("/api/ui/sets/{}", asked.set_id)).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+    assert_eq!(
+        sheet.questions[0]
+            .ask
+            .options
+            .iter()
+            .map(|option| option.text_html.as_str())
+            .collect::<Vec<_>>(),
+        ["Move to nuc-2", "Run it here"],
+    );
+}
+
+/// The Set of Verkstead's own that `on` put on that Conversation's Timeline
+/// after `before`, once it has.
+async fn verksteads_set_after(on: &Verkstead, conversation: i64, before: i64) -> QuestionSetEvent {
+    let after = |event: &TimelineEvent| match event {
+        TimelineEvent::QuestionSet(asked) if asked.by_verkstead && asked.set_id != before => {
+            Some(asked.clone())
+        }
+        _ => None,
+    };
+
+    on.view_saying(conversation, |drawn| {
+        drawn.timeline.iter().any(|event| after(event).is_some())
+    })
+    .await
+    .timeline
+    .iter()
+    .find_map(after)
+    .expect("the Set the view was waited for")
+}
+
+/// *Move to* an unticked device that is asleep, up to the Set that then waits
+/// on it: the first Set, answered, and the second.
+async fn moved_to_a_sleeping_device(
+    a: &Verkstead,
+    conversation: i64,
+) -> (QuestionSetEvent, QuestionSetEvent) {
+    resumes(a, conversation).await;
+
+    let first = verksteads_set(a, conversation).await;
+    assert_eq!(
+        first.rows[0].question,
+        format!("Task 01 wants Windows. {B_MACHINE} is linked but not permitted."),
+        "an unticked device is asked about as unticked, asleep or not",
+    );
+
+    picks(a, first.set_id, 1).await;
+
+    let second = verksteads_set_after(a, conversation, first.set_id).await;
+
+    (first, second)
+}
+
+/// **An unticked device asleep is asked about as unticked, then waited on**
+/// (ADR-0029, *A device both unticked and asleep is asked about as
+/// unticked*): *Move to* ticks it; finding it not awake, a line beside that
+/// answer says it was permitted and the asleep row's Set goes up as the wait;
+/// and the device answering moves the work and locks that second Set.
+#[tokio::test]
+async fn move_to_an_unticked_device_asleep_ticks_it_and_its_waking_moves_the_work() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) = planned_across_at(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            asleep: true,
+            ..Across::default()
+        },
+        looking_for_wakes(),
+    )
+    .await;
+
+    let (_, second) = moved_to_a_sleeping_device(&a, conversation).await;
+
+    assert_eq!(
+        store::permitted_devices(&a.pool, conversation)
+            .await
+            .unwrap(),
+        [B],
+        "the device picked is ticked",
+    );
+
+    let permitted = format!("{B_MACHINE} was permitted, and isn't awake yet.");
+
+    let first = verksteads_set(&a, conversation).await;
+    assert!(
+        matches!(first.standing, Standing::Answered(_)),
+        "the first Set stays answered: {:?}",
+        first.standing,
+    );
+    assert_eq!(first.lock_line.as_deref(), Some(permitted.as_str()));
+
+    let sheet: verkstead_render::SetReading =
+        reading(&a.workbench, &format!("/api/ui/sets/{}", first.set_id)).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+    assert_eq!(sheet.lock_line.as_deref(), Some(permitted.as_str()));
+
+    assert_eq!(
+        second.rows[0].question,
+        format!(
+            "Task 01 wants Windows. {B_MACHINE} is not awake, and the work moves there by \
+             itself once it is."
+        ),
+    );
+    assert!(matches!(second.standing, Standing::Waiting(_)));
+
+    let sheet: verkstead_render::SetReading =
+        reading(&a.workbench, &format!("/api/ui/sets/{}", second.set_id)).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+    assert_eq!(
+        sheet.questions[0]
+            .ask
+            .options
+            .iter()
+            .map(|option| option.text_html.as_str())
+            .collect::<Vec<_>>(),
+        ["Run it here"],
+        "Run it here is still there to press",
+    );
+
+    // Asked a few times over, and still asleep.
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    assert!(
+        a.view(conversation).await.transferred.is_none(),
+        "nothing moves while the device sleeps",
+    );
+    assert!(
+        a.view(conversation).await.driven,
+        "and the second Set holds the work's place",
+    );
+
+    wakes(&a, &b).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    b.latest_capture_saying(there, "worked task 01 on B").await;
+
+    let second = verksteads_set_after(&a, conversation, first.set_id).await;
+    assert!(
+        matches!(second.standing, Standing::LockedUnanswered(_)),
+        "the second Set is locked: {:?}",
+        second.standing,
+    );
+    assert_eq!(
+        second.lock_line.as_deref(),
+        Some(format!("{B_MACHINE} answered, so the work moved there.").as_str()),
+    );
+
+    assert!(
+        !printed_on(&a, conversation)
+            .await
+            .contains("worked task 01"),
+        "and nothing here was launched for it",
+    );
+}
+
+/// **Run it here** on the Set that waits on a device just ticked starts the
+/// task here, and nothing is moved.
+#[tokio::test]
+async fn run_it_here_on_the_wait_after_move_to_starts_the_task_here() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            asleep: true,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    let (_, second) = moved_to_a_sleeping_device(&a, conversation).await;
+
+    picks(&a, second.set_id, 1).await;
+
+    a.latest_capture_saying(conversation, "finishing on A")
+        .await;
+    assert!(
+        printed_on(&a, conversation)
+            .await
+            .contains("worked task 01 on A"),
+        "Run it here starts the task here",
+    );
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "and nothing was moved",
+    );
+}
+
+/// **The open Set is the wait** (ADR-0029): while it is open the Conversation
+/// is held on the drivers register — the register a place on the server is
+/// counted off — a Resume pressed meanwhile finds it already driven and asks
+/// nothing again, and settling the Set lets the place go.
+#[tokio::test]
+async fn an_open_set_holds_a_place_until_it_settles() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+
+    let asked = verksteads_set(&a, conversation).await;
+
+    // Long enough for the runner that put it to have stood down, so what is
+    // read is the Set's own hold rather than the runner's.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        a.view(conversation).await.driven,
+        "the Conversation waiting on the Set takes a place",
+    );
+
+    let pressed = press(
+        &a.workbench,
+        &format!("/api/ui/conversations/{conversation}/resume"),
+        None,
+    )
+    .await;
+    assert_eq!(pressed, "\"AlreadyDriven\"", "the Set is what drives it");
+    assert_eq!(
+        a.sets_on(conversation).await,
+        [asked.set_id],
+        "and nothing was asked twice",
+    );
+
+    picks(&a, asked.set_id, 1).await;
+
+    a.view_saying(conversation, |drawn| {
+        drawn.transferred.is_some() && !drawn.driven
+    })
+    .await;
+}
+
+/// **A restart re-finds the open Set**: the startup resume reaches the same
+/// launch, waits on the Set rather than putting a second, and holds the place
+/// again; answering it afterwards still starts the task.
+#[tokio::test]
+async fn a_restart_waits_on_the_open_set_and_its_answer_still_starts_the_task() {
+    let spill = tempfile::tempdir().unwrap();
+    let (mut a, _b, _held, conversation) = planned_across_with(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+    let asked = verksteads_set(&a, conversation).await;
+
+    a.restarted(
+        &works_each_task_on("A", ONE_WINDOWS_TASK),
+        spill.path(),
+        rescuing(),
+    );
+
+    // And `verkstead done` relayed to the process now serving.
+    let _signalling = a.signalling();
+
+    a.view_saying(conversation, |drawn| drawn.driven).await;
+    assert_eq!(
+        a.sets_on(conversation).await,
+        [asked.set_id],
+        "the restart put no second Set",
+    );
+
+    picks(&a, asked.set_id, 2).await;
+
+    a.latest_capture_saying(conversation, "finishing on A")
+        .await;
+    assert!(
+        printed_on(&a, conversation)
+            .await
+            .contains("worked task 01 on A"),
+        "the answer starts the task here",
+    );
+    assert_eq!(a.sets_on(conversation).await, [asked.set_id]);
+}
+
+/// **The stall sweep leaves it alone**: a Conversation waiting on its
+/// placement Set is waiting on the human, not undriven, and sweep after sweep
+/// passes it over.
+#[tokio::test]
+async fn the_stall_sweep_leaves_a_conversation_waiting_on_its_set_running() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = planned_across_at(
+        ONE_WINDOWS_TASK,
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+        Pace {
+            stalls: Duration::from_millis(100),
+            ..rescuing()
+        },
+    )
+    .await;
+
+    resumes(&a, conversation).await;
+    verksteads_set(&a, conversation).await;
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    assert!(
+        store::stopped(&a.pool, conversation)
+            .await
+            .unwrap()
+            .is_none(),
+        "ten sweeps have passed and none stopped it",
+    );
+    assert!(a.view(conversation).await.driven);
+}
+
+/// **Permitted ones, none able to take it**: the Notice names each with what
+/// its preflight found, in the Transfer dialog's words.
+#[tokio::test]
+async fn a_task_no_permitted_device_can_take_says_what_each_lacks() {
+    let said = runs_here_saying(
+        Across {
+            holds_the_repo: false,
+            ..Across::default()
+        },
+        "Task 01 wants Windows",
+    )
+    .await;
+
+    assert!(
+        said.contains("can take it")
+            && said.contains(&format!("The repo {REPOSITORY} is not on {B_MACHINE}.")),
+        "the Notice says what the ticked device lacks: {said}",
+    );
+}
+
+/// **A roadmap stage's task is placed like any other**, and home goes on
+/// seeing the stage (ADR-0029, *Home drives a roadmap across devices*): with a
+/// ticked, awake Windows device, a stage's task that wants Windows is moved
+/// there and worked there, and a close on that device reads at home.
+#[tokio::test]
+async fn a_roadmap_stages_task_is_moved_and_home_still_sees_the_stage() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) = planned_across(ONE_WINDOWS_TASK, spill.path()).await;
+
+    sqlx::query("INSERT INTO stage_roadmaps (conversation_id, roadmap, stage) VALUES (?, ?, ?)")
+        .bind(conversation)
+        .bind("platform-placement")
+        .bind("03")
+        .execute(&a.pool)
+        .await
+        .unwrap();
+
+    resumes(&a, conversation).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let went = a.notice_saying(conversation, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for task 01, which wants Windows"),
+        "the stage is moved for its task: {went}",
+    );
+
+    b.latest_capture_saying(there, "finishing on B").await;
+    assert!(
+        printed_on(&b, there).await.contains("worked task 01 on B"),
+        "and the task is worked on the far device",
+    );
+
+    let repo_id = a.repo_row(REPOSITORY).await;
+    let at_home = || async {
+        store::stage_standings(&a.pool, repo_id)
+            .await
+            .unwrap()
+            .of("platform-placement", "03")
+    };
+    assert_eq!(at_home().await, Some(store::StageStanding::InFlight));
+
+    store::set_state(&b.pool, there, store::Lifecycle::Closed)
+        .await
+        .unwrap();
+    b.nudges.announce(verkstead_schema::Nudge::Conversation {
+        conversation: there,
+    });
+
+    let deadline = Instant::now() + WAITING;
+    while at_home().await != Some(store::StageStanding::Abandoned) {
+        assert!(
+            Instant::now() < deadline,
+            "home never read the stage closed on the far device: it reads {:?}",
+            at_home().await,
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    }
+}
+
+/// **A declared task moved off its platform by hand is moved again at its next
+/// launch**, a Resume's included — and the drafting device counts as permitted
+/// without a tick. Pressed onto the Windows device with nothing running, the
+/// arrival's own Resume there finds a task that wants Linux and sends the work
+/// home, where it is worked; nothing on the Windows device ever launched it.
+#[tokio::test]
+async fn a_declared_task_moved_off_its_platform_by_hand_is_moved_again_at_its_resume() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) = planned_across(ONE_LINUX_TASK, spill.path()).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let back = a
+        .notice_saying(conversation, "for task 01, which wants Linux")
+        .await;
+    assert!(
+        back.contains(B_MACHINE),
+        "the work comes home from the Windows device for the task: {back}",
+    );
+
+    let worked = a
+        .latest_capture_saying(conversation, "finishing on A")
+        .await;
+    let mut worked_here = String::new();
+    for event in a.sessions_on(conversation).await {
+        worked_here.push_str(&a.capture_of(conversation, event).await);
+    }
+    assert!(
+        worked_here.contains("worked task 01 on A"),
+        "and the task is worked here, the finish after it: {worked_here:?} then {worked:?}",
+    );
+
+    let there = b.own_rows().await[0].id;
+    let went = b
+        .notice_saying(there, "for task 01, which wants Linux")
+        .await;
+    assert!(
+        went.starts_with("<p>Transferred to"),
+        "the Windows device says why the work left it: {went}",
+    );
+
+    for event in b.sessions_on(there).await {
+        let said = b.capture_of(there, event).await;
+        assert!(
+            !said.contains("on B"),
+            "nothing on the Windows device was launched for the task: {said:?}",
+        );
+    }
+}
+
+/// What stands where claude goes for **an inline run worked across two
+/// devices**: the implementation session builds the work, says on which machine,
+/// and signals; the grilling writes its handoff and, where it `idles`, signals
+/// and idles on as one waiting on its proposal does, or otherwise ends at once.
+fn builds_inline_on(machine: &str, idles: bool) -> String {
+    let grilling = match idles {
+        true => "    : > /tmp/verkstead/done\n    printf 'grilling\\r\\n'\n    sleep 300",
+        false => "    printf 'grilling\\r\\n'",
+    };
+
+    format!(
+        r#"
+case "$2" in
+*implementing/SKILL.md*)
+    printf 'built\n' > built.md
+    git add built.md
+    git commit --quiet -m 'feat: build it inline'
+    printf 'built inline on {machine}\r\n'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*)
+    printf '# What we settled\n\nA counter.\n' > /tmp/verkstead/handoff.md
+{grilling}
+    ;;
+esac
+"#,
+    )
+}
+
+/// A grilling's closing proposal of an inline run, wanting `wants` — each a
+/// platform's word, as a proposal spells it.
+fn proposing_inline(wants: &[&str]) -> String {
+    let mut yaml = "title: Ready to build the rate limiter\nquestions:\n  - label: Q9\n    \
+                    text: Anything still open?\n    options:\n      - n: 1\n        text: \
+                    Nothing\n      - n: 2\n        text: Yes\nproposal:\n  direction: inline\n  \
+                    rationale: One change.\n"
+        .to_owned();
+
+    if !wants.is_empty() {
+        yaml.push_str("  wants:\n");
+        for platform in wants {
+            yaml.push_str(&format!(
+                "    - platform: {platform}\n      for: Its installer is built there.\n"
+            ));
+        }
+    }
+
+    yaml
+}
+
+/// Two devices as [`planned_across_with`] stands them, and a Conversation on A
+/// whose grilling put [`proposing_inline`] wanting `wants` and had Inline picked
+/// on it — the grilling idling on, where it `idles`, so that the pick hands off.
+async fn proposed_across(
+    wants: &[&str],
+    spill: &Path,
+    across: Across,
+    idles: bool,
+) -> (Verkstead, Verkstead, (Holding, Holding, Holding), i64) {
+    let a = Verkstead::building_on(
+        A,
+        &builds_inline_on("A", idles),
+        spill,
+        rescuing(),
+        across.os,
+    )
+    .await;
+    let b = Verkstead::building_on(
+        B,
+        &builds_inline_on("B", idles),
+        spill,
+        rescuing(),
+        across.os,
+    )
+    .await;
+    let signalling = (a.signalling(), b.signalling());
+
+    a.linked_to(&b.device, B_MACHINE, across.os, vec![b.at()])
+        .await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    a.repo().await;
+    if across.holds_the_repo {
+        b.repo().await;
+    }
+
+    let account = a.account().await;
+    let holding = b.holding();
+    b.profile_called(ACCOUNT).await;
+
+    let conversation = a.drafting_under(&account).await;
+    if across.ticked {
+        assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+    }
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+    if !idles {
+        a.view_saying(conversation, |drawn| !drawn.working).await;
+    }
+
+    let set = a.asks(conversation, &proposing_inline(wants)).await;
+    a.answers(
+        conversation,
+        set,
+        "answers:\n  - label: Q9\n    selected: 1\ndirection: inline\n",
+    )
+    .await;
+
+    (a, b, (signalling.0, signalling.1, holding), conversation)
+}
+
+/// Everything the sessions on that Conversation printed on `on`.
+async fn printed_on(on: &Verkstead, conversation: i64) -> String {
+    let mut printed = String::new();
+    for event in on.sessions_on(conversation).await {
+        printed.push_str(&on.capture_of(conversation, event).await);
+    }
+    printed
+}
+
+/// **An inline run whose proposal wants Windows starts there** (ADR-0029,
+/// *Placing declared work*): picked on a Linux device with a Windows member
+/// ticked, the Conversation moves as the grilling hands off, the implementation
+/// session starts on the Windows device, and both Timelines name the inline run.
+#[tokio::test]
+async fn an_inline_run_that_wants_windows_starts_there() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) =
+        proposed_across(&["windows"], spill.path(), Across::default(), true).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let went = a.notice_saying(conversation, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for the inline run, which wants Windows"),
+        "the source names the inline run and the device: {went}",
+    );
+
+    let came = b.notice_saying(there, "Transferred to").await;
+    assert!(
+        came.contains("for the inline run, which wants Windows"),
+        "and so does the far end: {came}",
+    );
+
+    b.latest_capture_saying(there, "built inline on B").await;
+
+    let worked_here = printed_on(&a, conversation).await;
+    assert!(
+        !worked_here.contains("built inline"),
+        "nothing here was launched for the run: {worked_here:?}",
+    );
+}
+
+/// **A proposal wanting several platforms, or none, starts where it is**, and
+/// the agent moves itself as the work needs.
+#[tokio::test]
+async fn an_inline_run_wanting_several_platforms_or_none_starts_here() {
+    for wants in [&["linux", "windows"][..], &[]] {
+        let spill = tempfile::tempdir().unwrap();
+        let (a, _b, _held, conversation) =
+            proposed_across(wants, spill.path(), Across::default(), true).await;
+
+        a.latest_capture_saying(conversation, "built inline on A")
+            .await;
+
+        let drawn = a.view(conversation).await;
+        assert!(
+            drawn.transferred.is_none() && drawn.transferring.is_none(),
+            "a proposal wanting {wants:?} moves nothing",
+        );
+        assert!(
+            !a.notices(conversation)
+                .await
+                .iter()
+                .any(|notice| notice.contains("The inline run wants")),
+            "and has nothing to say about where it runs",
+        );
+    }
+}
+
+/// **A Resume of an inline run never places it** (Set 1543, Q5b): on a Linux
+/// device, with a Windows one ticked and a proposal that wanted Windows, the
+/// implementation session launches here and nothing moves.
+#[tokio::test]
+async fn an_inline_runs_resume_launches_it_where_it_is() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) =
+        proposed_across(&["windows"], spill.path(), Across::default(), false).await;
+
+    store::start_implementing(&a.pool, conversation)
+        .await
+        .unwrap();
+
+    resumes(&a, conversation).await;
+
+    a.latest_capture_saying(conversation, "built inline on A")
+        .await;
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "and nothing was moved",
+    );
+}
+
+/// **With no permitted device of the platform**, the inline run is asked about
+/// as a task is, named as the inline run: **Move to** starts it there.
+#[tokio::test]
+async fn an_inline_run_with_no_permitted_device_of_its_platform_is_moved_where_the_human_picks() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _held, conversation) = proposed_across(
+        &["windows"],
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+        true,
+    )
+    .await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    assert_eq!(
+        asked.rows[0].question,
+        format!("The inline run wants Windows. {B_MACHINE} is linked but not permitted."),
+    );
+
+    picks(&a, asked.set_id, 1).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let went = a.notice_saying(conversation, "Transferred to").await;
+    assert!(
+        went.contains("for the inline run, which wants Windows"),
+        "the move is Verkstead's, for the inline run: {went}",
+    );
+
+    b.latest_capture_saying(there, "built inline on B").await;
+    assert!(
+        !printed_on(&a, conversation).await.contains("built inline"),
+        "and nothing here was launched for the run",
+    );
+}
+
+/// And **Run it here** starts it where it is.
+#[tokio::test]
+async fn an_inline_run_the_human_says_to_run_here_starts_here() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _held, conversation) = proposed_across(
+        &["windows"],
+        spill.path(),
+        Across {
+            ticked: false,
+            ..Across::default()
+        },
+        true,
+    )
+    .await;
+
+    let asked = verksteads_set(&a, conversation).await;
+    picks(&a, asked.set_id, 2).await;
+
+    a.latest_capture_saying(conversation, "built inline on A")
+        .await;
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "and nothing was moved",
     );
 }
 
@@ -4863,6 +6520,7 @@ async fn a_pairing_on_another_harness_than_the_record_says_so_where_the_work_arr
             session_id: running.clone(),
             agent_type: store::AgentType::Grok,
             widened_by: None,
+            kept_here_by: None,
         },
     )
     .await
@@ -6460,4 +8118,1778 @@ async fn transcripts(pool: &SqlitePool) -> Vec<String> {
     .unwrap();
 
     rows.into_iter().map(|(line,)| line).collect()
+}
+
+/// **A stage away from home reports to it** (ADR-0029, *Home drives a roadmap
+/// across devices*): the stage `rate-limiting` 01, born on A and worked on B,
+/// with A holding its tombstone and the roadmap.
+///
+/// Set down in both stores by hand rather than moved by a press, because what is
+/// under test is what happens *after* a move — the move itself is everything
+/// above this. A holds a branch with the roadmap on it, so a settle reported
+/// there has a stage 02 to start.
+struct Away {
+    a: Verkstead,
+    b: Verkstead,
+
+    /// A's tombstone of the stage.
+    tombstone: i64,
+
+    /// And B's live copy of it.
+    copy: i64,
+}
+
+/// The roadmap A's stage is a stage of: two stages, the second standing on the
+/// first by the roadmap's own order.
+const AWAY_ROADMAP: &str = "# Rate limiting roadmap\n\n## Stages\n\n- [ ] 01: Count the requests — [brief](01-counter.md)\n- [ ] 02: Refuse the rest — [brief](02-refusing.md)\n";
+
+/// The pace a stage away from home looks again at, briskly: a home that did not
+/// answer is tried again within the test rather than a minute later.
+fn reporting() -> Pace {
+    Pace {
+        reports: Duration::from_millis(200),
+        ..Pace::default()
+    }
+}
+
+/// Stand [`Away`] up, with the tombstone's live record named as being on
+/// `live_on` — B, unless a test is about a device that does not hold the work.
+async fn away(spill: &Path, live_on: &str) -> Away {
+    let a = Verkstead::running_at(A, "exit 0", spill, reporting()).await;
+    let b = Verkstead::running_at(B, "exit 0", spill, reporting()).await;
+
+    away_between(a, b, B_OS, AWAY_ROADMAP, live_on).await
+}
+
+/// [`away`] between `a` and `b`, with B linked to A as running `b_os` and the
+/// roadmap on stage 01's branch being `roadmap`.
+async fn away_between(
+    a: Verkstead,
+    b: Verkstead,
+    b_os: &str,
+    roadmap_md: &str,
+    live_on: &str,
+) -> Away {
+    a.linked_to(&b.device, B_MACHINE, b_os, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let branch = "roadmaps/rate-limiting/01-counter";
+
+    // A's repository, with the stage's branch carrying the roadmap and a worktree
+    // checked out on it: where the tombstone was being worked before it moved.
+    let theirs = a.repo().await;
+    git(&theirs, &["checkout", "-b", branch]);
+    let roadmap = theirs.join("docs/roadmaps/rate-limiting");
+    std::fs::create_dir_all(&roadmap).unwrap();
+    std::fs::write(roadmap.join("ROADMAP.md"), roadmap_md).unwrap();
+    std::fs::write(roadmap.join("01-counter.md"), "# 01. Count the requests\n").unwrap();
+    std::fs::write(roadmap.join("02-refusing.md"), "# 02. Refuse the rest\n").unwrap();
+    std::fs::write(roadmap.join("03-reporting.md"), "# 03. Report\n").unwrap();
+    git(&theirs, &["add", "-A"]);
+    git(&theirs, &["commit", "-m", "plan the rate-limiting roadmap"]);
+    git(&theirs, &["checkout", "main"]);
+
+    let worktree = a.elsewhere.path().join("01-counter");
+    git(
+        &theirs,
+        &["worktree", "add", worktree.to_str().unwrap(), branch],
+    );
+
+    // The account its work ran under at home, which is what the stage after it
+    // inherits and runs under.
+    let account = a.account().await;
+    let tombstone = staged(&a, REPOSITORY, branch, &worktree, Some(&account)).await;
+
+    let ours = b.repo().await;
+    let copy = staged(&b, REPOSITORY, branch, &ours, None).await;
+
+    store::record_birth(
+        &b.pool,
+        copy,
+        &store::Birth {
+            device: A.to_owned(),
+            id: tombstone,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::transfer_away(
+        &a.pool,
+        tombstone,
+        &store::Transferred {
+            device: live_on.to_owned(),
+            id: copy,
+        },
+    )
+    .await
+    .unwrap();
+
+    Away {
+        a,
+        b,
+        tombstone,
+        copy,
+    }
+}
+
+/// Stage 01 of `rate-limiting` on `branch`, recorded on `on` and run under
+/// `under` where it says one — a Pairing being chosen while drafting or never.
+async fn staged(
+    on: &Verkstead,
+    repo: &str,
+    branch: &str,
+    worktree: &Path,
+    under: Option<&str>,
+) -> i64 {
+    staged_as(on, repo, branch, worktree, under, "01", None).await
+}
+
+/// [`staged`], as stage `label` and standing on `stacks_on` where it says one.
+async fn staged_as(
+    on: &Verkstead,
+    repo: &str,
+    branch: &str,
+    worktree: &Path,
+    under: Option<&str>,
+    label: &str,
+    stacks_on: Option<&str>,
+) -> i64 {
+    let repo_id = on.repo_row(repo).await;
+
+    let id = store::start_conversation(&on.pool, repo_id, branch, on.device.id(), None)
+        .await
+        .unwrap()
+        .unwrap();
+
+    if let Some(profile) = under {
+        assert_eq!(
+            store::set_implementation_pairing(&on.pool, id, profile, None)
+                .await
+                .unwrap(),
+            store::Chosen::Chosen,
+        );
+    }
+
+    store::start_stage(
+        &on.pool,
+        id,
+        "c0ffee",
+        worktree,
+        stacks_on,
+        store::RoadmapStage {
+            roadmap: "rate-limiting",
+            label,
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    id
+}
+
+impl Away {
+    /// Move B's copy on to `state`, as a move there does: the row, the line on
+    /// its Timeline, and the Nudge.
+    async fn moves(&self, state: store::Lifecycle) {
+        store::set_state(&self.b.pool, self.copy, state)
+            .await
+            .unwrap();
+
+        self.b
+            .nudges
+            .announce(verkstead_schema::Nudge::Conversation {
+                conversation: self.copy,
+            });
+    }
+
+    /// What A's standings say of stage 01.
+    async fn at_home(&self) -> Option<store::StageStanding> {
+        let repo_id = self.a.repo_row(REPOSITORY).await;
+
+        store::stage_standings(&self.a.pool, repo_id)
+            .await
+            .unwrap()
+            .of("rate-limiting", "01")
+    }
+
+    /// Wait for A's standings to say `standing` of stage 01.
+    async fn home_reads(&self, standing: store::StageStanding) {
+        let deadline = Instant::now() + WAITING;
+
+        while self.at_home().await != Some(standing) {
+            assert!(
+                Instant::now() < deadline,
+                "home never read stage 01 as {standing:?}: it reads {:?}",
+                self.at_home().await,
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
+    /// And check A's standings go on saying `standing` for a few of B's looks.
+    async fn home_still_reads(&self, standing: store::StageStanding) {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+
+        assert_eq!(self.at_home().await, Some(standing));
+    }
+}
+
+/// **A stage closed on the far device reads abandoned at home**: B's copy closes
+/// before it ever wrapped up, B tells A, and A's standings — which read the
+/// tombstone — say so.
+#[tokio::test]
+async fn a_stage_closed_on_the_far_device_reads_abandoned_at_home() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), B).await;
+
+    assert_eq!(away.at_home().await, Some(store::StageStanding::InFlight));
+
+    away.moves(store::Lifecycle::Closed).await;
+
+    away.home_reads(store::StageStanding::Abandoned).await;
+}
+
+/// **A stage that settles on the far device starts, at home, the stage that
+/// stood on it** — and the far copy's Timeline says what home started, nobody
+/// opening the tombstone it would otherwise have been said on.
+#[tokio::test]
+async fn a_stage_that_settles_away_starts_the_next_at_home_and_says_so_where_it_settled() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), B).await;
+
+    away.moves(store::Lifecycle::Done).await;
+
+    away.home_reads(store::StageStanding::Settled).await;
+
+    let started = away
+        .b
+        .notice_saying(away.copy, "has started as a conversation of its own")
+        .await;
+
+    assert!(
+        started.contains("Stage 02"),
+        "the far copy says home started stage 02: {started}",
+    );
+
+    let deadline = Instant::now() + WAITING;
+
+    loop {
+        let rows = away.a.own_rows().await;
+
+        if rows
+            .iter()
+            .any(|row| row.branch == "roadmaps/rate-limiting/02-refusing")
+        {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "home never started stage 02: {:?}",
+            rows.iter().map(|row| &row.branch).collect::<Vec<_>>(),
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    }
+
+    assert!(
+        !away
+            .a
+            .notices(away.tombstone)
+            .await
+            .iter()
+            .any(|notice| notice.contains("has started as a conversation of its own")),
+        "and the tombstone, which nobody opens, is not where it was said",
+    );
+}
+
+/// A roadmap whose second stage wants Windows, and whose third stands on it.
+const WINDOWS_STAGE_ROADMAP: &str = "# Rate limiting roadmap\n\n## Stages\n\n\
+     - [ ] 01: Count the requests — [brief](01-counter.md) — no dependencies\n\
+     - [ ] 02: Refuse the rest — [brief](02-refusing.md) — after 01 — on windows\n\
+     - [ ] 03: Report — [brief](03-reporting.md) — after 02\n";
+
+/// What stands where claude goes for **a stage planned wherever it was placed**:
+/// a planning session says which stage it plans and on which machine, and stays
+/// up; anything else exits.
+fn plans_stages_on(machine: &str) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-stage*)
+    printf 'planning %s on {machine}\r\n' "$(git branch --show-current)"
+    sleep 300
+    ;;
+esac
+exit 0
+"#,
+    )
+}
+
+/// **A stage that wants Windows is made at home and moved there before its
+/// planning starts** (ADR-0029, *Placing declared work*), end to end: stage 01
+/// settles on the Windows device, home starts stage 02 — `on windows` — and
+/// moves it to the Windows device its roadmap may be transferred to, where its
+/// planning session runs; and when it settles there, home starts stage 03,
+/// which wants nothing, and plans it at home.
+#[tokio::test]
+async fn a_stage_that_wants_windows_is_planned_there_and_home_starts_the_one_after() {
+    let spill = tempfile::tempdir().unwrap();
+    let a =
+        Verkstead::running_on(A, &plans_stages_on("A"), spill.path(), reporting(), WINDOWS).await;
+    let b =
+        Verkstead::running_on(B, &plans_stages_on("B"), spill.path(), reporting(), WINDOWS).await;
+
+    let away = away_between(a, b, WINDOWS, WINDOWS_STAGE_ROADMAP, B).await;
+    let _holding = away.b.holding();
+    away.b.profile_called(ACCOUNT).await;
+
+    // The roadmap's tick, which its stages inherit.
+    store::permit_device(&away.a.pool, away.tombstone, B)
+        .await
+        .unwrap();
+
+    away.moves(store::Lifecycle::Done).await;
+
+    let started = away.b.notice_saying(away.copy, "Stage 02 of the").await;
+    assert!(
+        started.contains(&format!(
+            "It wants Windows, so it's moving to <strong>{B_MACHINE}</strong>."
+        )),
+        "the roadmap's Notice names the device the stage went to: {started}",
+    );
+
+    // Made at home, and moved: home holds the tombstone.
+    let stage_02 = away
+        .a
+        .own_rows()
+        .await
+        .into_iter()
+        .find(|row| row.branch == "roadmaps/rate-limiting/02-refusing")
+        .expect("home made stage 02")
+        .id;
+
+    let there = away
+        .a
+        .view_saying(stage_02, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let went = away.a.notice_saying(stage_02, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for stage 02, which wants Windows"),
+        "the stage's Timeline names the stage and the device: {went}",
+    );
+    assert!(
+        away.a.sessions_on(stage_02).await.is_empty(),
+        "and nothing ran at home before it moved",
+    );
+
+    away.b
+        .printed(there, "planning roadmaps/rate-limiting/02-refusing on B")
+        .await;
+
+    // Settling on the Windows device, it reports home, and home starts the stage
+    // that stands on it, here.
+    store::set_state(&away.b.pool, there, store::Lifecycle::Done)
+        .await
+        .unwrap();
+    away.b
+        .nudges
+        .announce(verkstead_schema::Nudge::Conversation {
+            conversation: there,
+        });
+
+    let deadline = Instant::now() + WAITING;
+    let stage_03 = loop {
+        if let Some(row) = away
+            .a
+            .own_rows()
+            .await
+            .into_iter()
+            .find(|row| row.branch == "roadmaps/rate-limiting/03-reporting")
+        {
+            break row.id;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "home never started stage 03 once stage 02 settled away",
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    };
+
+    away.a
+        .printed(
+            stage_03,
+            "planning roadmaps/rate-limiting/03-reporting on A",
+        )
+        .await;
+    assert!(
+        away.a.view(stage_03).await.transferring.is_none(),
+        "and a stage wanting no platform stays at home",
+    );
+}
+
+/// [`away_between`] for the stage gate's tests: A and B both planning stages,
+/// B linked to A as running `b_os`, and the roadmap's stage 02 wanting Windows.
+async fn away_for_the_gate(spill: &Path, b_os: &str, pace: Pace) -> Away {
+    let a = Verkstead::running_on(A, &plans_stages_on("A"), spill, pace, b_os).await;
+    let b = Verkstead::running_on(B, &plans_stages_on("B"), spill, pace, b_os).await;
+
+    away_between(a, b, b_os, WINDOWS_STAGE_ROADMAP, B).await
+}
+
+/// Stage 01 settling on B, and the stage 02 home starts for it: its id at home,
+/// once the roadmap's Notice of its start says `saying`.
+async fn stage_02_started(away: &Away, saying: &str) -> i64 {
+    away.moves(store::Lifecycle::Done).await;
+
+    let started = away.b.notice_saying(away.copy, "Stage 02 of the").await;
+    assert!(
+        started.contains(saying),
+        "the roadmap's Notice says where the stage runs: {started}",
+    );
+
+    away.a
+        .own_rows()
+        .await
+        .into_iter()
+        .find(|row| row.branch == "roadmaps/rate-limiting/02-refusing")
+        .expect("home made stage 02")
+        .id
+}
+
+/// **A Windows stage whose roadmap may not go to the Windows device asks**
+/// (ADR-0029, *Verkstead asks with a Question Set of its own*): its Timeline
+/// gets Verkstead's Set naming the stage, with **Move to** the device against
+/// **Run it here**, a phone is told, and nothing plans until it is answered;
+/// **Move to** ticks the device and moves the stage, and it plans there.
+#[tokio::test]
+async fn a_stage_whose_windows_device_is_not_ticked_asks_and_move_to_plans_it_there() {
+    let spill = tempfile::tempdir().unwrap();
+    let (service, received) = crate::push_delivery::push_service().await;
+
+    let away = away_for_the_gate(spill.path(), WINDOWS, reporting()).await;
+    let _holding = away.b.holding();
+    away.b.profile_called(ACCOUNT).await;
+
+    let phone = crate::push_delivery::Device::new(&service, "take", "phone");
+    crate::push_delivery::subscribe(&away.a.workbench, &phone).await;
+
+    let stage_02 = stage_02_started(
+        &away,
+        "It wants Windows, and waits for you to say where it runs.",
+    )
+    .await;
+
+    let asked = verksteads_set(&away.a, stage_02).await;
+    assert_eq!(
+        asked.rows[0].question,
+        format!("Stage 02 wants Windows. {B_MACHINE} is linked but not permitted."),
+    );
+
+    let sheet: verkstead_render::SetReading =
+        reading(&away.a.workbench, &format!("/api/ui/sets/{}", asked.set_id)).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+    assert_eq!(
+        sheet.questions[0]
+            .ask
+            .options
+            .iter()
+            .map(|option| option.text_html.as_str())
+            .collect::<Vec<_>>(),
+        [format!("Move to {B_MACHINE}").as_str(), "Run it here"],
+    );
+
+    let pushed = crate::push_delivery::pushes(&received, 1).await;
+    assert_eq!(
+        phone.read(&pushed[0])["title"],
+        asked.title.as_str(),
+        "the phone is told",
+    );
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        away.a.sessions_on(stage_02).await.is_empty(),
+        "nothing plans while the human is asked",
+    );
+    assert!(
+        away.a.view(stage_02).await.driven,
+        "and the stage waiting on its Set takes a place",
+    );
+
+    picks(&away.a, asked.set_id, 1).await;
+
+    let there = away
+        .a
+        .view_saying(stage_02, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    assert!(
+        store::permitted_devices(&away.a.pool, stage_02)
+            .await
+            .unwrap()
+            .contains(&B.to_owned()),
+        "the device picked is ticked",
+    );
+
+    let went = away.a.notice_saying(stage_02, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for stage 02, which wants Windows"),
+        "the move is Verkstead's, for the stage: {went}",
+    );
+
+    away.b
+        .printed(there, "planning roadmaps/rate-limiting/02-refusing on B")
+        .await;
+    assert!(
+        away.a.sessions_on(stage_02).await.is_empty(),
+        "and nothing at home planned it",
+    );
+}
+
+/// **A restart while the stage's Set is open waits on it** rather than planning
+/// the stage or asking twice, holding its place again; **Run it here** then
+/// plans it at home, asking nothing more.
+#[tokio::test]
+async fn a_restart_waits_on_the_stages_set_and_run_it_here_plans_it_at_home() {
+    let spill = tempfile::tempdir().unwrap();
+    let mut away = away_for_the_gate(spill.path(), WINDOWS, reporting()).await;
+    let _holding = away.b.holding();
+    away.b.profile_called(ACCOUNT).await;
+
+    let stage_02 = stage_02_started(
+        &away,
+        "It wants Windows, and waits for you to say where it runs.",
+    )
+    .await;
+    let asked = verksteads_set(&away.a, stage_02).await;
+
+    away.a
+        .restarted(&plans_stages_on("A"), spill.path(), reporting());
+
+    away.a.view_saying(stage_02, |drawn| drawn.driven).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        away.a.sets_on(stage_02).await,
+        [asked.set_id],
+        "the restart put no second Set",
+    );
+    assert!(
+        away.a.sessions_on(stage_02).await.is_empty(),
+        "and planned nothing",
+    );
+
+    picks(&away.a, asked.set_id, 2).await;
+
+    away.a
+        .printed(stage_02, "planning roadmaps/rate-limiting/02-refusing on A")
+        .await;
+
+    let drawn = away.a.view(stage_02).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "nothing was moved",
+    );
+    assert_eq!(
+        away.a.sets_on(stage_02).await,
+        [asked.set_id],
+        "and the planning the answer started asked nothing again",
+    );
+}
+
+/// **A stage whose ticked Windows device is asleep waits on it**: the asleep
+/// Set goes up, and once the device answers the stage moves there and plans,
+/// the Set locked with a line saying so.
+#[tokio::test]
+async fn a_stage_whose_ticked_device_is_asleep_moves_there_once_it_answers() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away_for_the_gate(
+        spill.path(),
+        WINDOWS,
+        Pace {
+            wakes: Duration::from_millis(200),
+            ..reporting()
+        },
+    )
+    .await;
+    let _holding = away.b.holding();
+    away.b.profile_called(ACCOUNT).await;
+
+    store::permit_device(&away.a.pool, away.tombstone, B)
+        .await
+        .unwrap();
+
+    // B, as A knows it, answering nowhere.
+    away.a
+        .linked_to(
+            &away.b.device,
+            B_MACHINE,
+            WINDOWS,
+            vec!["127.0.0.1:9".to_owned()],
+        )
+        .await;
+
+    let stage_02 = stage_02_started(
+        &away,
+        "It wants Windows, and waits for you to say where it runs.",
+    )
+    .await;
+
+    let asked = verksteads_set(&away.a, stage_02).await;
+    assert_eq!(
+        asked.rows[0].question,
+        format!(
+            "Stage 02 wants Windows. {B_MACHINE} is not awake, and the work moves there by \
+             itself once it is."
+        ),
+    );
+
+    wakes(&away.a, &away.b).await;
+
+    let there = away
+        .a
+        .view_saying(stage_02, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    away.b
+        .printed(there, "planning roadmaps/rate-limiting/02-refusing on B")
+        .await;
+
+    let card = verksteads_set(&away.a, stage_02).await;
+    assert_eq!(card.set_id, asked.set_id);
+    assert_eq!(
+        card.lock_line.as_deref(),
+        Some(format!("{B_MACHINE} answered, so the work moved there.").as_str()),
+    );
+    assert!(
+        away.a.sessions_on(stage_02).await.is_empty(),
+        "and nothing at home planned it",
+    );
+}
+
+/// **A roadmap with no Windows device linked plans the Windows stage at home**,
+/// one Notice on its Timeline saying why, and the roadmap's start Notice saying
+/// it runs here.
+#[tokio::test]
+async fn a_stage_wanting_a_platform_no_device_is_of_plans_at_home_saying_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away_for_the_gate(spill.path(), B_OS, reporting()).await;
+    let _holding = away.b.holding();
+    away.b.profile_called(ACCOUNT).await;
+
+    let stage_02 = stage_02_started(
+        &away,
+        "It wants Windows, but no Windows device is linked, so it's running here.",
+    )
+    .await;
+
+    away.a
+        .printed(stage_02, "planning roadmaps/rate-limiting/02-refusing on A")
+        .await;
+
+    let said = "Stage 02 wants Windows, but no Windows device is linked, so it's running here.";
+    assert_eq!(
+        away.a
+            .notices(stage_02)
+            .await
+            .iter()
+            .filter(|notice| notice.contains(said))
+            .count(),
+        1,
+        "said once, on the stage's own Timeline",
+    );
+    assert!(
+        away.a.sets_on(stage_02).await.is_empty(),
+        "and nobody was asked",
+    );
+}
+
+/// A roadmap whose first two stages want Windows and stand on nothing, and whose
+/// third wants nothing: a *Continue a roadmap* press starts all three.
+const PRESSED_ROADMAP: &str = "# Rate limiting roadmap\n\n## Stages\n\n\
+     - [ ] 01: Count the requests — [brief](01-counter.md) — no dependencies — on windows\n\
+     - [ ] 02: Refuse the rest — [brief](02-refusing.md) — no dependencies — on windows\n\
+     - [ ] 03: Report — [brief](03-reporting.md) — no dependencies\n";
+
+/// A and B both planning stages, B linked to A as running `b_os` and holding
+/// the repository, and on A a *Continue a roadmap* draft of [`PRESSED_ROADMAP`],
+/// its Pairings chosen and B ticked where `ticked` says: the id of the draft,
+/// ready for the press.
+async fn adopting_across(
+    spill: &Path,
+    b_os: &str,
+    ticked: bool,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let a = Verkstead::running_on(A, &plans_stages_on("A"), spill, reporting(), b_os).await;
+    let b = Verkstead::running_on(B, &plans_stages_on("B"), spill, reporting(), b_os).await;
+
+    a.linked_to(&b.device, B_MACHINE, b_os, vec![b.at()]).await;
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let theirs = a.repo().await;
+    let roadmap = theirs.join("docs/roadmaps/rate-limiting");
+    std::fs::create_dir_all(&roadmap).unwrap();
+    std::fs::write(roadmap.join("ROADMAP.md"), PRESSED_ROADMAP).unwrap();
+    std::fs::write(roadmap.join("01-counter.md"), "# 01. Count the requests\n").unwrap();
+    std::fs::write(roadmap.join("02-refusing.md"), "# 02. Refuse the rest\n").unwrap();
+    std::fs::write(roadmap.join("03-reporting.md"), "# 03. Report\n").unwrap();
+    git(&theirs, &["add", "-A"]);
+    git(&theirs, &["commit", "-m", "plan the rate-limiting roadmap"]);
+    b.repo().await;
+
+    let account = a.account().await;
+    let holding = b.holding();
+    b.profile_called(ACCOUNT).await;
+
+    let started = press(
+        &a.workbench,
+        "/api/ui/adoptions",
+        Some(
+            &serde_json::json!({
+                "repo_id": a.repo_row(REPOSITORY).await,
+                "roadmap": "rate-limiting",
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+    let Started::Started { id: pressed, .. } = serde_json::from_str(&started).unwrap() else {
+        panic!("the adopting draft was not started: {started}")
+    };
+
+    let pairing = serde_json::json!({ "profile_id": account, "model": MODEL });
+    let role = serde_json::json!({ "pairing": pairing });
+    for (path, saying) in [
+        ("grilling-pairing", &pairing),
+        ("implementation-pairing", &pairing),
+        ("review-pairing", &role),
+    ] {
+        let said = press(
+            &a.workbench,
+            &format!("/api/ui/conversations/{pressed}/{path}"),
+            Some(&saying.to_string()),
+        )
+        .await;
+
+        assert_eq!(said, "\"Chosen\"", "picking {path}");
+    }
+
+    if ticked {
+        assert_eq!(a.permits(pressed, B, true).await, "\"Recorded\"");
+    }
+
+    (a, b, holding, pressed)
+}
+
+/// Press *Continue a roadmap* on `pressed`.
+async fn continues(a: &Verkstead, pressed: i64) {
+    let adopted = press(
+        &a.workbench,
+        &format!("/api/ui/conversations/{pressed}/adopt"),
+        None,
+    )
+    .await;
+
+    assert_eq!(adopted, "\"Adopted\"", "the press starts the roadmap");
+}
+
+/// Stage `branch`'s Conversation at home, once it has one.
+async fn stage_row(a: &Verkstead, branch: &str) -> i64 {
+    let deadline = Instant::now() + WAITING;
+
+    loop {
+        if let Some(row) = a
+            .own_rows()
+            .await
+            .into_iter()
+            .find(|row| row.branch == branch)
+        {
+            return row.id;
+        }
+
+        assert!(Instant::now() < deadline, "home never started {branch}");
+        tokio::time::sleep(LOOKING).await;
+    }
+}
+
+/// **The stages a *Continue a roadmap* press starts are placed as a settle's
+/// are** (ADR-0029, *Placing declared work*): the pressed draft becomes stage
+/// 01, which wants Windows, and moves to the ticked Windows device before its
+/// planning starts; stage 02, started beside it and wanting Windows too, moves
+/// there the same way; and stage 03, which wants nothing, plans here. The
+/// pressed Timeline says where each one beside it went.
+#[tokio::test]
+async fn a_press_moves_the_stages_that_want_windows_there_and_plans_the_rest_here() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _holding, pressed) = adopting_across(spill.path(), WINDOWS, true).await;
+
+    continues(&a, pressed).await;
+
+    let there = a
+        .view_saying(pressed, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the pressed stage moved")
+        .id;
+    b.printed(there, "planning roadmaps/rate-limiting/01-counter on B")
+        .await;
+    assert!(
+        a.sessions_on(pressed).await.is_empty(),
+        "and nothing ran at home before it moved",
+    );
+
+    let went = a.notice_saying(pressed, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for stage 01, which wants Windows"),
+        "the pressed stage's Timeline names the stage and the device: {went}",
+    );
+
+    // Beside it, wanting Windows: moved the same way.
+    let stage_02 = stage_row(&a, "roadmaps/rate-limiting/02-refusing").await;
+    let beside = a
+        .view_saying(stage_02, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("stage 02 moved")
+        .id;
+    b.printed(beside, "planning roadmaps/rate-limiting/02-refusing on B")
+        .await;
+    assert!(a.sessions_on(stage_02).await.is_empty());
+
+    // And beside it, wanting nothing: here, as before.
+    let stage_03 = stage_row(&a, "roadmaps/rate-limiting/03-reporting").await;
+    a.printed(
+        stage_03,
+        "planning roadmaps/rate-limiting/03-reporting on A",
+    )
+    .await;
+    assert!(a.view(stage_03).await.transferring.is_none());
+
+    // What the pressed Timeline was told, read where it now lives.
+    let said_02 = b.notice_saying(there, "Stage 02 of the").await;
+    assert!(
+        said_02.contains(&format!(
+            "It wants Windows, so it's moving to <strong>{B_MACHINE}</strong>."
+        )),
+        "the press's Notice names the device the stage went to: {said_02}",
+    );
+    let said_03 = b.notice_saying(there, "Stage 03 of the").await;
+    assert!(
+        !said_03.contains("It wants"),
+        "and a stage wanting nothing is told as before: {said_03}",
+    );
+}
+
+/// **Where the Windows device may not take them, the press's stages ask** as a
+/// settle's would: the pressed stage and the one beside it each get
+/// Verkstead's Set, and nothing plans; the stage wanting nothing plans here.
+#[tokio::test]
+async fn a_press_whose_windows_device_is_not_ticked_asks_for_each_stage_that_wants_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _holding, pressed) = adopting_across(spill.path(), WINDOWS, false).await;
+
+    continues(&a, pressed).await;
+
+    let asked = verksteads_set(&a, pressed).await;
+    assert_eq!(
+        asked.rows[0].question,
+        format!("Stage 01 wants Windows. {B_MACHINE} is linked but not permitted."),
+    );
+
+    let stage_02 = stage_row(&a, "roadmaps/rate-limiting/02-refusing").await;
+    let asked_02 = verksteads_set(&a, stage_02).await;
+    assert_eq!(
+        asked_02.rows[0].question,
+        format!("Stage 02 wants Windows. {B_MACHINE} is linked but not permitted."),
+    );
+
+    let said_02 = a.notice_saying(pressed, "Stage 02 of the").await;
+    assert!(
+        said_02.contains("It wants Windows, and waits for you to say where it runs."),
+        "the press's Notice says the stage waits on the human: {said_02}",
+    );
+
+    let stage_03 = stage_row(&a, "roadmaps/rate-limiting/03-reporting").await;
+    a.printed(
+        stage_03,
+        "planning roadmaps/rate-limiting/03-reporting on A",
+    )
+    .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        a.sessions_on(pressed).await.is_empty() && a.sessions_on(stage_02).await.is_empty(),
+        "nothing plans while the human is asked",
+    );
+}
+
+/// **Where no Windows device is linked, the press's stages plan here**, each
+/// with one Notice on its own Timeline saying why, and the pressed Timeline
+/// saying it of the one beside it.
+#[tokio::test]
+async fn a_press_with_no_windows_device_linked_plans_its_stages_here_saying_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _holding, pressed) = adopting_across(spill.path(), B_OS, false).await;
+
+    continues(&a, pressed).await;
+
+    a.printed(pressed, "planning roadmaps/rate-limiting/01-counter on A")
+        .await;
+    let stage_02 = stage_row(&a, "roadmaps/rate-limiting/02-refusing").await;
+    a.printed(stage_02, "planning roadmaps/rate-limiting/02-refusing on A")
+        .await;
+
+    for (stage, label) in [(pressed, "01"), (stage_02, "02")] {
+        let said = format!(
+            "Stage {label} wants Windows, but no Windows device is linked, so it's running here."
+        );
+        assert_eq!(
+            a.notices(stage)
+                .await
+                .iter()
+                .filter(|notice| notice.contains(&said))
+                .count(),
+            1,
+            "said once, on stage {label}'s own Timeline",
+        );
+        assert!(a.sets_on(stage).await.is_empty(), "and nobody was asked");
+    }
+
+    let said_02 = a.notice_saying(pressed, "Stage 02 of the").await;
+    assert!(
+        said_02
+            .contains("It wants Windows, but no Windows device is linked, so it's running here."),
+        "the press's Notice says why it runs here: {said_02}",
+    );
+}
+
+/// **A move made while home is asleep reaches home's tombstone once home
+/// answers**: B's copy closes with A unreachable, and nothing is lost — the
+/// report is still owed, and goes the next time B looks after A is back.
+#[tokio::test]
+async fn a_move_made_while_home_is_asleep_reaches_it_once_home_answers() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), B).await;
+
+    // A, as B knows it, answering nowhere: the lid shut.
+    let (machine, os) = this_machine();
+    away.b
+        .linked_to(
+            &away.a.device,
+            &machine,
+            &os,
+            vec!["127.0.0.1:9".to_owned()],
+        )
+        .await;
+
+    away.moves(store::Lifecycle::Closed).await;
+
+    away.home_still_reads(store::StageStanding::InFlight).await;
+
+    // And A answering again.
+    away.b
+        .linked_to(&away.a.device, &machine, &os, vec![away.a.at()])
+        .await;
+
+    away.home_reads(store::StageStanding::Abandoned).await;
+}
+
+/// **A report from a device that does not hold the live record is refused**: A's
+/// tombstone says the work is on C, so what B says of it is not written.
+#[tokio::test]
+async fn a_report_from_a_device_not_holding_the_work_is_refused() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), C).await;
+
+    away.moves(store::Lifecycle::Closed).await;
+
+    away.home_still_reads(store::StageStanding::InFlight).await;
+
+    assert_eq!(
+        store::told(&away.b.pool, away.copy).await.unwrap(),
+        None,
+        "and B holds the report as still owed, home having taken nothing",
+    );
+}
+
+/// **A stage moved on from the device it was first moved to still reports
+/// home**: A's tombstone names C, which handed its copy on to B. A asks C where
+/// the work went, follows it to B, takes B's report, and points its tombstone at
+/// B from then on.
+#[tokio::test]
+async fn a_stage_moved_on_a_second_time_still_reports_home() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), C).await;
+
+    // C: the device the stage was first moved to, holding a tombstone of its own
+    // that says the work went on to B.
+    let c = Verkstead::running_at(C, "exit 0", spill.path(), reporting()).await;
+
+    away.a
+        .linked_to(&c.device, "the-desktop", "Linux", vec![c.at()])
+        .await;
+
+    let (machine, os) = this_machine();
+    c.linked_to(&away.a.device, &machine, &os, vec![away.a.at()])
+        .await;
+
+    let ours = c.repo().await;
+    let passed_on = staged(
+        &c,
+        REPOSITORY,
+        "roadmaps/rate-limiting/01-counter",
+        &ours,
+        None,
+    )
+    .await;
+
+    store::record_birth(
+        &c.pool,
+        passed_on,
+        &store::Birth {
+            device: A.to_owned(),
+            id: away.tombstone,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::transfer_away(
+        &c.pool,
+        passed_on,
+        &store::Transferred {
+            device: B.to_owned(),
+            id: away.copy,
+        },
+    )
+    .await
+    .unwrap();
+
+    away.moves(store::Lifecycle::Closed).await;
+
+    away.home_reads(store::StageStanding::Abandoned).await;
+
+    assert_eq!(
+        store::transferred(&away.a.pool, away.tombstone)
+            .await
+            .unwrap()
+            .map(|mark| (mark.device, mark.id)),
+        Some((B.to_owned(), away.copy)),
+        "and home's tombstone names where the work is now",
+    );
+}
+
+/// The pace a stage away from home asks home at, briskly: a wait to join is
+/// looked at again within the test rather than ten seconds later.
+fn joining() -> Pace {
+    Pace {
+        joins: Duration::from_millis(200),
+        ..reporting()
+    }
+}
+
+/// What stands where claude goes on **B** for a stage at its finish: the finish
+/// session's prompt written to `told`, which is what says what it was told about
+/// the chain.
+fn finishes_telling(told: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-task/SKILL.md*)
+    printf '%s\n' "$2" > '{told}'
+    printf 'finishing the stage\r\n'
+    ;;
+esac
+sleep 300
+"#,
+        told = told.display(),
+    )
+}
+
+/// [`Away`] at its finish: B's copy holds a backlog with every box ticked, on a
+/// branch cut from the roadmap's own, and a Resume on B is what reaches the
+/// finish. Home's tombstone says it stands on the roadmap's branch; B's copy
+/// says nothing of what it stands on, so a chain the finish is told that names
+/// that branch can only have come from home.
+async fn finishing_away(spill: &Path, told: &Path) -> Away {
+    let a = Verkstead::running_at(A, "exit 0", spill, joining()).await;
+    let b = Verkstead::running_at(B, &finishes_telling(told), spill, joining()).await;
+
+    // Each device's account saved before the two are linked: once they are, each
+    // mirrors the other's Profiles, and the second to save its own under the same
+    // name would find the name taken.
+    let at_home = a.account().await;
+    let here = b.account().await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let branch = "roadmaps/rate-limiting/01-counter";
+
+    // A's repository registered, which is all home needs of it: the work is not
+    // there.
+    a.repo().await;
+    let tombstone = staged_as(
+        &a,
+        REPOSITORY,
+        branch,
+        &a.elsewhere.path().join("01-counter"),
+        Some(&at_home),
+        "01",
+        Some("rate-limiting"),
+    )
+    .await;
+
+    // B's repository: the roadmap's branch, which nothing has merged, and the
+    // stage's cut from it with its backlog worked through.
+    let ours = b.repo().await;
+    git(&ours, &["checkout", "-b", "rate-limiting"]);
+    let roadmap = ours.join("docs/roadmaps/rate-limiting");
+    std::fs::create_dir_all(&roadmap).unwrap();
+    std::fs::write(roadmap.join("ROADMAP.md"), AWAY_ROADMAP).unwrap();
+    git(&ours, &["add", "-A"]);
+    git(&ours, &["commit", "-m", "plan the rate-limiting roadmap"]);
+    git(&ours, &["checkout", "-b", branch]);
+    std::fs::create_dir_all(ours.join(".tasks")).unwrap();
+    std::fs::write(
+        ours.join(".tasks/TODO.md"),
+        "# Count the requests\n\n## Tasks\n\n- [x] 01: count them — [details](01-count.md)\n",
+    )
+    .unwrap();
+    std::fs::write(ours.join(".tasks/01-count.md"), "# 01. count them\n").unwrap();
+    git(&ours, &["add", "-A"]);
+    git(&ours, &["commit", "-m", "feat: count the requests"]);
+    git(&ours, &["checkout", "main"]);
+
+    let worktree = b.elsewhere.path().join("01-counter");
+    git(
+        &ours,
+        &["worktree", "add", worktree.to_str().unwrap(), branch],
+    );
+
+    let copy = staged(&b, REPOSITORY, branch, &worktree, Some(&here)).await;
+
+    store::record_birth(
+        &b.pool,
+        copy,
+        &store::Birth {
+            device: A.to_owned(),
+            id: tombstone,
+        },
+    )
+    .await
+    .unwrap();
+
+    store::transfer_away(
+        &a.pool,
+        tombstone,
+        &store::Transferred {
+            device: B.to_owned(),
+            id: copy,
+        },
+    )
+    .await
+    .unwrap();
+
+    Away {
+        a,
+        b,
+        tombstone,
+        copy,
+    }
+}
+
+impl Away {
+    /// Take B's copy up, which finds every box ticked: the next step is its
+    /// finish, and the join in front of it.
+    async fn finishes(&self) {
+        let resumed = press(
+            &self.b.workbench,
+            &format!("/api/ui/conversations/{}/resume", self.copy),
+            None,
+        )
+        .await;
+
+        assert_eq!(resumed, "\"Resumed\"", "the copy is taken up");
+    }
+
+    /// The Conversations in home's queue to join, in order.
+    async fn queued_at_home(&self) -> Vec<i64> {
+        let repo_id = self.a.repo_row(REPOSITORY).await;
+
+        store::join_queue(&self.a.pool, repo_id, "rate-limiting")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|queued| queued.conversation_id)
+            .collect()
+    }
+}
+
+/// What B's finish session was told, once it has been launched.
+async fn told_at_the_finish(told: &Path) -> String {
+    let deadline = Instant::now() + WAITING;
+
+    loop {
+        if let Ok(said) = std::fs::read_to_string(told) {
+            return said;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "B's finish session was never launched",
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    }
+}
+
+/// **A stage that joins on the far device opens its pull request against the
+/// branch home named**: B asks A, A queues its tombstone and answers the chain,
+/// and B's finish session is told to rebase onto it and open against it.
+#[tokio::test]
+async fn a_stage_that_joins_away_opens_its_pull_request_against_the_branch_home_named() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    away.finishes().await;
+
+    let prompt = told_at_the_finish(&told).await;
+    let chain = prompt
+        .split_once("# The chain this stage joins")
+        .unwrap_or_else(|| panic!("the finish was told no chain: {prompt}"))
+        .1;
+
+    assert!(
+        chain.contains("open the pull request against `rate-limiting`"),
+        "the pull request opens against the branch home named: {chain}",
+    );
+
+    assert_eq!(
+        away.queued_at_home().await,
+        [away.tombstone],
+        "and home queued its tombstone when the far stage asked",
+    );
+}
+
+/// **With home asleep, the far finish is held** and the Timeline says it is
+/// waiting on home; it goes on when home answers.
+#[tokio::test]
+async fn a_finish_away_waits_on_a_home_that_is_asleep_and_goes_on_when_it_answers() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    // A, as B knows it, answering nowhere: the lid shut.
+    let (machine, os) = this_machine();
+    away.b
+        .linked_to(
+            &away.a.device,
+            &machine,
+            &os,
+            vec!["127.0.0.1:9".to_owned()],
+        )
+        .await;
+
+    away.finishes().await;
+
+    let said = away.b.notice_saying(away.copy, "Waiting to join").await;
+
+    assert!(
+        said.contains(&format!("held until <strong>{machine}</strong> answers")),
+        "the Timeline says it is waiting on home: {said}",
+    );
+    assert!(
+        away.b.view(away.copy).await.waiting_to_join,
+        "under the same label as every wait to join",
+    );
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        !told.exists(),
+        "and no finish session was launched while home was asleep",
+    );
+
+    // And A answering again.
+    away.b
+        .linked_to(&away.a.device, &machine, &os, vec![away.a.at()])
+        .await;
+
+    told_at_the_finish(&told).await;
+}
+
+/// **A home that answers and refuses is said as what it is**: A's tombstone
+/// names a device that is not B, so A refuses B's ask to join, and B's Timeline
+/// says A refused rather than that A is not answering. The finish is held all
+/// the same, and goes on once A lets it in.
+#[tokio::test]
+async fn a_finish_away_refused_by_home_says_home_refused_and_goes_on_when_let_in() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    // A's tombstone pointing at a machine nobody can reach, so the trail from it
+    // never leads to B.
+    let pointing_at = |device: &str| store::Transferred {
+        device: device.to_owned(),
+        id: away.copy,
+    };
+    store::transfer_away(&away.a.pool, away.tombstone, &pointing_at(C))
+        .await
+        .unwrap();
+
+    away.finishes().await;
+
+    let said = away.b.notice_saying(away.copy, "Waiting to join").await;
+    let (machine, _) = this_machine();
+
+    assert!(
+        said.contains(&format!(
+            "held until <strong>{machine}</strong> lets this stage join"
+        )),
+        "the Timeline says home is holding it: {said}",
+    );
+    assert!(
+        said.contains("refused it: 409 Conflict"),
+        "and what home said: {said}",
+    );
+    assert!(
+        !said.contains("answers:"),
+        "rather than that home is not answering: {said}",
+    );
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(!told.exists(), "and the finish is held while home refuses");
+
+    store::transfer_away(&away.a.pool, away.tombstone, &pointing_at(B))
+        .await
+        .unwrap();
+
+    told_at_the_finish(&told).await;
+}
+
+/// **Home's queue orders the far stage by when it asked to join**, against the
+/// stages finishing at home: a home stage queued first goes first, and the far
+/// stage waits on it — said on the far Timeline — until it settles.
+#[tokio::test]
+async fn home_queues_the_far_stage_behind_a_home_stage_whose_tasks_finished_first() {
+    let spill = tempfile::tempdir().unwrap();
+    let told = spill.path().join("finish-prompt");
+    let away = finishing_away(spill.path(), &told).await;
+
+    let first = staged_as(
+        &away.a,
+        REPOSITORY,
+        "roadmaps/rate-limiting/02-refusing",
+        &away.a.elsewhere.path().join("02-refusing"),
+        None,
+        "02",
+        None,
+    )
+    .await;
+    store::queue_to_join(&away.a.pool, first).await.unwrap();
+
+    away.finishes().await;
+
+    let said = away.b.notice_saying(away.copy, "Waiting to join").await;
+
+    assert!(
+        said.contains("stage 02 finished its tasks before this one and hasn't joined yet"),
+        "the far Timeline says which home stage is in front of it: {said}",
+    );
+    assert_eq!(
+        away.queued_at_home().await,
+        [first, away.tombstone],
+        "and home queued the far stage behind it",
+    );
+    assert!(!told.exists(), "the turn is not the far stage's yet");
+
+    store::set_state(&away.a.pool, first, store::Lifecycle::Done)
+        .await
+        .unwrap();
+
+    told_at_the_finish(&told).await;
+}
+
+/// **The next stage to join at home joins on top of the far stage's branch**:
+/// the pull request the far finish opened is reported home, and home's chain —
+/// what a finish at home is told to rebase onto — gains it at the top.
+#[tokio::test]
+async fn a_join_away_puts_the_far_stage_at_the_top_of_homes_chain() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away(spill.path(), B).await;
+
+    let repo_id = away.b.repo_row(REPOSITORY).await;
+    let branch = "roadmaps/rate-limiting/01-counter";
+
+    store::record_pull_request(
+        &away.b.pool,
+        away.copy,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Count the requests".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            head: Some(branch.to_owned()),
+            base: Some("rate-limiting".to_owned()),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    away.b
+        .nudges
+        .announce(verkstead_schema::Nudge::Conversation {
+            conversation: away.copy,
+        });
+
+    let home_repo = away.a.repo_row(REPOSITORY).await;
+    let deadline = Instant::now() + WAITING;
+
+    loop {
+        let chain = store::stage_chain(&away.a.pool, home_repo, "rate-limiting")
+            .await
+            .unwrap();
+
+        if let Some(top) = chain.last() {
+            assert_eq!(
+                (top.conversation_id, top.branch.as_str()),
+                (away.tombstone, branch),
+                "the far stage is the top of home's chain, on its branch",
+            );
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "home's chain never gained the far stage",
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    }
+
+    away.home_reads(store::StageStanding::InFlight).await;
+}
+
+/// The options of a Set as its sheet draws them.
+async fn options_of(on: &Verkstead, set: i64) -> Vec<String> {
+    let sheet: verkstead_render::SetReading =
+        reading(&on.workbench, &format!("/api/ui/sets/{set}")).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+
+    assert!(sheet.by_verkstead, "the sheet names Verkstead as its asker");
+
+    sheet.questions[0]
+        .ask
+        .options
+        .iter()
+        .map(|option| option.text_html.clone())
+        .collect()
+}
+
+/// The branch of a Conversation on `on`, which a Set's title names.
+async fn branch_of(on: &Verkstead, conversation: i64) -> String {
+    store::load_conversation(&on.pool, conversation)
+        .await
+        .unwrap()
+        .expect("the Conversation is here")
+        .branch
+}
+
+/// Wait until the session running on `on` has been ended.
+async fn ended(on: &Verkstead, conversation: i64) {
+    on.view_saying(conversation, |drawn| !drawn.working).await;
+}
+
+/// **The agent's call to a device not ticked is a request** (ADR-0029, *The
+/// agent's call becomes a request*): the call exits 0, the session is ended at
+/// its turn's end, and Verkstead's own Set asks *Move to* that device against
+/// *Keep it here*. *Move to* ticks it and the work is carried on over there.
+#[tokio::test]
+async fn a_call_to_an_unticked_device_asks_the_human_and_move_to_moves_the_work() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = drafted_running(
+        &writes_a_log_then(&calls_then_idles_at(&gate)),
+        &carries_on(),
+        spill.path(),
+        Repositories::Apart,
+    )
+    .await;
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+
+    let (status, said) = a.calls(conversation, B_MACHINE).await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "the call is a request: {said}"
+    );
+    assert_eq!(said.trim(), B_MACHINE, "naming the machine it asked for");
+
+    let asked = verksteads_set(&a, conversation).await;
+    let branch = branch_of(&a, conversation).await;
+    assert_eq!(asked.title, format!("Move {branch} to {B_MACHINE}?"));
+    assert_eq!(
+        asked.rows[0].question,
+        format!("The agent asked to move to {B_MACHINE}, which is not permitted."),
+    );
+    assert_eq!(
+        options_of(&a, asked.set_id).await,
+        [format!("Move to {B_MACHINE}"), "Keep it here".to_owned()],
+    );
+    assert_eq!(
+        store::transfer_asked(&a.pool, conversation).await.unwrap(),
+        None,
+        "nothing is moving until the human says so",
+    );
+
+    // A second call while the human is being asked is refused, and asks
+    // nothing more.
+    let (status, said) = a.calls(conversation, B_MACHINE).await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a second call is refused: {said}"
+    );
+    assert!(
+        said.contains(&format!(
+            "already being asked about this work's move, in Question Set {}",
+            asked.set_id
+        )),
+        "naming the Set that is asking: {said}",
+    );
+    assert_eq!(
+        a.view(conversation)
+            .await
+            .timeline
+            .iter()
+            .filter(|event| matches!(event, TimelineEvent::QuestionSet(set) if set.by_verkstead))
+            .count(),
+        1,
+        "and no second Set goes up",
+    );
+
+    // The agent says its last words and goes idle, and is ended for them.
+    std::fs::write(&gate, "go").unwrap();
+    ended(&a, conversation).await;
+
+    let session = a.sessions_on(conversation).await[0];
+    assert!(
+        a.capture_of(conversation, session).await.contains(CLOSING),
+        "the closing words reached the record before the session was ended",
+    );
+
+    picks(&a, asked.set_id, 1).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    assert_eq!(
+        store::permitted_devices(&a.pool, conversation)
+            .await
+            .unwrap(),
+        [B],
+        "the device picked is ticked",
+    );
+
+    b.notice_saying(there, "at the agent's request").await;
+
+    let resumed = b.latest_capture_saying(there, "carried on").await;
+    assert!(
+        resumed.contains("arg=--resume"),
+        "B's session carries on the conversation A's was having: {resumed:?}",
+    );
+}
+
+/// What stands where claude goes on A for **Keep it here**: the session that
+/// makes the call the first time, and the one carrying it on after — told to
+/// resume, and saying what it was launched with.
+fn calls_then_carries_on_at(gate: &Path) -> String {
+    format!(
+        r#"
+case " $* " in
+*" --resume "*)
+{carrying}
+    ;;
+*)
+{calling}
+    ;;
+esac
+"#,
+        carrying = carries_on(),
+        calling = writes_a_log_then(&calls_then_idles_at(gate)),
+    )
+}
+
+/// **Keep it here carries the session on where it is** (ADR-0029): the
+/// conversation the agent was having is resumed on this device, with a note
+/// saying the work stays, and nothing is moved or ticked.
+#[tokio::test]
+async fn keep_it_here_carries_the_session_on_here_with_a_note() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, _b, _holding, conversation) = drafted_running(
+        &calls_then_carries_on_at(&gate),
+        &re_primed(),
+        spill.path(),
+        Repositories::Apart,
+    )
+    .await;
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+
+    assert_eq!(
+        a.calls(conversation, B_MACHINE).await.0,
+        StatusCode::ACCEPTED
+    );
+
+    let asked = verksteads_set(&a, conversation).await;
+
+    std::fs::write(&gate, "go").unwrap();
+    ended(&a, conversation).await;
+
+    picks(&a, asked.set_id, 2).await;
+
+    let resumed = a.latest_capture_saying(conversation, "carried on").await;
+    assert!(
+        resumed.contains("arg=--resume"),
+        "the conversation the agent was having is resumed here: {resumed:?}",
+    );
+
+    let note = resumed.split_whitespace().collect::<Vec<_>>().join(" ");
+    for phrase in [
+        &format!("Question Set {}", asked.set_id),
+        "They answered **Keep it here**: the work stays on this device",
+        "Carry on with the work here.",
+    ] {
+        assert!(note.contains(phrase), "the note says {phrase:?}: {note}");
+    }
+
+    a.notice_saying(
+        conversation,
+        &format!("Question set {} kept the work here", asked.set_id),
+    )
+    .await;
+
+    let drawn = a.view(conversation).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "nothing was moved",
+    );
+    assert!(
+        store::permitted_devices(&a.pool, conversation)
+            .await
+            .unwrap()
+            .is_empty(),
+        "and nothing was ticked",
+    );
+}
+
+/// **A call to a ticked device asleep asks with *Keep it here* alone**, and the
+/// device answering moves the work, the Set locked with a line saying so
+/// (ADR-0029, the agent's asleep row).
+#[tokio::test]
+async fn a_call_to_a_ticked_device_asleep_waits_on_it_and_its_waking_moves_the_work() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = drafted_at(
+        &writes_a_log_then(&calls_then_idles_at(&gate)),
+        &carries_on(),
+        spill.path(),
+        Repositories::Apart,
+        true,
+        looking_for_wakes(),
+    )
+    .await;
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    // B goes to sleep.
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![NOWHERE.to_owned()])
+        .await;
+
+    assert_eq!(
+        a.calls(conversation, B_MACHINE).await.0,
+        StatusCode::ACCEPTED
+    );
+
+    let asked = verksteads_set(&a, conversation).await;
+    let branch = branch_of(&a, conversation).await;
+    assert_eq!(
+        asked.title,
+        format!("Keep {branch} here, or wait for {B_MACHINE}?")
+    );
+    assert_eq!(
+        asked.rows[0].question,
+        format!(
+            "The agent asked to move to {B_MACHINE}, which is not awake, and the work moves \
+             there by itself once it is."
+        ),
+    );
+    assert_eq!(options_of(&a, asked.set_id).await, ["Keep it here"]);
+
+    std::fs::write(&gate, "go").unwrap();
+    ended(&a, conversation).await;
+
+    // B wakes.
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let card = verksteads_set(&a, conversation).await;
+    assert!(
+        matches!(card.standing, Standing::LockedUnanswered(_)),
+        "the Set is locked: {:?}",
+        card.standing,
+    );
+    assert_eq!(
+        card.lock_line.as_deref(),
+        Some(format!("{B_MACHINE} answered, so the work moved there.").as_str()),
+    );
+
+    let resumed = b.latest_capture_saying(there, "carried on").await;
+    assert!(
+        resumed.contains("arg=--resume"),
+        "B's session carries on the conversation A's was having: {resumed:?}",
+    );
 }

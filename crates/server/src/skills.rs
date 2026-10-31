@@ -1421,54 +1421,81 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
     )
 }
 
-/// The same prompt again, with the devices this session may move its work onto
-/// named under it (ADR-0020, *The agent's call*).
+/// The same prompt again, with the devices of the cluster named under it, and
+/// which of them this session may move its work onto (ADR-0020, *The agent's
+/// call*; ADR-0029, *Consent stays off by default, and is told*).
 ///
-/// `devices` is the list as it stands **from this device's side** — the ones the
-/// human ticked and the drafting device, less the one the session is running on
-/// — see [`crate::transfers::may_go_to`]. Each is named with its id as well as
-/// its name, because a name is a hostname and two devices can share one, and
-/// with the word for its OS the device select draws, a WSL being *Linux (WSL)*
-/// rather than the Windows machine it shares a hostname with: the OS is the
-/// whole reason a session reaches for this.
+/// `cluster` is read **from this device's side** — see
+/// [`crate::transfers::cluster`]. It opens on this device, by name, id and the
+/// OS word its Device Reading spells, which is what gives *something this
+/// platform cannot do* a referent. Then every other member, the permitted ones
+/// first: each with its id as well as its name, because a name is a hostname
+/// and two devices can share one, and with the word for its OS the device
+/// select draws, a WSL being *Linux (WSL)* rather than the Windows machine it
+/// shares a hostname with: the OS is the whole reason a session reaches for
+/// this. No word on whether one is awake: the prompt is read once, at launch,
+/// and `verkstead transfer` finds out for itself.
+///
+/// **Every member, permitted or not.** Nothing is ticked by default, so a
+/// list of the permitted ones alone is, on most Conversations, a session never
+/// told the Windows machine it needs exists — and one never told cannot ask for
+/// it. So a device not permitted is named as one, and calling for it is a
+/// request the human is asked about (ADR-0029).
 ///
 /// **Said, rather than left neutral like the listings above it**, because what
-/// the call is for is not in the Brief: the human ticked the devices so that
-/// the agent could reach for one when the work needs a platform this is not, and
-/// a list with no word on when to use it is one no session would think to.
+/// the call is for is not in the Brief: a list with no word on when to use it
+/// is one no session would think to.
 ///
 /// Applied at the launch point to the fresh prompt and the carried note alike,
 /// so a session carried on at the far end is told where it may go from *there*.
 ///
-/// **Nothing where the list is empty**, which is every Conversation nobody
-/// ticked a device on that is still where it was drafted: a heading over
-/// nothing, or a sentence about a verb it may not use, would tell a session
-/// that moving was on the table.
-pub(crate) fn transferable(prompt: &str, devices: &[store::Member]) -> String {
-    if devices.is_empty() {
+/// **Nothing on a Verkstead of one device**: a heading over nothing, or a
+/// sentence about a verb with nowhere to go, would tell a session that moving
+/// was on the table.
+pub(crate) fn transferable(prompt: &str, cluster: Option<&crate::transfers::Cluster>) -> String {
+    let Some(cluster) = cluster else {
         return prompt.to_owned();
-    }
+    };
 
-    let listed: Vec<String> = devices
+    let listed: Vec<String> = cluster
+        .members
         .iter()
-        .map(|device| {
+        .map(|placed| {
             format!(
-                "- **{}** (id `{}`), {}.",
-                device.name, device.device, device.os
+                "- **{}** (id `{}`), {} — {}.",
+                placed.member.name,
+                placed.member.device,
+                placed.member.os,
+                if placed.permitted {
+                    "permitted"
+                } else {
+                    "not permitted yet"
+                },
             )
         })
         .collect();
 
     format!(
-        "{}\n\n# Devices this work may move to\n\nThe human has said this Conversation's \
-         work may be moved onto another device of their cluster:\n\n{}\n\nWhen the work \
-         needs something this platform cannot do — building or testing for another \
-         operating system, say — run `verkstead transfer <device>`, naming one of these \
-         by its name or its id. Accepted, this session is ended once the turn is over \
-         and the work carries on over there: the same conversation, the branch and \
-         the Worktree with it. Refused, it exits non-zero and says why, and nothing \
-         moves — pick another device or ask the human. `verkstead guide` says more.\n",
+        "{}\n\n# The devices of this cluster\n\nThis session is running on **{}** \
+         (id `{}`), {}. The other devices of the human's cluster, and whether this \
+         Conversation's work may be moved onto each:\n\n{}\n\nWhen the work needs \
+         something this platform cannot do — building or testing for another \
+         operating system, say — run `verkstead transfer <device>`, naming it by \
+         its name or its id. Accepted, this session is ended once the turn is \
+         over. To a permitted device that answers, the work carries on over there: \
+         the same conversation, the branch and the Worktree with it.\n\nTo a device \
+         not permitted yet, or permitted and not awake, the call is a request \
+         rather than a refusal: the turn ends the same way, and Verkstead asks the \
+         human with a Question Set of its own whether to move the work there. Either \
+         it moves, or this conversation carries on here with a note saying the work \
+         stays. Refused — a name that is no device's or is two devices', or a device \
+         that answers lacking something the work needs — it exits non-zero and says \
+         why, and nothing moves: pick another device or ask the human. `verkstead \
+         guide` says more.\n",
         prompt.trim_end(),
+        cluster.name,
+        cluster.id,
+        cluster.os,
         listed.join("\n"),
     )
 }
@@ -1613,6 +1640,31 @@ pub(crate) fn widened(set_id: i64, title: Option<&str>, added: &[String]) -> Str
     ));
 
     note
+}
+
+/// The note a session is resumed with after the human answered **Keep it here**
+/// to the Set Verkstead asked for its own `verkstead transfer` (ADR-0029,
+/// *Verkstead asks with a Question Set of its own*).
+///
+/// [`widened`]'s occasion one along: the conversation above carried on, what
+/// changed — nothing but where the work is not going — and what to do next,
+/// which is the work it was doing, here. `title` is the Set's own, where its
+/// body could be read.
+pub(crate) fn kept(set_id: i64, title: Option<&str>) -> String {
+    let set = match title {
+        Some(title) => format!("Question Set {set_id}, *{title}*"),
+        None => format!("Question Set {set_id}"),
+    };
+
+    format!(
+        "You asked to move the work to another device, and Verkstead asked the human about it \
+         with {set}. They answered **Keep it here**: the work stays on this device, and nothing \
+         has moved. Verkstead ended the session that made the call, as an accepted call ends \
+         one, and started this one to carry it on — this is the conversation above carried on \
+         rather than a new one.\n\nCarry on with the work here. Don't call `verkstead \
+         transfer` for that device again unless something has changed; where the work still \
+         needs it, say why with `verkstead ask`.\n"
+    )
 }
 
 /// One Question Set a resumed session was idling on, said both ways round.
@@ -2555,6 +2607,82 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A platform is written only where the work can be verified nowhere else
+    /// (ADR-0029, *Declaring what the work wants*), and both planning skills
+    /// say so beside the `on <os>` they describe: a line that declared a
+    /// platform for every mention of one would pull work onto a device it does
+    /// not need.
+    #[test]
+    fn both_planning_skills_say_when_a_line_declares_a_platform() {
+        for named in [STAGING, BREAKING_DOWN] {
+            let text = flowed(named);
+
+            for wording in [
+                "can be verified nowhere else",
+                "a platform `cfg`",
+                "a platform's own component",
+                "a suite that only runs on that operating system",
+                "Naming a platform in prose declares nothing",
+                "shared code with a cross-platform suite declares nothing",
+            ] {
+                assert!(
+                    text.contains(wording),
+                    "{named} says when a line declares a platform, `{wording}` among it: \
+                     {text}"
+                );
+            }
+        }
+    }
+
+    /// And each template shows a declared line, an example being what an agent
+    /// copies: the roadmap's among its stage lines, the backlog's among its
+    /// task lines — the same tail, read by the same reading.
+    #[test]
+    fn both_planning_templates_show_a_declared_platform() {
+        let staging = skill(STAGING);
+        let breaking_down = skill(BREAKING_DOWN);
+
+        let declared = |lines: Vec<String>| {
+            lines.iter().any(|line| {
+                crate::checklist::entry(line)
+                    .is_some_and(|entry| crate::declarations::read(entry.after).platform.is_some())
+            })
+        };
+
+        assert!(
+            declared(stage_lines(&staging)),
+            "the roadmap template shows a stage line wanting a platform: {staging}"
+        );
+
+        let task_lines = breaking_down
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("- [") && line.contains("[details]("))
+            .map(|line| line.replace("] NN:", "] 07:"))
+            .collect();
+
+        assert!(
+            declared(task_lines),
+            "the task-list template shows a task line wanting a platform: {breaking_down}"
+        );
+    }
+
+    /// A task is placed by its platform before its session starts, and the
+    /// skill says so — and that the move is Verkstead's rather than a session's.
+    #[test]
+    fn the_breakdown_skill_says_a_task_platform_moves_the_work() {
+        let breaking_down = flowed(BREAKING_DOWN);
+
+        assert!(
+            breaking_down.contains("before that task's session starts, it moves the work"),
+            "Verkstead moves a declared task before it starts: {breaking_down}"
+        );
+        assert!(
+            breaking_down.contains("No session moves itself for a declared task."),
+            "and the session working it does not: {breaking_down}"
+        );
     }
 
     /// The fork drops what a workstation-driven flow assumes and Verkstead
@@ -3590,6 +3718,65 @@ mod tests {
         assert!(
             addressing.contains("Fix the cause"),
             "and the cause rather than the symptom: {addressing}"
+        );
+    }
+
+    /// CI confirms; it does not discover (ADR-0029, *What the skills say*). The
+    /// three skills that build say a platform's build, suite or check is run on
+    /// that platform — moving where the prompt permits it, a call for one not
+    /// permitted being the ask, CI alone only where there is no device of it to
+    /// ask for — and
+    /// point at the prompt's section and the Guide's rather than restating
+    /// them. None of them takes the platform from a job's name.
+    #[test]
+    fn the_building_skills_say_ci_confirms_and_does_not_discover() {
+        for named in [IMPLEMENTING, NEXT_TASK, ADDRESSING] {
+            let text = flowed(named);
+
+            for wording in [
+                "CI confirms; it does not discover",
+                "`verkstead transfer`",
+                "calling for one not permitted yet asks the human for it",
+                "*The devices of this cluster*",
+                "*Moving the work to another device*",
+                "is a name, not a declaration, and no device follows from it",
+                "Only where there is no device of that operating system to ask for",
+            ] {
+                assert!(
+                    text.contains(wording),
+                    "{named} says CI confirms and does not discover, `{wording}` among it: \
+                     {text}"
+                );
+            }
+        }
+    }
+
+    /// And the addressing skill's failed check is run where its job ran, the
+    /// move named before anything is fixed rather than the log read and a guess
+    /// pushed.
+    #[test]
+    fn the_addressing_skill_reproduces_a_failed_check_where_it_ran() {
+        let addressing = flowed(ADDRESSING);
+
+        let failed = addressing
+            .find("**A failed check**")
+            .expect("the addressing skill has a failed-check step");
+        let fixed = addressing
+            .find("## 2. Fix the cause")
+            .expect("the addressing skill has a fix step");
+        let step = &addressing[failed..fixed];
+
+        assert!(
+            step.contains("**on the operating system the job ran on**"),
+            "the failed check is run where its job ran: {step}"
+        );
+        assert!(
+            step.contains("move there before fixing anything"),
+            "and the move is named before the fix: {step}"
+        );
+        assert!(
+            step.contains("a fix written from the log alone is a guess"),
+            "never from the log alone: {step}"
         );
     }
 
@@ -5221,24 +5408,53 @@ mod tests {
         }
     }
 
-    /// A Conversation with devices to move to is told each by name, id and OS
-    /// — a WSL as the OS it reports — and when to reach for the call.
+    fn cluster(members: Vec<(store::Member, bool)>) -> crate::transfers::Cluster {
+        crate::transfers::Cluster {
+            name: "workstation".to_owned(),
+            id: "11111111111111111111111111111111".to_owned(),
+            os: "Linux".to_owned(),
+            members: members
+                .into_iter()
+                .map(|(member, permitted)| crate::transfers::Placed { member, permitted })
+                .collect(),
+        }
+    }
+
+    /// A Conversation with devices to move to is told this device, then each
+    /// other by name, id and OS — a WSL as the OS it reports — with whether it
+    /// is permitted, and when to reach for the call.
     #[test]
     fn a_session_is_told_each_device_it_may_move_to_and_when() {
         let prompt = transferable(
             &implementing(&mounted(), "# Fix the Windows build\n", None),
-            &[
-                member("22222222222222222222222222222222", "winvm", "Windows"),
-                member("33333333333333333333333333333333", "winvm", "Linux (WSL)"),
-            ],
+            Some(&cluster(vec![
+                (
+                    member("22222222222222222222222222222222", "winvm", "Windows"),
+                    true,
+                ),
+                (
+                    member("33333333333333333333333333333333", "winvm", "Linux (WSL)"),
+                    true,
+                ),
+            ])),
         );
 
         assert!(
-            prompt.contains("- **winvm** (id `22222222222222222222222222222222`), Windows."),
+            prompt.contains(
+                "running on **workstation** (id `11111111111111111111111111111111`), Linux."
+            ),
             "{prompt}"
         );
         assert!(
-            prompt.contains("- **winvm** (id `33333333333333333333333333333333`), Linux (WSL)."),
+            prompt.contains(
+                "- **winvm** (id `22222222222222222222222222222222`), Windows — permitted."
+            ),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains(
+                "- **winvm** (id `33333333333333333333333333333333`), Linux (WSL) — permitted."
+            ),
             "{prompt}"
         );
 
@@ -5254,12 +5470,43 @@ mod tests {
         }
     }
 
-    /// And one with nowhere to go says nothing about moving at all.
+    /// With nothing ticked, the Windows member is still named — not permitted
+    /// yet, and that calling for it is a request the human is asked about
+    /// (ADR-0029, *Consent stays off by default, and is told*).
+    #[test]
+    fn a_session_with_nothing_ticked_is_told_every_device_and_how_to_ask() {
+        let prompt = transferable(
+            &implementing(&mounted(), "# Fix the Windows build\n", None),
+            Some(&cluster(vec![(
+                member("22222222222222222222222222222222", "winvm", "Windows"),
+                false,
+            )])),
+        );
+
+        assert!(
+            prompt.contains(
+                "- **winvm** (id `22222222222222222222222222222222`), Windows — not permitted yet."
+            ),
+            "{prompt}"
+        );
+
+        let said = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+        for phrase in [
+            "This session is running on **workstation**",
+            "not permitted yet, or permitted and not awake, the call is a request",
+            "Question Set of its own",
+            "carries on here with a note saying the work stays",
+        ] {
+            assert!(said.contains(phrase), "should say {phrase:?}: {said}");
+        }
+    }
+
+    /// And one on a Verkstead of one device says nothing about moving at all.
     #[test]
     fn a_session_with_nowhere_to_move_is_told_nothing_about_transfer() {
         let built = implementing(&mounted(), "# Rate limiting\n", None);
 
-        assert_eq!(transferable(&built, &[]), built);
+        assert_eq!(transferable(&built, None), built);
         assert!(!built.contains("transfer"), "{built}");
     }
 

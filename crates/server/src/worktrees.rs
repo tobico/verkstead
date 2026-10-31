@@ -1665,8 +1665,15 @@ mod tests {
         };
 
         assert!(said.contains("did not answer"), "it said {said:?}");
+
+        // Generous, because what it measures is three processes started rather
+        // than the deadline alone — `git remote`, the fetch and, on Windows,
+        // `taskkill` — and a loaded runner starts those slowly: 25 seconds of
+        // this test once, beside the session-account suites (run 41039615916).
+        // The remote never answers, so without the deadline this never returns
+        // at all; any bound short of that is the claim.
         assert!(
-            started.elapsed() < Duration::from_secs(10),
+            started.elapsed() < Duration::from_secs(60),
             "the deadline is what ends the wait, not the fetch"
         );
 

@@ -202,11 +202,12 @@ impl Client {
     }
 
     /// Ask for this session's work to be moved onto `device`, by name or id, and
-    /// hand back the name the server knows that machine by.
+    /// hand back the name the server knows that machine by, and whether the
+    /// move is made or asked for — see [`Called`].
     ///
     /// No retry, for [`Client::done`]'s reason: a refusal is a device to pick
     /// again or a human to ask, and the agent is owed it straight away.
-    pub fn transfer(&self, device: &str) -> Result<String> {
+    pub fn transfer(&self, device: &str) -> Result<(String, Called)> {
         let mut reply = self
             .agent
             .post(format!("{}/api/v1/transfer", self.base))
@@ -220,7 +221,8 @@ impl Client {
             .context("reading the server's reply")?;
 
         match status {
-            200 => Ok(text.trim().to_owned()),
+            200 => Ok((text.trim().to_owned(), Called::Moving)),
+            202 => Ok((text.trim().to_owned(), Called::Asked)),
             404 => bail!(
                 "the server at {} has no transfer to take — it may be older than this command",
                 self.said
@@ -449,6 +451,19 @@ impl Client {
             }
         }
     }
+}
+
+/// What a `verkstead transfer` the server took comes to (ADR-0029).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Called {
+    /// The device is permitted and answers: the work moves once the session
+    /// has ended.
+    Moving,
+
+    /// The device is linked and not permitted, or permitted and asleep: the
+    /// human is asked, with a Question Set of Verkstead's, once the session
+    /// has ended.
+    Asked,
 }
 
 /// Why a wait ended early: because it is worth trying again, or because it

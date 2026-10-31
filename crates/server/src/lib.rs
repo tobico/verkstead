@@ -215,6 +215,7 @@ mod nudging;
 /// it is a server stood up over a stated machine, which is a test standing
 /// where a start does.
 pub mod onboarding;
+mod own_sets;
 /// What a Repo nothing has grilled arrives with in its pickers when there is no
 /// last start to copy: one account per harness order and a model per role.
 mod pairing_defaults;
@@ -248,6 +249,9 @@ pub mod pipe;
 /// The look that starts a roadmap stage which waited for a place the whole
 /// server has, made as one comes free.
 mod places;
+/// Moving a task of the backlog to the platform its line declares, before its
+/// session starts (ADR-0029).
+mod placing;
 /// Where a directory of Verkstead's own goes when nobody has said: the
 /// platform's own place for the Data Directory, and the environment values it
 /// is resolved out of.
@@ -283,6 +287,7 @@ pub mod remote;
 mod renames;
 pub mod replicating;
 mod reply;
+mod reporting;
 mod repos;
 /// Speaking to a session that has gone idle without asking anything.
 mod rescues;
@@ -508,6 +513,10 @@ pub(crate) struct AppState {
     /// than inside them, because a held stage is being driven: the run holding
     /// it is the driver, and this is what it is holding it for.
     joins: joins::Joins,
+
+    /// And the open Sets of Verkstead's own being waited on, each holding a
+    /// driver registration while it is — see [`own_sets::Holds`].
+    own_holds: own_sets::Holds,
 
     /// And what each running session is to be ended on the Done signal for,
     /// where something is waiting on one — see [`done`].
@@ -1648,6 +1657,7 @@ fn standing(
         followers: followers::Followers::new(),
         drivers: drivers::Drivers::new(),
         joins: joins::Joins::new(),
+        own_holds: own_sets::Holds::new(),
         signals: done::Signals::new(),
         updates,
 
@@ -1800,6 +1810,11 @@ fn standing(
     // so every device holds the cluster's Authors, Agent Profiles, Instructions
     // and MCP servers (ADR-0028) — see [`replicating`].
     replicating::pulling(&state);
+
+    // And the stages this device holds away from their home, each telling that
+    // device where it stands, on the same channel again and on a slow clock for
+    // a home that was asleep — see [`reporting`] (ADR-0029).
+    reporting::reporting(&state);
 
     // And what this device forwards, on the same channel again: a member's
     // `ports` Nudge is that Conversation's ports read over the link and held on

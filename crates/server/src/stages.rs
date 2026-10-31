@@ -578,6 +578,14 @@ pub(crate) struct Stage {
 
     /// And the brief itself, which is what the stage's Conversation starts from.
     pub(crate) brief: String,
+
+    /// The platform its line declares — `on windows` — which is where the stage
+    /// is placed as it starts (ADR-0029, *Placing declared work*), or `None`
+    /// where it declares none — and on every stage of a roadmap that declares
+    /// nothing, whatever its prose says: see [`declared_platforms`]. Read in the
+    /// same reading as the rest of it, off the top of the chain, and never
+    /// kept: the stage is placed once.
+    pub(crate) platform: Option<crate::platform::Platform>,
 }
 
 impl Stage {
@@ -847,6 +855,10 @@ pub(crate) fn next_stage(
     // its limit starts nothing rather than going backwards.
     let places = at_once.saturating_sub(in_flight);
 
+    // Where each of them is placed, off the judged declaration rather than the
+    // line — see [`declared_platforms`].
+    let platforms = declared_platforms(roadmap, &list);
+
     let mut starting = Vec::new();
     let mut held = Vec::new();
 
@@ -934,6 +946,7 @@ pub(crate) fn next_stage(
             label: entry.label.to_owned(),
             title: entry.title.to_owned(),
             brief: markdown,
+            platform: platforms.get(entry.label).copied(),
         });
     }
 
@@ -1746,6 +1759,10 @@ fn opened(
                     .as_ref()
                     .and_then(|declared| declared.platform)
                     .map(str::to_owned),
+                // Off the record rather than the line, and so whatever the
+                // roadmap declares: a stage moved by hand is on its device all
+                // the same.
+                device: record.device(name, entry.label).map(str::to_owned),
                 // Absent only where the roadmap names a brief nobody wrote, or
                 // one that will not be read. Both are the same nothing to draw,
                 // and the pane says so in words.
@@ -2398,7 +2415,11 @@ pub(crate) fn startable(
     // Clauses 2 to 4, on the stage the Conversation doing the pressing would
     // become: what is wrong with that one refuses the press by name, each of them
     // being a different thing for the human to go and do.
-    let stage = match offered(repo, commit, name, &entry) {
+    // Where each stage offered is placed, off the judged declaration rather
+    // than the line — see [`declared_platforms`].
+    let platforms = declared_platforms(name, &index);
+
+    let stage = match offered(repo, commit, name, &entry, &platforms) {
         Ok(stage) => stage,
         Err(refusal) => return refusal,
     };
@@ -2416,7 +2437,7 @@ pub(crate) fn startable(
     // lazy iterator is what keeps the clauses to one reading per stage offered.
     let beside = rest
         .into_iter()
-        .filter_map(|entry| offered(repo, commit, name, &entry).ok())
+        .filter_map(|entry| offered(repo, commit, name, &entry, &platforms).ok())
         .take(places - 1)
         .collect();
 
@@ -2426,6 +2447,24 @@ pub(crate) fn startable(
         beside,
         behind,
     }))
+}
+
+/// The platform each stage of the roadmap `list` wants, by its label, as
+/// [`declarations::judge`] matched it: what places a stage as it starts.
+///
+/// Off the judgement rather than the line, so a roadmap that declares nothing
+/// places nothing — its tails are prose, and a word following an `on` in one is
+/// not a platform anybody asked for — and a stage is placed by exactly the
+/// platform the roadmap's pane names for it. A roadmap the judging refuses
+/// starts nothing anyway.
+fn declared_platforms(roadmap: &str, list: &str) -> HashMap<String, crate::platform::Platform> {
+    match declarations::judge(roadmap, list) {
+        declarations::Judgement::Declared(declared) => declared
+            .into_iter()
+            .filter_map(|one| Some((one.label, one.platform?)))
+            .collect(),
+        declarations::Judgement::Undeclared | declarations::Judgement::Refused(_) => HashMap::new(),
+    }
 }
 
 /// One ready stage of a roadmap as something to start, or which of the three
@@ -2464,6 +2503,7 @@ fn offered(
     commit: &str,
     roadmap: &str,
     entry: &checklist::Entry<'_>,
+    platforms: &HashMap<String, crate::platform::Platform>,
 ) -> Result<Stage, Startable> {
     if annotating(entry.after).is_some_and(|branch| worktrees::branch_taken(repo, branch)) {
         return Err(Startable::InFlight);
@@ -2485,6 +2525,7 @@ fn offered(
         title: entry.title.to_owned(),
         brief_path,
         brief,
+        platform: platforms.get(entry.label).copied(),
     };
 
     let branch = stage.branch();
@@ -4219,6 +4260,43 @@ Turns this askance clone into Verkstead.
         assert_eq!(pane.stages[1].platform.as_deref(), Some("freebsd"));
     }
 
+    /// The device a stage is on, wherever that is not here: off the record's
+    /// tombstone rather than the line, so a stage moved by hand names its device
+    /// as one the platform placed does, and a stage here says nothing more.
+    #[test]
+    fn the_pane_names_the_device_a_stage_is_on() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) — after 01 — on windows\n\
+             - [ ] 03: Implementation — [brief](03-implementation.md) — after 01\n",
+        );
+
+        let record = store::StageStandings::from_rows([
+            ("mvp", "01", store::StageStanding::Settled, false, 1),
+            ("mvp", "02", store::StageStanding::InFlight, false, 2),
+            ("mvp", "03", store::StageStanding::InFlight, false, 3),
+        ])
+        .with_device(2, "nuc-win")
+        .with_device(3, "studio");
+
+        let pane = repo.opened_with("mvp", &record).unwrap();
+
+        assert_eq!(
+            pane.stages[0].device, None,
+            "a stage here says nothing more"
+        );
+        assert_eq!(pane.stages[1].platform.as_deref(), Some("windows"));
+        assert_eq!(pane.stages[1].device.as_deref(), Some("nuc-win"));
+        assert_eq!(
+            pane.stages[2].platform, None,
+            "one with no platform, moved by hand,",
+        );
+        assert_eq!(pane.stages[2].device.as_deref(), Some("studio"));
+    }
+
     /// The renderer in the page is loaded for the pane rather than for a stage,
     /// so the flag is asked of all of them at once.
     #[test]
@@ -4364,6 +4442,7 @@ Turns this askance clone into Verkstead.
             title: "Wrap-up".to_owned(),
             brief_path: "docs/roadmaps/mvp/04.md".to_owned(),
             brief: "# 04.\n".to_owned(),
+            platform: None,
         };
 
         assert_eq!(stage.branch(), "roadmaps/mvp/04");
@@ -5604,6 +5683,58 @@ Turns this askance clone into Verkstead.
         );
 
         assert_eq!(stage.label, "02");
+        assert_eq!(
+            stage.platform,
+            Some(crate::platform::Platform::Windows),
+            "and the stage carries the platform its line declares, which places it",
+        );
+    }
+
+    /// A line that declares no platform is a stage that wants none.
+    #[test]
+    fn a_stage_declaring_no_platform_wants_none() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) — after 01\n",
+        );
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+
+        let stage = only(repo.next("mvp", "grilling"), "stage 02 is the one left");
+
+        assert_eq!(stage.platform, None);
+    }
+
+    /// And a roadmap that declares nothing places nothing, whatever its prose
+    /// says: a tail written before any of this is not a platform somebody asked
+    /// for, at a settle's start or at a press's.
+    #[test]
+    fn an_undeclared_roadmaps_prose_places_no_stage() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Installers — [brief](02-installers.md) — focus on windows installers\n",
+        );
+        repo.brief("mvp", "02-installers.md", "# 02. Installers\n");
+        repo.commit();
+
+        let stage = only(repo.next("mvp", "grilling"), "stage 02 is the one left");
+
+        assert_eq!(stage.platform, None, "a settle's start places nothing");
+
+        let Startable::Stage(abandoned) = repo.startable("mvp") else {
+            panic!(
+                "the press has a stage to start: {:?}",
+                repo.startable("mvp")
+            );
+        };
+
+        assert_eq!(abandoned.stage.label, "02");
+        assert_eq!(abandoned.stage.platform, None, "and nor does a press's");
     }
 
     /// The end of a roadmap, which is where the whole pipeline stops of its own

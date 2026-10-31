@@ -973,6 +973,14 @@
   color: var(--ink-soft);
 }
 
+/* And who asked, where it was Verkstead itself: said as quietly, for the same
+   reason. */
+.questionSet .asker {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
 /* A Set nobody was ever going to answer. Said quietly: it is a fact about the
    record rather than something to do. */
 .questionSet .closed {

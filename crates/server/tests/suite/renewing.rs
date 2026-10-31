@@ -875,9 +875,11 @@ async fn a_newcomer_a_member_named_is_told_about_the_changeover_too() {
     );
 
     // Which leaves C, and C alone, standing between this changeover and the end
-    // of it — rather than C and a device nothing would ever have told.
+    // of it — rather than C and a device nothing would ever have told. C is
+    // dialled at the ordinary patience, not [`PATIENCE`]: it is there, and a
+    // dial cut short on a slow machine leaves it owed and the changeover open.
     back_again(&a, &c).await;
-    a.devices().waiting(PATIENCE).announce_renewal().await;
+    a.devices().announce_renewal().await;
 
     assert!(
         !a.device.incoming_path().exists(),

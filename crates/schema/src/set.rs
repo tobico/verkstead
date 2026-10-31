@@ -211,6 +211,58 @@ pub struct Proposal {
     /// the human is deciding against the agent's reasoning rather than against
     /// a bare word.
     pub rationale: String,
+
+    /// The platforms the work wants, each with the reason it wants it. Empty
+    /// on a proposal that wants none, which is most of them, and drawn then
+    /// exactly as a proposal was before it could want anything.
+    ///
+    /// On the proposal rather than asked as a Question, because the chooser is
+    /// where the human is already deciding how the work is built, and so where
+    /// they are asked to let it move.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wants: Vec<Want>,
+}
+
+/// One platform a proposal wants, and why.
+///
+/// A reason every time rather than a bare word, because the reason is what the
+/// human reads beside the tick.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Want {
+    pub platform: WantedPlatform,
+
+    /// Why the work wants it, as markdown. `for` on the wire, which reads as
+    /// the sentence it finishes and is a keyword here.
+    #[serde(rename = "for")]
+    pub reason: String,
+}
+
+/// The three platforms work can want, in the words a stage line's `on <os>`
+/// spells them.
+///
+/// The schema's own rather than the server's `Platform`, because this crate is
+/// built for wasm and cannot reach it; the server maps one onto the other where
+/// it needs to. An enum, so a fourth word is refused when the Set is read, as a
+/// fourth direction is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+#[serde(rename_all = "lowercase")]
+pub enum WantedPlatform {
+    Linux,
+    Macos,
+    Windows,
+}
+
+impl WantedPlatform {
+    /// The word as the wire spells it, for a refusal to quote back.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Linux => "linux",
+            Self::Macos => "macos",
+            Self::Windows => "windows",
+        }
+    }
 }
 
 /// One of the three ways the work can be built.

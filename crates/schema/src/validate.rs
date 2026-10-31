@@ -20,7 +20,8 @@
 //! - a Set carrying a `proposal` gives its reasoning. The direction is an enum,
 //!   so the wire format refuses an unknown one on its own; what is left is a
 //!   rationale nobody wrote, and the chooser has nothing to show the human the
-//!   recommendation was argued for.
+//!   recommendation was argued for. A platform it `wants` is an enum too, and
+//!   each one needs the reason the human reads beside the tick.
 //!
 //! Multi-select needs no rule: the format gives no way to express it — an
 //! Answer carries one `selected` number.
@@ -286,6 +287,33 @@ fn check_proposal(set: &QuestionSet, violations: &mut Vec<Violation>) {
             "a `proposal` needs a rationale; the chooser shows the human why this \
              direction was recommended, and a bare word is not a reason",
         ));
+    }
+
+    // The platform is an enum and refused as it parses; the reason is the
+    // half the grammar cannot express, and what the human reads beside the tick.
+    for want in &proposal.wants {
+        if want.reason.trim().is_empty() {
+            violations.push(Violation::set(format!(
+                "every entry of a proposal's `wants` needs a `for`; the chooser shows \
+                 the human why the work wants {}, beside the device they may tick for it",
+                want.platform.word(),
+            )));
+        }
+    }
+
+    // And each platform once: the chooser draws a platform's devices under
+    // each entry for it, so a second would draw the same tick twice.
+    for (at, want) in proposal.wants.iter().enumerate() {
+        if proposal.wants[..at]
+            .iter()
+            .any(|earlier| earlier.platform == want.platform)
+        {
+            violations.push(Violation::set(format!(
+                "a proposal's `wants` names {} twice; give it one entry, with every \
+                 reason the work wants it in that entry's `for`",
+                want.platform.word(),
+            )));
+        }
     }
 }
 

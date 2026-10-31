@@ -2325,11 +2325,32 @@ function QuestionSet(props: {
       <span class={styles.eventHead}>
         <span class={styles.what}>Question set</span>
         <span class={styles.setTitle}>{props.asked.title}</span>
-        <Show when={deferred()}>
-          <span class={styles.deferred}>deferred</span>
+        {/* Who asked, where it was Verkstead rather than the agent. In place of
+            the deferred mark, which is how Verkstead's are stored: nobody is
+            standing still behind one, and naming the asker says so. */}
+        <Show
+          when={props.asked.by_verkstead}
+          fallback={
+            <Show when={deferred()}>
+              <span class={styles.deferred}>deferred</span>
+            </Show>
+          }
+        >
+          <span class={styles.asker}>asked by Verkstead</span>
         </Show>
-        <Show when={locked()}>
-          <span class={styles.closed}>closed unanswered</span>
+        {/* What its lock said, where it said something: Verkstead's, settling
+            its own Set. In place of the human's lock's words, which would be
+            wrong about it. And the same line beside an answer Verkstead acted
+            on, where acting on it did not go as it said. */}
+        <Show
+          when={!waiting() && props.asked.lock_line}
+          fallback={
+            <Show when={locked()}>
+              <span class={styles.closed}>closed unanswered</span>
+            </Show>
+          }
+        >
+          {(line) => <span class={styles.closed}>{line()}</span>}
         </Show>
         {/* And a Set still waiting says so in the disc the sidebar says it in,
             at the right edge of the title's line — the same mark, in the same

@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use sqlx::SqlitePool;
-use verkstead_schema::{Direction, QuestionSet, SetCreated};
+use verkstead_schema::{Direction, QuestionSet, SetCreated, WantedPlatform};
 
 use super::wrap_up::{WaitingOn, settled_when};
 
@@ -1571,6 +1571,26 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the stage joinings table")?;
 
+    // And when a stage that has come home joined its chain, which the record
+    // alone stops saying once it has moved. [`stage_chain`] orders the links by
+    // the Event their pull request hangs off, and a record landing again writes
+    // every Event under a new id — so a stage moved away and back after it
+    // joined would read as having joined last. What is kept is the Event id
+    // this device first had for the join, compared with the others' in the one
+    // sequence they are all issued from; nothing else reads it, and a stage
+    // that has never landed again has no row. Written by [`super::land`], and
+    // this device's own rather than the record's: the far end's ids are no
+    // order here. See [`super::slices::STAYS_BEHIND`].
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS stage_joined_at (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             event_id        INTEGER NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the table of when stages that came home joined")?;
+
     // The model half of a Conversation's Pairings, one row per role. A
     // table of its own for the reason the direction is one: there is no
     // migration machinery here and `conversations` is STRICT and left alone —
@@ -2865,6 +2885,55 @@ pub async fn picked_direction(pool: &SqlitePool, id: i64) -> Result<Option<Direc
     direction(pool, id).await
 }
 
+/// The platforms the proposal the human picked a direction on wants (ADR-0029,
+/// *Placing declared work*): none where it wants none, or where nothing has
+/// been picked on a proposal at all.
+///
+/// The newest Set on the Conversation's Timeline carrying a proposal whose
+/// Response picked a direction, because a later pick supersedes an earlier one
+/// — see [`pick_direction`] — and the `wants` are the picked proposal's own.
+/// Read off the Set rather than recorded beside the pick, because the Set is
+/// where they were written, and it is already the record of that decision.
+pub async fn picked_wants(pool: &SqlitePool, id: i64) -> Result<Vec<WantedPlatform>> {
+    let answered: Vec<(i64,)> = sqlx::query_as(
+        "SELECT q.id
+         FROM question_sets q
+         JOIN set_events s ON s.set_id = q.id
+         JOIN timeline_events e ON e.id = s.event_id
+         JOIN responses r ON r.set_id = q.id
+         WHERE e.conversation_id = ?
+         ORDER BY q.id DESC",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("looking for the proposal picked on Conversation {id}"))?;
+
+    for (set_id,) in answered {
+        let Some(super::StoredSet {
+            set: super::Asked::Set(set),
+            ..
+        }) = super::load_set(pool, set_id).await?
+        else {
+            continue;
+        };
+
+        let Some(proposal) = set.proposal else {
+            continue;
+        };
+
+        let picked = super::load_response(pool, set_id)
+            .await?
+            .is_some_and(|stored| stored.response.direction.is_some());
+
+        if picked {
+            return Ok(proposal.wants.iter().map(|want| want.platform).collect());
+        }
+    }
+
+    Ok(Vec::new())
+}
+
 /// How a Conversation's work is to be built, if the human has chosen yet.
 async fn direction(pool: &SqlitePool, id: i64) -> Result<Option<Direction>> {
     let row: Option<(String,)> =
@@ -3683,6 +3752,42 @@ pub async fn ask(
     set: &QuestionSet,
     ask: super::Ask,
 ) -> Result<Option<SetCreated>> {
+    asking(pool, conversation_id, set, ask, None).await
+}
+
+/// Put a Question Set of Verkstead's own on a Conversation's Timeline, asking
+/// about `about` — see [`super::own_sets`].
+///
+/// Stored as a Deferred Ask is, because that is what it is to everything that
+/// asks how a Set was asked: no session is idling on it, so nothing reaps,
+/// rescues or locks one over it, and nothing ages it against the clock. Its
+/// Answers are Verkstead's to act on rather than a later session's to be told
+/// about — see [`super::unfolded`], which passes it over.
+pub async fn ask_on_our_own(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    set: &QuestionSet,
+    about: &super::OwnAsking,
+) -> Result<Option<SetCreated>> {
+    asking(
+        pool,
+        conversation_id,
+        set,
+        super::Ask::Deferred,
+        Some(about),
+    )
+    .await
+}
+
+/// Either of the two above, the record of whose Set it is written in the same
+/// transaction as the Set.
+async fn asking(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    set: &QuestionSet,
+    ask: super::Ask,
+    own: Option<&super::OwnAsking>,
+) -> Result<Option<SetCreated>> {
     let body = serde_json::to_string(set).context("serialising the Question Set")?;
 
     let mut tx = super::writing(pool, "putting a Question Set").await?;
@@ -3727,6 +3832,10 @@ pub async fn ask(
 
     if ask.deferred_shaped() {
         super::deferrals::defer(&mut tx, id, ask.idled()).await?;
+    }
+
+    if let Some(own) = own {
+        super::own_sets::record(&mut tx, id, own).await?;
     }
 
     tx.commit().await.context("putting a Question Set")?;
@@ -6275,6 +6384,7 @@ impl StageStanding {
 pub struct StageStandings {
     stages: HashMap<String, HashMap<String, Held>>,
     planners: HashMap<String, StageStanding>,
+    away: HashMap<i64, String>,
 }
 
 impl StageStandings {
@@ -6318,6 +6428,26 @@ impl StageStandings {
     /// by the old tools, which is a stage with no Conversation to name.
     pub fn conversation(&self, roadmap: &str, label: &str) -> Option<i64> {
         self.held(roadmap, label).map(|held| held.conversation_id)
+    }
+
+    /// And **the device** that stage is on, by the name its member goes by,
+    /// wherever that is not here: read off this copy's tombstone of the stage —
+    /// the mark naming the device holding the live record — whoever moved it
+    /// there, a placement or a human's Transfer.
+    ///
+    /// `None` is a stage here, one with no row, and one moved to a device that is
+    /// no longer a member, there being no name left to say.
+    pub fn device(&self, roadmap: &str, label: &str) -> Option<&str> {
+        self.away
+            .get(&self.conversation(roadmap, label)?)
+            .map(String::as_str)
+    }
+
+    /// And the same with Conversation `conversation_id` on the device named
+    /// `device`, for the readings' tests — see [`StageStandings::from_rows`].
+    pub fn with_device(mut self, conversation_id: i64, device: &str) -> Self {
+        self.away.insert(conversation_id, device.to_owned());
+        self
     }
 
     /// What the record says about **the roadmap's own Conversation** — the one
@@ -6538,6 +6668,23 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
         }
     }
 
+    // Where any of them has been moved to, by the name its member goes by: the
+    // tombstone names the device, and the membership names that.
+    let away: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT t.conversation_id, m.name
+         FROM transferred t
+         JOIN stage_roadmaps r ON r.conversation_id = t.conversation_id
+         JOIN conversations c ON c.id = t.conversation_id
+         JOIN members m ON m.device = t.device
+         WHERE c.repo_id = ? AND r.stage IS NOT NULL",
+    )
+    .bind(repo_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading which devices Repo {repo_id}'s roadmap stages are on"))?;
+
+    standings.away = away.into_iter().collect();
+
     Ok(standings)
 }
 
@@ -6574,7 +6721,9 @@ pub struct Joined {
 ///
 /// Nothing is stored for this beyond that. A join is a fact that already has a
 /// record — the pull request — and a second row saying so could come to
-/// disagree with it.
+/// disagree with it. The one exception is *when*, for a stage whose record has
+/// landed here again since it joined: the landing renumbered that Event, so the
+/// id this device first had for it is kept beside it — see [`super::land`].
 ///
 /// The **foot** of the chain is the roadmap's own branch while its pull request
 /// is unmerged, and it is not in here: it is not a stage, nothing waits on it
@@ -6599,9 +6748,10 @@ pub async fn stage_chain(pool: &SqlitePool, repo_id: i64, roadmap: &str) -> Resu
          JOIN conversations c ON c.id = r.conversation_id
          JOIN pull_requests p
            ON p.conversation_id = r.conversation_id AND p.repo_id = c.repo_id
+         LEFT JOIN stage_joined_at k ON k.conversation_id = r.conversation_id
          WHERE c.repo_id = ? AND r.roadmap = ? AND r.stage IS NOT NULL
          GROUP BY r.conversation_id
-         ORDER BY MIN(p.event_id)",
+         ORDER BY COALESCE(k.event_id, MIN(p.event_id))",
     )
     .bind(repo_id)
     .bind(roadmap)
@@ -6746,15 +6896,27 @@ pub struct Driven {
 ///
 /// Within a roadmap the order is the roadmap's own rather than this reading's —
 /// see the server's `stages::ready`, which answers lowest-numbered first.
-pub async fn driven_roadmaps(pool: &SqlitePool) -> Result<Vec<Driven>> {
+///
+/// **And only what was born here drives** (ADR-0029, *Home drives a roadmap
+/// across devices*). A stage moved to this device brings its roadmap row with
+/// it, and that row read as driving would have this device start the stage's
+/// siblings beside home starting them. So a row counts only where its
+/// Conversation's birth key names `here` — this device's Device Id — or where
+/// it has none, which is a database from before there were any. Home's
+/// tombstone of a stage moved away was born here and counts, and so does a
+/// stage that has come home.
+pub async fn driven_roadmaps(pool: &SqlitePool, here: &str) -> Result<Vec<Driven>> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
         "SELECT c.repo_id, r.roadmap
          FROM stage_roadmaps r
          JOIN conversations c ON c.id = r.conversation_id
+         LEFT JOIN births b ON b.conversation_id = r.conversation_id
          WHERE c.repo_id NOT IN (SELECT repo_id FROM unregistered_repos)
+           AND (b.device IS NULL OR b.device = ?)
          GROUP BY c.repo_id, r.roadmap
          ORDER BY MIN(r.conversation_id)",
     )
+    .bind(here)
     .fetch_all(pool)
     .await
     .context("reading which roadmaps Verkstead is driving")?;
