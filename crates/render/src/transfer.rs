@@ -471,6 +471,13 @@ pub enum MovedFor {
     Inline {
         wants: String,
     },
+
+    /// A roadmap stage whose line declares a platform: its label as the
+    /// roadmap writes it, and the word for the platform as a screen draws it.
+    Stage {
+        label: String,
+        wants: String,
+    },
 }
 
 impl MovedFor {
@@ -482,6 +489,7 @@ impl MovedFor {
             MovedFor::Session => "at the agent's request".to_owned(),
             MovedFor::Task { label, wants } => format!("for task {label}, which wants {wants}"),
             MovedFor::Inline { wants } => format!("for the inline run, which wants {wants}"),
+            MovedFor::Stage { label, wants } => format!("for stage {label}, which wants {wants}"),
         }
     }
 }
@@ -495,7 +503,8 @@ impl MovedFor {
 /// and no press of the human's, so *the agent's request* is the nearer of the
 /// two sentences such an end has to say it with. An inline run's goes the same
 /// way beside an `inline` field, its platform being the grilling agent's
-/// proposal.
+/// proposal, and a stage's beside a `stage` field, its platform being the line
+/// the agent writing the roadmap gave it.
 #[derive(Serialize, Deserialize)]
 struct Arriving {
     device: String,
@@ -508,6 +517,9 @@ struct Arriving {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     inline: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stage: Option<Placing>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -525,11 +537,17 @@ struct Placing {
 
 impl From<Arriving> for CameFrom {
     fn from(arriving: Arriving) -> CameFrom {
-        let asked = match (arriving.task, arriving.inline, arriving.asked) {
+        let asked = match (
+            arriving.task,
+            arriving.inline,
+            arriving.stage,
+            arriving.asked,
+        ) {
             (Some(Placing { label, wants }), ..) => MovedFor::Task { label, wants },
-            (None, Some(wants), _) => MovedFor::Inline { wants },
-            (None, None, Asker::Human) => MovedFor::Human,
-            (None, None, Asker::Session) => MovedFor::Session,
+            (None, Some(wants), ..) => MovedFor::Inline { wants },
+            (None, None, Some(Placing { label, wants }), _) => MovedFor::Stage { label, wants },
+            (None, None, None, Asker::Human) => MovedFor::Human,
+            (None, None, None, Asker::Session) => MovedFor::Session,
         };
 
         CameFrom {
@@ -541,13 +559,16 @@ impl From<Arriving> for CameFrom {
 
 impl From<CameFrom> for Arriving {
     fn from(came: CameFrom) -> Arriving {
-        let (asked, task, inline) = match came.asked {
-            MovedFor::Human => (Asker::Human, None, None),
-            MovedFor::Session => (Asker::Session, None, None),
+        let (asked, task, inline, stage) = match came.asked {
+            MovedFor::Human => (Asker::Human, None, None, None),
+            MovedFor::Session => (Asker::Session, None, None, None),
             MovedFor::Task { label, wants } => {
-                (Asker::Session, Some(Placing { label, wants }), None)
+                (Asker::Session, Some(Placing { label, wants }), None, None)
             }
-            MovedFor::Inline { wants } => (Asker::Session, None, Some(wants)),
+            MovedFor::Inline { wants } => (Asker::Session, None, Some(wants), None),
+            MovedFor::Stage { label, wants } => {
+                (Asker::Session, None, None, Some(Placing { label, wants }))
+            }
         };
 
         Arriving {
@@ -555,6 +576,7 @@ impl From<CameFrom> for Arriving {
             asked,
             task,
             inline,
+            stage,
         }
     }
 }
@@ -823,6 +845,33 @@ mod tests {
             inline.asked.why(),
             "for the inline run, which wants Windows",
             "the Timeline names the inline run and the platform",
+        );
+
+        let older: Older = serde_json::from_value(wire).unwrap();
+        assert_eq!(older.asked, OlderAsker::Session);
+    }
+
+    /// A stage's move crosses whole too, and to an older end as the agent's
+    /// request.
+    #[test]
+    fn a_stages_move_reads_back_as_the_stages() {
+        let stage = CameFrom {
+            device: "aa00".to_owned(),
+            asked: MovedFor::Stage {
+                label: "06".to_owned(),
+                wants: "Windows".to_owned(),
+            },
+        };
+        let wire = serde_json::to_value(&stage).unwrap();
+
+        assert_eq!(
+            serde_json::from_value::<CameFrom>(wire.clone()).unwrap(),
+            stage
+        );
+        assert_eq!(
+            stage.asked.why(),
+            "for stage 06, which wants Windows",
+            "the Timeline names the stage and the platform",
         );
 
         let older: Older = serde_json::from_value(wire).unwrap();

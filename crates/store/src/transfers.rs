@@ -91,6 +91,12 @@ pub enum AskedBy {
     /// one platform before its implementation session starts: the word for
     /// the platform as a screen draws it.
     Inline { wants: String },
+
+    /// Verkstead itself, placing a roadmap stage whose line declares the
+    /// platform it wants before its first session starts: the stage's label as
+    /// the roadmap writes it, and the word for the platform as a screen draws
+    /// it.
+    Stage { label: String, wants: String },
 }
 
 impl AskedBy {
@@ -103,6 +109,7 @@ impl AskedBy {
             AskedBy::Session => "session".to_owned(),
             AskedBy::Task { label, wants } => format!("task:{wants}:{label}"),
             AskedBy::Inline { wants } => format!("inline:{wants}"),
+            AskedBy::Stage { label, wants } => format!("stage:{wants}:{label}"),
         }
     }
 
@@ -112,6 +119,16 @@ impl AskedBy {
             .and_then(|task| task.split_once(':'))
         {
             return AskedBy::Task {
+                label: label.to_owned(),
+                wants: wants.to_owned(),
+            };
+        }
+
+        if let Some((wants, label)) = column
+            .strip_prefix("stage:")
+            .and_then(|stage| stage.split_once(':'))
+        {
+            return AskedBy::Stage {
                 label: label.to_owned(),
                 wants: wants.to_owned(),
             };

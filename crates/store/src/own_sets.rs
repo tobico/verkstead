@@ -65,6 +65,10 @@ pub enum PlacedWork {
     /// The inline run, its implementation session about to start.
     Inline,
 
+    /// A roadmap stage, by its label as the roadmap writes it, its planning
+    /// session about to start.
+    Stage { label: String },
+
     /// The session's own call, `verkstead transfer` naming a device that is
     /// linked and not permitted, or permitted and asleep: a request rather
     /// than a refusal (ADR-0029). Its `wants` is that device's OS word, and its

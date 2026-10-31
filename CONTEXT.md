@@ -654,7 +654,7 @@ Timelines name the task and the platform it wants beside the device, and the
 agent never calls `verkstead transfer` for it. **The work stays where the move
 left it**: the next undeclared task, the finish and the wrap-up run there, and
 nothing moves it home. Where no permitted device of that platform can take it,
-the task runs where it is.
+Verkstead asks or the task runs where it is — see **Notice**.
 **And for an inline run whose proposal wants exactly one platform**, placed the
 same way as the grilling hands off, before the implementation session starts:
 the handoff is on the record by then and crosses with it, and the Timelines name
@@ -662,7 +662,16 @@ the inline run rather than a task. A proposal wanting several platforms, or
 none, starts where it is and the agent moves itself as the work needs; and a
 **Resume** of the run never places it, since once it has started where it is is
 the agent's and the human's to decide.
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)), by stage 06 of the platform-placement roadmap: Verkstead itself moves the Stage that declares a platform, before launching it, to the first reachable ticked device of that operating system.
+**And for a Stage whose line declares a platform**, placed as it starts, whether
+a settle started it or *Continue a roadmap* did: made and recorded at home as
+every Stage is, then moved to the first permitted device of that platform whose
+**Preflight** holds nothing, before its planning session launches — the far
+end's arrival plans it, and home keeps the tombstone and drives it from there,
+as above. The roadmap's Notice saying the Stage started names the device it is
+moving to, and both Timelines name the Stage and the platform it wants. **Placed
+once, where it starts**, as an inline run is: a **Resume** never places it
+again, so a Stage moved home by hand stays home, and its declared tasks are
+still placed one by one as any task is.
 _Avoid_: migrate, hand off, sync, failover
 
 **Permitted Device**:
@@ -708,7 +717,12 @@ stays off by default, and is told*): the prompt of a session on a Conversation
 of a clustered Verkstead names the device it runs on, with its OS word, and
 every other member with whether it is permitted — so a session with nothing
 ticked still knows the Windows machine exists, and asks the human for it.
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)), by stage 06 of the platform-placement roadmap: a roadmap's Stages inherit the roadmap Conversation's ticks.
+**A roadmap's Stages inherit the roadmap Conversation's ticks** as each one
+starts, through the one funnel that carries its Pairings and companions — and
+its drafting device too, where that is not home: a Stage's **Birth Key** is
+home's, so the device the roadmap was permitted by its own birth key would
+otherwise be lost to it. Home is never written as a tick. A draft pressed into
+the first Stage by *Continue a roadmap* is that Stage, and keeps its own ticks.
 _Avoid_: allowed device, whitelist, target list
 
 **Carried Conversation**:
@@ -3400,7 +3414,9 @@ gate summary (the gate is gone), changelog entry
 
 **Notice**:
 The Event Verkstead writes on its own account to say what it did: which Stages it
-started and where each of their branches went, that a ready Stage waited for a
+started and where each of their branches went — and, for a Stage declaring a
+platform, the device it is moving to, or that it waits on the human to say where
+it runs, or why it runs here — that a ready Stage waited for a
 place, that a roadmap has no Stage left to run, that the roadmap on the record
 is not on the branch to read, that a branch wrote no single roadmap so no Stage
 was started, that the roadmap declares badly so nothing of it was started, that
@@ -3410,8 +3426,9 @@ copy could not write its Profile's login back to the device the account was fetc
 **Account mirror** — that a Conversation moved onto this device was taken up
 with the harness's own resume of the conversation it arrived part way through,
 or with Verkstead's own Resume and which reason it was — see **Carried
-Conversation** — that a task or an inline run wanting a platform is running
-where it is, and why no device of it could take the work — see **Transfer** —
+Conversation** — that a task, an inline run or a Stage wanting a platform is
+running where it is, and why no device of it could take the work — see
+**Transfer** —
 or — as a **stop Notice** — what stopped driving, why, and what
 the evidence was. No agent wrote it and nobody pressed anything for it. It is
 what running unattended owes the human: a decision made while nobody was
@@ -4521,10 +4538,17 @@ roadmap* is the human asking, and may start one sooner.
 brief: `after 01, 03` names other stages of the same roadmap by their labels as
 the roadmap writes them, and `no dependencies` is a root. The line may name a
 **platform** as well, `on windows`. Verkstead reads all of it, and the roadmap's
-details pane says what each stage stands on and names its platform where it has
-one. **The roadmap is scheduled by what it declares** — the platform alone is
-read and shown and acted on by nothing, placing a Stage on a device that matches
-it being a follow-up once cluster mode has landed. Every line of a declaring
+details pane says what each stage stands on, names its platform where it has
+one, and names the device it is on wherever that is not home — *on windows ·
+running on nuc-win* — read off home's tombstone of it, so a Stage moved by hand names its
+device too. **The roadmap is scheduled by what it declares, and placed by its
+platforms**: a Stage that declares one is made at home as every Stage is, and
+moved by the ordinary **Transfer** to the first permitted device of that
+platform able to take it before its first session starts. Where the devices of
+it are asleep or not permitted, Verkstead asks with a **Question Set** of its
+own, the Stage taking a place while it waits on the human; where none is linked,
+or none awake can take it, the Stage runs at home and a **Notice** says why. It
+is **placed once, where it starts** — see **Transfer**. Every line of a declaring
 roadmap carries a declaration, a bare line there being a root and a forgotten
 declaration at once — and **a roadmap declaring nothing at all is one run
 strictly in order**, which is every roadmap written before this and is read
@@ -4751,7 +4775,6 @@ retired, a decision corrected in passing — so the effort a Stage belongs to is
 Verkstead's own record rather than something worked out from the branch. A
 roadmap that runs out is the roadmap complete, whatever else is in the Worktree
 with work left in it; taking up another one is **Adopt**. See ADR-0017.
-**Being revised by ADR-0029** ([docs/adr/0029-work-is-placed-by-platform.md](docs/adr/0029-work-is-placed-by-platform.md)): the platform a line names stops being acted on by nothing — a Stage that wants one is made at home, inherits the roadmap Conversation's ticks, and is moved to the first reachable ticked device of that platform before its first session, Verkstead asking with a Question Set of its own where none is. A task line in `.tasks/TODO.md` that carries the same word is already placed by it — see **Transfer**.
 _Avoid_: phase, milestone, epic, step (that is a backlog's)
 
 **Chain**:

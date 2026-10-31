@@ -1331,16 +1331,16 @@ async fn start(
     // branch it is on was nobody's choice but this; and on the settled one,
     // because that is where the human was watching when it happened.
     say(state, id, &begun(&stage, &branch, &stands)).await;
+
+    // And where it runs, its line declaring a platform: placed once, here, before
+    // its planning session starts and before the roadmap is told it started, so
+    // that what the roadmap is told names the device it went to (ADR-0029,
+    // *Placing declared work*). After the stage's own Notices, which cross with
+    // it where it moves.
+    let placed = placed(state, id, &stage).await;
+
     brought
-        .started(
-            state,
-            settled,
-            &format!(
-                "Stage {} of the `{}` roadmap, *{}*, has started as a conversation of its own \
-                 on `{branch}`.",
-                stage.label, stage.roadmap, stage.title,
-            ),
-        )
+        .started(state, settled, &started_where(&stage, &branch, &placed))
         .await;
 
     tracing::info!(
@@ -1372,6 +1372,13 @@ async fn start(
     // reloaded.
     state.nudges.announce(Nudge::Conversations);
 
+    // Moving, the far end's arrival plans it, by the Resume it presses for
+    // itself; asked about, the human's answer does. Neither is this device's to
+    // launch, and nothing here is driving it.
+    if !placed.here() {
+        return;
+    }
+
     // Taken here rather than by the planning, which is started from more than one
     // place and takes the registration from all of them — see
     // [`crate::runner::plan_stage`].
@@ -1383,6 +1390,55 @@ async fn start(
         cut_from,
         driving,
     ));
+}
+
+/// Place `stage`, just recorded at home as Conversation `id`, where its line
+/// declares a platform: once, before its planning session starts — see
+/// [`crate::placing::stage`]. A line declaring none plans here.
+///
+/// Every start of a stage goes through this, a settle's and a *Continue a
+/// roadmap* press's alike: somebody may be at the workbench for the press, but
+/// they pick no device for it.
+pub(crate) async fn placed(state: &AppState, id: i64, stage: &Stage) -> crate::placing::Placed {
+    match stage.platform {
+        Some(wants) => crate::placing::stage(state, id, &stage.label, wants).await,
+        None => crate::placing::Placed::Here,
+    }
+}
+
+/// What the roadmap is told about `stage` starting on `branch`, and where it
+/// was `placed`.
+fn started_where(stage: &Stage, branch: &str, placed: &crate::placing::Placed) -> String {
+    format!(
+        "Stage {} of the `{}` roadmap, *{}*, has started as a conversation of its own on \
+         `{branch}`.{}",
+        stage.label,
+        stage.roadmap,
+        stage.title,
+        where_it_runs(stage, placed),
+    )
+}
+
+/// Where `stage` runs, having been `placed`, as the sentence that follows the
+/// one saying it started: nothing for a stage declaring no platform, or one
+/// that is of this device's.
+pub(crate) fn where_it_runs(stage: &Stage, placed: &crate::placing::Placed) -> String {
+    let wants = stage
+        .platform
+        .map(|wants| crate::platform::os_word(wants, None));
+
+    match (placed, wants) {
+        (crate::placing::Placed::Moving { to }, Some(wants)) => {
+            format!(" It wants {wants}, so it's moving to **{to}**.")
+        }
+        (crate::placing::Placed::Asked, Some(wants)) => {
+            format!(" It wants {wants}, and waits for you to say where it runs.")
+        }
+        (crate::placing::Placed::Instead { why }, Some(wants)) => {
+            format!(" It wants {wants}, but {why}, so it's running here.")
+        }
+        _ => String::new(),
+    }
 }
 
 /// Where a stage's branch starts, and why it starts there.
@@ -1929,6 +1985,11 @@ fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
 /// before pairings existed carries no model, which leaves this stage running on
 /// the same Profile's own model, exactly as its predecessor did.
 ///
+/// **The *May be transferred to* ticks come across too** (ADR-0029, *Placing
+/// declared work*): a stage may go everywhere its roadmap may, which is what
+/// lets a stage declared `on windows` be moved to the Windows device the human
+/// ticked at the roadmap's closing Set.
+///
 /// **The companions come across in the mode they were in**, off the same three
 /// presses the setup card makes, this Conversation being a Draft with no branch
 /// made — which is the only state any of them is allowed in. Every one of the
@@ -1985,6 +2046,22 @@ pub(crate) async fn settle(
     }
 
     store::save_brief(&state.pool, id, &stage.brief).await?;
+
+    // Everywhere the roadmap may be moved to, the stage may be too: its ticks,
+    // and the device it was drafted on where that is not this one — permitted
+    // there by its birth key rather than a tick, which the stage's own key (this
+    // device's) would otherwise lose it. Home is never a tick, being the stage's
+    // own birth key.
+    let drafted = store::birth(&state.pool, conversation.id).await?;
+
+    for device in conversation
+        .permitted
+        .iter()
+        .chain(drafted.as_ref().map(|born| &born.device))
+        .filter(|device| **device != state.device)
+    {
+        store::permit_device(&state.pool, id, device).await?;
+    }
 
     for companion in &conversation.companions {
         let named = &companion.repo.name;

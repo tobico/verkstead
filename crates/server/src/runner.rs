@@ -706,6 +706,13 @@ async fn backlog_again(
         // opened nothing, so what an empty backlog means there is that the run
         // has not started rather than that it is over.
         if let Some(cut_from) = stage_to_plan(&state, conversation_id, working_in, base).await {
+            // A stage the human is still being asked where to start has not
+            // started, and its open Set is the wait — a restart reaching it
+            // included. See [`crate::placing::stage_waiting`].
+            if crate::placing::stage_waiting(&state, conversation_id).await {
+                return;
+            }
+
             tracing::info!(
                 conversation_id,
                 "a stage's backlog was never planned, so the planning is being run again",
@@ -754,8 +761,9 @@ async fn backlog_again(
     // any other, so one moved back by hand is moved again — see
     // [`crate::placing`].
     if let Step::Task { number, .. } = &step
-        && crate::placing::task(&state, conversation_id, working_in, *number).await
-            != crate::placing::Placed::Here
+        && !crate::placing::task(&state, conversation_id, working_in, *number)
+            .await
+            .here()
     {
         return;
     }
@@ -1214,8 +1222,9 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
         // human is asked where it runs instead, it stands down too: their
         // answer is what launches it.
         if let Step::Task { number, .. } = &step
-            && crate::placing::task(&state, conversation_id, &worktree, *number).await
-                != crate::placing::Placed::Here
+            && !crate::placing::task(&state, conversation_id, &worktree, *number)
+                .await
+                .here()
         {
             return;
         }
@@ -1553,7 +1562,7 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
     // far end's arrival presses its own Resume, which launches the run there
     // without asking again — see [`crate::placing::inline`]. Where the human is
     // asked where it runs instead, their answer launches it.
-    if crate::placing::inline(&state, conversation_id).await != crate::placing::Placed::Here {
+    if !crate::placing::inline(&state, conversation_id).await.here() {
         return;
     }
 

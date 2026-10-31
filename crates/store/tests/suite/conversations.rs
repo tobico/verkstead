@@ -7,18 +7,19 @@ use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
     Account, AdoptedPullRequest, Archiving, Attaching, Birth, Closing, Decision, Driven, Edited,
-    Event, Grilling, Joined, Lifecycle, Planned, ProfileFacts, PullRequest, Queued, Recorded,
-    RoadmapStage, RowState, StageOf, StageStanding, Staged, Steer, Switched, Unarchiving,
-    add_companion, adopted_pull_request, adopting, any_archived, archive_conversation, archived,
-    attach_mcp_server_to_draft, attach_to_draft, attachments, clear_stop, close_conversation,
-    conversation_branch, conversations, create_profile, driven_roadmaps, follow_branch,
-    hold_pull_request, join_queue, load_conversation, mcp_servers, open_database, pick_direction,
-    queue_to_join, record_another_pull_request, record_birth, record_pull_request, record_roadmap,
-    register_repo, reinvent_branch, rename_branch, roadmap_planner, save_brief, set_base_commit,
-    set_grilling_pairing, set_state, set_target, settle_naming, show_archived, showing_archived,
-    stacks_on, stage_chain, stage_roadmap, stage_standings, start_adoption, start_conversation,
-    start_grilling, start_stage, start_tinkering, start_unnamed_conversation, state,
-    steer_conversation, stop, switch_repo, target, timeline, unarchive_conversation,
+    Event, Grilling, Joined, Lifecycle, Linking, Planned, ProfileFacts, PullRequest, Queued,
+    Recorded, RoadmapStage, RowState, StageOf, StageStanding, Staged, Steer, Switched, Transferred,
+    Unarchiving, add_companion, adopted_pull_request, adopting, any_archived, archive_conversation,
+    archived, attach_mcp_server_to_draft, attach_to_draft, attachments, clear_stop,
+    close_conversation, conversation_branch, conversations, create_profile, driven_roadmaps,
+    follow_branch, hold_pull_request, join_queue, load_conversation, mcp_servers, open_database,
+    pick_direction, queue_to_join, record_another_pull_request, record_birth, record_member,
+    record_pull_request, record_roadmap, register_repo, reinvent_branch, rename_branch,
+    roadmap_planner, save_brief, set_base_commit, set_grilling_pairing, set_state, set_target,
+    settle_naming, show_archived, showing_archived, stacks_on, stage_chain, stage_roadmap,
+    stage_standings, start_adoption, start_conversation, start_grilling, start_stage,
+    start_tinkering, start_unnamed_conversation, state, steer_conversation, stop, switch_repo,
+    target, timeline, transfer_away, unarchive_conversation,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -2084,6 +2085,73 @@ async fn the_record_says_which_stages_have_stopped_beside_where_each_of_them_got
             .unwrap()
             .stopped("mvp", "02"),
     );
+}
+
+/// And **the device** each of them is on wherever that is not here, by the name
+/// its member goes by: read off this copy's tombstone of the stage, whoever moved
+/// it there.
+#[tokio::test]
+async fn the_record_names_the_device_a_stage_was_moved_to() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let at_home = stage(&pool, repo_id, "mvp", "01").await;
+    let moved = stage(&pool, repo_id, "mvp", "02").await;
+    let moved_to_a_stranger = stage(&pool, repo_id, "mvp", "03").await;
+
+    const NUC: &str = "0011223344556677889900aabbccddee";
+
+    record_member(
+        &pool,
+        &Linking {
+            device: NUC.to_owned(),
+            name: "nuc-win".to_owned(),
+            os: "Windows".to_owned(),
+            addresses: vec!["100.64.0.2".to_owned()],
+            fingerprint: "3A:7B:1F:04:C8:92:6D:5E:AA:11:B0:47:9C:3D:2E:88".to_owned(),
+            kept_by: None,
+            version: None,
+            install: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    transfer_away(
+        &pool,
+        moved,
+        &Transferred {
+            device: NUC.to_owned(),
+            id: 7,
+        },
+    )
+    .await
+    .unwrap();
+    transfer_away(
+        &pool,
+        moved_to_a_stranger,
+        &Transferred {
+            device: "ffeeddccbbaa00998877665544332211".to_owned(),
+            id: 8,
+        },
+    )
+    .await
+    .unwrap();
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(standings.device("mvp", "02"), Some("nuc-win"));
+    assert_eq!(
+        standings.device("mvp", "01"),
+        None,
+        "a stage here is on no other device (Conversation {at_home})",
+    );
+    assert_eq!(
+        standings.device("mvp", "03"),
+        None,
+        "and one on a device that is no longer a member has no name left to say",
+    );
+    assert_eq!(standings.device("mvp", "04"), None);
 }
 
 /// Two Conversations answer to one label where a stage was attempted twice, and
