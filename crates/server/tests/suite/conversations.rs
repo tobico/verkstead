@@ -9939,6 +9939,91 @@ async fn a_typed_companion_branch_does_not_follow_the_stages_started_beside() {
     ));
 }
 
+/// Every stage a *Continue a roadmap* press starts may be moved wherever the
+/// pressed draft may: its ticks, and the device it was drafted on where that is
+/// not this one (ADR-0029, *Placing declared work*).
+///
+/// The draft's own stage is the draft, ticks and all. The one beside it is a row
+/// of this device's, born under this device's key — so the drafting device its
+/// roadmap was permitted by its birth key arrives as a tick, and this device
+/// does not arrive at all.
+#[tokio::test]
+async fn the_stages_a_press_starts_may_go_wherever_the_draft_may() {
+    let (elsewhere, _dir, app, pool, repo_id) = workbench_and_pool().await;
+    roadmap(
+        &elsewhere.path().join("verkstead"),
+        TWO_ROOTS,
+        &["01-workbench.md", "02-grilling.md"],
+    );
+
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    const NUC_WIN: &str = "11111111111111111111111111111111";
+    const DRAFTED_ON: &str = "22222222222222222222222222222222";
+
+    // Ticked as the row is written rather than through the press, which asks the
+    // membership first: what is asked here is what a stage inherits.
+    store::permit_device(&pool, id, NUC_WIN).await.unwrap();
+
+    // And the draft drafted elsewhere and transferred here, which is a birth key
+    // naming another device.
+    sqlx::query("UPDATE births SET device = ? WHERE conversation_id = ?")
+        .bind(DRAFTED_ON)
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    assert_eq!(opened(&app, id).await.permitted, vec![NUC_WIN]);
+
+    let beside = sidebar(&app)
+        .await
+        .into_iter()
+        .find(|entry| entry.branch == "roadmaps/mvp/02-grilling")
+        .expect("stage 02 started beside it");
+
+    assert_eq!(
+        opened(&app, beside.id).await.permitted,
+        vec![NUC_WIN, DRAFTED_ON],
+        "the draft's tick, and the device it was drafted on",
+    );
+    assert_eq!(
+        store::permitted_devices(&pool, beside.id).await.unwrap(),
+        vec![NUC_WIN, DRAFTED_ON],
+    );
+}
+
+/// And a draft with nothing ticked, drafted here, gives the stages beside it
+/// nothing: this device is the stage's own birth key, never a tick.
+#[tokio::test]
+async fn a_draft_with_nothing_ticked_gives_its_stages_nothing() {
+    let (elsewhere, _dir, app, pool, repo_id) = workbench_and_pool().await;
+    roadmap(
+        &elsewhere.path().join("verkstead"),
+        TWO_ROOTS,
+        &["01-workbench.md", "02-grilling.md"],
+    );
+
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    let beside = sidebar(&app)
+        .await
+        .into_iter()
+        .find(|entry| entry.branch == "roadmaps/mvp/02-grilling")
+        .expect("stage 02 started beside it");
+
+    assert!(
+        store::permitted_devices(&pool, beside.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
 /// A stage that cannot be started beside the adopted one is **said** on the
 /// Timeline the human pressed on, and leaves nothing behind.
 ///

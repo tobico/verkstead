@@ -1929,6 +1929,11 @@ fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
 /// before pairings existed carries no model, which leaves this stage running on
 /// the same Profile's own model, exactly as its predecessor did.
 ///
+/// **The *May be transferred to* ticks come across too** (ADR-0029, *Placing
+/// declared work*): a stage may go everywhere its roadmap may, which is what
+/// lets a stage declared `on windows` be moved to the Windows device the human
+/// ticked at the roadmap's closing Set.
+///
 /// **The companions come across in the mode they were in**, off the same three
 /// presses the setup card makes, this Conversation being a Draft with no branch
 /// made — which is the only state any of them is allowed in. Every one of the
@@ -1985,6 +1990,22 @@ pub(crate) async fn settle(
     }
 
     store::save_brief(&state.pool, id, &stage.brief).await?;
+
+    // Everywhere the roadmap may be moved to, the stage may be too: its ticks,
+    // and the device it was drafted on where that is not this one — permitted
+    // there by its birth key rather than a tick, which the stage's own key (this
+    // device's) would otherwise lose it. Home is never a tick, being the stage's
+    // own birth key.
+    let drafted = store::birth(&state.pool, conversation.id).await?;
+
+    for device in conversation
+        .permitted
+        .iter()
+        .chain(drafted.as_ref().map(|born| &born.device))
+        .filter(|device| **device != state.device)
+    {
+        store::permit_device(&state.pool, id, device).await?;
+    }
 
     for companion in &conversation.companions {
         let named = &companion.repo.name;

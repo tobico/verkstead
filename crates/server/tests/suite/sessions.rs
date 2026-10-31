@@ -39461,6 +39461,58 @@ async fn a_stage_inherits_the_no_review_its_roadmap_was_grilled_with() {
     );
 }
 
+/// And a stage a settle starts may be moved wherever its roadmap may: the
+/// *May be transferred to* ticks, and the device the roadmap was drafted on
+/// where that is not this one (ADR-0029, *Placing declared work*).
+///
+/// The roadmap's drafting device is permitted by its birth key rather than a
+/// tick, and the stage's birth key is this device's — so without the tick a
+/// roadmap that had itself moved would give its stages one device fewer.
+#[tokio::test]
+async fn a_stage_inherits_where_its_roadmap_may_be_transferred_to() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_unreviewed(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    const NUC_WIN: &str = "11111111111111111111111111111111";
+    const DRAFTED_ON: &str = "22222222222222222222222222222222";
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    verkstead_store::permit_device(&pool, fixture.id, NUC_WIN)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE births SET device = ? WHERE conversation_id = ?")
+        .bind(DRAFTED_ON)
+        .bind(fixture.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+
+    assert_eq!(
+        stage.permitted,
+        vec![NUC_WIN, DRAFTED_ON],
+        "the roadmap's tick, and the device it was drafted on",
+    );
+    assert_eq!(
+        verkstead_store::permitted_devices(&pool, stage.id)
+            .await
+            .unwrap(),
+        vec![NUC_WIN, DRAFTED_ON],
+    );
+}
+
 /// A Conversation's own terminal, end to end: a shell running in its Sandbox,
 /// with its Worktree as the working directory, and what is typed into it
 /// answered.
