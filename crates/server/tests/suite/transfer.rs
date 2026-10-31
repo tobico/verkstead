@@ -8539,6 +8539,289 @@ async fn a_stage_that_wants_windows_is_planned_there_and_home_starts_the_one_aft
     );
 }
 
+/// [`away_between`] for the stage gate's tests: A and B both planning stages,
+/// B linked to A as running `b_os`, and the roadmap's stage 02 wanting Windows.
+async fn away_for_the_gate(spill: &Path, b_os: &str, pace: Pace) -> Away {
+    let a = Verkstead::running_on(A, &plans_stages_on("A"), spill, pace, b_os).await;
+    let b = Verkstead::running_on(B, &plans_stages_on("B"), spill, pace, b_os).await;
+
+    away_between(a, b, b_os, WINDOWS_STAGE_ROADMAP, B).await
+}
+
+/// Stage 01 settling on B, and the stage 02 home starts for it: its id at home,
+/// once the roadmap's Notice of its start says `saying`.
+async fn stage_02_started(away: &Away, saying: &str) -> i64 {
+    away.moves(store::Lifecycle::Done).await;
+
+    let started = away.b.notice_saying(away.copy, "Stage 02 of the").await;
+    assert!(
+        started.contains(saying),
+        "the roadmap's Notice says where the stage runs: {started}",
+    );
+
+    away.a
+        .own_rows()
+        .await
+        .into_iter()
+        .find(|row| row.branch == "roadmaps/rate-limiting/02-refusing")
+        .expect("home made stage 02")
+        .id
+}
+
+/// **A Windows stage whose roadmap may not go to the Windows device asks**
+/// (ADR-0029, *Verkstead asks with a Question Set of its own*): its Timeline
+/// gets Verkstead's Set naming the stage, with **Move to** the device against
+/// **Run it here**, a phone is told, and nothing plans until it is answered;
+/// **Move to** ticks the device and moves the stage, and it plans there.
+#[tokio::test]
+async fn a_stage_whose_windows_device_is_not_ticked_asks_and_move_to_plans_it_there() {
+    let spill = tempfile::tempdir().unwrap();
+    let (service, received) = crate::push_delivery::push_service().await;
+
+    let away = away_for_the_gate(spill.path(), WINDOWS, reporting()).await;
+    let _holding = away.b.holding();
+    away.b.profile_called(ACCOUNT).await;
+
+    let phone = crate::push_delivery::Device::new(&service, "take", "phone");
+    crate::push_delivery::subscribe(&away.a.workbench, &phone).await;
+
+    let stage_02 = stage_02_started(
+        &away,
+        "It wants Windows, and waits for you to say where it runs.",
+    )
+    .await;
+
+    let asked = verksteads_set(&away.a, stage_02).await;
+    assert_eq!(
+        asked.rows[0].question,
+        format!("Stage 02 wants Windows. {B_MACHINE} is linked but not permitted."),
+    );
+
+    let sheet: verkstead_render::SetReading =
+        reading(&away.a.workbench, &format!("/api/ui/sets/{}", asked.set_id)).await;
+    let verkstead_render::SetReading::Set(sheet) = sheet else {
+        panic!("Verkstead's Set reads as a Set");
+    };
+    assert_eq!(
+        sheet.questions[0]
+            .ask
+            .options
+            .iter()
+            .map(|option| option.text_html.as_str())
+            .collect::<Vec<_>>(),
+        [format!("Move to {B_MACHINE}").as_str(), "Run it here"],
+    );
+
+    let pushed = crate::push_delivery::pushes(&received, 1).await;
+    assert_eq!(
+        phone.read(&pushed[0])["title"],
+        asked.title.as_str(),
+        "the phone is told",
+    );
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        away.a.sessions_on(stage_02).await.is_empty(),
+        "nothing plans while the human is asked",
+    );
+    assert!(
+        away.a.view(stage_02).await.driven,
+        "and the stage waiting on its Set takes a place",
+    );
+
+    picks(&away.a, asked.set_id, 1).await;
+
+    let there = away
+        .a
+        .view_saying(stage_02, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    assert!(
+        store::permitted_devices(&away.a.pool, stage_02)
+            .await
+            .unwrap()
+            .contains(&B.to_owned()),
+        "the device picked is ticked",
+    );
+
+    let went = away.a.notice_saying(stage_02, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for stage 02, which wants Windows"),
+        "the move is Verkstead's, for the stage: {went}",
+    );
+
+    away.b
+        .printed(there, "planning roadmaps/rate-limiting/02-refusing on B")
+        .await;
+    assert!(
+        away.a.sessions_on(stage_02).await.is_empty(),
+        "and nothing at home planned it",
+    );
+}
+
+/// **A restart while the stage's Set is open waits on it** rather than planning
+/// the stage or asking twice, holding its place again; **Run it here** then
+/// plans it at home, asking nothing more.
+#[tokio::test]
+async fn a_restart_waits_on_the_stages_set_and_run_it_here_plans_it_at_home() {
+    let spill = tempfile::tempdir().unwrap();
+    let mut away = away_for_the_gate(spill.path(), WINDOWS, reporting()).await;
+    let _holding = away.b.holding();
+    away.b.profile_called(ACCOUNT).await;
+
+    let stage_02 = stage_02_started(
+        &away,
+        "It wants Windows, and waits for you to say where it runs.",
+    )
+    .await;
+    let asked = verksteads_set(&away.a, stage_02).await;
+
+    away.a
+        .restarted(&plans_stages_on("A"), spill.path(), reporting());
+
+    away.a.view_saying(stage_02, |drawn| drawn.driven).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        away.a.sets_on(stage_02).await,
+        [asked.set_id],
+        "the restart put no second Set",
+    );
+    assert!(
+        away.a.sessions_on(stage_02).await.is_empty(),
+        "and planned nothing",
+    );
+
+    picks(&away.a, asked.set_id, 2).await;
+
+    away.a
+        .printed(stage_02, "planning roadmaps/rate-limiting/02-refusing on A")
+        .await;
+
+    let drawn = away.a.view(stage_02).await;
+    assert!(
+        drawn.transferred.is_none() && drawn.transferring.is_none(),
+        "nothing was moved",
+    );
+    assert_eq!(
+        away.a.sets_on(stage_02).await,
+        [asked.set_id],
+        "and the planning the answer started asked nothing again",
+    );
+}
+
+/// **A stage whose ticked Windows device is asleep waits on it**: the asleep
+/// Set goes up, and once the device answers the stage moves there and plans,
+/// the Set locked with a line saying so.
+#[tokio::test]
+async fn a_stage_whose_ticked_device_is_asleep_moves_there_once_it_answers() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away_for_the_gate(
+        spill.path(),
+        WINDOWS,
+        Pace {
+            wakes: Duration::from_millis(200),
+            ..reporting()
+        },
+    )
+    .await;
+    let _holding = away.b.holding();
+    away.b.profile_called(ACCOUNT).await;
+
+    store::permit_device(&away.a.pool, away.tombstone, B)
+        .await
+        .unwrap();
+
+    // B, as A knows it, answering nowhere.
+    away.a
+        .linked_to(
+            &away.b.device,
+            B_MACHINE,
+            WINDOWS,
+            vec!["127.0.0.1:9".to_owned()],
+        )
+        .await;
+
+    let stage_02 = stage_02_started(
+        &away,
+        "It wants Windows, and waits for you to say where it runs.",
+    )
+    .await;
+
+    let asked = verksteads_set(&away.a, stage_02).await;
+    assert_eq!(
+        asked.rows[0].question,
+        format!(
+            "Stage 02 wants Windows. {B_MACHINE} is not awake, and the work moves there by \
+             itself once it is."
+        ),
+    );
+
+    wakes(&away.a, &away.b).await;
+
+    let there = away
+        .a
+        .view_saying(stage_02, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    away.b
+        .printed(there, "planning roadmaps/rate-limiting/02-refusing on B")
+        .await;
+
+    let card = verksteads_set(&away.a, stage_02).await;
+    assert_eq!(card.set_id, asked.set_id);
+    assert_eq!(
+        card.lock_line.as_deref(),
+        Some(format!("{B_MACHINE} answered, so the work moved there.").as_str()),
+    );
+    assert!(
+        away.a.sessions_on(stage_02).await.is_empty(),
+        "and nothing at home planned it",
+    );
+}
+
+/// **A roadmap with no Windows device linked plans the Windows stage at home**,
+/// one Notice on its Timeline saying why, and the roadmap's start Notice saying
+/// it runs here.
+#[tokio::test]
+async fn a_stage_wanting_a_platform_no_device_is_of_plans_at_home_saying_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let away = away_for_the_gate(spill.path(), B_OS, reporting()).await;
+    let _holding = away.b.holding();
+    away.b.profile_called(ACCOUNT).await;
+
+    let stage_02 = stage_02_started(
+        &away,
+        "It wants Windows, but no Windows device is linked, so it's running here.",
+    )
+    .await;
+
+    away.a
+        .printed(stage_02, "planning roadmaps/rate-limiting/02-refusing on A")
+        .await;
+
+    let said = "Stage 02 wants Windows, but no Windows device is linked, so it's running here.";
+    assert_eq!(
+        away.a
+            .notices(stage_02)
+            .await
+            .iter()
+            .filter(|notice| notice.contains(said))
+            .count(),
+        1,
+        "said once, on the stage's own Timeline",
+    );
+    assert!(
+        away.a.sets_on(stage_02).await.is_empty(),
+        "and nobody was asked",
+    );
+}
+
 /// **A move made while home is asleep reaches home's tombstone once home
 /// answers**: B's copy closes with A unreachable, and nothing is lost — the
 /// report is still owed, and goes the next time B looks after A is back.

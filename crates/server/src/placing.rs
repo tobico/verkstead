@@ -77,9 +77,14 @@ use crate::store;
 /// What the runner is to do about the task it was about to launch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Placed {
-    /// Launch it here: it wants no platform, this device is of the one it
-    /// wants, or no device of that platform can take it.
+    /// Launch it here: it wants no platform, or this device is of the one it
+    /// wants, or the human said to run it here.
     Here,
+
+    /// Launch it here, no device of the platform it wants being able to take
+    /// it: `why` is the clause the Notice on its own Timeline gave, which the
+    /// roadmap's Notice of a stage's start says again.
+    Instead { why: String },
 
     /// Stand down: the move is asked for, and the far end's Resume launches it.
     /// `to` is the name of the device it is going to, as the human gave it.
@@ -89,6 +94,13 @@ pub(crate) enum Placed {
     /// Verkstead's own — or was already, and has not answered — and their answer
     /// launches it — see [`answered`].
     Asked,
+}
+
+impl Placed {
+    /// Whether the work is launched here.
+    pub(crate) fn here(&self) -> bool {
+        matches!(self, Placed::Here | Placed::Instead { .. })
+    }
 }
 
 /// What is being placed, which the Notice and both Timelines name.
@@ -223,36 +235,19 @@ enum Unplaced {
 }
 
 impl Unplaced {
-    /// The Notice, naming the work — a task by its label — and the platform as
-    /// the human writes it.
-    fn said(&self, work: &Work, wants: Platform) -> String {
+    /// Why, as the clause after *but* says it, the platform written as the
+    /// human writes it: what the work's own Notice and a roadmap's Notice of a
+    /// stage's start both say.
+    fn because(&self, wants: Platform) -> String {
         let wants = platform::os_word(wants, None);
-        let named = work.named();
 
         match self {
-            Unplaced::NoneLinked => format!(
-                "{named} wants {wants}, but no {wants} device is linked, so it's running here."
+            Unplaced::NoneLinked => format!("no {wants} device is linked"),
+
+            Unplaced::NonePermitted(devices) => format!(
+                "this conversation may not be transferred to {}",
+                either(&names(devices)),
             ),
-
-            // A tick is advice for the tasks after this one; an inline run or
-            // a stage is placed only as it starts, so there is no later one for
-            // it to help.
-            Unplaced::NonePermitted(devices) => {
-                let mut said = format!(
-                    "{named} wants {wants}, but this conversation may not be transferred to {}, \
-                     so it's running here.",
-                    either(&names(devices)),
-                );
-
-                if let Work::Task { .. } = work {
-                    said.push_str(&format!(
-                        " Tick a {wants} device under **May be transferred to** to have tasks \
-                         like it moved there."
-                    ));
-                }
-
-                said
-            }
 
             Unplaced::Asleep { asleep, .. } => {
                 let awake = match asleep.as_slice() {
@@ -260,25 +255,49 @@ impl Unplaced {
                     _ => "aren't awake",
                 };
 
-                format!(
-                    "{named} wants {wants}, but {} {awake}, so it's running here.",
-                    either(&names(asleep)),
-                )
+                format!("{} {awake}", either(&names(asleep)))
+            }
+
+            Unplaced::NoneCanTake(_) => {
+                format!("no {wants} device it may be transferred to can take it")
+            }
+        }
+    }
+
+    /// The Notice, naming the work — a task by its label — and the platform as
+    /// the human writes it.
+    fn said(&self, work: &Work, wants: Platform) -> String {
+        let mut said = format!(
+            "{} wants {}, but {}, so it's running here.",
+            work.named(),
+            platform::os_word(wants, None),
+            self.because(wants),
+        );
+
+        match self {
+            // A tick is advice for the tasks after this one; an inline run or
+            // a stage is placed only as it starts, so there is no later one for
+            // it to help.
+            Unplaced::NonePermitted(_) if matches!(work, Work::Task { .. }) => {
+                said.push_str(&format!(
+                    " Tick a {} device under **May be transferred to** to have tasks like it \
+                     moved there.",
+                    platform::os_word(wants, None),
+                ));
             }
 
             Unplaced::NoneCanTake(found) => {
-                let mut said = format!(
-                    "{named} wants {wants}, but no {wants} device it may be transferred to can \
-                     take it, so it's running here.\n"
-                );
+                said.push('\n');
 
                 for finding in found {
                     said.push_str(&format!("\n- {finding}"));
                 }
-
-                said
             }
+
+            _ => {}
         }
+
+        said
     }
 }
 
@@ -457,7 +476,9 @@ async fn unplaced(
         tracing::error!(error = ?error, conversation_id, "saying why work runs here failed");
     }
 
-    Placed::Here
+    Placed::Instead {
+        why: unplaced.because(wants),
+    }
 }
 
 /// Put the Question Set of Verkstead's own that asks where `work` runs, none of
@@ -730,6 +751,42 @@ async fn asked_before(state: &AppState, conversation_id: i64, work: &Work) -> Be
 /// them.
 pub(crate) async fn inline_waiting(state: &AppState, conversation_id: i64) -> bool {
     match asked_before(state, conversation_id, &Work::Inline).await {
+        Before::Open(set_id) => {
+            crate::own_sets::wait(state, conversation_id, set_id).await;
+            true
+        }
+        Before::RunHere | Before::Nothing => false,
+    }
+}
+
+/// Whether the roadmap stage `conversation_id` is waiting on a Set of
+/// Verkstead's own asking where it runs — and if so, wait on it.
+///
+/// What a Resume of an unplanned stage asks before planning it, a restart's
+/// included, for [`inline_waiting`]'s reason: a Resume never places the stage,
+/// but one the human has not yet answered about has not started.
+pub(crate) async fn stage_waiting(state: &AppState, conversation_id: i64) -> bool {
+    let own = match store::own_sets(&state.pool, conversation_id).await {
+        Ok(own) => own,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Sets Verkstead asked failed");
+            return false;
+        }
+    };
+
+    // The stage a Set was put about, by its label: a stage's Conversation is
+    // only ever the one stage, so the newest is the one.
+    let Some(label) = own.into_iter().rev().find_map(|own| match own.asking {
+        store::OwnAsking::Placing {
+            work: store::PlacedWork::Stage { label },
+            ..
+        } => Some(label),
+        store::OwnAsking::Placing { .. } => None,
+    }) else {
+        return false;
+    };
+
+    match asked_before(state, conversation_id, &Work::Stage { label }).await {
         Before::Open(set_id) => {
             crate::own_sets::wait(state, conversation_id, set_id).await;
             true

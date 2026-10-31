@@ -20,7 +20,7 @@ Roadmap stage: [06: Stages placed by platform](docs/roadmaps/platform-placement/
 
 - [x] 01: Inherited ticks — [details](01-inherited-ticks.md)
 - [x] 02: The move before the first session — [details](02-the-move-before-the-first-session.md)
-- [ ] 03: The gate for stages — [details](03-the-gate-for-stages.md)
+- [x] 03: The gate for stages — [details](03-the-gate-for-stages.md)
 - [ ] 04: Continue a roadmap places its stages — [details](04-continue-a-roadmap-places-its-stages.md)
 - [ ] 05: The roadmap pane names the device — [details](05-the-roadmap-pane-names-the-device.md)
 - [ ] 06: The glossary — [details](06-the-glossary.md)

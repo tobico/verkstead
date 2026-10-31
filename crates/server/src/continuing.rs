@@ -1378,7 +1378,7 @@ async fn start(
     // Moving, the far end's arrival plans it, by the Resume it presses for
     // itself; asked about, the human's answer does. Neither is this device's to
     // launch, and nothing here is driving it.
-    if placed != crate::placing::Placed::Here {
+    if !placed.here() {
         return;
     }
 
@@ -1414,6 +1414,9 @@ fn started_where(stage: &Stage, branch: &str, placed: &crate::placing::Placed) -
         }
         (crate::placing::Placed::Asked, Some(wants)) => {
             format!("{started} It wants {wants}, and waits for you to say where it runs.")
+        }
+        (crate::placing::Placed::Instead { why }, Some(wants)) => {
+            format!("{started} It wants {wants}, but {why}, so it's running here.")
         }
         _ => started,
     }
