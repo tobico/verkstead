@@ -87,6 +87,20 @@ stages inherit the roadmap Conversation's ticks
 through the one inheritance funnel that already carries its Pairings and
 companions.
 
+**Two more were settled when the stage that places stages was planned** (Set
+1549):
+
+- **A stage inherits the roadmap's drafting device as a tick, where that is not
+  home** (Q5). The roadmap Conversation is permitted its drafting device by its
+  birth key and never as a tick, and a stage's birth key is home's, so a
+  roadmap that had itself moved would otherwise leave its stages one device
+  short. Home is never written as a tick.
+- **A stage is placed once, where it starts, as an inline run is** (Q2):
+  whether a settle starts it or *Continue a roadmap* does, and never again on a
+  Resume. A stage moved home by hand stays home, and its declared tasks are
+  still placed one by one by the task rule, so nothing about the platform is
+  stored on the stage's record.
+
 **The work stays where it is.** It does not come home after the platform work,
 before the finish or before the wrap-up: a wrap-up that had come home could be
 stuck fixing a Windows check on Linux, which is the position this whole
