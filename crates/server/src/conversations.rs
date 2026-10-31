@@ -2857,25 +2857,13 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         .announce(Nudge::Conversation { conversation: id });
     state.nudges.announce(Nudge::Repos);
 
-    // Taken here rather than by the planning, which is started from more than one
-    // place and takes the registration from all of them — see
-    // [`crate::runner::plan_stage`].
-    let driving = state.drivers.driving(id);
-
-    tokio::spawn(crate::runner::plan_stage(
-        state.clone(),
-        id,
-        stacks_on.clone(),
-        driving,
-    ));
-
     // And every stage the press starts beside this one, each as a Conversation of
     // its own and each its own act: one that halts says so on this Timeline and
     // the next is attempted anyway, which is the carry-on's rule and for the
     // carry-on's reason. This one has started, and nothing here can undo that.
     //
     // After it rather than beside it, so that the Conversation the human composed
-    // is the one that starts first whatever the others come to — and so that each
+    // is the one recorded first whatever the others come to — and so that each
     // of these inherits a Conversation that is already a stage.
     for stage in beside {
         alongside(
@@ -2889,6 +2877,31 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             &author,
         )
         .await;
+    }
+
+    // And where it runs, its line declaring a platform: placed exactly as a
+    // settle's start places a stage, before its planning starts. After the
+    // stages beside it rather than before them, because each of those says on
+    // this Timeline that it started and where it went, and this one may be about
+    // to move: what they said would land on a tombstone nobody opens. Its own
+    // Notices are above, and cross with it where it moves; the placing says on
+    // it where it went.
+    let placed = crate::continuing::placed(state, id, &stage).await;
+
+    // Moving, the far end's arrival plans it; asked about, the human's answer
+    // does. Neither is this device's to launch.
+    if placed.here() {
+        // Taken here rather than by the planning, which is started from more
+        // than one place and takes the registration from all of them — see
+        // [`crate::runner::plan_stage`].
+        let driving = state.drivers.driving(id);
+
+        tokio::spawn(crate::runner::plan_stage(
+            state.clone(),
+            id,
+            stacks_on,
+            driving,
+        ));
     }
 
     Ok(Adopted::Adopted)
@@ -3186,13 +3199,22 @@ async fn alongside(
     // but this; and the pressed one, because that is where the human was standing
     // when it happened.
     crate::continuing::say(state, id, &adopted(&stage, &branch, stacks_on, named)).await;
+
+    // And where it runs, placed as the pressed stage was — between its own
+    // Notices and the pressed Timeline's, so that what the human is told names
+    // where it went.
+    let placed = crate::continuing::placed(state, id, &stage).await;
+
     crate::continuing::say(
         state,
         pressed,
         &format!(
             "Stage {} of the `{}` roadmap, *{}*, started beside it as a conversation of its \
-             own on `{branch}`.",
-            stage.label, stage.roadmap, stage.title,
+             own on `{branch}`.{}",
+            stage.label,
+            stage.roadmap,
+            stage.title,
+            crate::continuing::where_it_runs(&stage, &placed),
         ),
     )
     .await;
@@ -3207,6 +3229,10 @@ async fn alongside(
     );
 
     state.nudges.announce(Nudge::Conversations);
+
+    if !placed.here() {
+        return;
+    }
 
     let driving = state.drivers.driving(id);
 

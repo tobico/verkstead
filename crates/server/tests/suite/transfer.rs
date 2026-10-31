@@ -8822,6 +8822,266 @@ async fn a_stage_wanting_a_platform_no_device_is_of_plans_at_home_saying_so() {
     );
 }
 
+/// A roadmap whose first two stages want Windows and stand on nothing, and whose
+/// third wants nothing: a *Continue a roadmap* press starts all three.
+const PRESSED_ROADMAP: &str = "# Rate limiting roadmap\n\n## Stages\n\n\
+     - [ ] 01: Count the requests — [brief](01-counter.md) — no dependencies — on windows\n\
+     - [ ] 02: Refuse the rest — [brief](02-refusing.md) — no dependencies — on windows\n\
+     - [ ] 03: Report — [brief](03-reporting.md) — no dependencies\n";
+
+/// A and B both planning stages, B linked to A as running `b_os` and holding
+/// the repository, and on A a *Continue a roadmap* draft of [`PRESSED_ROADMAP`],
+/// its Pairings chosen and B ticked where `ticked` says: the id of the draft,
+/// ready for the press.
+async fn adopting_across(
+    spill: &Path,
+    b_os: &str,
+    ticked: bool,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let a = Verkstead::running_on(A, &plans_stages_on("A"), spill, reporting(), b_os).await;
+    let b = Verkstead::running_on(B, &plans_stages_on("B"), spill, reporting(), b_os).await;
+
+    a.linked_to(&b.device, B_MACHINE, b_os, vec![b.at()]).await;
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let theirs = a.repo().await;
+    let roadmap = theirs.join("docs/roadmaps/rate-limiting");
+    std::fs::create_dir_all(&roadmap).unwrap();
+    std::fs::write(roadmap.join("ROADMAP.md"), PRESSED_ROADMAP).unwrap();
+    std::fs::write(roadmap.join("01-counter.md"), "# 01. Count the requests\n").unwrap();
+    std::fs::write(roadmap.join("02-refusing.md"), "# 02. Refuse the rest\n").unwrap();
+    std::fs::write(roadmap.join("03-reporting.md"), "# 03. Report\n").unwrap();
+    git(&theirs, &["add", "-A"]);
+    git(&theirs, &["commit", "-m", "plan the rate-limiting roadmap"]);
+    b.repo().await;
+
+    let account = a.account().await;
+    let holding = b.holding();
+    b.profile_called(ACCOUNT).await;
+
+    let started = press(
+        &a.workbench,
+        "/api/ui/adoptions",
+        Some(
+            &serde_json::json!({
+                "repo_id": a.repo_row(REPOSITORY).await,
+                "roadmap": "rate-limiting",
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+    let Started::Started { id: pressed, .. } = serde_json::from_str(&started).unwrap() else {
+        panic!("the adopting draft was not started: {started}")
+    };
+
+    let pairing = serde_json::json!({ "profile_id": account, "model": MODEL });
+    let role = serde_json::json!({ "pairing": pairing });
+    for (path, saying) in [
+        ("grilling-pairing", &pairing),
+        ("implementation-pairing", &pairing),
+        ("review-pairing", &role),
+    ] {
+        let said = press(
+            &a.workbench,
+            &format!("/api/ui/conversations/{pressed}/{path}"),
+            Some(&saying.to_string()),
+        )
+        .await;
+
+        assert_eq!(said, "\"Chosen\"", "picking {path}");
+    }
+
+    if ticked {
+        assert_eq!(a.permits(pressed, B, true).await, "\"Recorded\"");
+    }
+
+    (a, b, holding, pressed)
+}
+
+/// Press *Continue a roadmap* on `pressed`.
+async fn continues(a: &Verkstead, pressed: i64) {
+    let adopted = press(
+        &a.workbench,
+        &format!("/api/ui/conversations/{pressed}/adopt"),
+        None,
+    )
+    .await;
+
+    assert_eq!(adopted, "\"Adopted\"", "the press starts the roadmap");
+}
+
+/// Stage `branch`'s Conversation at home, once it has one.
+async fn stage_row(a: &Verkstead, branch: &str) -> i64 {
+    let deadline = Instant::now() + WAITING;
+
+    loop {
+        if let Some(row) = a
+            .own_rows()
+            .await
+            .into_iter()
+            .find(|row| row.branch == branch)
+        {
+            return row.id;
+        }
+
+        assert!(Instant::now() < deadline, "home never started {branch}");
+        tokio::time::sleep(LOOKING).await;
+    }
+}
+
+/// **The stages a *Continue a roadmap* press starts are placed as a settle's
+/// are** (ADR-0029, *Placing declared work*): the pressed draft becomes stage
+/// 01, which wants Windows, and moves to the ticked Windows device before its
+/// planning starts; stage 02, started beside it and wanting Windows too, moves
+/// there the same way; and stage 03, which wants nothing, plans here. The
+/// pressed Timeline says where each one beside it went.
+#[tokio::test]
+async fn a_press_moves_the_stages_that_want_windows_there_and_plans_the_rest_here() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, b, _holding, pressed) = adopting_across(spill.path(), WINDOWS, true).await;
+
+    continues(&a, pressed).await;
+
+    let there = a
+        .view_saying(pressed, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the pressed stage moved")
+        .id;
+    b.printed(there, "planning roadmaps/rate-limiting/01-counter on B")
+        .await;
+    assert!(
+        a.sessions_on(pressed).await.is_empty(),
+        "and nothing ran at home before it moved",
+    );
+
+    let went = a.notice_saying(pressed, "Transferred to").await;
+    assert!(
+        went.contains(B_MACHINE) && went.contains("for stage 01, which wants Windows"),
+        "the pressed stage's Timeline names the stage and the device: {went}",
+    );
+
+    // Beside it, wanting Windows: moved the same way.
+    let stage_02 = stage_row(&a, "roadmaps/rate-limiting/02-refusing").await;
+    let beside = a
+        .view_saying(stage_02, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("stage 02 moved")
+        .id;
+    b.printed(beside, "planning roadmaps/rate-limiting/02-refusing on B")
+        .await;
+    assert!(a.sessions_on(stage_02).await.is_empty());
+
+    // And beside it, wanting nothing: here, as before.
+    let stage_03 = stage_row(&a, "roadmaps/rate-limiting/03-reporting").await;
+    a.printed(
+        stage_03,
+        "planning roadmaps/rate-limiting/03-reporting on A",
+    )
+    .await;
+    assert!(a.view(stage_03).await.transferring.is_none());
+
+    // What the pressed Timeline was told, read where it now lives.
+    let said_02 = b.notice_saying(there, "Stage 02 of the").await;
+    assert!(
+        said_02.contains(&format!(
+            "It wants Windows, so it's moving to <strong>{B_MACHINE}</strong>."
+        )),
+        "the press's Notice names the device the stage went to: {said_02}",
+    );
+    let said_03 = b.notice_saying(there, "Stage 03 of the").await;
+    assert!(
+        !said_03.contains("It wants"),
+        "and a stage wanting nothing is told as before: {said_03}",
+    );
+}
+
+/// **Where the Windows device may not take them, the press's stages ask** as a
+/// settle's would: the pressed stage and the one beside it each get
+/// Verkstead's Set, and nothing plans; the stage wanting nothing plans here.
+#[tokio::test]
+async fn a_press_whose_windows_device_is_not_ticked_asks_for_each_stage_that_wants_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _holding, pressed) = adopting_across(spill.path(), WINDOWS, false).await;
+
+    continues(&a, pressed).await;
+
+    let asked = verksteads_set(&a, pressed).await;
+    assert_eq!(
+        asked.rows[0].question,
+        format!("Stage 01 wants Windows. {B_MACHINE} is linked but not permitted."),
+    );
+
+    let stage_02 = stage_row(&a, "roadmaps/rate-limiting/02-refusing").await;
+    let asked_02 = verksteads_set(&a, stage_02).await;
+    assert_eq!(
+        asked_02.rows[0].question,
+        format!("Stage 02 wants Windows. {B_MACHINE} is linked but not permitted."),
+    );
+
+    let said_02 = a.notice_saying(pressed, "Stage 02 of the").await;
+    assert!(
+        said_02.contains("It wants Windows, and waits for you to say where it runs."),
+        "the press's Notice says the stage waits on the human: {said_02}",
+    );
+
+    let stage_03 = stage_row(&a, "roadmaps/rate-limiting/03-reporting").await;
+    a.printed(
+        stage_03,
+        "planning roadmaps/rate-limiting/03-reporting on A",
+    )
+    .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        a.sessions_on(pressed).await.is_empty() && a.sessions_on(stage_02).await.is_empty(),
+        "nothing plans while the human is asked",
+    );
+}
+
+/// **Where no Windows device is linked, the press's stages plan here**, each
+/// with one Notice on its own Timeline saying why, and the pressed Timeline
+/// saying it of the one beside it.
+#[tokio::test]
+async fn a_press_with_no_windows_device_linked_plans_its_stages_here_saying_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let (a, _b, _holding, pressed) = adopting_across(spill.path(), B_OS, false).await;
+
+    continues(&a, pressed).await;
+
+    a.printed(pressed, "planning roadmaps/rate-limiting/01-counter on A")
+        .await;
+    let stage_02 = stage_row(&a, "roadmaps/rate-limiting/02-refusing").await;
+    a.printed(stage_02, "planning roadmaps/rate-limiting/02-refusing on A")
+        .await;
+
+    for (stage, label) in [(pressed, "01"), (stage_02, "02")] {
+        let said = format!(
+            "Stage {label} wants Windows, but no Windows device is linked, so it's running here."
+        );
+        assert_eq!(
+            a.notices(stage)
+                .await
+                .iter()
+                .filter(|notice| notice.contains(&said))
+                .count(),
+            1,
+            "said once, on stage {label}'s own Timeline",
+        );
+        assert!(a.sets_on(stage).await.is_empty(), "and nobody was asked");
+    }
+
+    let said_02 = a.notice_saying(pressed, "Stage 02 of the").await;
+    assert!(
+        said_02
+            .contains("It wants Windows, but no Windows device is linked, so it's running here."),
+        "the press's Notice says why it runs here: {said_02}",
+    );
+}
+
 /// **A move made while home is asleep reaches home's tombstone once home
 /// answers**: B's copy closes with A unreachable, and nothing is lost — the
 /// report is still owed, and goes the next time B looks after A is back.
