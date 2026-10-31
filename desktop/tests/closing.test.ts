@@ -77,7 +77,12 @@ describe("with the tray off", () => {
   /// The setting is not overwritten by any of this — it is read past, and
   /// turning the icon back on is the position doing what it says again.
   it("restores the position when the icon comes back", () => {
-    const chosen: Settings = { whenClosed: "tray", trayIcon: false, notifications: true };
+    const chosen: Settings = {
+      whenClosed: "tray",
+      trayIcon: false,
+      notifications: true,
+      installOffer: true,
+    };
 
     expect(closing(chosen, "linux")).toBe("quit");
     expect(closing({ ...chosen, trayIcon: true }, "linux")).toBe("hide");

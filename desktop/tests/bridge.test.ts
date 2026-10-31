@@ -18,10 +18,12 @@ import { describe, expect, it } from "vitest";
 import {
   ASKED,
   HEAD,
+  INSTALLS,
   LOGS,
   NAME,
   NOTIFIABLE,
   OPEN,
+  PLACED,
   PRELOAD,
   REGISTER,
   SET,
@@ -34,7 +36,7 @@ import {
 /// a name in a renderer's namespace whichever direction the message travels in,
 /// and a push that shared a name with a question would be an overlay recoloured by
 /// a set.
-const CHANNELS = [ASKED, SET, LOGS, STARTUP, REGISTER, NOTIFIABLE, HEAD, WHERE, OPEN];
+const CHANNELS = [ASKED, SET, LOGS, STARTUP, REGISTER, NOTIFIABLE, PLACED, INSTALLS, HEAD, WHERE, OPEN];
 
 /// This project's own directory, which is what `src/` is under.
 const project = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -67,6 +69,16 @@ describe("the channel a clicked notification is told on", () => {
 describe("the channel what the open Conversation can go to is said on", () => {
   it("is the app's own word for where", () => {
     expect(WHERE).toBe("verkstead:where");
+  });
+});
+
+/// And the two the Desktop page's Install row is drawn from and pressed on,
+/// which the page's side says again — pinned here and in
+/// `web/tests/desktop.test.tsx` to the same literals.
+describe("the channels the Install row asks on", () => {
+  it("are the app's own words for where it runs from and installing", () => {
+    expect(PLACED).toBe("verkstead:placed");
+    expect(INSTALLS).toBe("verkstead:install");
   });
 });
 

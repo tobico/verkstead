@@ -1502,8 +1502,9 @@ What the desktop app keeps about the machine it is running on, and the
 **Desktop** section at the top of the settings page that draws them: **When the
 window is closed** — keep running in the tray, ask before quitting, or quit,
 keeping running being the default — **Show tray icon**, and **notifications**,
-on by default so that a fresh install is told about a Set with nothing pressed.
-A JSON file of
+on by default so that a fresh install is told about a Set with nothing pressed;
+and a fourth key the page draws no control for, `installOffer`, which the
+**Install Offer**'s **Don't ask again** turns off. A JSON file of
 Electron's own under its user data, beside the one the window's place is
 remembered in, rather than anything the server was ever told (ADR-0020):
 whether this machine's Verkstead keeps running when its window is closed is a
@@ -1562,6 +1563,25 @@ each item that goes somewhere routing the page in place (ADR-0020, *Amended: the
 Mac menu bar*). Windows and Linux keep their bar hidden, its keys kept.
 _Avoid_: preferences, app config, device settings, desktop configuration, the
 settings page (that is the whole page, and this is one section of it)
+
+**Install Offer**:
+The dialog a packed desktop app puts up when it is run from outside an
+Applications folder — Electron's own reading on a Mac, `$APPIMAGE` not under
+`~/Applications` on Linux — before its sidecar is started: *Install Verkstead?*,
+**Install** and **Skip**, and **Don't ask again**, which is a fourth key of the
+**Desktop Settings** (ADR-0020, *Amended: a download offers to install
+itself*). Install moves the app — into `/Applications` through Electron's own
+call on a Mac; to `~/Applications/Verkstead-x86_64.AppImage` on Linux, with a
+desktop entry and the icon set written beside the autostart entry's neighbours —
+and relaunches it from there, so the **Startup Registration** and the Update
+both point at a file that stays. A newer Verkstead already installed is offered
+to open instead; an older one is replaced. Never on a checkout run, never on a
+hidden start, and never on Windows, whose download is the installer. The
+**Desktop** section of the settings carries the same Install as a row while the
+app runs from outside Applications, which is the way back once the box is
+ticked; and `--install` on the app's command line is that Install with nobody
+asked, which is how the release legs install the way a downloader does.
+_Avoid_: first-run wizard, setup, move to Applications (the dialog says install)
 
 **Window Decorations**:
 The window the desktop app draws has no title bar, and what stands where one

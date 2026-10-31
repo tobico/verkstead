@@ -98,6 +98,19 @@
   font-size: 0.85rem;
 }
 
+/* Install, while the app runs from outside Applications: where it runs from,
+   and the press under it. */
+.install {
+  margin-top: 1.5rem;
+}
+
+.from {
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
 /* The way to this run's log file, drawn whatever the switch above says. The
    press and the line under it, the way a duration on the Cleanup pane is its
    field and its label. */

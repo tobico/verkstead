@@ -1,5 +1,6 @@
 //! The app's own settings: what closing the window means, whether there is an
-//! icon in the tray, and whether the app shows notifications.
+//! icon in the tray, whether the app shows notifications, and whether a
+//! download is offered its install.
 //!
 //! **A file of the app's own, beside the one the window's place is kept in**
 //! ([`bounds.ts`](./bounds.js)), and for the same reason (ADR-0020). Whether
@@ -10,12 +11,15 @@
 //! on. So nothing here goes on the wire — the split the per-device push switch
 //! already made.
 //!
-//! **Three settings, and the shape is the whole of what the page and the bridge
-//! read**: `whenClosed`, which is one of three positions, `trayIcon` and
-//! `notifications`. The defaults are keep running in the tray, an icon shown
-//! and notifications on, which is the app the human who has never opened the
-//! Desktop page is using — told about a Set with nothing pressed (ADR-0020,
-//! *Amended: notifications are the app's own*).
+//! **Four settings, and the shape is the whole of what the page and the bridge
+//! read**: `whenClosed`, which is one of three positions, `trayIcon`,
+//! `notifications` and `installOffer`. The defaults are keep running in the
+//! tray, an icon shown, notifications on and the **Install Offer** made, which
+//! is the app the human who has never opened the Desktop page is using — told
+//! about a Set with nothing pressed (ADR-0020, *Amended: notifications are the
+//! app's own*), and asked once whether a download should install itself
+//! (*Amended: a download offers to install itself*), whose **Don't ask again**
+//! is the fourth key turned off.
 //!
 //! **A file that is not what this wrote reads as the defaults one setting at a
 //! time.** Not all-or-nothing: a hand that edited the file and mistyped one
@@ -67,12 +71,22 @@ export interface Settings {
   /// Whether a notice from the sidecar is shown as the platform's own
   /// notification. The switch on the Settings head, inside the app.
   notifications: boolean;
+
+  /// Whether a launch from outside an Applications folder puts up the
+  /// **Install Offer** — see [`offer.ts`](./offer.js). Turned off by the
+  /// dialog's own **Don't ask again** box, and nothing else turns it off.
+  installOffer: boolean;
 }
 
 /// The app somebody who has never opened the Desktop page is using: it keeps
-/// running in the tray, there is a tray to keep running in, and it says when a
-/// Set is waiting.
-export const DEFAULTS: Settings = { whenClosed: "tray", trayIcon: true, notifications: true };
+/// running in the tray, there is a tray to keep running in, it says when a
+/// Set is waiting, and a download offers to install itself.
+export const DEFAULTS: Settings = {
+  whenClosed: "tray",
+  trayIcon: true,
+  notifications: true,
+  installOffer: true,
+};
 
 /// What this machine's settings are, out of `file`.
 ///
@@ -110,6 +124,8 @@ export function settings(file: string): Settings {
     trayIcon: typeof held.trayIcon === "boolean" ? held.trayIcon : DEFAULTS.trayIcon,
     notifications:
       typeof held.notifications === "boolean" ? held.notifications : DEFAULTS.notifications,
+    installOffer:
+      typeof held.installOffer === "boolean" ? held.installOffer : DEFAULTS.installOffer,
   };
 }
 
@@ -135,6 +151,11 @@ export function position(value: unknown): WhenClosed | undefined {
 ///
 /// A change that names nothing is nothing to write, so it is refused with the
 /// rest: every set this app makes comes from a control somebody moved.
+///
+/// **And `installOffer` is not one of them.** There is no control on the page
+/// for it — the dialog's own box is what turns it off, and the Desktop page's
+/// way back is an **Install** button rather than the offer switched on again —
+/// so a set naming it names a key the bridge has no setting for.
 export function changed(sent: unknown): Partial<Settings> | undefined {
   if (typeof sent !== "object" || sent === null || Array.isArray(sent)) {
     return undefined;

@@ -24,8 +24,9 @@
 //! rather than a sequence of conveniences: the log file, so that every line
 //! below it is in the file somebody will be asked to send; then the lock, so
 //! that a second launch is the first window brought forward and never a second
-//! sidecar; then the address, which the lock is what makes an unambiguous
-//! question; then the binary; and only then a child. Everything before the
+//! sidecar; then the **Install Offer**, so that a download hands over to its
+//! installed copy having started nothing; then the address, which the lock is
+//! what makes an unambiguous question; then the binary; and only then a child. Everything before the
 //! child is an app that can refuse having made nothing at all.
 //!
 //! **And it holds the notices stream for the rest of the run**, drawing each
@@ -43,10 +44,18 @@
 //! [`hidden`](./startup.js) is that whole reading, and the registration it was
 //! read out of is rewritten here at every launch while there is one.
 
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { app, BrowserWindow, dialog, ipcMain, Notification } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  type MessageBoxOptions,
+  type MessageBoxReturnValue,
+  Notification,
+} from "electron";
 import electronUpdater from "electron-updater";
 
 import { artwork } from "./artwork.js";
@@ -55,9 +64,12 @@ import { FILE } from "./bounds.js";
 import {
   ASKED,
   HEAD,
+  INSTALLS,
   LOGS,
   NOTIFIABLE,
+  PLACED,
   PRELOAD,
+  type Pressed,
   REGISTER,
   SET,
   STARTUP,
@@ -72,6 +84,28 @@ import { takeOver as takeOverAgent } from "./launchd.js";
 import { heard, keep, type Kept, say } from "./log.js";
 import { grey, shortcuts } from "./menu.js";
 import { hold, type Notice, opens, showing } from "./notices.js";
+import {
+  asking,
+  executable,
+  failure,
+  HICOLOR,
+  install as installTo,
+  INSTALL,
+  installed,
+  INSTALLING,
+  instead,
+  moveInto,
+  newer,
+  NotInstalled,
+  offered,
+  OPENING,
+  type Placed,
+  placed,
+  placement,
+  plan,
+  relaunched,
+  version,
+} from "./offer.js";
 import { dataDir, logDir } from "./platform.js";
 import { GUIDE, ISSUES } from "./roles.js";
 import { takeOver as takeOverValue } from "./runkey.js";
@@ -89,7 +123,7 @@ import {
 import { taken } from "./taken.js";
 import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
-import { APPDIR, stripped, unmounted } from "./unmounted.js";
+import { APPDIR, type Environment, stripped, unmounted } from "./unmounted.js";
 import {
   alive,
   ASKING,
@@ -222,6 +256,16 @@ let leaving = false;
 /// up in front of somebody who had just chosen Quit. The warning is the close
 /// button's alone (ADR-0020), and this is what makes that true.
 let quitting = false;
+
+/// Whether this quit is an Install handing over with the sidecar running —
+/// pressed on the Desktop page — so that the quit waits for the sidecar to have
+/// gone before the process does.
+///
+/// **Because the copy starts the moment this process has gone**: Electron's
+/// relaunch and a Mac's move both wait for this pid and nothing else, and a
+/// sidecar still stopping is the copy meeting the address taken and refusing to
+/// start. At launch there is no sidecar yet, and an exit is all there is.
+let relaunching = false;
 
 /// Stop the sidecar and end this launch with `code`.
 ///
@@ -436,6 +480,289 @@ function noticed({ window, visit }: Opened, arrived: Notice, on: boolean): void 
   say(`a notice is shown — ${arrived.title}`);
 }
 
+/// Install the app at `from` and relaunch from the copy — the **Install
+/// Offer**'s **Install**, and `--install`'s — answering whether this launch is
+/// over.
+///
+/// **On a Mac the whole of it is Electron's** `moveToApplicationsFolder`, which
+/// moves the bundle into `/Applications` and quits and relaunches on its own;
+/// what is here is its answer read, by [`moveInto`], and the failure dialog.
+/// Its conflict handler is left to its default, which trashes a copy that was
+/// there.
+///
+/// **On Linux what the move and the writes are is [`offer.ts`](./offer.js)'s**; what is
+/// here is the reads of the running image it needs, the failure dialog, and the
+/// relaunch. Nothing has been started yet — the sidecar comes after this — so
+/// handing over is an exit and nothing more, and Electron's relaunch waits for
+/// this process to have gone before the copy starts, which is what lets the
+/// copy take the lock.
+///
+/// **A newer Verkstead already installed is offered to open instead** — see
+/// [`superseded`] — and an older or the same one is replaced.
+///
+/// **A failure carries on from where it is** (ADR-0020): the dialog says why,
+/// and this launch goes on serving out of the download.
+async function installing(
+  from: string,
+  machine: { platform: NodeJS.Platform; env: Environment },
+  asked: boolean,
+  window?: BrowserWindow | null,
+): Promise<boolean | NotInstalled> {
+  const over = await superseded(machine, asked, window);
+  if (over !== undefined) {
+    return over;
+  }
+
+  if (machine.platform === "darwin") {
+    // After ready, as the rest of Electron's AppKit is: the move may put up
+    // the administrator's password dialog.
+    await app.whenReady();
+    say(`installing ${from} into /Applications`);
+
+    // Before the move rather than after it, because the quit the move starts is
+    // Electron's own and may already be under way when the call returns.
+    relaunching = child !== undefined;
+
+    try {
+      // A copy already there is replaced: `superseded` has read its version
+      // and found it older or the same, so the conflict is no question.
+      moveInto(() => app.moveToApplicationsFolder({ conflictHandler: () => true }));
+    } catch (trouble) {
+      relaunching = false;
+      return failed(trouble, from, machine);
+    }
+
+    // Electron has moved the bundle and relaunches the copy once this process
+    // has gone — so it goes: at once with nothing started, and once the
+    // sidecar has stopped where there is one.
+    say("installed, so this launch hands over to the copy in /Applications");
+    if (child === undefined) {
+      app.exit(0);
+    } else {
+      departing();
+    }
+    return true;
+  }
+
+  // The icon set, read out of the mount this run came from: the only place the
+  // icons are, and gone once the app runs from anywhere else.
+  const appdir = machine.env[APPDIR];
+  let found: string[] = [];
+  if (appdir !== undefined) {
+    try {
+      found = readdirSync(join(appdir, HICOLOR), { recursive: true, encoding: "utf8" });
+    } catch (trouble) {
+      say(`the image's icons could not be listed, so none are installed — ${String(trouble)}`);
+    }
+  }
+
+  const planned = plan(from, machine, appdir, found);
+  if (planned === undefined) {
+    say("there is nowhere on this machine to install to, so this launch carries on");
+    return false;
+  }
+
+  say(`installing ${from} as ${planned.file}, with ${planned.entry} and ${planned.icons.length} icons`);
+
+  try {
+    installTo(planned, machine);
+  } catch (trouble) {
+    return failed(trouble, from, machine);
+  }
+
+  say(`installed, so this launch hands over to ${planned.file}`);
+  handOver(planned.file, machine);
+  return true;
+}
+
+/// Whether a newer Verkstead is already installed, and what came of it: true
+/// is this launch handed over to it, false is **Keep this one** — the launch
+/// carrying on from where it is, with nothing installed — and nothing is an
+/// Install to go ahead with, over an older copy, the same one, one whose
+/// version cannot be read, or none.
+///
+/// Asked, the open-installed dialog says so; `--install`, with nobody to ask,
+/// opens the newer copy and says so in the log.
+async function superseded(
+  machine: { platform: NodeJS.Platform; env: Environment },
+  asked: boolean,
+  window?: BrowserWindow | null,
+): Promise<boolean | undefined> {
+  const there = installed(machine);
+  if (there === undefined || !existsSync(there)) {
+    return undefined;
+  }
+
+  const was = version(there, machine);
+  const running = app.getVersion();
+  if (was === undefined || !newer(was, running)) {
+    say(`${there} is ${was ?? "of a version that cannot be read"}, not newer than ${running}, so it is replaced`);
+    return undefined;
+  }
+
+  if (asked) {
+    say(`${there} is ${was}, newer than ${running}, so the launch offers to open it instead`);
+    const answer = await answered(instead(was, running), window);
+    if (answer.response !== OPENING) {
+      say("Keep this one is pressed, so this launch carries on from where it is");
+      return false;
+    }
+  } else {
+    say(`${INSTALL} finds ${there} at ${was}, newer than ${running}, so it opens that instead`);
+  }
+
+  say(`this launch hands over to the installed ${there}`);
+  handOver(executable(there, machine.platform), machine);
+  return true;
+}
+
+/// End this launch, and start `exe` in its place.
+///
+/// The copy is relaunched with the environment this run was given rather than
+/// the one its mount made of it — the same reading the sidecar is handed, see
+/// [`unmounted`]. The copy's own runtime puts its own mount in front again.
+/// At launch nothing has been started yet, so the exit is all there is to stop,
+/// and Electron's relaunch waits for this process to have gone, which is what
+/// lets the copy take the lock. Pressed on the Desktop page, the sidecar is
+/// running, and the quit is [`departing`]'s.
+function handOver(exe: string, machine: { platform: NodeJS.Platform; env: Environment }): void {
+  const passed = unmounted(machine.env);
+  for (const variable of stripped(machine.env, passed)) {
+    if (passed[variable] === undefined) {
+      delete process.env[variable];
+    } else {
+      process.env[variable] = passed[variable];
+    }
+  }
+
+  // Told before the relaunch is asked for, which takes this environment as it
+  // stands — see [`departing`].
+  if (child !== undefined) {
+    process.env[RELAUNCH] = String(process.pid);
+  }
+
+  app.relaunch({ execPath: exe, args: relaunched(process.argv) });
+  if (child === undefined) {
+    app.exit(0);
+  } else {
+    departing();
+  }
+}
+
+/// Quit for an Install with the sidecar running, which goes with the quit: the
+/// sessions on it stop, and the copy's own server resumes them.
+///
+/// The quit waits for the sidecar to have gone — see [`relaunching`]. On Linux
+/// the copy is told this pid as well, as an Update's relaunch is, so that it
+/// waits out the address too — see [`waitOut`]; [`handOver`] says it before
+/// asking for the relaunch, which takes the environment as it stands at the
+/// call. A Mac's move relaunches through `open`, which hands the copy none of
+/// this environment, so there the wait is the quit's alone.
+function departing(): void {
+  relaunching = true;
+  leaving = true;
+  quitting = true;
+  app.quit();
+}
+
+/// A native message box, and its answer: before any window at launch, and over
+/// `window` where the Desktop page asked for it.
+///
+/// **A timer ticks while the box is up, and it is load-bearing.** Measured
+/// on the packed AppImage under Electron 43.7.5 on X11: the box closed at
+/// the press, and the promise it answers with resolved only when something
+/// else next woke the main process — some 30 seconds after launch, or never
+/// — because this early in a launch nothing else is running to. A tick
+/// every tenth of a second is that something, so the press is acted on at
+/// once. `showMessageBoxSync` would need no timer and cannot say whether the
+/// box was ticked.
+async function answered(
+  options: MessageBoxOptions,
+  window?: BrowserWindow | null,
+): Promise<MessageBoxReturnValue> {
+  // The message box wants a ready app; `whenReady` answers at once after.
+  await app.whenReady();
+  const awake = setInterval(() => undefined, 100);
+  const shown = window ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options);
+  return shown.finally(() => clearInterval(awake));
+}
+
+/// The offer put up, and what came of it: true is this launch handed over,
+/// false is nothing installed — a Skip or a Keep this one — and a
+/// [`NotInstalled`] is an install that failed, which the failure dialog has
+/// said. The launch's offer and the Desktop page's Install both come here, the
+/// page's with the window it was pressed in and its sentence about the
+/// sessions running.
+async function offering(
+  from: string,
+  machine: { platform: NodeJS.Platform; env: Environment },
+  desk: string,
+  window?: BrowserWindow | null,
+  stopping?: string,
+): Promise<boolean | NotInstalled> {
+  const answer = await answered(asking(from, machine, stopping), window);
+
+  if (answer.checkboxChecked) {
+    say("Don't ask again is ticked, so the offer is not made again");
+    set(desk, { ...settings(desk), installOffer: false });
+  }
+
+  if (answer.response !== INSTALLING) {
+    say("the offer is skipped, and this launch carries on from where it is");
+    return false;
+  }
+
+  return installing(from, machine, true, window);
+}
+
+/// **Install** pressed on the Desktop page (ADR-0020, *Amended: a download
+/// offers to install itself*): the launch's own dialog, over the window it was
+/// pressed in, and what came of it for the row to say — an Install that went
+/// ahead answers nothing anybody reads, the app being on its way out.
+///
+/// The sentence arriving from the page is said only where it is one: anything
+/// else is the dialog the launch puts up.
+async function pressedInstall(
+  here: Placed,
+  machine: { platform: NodeJS.Platform; env: Environment },
+  desk: string,
+  window: BrowserWindow | null,
+  stopping: unknown,
+): Promise<Pressed> {
+  if (!("outside" in here)) {
+    say("Install is pressed on the desktop page, and there is nothing to install");
+    return {};
+  }
+
+  say(`Install is pressed on the desktop page, so ${here.outside} offers to install itself`);
+  const came = await offering(
+    here.outside,
+    machine,
+    desk,
+    window,
+    typeof stopping === "string" ? stopping : undefined,
+  );
+
+  return came instanceof NotInstalled ? { failed: came.message } : {};
+}
+
+/// An install that did not happen: said in the log and in the failure dialog,
+/// and this launch carries on from where it is (ADR-0020).
+async function failed(
+  trouble: unknown,
+  from: string,
+  machine: { platform: NodeJS.Platform; env: Environment },
+): Promise<NotInstalled> {
+  if (!(trouble instanceof NotInstalled)) {
+    throw trouble;
+  }
+  say(`the install did not happen, so this launch carries on from ${from} — ${trouble.message}`);
+  await app.whenReady();
+  const told = failure(trouble.message, from, machine);
+  dialog.showErrorBox(told.title, told.content);
+  return trouble;
+}
+
 async function run(): Promise<void> {
   // The one read of the process's own platform and environment, made first
   // because everything below is a function of these two values — and the
@@ -537,6 +864,99 @@ async function run(): Promise<void> {
   app.on("before-quit", () => {
     quitting = true;
   });
+
+  // Electron's own user data, which is this machine's and never the server's:
+  // where the window sits and what closing it means are facts about the desk in
+  // front of the human, so both are kept beside what Electron keeps here rather
+  // than in `config.yaml` (ADR-0020). Read here, ahead of the offer below, whose
+  // **Don't ask again** is kept in the same file.
+  const userData = app.getPath("userData");
+  const desk = join(userData, DESKTOP);
+
+  // **Launch on Startup**, which is the one setting on the Desktop page that is
+  // not in that file at all: the platform's own registration is the state (Set
+  // 846 Q9a), and what is read off this process for it is whether this is a
+  // packed app, where its executable is and what `$APPIMAGE` says. The
+  // login-item API is handed in rather than reached for, so that the two arms
+  // this machine will never take are still arms vitest runs. Made here because
+  // whether this launch is a hidden one is what the offer asks it — making it
+  // reads nothing, and every reading is made where it is asked.
+  const registering: Registering = {
+    packaged: app.isPackaged,
+    exe: process.execPath,
+    ...machine,
+  };
+
+  // Four reads of the one call and one write of the other, each of them
+  // mechanical: which of them a platform is asked, and what its answer comes to,
+  // is `startup.ts`'s — including the one this file cannot make look the same on
+  // both, `openAtLogin` being Windows' answer about a value named after the
+  // AppUserModelId rather than about the one this app writes.
+  const login: LoginItem = {
+    registered: () => app.getLoginItemSettings().openAtLogin,
+
+    // Which is why Windows is handed its own list instead: every Run value that
+    // would start this executable at a sign-in, Verkstead's own among them.
+    // Undefined on a Mac, which carries no such list.
+    values: () => app.getLoginItemSettings().launchItems ?? [],
+
+    // The Mac's own account of this launch, which is what it has instead of the
+    // flag the other two carry on their command lines.
+    openedAtLogin: () => app.getLoginItemSettings().wasOpenedAtLogin,
+
+    // And what macOS 13's `SMAppService` says about the registration beside
+    // `openAtLogin`: a human who switched Verkstead off in System Settings is
+    // `requires-approval`, which is a registration that starts nothing.
+    status: () => app.getLoginItemSettings().status,
+
+    register: (asked) => app.setLoginItemSettings(asked),
+  };
+
+  const starts = startup(registering, login);
+
+  // **The Install Offer** (ADR-0020, *Amended: a download offers to install
+  // itself*): after the lock, so that an installed copy already running has
+  // been handed the launch before any dialog could be drawn, and before the
+  // port probe and the sidecar, so that nothing has been started when this
+  // launch hands over to the copy. `--install` is its Install with nobody
+  // asked; everything else is [`offered`]'s to decide, and every no is said.
+  const here = placed({
+    packaged: app.isPackaged,
+    exe: process.execPath,
+    applied: machine.platform === "darwin" && app.isInApplicationsFolder(),
+    ...machine,
+  });
+
+  if (process.argv.includes(INSTALL)) {
+    if ("outside" in here) {
+      say(`${INSTALL} asks for an install with nobody asked`);
+      if ((await installing(here.outside, machine, false)) === true) {
+        return;
+      }
+    } else {
+      say(
+        `${INSTALL} asks for an install, and there is nothing to do — ` +
+          ("inside" in here ? `it already runs from ${here.inside}` : here.nowhere),
+      );
+    }
+  } else {
+    const offer = offered(
+      here,
+      () => hidden(process.argv, settings(desk), starts.atLogin()),
+      settings(desk),
+    );
+
+    if ("why" in offer) {
+      say(`no Install Offer — ${offer.why}`);
+    } else {
+      // Nothing below this needs the app not to be ready: `whenReady` is
+      // awaited again further down and answers at once.
+      say(`this run is ${offer.offer}, outside Applications, so it offers to install itself`);
+      if ((await offering(offer.offer, machine, desk)) === true) {
+        return;
+      }
+    }
+  }
 
   if (await taken(HOST, PORT)) {
     say(`something is already listening on ${ADDRESS}, so there is nothing to start`);
@@ -657,7 +1077,8 @@ async function run(): Promise<void> {
   // — the two things this app has outside its own process. `will-quit` rather
   // than `before-quit` so that a quit which something else has since cancelled
   // takes neither with it.
-  app.on("will-quit", () => {
+  let waiting = false;
+  app.on("will-quit", (event) => {
     leaving = true;
     // Said before either is done, so that the file somebody sends ends with the
     // app going rather than simply stopping: Cmd+Q on a Mac takes the whole app
@@ -667,6 +1088,17 @@ async function run(): Promise<void> {
     say("Verkstead is quitting — the icon comes down and the sidecar is stopped");
     lower();
     sidecar.stop();
+
+    // And an Install handing over goes once the sidecar has — see
+    // [`relaunching`]. Bounded by the sidecar's own grace, after which it is
+    // taken.
+    if (relaunching) {
+      event.preventDefault();
+      if (!waiting) {
+        waiting = true;
+        void sidecar.gone.then(() => app.exit(0));
+      }
+    }
   });
 
   // And the server ending is the app quitting, carried over from the tray app:
@@ -779,13 +1211,6 @@ async function run(): Promise<void> {
     say("there is nowhere on this machine for a Data Directory, so there is no key to read");
   }
 
-  // Electron's own user data, which is this machine's and never the server's:
-  // where the window sits and what closing it means are facts about the desk in
-  // front of the human, so both are kept beside what Electron keeps here rather
-  // than in `config.yaml` (ADR-0020).
-  const userData = app.getPath("userData");
-  const desk = join(userData, DESKTOP);
-
   // And whether the Update the last run handed over to landed: a start on
   // another version than the one remembered is an install that failed
   // quietly, which this device's row is told as its trouble line — the server
@@ -818,43 +1243,6 @@ async function run(): Promise<void> {
     platform: machine.platform,
   };
 
-  // **Launch on Startup**, which is the one setting on the Desktop page that is
-  // not in that file at all: the platform's own registration is the state (Set
-  // 846 Q9a), and what is read off this process for it is whether this is a
-  // packed app, where its executable is and what `$APPIMAGE` says. The
-  // login-item API is handed in rather than reached for, so that the two arms
-  // this machine will never take are still arms vitest runs.
-  const registering: Registering = {
-    packaged: app.isPackaged,
-    exe: process.execPath,
-    ...machine,
-  };
-
-  // Four reads of the one call and one write of the other, each of them
-  // mechanical: which of them a platform is asked, and what its answer comes to,
-  // is `startup.ts`'s — including the one this file cannot make look the same on
-  // both, `openAtLogin` being Windows' answer about a value named after the
-  // AppUserModelId rather than about the one this app writes.
-  const login: LoginItem = {
-    registered: () => app.getLoginItemSettings().openAtLogin,
-
-    // Which is why Windows is handed its own list instead: every Run value that
-    // would start this executable at a sign-in, Verkstead's own among them.
-    // Undefined on a Mac, which carries no such list.
-    values: () => app.getLoginItemSettings().launchItems ?? [],
-
-    // The Mac's own account of this launch, which is what it has instead of the
-    // flag the other two carry on their command lines.
-    openedAtLogin: () => app.getLoginItemSettings().wasOpenedAtLogin,
-
-    // And what macOS 13's `SMAppService` says about the registration beside
-    // `openAtLogin`: a human who switched Verkstead off in System Settings is
-    // `requires-approval`, which is a registration that starts nothing.
-    status: () => app.getLoginItemSettings().status,
-
-    register: (asked) => app.setLoginItemSettings(asked),
-  };
-
   // The tray app's own registrations, taken over once — before anything below
   // reads this app's, because on a machine that had that app they are what the
   // human asked for and the API has never heard of either. The launch agent on a
@@ -864,20 +1252,18 @@ async function run(): Promise<void> {
   takeOverAgent(registering, login);
   takeOverValue(registering, login);
 
-  const starts = startup(registering, login);
-
   // And the registration rewritten while there is one, which is what heals an
   // app that was moved: the entry a login reads names where the app used to be,
   // and a launch by hand is the moment that can be put right. A machine nobody
   // asked to be started on is left exactly as it is.
   starts.refresh();
 
-  // The bridge's seven acts, enacted here because here is the process that can
-  // — the file is read and written, the icon is raised and lowered, the log
-  // file is handed to whatever the desktop reads text with, the platform is
-  // asked about its startup registration and whether it shows notifications at
-  // all, and the window is dressed to the
-  // page's own head. Registered before the window is opened, because the page is
+  // The bridge's acts, enacted here because here is the process that can —
+  // the file is read and written, the icon is raised and lowered, the log file
+  // is handed to whatever the desktop reads text with, the platform is asked
+  // about its startup registration and whether it shows notifications at all,
+  // where this run is from is said and its Install pressed, and the window is
+  // dressed to the page's own head. Registered before the window is opened, because the page is
   // loaded the moment there is one and a page that asked before this would be
   // asking nobody.
   ipcMain.handle(ASKED, () => settings(desk));
@@ -886,6 +1272,14 @@ async function run(): Promise<void> {
   ipcMain.handle(STARTUP, () => starts.standing());
   ipcMain.handle(REGISTER, (_event, asked: unknown) => ticked(starts, asked));
   ipcMain.handle(NOTIFIABLE, () => Notification.isSupported());
+
+  // And where this run is from, which is the reading the offer above made, and
+  // Install pressed on the Desktop page, which raises the offer's own dialog
+  // over the window it was pressed in.
+  ipcMain.handle(PLACED, () => placement(here, machine));
+  ipcMain.handle(INSTALLS, (event, stopping: unknown) =>
+    pressedInstall(here, machine, desk, BrowserWindow.fromWebContents(event.sender), stopping),
+  );
 
   // And the one that is a statement rather than a question, so `on` rather than
   // `handle`. The window is the one the push came *from* rather than `onscreen`:

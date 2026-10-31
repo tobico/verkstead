@@ -228,8 +228,16 @@ impl Verkstead {
         router_answering_devices_telling(self.pool.clone(), devices, self.nudges.clone())
     }
 
+    /// How a test dials a member itself, which is always to a listener that is
+    /// up.
+    ///
+    /// **[`ANSWERED_WITHIN`] rather than [`PATIENCE`], for the reason the
+    /// workbench has it.** A dial of an Annex's identity is answered only once
+    /// the Annex has asked its Keeper what to advertise, so it outlasts a dial
+    /// of its own. At [`PATIENCE`], a loaded Windows runner timed the Keeper's
+    /// identity read of its Annex out.
     fn peers(&self) -> Peers {
-        Peers::of(self.device.clone(), self.members.clone()).waiting(PATIENCE)
+        Peers::of(self.device.clone(), self.members.clone()).waiting(ANSWERED_WITHIN)
     }
 
     /// The row this device holds for `device`.

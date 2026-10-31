@@ -40,6 +40,7 @@ import { type Mock, afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ConversationEntry,
+  DevicesView,
   ProfileEntry,
   RepoEntry,
   SettingsView,
@@ -51,11 +52,15 @@ import styles from "../src/settings/Desktop.module.css";
 import settingsCard from "../src/settings/SettingsCard.module.css";
 import git from "../src/settings/Git.module.css";
 import {
+  INSTALLS,
   NAME,
+  PLACED,
   POSITIONS,
   type Bridge,
   type DesktopSettings,
   type Head,
+  type Placement,
+  type Pressed,
   type Registration,
 } from "../src/settings/bridge";
 import {
@@ -66,6 +71,7 @@ import { pathTo } from "../src/settings/openings";
 import { json, serving, whenever } from "./serving";
 import { slidPress } from "./sliding";
 import conversations from "./fixtures/conversations.json" with { type: "json" };
+import devices from "./fixtures/devices.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -75,6 +81,7 @@ const PROFILES = profiles as ProfileEntry[];
 const REPOS = repos as RepoEntry[];
 const SIDEBAR = conversations as ConversationEntry[];
 const HIDING_ARCHIVED: ShowingArchived = { showing: false, any: false };
+const DEVICES = devices as DevicesView;
 
 /// The app every first run gets, which is what `DEFAULTS` in
 /// `desktop/src/settings.ts` holds: it keeps running in the tray, and there is a
@@ -85,6 +92,16 @@ const DEFAULTS: DesktopSettings = { whenClosed: "tray", trayIcon: true, notifica
 /// reads as — which is what `startup` in `desktop/src/startup.ts` answers there:
 /// it could be registered, and nobody has asked for it to be.
 const UNREGISTERED: Registration = { possible: true, on: false };
+
+/// And where an app reads as running from once it is installed — or on a
+/// checkout run, which says the same: not outside Applications.
+const INSTALLED: Placement = { outside: false };
+
+/// And a download run from Downloads, which is what draws the Install row.
+const DOWNLOADED: Placement = {
+  outside: true,
+  from: "~/Downloads/Verkstead-x86_64.AppImage",
+};
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -103,6 +120,7 @@ type Asked = {
   logs: Mock<() => Promise<void>>;
   startup: Mock<() => Promise<Registration>>;
   register: Mock<(on: boolean) => Promise<Registration>>;
+  install: Mock<(stopping?: string) => Promise<Pressed>>;
   head: Mock<(worn: Head) => void>;
 };
 
@@ -121,6 +139,8 @@ function standingIn(
   platform = "linux",
   refuse = false,
   registration: Registration = UNREGISTERED,
+  placement: Placement = INSTALLED,
+  pressed: Pressed = {},
 ): Asked {
   let stands = held;
   let starts = registration;
@@ -148,6 +168,10 @@ function standingIn(
       return Promise.resolve(starts);
     }),
 
+    // A press the app answered, which is one where nothing was installed: an
+    // Install that went ahead is the app relaunching, and nothing comes back.
+    install: vi.fn(() => Promise.resolve(pressed)),
+
     head: vi.fn(),
   };
 
@@ -159,6 +183,8 @@ function standingIn(
     startup: () => asked.startup() as Promise<Registration>,
     register: (on) => asked.register(on) as Promise<Registration>,
     notifiable: () => Promise.resolve(true),
+    placed: () => Promise.resolve(placement),
+    install: (stopping) => asked.install(stopping) as Promise<Pressed>,
     head: (worn) => {
       asked.head(worn);
     },
@@ -662,6 +688,141 @@ describe("View logs", () => {
   });
 });
 
+describe("Install", () => {
+  /// The app's own reading, said over the bridge: an app in Applications and a
+  /// checkout run both answer *not outside*, and draw nothing.
+  it("is not drawn while the app runs from Applications", async () => {
+    standingIn();
+    mountPane();
+
+    await screen.findByText("View logs");
+
+    expect(screen.queryByRole("button", { name: "Install" })).toBeNull();
+    expect(screen.queryByText(/running from/)).toBeNull();
+  });
+
+  it("names where the app runs from, with the button, outside Applications", async () => {
+    standingIn(DEFAULTS, "linux", false, UNREGISTERED, DOWNLOADED);
+    const { container } = mountPane();
+
+    await screen.findByRole("button", { name: "Install" });
+
+    expect(container.querySelector(`.${styles.install} code`)!.textContent).toBe(
+      "~/Downloads/Verkstead-x86_64.AppImage",
+    );
+    expect(container.querySelector(`.${styles.from}`)!.textContent).toBe(
+      "Verkstead is running from ~/Downloads/Verkstead-x86_64.AppImage, outside Applications.",
+    );
+  });
+
+  /// The app names no path on a Mac, whose bundle runs from wherever
+  /// Gatekeeper translocated it.
+  it("is drawn on a Mac, naming no path", async () => {
+    standingIn(DEFAULTS, "darwin", false, UNREGISTERED, { outside: true });
+    const { container } = mountPane();
+
+    await screen.findByRole("button", { name: "Install" });
+    expect(container.querySelector(`.${styles.install} code`)).toBeNull();
+    expect(container.querySelector(`.${styles.from}`)!.textContent).toBe(
+      "Verkstead is running from outside Applications.",
+    );
+  });
+
+  /// With nothing running here the dialog is the launch's own, so nothing is
+  /// handed over with the press.
+  it("asks the app with no sentence when no session runs here", async () => {
+    serving(whenever("/api/ui/devices", json(DEVICES)));
+    const asked = standingIn(DEFAULTS, "linux", false, UNREGISTERED, DOWNLOADED);
+    mountPane();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    await waitFor(() => expect(asked.install).toHaveBeenCalledWith(undefined));
+  });
+
+  /// Read the way the Update card reads them, afresh at the press: each branch
+  /// by name and the drafts counted (ADR-0027).
+  it("names the sessions running here as stopped and resumed", async () => {
+    serving(
+      whenever(
+        "/api/ui/devices",
+        json({ ...DEVICES, this_running: ["rate-limiting"], this_running_drafts: 2 }),
+      ),
+    );
+    const asked = standingIn(DEFAULTS, "linux", false, UNREGISTERED, DOWNLOADED);
+    mountPane();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    await waitFor(() =>
+      expect(asked.install).toHaveBeenCalledWith(
+        "The sessions on rate-limiting and 2 drafts will be stopped and resumed.",
+      ),
+    );
+  });
+
+  it("names one session as one", async () => {
+    serving(whenever("/api/ui/devices", json({ ...DEVICES, this_running: ["rate-limiting"] })));
+    const asked = standingIn(DEFAULTS, "linux", false, UNREGISTERED, DOWNLOADED);
+    mountPane();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    await waitFor(() =>
+      expect(asked.install).toHaveBeenCalledWith(
+        "The session on rate-limiting will be stopped and resumed.",
+      ),
+    );
+  });
+
+  /// The last word before the app quits says *any* rather than nothing, where
+  /// the server could not say which are running.
+  it("says any sessions where the server can't say which", async () => {
+    serving(whenever("/api/ui/devices", json({ message: "no" }, 500)));
+    const asked = standingIn(DEFAULTS, "linux", false, UNREGISTERED, DOWNLOADED);
+    mountPane();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    await waitFor(() =>
+      expect(asked.install).toHaveBeenCalledWith(
+        "Any sessions running here will be stopped and resumed.",
+      ),
+    );
+  });
+
+  /// The app's own sentence, under the button as a refused registration's is
+  /// under its box.
+  it("says a failure under the button", async () => {
+    serving(whenever("/api/ui/devices", json(DEVICES)));
+    standingIn(DEFAULTS, "linux", false, UNREGISTERED, DOWNLOADED, {
+      failed: "It couldn't be moved to ~/Applications (ENOSPC: no space left on device).",
+    });
+    const { container } = mountPane();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+
+    await screen.findByText(/couldn't be installed/);
+    expect(container.querySelector(`.${styles.install}`)!.textContent).toContain(
+      "Verkstead couldn't be installed. It couldn't be moved to ~/Applications " +
+        "(ENOSPC: no space left on device).",
+    );
+  });
+
+  /// A Skip is nothing installed and nothing wrong: the row stands as it was.
+  it("says nothing after a Skip, and stands as it was", async () => {
+    serving(whenever("/api/ui/devices", json(DEVICES)));
+    const asked = standingIn(DEFAULTS, "linux", false, UNREGISTERED, DOWNLOADED);
+    mountPane();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Install" }));
+    await waitFor(() => expect(asked.install).toHaveBeenCalled());
+
+    expect(screen.queryByText(/couldn't be installed/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Install" })).toBeTruthy();
+  });
+});
+
 /// The page whole, which is what says where the section stands and what a
 /// browser's settings are without it.
 function thePage(at = "/settings") {
@@ -805,5 +966,14 @@ describe("the name on the window", () => {
   /// same literal on the side that puts it there.
   it("is the product's own", () => {
     expect(NAME).toBe("verkstead");
+  });
+});
+
+/// And the two channels the Install row asks on, which the preload names for
+/// the page — `desktop/tests/bridge.test.ts` pins the same literals.
+describe("the channels the Install row asks on", () => {
+  it("are the app's own words for where it runs from and installing", () => {
+    expect(PLACED).toBe("verkstead:placed");
+    expect(INSTALLS).toBe("verkstead:install");
   });
 });

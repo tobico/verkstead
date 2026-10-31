@@ -4,14 +4,15 @@
 //! The fourth file at the edge, and the only one that is not the main process:
 //! it imports `electron` for `contextBridge` and `ipcRenderer`, so the lint
 //! wall in `eslint.config.js` names it. What it puts on the window is
-//! [`bridge.ts`](./bridge.js)'s shape and nothing else — one value and nine
+//! [`bridge.ts`](./bridge.js)'s shape and nothing else — one value and eleven
 //! calls, each of them a message to the main process or a listener for one,
 //! which is where the file is read, the icon is raised, the log is opened, the
-//! platform is asked about its startup registration and its notifications, the overlay is recoloured,
+//! platform is asked about its startup registration and its notifications, the
+//! app says where it runs from and is asked to install itself, the overlay is recoloured,
 //! the Go menu is told what it can go to, and a clicked notification's path is
 //! heard.
 //!
-//! **Nothing is exposed but the ten.** `contextBridge` is what makes that
+//! **Nothing is exposed but the twelve.** `contextBridge` is what makes that
 //! true: the page runs in a world of its own with no Node in it, and what
 //! crosses is this object rather than a process, a filesystem or an
 //! `ipcRenderer`. A set arriving on the other side is checked against the shape
@@ -37,10 +38,14 @@ import {
   ASKED,
   type Bridge,
   HEAD,
+  INSTALLS,
   LOGS,
   NAME,
   NOTIFIABLE,
   OPEN,
+  PLACED,
+  type Placement,
+  type Pressed,
   REGISTER,
   SET,
   STARTUP,
@@ -78,6 +83,9 @@ const bridge: Bridge = {
   register: (on) => ipcRenderer.invoke(REGISTER, on) as Promise<Registration>,
 
   notifiable: () => ipcRenderer.invoke(NOTIFIABLE) as Promise<boolean>,
+
+  placed: () => ipcRenderer.invoke(PLACED) as Promise<Placement>,
+  install: (stopping) => ipcRenderer.invoke(INSTALLS, stopping) as Promise<Pressed>,
 
   head: (worn) => ipcRenderer.send(HEAD, worn),
   where: (open) => ipcRenderer.send(WHERE, open),
