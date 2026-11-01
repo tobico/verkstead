@@ -1145,6 +1145,13 @@ impl Root {
     ///   crosses is narrower than it was and is still the whole store, and the
     ///   bound in [`crate::mirroring::memory::MOST_A_STORE_IS`] is what stands
     ///   in front of a big one.
+    /// - **Antigravity CLI** — Grok's rule twice over, by the ids agy gave this
+    ///   Conversation's sessions (see [`crate::transcript`]): the one database
+    ///   per conversation under `conversations/`, and the conversation's own
+    ///   directory under `brain/`, where its Transcript is. Not the summaries
+    ///   database beside them, for the reason Grok's index stays: it is the
+    ///   human's list of every conversation, and agy 1.4.12 resumes one it has no
+    ///   row for, writing the row as it does.
     ///
     /// **Nothing at all where the memory switch is off**, which is the reading
     /// [`Root::joined_store`] makes of the same switch: a session that runs from a
@@ -1204,10 +1211,24 @@ impl Root {
                 Whose::Database(super::OPENCODE_DB_FILE),
             )],
 
-            // Nothing yet: which of agy's conversations are this
-            // Conversation's is read out of its summaries database, and until
-            // that is read the store stays on the device it is bound on.
-            Harness::Agy => Vec::new(),
+            // The record `--conversation` resumes from and the brain directory
+            // the Transcript is followed in, each picked out by the ids agy
+            // gave this Conversation's sessions. Not the summaries database,
+            // which is the human's index of every conversation they have had:
+            // agy 1.4.12 resumes a conversation that has no row in it and
+            // writes the row itself.
+            Harness::Agy => vec![
+                part(
+                    CONVERSATIONS,
+                    PathBuf::from(AGY_MEMORY[0]),
+                    Whose::Databases(sessions.to_vec()),
+                ),
+                part(
+                    BRAIN,
+                    PathBuf::from(AGY_MEMORY[1]),
+                    Whose::Called(sessions.to_vec()),
+                ),
+            ],
         }
     }
 }
@@ -1224,6 +1245,8 @@ pub(crate) const WORKTREE: &str = "worktree";
 pub(crate) const SESSIONS_PART: &str = "sessions";
 pub(crate) const MEMORY: &str = "memory";
 pub(crate) const DATA: &str = "data";
+pub(crate) const CONVERSATIONS: &str = "conversations";
+pub(crate) const BRAIN: &str = "brain";
 
 /// One part of a memory store, as the device it is on names it.
 ///
@@ -1283,6 +1306,14 @@ pub(crate) enum Whose {
     /// A sibling that is not there is nothing to carry rather than a failure,
     /// which is a database whose log has been folded back into it.
     Database(&'static str),
+
+    /// And a database apiece directly under the part, `<id>.db` for each of
+    /// these ids, with the two siblings SQLite keeps beside each.
+    ///
+    /// The Antigravity CLI's record of a conversation: agy 1.4.12 keeps one
+    /// SQLite file per conversation under `conversations/`, named for the id it
+    /// gave the conversation, and that file is what `--conversation` resumes.
+    Databases(Vec<String>),
 }
 
 /// Where an account keeps its login, whatever else is true of it.

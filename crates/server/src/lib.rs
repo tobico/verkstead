@@ -349,6 +349,9 @@ mod stopping;
 /// The human stopping a Conversation on purpose: Stop, which waits for the step
 /// it is on, and Force stop, which does not.
 mod stops;
+/// The Antigravity CLI's index of its conversations, read from outside the
+/// program writing it to find which conversation a session is having.
+mod summaries;
 /// What a **Review** Conversation is to take up: the **Target** field read at the
 /// press, and the Brief read for the pull request URL or bare `#number` that
 /// fills that field while it is empty.

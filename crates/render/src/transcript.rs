@@ -7,15 +7,16 @@
 //! nothing here recognises is still on the Transcript, and is still shown — as
 //! the JSON it is.
 //!
-//! **Four backends, and the line says which.** Claude Code writes a line per
+//! **Five backends, and the line says which.** Claude Code writes a line per
 //! thing said; codex writes a rollout, whose lines are a timestamp, an ordinal
 //! and a `type` around a payload; grok writes the session updates its own
 //! protocol is made of, keyed on `sessionUpdate` and carrying no `type` at all;
-//! and an OpenCode line is one record out of the store opencode keeps of its
-//! session, keyed on the `kind` opencode filed that record under. Nothing has
-//! to be told which is which: the keys are disjoint, so a line falls to the
-//! reader that knows its own kind and to the fold below all four where none
-//! does. The same lines are rendered in three places and none of them carries
+//! an OpenCode line is one record out of the store opencode keeps of its
+//! session, keyed on the `kind` opencode filed that record under; and the
+//! Antigravity CLI writes a line per step of its conversation, typed in capitals
+//! of its own — see [`stepped`]. Nothing has to be told which is which: the keys
+//! and their spellings are disjoint, so a line falls to the reader that knows
+//! its own kind and to the fold below all five where none does. The same lines are rendered in three places and none of them carries
 //! the agent type, which is what makes reading it off the line the only answer
 //! that works everywhere.
 //!
@@ -368,6 +369,17 @@ const ROLLOUT: &[&str] = &[
     "world_state",
 ];
 
+/// And the same for the Antigravity CLI's steps: the kinds it writes that are
+/// not the conversation — the notices agy puts to the model in the system's
+/// voice, such as the one saying its background tasks stopped when a resumed
+/// conversation's server restarted.
+///
+/// A closed list and a fall-back past it: agy 1.4.12 names dozens of step types
+/// in its binary and a session driven the way Verkstead drives one was seen to
+/// write four, so every other one folds away under its own name until it is
+/// met (ADR 0006).
+const AGY: &[&str] = &["SYSTEM_MESSAGE"];
+
 /// And the same for grok's session updates: the kinds it writes that are not
 /// the conversation it kept.
 ///
@@ -447,10 +459,13 @@ const OPENCODE_PART: &[&str] = &[
 /// here has heard of still gets a line out of this.
 const ABOUT: &[&str] = &[
     "description",
+    "toolSummary",
     "command",
+    "CommandLine",
     "file_path",
     "filePath",
     "path",
+    "Path",
     "pattern",
     "prompt",
     "query",
@@ -731,7 +746,12 @@ fn read(line: &str, into: &mut Reading) {
         Some("assistant") => said(&entry, into),
         Some("user") => put(&entry, into),
         Some(EVENT_MSG) => drawn(&entry, into),
-        Some(kind) if BOOKKEEPING.contains(&kind) || ROLLOUT.contains(&kind) => {
+        Some(kind @ (AGY_USER_INPUT | AGY_PLANNER_RESPONSE | AGY_GENERIC)) => {
+            stepped(kind, &entry, into)
+        }
+        Some(kind)
+            if BOOKKEEPING.contains(&kind) || ROLLOUT.contains(&kind) || AGY.contains(&kind) =>
+        {
             into.keep(kind.to_owned(), raw(&entry, reads))
         }
         // And a whole line of a kind nobody here has heard of, the same way:
@@ -1615,6 +1635,87 @@ const IGNORED: &str = "ignored";
 /// that ended badly.
 const OPENCODE_COMPLETED: &str = "completed";
 const OPENCODE_ERROR: &str = "error";
+
+/// One step of an Antigravity CLI conversation: a turn put to it, what the
+/// model said and called, or what a tool it called gave back.
+///
+/// **A step is one line, written when it finishes**, so a line is never part of
+/// a turn still growing — agy 1.4.12 appends each as its status becomes
+/// `DONE`. A response carries its thinking, its words and its calls side by
+/// side under three keys, drawn in that order, which is the order they were
+/// made in.
+///
+/// **A call and its answer carry nothing that names the other.** agy's answer
+/// is the next step after the call, by `step_index`, and pairing them would
+/// mean looking back across lines, which no reading here does — so each stands
+/// on its own, still a call and still an answer.
+fn stepped(kind: &str, entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+
+    match kind {
+        AGY_USER_INPUT => {
+            let put = entry["content"].as_str().unwrap_or_default();
+
+            if let Some(html) = rendered(requested(put), reads) {
+                into.take(Turn::Put(Put { id: UNPLACED, html }));
+            }
+        }
+
+        AGY_PLANNER_RESPONSE => {
+            if let Some(Prose { html, .. }) = prose(entry, "thinking", reads) {
+                into.take(Turn::Reasoning(Reasoning { id: UNPLACED, html }));
+            }
+
+            if let Some(prose) = prose(entry, "content", reads) {
+                into.take(Turn::Prose(prose));
+            }
+
+            for call in entry["tool_calls"].as_array().into_iter().flatten() {
+                let args = &call["args"];
+
+                into.take(Turn::ToolUse(ToolUse {
+                    id: UNPLACED,
+                    name: text(call["name"].as_str().unwrap_or_default(), reads),
+                    call: String::new(),
+                    about: match reads {
+                        Reads::Drawing => about(args),
+                        _ => String::new(),
+                    },
+                    input: raw(args, reads),
+                }));
+            }
+        }
+
+        // What a tool gave back, as agy wrote it out for the model: when it ran,
+        // how it ended, and its output. Whether it failed is in those words and
+        // in no key, so it is not read out of them.
+        _ => into.take(Turn::ToolResult(ToolResult {
+            id: UNPLACED,
+            call: String::new(),
+            failed: false,
+            text: text(entry["content"].as_str().unwrap_or_default(), reads),
+        })),
+    }
+}
+
+/// What the human put, out of the turn agy wrote for the model: the request
+/// inside its `<USER_REQUEST>` tags, without the local time and the settings
+/// changes agy wraps around it. The whole turn where there are no such tags.
+fn requested(put: &str) -> &str {
+    put.split_once(USER_REQUEST_OPENS)
+        .and_then(|(_, rest)| rest.split_once(USER_REQUEST_CLOSES))
+        .map(|(request, _)| request)
+        .unwrap_or(put)
+}
+
+/// What the Antigravity CLI types its steps, and the tags it wraps the human's
+/// words in. Somebody else's spellings, read off agy 1.4.12 and named for the
+/// reason [`SESSION_META`] is.
+const AGY_USER_INPUT: &str = "USER_INPUT";
+const AGY_PLANNER_RESPONSE: &str = "PLANNER_RESPONSE";
+const AGY_GENERIC: &str = "GENERIC";
+const USER_REQUEST_OPENS: &str = "<USER_REQUEST>";
+const USER_REQUEST_CLOSES: &str = "</USER_REQUEST>";
 
 /// Whatever this is, shown as the JSON it is.
 fn unread(value: &Value, reads: Reads) -> Turn {
@@ -3154,6 +3255,86 @@ mod tests {
             matches!(&view.turns[3], Turn::Prose(prose) if prose.html.contains("<em>record</em>")),
             "{:?}",
             view.turns
+        );
+    }
+
+    /// An Antigravity CLI conversation as agy 1.4.12 wrote it, a line per step:
+    /// a turn put to it wrapped in agy's own tags, a response that called a
+    /// tool, what the tool gave back, a notice in the system's voice, and a
+    /// response that thought and then spoke.
+    const STEPS: &[&str] = &[
+        r#"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-11-01T21:13:51Z","content":"<USER_REQUEST>\nRun **ls**, then reply.\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-11-02T08:13:51+11:00.\n</ADDITIONAL_METADATA>"}"#,
+        r#"{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-01T21:13:51Z","input_tokens":6797,"cache_read_tokens":0,"output_tokens":87,"tool_calls":[{"name":"run_command","args":{"CommandLine":"ls","WaitMsBeforeAsync":5000,"toolSummary":"Run ls command"}}]}"#,
+        r#"{"step_index":2,"source":"MODEL","type":"GENERIC","status":"DONE","created_at":"2026-11-01T21:13:54Z","content":"Command exited with code 0.\n\nCommand output:\na.txt\r\n"}"#,
+        r#"{"step_index":3,"source":"SYSTEM","type":"SYSTEM_MESSAGE","status":"DONE","created_at":"2026-11-01T21:15:47Z","content":"<SYSTEM_MESSAGE>[Notice] All your subagents and background tasks have been stopped.</SYSTEM_MESSAGE>"}"#,
+        r#"{"step_index":4,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-01T21:13:58Z","input_tokens":7150,"cache_read_tokens":0,"output_tokens":12,"thinking":"One file is there.\n\n","content":"There is *one* file."}"#,
+    ];
+
+    /// The conversation agy kept: the human's words out of their tags, the call
+    /// and what it gave back, and the thinking before the words.
+    #[test]
+    fn a_real_agy_conversation_draws_as_the_conversation_it_records() {
+        let view = transcript_view(&lines(STEPS));
+
+        assert_eq!(
+            view.turns,
+            vec![
+                Turn::Put(Put {
+                    id: 1,
+                    html: "<p>Run <strong>ls</strong>, then reply.</p>\n".to_owned()
+                }),
+                Turn::ToolUse(ToolUse {
+                    id: 2,
+                    name: "run_command".to_owned(),
+                    call: String::new(),
+                    about: "Run ls command".to_owned(),
+                    input: serde_json::to_string_pretty(&serde_json::json!({
+                        "CommandLine": "ls",
+                        "WaitMsBeforeAsync": 5000,
+                        "toolSummary": "Run ls command",
+                    }))
+                    .unwrap(),
+                }),
+                Turn::ToolResult(ToolResult {
+                    id: 3,
+                    call: String::new(),
+                    failed: false,
+                    text: "Command exited with code 0.\n\nCommand output:\na.txt\r\n".to_owned(),
+                }),
+                Turn::Reasoning(Reasoning {
+                    id: 4,
+                    html: "<p>One file is there.</p>\n".to_owned()
+                }),
+                Turn::Prose(Prose {
+                    id: 5,
+                    html: "<p>There is <em>one</em> file.</p>\n".to_owned()
+                }),
+            ]
+        );
+        assert_eq!(
+            view.bookkeeping,
+            vec![Bookkeeping {
+                id: 1,
+                kind: "SYSTEM_MESSAGE".to_owned(),
+                line: pretty(STEPS[3]),
+            }]
+        );
+    }
+
+    /// The row's count and quote are the pane's reading of agy's steps too.
+    #[test]
+    fn an_agy_rows_count_and_quote_are_the_reading_the_pane_draws() {
+        assert_eq!(turns(&lines(STEPS)), 5);
+        assert_eq!(statements(&lines(STEPS)), ["There is *one* file."]);
+    }
+
+    /// A turn agy put with none of its tags around it is drawn whole.
+    #[test]
+    fn an_agy_turn_without_its_tags_is_drawn_whole() {
+        assert_eq!(requested("Just the words."), "Just the words.");
+        assert_eq!(
+            requested("<USER_REQUEST>\nThese.\n</USER_REQUEST>\nNot these."),
+            "\nThese.\n"
         );
     }
 }

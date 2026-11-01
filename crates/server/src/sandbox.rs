@@ -3257,6 +3257,13 @@ impl Home {
             .join(OPENCODE_DATA_INSIDE_HOME)
             .join(OPENCODE_DB_FILE)
     }
+
+    /// And the root's own `antigravity-cli/` on the host, which is where an
+    /// Antigravity CLI session's conversations are written when its Profile
+    /// shares no memory.
+    pub(crate) fn agy_store(&self) -> PathBuf {
+        self.built.join(AGY_INSIDE_HOME).join("antigravity-cli")
+    }
 }
 
 /// The Verkstead executable a session is given, which is the one serving it.

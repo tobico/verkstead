@@ -836,10 +836,10 @@ struct Line {
     /// is on the end of it.
     ///
     /// `None` where Verkstead does not carry a conversation on from a session of
-    /// this backend, which is now no backend at all: all four have a resume, and
+    /// this backend, which is now no backend at all: all five have a resume, and
     /// what separated them was never that but whether Verkstead knew the id to
     /// resume by and whether their store had to be put right first. It stays an
-    /// `Option` because a fifth backend lands here before either of those is
+    /// `Option` because a sixth backend lands here before either of those is
     /// answered for it, and until they are a launch under it opens a session of
     /// its own, which is Verkstead's own Resume and nothing lost.
     resume: Option<Resume>,
@@ -1058,10 +1058,13 @@ enum Named {
 /// the workspace. It takes no session id at launch, so its conversation is
 /// found rather than named. Read off agy 1.4.12's own help.
 ///
-/// **And no resume yet.** agy's is `--conversation <id>`, and the id is the one
-/// its summaries database gives the conversation — which until it is read, a
-/// launch continuing a conversation opens one of its own, Verkstead's own
-/// Resume standing in.
+/// **Its resume is `--conversation <id>`**, written where the session id would
+/// have gone, after the Brief — which agy takes alongside it as the next turn
+/// of the conversation it picks up (checked against agy 1.4.12, which appended
+/// that turn to the same conversation's transcript). The id is the one its
+/// summaries index gave the conversation, put on the record as the session was
+/// followed — see [`crate::transcript`] — and the record is proved to be here
+/// before the line is built, see [`crate::transcript::carried`].
 fn line(agent_type: store::AgentType, worktree: Option<&Path>, companions: &[PathBuf]) -> Line {
     match agent_type {
         store::AgentType::Claude => Line {
@@ -1147,7 +1150,7 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>, companions: &[Pat
                 model: "--model",
                 prompt: Some("--prompt-interactive"),
                 names_the_session: false,
-                resume: None,
+                resume: Some(Resume::Flag("--conversation")),
                 tail,
             }
         }
@@ -3801,7 +3804,7 @@ struct Continuing {
 ///   Conversation whose Profile was changed under it has a log no other backend
 ///   could read.
 /// - **That harness has a resume line at all** — see [`Line::resume`], which is
-///   now every one of the four, and is still asked because a fifth backend lands
+///   now every one of the five, and is still asked because a sixth backend lands
 ///   without one.
 /// - **The Profile shares its account's memory.** A session under one that does
 ///   not gets a store of its own and empty, bound here or run from a copy — so
@@ -5502,25 +5505,30 @@ mod tests {
         );
     }
 
-    /// And a launch continuing an agy conversation opens one of its own for
-    /// now: there is no resume on agy's line until its conversation's id is
-    /// read, so the Brief is there and no `--conversation` is.
+    /// And a launch continuing an agy conversation says `--conversation` and
+    /// the id agy gave it, after the Brief, which agy runs as the next turn of
+    /// that conversation.
     #[test]
-    fn an_agy_session_has_no_resume_yet() {
+    fn an_agy_session_continues_by_its_conversation() {
         let state = tempfile::tempdir().unwrap();
         let argv = agents(vec!["agy".to_owned()], state.path()).resumed(
             &agy_pairing(),
             "# Rate limiting\n",
-            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            Some("f3bb0089-ec9c-4257-a7b9-41a29ba18dae"),
             worktree(),
         );
 
-        assert!(argv.contains(&"--prompt-interactive".to_owned()));
-        assert!(!argv.contains(&"--conversation".to_owned()));
-        assert!(
-            line(store::AgentType::Agy, worktree(), &[])
-                .resume
-                .is_none()
+        assert_eq!(
+            argv[..7],
+            [
+                "agy",
+                "--model",
+                "gemini-pro",
+                "--prompt-interactive",
+                "# Rate limiting\n",
+                "--conversation",
+                "f3bb0089-ec9c-4257-a7b9-41a29ba18dae",
+            ]
         );
     }
 

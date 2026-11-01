@@ -82,17 +82,29 @@ a section of its own, measured against agy 1.4.12 on this machine signed out:
   agy **blocks**, with a *Running the ask* of its own. The signature is the
   at-work label `esc to cancel`, codex's reading; and a signed-in account's
   first run, a colour picker and the terms, is marked over in every root.
-- **Its own record is protobuf, so the Transcript reads a different file.** The
-  trajectories under `conversations/` have no public schema; what agy also
-  writes is `<worktree>/.gemini/antigravity-cli/transcript.jsonl`, a file of
-  lines in the Worktree, and that is what is followed — ADR-0006 unchanged, the
-  Claude follower's mechanism. The session is found through the summaries
-  database by Worktree and start time, Codex's rule against a third store, and
-  its id goes on the record for the resume. Where the file turns out not to be
-  written the session is Capture-only, said in the log. Because it is in the
-  Worktree, `.gemini/` is written into the Worktree's `info/exclude` at launch,
-  so neither the Diff nor a commit picks it up. Antigravity's own artifacts
-  under `brain/` — its task list, plan and walkthrough — are left for later.
+- **Its own record is not text, so the Transcript reads a different file.**
+  The record `--conversation` resumes is a database per conversation under
+  `conversations/`, with no public schema. What agy also writes is a
+  transcript per conversation, a line per step appended as the step finishes,
+  and that is what is followed — ADR-0006 unchanged, the Claude follower's
+  mechanism, and a fifth kind of line beside the four. *Measured signed in:* no
+  transcript is written into the Worktree, hook or none; it is
+  `brain/<id>/.system_generated/logs/transcript_full.jsonl` in agy's own
+  directory, beside a compact `transcript.jsonl` that truncates large content
+  and writes tool arguments as strings of themselves, so the full one is read.
+  The session is found through the summaries database — the newest row naming
+  this Worktree written since the launch, sub-agents left out — Codex's rule
+  against a third store, and the id it answers goes on the record at once; the
+  log is then the lookup that id names. Where the log is never written the
+  session is Capture-only, said in the log. The resume is `--conversation <id>`
+  after the Brief, which agy runs as the next turn of that conversation; the
+  memory sync carries the conversation's database and its brain directory by
+  that id, and not the summaries database, which is the human's index of every
+  conversation — agy 1.4.12 resumed a conversation it had no row for and wrote
+  the row itself. `.gemini/` is still written into the Worktree's
+  `info/exclude` at launch, so neither the Diff nor a commit picks up what agy
+  makes there. Antigravity's own artifacts under `brain/` — its task list,
+  plan and walkthrough — are left for later.
 - **Defaults and the rest.** Pro for grilling, Flash for implementation and
   review, the ids read off `agy models` — which, to an account on Google's
   starter quota, lists no Pro: Gemini 3.8 Flash at `high` grills and at

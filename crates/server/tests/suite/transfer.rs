@@ -116,6 +116,14 @@ const OPENCODE_MODEL: &str = "opencode/big-pickle";
 /// inside that the name the sandbox pinned.
 const OPENCODE_STORE: &str = ".local/share/opencode/opencode.db";
 
+/// The model the Antigravity CLI Profile lists, which is what its sessions are
+/// launched on.
+const AGY_MODEL: &str = "gemini-3.8-flash-high";
+
+/// And agy's own directory inside the `~/.gemini` an Antigravity CLI account is,
+/// where its conversations and the index of them are kept.
+const AGY_STORE: &str = ".gemini/antigravity-cli";
+
 /// What every repository in this suite is called. Neither end has an origin, so
 /// the match is by name — which is the ordinary case for two clones nobody has
 /// pushed anywhere.
@@ -732,6 +740,53 @@ impl Verkstead {
             .join("accounts")
             .join(profile_id)
             .join(OPENCODE_STORE)
+    }
+
+    /// And an **Antigravity CLI** account of this device's own, saved over the
+    /// `~/.gemini` agy keeps its own directory in, signed in by the file agy
+    /// falls to where its keyring is out of reach.
+    ///
+    /// Here because agy is the harness whose conversation is found in an index
+    /// and whose record is a database per conversation, which is a thing only an
+    /// agy Profile can be tested on.
+    async fn agy_account(&self) -> String {
+        let home = self.elsewhere.path().join(ACCOUNT).join(".gemini");
+
+        std::fs::create_dir_all(home.join("antigravity-cli")).unwrap();
+        std::fs::write(
+            home.join("antigravity-cli/antigravity-oauth-token"),
+            "{\"access_token\":\"the-desk\"}",
+        )
+        .unwrap();
+
+        let said = press(
+            &self.workbench,
+            PROFILES,
+            Some(
+                &serde_json::json!({
+                    "name": ACCOUNT,
+                    "account": { "agent_type": "Agy", "home": home },
+                    "models": [AGY_MODEL],
+                    "memory": true,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "saving the Antigravity CLI account");
+
+        self.profile_called(ACCOUNT).await.id
+    }
+
+    /// And where this device's own agy account keeps its index of
+    /// conversations, which is what says which conversation a session is having.
+    fn agy_index_at_home(&self) -> PathBuf {
+        self.elsewhere
+            .path()
+            .join(ACCOUNT)
+            .join(AGY_STORE)
+            .join("conversation_summaries.db")
     }
 
     /// The row of this device's Profiles with that name, once there is one —
@@ -1883,6 +1938,110 @@ fi
     )
 }
 
+/// The conversation id **agy chooses for itself**, which is the difficulty this
+/// harness shares with Codex and OpenCode: Verkstead names no agy conversation,
+/// so the only places this string exists before the session runs are the stub
+/// writing its record and the index the test writes beside it.
+const AGY_CHOSE: &str = "f3bb0089-ec9c-4257-a7b9-41a29ba18dae";
+
+/// A step of agy's transcript as agy 1.4.12 writes one: the question the
+/// session on A is on, and the step only a session that really carried on
+/// could have added.
+const AGY_ASKED: &str = r#"{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","content":"Where should the counter live?"}"#;
+const AGY_CARRYING_ON: &str = r#"{"step_index":2,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","content":"So, back to the counter."}"#;
+
+/// And what stands where **agy** goes, on either machine: one script for both of
+/// the launches a device makes, because whether a launch opens a conversation or
+/// carries one on is what the line says.
+///
+/// **Its record is written where agy writes one and named what agy names it**: a
+/// database per conversation under `conversations/`, and the transcript under the
+/// conversation's own directory of `brain/`, both called after the id. The
+/// database is a stand-in file — there is no `sqlite3` in the sandbox, and what
+/// Verkstead asks of it is only that it is there. **The index naming the
+/// conversation is written from outside by the test**, for the same reason.
+///
+/// **A launch it was told to resume** says every word of its own line, one per
+/// line, and appends to the transcript **of the id it was handed** — so an append
+/// is proof both that the record crossed and that the line named the right
+/// conversation. **Any other launch** writes the question it is on and waits at
+/// the gate.
+///
+/// `opening` is the word the second of those prints, different on each machine
+/// for [`drafted_running`]'s reason.
+fn agy_that_carries_on_at(gate: &Path, opening: &str) -> String {
+    format!(
+        r#"
+conversation=
+take=
+for word in "$@"; do
+  if [ -n "$take" ]; then conversation=$word; take=; fi
+  if [ "$word" = "--conversation" ]; then take=yes; fi
+done
+
+store="$HOME/.gemini/antigravity-cli"
+
+if [ -n "$conversation" ]; then
+  printf 'carried on\r\n'
+  for word in "$@"; do printf 'arg=%s\r\n' "$word"; done
+  log="$store/brain/$conversation/.system_generated/logs/transcript_full.jsonl"
+  if [ -f "$log" ]; then printf '%s\n' '{carrying}' >> "$log"; fi
+  exit 0
+fi
+
+printf '{opening}\r\n'
+printf 'prompt=%s\r\n' "$3"
+
+mkdir -p "$store/conversations" "$store/brain/{chose}/.system_generated/logs"
+printf 'a database' > "$store/conversations/{chose}.db"
+printf '%s\n' '{asked}' > "$store/brain/{chose}/.system_generated/logs/transcript_full.jsonl"
+
+{waiting}
+"#,
+        chose = AGY_CHOSE,
+        carrying = AGY_CARRYING_ON,
+        asked = AGY_ASKED,
+        waiting = waits_at(gate),
+    )
+}
+
+/// The row agy's index keeps of a conversation, written into the index at
+/// `database` the way agy 1.4.12 writes one — and holding only the columns
+/// Verkstead reads.
+async fn agy_indexed(database: &Path, conversation: &str, workspace: &Path) {
+    let writing = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(database)
+            .create_if_missing(true),
+    )
+    .await
+    .unwrap();
+
+    sqlx::Executor::execute(
+        &writing,
+        "CREATE TABLE IF NOT EXISTS conversation_summaries (
+             conversation_id        TEXT PRIMARY KEY,
+             last_modified_time     DATETIME NOT NULL,
+             workspace_uris         TEXT NOT NULL,
+             parent_conversation_id TEXT NOT NULL DEFAULT ''
+         );",
+    )
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO conversation_summaries (conversation_id, last_modified_time, workspace_uris)
+         VALUES (?, strftime('%Y-%m-%d %H:%M:%f+00:00', 'now'), ?)",
+    )
+    .bind(conversation)
+    .bind(serde_json::json!([format!("file://{}", workspace.display())]).to_string())
+    .execute(&writing)
+    .await
+    .unwrap();
+
+    writing.close().await;
+}
+
 /// Set `core.autocrlf` on a repository, the way the machine it is on would have
 /// it — and respell whatever is checked out of it so the trees agree with the
 /// switch.
@@ -2271,6 +2430,40 @@ async fn ready_to_carry_opencode_on(
     a.grills(conversation).await;
 
     (a, b, holding, conversation, mirror)
+}
+
+/// And the same again on the **Antigravity CLI**, whose conversation is named by
+/// an index the test writes: both machines run the one script that opens a
+/// conversation or carries one on as its line says, each waiting at a gate of
+/// its own.
+///
+/// Every test about carrying an agy conversation on starts here.
+async fn ready_to_carry_agy_on(
+    here: &Path,
+    there: &Path,
+    spill: &Path,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let a = Verkstead::running(A, &agy_that_carries_on_at(here, OPENED_HERE), spill).await;
+    let b = Verkstead::running(B, &agy_that_carries_on_at(there, RE_PRIMED_THERE), spill).await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let theirs = a.repo().await;
+    b.cloned_from(&theirs).await;
+
+    let account = a.agy_account().await;
+
+    let holding = b.holding();
+    b.profile_called(ACCOUNT).await;
+
+    let conversation = a.drafting_under_on(&account, AGY_MODEL).await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
 }
 
 /// The same with each machine's session saying what this test needs of it, which
@@ -7473,6 +7666,141 @@ async fn an_opencode_store_with_no_row_for_the_session_falls_through_to_verkstea
         "and the store that landed here is as it arrived: a resume that found no \
          row of its own leaves somebody else's alone rather than writing a guess \
          over it",
+    );
+}
+
+/// **An Antigravity CLI grilling transferred mid-interview carries on in the
+/// conversation agy's index named** — found rather than named, as Codex's and
+/// opencode's are, and resumed by `--conversation`.
+///
+/// agy takes no conversation id at launch, so the session's conversation is the
+/// row of agy's index naming this Worktree and written since the launch, and
+/// the id of that row is what goes on the record beside the session. Its record
+/// crosses with the memory sync by that id — the conversation's database and its
+/// brain directory, where the transcript is — and a device that never ran the
+/// session resumes it from there.
+///
+/// **Four things are read.** A's Transcript is the transcript agy wrote under the
+/// conversation's brain directory. A's record calls the session what the index
+/// called it. B's session was launched with `--conversation` and that id, after
+/// the note. And B's Transcript holds what B's session added and not what A's
+/// already had, which is the transcript having crossed and been followed on from
+/// where it stood.
+#[tokio::test]
+async fn an_agy_grilling_transferred_mid_interview_carries_on_in_the_conversation_its_index_named()
+{
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation) = ready_to_carry_agy_on(&here, &there, spill.path()).await;
+
+    // A turn genuinely in flight, and then the index agy would have written as
+    // it started the conversation — from outside the sandbox, as opencode's is.
+    a.printed(conversation, OPENED_HERE).await;
+
+    let worktree = a.worktree(conversation).await;
+    agy_indexed(&a.agy_index_at_home(), AGY_CHOSE, &worktree).await;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await,
+        vec![AGY_ASKED.to_owned()],
+        "the interview is on A's Transcript, read out of the transcript agy wrote \
+         under the brain directory of the conversation its index named",
+    );
+
+    assert_eq!(
+        session_names(&a.pool)
+            .await
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<String>>(),
+        vec![AGY_CHOSE.to_owned()],
+        "and A's record calls that session what agy's index calls its \
+         conversation, which is the only name it has",
+    );
+
+    std::fs::write(&here, "go").unwrap();
+
+    let there_id = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there_id).await;
+
+    let said = b.latest_capture_saying(there_id, "carried on").await;
+
+    assert!(
+        said.contains("arg=--conversation") && said.contains(&format!("arg={AGY_CHOSE}")),
+        "B's session was told to continue the conversation the index named, by the \
+         flag agy takes: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("arg={AGY_MODEL}"))
+            && said.contains("arg=--dangerously-skip-permissions"),
+        "and the rest of the ordinary line came across onto it: {said:?}",
+    );
+    assert!(
+        !said.contains("Rate limiting"),
+        "and the prompt is the note alone: the Brief is already in the \
+         conversation it carries on: {said:?}",
+    );
+
+    assert_eq!(
+        b.transcript_of(there_id, 1).await,
+        vec![AGY_CARRYING_ON.to_owned()],
+        "and the continued session's Transcript holds what it added and not what \
+         the session on A had already written — the transcript having crossed and \
+         been followed on from where it stood",
+    );
+}
+
+/// **And a conversation agy's index never named leaves Verkstead's own Resume
+/// doing what it does today**, with the Notice saying why.
+///
+/// The index here names some other Worktree, which is a session of another
+/// Conversation's, so nothing was put on the record but the name the Capture
+/// opened under and no conversation answers to it.
+#[tokio::test]
+async fn an_agy_conversation_its_index_never_named_falls_through_to_verksteads_resume() {
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation) = ready_to_carry_agy_on(&here, &there, spill.path()).await;
+
+    a.printed(conversation, OPENED_HERE).await;
+
+    agy_indexed(
+        &a.agy_index_at_home(),
+        AGY_CHOSE,
+        Path::new("/srv/worktrees/tables"),
+    )
+    .await;
+
+    std::fs::write(&here, "go").unwrap();
+
+    let there_id = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there_id).await;
+
+    let re_primed = b.latest_capture_saying(there_id, RE_PRIMED_THERE).await;
+
+    assert!(
+        !re_primed.contains("arg=--conversation"),
+        "no conversation of agy's was ever this session's, so there is nothing to \
+         resume and Verkstead's own Resume stands: {re_primed:?}",
+    );
+    assert!(
+        re_primed.contains("Rate limiting"),
+        "which means the session was primed off the record, Brief and all: \
+         {re_primed:?}",
+    );
+
+    let said = b
+        .notice_saying(there_id, "The memory sync carried none of it")
+        .await;
+
+    assert!(
+        said.contains("agy") && said.contains("own resume"),
+        "the Notice names the harness whose record could not be found, and what \
+         was started instead: {said:?}",
     );
 }
 

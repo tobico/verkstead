@@ -6,7 +6,7 @@
 //! working out where the backend would have put it means reimplementing a
 //! private algorithm belonging to somebody else's program (ADR 0006).
 //!
-//! **Three of the four backends keep a file of lines, and the fourth keeps a
+//! **Four of the five backends keep a file of lines, and one keeps a
 //! database** — see [`Following`]. What that changes is the bookkeeping and
 //! nothing else: a file is followed by remembering how far into it the reading
 //! got, a store by remembering the last record taken, and both take what has
@@ -26,7 +26,10 @@
 //! walked rather than the encoding reproduced. opencode takes none either and
 //! keeps no file: the session to follow is the row of its account's database
 //! that records this Worktree and was created after this session was launched,
-//! which is Codex's rule against a store of another shape.
+//! which is Codex's rule against a store of another shape. And the Antigravity
+//! CLI takes none and keeps both: an index of its conversations, asked as
+//! opencode's store is, and a file of lines per conversation named for the id
+//! the index answers — see [`Brain`] and [`crate::summaries`].
 //!
 //! **And what the search finds is what gives the two unnamed backends their
 //! names.** Codex and opencode each choose their own, so the Capture is opened
@@ -147,7 +150,7 @@ pub(crate) struct Tail {
 
 /// How a session's own record of itself is found.
 ///
-/// Four backends, four answers, and the difference between them is not an
+/// Five backends, five answers, and the difference between them is not an
 /// implementation detail. Claude takes the name Verkstead gave the session and
 /// writes a file called that, so its log is a lookup. Codex takes no session id
 /// at launch at all — so nothing Verkstead knows before the session starts
@@ -158,7 +161,9 @@ pub(crate) struct Tail {
 /// what that directory sits in is grok's own encoding of the working directory.
 /// opencode takes none either, and keeps no log at all: it writes its sessions
 /// into a database, and the one to follow is found in it the way a rollout is —
-/// see [`crate::records`].
+/// see [`crate::records`]. The Antigravity CLI takes none and finds its
+/// conversation as opencode's is found, in an index, and then keeps a log
+/// named for it as Claude does — see [`Brain`].
 enum Search {
     /// Claude's: the Profile's directory of projects, and the name Verkstead
     /// gave the session, which is what the file is called.
@@ -186,6 +191,11 @@ enum Search {
         worktree: PathBuf,
         launched: SystemTime,
     },
+
+    /// The Antigravity CLI's: the conversation is found as opencode's session
+    /// is, by its Worktree and its moment in an index agy keeps, and its log is
+    /// then a lookup by the id the index answered with — see [`Brain`].
+    Brain(Brain),
 
     /// And nowhere at all, for a session there is nothing to look for. Nothing
     /// is looked for and the Capture is the whole record, which is ADR-0006's
@@ -342,10 +352,20 @@ impl Tail {
             // guessed at.
             (store::Account::OpenCode { .. }, None) => Search::Nowhere,
 
-            // And the Antigravity CLI's record is not followed yet: what agy
-            // writes of a session as text is read once it has been seen, and
-            // until then the session is its Capture alone.
-            (store::Account::Agy { .. }, _) => Search::Nowhere,
+            // And where agy keeps its conversations: under the one directory of
+            // the account it writes in where the Profile shares its memory, and
+            // under the session's own root on the host where it does not, for
+            // Codex's reason. Found by Worktree and moment, as opencode's are.
+            (store::Account::Agy { home: account }, Some(worktree)) => Search::Brain(Brain {
+                store: agy_store(account, profile.memory, home),
+                worktree: worktree.to_owned(),
+                launched,
+                conversation: None,
+                unwritten: 0,
+            }),
+
+            // An agy session with no Worktree is the Codex case word for word.
+            (store::Account::Agy { .. }, None) => Search::Nowhere,
         };
 
         Tail {
@@ -376,7 +396,7 @@ impl Tail {
     /// session writes a row only where there is a new one to write.
     pub(crate) async fn poll(&mut self, pool: &SqlitePool, nudges: &Nudges, event_id: i64) -> bool {
         if matches!(self.following, Following::Looking) {
-            self.following = self.find().await;
+            self.following = self.find(pool, event_id).await;
 
             // And the moment a rollout is found is the moment its session has a
             // name: codex takes none at launch, so the log is found rather than
@@ -424,8 +444,8 @@ impl Tail {
     /// for, because what is looked for is inside the database rather than
     /// beside it, and the reader does its own finding on every poll until it
     /// finds its session — see [`crate::records`].
-    async fn find(&self) -> Following {
-        match &self.search {
+    async fn find(&mut self, pool: &SqlitePool, event_id: i64) -> Following {
+        match &mut self.search {
             Search::Nowhere => Following::Looking,
             Search::Named { projects, session } => following(named(projects, session).await),
             Search::Rollout {
@@ -434,6 +454,7 @@ impl Tail {
                 launched,
             } => following(rollout(sessions, worktree, *launched).await),
             Search::Updates { sessions, session } => following(updates(sessions, session).await),
+            Search::Brain(brain) => following(brain.looked(pool, event_id).await),
             Search::Records {
                 database,
                 worktree,
@@ -722,9 +743,20 @@ pub(crate) async fn carried(
             })
         }
 
-        // Nothing of agy's is carried on yet, so there is nothing to resume:
-        // Verkstead's own Resume stands.
-        store::Account::Agy { .. } => None,
+        // agy resumes from the conversation's own database, and the
+        // Transcript carries on in the log under its brain directory — both
+        // named for the id, and both crossing with the memory sync by it. Each
+        // is proved to be here: a record without its log would be a Transcript
+        // that began again, and a log without its record a resume agy refuses.
+        store::Account::Agy { home: account } => {
+            let store = agy_store(account, profile.memory, home);
+
+            if !is_file(&store.join(AGY_CONVERSATIONS).join(format!("{session}.db"))).await {
+                return None;
+            }
+
+            as_far_as_it_got(agy_log(&store, session)).await
+        }
     }
 }
 
@@ -865,7 +897,7 @@ async fn holding(sessions: &Path, session: &str) -> Option<PathBuf> {
 /// what keeps [`stands_for`] a reading: a `%` and two hexadecimal digits are the
 /// byte they spell, every other byte is itself, and a `%` with anything else after
 /// it is a name this cannot read.
-fn decoded(name: &str) -> Option<String> {
+pub(crate) fn decoded(name: &str) -> Option<String> {
     let spelt = name.as_bytes();
     let mut read = Vec::with_capacity(spelt.len());
     let mut at = 0;
@@ -935,6 +967,122 @@ fn opencode_database(account: &Path, memory: bool, home: &crate::sandbox::Home) 
         false => home.opencode_database(),
     }
 }
+
+/// And where the Antigravity CLI keeps its conversations for one — the
+/// directory of `~/.gemini` that is agy's own — which is the same two answers
+/// again, for the same reason: see [`claude_projects`].
+fn agy_store(account: &Path, memory: bool, home: &crate::sandbox::Home) -> PathBuf {
+    match memory {
+        true => account.join(AGY_CLI),
+        false => home.agy_store(),
+    }
+}
+
+/// The log agy keeps of the conversation `conversation`, inside its store.
+fn agy_log(store: &Path, conversation: &str) -> PathBuf {
+    store.join(AGY_BRAIN).join(conversation).join(AGY_LOG)
+}
+
+/// An Antigravity CLI session's search: which conversation agy is having, and
+/// then the log of it.
+///
+/// **Two steps, because the two halves are in two places.** agy takes no
+/// conversation id at launch, so the conversation is found in its summaries
+/// index by the Worktree and the moment — see [`crate::summaries`]. That id is
+/// then the whole of where the log is: agy writes each conversation's
+/// transcript under `brain/<id>/`, appended to as each step finishes.
+///
+/// **The id goes on the record the moment it is found**, before the log is,
+/// for the reason Codex's and opencode's do: it is what a device that never ran
+/// this session resumes by, and a conversation can be resumed whether or not
+/// its log was ever written.
+struct Brain {
+    /// agy's own directory inside the account, or the root's on the host.
+    store: PathBuf,
+
+    /// The Worktree the session was launched in, and when — what the index is
+    /// asked by.
+    worktree: PathBuf,
+    launched: SystemTime,
+
+    /// The conversation, once the index has named it.
+    conversation: Option<String>,
+
+    /// How many polls have found the conversation and no log of it — see
+    /// [`UNWRITTEN`].
+    unwritten: u32,
+}
+
+impl Brain {
+    /// The log, where it is there to follow yet.
+    async fn looked(&mut self, pool: &SqlitePool, event_id: i64) -> Option<PathBuf> {
+        let conversation = match &self.conversation {
+            Some(conversation) => conversation.clone(),
+            None => {
+                let found = crate::summaries::conversation(
+                    &self.store.join(AGY_SUMMARIES),
+                    &self.worktree,
+                    self.launched,
+                )
+                .await?;
+
+                if let Err(error) = store::found_as(pool, event_id, &found).await {
+                    tracing::error!(error = ?error, event_id, conversation = found, "writing down which conversation an Antigravity CLI session is having failed, so nothing on another device could carry it on");
+                }
+
+                self.conversation = Some(found.clone());
+                found
+            }
+        };
+
+        let log = agy_log(&self.store, &conversation);
+
+        if is_file(&log).await {
+            return Some(log);
+        }
+
+        // A conversation agy is having and writing no transcript of, which is
+        // a session the Capture alone records. Said once, and looked for still:
+        // a log that turns up late is followed from its first line.
+        self.unwritten += 1;
+
+        if self.unwritten == UNWRITTEN {
+            tracing::info!(
+                event_id,
+                conversation,
+                log = %log.display(),
+                "the Antigravity CLI is writing no transcript of this session's conversation, so \
+                 the session is Capture-only",
+            );
+        }
+
+        None
+    }
+}
+
+/// How many polls a found conversation may go without a log before the session
+/// is said to be Capture-only: half a minute at the cadence it is followed on.
+/// agy 1.4.12 writes the log with the first step, in the same moment as the
+/// index's row, so a log still missing by then is one that is not coming.
+const UNWRITTEN: u32 = 60;
+
+/// agy's own directory inside `~/.gemini`, and the three things of it the
+/// Transcript reads: the index of conversations, the directory of each
+/// conversation's brain, and the database `--conversation` resumes from.
+/// Somebody else's spellings, read off agy 1.4.12, kept in one place.
+const AGY_CLI: &str = "antigravity-cli";
+const AGY_SUMMARIES: &str = "conversation_summaries.db";
+const AGY_BRAIN: &str = "brain";
+const AGY_CONVERSATIONS: &str = "conversations";
+
+/// And the log itself, inside a conversation's brain directory.
+///
+/// **The full transcript rather than the compact one beside it.** agy 1.4.12
+/// writes both, a line per step as the step finishes: `transcript.jsonl`
+/// truncates large content and writes every tool argument as a JSON string of
+/// itself, where `transcript_full.jsonl` holds the step as it was. The record is
+/// the ground truth (ADR 0006), so it is the full one.
+const AGY_LOG: &str = ".system_generated/logs/transcript_full.jsonl";
 
 /// The log Claude Code keeps of a session, which is the file named for the name
 /// Verkstead gave it.
