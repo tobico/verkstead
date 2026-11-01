@@ -255,7 +255,9 @@ const AGY_MCP: &str = "config/mcp_config.json";
 /// directory rules a Worktree's `GEMINI.md` or `AGENTS.md` are, walked up from
 /// where it runs; the binary names `/.gemini/GEMINI.md` and `/.gemini/AGENTS.md`
 /// as the global pair, which is the Antigravity family's own place for a
-/// global rule. One of the two, and the first of them, written alone.
+/// global rule. One of the two, and the first of them, written alone. Proved
+/// on a signed-in agy 1.4.12: a rule written here alone reached the model,
+/// which answered from it without reading a file.
 const AGY_INSTRUCTIONS: &str = "GEMINI.md";
 
 /// The memory agy keeps, inside `~/.gemini`: the record of each conversation,
@@ -283,6 +285,25 @@ const AGY_SUMMARIES_JOINED: [&str; 3] = [
     "antigravity-cli/conversation_summaries.db-wal",
     "antigravity-cli/conversation_summaries.db-shm",
 ];
+
+/// Where agy records that the account has been through its first run, inside
+/// `~/.gemini`, and what a root writes there to say it has.
+///
+/// **A signed-in account's first TUI session parks on two screens** before it
+/// reads anything: a colour-scheme picker, and then the terms of service with
+/// the data-use opt-in under them. Read off agy 1.4.12 freshly signed in: what
+/// getting past them changes is this file, from `false` to `true`, and nothing
+/// else — the choice of colours left at its default writes nothing, and the
+/// opt-in is not written to the account at all. A fresh account given only
+/// this file starts at its composer with the Brief submitted.
+///
+/// Written rather than joined, as the settings beside it are, and written into
+/// every root rather than only a fresh one's: a root is built fresh each time,
+/// and agy keeps the file under `cache/`, so the account's own may be gone
+/// whatever the account has seen. The telemetry the second screen offers is
+/// left where agy's default leaves it, as ADR-0011 has it.
+const AGY_ONBOARDED: &str = "antigravity-cli/cache/onboarding.json";
+const AGY_ONBOARDED_AS: &str = "{\"onboardingComplete\":true}\n";
 
 /// The file agy falls to for its login where its keyring is unreachable,
 /// inside `~/.gemini`.
@@ -664,13 +685,18 @@ impl Root {
     /// The directories inside a root built in the Conversation's own directory
     /// at `built` that are made empty in it as it is built, for what is written
     /// there and joined there to be put in: an Antigravity CLI root's two — see
-    /// [`AGY_CLI`] — and none for any other, whose files are written straight
+    /// [`AGY_CLI`] — with the `cache/` inside the first that holds
+    /// [`AGY_ONBOARDED`], and none for any other, whose files are written straight
     /// into a directory [`Root::built`] already names.
     pub(crate) fn furnished_in(&self, built: &Path) -> Vec<PathBuf> {
         let root = built.join(self.landing());
 
         match self.harness {
-            Harness::Agy => vec![root.join(AGY_CLI), root.join(AGY_CUSTOMISATION)],
+            Harness::Agy => vec![
+                root.join(AGY_CLI),
+                root.join(AGY_CUSTOMISATION),
+                root.join(AGY_ONBOARDED).parent().unwrap().to_owned(),
+            ],
             Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::OpenCode => {
                 Vec::new()
             }
@@ -815,9 +841,15 @@ impl Root {
                     ),
                 );
 
+                let onboarded = (root.join(AGY_ONBOARDED), AGY_ONBOARDED_AS.into());
+
                 return match servers.is_empty() {
-                    true => vec![settings],
-                    false => vec![settings, (root.join(AGY_MCP), agy_servers(servers))],
+                    true => vec![settings, onboarded],
+                    false => vec![
+                        settings,
+                        (root.join(AGY_MCP), agy_servers(servers)),
+                        onboarded,
+                    ],
                 };
             }
         };
@@ -3251,12 +3283,13 @@ mod tests {
             [
                 PathBuf::from("/built/.gemini/antigravity-cli"),
                 PathBuf::from("/built/.gemini/config"),
+                PathBuf::from("/built/.gemini/antigravity-cli/cache"),
             ]
         );
 
         let written = root.written(built, NONE);
 
-        assert_eq!(written.len(), 1, "no servers, no `mcp_config.json`");
+        assert_eq!(written.len(), 2, "no servers, no `mcp_config.json`");
         assert_eq!(
             written[0].0,
             PathBuf::from("/built/.gemini/antigravity-cli/settings.json")
@@ -3307,6 +3340,38 @@ mod tests {
             serde_json::json!({}),
             "and an account with no settings is given an empty object"
         );
+    }
+
+    /// And every Antigravity CLI root says the account's first run is over,
+    /// servers or none, so no session parks on the colour picker and the terms
+    /// a freshly signed-in account is otherwise shown first.
+    #[test]
+    fn an_agy_root_is_written_past_the_first_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let account = dir.path().join(".gemini");
+        let root = Root::agy(&account);
+        let built = Path::new("/built");
+
+        for servers in [
+            NONE,
+            &[AttachedServer::of(
+                "open",
+                "https://mcp.example.com/open",
+                &[],
+            )][..],
+        ] {
+            let written = root.written(built, servers);
+            let (path, bytes) = written.last().unwrap();
+
+            assert_eq!(
+                *path,
+                PathBuf::from("/built/.gemini/antigravity-cli/cache/onboarding.json")
+            );
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(bytes).unwrap(),
+                serde_json::json!({ "onboardingComplete": true }),
+            );
+        }
     }
 
     /// Only a Grok Build root on Linux is given its login as a copy: grok saves

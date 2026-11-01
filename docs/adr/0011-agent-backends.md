@@ -76,6 +76,12 @@ a section of its own, measured against agy 1.4.12 on this machine signed out:
   tool takes a timeout and has a background form, and whether it holds
   `verkstead ask` for hours without a paid turn decides blocking against
   store-and-nudge by the rule above, the Guide tailored to whichever it is.
+  *Measured signed in:* `run_command` turns the ask into a background task
+  after `WaitMsBeforeAsync`, the turn ends, and agy wakes the session with the
+  output when it returns — a hold of over an hour with no model turn spent — so
+  agy **blocks**, with a *Running the ask* of its own. The signature is the
+  at-work label `esc to cancel`, codex's reading; and a signed-in account's
+  first run, a colour picker and the terms, is marked over in every root.
 - **Its own record is protobuf, so the Transcript reads a different file.** The
   trajectories under `conversations/` have no public schema; what agy also
   writes is `<worktree>/.gemini/antigravity-cli/transcript.jsonl`, a file of
@@ -88,7 +94,9 @@ a section of its own, measured against agy 1.4.12 on this machine signed out:
   so neither the Diff nor a commit picks it up. Antigravity's own artifacts
   under `brain/` — its task list, plan and walkthrough — are left for later.
 - **Defaults and the rest.** Pro for grilling, Flash for implementation and
-  review, the ids read off `agy models`. No usage-limit phrase until one is
+  review, the ids read off `agy models` — which, to an account on Google's
+  starter quota, lists no Pro: Gemini 3.8 Flash at `high` grills and at
+  `medium` builds until an account that lists one says otherwise. No usage-limit phrase until one is
   seen. The wizard gets a row and the vendor's installers: one file at
   `~/.local/bin/agy` on Linux and a Mac, `%LOCALAPPDATA%\agy\bin\agy.exe` on
   Windows, self-updating, no versions directory. Full parity on all three

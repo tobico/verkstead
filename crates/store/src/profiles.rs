@@ -101,9 +101,10 @@ impl AgentType {
     /// Set answer the question the same way.
     pub fn channel(self) -> Channel {
         match self {
-            // The Antigravity CLI's is not yet measured, and blocking is what
-            // a session asks on until it is: see ADR-0011's amendment of
-            // 2026-11-01.
+            // The Antigravity CLI blocks for free: agy 1.4.12's shell tool
+            // turns a long command into a background task, ends the turn, and
+            // wakes the session when it returns — an hour's hold measured with
+            // no model turn spent on it.
             Self::Claude | Self::OpenCode | Self::Agy => Channel::Blocking,
             Self::Codex | Self::Grok => Channel::StoreAndNudge,
         }

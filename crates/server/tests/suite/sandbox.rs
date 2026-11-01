@@ -3336,6 +3336,7 @@ async fn an_agy_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
             say cli "$(ls -A "$HOME/.gemini/antigravity-cli" | sort | tr '\n' ' ')"
             say config "$(ls -A "$HOME/.gemini/config" | sort | tr '\n' ' ')"
             say settings "$(tr -d '\n' < "$HOME/.gemini/antigravity-cli/settings.json")"
+            say onboarded "$(tr -d '\n' < "$HOME/.gemini/antigravity-cli/cache/onboarding.json")"
             file "$HOME/.gemini/antigravity-cli/conversations/0123-the-humans.pb" record
             file "$HOME/.gemini/antigravity-cli/brain/0123-the-humans/task.md" brain
             file "$HOME/.gemini/antigravity-cli/conversation_summaries.db" summaries
@@ -3353,9 +3354,10 @@ async fn an_agy_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
     );
     assert_eq!(
         reported["cli"],
-        "brain conversation_summaries.db conversation_summaries.db-shm \
+        "brain cache conversation_summaries.db conversation_summaries.db-shm \
          conversation_summaries.db-wal conversations settings.json ",
-        "the written settings and the memory store, and nothing else of agy's own"
+        "the written settings, the first run marked over and the memory store, \
+         and nothing else of agy's own"
     );
     assert_eq!(
         reported["config"], "",
@@ -3368,6 +3370,11 @@ async fn an_agy_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
             "gcp": { "project": "the-humans-123" },
         }),
         "the provider the account names, and none of how the human works"
+    );
+    assert_eq!(
+        reported["onboarded"], r#"{"onboardingComplete":true}"#,
+        "and the first run marked over, so a freshly signed-in account's session \
+         is not parked on its colour picker and terms"
     );
 
     for write in ["record", "brain", "summaries", "log"] {
@@ -3426,7 +3433,7 @@ async fn an_agy_root_without_memory_has_a_store_of_its_own() {
     );
 
     assert_eq!(
-        reported["cli"], "brain conversations settings.json ",
+        reported["cli"], "brain cache conversations settings.json ",
         "the same root, with no database of the account's in it"
     );
     assert_eq!(

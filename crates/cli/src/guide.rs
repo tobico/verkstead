@@ -43,12 +43,13 @@ const KINDS_BLOCKING: &str = include_str!("../guide/kinds-blocking.md");
 const KINDS_STORE_AND_NUDGE: &str = include_str!("../guide/kinds-store-and-nudge.md");
 
 /// And where running one is, which is the backend's own — one apiece for the
-/// two that block, and one the store-and-nudge backends share because what
+/// three that block, and one the store-and-nudge backends share because what
 /// they share is real: the Set is stored, the turn ends, and `verkstead
 /// answers` is what fetches the Answers when the nudge lands.
 const RUNNING_MARKER: &str = "<!-- running the ask, per backend -->";
 const RUNNING_CLAUDE: &str = include_str!("../guide/running-claude.md");
 const RUNNING_OPENCODE: &str = include_str!("../guide/running-opencode.md");
+const RUNNING_AGY: &str = include_str!("../guide/running-agy.md");
 const RUNNING_STORE_AND_NUDGE: &str = include_str!("../guide/running-store-and-nudge.md");
 
 /// Print the Guide on stdout.
@@ -119,7 +120,10 @@ fn tailored(agent_type: Option<store::AgentType>) -> String {
 /// Matched on the type rather than on the channel so that a backend landing
 /// beside these is a decision taken here rather than one inherited from
 /// whichever channel it was given: the two that share a section share a
-/// mechanism, and the two that block do not.
+/// mechanism, and the three that block do not. Claude Code backgrounds the call
+/// itself, opencode holds it in the turn under a timeout, and agy's
+/// `run_command` turns it into a background task of its own after a wait and
+/// wakes the session when it ends.
 ///
 /// Nothing set reads Claude's, which is what a Guide printed outside a sandbox
 /// has always been.
@@ -127,11 +131,7 @@ fn running(agent_type: Option<store::AgentType>) -> &'static str {
     match agent_type {
         None | Some(store::AgentType::Claude) => RUNNING_CLAUDE,
         Some(store::AgentType::OpenCode) => RUNNING_OPENCODE,
-
-        // Not yet measured: agy's shell tool takes a timeout, which is
-        // opencode's mechanism, and it reads opencode's section until a session
-        // has shown whether it holds an ask that way for free.
-        Some(store::AgentType::Agy) => RUNNING_OPENCODE,
+        Some(store::AgentType::Agy) => RUNNING_AGY,
         Some(store::AgentType::Codex | store::AgentType::Grok) => RUNNING_STORE_AND_NUDGE,
     }
 }

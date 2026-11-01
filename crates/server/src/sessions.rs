@@ -704,10 +704,11 @@ impl Agents {
     /// rather than repainting a screen, so there is no frame to read a prompt
     /// off, and three seconds of silence is an answer that works.
     ///
-    /// Codex's is [`CODEX_AT_WORK`], Grok Build's is [`GROK_AT_WORK`] and
-    /// OpenCode's is [`OPENCODE_AT_WORK`], and all three are the same one of
-    /// the two readings — see [`Signature`]. Every backend that draws a screen
-    /// has now been measured and every one of them came out that way round, so
+    /// Codex's is [`CODEX_AT_WORK`], Grok Build's is [`GROK_AT_WORK`],
+    /// OpenCode's is [`OPENCODE_AT_WORK`] and the Antigravity CLI's is
+    /// [`AGY_AT_WORK`], and all four are the same one of the two readings — see
+    /// [`Signature`]. Every backend that draws a screen has now been measured
+    /// and every one of them came out that way round, so
     /// the at-the-prompt reading stands unused: what it is there for is the
     /// backend that turns out to differ, and none has. What stands where any of
     /// the three goes instead is whatever the suite handed in, which is the
@@ -732,9 +733,11 @@ impl Agents {
                     .clone()
                     .unwrap_or_else(|| Signature::AtWork(OPENCODE_AT_WORK.to_owned())),
             ),
-            // Not yet measured, and judged by the silence meanwhile: agy draws
-            // inline, as Claude does, so there is a record to be silent in.
-            store::AgentType::Agy => None,
+            store::AgentType::Agy => Some(
+                self.signature
+                    .clone()
+                    .unwrap_or_else(|| Signature::AtWork(AGY_AT_WORK.to_owned())),
+            ),
         }
     }
 
@@ -1295,6 +1298,35 @@ const GROK_AT_WORK: &str = "Esc:cancel";
 /// the usage-limit phrase makes: the wording is opencode's and it will move,
 /// and moving it costs one edit here.
 const OPENCODE_AT_WORK: &str = "esc interrupt";
+
+/// What the Antigravity CLI has on its Screen while it is working, and nothing
+/// of what it has there when it is waiting for a human — see
+/// [`Signature::AtWork`].
+///
+/// Read off agy 1.4.12, signed in and launched on the line a session is, with
+/// the running light off, sampled once a second across three sessions: a reply
+/// of one word, a call to an MCP server, and a shell command held for four
+/// minutes as a background task. agy draws inline, but it repaints the foot of
+/// what it drew — the composer between two rules and a hint row under it — and
+/// that row is where the two states differ. Mid-turn its left end is this
+/// label; at rest it is `? for shortcuts`. The model's name on the right of the
+/// row, and the `1 task(s) · /tasks` beside it while a background task runs,
+/// stand in both. The label was in every working frame and in none of the
+/// resting ones, a turn that had handed its command to the background included.
+///
+/// **Silence would have read it too**: a resting agy sends not a byte, and a
+/// working one never went a second without repainting its spinner. The label
+/// rather than the silence because it is the reading every backend that
+/// repaints a screen takes, and because a turn waiting on a slow model would
+/// otherwise rest on a spinner nobody has promised to keep turning.
+///
+/// Three words, as codex's are, and a different three — `esc to cancel` against
+/// `esc to interrupt` — so neither backend's constant reads the other's frame.
+///
+/// Named for the same reason [`CODEX_AT_WORK`] is, and it is the same bargain
+/// the usage-limit phrase makes: the wording is agy's and it will move, and
+/// moving it costs one edit here.
+const AGY_AT_WORK: &str = "esc to cancel";
 
 /// The sessions this server has running, by the Conversation each belongs to.
 ///

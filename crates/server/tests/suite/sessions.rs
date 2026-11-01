@@ -35017,7 +35017,7 @@ resting() {{
     printf 'silent\n' > "/tmp/verkstead/silent-$1"
     sleep 300
 }}
-[ "$2" = --prompt ] && set -- "$1" "$3"
+case "$2" in --prompt|--prompt-interactive) set -- "$1" "$3" ;; esac
 case "$1" in
 {grilling_model})
     working 10
@@ -35453,6 +35453,146 @@ async fn an_opencode_at_work_label_that_never_goes_is_caught_by_the_long_stop() 
     );
 }
 
+/// What the real agy has at the left of the row under its composer while it is
+/// working, which is the whole of what says an Antigravity CLI session has not
+/// stopped — Verkstead's own copy of the label is in the server's `sessions`
+/// module, and this is written out for the reason codex's is.
+const AGY_AT_WORK: &str = "esc to cancel                                    Gemini 3.8 Flash · low";
+
+/// And the row it leaves when its turn is over: a hint where the label was, and
+/// the model on the right as it was mid-turn.
+const AGY_AT_ITS_PROMPT: &str =
+    "? for shortcuts                                  Gemini 3.8 Flash · low";
+
+/// A backlog worked by sessions that draw agy's at-work label is worked to the
+/// end, on that label going.
+///
+/// The fifth backend's own wording, and one a Verkstead reaching for codex's
+/// would miss: `esc to cancel` against `esc to interrupt`.
+#[tokio::test]
+async fn agy_sessions_are_ended_on_their_own_at_work_label_rather_than_on_codexs() {
+    let fixture = grilling_on_agy(&a_backlog_at_work(
+        AGY_GRILLING_MODEL,
+        AGY_AT_WORK,
+        AGY_AT_ITS_PROMPT,
+        true,
+    ))
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped: every session was ended where it stood: {:?}",
+        notices(&view),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into any of them: the silence each left mid-turn \
+         is longer than either grace, and its at-work label stood through it",
+    );
+}
+
+/// And an agy label that never goes is caught by the long-stop, as every
+/// backend's that draws one is.
+#[tokio::test]
+async fn an_agy_at_work_label_that_never_goes_is_caught_by_the_long_stop() {
+    let fixture = grilling_on_agy(&a_backlog_at_work(
+        AGY_GRILLING_MODEL,
+        AGY_AT_WORK,
+        AGY_AT_WORK,
+        false,
+    ))
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    until_written(&handoff_directory(&fixture).join("silent-step")).await;
+    let fell_silent = Instant::now();
+
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "nothing was typed into it while it was drawing its label",
+    );
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        fell_silent.elapsed() >= BRISKLY.long_stop,
+        "and what caught it was the long-stop, which says Verkstead is reading \
+         agy's own label rather than the silence",
+    );
+    assert!(said[0].contains("summarize your status"), "{said:?}");
+}
+
+/// An agy session holding a blocking ask is left where it stands however long
+/// the human takes, and ended by the ordinary rules once they have answered.
+///
+/// **Here the stub's shape is the real one.** agy 1.4.12's `run_command` turns
+/// the ask into a background task and ends the turn, so a session holding an
+/// ask sits at its prompt, label gone and not a byte sent, until the task ends
+/// and agy wakes it — idle by every reading Verkstead has. The unanswered Set
+/// of its own is what keeps it.
+#[tokio::test]
+async fn an_agy_session_holding_a_blocking_ask_is_neither_ended_nor_prodded() {
+    let fixture = grilling_on_agy(&a_step_that_holds_an_ask(
+        AGY_GRILLING_MODEL,
+        AGY_AT_WORK,
+        AGY_AT_ITS_PROMPT,
+    ))
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    fixture
+        .until(|view| {
+            let outputs = outputs(view);
+            (outputs.len() >= 2 && outputs.last().is_some_and(|output| output.running))
+                .then_some(())
+        })
+        .await;
+
+    let set = fixture.ask(A_STEPS_QUESTION).await;
+    std::fs::write(handoff_directory(&fixture).join("hold"), "").unwrap();
+
+    until_written(&handoff_directory(&fixture).join("holding")).await;
+
+    tokio::time::sleep(BRISKLY.long_stop + BRISKLY.proposing * 2).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the session is still there to read what they say: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into it",
+    );
+    assert!(notices(&view).is_empty(), "{:?}", notices(&view));
+
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(notices(&view).is_empty(), "{:?}", notices(&view));
+    assert!(!handoff_directory(&fixture).join("rescues").exists());
+}
+
 /// A Set of the step session's own, which is what a session blocked on
 /// `verkstead ask` is waiting for. Q9, because that is the Question
 /// [`Grilling::answer`] answers.
@@ -35502,7 +35642,7 @@ working() {{
         LEFT=$((LEFT - 1))
     done
 }}
-[ "$2" = --prompt ] && set -- "$1" "$3"
+case "$2" in --prompt|--prompt-interactive) set -- "$1" "$3" ;; esac
 case "$1" in
 {grilling_model})
     working 10

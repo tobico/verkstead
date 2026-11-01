@@ -42,9 +42,11 @@ const HARNESSES: [AgentType; 5] = [
 /// Ids as a Profile lists them, since a Profile's list is what the default is
 /// matched against. Codex has one model it is known to run, so both tiers are
 /// it; Grok 4.6 is Grok Build's value tier because the older 4.5 reads as older
-/// rather than cheaper. The Antigravity CLI's two are placeholders for its Pro
-/// and Flash tiers, `agy models` saying nothing to an account that is not
-/// signed in — Pro for the grilling, Flash for the rest.
+/// rather than cheaper. The Antigravity CLI's are Gemini 3.8 Flash at two of
+/// its three thinking levels, high for the grilling and medium for the rest:
+/// read off `agy models` on agy 1.4.12 signed in to a Google account on its
+/// starter quota, which lists those three, two Claude models and GPT-OSS, and
+/// no Pro to grill on.
 fn model(harness: AgentType, role: Role) -> &'static str {
     match (harness, role) {
         (AgentType::Claude, Role::Grilling) => "claude-fable-5",
@@ -53,8 +55,8 @@ fn model(harness: AgentType, role: Role) -> &'static str {
         (AgentType::Grok, _) => "grok-4.6",
         (AgentType::OpenCode, Role::Grilling) => "opencode/gpt-5.1-codex",
         (AgentType::OpenCode, Role::Implementation | Role::Review) => "minimax/minimax-m2.1",
-        (AgentType::Agy, Role::Grilling) => "gemini-pro",
-        (AgentType::Agy, Role::Implementation | Role::Review) => "gemini-flash",
+        (AgentType::Agy, Role::Grilling) => "gemini-3.8-flash-high",
+        (AgentType::Agy, Role::Implementation | Role::Review) => "gemini-3.8-flash-medium",
     }
 }
 
