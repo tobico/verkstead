@@ -22,4 +22,8 @@ blocking one.
 - [x] 02: Asking and idling — [brief](02-asking-and-idling.md)
 - [x] 03: Codex — [brief](03-codex.md)
 - [x] 04: Grok Build — [brief](04-grok-build.md)
-- [ ] 05: OpenCode — [brief](05-opencode.md) *(in progress: `agent-backends/05-opencode`)*
+- [x] 05: OpenCode — [brief](05-opencode.md)
+
+A fifth backend, the Antigravity CLI, was not a stage of this roadmap: it
+landed as a task list on `agy-harness`, its decisions recorded as an
+amendment to ADR-0011 dated 2026-11-01.

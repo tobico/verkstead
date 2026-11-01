@@ -24,6 +24,76 @@ which every session of that Conversation is launched with. So wherever this
 decision says a session has no MCP servers, it means none of the **account's**
 rather than none at all.
 
+Amended (2026-11-01): **the Antigravity CLI is the fifth backend**, Google's
+`agy`, typed `agy` and shown as *Antigravity CLI*. Decided in the grilling of
+2026-11-01 (Sets 1558 to 1562) and built from `.tasks/` on `agy-harness`. The
+rules below hold for it unchanged, and what it adds is said here rather than in
+a section of its own, measured against agy 1.4.12 on this machine signed out:
+
+- **Only the CLI.** Antigravity is four surfaces on one engine — a desktop
+  app, an IDE, a Python SDK and the CLI — and only the CLI runs in a terminal a
+  Capture can hold. The others are GUIs and are not backends.
+- **The account is `~/.gemini`, found where it holds `antigravity-cli/`**, a
+  bare `~/.gemini` being what Gemini CLI left behind. One home, as every
+  backend after Claude keeps. Inside it `antigravity-cli/` holds the settings,
+  the conversations, `brain/`, the summaries database and the logs, and
+  `config/` is the global customisation root — `mcp_config.json`, `hooks.json`,
+  `skills/`, `plugins/`. Both are built; with memory on, `conversations/`,
+  `brain/` and `conversation_summaries.db` are joined as one, the record being
+  what `--conversation <id>` resumes from and the database what finds it.
+- **The login is a file in the account, because the keyring is unreachable.**
+  agy keeps its token in the system keyring — Secret Service over D-Bus on
+  Linux, Keychain on a Mac, Credential Manager on Windows — and falls to a file
+  store where the keyring cannot be reached. A Linux sandbox has no session bus,
+  so it cannot; a Mac session is given a seatbelt policy that refuses the
+  Keychain's mach services, the first narrowing of that policy's `mach-lookup`,
+  so it cannot either; and the file both then write is the Profile's login,
+  linked into every root and written back as any login is. Windows is measured
+  before it is decided: whether the session account's vault or a forced file
+  store is what agy reaches there, and the rule that decides is that a login is
+  the Profile's rather than the device's. **Verkstead runs the login** for this
+  harness as ADR-0022 runs Claude's — agy's headless sign-in prints an address
+  and reads a code from standard input, the same conversation over pipes — and
+  ADR-0022's *Claude only* is amended to say so. Rejected: lending the human's
+  own keyring entry to sessions, one login per machine rather than per Profile
+  and a `/logout` inside a session signing the human out; and an API key alone,
+  which forgoes the Gemini subscription the human signs in with.
+- **The launch line** is `--model`, the Brief by `--prompt-interactive`,
+  `--dangerously-skip-permissions`, `--conversation <id>` to continue, and an
+  `--add-dir` per Companion Repo; and a session-only `--settings` JSON carrying
+  `toolPermission: always-proceed`, `allowNonWorkspaceAccess` for the skills
+  and the handoff outside the Worktree, the Worktree and its companions as
+  `trustedWorkspaces`, `altScreenMode: never` and `runningLightSpeed: off`.
+  Nothing of that is written into the account. The written `settings.json`
+  carries only what names a provider — `modelProvider`, `customModelsConfig`,
+  `gcp` — the way every other written configuration does. Effort and
+  telemetry are left as the account has them; the mode stays agy's default,
+  since `auto` turns its own terminal sandbox on and bwrap is already the
+  boundary.
+- **It draws inline**, so unlike the three before it the Capture is a record
+  again; which reading its idle signature takes is measured and written as a
+  constant like the others'. **Its ask channel is measured first**: agy's shell
+  tool takes a timeout and has a background form, and whether it holds
+  `verkstead ask` for hours without a paid turn decides blocking against
+  store-and-nudge by the rule above, the Guide tailored to whichever it is.
+- **Its own record is protobuf, so the Transcript reads a different file.** The
+  trajectories under `conversations/` have no public schema; what agy also
+  writes is `<worktree>/.gemini/antigravity-cli/transcript.jsonl`, a file of
+  lines in the Worktree, and that is what is followed — ADR-0006 unchanged, the
+  Claude follower's mechanism. The session is found through the summaries
+  database by Worktree and start time, Codex's rule against a third store, and
+  its id goes on the record for the resume. Where the file turns out not to be
+  written the session is Capture-only, said in the log. Because it is in the
+  Worktree, `.gemini/` is written into the Worktree's `info/exclude` at launch,
+  so neither the Diff nor a commit picks it up. Antigravity's own artifacts
+  under `brain/` — its task list, plan and walkthrough — are left for later.
+- **Defaults and the rest.** Pro for grilling, Flash for implementation and
+  review, the ids read off `agy models`. No usage-limit phrase until one is
+  seen. The wizard gets a row and the vendor's installers: one file at
+  `~/.local/bin/agy` on Linux and a Mac, `%LOCALAPPDATA%\agy\bin\agy.exe` on
+  Windows, self-updating, no versions directory. Full parity on all three
+  platforms, the Mac and Windows tasks placed on their devices.
+
 Verkstead runs its sessions on one coding agent, and the `AgentType`
 discriminator has sat in the Profile with one value in it since the store was
 written — "so a second backend slots in beside `claude` rather than having to

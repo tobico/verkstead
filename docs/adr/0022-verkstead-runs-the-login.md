@@ -66,7 +66,13 @@ device can open.
   as it goes.
 
 - **Claude only, and only Profiles at home on this device.** The other
-  harnesses log in differently, and none of them has needed this yet. A
+  harnesses log in differently, and none of them has needed this yet.
+  Amended (2026-11-01): **and the Antigravity CLI.** agy's headless sign-in is
+  the same conversation over pipes — an address printed, a code read from
+  standard input — and its login has to be made where the keyring is
+  unreachable so that it lands in a file the root can link, which is exactly
+  the Built Root this runs in. See ADR-0011's amendment of the same date; the
+  other two still log in differently. A
   mirrored Profile's account is a copy, refreshed from its home device before
   each launch, so a login written into it would be overwritten by the next
   refresh. It is logged in on the device it is at home on, and its card offers

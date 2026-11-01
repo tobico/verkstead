@@ -3870,13 +3870,15 @@ anything for one to tell apart. **The account's shape is its type's**, rather
 than one shape every Profile is assumed to have — Claude Code's is the directory
 and config file pair at `~/.claude` / `~/.claude.json`, and every backend after
 it keeps its whole account under one relocatable home — Codex's at `~/.codex`,
-Grok Build's at `~/.grok`, and OpenCode's at neither, opencode keeping no
+Grok Build's at `~/.grok`, the Antigravity CLI's at `~/.gemini`, found where it
+holds `antigravity-cli/`, and OpenCode's at neither, opencode keeping no
 dot-directory of its own: its home is the directory its XDG config and data
 directories sit inside. Whichever it is, a session is given a **Built Root**
 made out of that one account and no other, never the account whole, which is
 what keeps accounts separate. A type is offered
 to the human only once it can launch the real thing: one that cannot would be a
-lie in a picker, so the form offers Claude, Codex, Grok Build and OpenCode, and
+lie in a picker, so the form offers Claude, Codex, Grok Build, OpenCode and the
+Antigravity CLI, and
 a Profile of a type whose stage has not landed is one saved over the API until
 it does. Picking a type on the form asks for that type's own account paths. The
 models are a list and the list is the Profile's own, because different Profiles
@@ -4021,8 +4023,9 @@ is what an unnamed one is *called*, not one anything falls back to)
 **Built Root**:
 What a session is given of its **Agent Profile**'s account, whatever the
 harness: the `~/.claude` a Claude session runs in, the `~/.codex` a Codex one
-does, the `~/.grok` a Grok Build one does, and the config and data directories
-under `~/.config/opencode` and `~/.local/share/opencode` an OpenCode one does.
+does, the `~/.grok` a Grok Build one does, the `~/.gemini` an Antigravity CLI one
+does, and the config and data directories under `~/.config/opencode` and
+`~/.local/share/opencode` an OpenCode one does.
 Each is a directory of Verkstead's own at `homes/<id>` under the Data
 Directory, emptied and made again as each of the Conversation's sessions starts
 — except while something of the Conversation is still running in what would be
@@ -4035,14 +4038,18 @@ builds it.
 **One rule for every harness, in four parts**, each harness's own files filling
 them:
 **The login, linked**, so a login or a token refresh from inside lands in the
-account: Claude's `.credentials.json`, and `auth.json` for the other three.
+account: Claude's `.credentials.json`, `auth.json` for Codex, Grok Build and
+OpenCode, and for the Antigravity CLI the file agy falls to where its keyring
+is unreachable — which inside a sandbox it is made to be, on every platform.
 An account with no login gets none.
 **The memory store, joined read-write only where the Profile's memory switch
 is on**, and made in the account first where missing. Claude's is two entries
 under `projects/` — the Repo's main checkout's, which holds Claude's memory of
 the Repo, and the Worktree's, where the session's transcript is written — and
 no other repository's. Codex's is `sessions/`, where its rollouts go, and
-`memories/`. Grok Build's is `sessions/` and `memory/`. OpenCode's is its
+`memories/`. Grok Build's is `sessions/` and `memory/`. The Antigravity CLI's is
+`conversations/`, `brain/` and `conversation_summaries.db` under
+`antigravity-cli/`, joined as one. OpenCode's is its
 whole data directory, because the database in it runs in write-ahead-log mode
 and one joined a file at a time will not open; its login is in there too.
 With the switch off each of those is the root's own and empty, and for
@@ -4055,6 +4062,9 @@ Grok Build's `config.toml` holds `model`, `model_providers`, `auth_provider`,
 `auth`, `grok_com_config`, and where models are listed and reached out of
 `endpoints`. OpenCode's `opencode.json`, the only file in its config
 directory, holds `provider`, read from `opencode.json` or `opencode.jsonc`.
+The Antigravity CLI's `settings.json` holds `modelProvider`, `customModelsConfig`
+and `gcp`; what a session needs of agy's settings goes on its line as a
+session-only `--settings`, never into the account.
 Nothing else of the account's configuration goes in: no hooks, plugins,
 permissions, rules or MCP servers. It is not written back. **An MCP server the
 Conversation attached does go in**, and is the one thing a root holds that is
@@ -4064,8 +4074,9 @@ none leaves the root with no MCP server at all, which is every root there was
 before there was such a declaration.
 **The settings page's Instructions text, written as the file that harness
 reads** for its global instructions: `CLAUDE.md` in a Claude root,
-`AGENTS.md` in a Codex or a Grok Build one, and `AGENTS.md` in OpenCode's
-config directory. Verbatim and alone, with no heading over it and no line
+`AGENTS.md` in a Codex or a Grok Build one, `AGENTS.md` in OpenCode's
+config directory, and the global rules file agy reads under the Antigravity
+CLI's `config/`. Verbatim and alone, with no heading over it and no line
 saying where it came from, and written rather than joined the way the
 configuration file beside it is — Verkstead's own, never the account's, and
 nothing of it written back. The account's own such file is left out with the
@@ -4362,7 +4373,8 @@ away or no longer usable, the **platform default**. A skip is not carried to
 another Repo: a brand-new one silently skipping its interview on the strength
 of somebody else's work would be a surprise. The platform default is the one
 place Verkstead names a model on nobody's behalf: the first harness with a
-Profile saved, in the order Claude Code, Codex, Grok Build, OpenCode; that
+Profile saved, in the order Claude Code, Codex, Grok Build, OpenCode, Antigravity
+CLI; that
 harness's unnamed Profile, or else the earliest saved; and the harness's
 frontier model for the grilling and its value model for implementation and
 review — Fable 5 and Opus 5 on Claude Code — or the first model the Profile
