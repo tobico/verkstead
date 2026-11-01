@@ -882,6 +882,19 @@ pub async fn create_profile(
     pool: &SqlitePool,
     facts: &ProfileFacts,
 ) -> Result<Result<Profile, Clash>> {
+    create_profile_holding(pool, facts, holding()).await
+}
+
+/// And the same where the save looked at the account first: `login` is whether
+/// it holds a **login file**, said on the binding in the write that makes it —
+/// see [`Binding::login`]. Without it the binding is taken to hold one until
+/// this device's next look, and a member pulling in between would read an
+/// account with none as one to fetch from.
+pub async fn create_profile_holding(
+    pool: &SqlitePool,
+    facts: &ProfileFacts,
+    login: bool,
+) -> Result<Result<Profile, Clash>> {
     let mut tx = super::writing(pool, "saving a Profile").await?;
 
     if let Some(clash) = clash(&mut tx, facts, None).await? {
@@ -902,7 +915,10 @@ pub async fn create_profile(
         &mut tx,
         &here,
         &binding_uuid(&id, &here),
-        &Binding::of(&facts.account)?,
+        &Binding {
+            login,
+            ..Binding::of(&facts.account)?
+        },
         true,
     )
     .await?;
@@ -980,6 +996,29 @@ pub(crate) const MINTED_UUID: &str = "(lower(hex(randomblob(4))) || '-' || \
 /// account is each bound device's own, and binding this one is a press of its
 /// own — never a side effect of a save.
 pub async fn update_profile(pool: &SqlitePool, id: &str, facts: &ProfileFacts) -> Result<Saving> {
+    rewrite_profile(pool, id, facts, None).await
+}
+
+/// And the same where the save looked at the account first: `login` is whether
+/// it holds a login file, said on this device's binding whatever it said before
+/// — see [`create_profile_holding`]. A Profile with no binding here is still
+/// rewritten as a record alone, and `login` goes nowhere.
+pub async fn update_profile_holding(
+    pool: &SqlitePool,
+    id: &str,
+    facts: &ProfileFacts,
+    login: bool,
+) -> Result<Saving> {
+    rewrite_profile(pool, id, facts, Some(login)).await
+}
+
+/// Both rewrites, `login` being what was looked at where anything was.
+async fn rewrite_profile(
+    pool: &SqlitePool,
+    id: &str,
+    facts: &ProfileFacts,
+    login: Option<bool>,
+) -> Result<Saving> {
     let mut tx = super::writing(pool, "rewriting a Profile").await?;
 
     let Some(held) = replicated::record_on::<Profiles>(&mut tx, id).await? else {
@@ -1029,9 +1068,11 @@ pub async fn update_profile(pool: &SqlitePool, id: &str, facts: &ProfileFacts) -
     if let Some(held) = binding {
         let mut binding = Binding::of(&facts.account)?;
 
-        if binding.paths() == held.paths() {
-            binding.login = held.login;
-        }
+        binding.login = match login {
+            Some(looked) => looked,
+            None if binding.paths() == held.paths() => held.login,
+            None => binding.login,
+        };
 
         replicated::written_on::<Bindings>(
             &mut tx,

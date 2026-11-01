@@ -50,16 +50,18 @@ use crate::{AppState, store};
 
 /// Save a new Profile, or say why not.
 pub(crate) async fn create(pool: &SqlitePool, edit: &ProfileEdit) -> Result<ProfileSaved> {
-    let facts = match checked(edit).await? {
-        Ok(facts) => facts,
+    let (facts, login) = match checked(edit).await? {
+        Ok(checked) => checked,
         Err(refusal) => return Ok(refusal),
     };
 
-    Ok(match store::create_profile(pool, &facts).await? {
-        Ok(_) => ProfileSaved::Saved,
-        Err(store::Clash::NameTaken) => ProfileSaved::NameTaken,
-        Err(store::Clash::DefaultTaken) => ProfileSaved::DefaultTaken,
-    })
+    Ok(
+        match store::create_profile_holding(pool, &facts, login).await? {
+            Ok(_) => ProfileSaved::Saved,
+            Err(store::Clash::NameTaken) => ProfileSaved::NameTaken,
+            Err(store::Clash::DefaultTaken) => ProfileSaved::DefaultTaken,
+        },
+    )
 }
 
 /// Rewrite one, whole. Everything about a Profile is the human's to change:
@@ -74,24 +76,28 @@ pub(crate) async fn edit(pool: &SqlitePool, id: &str, edit: &ProfileEdit) -> Res
         return Ok(ProfileSaved::NoSuchProfile);
     };
 
-    let facts = match held.unbound {
+    let saving = match held.unbound {
         None => match checked(edit).await? {
-            Ok(facts) => facts,
+            Ok((facts, login)) => store::update_profile_holding(pool, id, &facts, login).await?,
             Err(refusal) => return Ok(refusal),
         },
 
         Some(_) => match named(edit) {
-            Ok((name, models)) => store::ProfileFacts {
-                name,
-                account: held.account,
-                models,
-                memory: edit.memory,
-            },
+            Ok((name, models)) => {
+                let facts = store::ProfileFacts {
+                    name,
+                    account: held.account,
+                    models,
+                    memory: edit.memory,
+                };
+
+                store::update_profile(pool, id, &facts).await?
+            }
             Err(refusal) => return Ok(refusal),
         },
     };
 
-    Ok(match store::update_profile(pool, id, &facts).await? {
+    Ok(match saving {
         store::Saving::Saved => ProfileSaved::Saved,
         store::Saving::NoSuchProfile => ProfileSaved::NoSuchProfile,
         store::Saving::NameTaken => ProfileSaved::NameTaken,
@@ -401,11 +407,16 @@ impl Lines {
 fn lends(profile: &store::Profile) -> bool {
     match &profile.unbound {
         Some(unbound) => !unbound.lending.is_empty(),
-        None => matches!(
-            resolve(&crate::sandbox::root::login_at(&profile.account)),
-            Resolved::At(_)
-        ),
+        None => holds_login(&profile.account),
     }
+}
+
+/// Whether an account at these paths holds its login file, looked at here.
+fn holds_login(account: &store::Account) -> bool {
+    matches!(
+        resolve(&crate::sandbox::root::login_at(account)),
+        Resolved::At(_)
+    )
 }
 
 /// How a device a Profile is bound on is read, off the membership.
@@ -605,7 +616,13 @@ fn broken(
 /// The filesystem half runs off the runtime for the reason a registration's
 /// does: resolving a path is blocking, and a save is rare enough that the thread
 /// it borrows costs nothing.
-async fn checked(edit: &ProfileEdit) -> Result<Result<store::ProfileFacts, ProfileSaved>> {
+///
+/// **And whether the account holds a login file**, looked at in the same hop,
+/// for the save to say on the binding it writes — see
+/// [`store::create_profile_holding`]. Said by [`looked`] on the next read
+/// instead, a member could pull the binding in between and read an account
+/// with no login as one to fetch from.
+async fn checked(edit: &ProfileEdit) -> Result<Result<(store::ProfileFacts, bool), ProfileSaved>> {
     let (name, models) = match named(edit) {
         Ok(named) => named,
         Err(refusal) => return Ok(Err(refusal)),
@@ -614,14 +631,25 @@ async fn checked(edit: &ProfileEdit) -> Result<Result<store::ProfileFacts, Profi
     let account = edit.account.clone();
     let memory = edit.memory;
 
-    Ok(tokio::task::spawn_blocking(move || inspect(&account))
-        .await?
-        .map(|account| store::ProfileFacts {
-            name,
-            account,
-            models,
-            memory,
-        }))
+    Ok(tokio::task::spawn_blocking(move || {
+        inspect(&account).map(|account| {
+            let login = holds_login(&account);
+
+            (account, login)
+        })
+    })
+    .await?
+    .map(|(account, login)| {
+        (
+            store::ProfileFacts {
+                name,
+                account,
+                models,
+                memory,
+            },
+            login,
+        )
+    }))
 }
 
 /// The name and the models the human typed, tidied — or the reason they are

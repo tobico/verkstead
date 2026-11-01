@@ -13,12 +13,12 @@ use verkstead_store::replicated::{Record, merge, records};
 use verkstead_store::{
     Account, AgentType, Binding, Bindings, Chosen, Clash, Deleting, Event, Lifecycle, Linking,
     Pairing, PendingForm, PendingPairing, Picked, Profile, ProfileFacts, ProfileRecord, Profiles,
-    Saving, Settled, Unbound, binding_uuid, create_profile, delete_profile, load_conversation,
-    load_profile, logins_held, open_database, open_pending_steer, profile_arrived, profiles,
-    record_member, register_repo, save_pending_steer, set_grilling_pairing,
-    set_implementation_pairing, set_review_pairing, settle, skip_review, stamp_the_profiles,
-    start_capture, start_conversation, start_grilling, this_device_called, timeline,
-    update_profile,
+    Saving, Settled, Unbound, binding_uuid, create_profile, create_profile_holding, delete_profile,
+    load_conversation, load_profile, logins_held, open_database, open_pending_steer,
+    profile_arrived, profiles, record_member, register_repo, save_pending_steer,
+    set_grilling_pairing, set_implementation_pairing, set_review_pairing, settle, skip_review,
+    stamp_the_profiles, start_capture, start_conversation, start_grilling, this_device_called,
+    timeline, update_profile, update_profile_holding,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -1959,6 +1959,45 @@ async fn a_binding_says_whether_its_account_holds_a_login() {
             lending: vec![],
         }),
         "bound there, and nothing to fetch from it",
+    );
+}
+
+/// A save that looked at the account says on its binding what it found, in the
+/// write that makes the binding: nothing a member pulls in between can read a
+/// fresh account as holding a login it has not got.
+#[tokio::test]
+async fn a_save_that_looked_says_the_login_it_found() {
+    let (_dir, pool) = fresh_pool().await;
+    stamp_the_profiles(&pool, THIS_DEVICE).await.unwrap();
+
+    let login = |pool: SqlitePool, id: String| async move {
+        records::<Bindings>(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|binding| binding.uuid == binding_uuid(&id, THIS_DEVICE))
+            .expect("this device's binding")
+            .fields
+            .login
+    };
+
+    let ours = create_profile_holding(&pool, &facts("ours"), false)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(
+        !login(pool.clone(), ours.id.clone()).await,
+        "none, from the first write of it",
+    );
+
+    update_profile_holding(&pool, &ours.id, &facts_for("renamed", claude("ours")), true)
+        .await
+        .unwrap();
+
+    assert!(
+        login(pool.clone(), ours.id.clone()).await,
+        "and a save over the same paths says what it looked at since",
     );
 }
 
