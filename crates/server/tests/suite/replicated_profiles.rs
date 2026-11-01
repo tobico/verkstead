@@ -592,7 +592,7 @@ fn no_tailscale() -> Tailscale {
 
 /// Every harness a device in this suite is normally taken to have, named the
 /// way a session launches one.
-const EVERY_HARNESS: &[&str] = &["claude", "codex", "grok", "opencode"];
+const EVERY_HARNESS: &[&str] = &["claude", "codex", "grok", "opencode", "agy"];
 
 /// The machine a device here is judged on: one directory on the `PATH` a
 /// session would search, holding a program for each of `harnesses`.

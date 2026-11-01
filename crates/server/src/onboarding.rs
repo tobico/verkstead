@@ -2,7 +2,7 @@
 //! answered by, and the mode a server that cannot enters at startup.
 //!
 //! **The objective is three things** (ADR-0016): a sandbox, `git` and at least
-//! one of the four harnesses present; at least one Agent Profile; a git author.
+//! one of the five harnesses present; at least one Agent Profile; a git author.
 //! The GitHub token is not among them — GitHub may not be in use at all, while
 //! git is not optional and its author is what git asks for.
 //!
@@ -250,7 +250,7 @@ fn sysctl(platform: Platform) -> Option<String> {
 /// the program a session of that type is launched as.
 ///
 /// The names themselves are the sandbox module's — [`sandbox::PROGRAMS`], which
-/// holds these four with the `git` and `gh` a row is drawn for beside them —
+/// holds these five with the `git` and `gh` a row is drawn for beside them —
 /// because what is done with a name is that module's: every name here is
 /// followed into its install and granted where that install is the human's own.
 /// What holds the two lists together is
@@ -260,13 +260,8 @@ const HARNESSES: &[(Dependency, store::AgentType)] = &[
     (Dependency::Codex, store::AgentType::Codex),
     (Dependency::Grok, store::AgentType::Grok),
     (Dependency::OpenCode, store::AgentType::OpenCode),
+    (Dependency::Agy, store::AgentType::Agy),
 ];
-
-/// And the harnesses whose account is offered before the wizard draws a row of
-/// theirs: the Antigravity CLI, whose Profile can be made and launched before
-/// its install is the wizard's to make. Its tick is asked of the machine
-/// directly, the same probe a row would have read.
-const UNROWED: &[store::AgentType] = &[store::AgentType::Agy];
 
 /// The machine the probes are made against: whose rules a name is read by,
 /// where a session would look for one, and what this box calls itself.
@@ -599,7 +594,7 @@ impl Machine {
     }
 
     /// Every row of the dependencies step, in the order it is drawn: the
-    /// sandbox, `git`, the four harnesses, `gh`, and WSL on Windows.
+    /// sandbox, `git`, the five harnesses, `gh`, and WSL on Windows.
     ///
     /// Blocks: a `PATH` walk apiece, one `bwrap` run on Linux, and one
     /// `xcode-select` on a Mac whose `git` is Apple's.
@@ -646,16 +641,9 @@ impl Machine {
             return Vec::new();
         };
 
-        let rowed = HARNESSES
+        HARNESSES
             .iter()
-            .map(|(dependency, agent_type)| (*agent_type, there(dependencies, *dependency)));
-
-        let unrowed = UNROWED
-            .iter()
-            .map(|agent_type| (*agent_type, self.harness(*agent_type)));
-
-        rowed
-            .chain(unrowed)
+            .map(|(dependency, agent_type)| (*agent_type, there(dependencies, *dependency)))
             .filter_map(|(agent_type, harness)| {
                 Some(AccountView {
                     account: profiles::account(&sandbox::account_in_home(agent_type, home)?),
@@ -724,7 +712,7 @@ impl Machine {
     /// what could be launched here at all — see [`crate::peer::harnesses`].
     ///
     /// **The dependency step's own list**, walked in the order those rows are
-    /// drawn: a second spelling of *the four harnesses* is a list that would go
+    /// drawn: a second spelling of *the five harnesses* is a list that would go
     /// out of step with the one the wizard installs from.
     ///
     /// Blocks: one `PATH` walk apiece.
@@ -1494,11 +1482,11 @@ fn met(steps: StepsView) -> bool {
     steps.dependencies && steps.accounts && steps.git
 }
 
-/// And the first of them: a sandbox, `git`, and at least one of the four
+/// And the first of them: a sandbox, `git`, and at least one of the five
 /// harnesses.
 ///
 /// *At least one*, because a session runs under one Profile and a Profile is of
-/// one agent type: three rows left unticked hold nothing up. And `gh` holds
+/// one agent type: four rows left unticked hold nothing up. And `gh` holds
 /// nothing up at all, GitHub being a choice rather than a dependency.
 fn dependencies_met(dependencies: &[DependencyView]) -> bool {
     there(dependencies, Dependency::Sandbox)
@@ -2541,13 +2529,6 @@ echo {token}
                     .iter()
                     .map(|(_, agent_type)| sessions::binary(*agent_type)),
             )
-            // And the harness whose account is offered before its row is
-            // drawn, which is followed all the same: its sessions launch.
-            .chain(
-                UNROWED
-                    .iter()
-                    .map(|agent_type| sessions::binary(*agent_type)),
-            )
             .chain(std::iter::once(sandbox::GH))
             .collect();
 
@@ -3213,7 +3194,7 @@ echo {token}
         }
     }
 
-    /// The objective wants a sandbox, `git` and *one* harness — so three rows
+    /// The objective wants a sandbox, `git` and *one* harness — so four rows
     /// left unticked hold nothing up, and `gh` holds nothing up at all.
     #[test]
     fn one_harness_meets_the_step_and_gh_never_gates() {
@@ -3225,6 +3206,7 @@ echo {token}
                 row(Dependency::Codex, NOT_THERE),
                 row(Dependency::Grok, NOT_THERE),
                 row(Dependency::OpenCode, NOT_THERE),
+                row(Dependency::Agy, NOT_THERE),
                 row(Dependency::Gh, gh),
             ]
         };

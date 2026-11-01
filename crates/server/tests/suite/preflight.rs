@@ -74,7 +74,7 @@ const MODEL: &str = "claude-opus-5";
 
 /// Every harness a device in this suite normally has, named the way a session
 /// launches one.
-const EVERY_HARNESS: &[&str] = &["claude", "codex", "grok", "opencode"];
+const EVERY_HARNESS: &[&str] = &["claude", "codex", "grok", "opencode", "agy"];
 
 /// How long one address has to answer here, rather than the two seconds a
 /// running server gives one.

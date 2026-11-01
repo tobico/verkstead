@@ -83,7 +83,7 @@ export type Instruction = {
 };
 
 /// One operating system's answers: what the tab is called, and an instruction
-/// for each of the eight rows.
+/// for each of the nine rows.
 ///
 /// Where a session looks is not among them. That was a sentence per tab naming
 /// the fixed list a session's `PATH` used to be; a session's `PATH` is now the
@@ -222,6 +222,42 @@ const GROK_WINDOWS: Instruction = {
     "grok-cli on npm is a different project.",
 };
 
+/// The Antigravity CLI the way Google installs it, which is the row on every
+/// Linux tab.
+///
+/// **Nothing else carries it**: no distribution, no Homebrew formula, no npm
+/// package. So this is the one line on every tab, with no alternative under it.
+/// The script puts one file in `~/.local/bin` and edits no shell profile, and
+/// it refuses to overwrite an `agy` already there, agy updating itself — so the
+/// note is [`CLAUDE_NATIVE`]'s, about the shell's `PATH`.
+const AGY_UNIX: Instruction = {
+  command: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+  note:
+    "Google's own installer, which keeps agy current. It puts agy in " +
+    "~/.local/bin, which has to be on the PATH of the shell Verkstead is " +
+    "started from. Start Verkstead again once it is.",
+};
+
+/// And on a Mac, where `~/.local/bin` leads every session's `PATH` — see
+/// [`CLAUDE_ON_A_MAC`], whose note is shorter for the same reason.
+const AGY_ON_A_MAC: Instruction = {
+  command: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+  note:
+    "Google's own installer, which keeps agy current. It puts agy in " +
+    "~/.local/bin, which is on every Mac session's PATH.",
+};
+
+/// And on Windows, where it is the PowerShell one, landing per user in
+/// `%LOCALAPPDATA%\agy\bin` and leaving the `PATH` alone.
+const AGY_WINDOWS: Instruction = {
+  command: "irm https://antigravity.google/cli/install.ps1 | iex",
+  note:
+    "Google's own installer, which keeps agy current. It puts agy.exe in " +
+    "%LOCALAPPDATA%\\agy\\bin and doesn't add it to your PATH. Tick the row " +
+    "and Verkstead puts it on every session's PATH, or add it to the PATH of " +
+    "the shell Verkstead is started from and start Verkstead again.",
+};
+
 /// OpenCode the way OpenCode installs it, which is what the one tab with no
 /// package manager on it has.
 ///
@@ -334,7 +370,7 @@ export const GUIDES: Record<Distro, Guide> = {
     //
     // What it is above is the rows that are a `brew install`, rather than all
     // of them: Claude Code is Anthropic's own installer here as everywhere
-    // else, and Grok Build is xAI's.
+    // else, Grok Build is xAI's and the Antigravity CLI is Google's.
     before: {
       command:
         '/bin/bash -c "$(curl -fsSL ' +
@@ -378,6 +414,7 @@ export const GUIDES: Record<Distro, Guide> = {
       },
       Grok: GROK_UNIX,
       OpenCode: { command: "brew install opencode" },
+      Agy: AGY_ON_A_MAC,
       Gh: { command: "brew install gh" },
       Wsl: WSL_ELSEWHERE,
     },
@@ -432,6 +469,7 @@ export const GUIDES: Record<Distro, Guide> = {
 
       Grok: GROK_UNIX,
       OpenCode: OPENCODE_NATIVE,
+      Agy: AGY_ON_A_MAC,
 
       Gh: {
         link: "https://github.com/cli/cli/releases",
@@ -463,6 +501,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Codex: windowsNpm("@openai/codex"),
       Grok: GROK_WINDOWS,
       OpenCode: windowsNpm("opencode-ai"),
+      Agy: AGY_WINDOWS,
       Gh: { command: "winget install --id GitHub.cli" },
       Wsl: WSL_ON_WINDOWS,
     },
@@ -482,6 +521,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Codex: nixos("codex"),
       Grok: GROK_UNIX,
       OpenCode: nixos("opencode"),
+      Agy: AGY_UNIX,
       Gh: nixos("gh"),
       Wsl: WSL_ELSEWHERE,
     },
@@ -499,6 +539,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Codex: npm("@openai/codex", "sudo apt install nodejs npm"),
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo apt install nodejs npm"),
+      Agy: AGY_UNIX,
       Gh: { command: "sudo apt install gh" },
       Wsl: WSL_ELSEWHERE,
     },
@@ -516,6 +557,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Codex: npm("@openai/codex", "sudo dnf install nodejs npm"),
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo dnf install nodejs npm"),
+      Agy: AGY_UNIX,
       Gh: { command: "sudo dnf install gh" },
       Wsl: WSL_ELSEWHERE,
     },
@@ -533,6 +575,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Codex: npm("@openai/codex", "sudo apt install nodejs npm"),
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo apt install nodejs npm"),
+      Agy: AGY_UNIX,
       Gh: { command: "sudo apt install gh" },
       Wsl: WSL_ELSEWHERE,
     },
@@ -550,6 +593,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Codex: npm("@openai/codex", "sudo pacman -S npm"),
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo pacman -S npm"),
+      Agy: AGY_UNIX,
       Gh: { command: "sudo pacman -S github-cli" },
       Wsl: WSL_ELSEWHERE,
     },
@@ -577,6 +621,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Codex: npm("@openai/codex", "install your distribution's nodejs and npm"),
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "install your distribution's nodejs and npm"),
+      Agy: AGY_UNIX,
       Gh: {
         note:
           "Install your distribution's GitHub CLI package, which is gh or " +

@@ -2489,10 +2489,10 @@ author?: string, };
  * What a row is about.
  *
  * Flat rather than a harness variant carrying an [`crate::AgentType`]: the
- * step draws eight rows with an instruction apiece, and which of them are
+ * step draws nine rows with an instruction apiece, and which of them are
  * harnesses is a fact about the objective rather than about the drawing.
  */
-export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Gh" | "Wsl";
+export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Agy" | "Gh" | "Wsl";
 
 /**
  * And whether the machine has it.
@@ -7544,7 +7544,7 @@ branch: string, };
  */
 export type StepsView = { 
 /**
- * A sandbox, `git`, and at least one of the four harnesses.
+ * A sandbox, `git`, and at least one of the five harnesses.
  */
 dependencies: boolean, 
 /**

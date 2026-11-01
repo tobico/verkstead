@@ -1,4 +1,4 @@
-//! The two rows that are a vendor's own installer rather than a package: what a
+//! The rows that are a vendor's own installer rather than a package: what a
 //! ticked one runs, where it lands, and the `session_path` write that puts what
 //! it landed on a session's `PATH`.
 //!
@@ -18,7 +18,8 @@
 //!
 //! **Nothing here reaches the network and nothing installs anything.** What a
 //! ticked Claude row runs is `curl -fsSL https://claude.ai/install.sh | bash`
-//! and what a ticked Grok Build row runs is xAI's line beside it; the `curl` on
+//! and what a ticked Grok Build or Antigravity CLI row runs is xAI's or Google's
+//! line beside it; the `curl` on
 //! this machine's `PATH` is a stub that answers with a script of this suite's
 //! own, and that script copies a program into the directory the vendor's
 //! installer really uses. So the `session_path` write and the re-probe are
@@ -62,10 +63,13 @@ const CLAUDE_LANDS: &str = ".local/bin";
 /// And where xAI's lands `grok`.
 const GROK_LANDS: &str = ".grok/bin";
 
+/// And where Google's lands `agy`: the same `.local/bin` as Anthropic's.
+const AGY_LANDS: &str = ".local/bin";
+
 /// How long the test waits on the run's own thread before giving up on it.
 const PATIENCE: Duration = Duration::from_secs(20);
 
-/// Ticking the sandbox, git and both vendor rows on an Ubuntu: the elevated
+/// Ticking the sandbox, git and the three vendor rows on an Ubuntu: the elevated
 /// batch first, then an installer apiece run as the user — and the directories
 /// they landed in are on `session_path`, on the next probe and on the next
 /// session's `PATH`, with nothing restarted.
@@ -157,20 +161,21 @@ async fn the_vendor_installers_run_as_the_user_and_what_they_land_is_on_the_path
         Dependency::Git,
         Dependency::Claude,
         Dependency::Grok,
+        Dependency::Agy,
     ];
 
     let pressed = install(&app, &ticked).await;
 
     assert_eq!(
         pressed.run.expect("a press makes a run").total,
-        4,
+        5,
         "one row of the run per ticked row",
     );
 
     let landed = over(&app).await;
     let run = landed.run.clone().expect("the run it was started with");
 
-    assert_eq!(run.done, 4);
+    assert_eq!(run.done, 5);
     assert_eq!(run.status, "Everything that was ticked is installed.");
 
     // The elevated half is the package manager and nothing else: an installer
@@ -181,7 +186,7 @@ async fn the_vendor_installers_run_as_the_user_and_what_they_land_is_on_the_path
     assert_eq!(
         raised.len(),
         1,
-        "the batch was raised and neither installer was: {raised:?}",
+        "the batch was raised and no installer was: {raised:?}",
     );
     assert!(
         raised[0].last().expect("a shell line").contains("apt-get"),
@@ -207,6 +212,20 @@ async fn the_vendor_installers_run_as_the_user_and_what_they_land_is_on_the_path
         },
         "and at the one xAI's does",
     );
+    assert_eq!(
+        state(&landed, Dependency::Agy),
+        &DependencyState::Present {
+            at: Some(
+                home.path()
+                    .join(AGY_LANDS)
+                    .join("agy")
+                    .to_string_lossy()
+                    .into_owned()
+            ),
+            target: None,
+        },
+        "and at the one Google's does, which is Anthropic's too",
+    );
 
     for installed in ticked {
         assert_eq!(
@@ -222,8 +241,8 @@ async fn the_vendor_installers_run_as_the_user_and_what_they_land_is_on_the_path
             local.to_string_lossy().into_owned(),
             grok.to_string_lossy().into_owned(),
         ],
-        "both directories are in `config.yaml`, in the order the units ran, so \
-         the next start reads them back",
+        "both directories are in `config.yaml` once each, in the order the \
+         units ran, so the next start reads them back",
     );
 
     let entries = looks_in(&sandbox::machine_path(Platform::Linux));
@@ -318,7 +337,7 @@ fn a_package_manager(bin: &Path, borrowed: &Borrowed, installed: &Path) {
 /// The line each vendor publishes is `curl -fsSL <the script> | bash`, so what
 /// this `curl` answers with is a script that puts a program in the directory
 /// that vendor's installer really uses — `~/.local/bin` for Anthropic's and
-/// `~/.grok/bin` for xAI's. A URL it does not know is a `curl` that failed,
+/// Google's, and `~/.grok/bin` for xAI's. A URL it does not know is a `curl` that failed,
 /// which is what a stub standing in for the network should be.
 ///
 /// `bash` is the machine's `sh`: what is being asked about here is the run and
@@ -336,6 +355,7 @@ fn an_installer(bin: &Path, borrowed: &Borrowed, installed: &Path) {
              case \"$argument\" in\n\
              *claude.ai*) into=\"$HOME/{CLAUDE_LANDS}\"; name=claude;;\n\
              *x.ai*) into=\"$HOME/{GROK_LANDS}\"; name=grok;;\n\
+             *antigravity.google*) into=\"$HOME/{AGY_LANDS}\"; name=agy;;\n\
              esac\n\
              done\n\
              test -n \"$name\" || {{ printf '%s\\n' 'curl: (6) Could not resolve host' >&2; exit 6; }}\n\

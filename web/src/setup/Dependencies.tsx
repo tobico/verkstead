@@ -7,7 +7,7 @@
 //!
 //! **The checkbox screen** is where the step opens. Every row the server drew is
 //! on it, in three groups — *Required*, the sandbox and `git`; *An agent*, the
-//! four harnesses as tiles; and *Optional*, `gh` and, on Windows, WSL — and a
+//! five harnesses as tiles; and *Optional*, `gh` and, on Windows, WSL — and a
 //! row this machine has not got carries a checkbox, with the row's name as the
 //! label. A row that is there carries a tick and an *Installed* pill instead,
 //! and nothing else: which file it found is the by-hand screen's to say. The sandbox and `git` start ticked,
@@ -140,6 +140,7 @@ export const NAMES: Record<Dependency, string> = {
   Codex: AGENT_NAME.Codex,
   Grok: AGENT_NAME.Grok,
   OpenCode: AGENT_NAME.OpenCode,
+  Agy: AGENT_NAME.Agy,
   Gh: "gh",
   Wsl: "Linux development (WSL)",
 };
@@ -152,6 +153,7 @@ const WHY: Record<Dependency, string> = {
   Codex: "One harness is enough.",
   Grok: "One harness is enough.",
   OpenCode: "One harness is enough.",
+  Agy: "One harness is enough.",
   Gh: "Pull requests and reviews",
   Wsl: "Sessions on Linux, on this PC",
 };
@@ -165,6 +167,7 @@ const COMMANDS: Partial<Record<Dependency, string>> = {
   Codex: "codex",
   Grok: "grok",
   OpenCode: "opencode",
+  Agy: "agy",
 };
 
 /// The command beside a row's name, where the name is not one already: the
@@ -231,20 +234,21 @@ const HARNESSES: Partial<Record<Dependency, AgentType>> = {
   Codex: "Codex",
   Grok: "Grok",
   OpenCode: "OpenCode",
+  Agy: "Agy",
 };
 
-/// The four of them, as the objective reads them: one is enough.
+/// The five of them, as the objective reads them: one is enough.
 const HARNESS = Object.keys(HARNESSES) as Dependency[];
 
 /// And the two rows that start ticked: the ones a session cannot start without.
 ///
-/// A harness is needed too, and no harness is: which of the four somebody wants
+/// A harness is needed too, and no harness is: which of the five somebody wants
 /// is theirs to say, and a wizard that ticked one for them would install an
 /// agent nobody asked for.
 const GATING: Dependency[] = ["Sandbox", "Git"];
 
 /// The three groups of the checkbox screen, in the order they are drawn: the
-/// two rows nothing runs without, the four a session needs one of, and the
+/// two rows nothing runs without, the five a session needs one of, and the
 /// rest. A row the server drew that is in neither of the first two is the
 /// third's, which is where WSL goes on Windows — its own label already says it
 /// is optional.

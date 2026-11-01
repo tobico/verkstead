@@ -2110,7 +2110,7 @@ fn probing(dir: &Path) -> Machine {
     let bin = dir.join("probed");
     std::fs::create_dir_all(&bin).unwrap();
 
-    for harness in ["claude", "codex", "grok", "opencode"] {
+    for harness in ["claude", "codex", "grok", "opencode", "agy"] {
         let at = bin.join(harness);
 
         std::fs::write(&at, "#!/bin/sh\nexit 0\n").unwrap();
