@@ -7,6 +7,9 @@
 //! standard input. It writes the login where Claude would, under the HOME the
 //! sandbox gives it, so what reaches the account is whatever the write-back a
 //! session's ending does carries there.
+//!
+//! And the Antigravity CLI's the same way, against a script that is what agy
+//! 1.4.12 does — see [`agy_stub`].
 
 #![cfg(target_os = "linux")]
 
@@ -74,6 +77,49 @@ esac
     )
 }
 
+/// What stands where `agy` goes: what agy 1.4.12 does, measured against the
+/// real binary. `$0` is the first word after it — `-p` for the login, `models`
+/// for the question of whether the account is signed in.
+///
+/// It offers the address only to a standard input that is a terminal, and
+/// says it on standard error with the address on a line of its own. A wrong
+/// code is a failed exchange and an exit. Where `./expiring` is in the
+/// directory it was started in, the first of it gives up waiting for a code
+/// at once, the way agy does after a minute.
+fn agy_stub(marker: &str) -> String {
+    format!(
+        r#"# {marker}
+case "$0" in
+-p)
+  echo started >> ./started
+  [ -t 0 ] || {{ echo "Error: authentication required. Run 'agy' to log in, then retry." >&2; exit 1; }}
+  echo "Authentication required. Please visit the URL to log in:" >&2
+  echo "  https://accounts.google.com/o/oauth2/auth?access_type=offline&state=$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')" >&2
+  echo >&2
+  echo "Waiting for authentication (timeout 60s)..." >&2
+  echo "Or, paste the authorization code here and press Enter:" >&2
+  if [ -f ./expiring ] && [ "$(wc -l < ./started)" -eq 1 ]; then
+    sleep 1
+    echo "Error: authentication timed out." >&2
+    echo "error: authentication failed or timed out" >&2
+    exit 1
+  fi
+  read code
+  [ "$code" = "{GOOD_CODE}" ] || {{ echo "Error: authentication failed: token exchange failed: oauth2: \"invalid_grant\" \"Malformed auth code.\"" >&2; exit 1; }}
+  printf '{{"token":{{"access_token":"%s"}}}}' "$code" > "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
+  printf '/help\tShow available commands and keybindings\n'
+  ;;
+models)
+  echo "Fetching available models..." >&2
+  [ -f "$HOME/.gemini/antigravity-cli/antigravity-oauth-token" ] && {{ echo "gemini-pro"; exit 0; }}
+  echo "Error: Please sign in to view available models. Launch the CLI without arguments to sign in." >&2
+  exit 1
+  ;;
+esac
+"#
+    )
+}
+
 struct Workbench {
     app: Router,
     pool: SqlitePool,
@@ -88,8 +134,13 @@ impl Workbench {
         Workbench::harnessed(limit, None).await
     }
 
+    /// The same, with [`agy_stub`] standing where every type's binary goes.
+    async fn agy(limit: Duration) -> Workbench {
+        Workbench::harnessed(limit, Some(Vec::new())).await
+    }
+
     /// The same, with `harness` standing where every type's binary goes in
-    /// place of the stub.
+    /// place of the stub — or, empty, [`agy_stub`].
     async fn harnessed(limit: Duration, harness: Option<Vec<String>>) -> Workbench {
         let dir = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
@@ -104,7 +155,13 @@ impl Workbench {
         );
 
         let agents = Agents::running(
-            harness.unwrap_or_else(|| vec!["/bin/sh".to_owned(), "-c".to_owned(), stub(&marker)]),
+            match harness {
+                None => vec!["/bin/sh".to_owned(), "-c".to_owned(), stub(&marker)],
+                Some(agy) if agy.is_empty() => {
+                    vec!["/bin/sh".to_owned(), "-c".to_owned(), agy_stub(&marker)]
+                }
+                Some(harness) => harness,
+            },
             Homes::on(Platform::HERE, home.path().to_owned(), dir.path()),
             Reachable::at(LISTENING),
             SandboxConfig::default(),
@@ -173,6 +230,54 @@ impl Workbench {
             .id
     }
 
+    /// An Antigravity CLI Profile with no login yet, saved the way the form
+    /// saves one.
+    async fn agy_profile(&self, name: &str) -> String {
+        let home = self.accounts.path().join(name).join(".gemini");
+        std::fs::create_dir_all(home.join("antigravity-cli")).unwrap();
+
+        let saved = self
+            .press(
+                "/api/ui/profiles",
+                serde_json::json!({
+                    "name": name,
+                    "account": { "agent_type": "Agy", "home": home },
+                    "models": ["gemini-pro"],
+                }),
+            )
+            .await;
+
+        assert_eq!(saved.0, StatusCode::OK, "{}", saved.1);
+
+        store::profiles(&self.pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|profile| profile.name.as_deref() == Some(name))
+            .expect("the Profile was saved")
+            .id
+    }
+
+    /// The login an Antigravity CLI account named `name` holds, if any.
+    fn agy_login_of(&self, name: &str) -> Option<String> {
+        std::fs::read_to_string(
+            self.accounts
+                .path()
+                .join(name)
+                .join(".gemini/antigravity-cli/antigravity-oauth-token"),
+        )
+        .ok()
+    }
+
+    /// The directory `profile`'s login is started in, where a stub keeps what
+    /// it was asked to do.
+    fn place(&self, profile: &str) -> PathBuf {
+        self.dir
+            .path()
+            .join("homes")
+            .join(format!("login-{profile}.place"))
+    }
+
     fn pair(&self, name: &str) -> (PathBuf, PathBuf) {
         let home = self.accounts.path().join(name);
         let claude_dir = home.join(".claude");
@@ -187,6 +292,11 @@ impl Workbench {
     /// A draft Investigate on a fresh repository, run under `profile`, with
     /// everything settled but whether its account is logged in.
     async fn investigation_under(&self, profile: &str) -> i64 {
+        self.investigation_on(profile, "claude-opus-5").await
+    }
+
+    /// The same, paired with `model`.
+    async fn investigation_on(&self, profile: &str, model: &str) -> i64 {
         let repo = self.accounts.path().join("repo");
         std::fs::create_dir_all(&repo).unwrap();
 
@@ -223,7 +333,7 @@ impl Workbench {
         for (path, body) in [
             (
                 "implementation-pairing",
-                serde_json::json!({ "profile_id": profile, "model": "claude-opus-5" }),
+                serde_json::json!({ "profile_id": profile, "model": model }),
             ),
             ("process", serde_json::json!({ "process": "Investigate" })),
             (
@@ -288,16 +398,10 @@ impl Workbench {
 
     /// How many logins the stub has been started as for `profile`.
     fn started(&self, profile: &str) -> usize {
-        std::fs::read_to_string(
-            self.dir
-                .path()
-                .join("homes")
-                .join(format!("login-{profile}.place"))
-                .join("started"),
-        )
-        .unwrap_or_default()
-        .lines()
-        .count()
+        std::fs::read_to_string(self.place(profile).join("started"))
+            .unwrap_or_default()
+            .lines()
+            .count()
     }
 
     /// How many processes on this machine are the stub, logging in.
@@ -316,7 +420,7 @@ impl Workbench {
 
                     words.first() == Some(&&b"/bin/sh"[..])
                         && String::from_utf8_lossy(&line).contains(&self.marker)
-                        && words.contains(&&b"login"[..])
+                        && (words.contains(&&b"login"[..]) || words.contains(&&b"/help"[..]))
                 })
             })
             .count()
@@ -812,4 +916,150 @@ async fn a_harness_that_is_not_there_does_not_read_as_signed_out() {
         GrillingStarted::Started
     );
     assert_eq!(workbench.broken(&profile).await, None);
+}
+
+/// An Antigravity CLI Profile logs in the way a Claude one does: the address
+/// agy prints, a code handed back, and the token in the account — read off a
+/// terminal, since agy offers its address to nothing else.
+#[tokio::test]
+async fn an_agy_login_leaves_its_token_in_the_account() {
+    let workbench = Workbench::agy(Duration::from_secs(600)).await;
+    let profile = workbench.agy_profile("work").await;
+
+    workbench.opened(&profile, "laptop").await;
+
+    let url = workbench.waiting(&profile).await;
+    assert!(
+        url.starts_with("https://accounts.google.com/o/oauth2/auth?"),
+        "{url}"
+    );
+    assert_eq!(workbench.agy_login_of("work"), None);
+
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    workbench
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .await;
+
+    let login = workbench
+        .agy_login_of("work")
+        .expect("the account has a login");
+    assert!(login.contains(GOOD_CODE), "{login}");
+
+    workbench.closed(&profile, "laptop").await;
+    workbench.none_running().await;
+}
+
+/// A code agy refuses is a fresh login with a fresh address, said in its name.
+#[tokio::test]
+async fn a_code_agy_refuses_starts_a_fresh_login() {
+    let workbench = Workbench::agy(Duration::from_secs(600)).await;
+    let profile = workbench.agy_profile("work").await;
+
+    workbench.opened(&profile, "laptop").await;
+    let first = workbench.waiting(&profile).await;
+
+    let (status, said) = workbench.coded(&profile, "4/0Ab-cut").await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    let again = workbench
+        .read_until(
+            &profile,
+            |reading| matches!(reading, Some(LoginState::Waiting { url, .. }) if url != &first),
+        )
+        .await;
+
+    let Some(LoginState::Waiting { refused, .. }) = again else {
+        unreachable!()
+    };
+    let refused = refused.expect("the modal is told the code was refused");
+    assert!(
+        refused.starts_with("Antigravity didn't accept"),
+        "{refused}"
+    );
+    assert_eq!(workbench.started(&profile), 2);
+    assert_eq!(workbench.agy_login_of("work"), None);
+
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    workbench
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .await;
+    assert!(workbench.agy_login_of("work").is_some());
+
+    workbench.closed(&profile, "laptop").await;
+    workbench.none_running().await;
+}
+
+/// agy gives up on a code after a minute. While the modal is open that is a
+/// fresh address in place of the one that ran out, rather than a failure.
+#[tokio::test]
+async fn an_agy_address_that_runs_out_is_replaced_by_a_fresh_one() {
+    let workbench = Workbench::agy(Duration::from_secs(600)).await;
+    let profile = workbench.agy_profile("work").await;
+
+    std::fs::create_dir_all(workbench.place(&profile)).unwrap();
+    std::fs::write(workbench.place(&profile).join("expiring"), "").unwrap();
+
+    workbench.opened(&profile, "laptop").await;
+    let first = workbench.waiting(&profile).await;
+
+    let again = workbench
+        .read_until(
+            &profile,
+            |reading| matches!(reading, Some(LoginState::Waiting { url, .. }) if url != &first),
+        )
+        .await;
+
+    let Some(LoginState::Waiting { refused, .. }) = again else {
+        unreachable!()
+    };
+    let refused = refused.expect("the modal is told the address ran out");
+    assert!(refused.contains("ran out"), "{refused}");
+    assert_eq!(workbench.started(&profile), 2);
+
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    workbench
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .await;
+
+    workbench.closed(&profile, "laptop").await;
+    workbench.none_running().await;
+}
+
+/// A press under an Antigravity CLI account with no login is refused before
+/// anything starts, the way a Claude one is, until a login from the card.
+#[tokio::test]
+async fn a_press_under_a_signed_out_agy_account_is_refused_until_it_logs_in() {
+    let workbench = Workbench::agy(Duration::from_secs(600)).await;
+    let profile = workbench.agy_profile("work").await;
+    let conversation = workbench.investigation_on(&profile, "gemini-pro").await;
+
+    assert_eq!(
+        workbench.pressed(conversation).await,
+        GrillingStarted::ProfileBroken(ProfileTrouble {
+            broken: Broken::SignedOut,
+            agent_type: AgentType::Agy,
+        }),
+    );
+    assert_eq!(workbench.broken(&profile).await, Some(Broken::SignedOut));
+
+    workbench.opened(&profile, "laptop").await;
+    workbench.waiting(&profile).await;
+    let (status, said) = workbench.coded(&profile, GOOD_CODE).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    workbench
+        .read_until(&profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .await;
+    workbench.closed(&profile, "laptop").await;
+
+    assert_eq!(workbench.broken(&profile).await, None);
+    assert_eq!(
+        workbench.pressed(conversation).await,
+        GrillingStarted::Started
+    );
 }

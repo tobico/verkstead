@@ -147,8 +147,8 @@ pub enum Broken {
     /// rather than in a second vocabulary for one fact.
     HarnessMissing,
 
-    /// The Claude account bound here has no login: `claude auth status` said
-    /// so when a press was about to start a session under it.
+    /// The account bound here has no login: `claude auth status` or `agy
+    /// models` said so when a press was about to start a session under it.
     ///
     /// Remembered from that press rather than asked at every read, the asking
     /// being a run of the harness. It goes when a login from the card lands,

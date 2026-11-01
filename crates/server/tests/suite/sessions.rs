@@ -17747,6 +17747,7 @@ async fn an_account_that_signs_out_stops_the_run_with_a_log_in_press() {
     assert_eq!(
         notice.log_in,
         Some(verkstead_render::NoticeLogIn {
+            agent_type: verkstead_render::AgentType::Claude,
             profile: implementation.id,
             name: Some("implementation".to_owned()),
         }),

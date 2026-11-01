@@ -20,8 +20,8 @@ export function LogIn(props: { press: NoticeLogIn }): JSX.Element {
   // human gave the account where they gave it one.
   const called = () =>
     props.press.name
-      ? `${AGENT_NAME.Claude} · ${props.press.name}`
-      : AGENT_NAME.Claude;
+      ? `${AGENT_NAME[props.press.agent_type]} · ${props.press.name}`
+      : AGENT_NAME[props.press.agent_type];
 
   return (
     <>
@@ -31,6 +31,7 @@ export function LogIn(props: { press: NoticeLogIn }): JSX.Element {
       <Show when={open()}>
         <LoggingIn
           profile={props.press.profile}
+          agentType={props.press.agent_type}
           called={called()}
           close={() => setOpen(false)}
         />

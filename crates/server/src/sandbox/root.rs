@@ -287,14 +287,15 @@ const AGY_SUMMARIES_JOINED: [&str; 3] = [
 /// The file agy falls to for its login where its keyring is unreachable,
 /// inside `~/.gemini`.
 ///
-/// **Not yet measured.** agy keeps its token in the system keyring and has a
-/// file store of its own — its changelog calls it *the CLI's private secrets
-/// file*, and `authstore.enc` is the name its binary carries — but where it
-/// lands is read off a real sign-in made with the keyring out of reach, and
-/// none has been. So this is the place a link is made from once that is read:
-/// a root links the account's file only where the account has one, and an
-/// account has none at this path that agy has not written.
-const AGY_LOGIN: &str = "antigravity-cli/authstore.enc";
+/// **Read off agy 1.4.12 signing in with no session bus**, which is what a
+/// sandbox is: its log says *Using file-based token storage because no D-Bus
+/// session bus detected*, and the token lands here as JSON — the OAuth token
+/// with its refresh token, and the account's address — readable by its owner
+/// alone. Nothing about it has to be asked for: the fallback is agy's own.
+///
+/// **Written in place**, opened for writing and truncated rather than renamed
+/// over, so a bind of it on Linux takes the write the way a Codex login's does.
+const AGY_LOGIN: &str = "antigravity-cli/antigravity-oauth-token";
 
 /// Of the account's `.claude.json`, the key its MCP servers are under: at the top
 /// level, and again under each `projects` entry.

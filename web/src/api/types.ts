@@ -4304,10 +4304,14 @@ log_in: NoticeLogIn | null, };
  */
 export type NoticeLogIn = { 
 /**
- * The Profile, by its uuid. Always a Claude one: that is the one harness
- * Verkstead runs a login for.
+ * The Profile, by its uuid. Always a Claude or an Antigravity CLI one:
+ * those are the harnesses Verkstead runs a login for.
  */
 profile: string, 
+/**
+ * What it runs, which the modal names.
+ */
+agent_type: AgentType, 
 /**
  * What the human called it, where they called it anything — which the
  * modal reads beside the harness, the way the Profile's card does.

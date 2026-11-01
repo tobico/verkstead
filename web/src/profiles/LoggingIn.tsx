@@ -1,8 +1,8 @@
 //! A Profile's login, run by the server and drawn here (ADR-0022): the address
 //! to log in at, and a box for the code that page hands back.
 //!
-//! **The server runs it, so any device can finish it.** `claude auth login`
-//! runs in the Profile's own sandbox on the machine the account is at home on,
+//! **The server runs it, so any device can finish it.** `claude auth login`, or
+//! the Antigravity CLI's own sign-in, runs in the Profile's own sandbox on the machine the account is at home on,
 //! and what this modal does is show what it printed and hand it what was
 //! pasted. The page that hands back the code can be opened on a phone while the
 //! modal is open on a laptop, or the other way round.
@@ -33,13 +33,22 @@ import {
   openLogin,
   sendLoginCode,
 } from "../api/client";
-import type { LoginState } from "../api/types";
+import type { AgentType, LoginState } from "../api/types";
 import { useReading } from "../freshness";
 import styles from "./LoggingIn.module.css";
+
+/// What the modal calls the harness it logs in: the short name the server's own
+/// words about the login use too. Only the harnesses whose login it runs.
+const CALLED: Partial<Record<AgentType, string>> = {
+  Claude: "Claude",
+  Agy: "Antigravity",
+};
 
 /// The modal, open over `profile` for as long as it is mounted.
 export function LoggingIn(props: {
   profile: string;
+  /// What the Profile runs, which the modal names.
+  agentType: AgentType;
   /// What the human asked to be called — the card's own reading.
   called: string;
   close: () => void;
@@ -88,6 +97,8 @@ export function LoggingIn(props: {
     void closeLogin(props.profile, viewer).catch(() => {});
   });
 
+  const harness = (): string => CALLED[props.agentType] ?? "the agent";
+
   const state = (): LoginState | null =>
     login.data ?? open.data ?? null;
 
@@ -97,10 +108,10 @@ export function LoggingIn(props: {
   return (
     <Modal class={styles.login!} open close={props.close} labelledBy={id}>
       <p id={id} class={styles.title}>
-        Log in to Claude for {props.called}
+        Log in to {harness()} for {props.called}
       </p>
 
-      <Switch fallback={<p class={styles.said}>Starting Claude…</p>}>
+      <Switch fallback={<p class={styles.said}>Starting {harness()}…</p>}>
         <Match
           when={((s) => (s?.state === "Waiting" ? s : null))(state())}
         >

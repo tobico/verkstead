@@ -16,7 +16,7 @@ proved there.
 ## Tasks
 
 - [x] 01: The `agy` type and its Built Root — [details](01-the-agy-type-and-its-root.md)
-- [ ] 02: Verkstead runs the agy login — [details](02-verkstead-runs-the-agy-login.md)
+- [x] 02: Verkstead runs the agy login — [details](02-verkstead-runs-the-agy-login.md)
 - [ ] 03: A session on agy: the Brief, the ask channel, idle — [details](03-a-session-on-agy.md)
 - [ ] 04: The Transcript and the resume — [details](04-the-transcript-and-the-resume.md)
 - [ ] 05: The wizard row and the installers — [details](05-the-wizard-row-and-installers.md)

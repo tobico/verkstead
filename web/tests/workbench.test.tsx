@@ -17893,7 +17893,11 @@ describe("the notice of a stop", () => {
 describe("a run stopped because its account signed out", () => {
   /// The press the server puts on the stop's own notice, for an account at
   /// home on this device (ADR-0022).
-  const PRESS = { profile: PROFILES[1]!.id, name: "opus" };
+  const PRESS = {
+    profile: PROFILES[1]!.id,
+    agent_type: "Claude" as const,
+    name: "opus",
+  };
   const LOGIN = `/api/ui/profiles/${PRESS.profile}/login`;
 
   /// The stopped conversation with that press on its notice, or none.

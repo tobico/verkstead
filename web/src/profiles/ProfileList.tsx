@@ -545,10 +545,11 @@ function ProfileCard(props: {
           </span>
           <span class={styles.end}>
             {/* The login, which the server runs in the Profile's own sandbox —
-                see `LoggingIn.tsx`. A Claude account bound here only: one bound
-                elsewhere runs from a copy, and its login is made on a machine it
-                is bound on. A press of its own inside the card, so it stands out
-                of the card's press and the card's keys alike. */}
+                see `LoggingIn.tsx`. A Claude or an Antigravity CLI account bound
+                here only: one bound elsewhere runs from a copy, and its login is
+                made on a machine it is bound on. A press of its own inside the
+                card, so it stands out of the card's press and the card's keys
+                alike. */}
             <Show when={loggable(props.profile)}>
               <Show
                 when={!loggedIn(props.profile)}
@@ -589,6 +590,7 @@ function ProfileCard(props: {
       <Show when={loggingIn()}>
         <LoggingIn
           profile={props.profile.id}
+          agentType={props.profile.account.agent_type}
           called={summary(props.profile)}
           close={() => setLoggingIn(false)}
         />
@@ -653,10 +655,12 @@ function notLendable(profile: ProfileEntry): boolean {
   return !profile.login && profile.bound;
 }
 
-/// Whether a card offers a login: a Claude Profile bound on this device — see
-/// ADR-0022 for why no other.
+/// Whether a card offers a login: a Claude or an Antigravity CLI Profile bound
+/// on this device — see ADR-0022 for why no other.
 function loggable(profile: ProfileEntry): boolean {
-  return profile.account.agent_type === "Claude" && profile.bound;
+  const runs = profile.account.agent_type;
+
+  return (runs === "Claude" || runs === "Agy") && profile.bound;
 }
 
 /// Whether the account is logged in here: it holds a login file, and the server
@@ -798,6 +802,7 @@ export function ProfilePane(props: {
               <Show when={loggingIn()}>
                 <LoggingIn
                   profile={profile().id}
+                  agentType={profile().account.agent_type}
                   called={summary(profile())}
                   close={() => setLoggingIn(false)}
                 />

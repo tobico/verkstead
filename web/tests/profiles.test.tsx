@@ -982,6 +982,29 @@ describe("logging an account in", () => {
     expect(theCard(reads(codex)).querySelector("button")).toBeNull();
   });
 
+  it("offers one on an Antigravity CLI account, in its name", async () => {
+    const agy: ProfileEntry = {
+      ...FABLE,
+      login: false,
+      name: "gemini",
+      account: { agent_type: "Agy", home: "/home/me/.gemini" },
+    };
+    const GOOGLE = "https://accounts.google.com/o/oauth2/auth?state=1";
+
+    serving(
+      whenever("/api/ui/profiles", json([agy])),
+      whenever(LOGIN, json({ state: "Starting" }), "POST"),
+      whenever(LOGIN, json({ state: "Waiting", url: GOOGLE, refused: null })),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(agy)));
+    fireEvent.click(theCard(reads(agy)).querySelector("button")!);
+
+    await waitFor(() => screen.getByText(GOOGLE));
+    screen.getByText(`Log in to Antigravity for ${reads(agy)}`);
+  });
+
   it("shows the address the login printed and hands it the code", async () => {
     const fetching = serving(
       whenever("/api/ui/profiles", json(SIGNED_OUT)),

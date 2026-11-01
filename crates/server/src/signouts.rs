@@ -16,9 +16,10 @@
 //! waits, and one wait is one stop.
 //!
 //! **The phrase rule.** A session has signed out when one of its lines *ends*
-//! with [`CLAUDE_SIGNED_OUT`], once the terminal's decoration is off both ends
-//! of it. Claude says it as `<reason> · Please run /login`, the reason first and
-//! the instruction last, so what has to be anchored is the end. Anchored, a line
+//! with its harness's phrase — [`CLAUDE_SIGNED_OUT`], [`AGY_SIGNED_OUT`] — once
+//! the terminal's decoration is off both ends of it. Claude says it as
+//! `<reason> · Please run /login`, the reason first and the instruction last,
+//! so what has to be anchored is the end; agy greets before it says so. Anchored, a line
 //! that merely mentions the phrase — an agent reading ADR-0022 aloud, a grep of
 //! this file — goes on: the phrase is in the middle of it, or a quotation mark
 //! or a backtick comes after it, and ASCII punctuation is not decoration. See
@@ -38,9 +39,9 @@
 //! and nobody is woken for. Its Notice says why, and the run is started again
 //! the moment the session has gone — see [`carrying_on`].
 //!
-//! **Claude only.** The other harnesses log in differently, and none of them
-//! has a login Verkstead can run yet — so they have no phrase, and a session on
-//! one is never stopped here.
+//! **Claude and the Antigravity CLI only.** The other harnesses log in
+//! differently, and none of them has a login Verkstead can run yet — so they
+//! have no phrase, and a session on one is never stopped here.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -63,15 +64,23 @@ use crate::store;
 /// will move; the instruction is the part they all share.
 const CLAUDE_SIGNED_OUT: &str = "please run /login";
 
+/// And what agy 1.4.12 ends a line with when it has no login to run on:
+/// `Welcome to the Antigravity CLI. You are currently not signed in.`, over the
+/// sign-in picker it then waits at.
+///
+/// Drawn the same for an account that never had a login and for one whose
+/// token was refused when agy went to refresh it — both read off the real
+/// binary, the second with Google's token endpoint answered by a stand-in. A
+/// session signed in draws no such line on its way up.
+const AGY_SIGNED_OUT: &str = "you are currently not signed in.";
+
 /// The sentence a session of `agent_type` ends a line with when its account has
 /// signed out — or nothing, where Verkstead cannot run that harness's login.
 fn signed_out_phrase(agent_type: store::AgentType) -> Option<&'static str> {
     match agent_type {
         store::AgentType::Claude => Some(CLAUDE_SIGNED_OUT),
-        store::AgentType::Codex
-        | store::AgentType::Grok
-        | store::AgentType::OpenCode
-        | store::AgentType::Agy => None,
+        store::AgentType::Agy => Some(AGY_SIGNED_OUT),
+        store::AgentType::Codex | store::AgentType::Grok | store::AgentType::OpenCode => None,
     }
 }
 
@@ -122,8 +131,9 @@ pub(crate) enum Home {
 /// The account's login file as it was when a session's root was built, so that
 /// a sign-out can tell a login replaced since from the one it was given.
 ///
-/// Only a Claude account bound here: one not bound here runs from a copy fetched
-/// before each launch, and the other harnesses are never stopped here at all.
+/// Only a Claude or an Antigravity CLI account bound here: one not bound here
+/// runs from a copy fetched before each launch, and the other harnesses are
+/// never stopped here at all.
 #[derive(Debug, Clone)]
 pub(crate) struct Login {
     path: PathBuf,
@@ -562,7 +572,7 @@ async fn home_named(pool: &SqlitePool, device: &str) -> String {
 mod tests {
     use super::*;
 
-    use store::AgentType::{Claude, Codex, Grok, OpenCode};
+    use store::AgentType::{Agy, Claude, Codex, Grok, OpenCode};
 
     fn signed_out(text: &str) -> Option<String> {
         saying(text, signed_out_phrase(Claude))
@@ -641,10 +651,32 @@ mod tests {
         }
     }
 
-    /// Only Claude's sessions are read: the others have no login Verkstead can
-    /// run.
+    /// What agy 1.4.12 draws over its sign-in picker, as it draws it.
     #[test]
-    fn only_a_claude_session_is_read() {
+    fn the_line_agy_draws_when_it_has_no_login_is_recognised() {
+        for line in [
+            " Welcome to the Antigravity CLI. You are currently not signed in.",
+            "\u{1b}[1mWelcome to the Antigravity CLI.\u{1b}[0m You are currently not signed in.",
+        ] {
+            assert!(
+                saying(line, signed_out_phrase(Agy)).is_some(),
+                "{line:?} was not recognised"
+            );
+        }
+
+        for line in [
+            "You are currently not signed in.",
+            "agy says `You are currently not signed in.` over its picker",
+            "Welcome to the Antigravity CLI. You are currently not signed in. Pick one.",
+            "Not logged in · Please run /login",
+        ] {
+            assert_eq!(saying(line, signed_out_phrase(Agy)), None, "{line:?}");
+        }
+    }
+
+    /// Only the sessions of a harness whose login Verkstead runs are read.
+    #[test]
+    fn only_a_session_whose_login_verkstead_runs_is_read() {
         for agent_type in [Codex, Grok, OpenCode] {
             assert_eq!(
                 saying(
