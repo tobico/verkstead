@@ -1393,8 +1393,21 @@ async fn a_binding_with_no_login_is_no_source_until_its_device_has_one() {
     let account = a.account_nobody_is_logged_in_to("work");
     let id = a.saving("work", account.clone()).await;
 
+    // Broken *with A's binding of it here*, rather than broken alone: the
+    // Profile can land before its binding does, and a binding is written
+    // holding a login until A's own look says otherwise — so a reading of
+    // the bare record would be followed by one to run under, and Start would
+    // go through to the brief.
     let rows = b
-        .profiles_saying(|rows| called(rows, "work").is_some_and(|row| row.broken.is_some()))
+        .profiles_saying(|rows| {
+            called(rows, "work").is_some_and(|row| {
+                row.broken.is_some()
+                    && row
+                        .devices
+                        .iter()
+                        .any(|line| line.device.id.as_deref() == Some(A) && line.bound.is_some())
+            })
+        })
         .await;
 
     let row = called(&rows, "work").unwrap();
