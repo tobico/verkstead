@@ -480,6 +480,7 @@ pub(crate) fn here(
         store::Account::Codex { home } => Root::codex(home),
         store::Account::Grok { home } => Root::grok(home),
         store::Account::OpenCode { home } => Root::opencode(home),
+        store::Account::Agy { home } => Root::agy(home),
     };
 
     // What the question settled, which on this end is what a path could be named

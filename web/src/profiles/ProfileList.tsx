@@ -300,6 +300,19 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
       placeholder: "/home/you/accounts/work/opencode",
     },
   ],
+  Agy: [
+    {
+      key: "home",
+      label: "Home directory",
+      note: (
+        <>
+          Mounted at <code>~/.gemini</code>. It holds{" "}
+          <code>antigravity-cli</code> once agy has run in it.
+        </>
+      ),
+      placeholder: "/home/you/accounts/work/.gemini",
+    },
+  ],
 };
 
 /// An account of each type with nothing typed into it: what picking that type
@@ -313,6 +326,7 @@ const BLANK_ACCOUNT: Record<AgentType, ProfileAccount> = {
   Codex: { agent_type: "Codex", home: "" },
   Grok: { agent_type: "Grok", home: "" },
   OpenCode: { agent_type: "OpenCode", home: "" },
+  Agy: { agent_type: "Agy", home: "" },
 };
 
 /// An empty form: what "add a profile" starts from.
@@ -343,7 +357,7 @@ export const BLANK_PROFILE: ProfileEdit = {
 /// So the stage that lands a backend adds it here, last, as the last thing it
 /// does — and a discriminator that arrives ahead of its stage is drawable
 /// without being offered, which is what it was always meant to be.
-const AGENT_TYPES: AgentType[] = ["Claude", "Codex", "Grok", "OpenCode"];
+const AGENT_TYPES: AgentType[] = ["Claude", "Codex", "Grok", "OpenCode", "Agy"];
 
 /// One of an account's paths, by the key the table above named it with.
 ///

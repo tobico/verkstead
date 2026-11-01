@@ -341,6 +341,11 @@ impl Tail {
             // for word: it cannot happen, and it is given up on rather than
             // guessed at.
             (store::Account::OpenCode { .. }, None) => Search::Nowhere,
+
+            // And the Antigravity CLI's record is not followed yet: what agy
+            // writes of a session as text is read once it has been seen, and
+            // until then the session is its Capture alone.
+            (store::Account::Agy { .. }, _) => Search::Nowhere,
         };
 
         Tail {
@@ -716,6 +721,10 @@ pub(crate) async fn carried(
                 taken,
             })
         }
+
+        // Nothing of agy's is carried on yet, so there is nothing to resume:
+        // Verkstead's own Resume stands.
+        store::Account::Agy { .. } => None,
     }
 }
 

@@ -633,6 +633,7 @@ pub(crate) fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String
                 AgentType::Codex => "Codex",
                 AgentType::Grok => "Grok Build",
                 AgentType::OpenCode => "OpenCode",
+                AgentType::Agy => "Antigravity CLI",
             };
 
             format!(

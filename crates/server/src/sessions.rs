@@ -588,6 +588,10 @@ impl Agents {
     ///
     /// **This blocks on the platform that writes the file**, which is why it is
     /// asked from the same blocking thread the sandbox is built on.
+    ///
+    /// `companions` is the Worktree of each Companion Repo, which only the
+    /// Antigravity CLI's line says anything about — see [`line`].
+    #[allow(clippy::too_many_arguments)]
     fn argv(
         &self,
         conversation_id: i64,
@@ -596,9 +600,10 @@ impl Agents {
         session: Option<&str>,
         named: Named,
         worktree: Option<&Path>,
+        companions: &[PathBuf],
     ) -> Option<Vec<String>> {
         let agent_type = pairing.profile.agent_type();
-        let line = line(agent_type, worktree);
+        let line = line(agent_type, worktree, companions);
 
         let mut argv = match &self.agent {
             Some(standing) => standing.clone(),
@@ -727,6 +732,9 @@ impl Agents {
                     .clone()
                     .unwrap_or_else(|| Signature::AtWork(OPENCODE_AT_WORK.to_owned())),
             ),
+            // Not yet measured, and judged by the silence meanwhile: agy draws
+            // inline, as Claude does, so there is a record to be silent in.
+            store::AgentType::Agy => None,
         }
     }
 
@@ -763,6 +771,23 @@ pub(crate) const fn binary(agent_type: store::AgentType) -> &'static str {
         store::AgentType::Codex => "codex",
         store::AgentType::Grok => "grok",
         store::AgentType::OpenCode => "opencode",
+        store::AgentType::Agy => "agy",
+    }
+}
+
+/// What a backend writes inside the Worktree it runs in, as the line of
+/// `info/exclude` that keeps it out of git — see [`crate::worktrees::excluded`].
+///
+/// The Antigravity CLI's `.gemini/`, where agy 1.4.12 keeps its transcript of
+/// the session and whatever else it files under the workspace; and nothing for
+/// the four before it, which write nothing there.
+fn written_in_worktree(agent_type: store::AgentType) -> Option<&'static str> {
+    match agent_type {
+        store::AgentType::Agy => Some(".gemini/"),
+        store::AgentType::Claude
+        | store::AgentType::Codex
+        | store::AgentType::Grok
+        | store::AgentType::OpenCode => None,
     }
 }
 
@@ -880,7 +905,8 @@ enum Named {
     Continuing,
 }
 
-/// Which line `agent_type` takes, for a session working in `worktree`.
+/// Which line `agent_type` takes, for a session working in `worktree` beside
+/// the Worktrees of its Companion Repos, `companions`.
 ///
 /// **Every backend is launched with its approval bypass on.** Running
 /// unattended is what Verkstead promises rather than something the account's
@@ -1018,7 +1044,22 @@ enum Named {
 /// before the line is built at all, and a store this build cannot write leaves
 /// the row alone and falls through to Verkstead's own Resume. See
 /// [`crate::records::carried`].
-fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
+///
+/// **The Antigravity CLI's says what a session needs of agy's settings on the
+/// line**, as a session-only `--settings` JSON that agy never saves — see
+/// [`agy_settings`] — so nothing of it is written into the account (ADR-0011).
+/// The model under `--model`, the Brief under `--prompt-interactive`, which
+/// runs it as the first turn and stays interactive, `--dangerously-skip-
+/// permissions` for the approvals, and an `--add-dir` per Companion Repo, which
+/// is how agy is told a directory beyond the one it was started in is part of
+/// the workspace. It takes no session id at launch, so its conversation is
+/// found rather than named. Read off agy 1.4.12's own help.
+///
+/// **And no resume yet.** agy's is `--conversation <id>`, and the id is the one
+/// its summaries database gives the conversation — which until it is read, a
+/// launch continuing a conversation opens one of its own, Verkstead's own
+/// Resume standing in.
+fn line(agent_type: store::AgentType, worktree: Option<&Path>, companions: &[PathBuf]) -> Line {
     match agent_type {
         store::AgentType::Claude => Line {
             model: "--model",
@@ -1084,7 +1125,64 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
             resume: Some(Resume::Flag("--session")),
             tail: vec!["--auto".to_owned()],
         },
+        store::AgentType::Agy => {
+            let mut tail = vec!["--dangerously-skip-permissions".to_owned()];
+
+            for companion in companions {
+                tail.push("--add-dir".to_owned());
+                tail.push(companion.display().to_string());
+            }
+
+            tail.push("--settings".to_owned());
+            tail.push(agy_settings(
+                worktree
+                    .into_iter()
+                    .chain(companions.iter().map(PathBuf::as_path)),
+            ));
+
+            Line {
+                model: "--model",
+                prompt: Some("--prompt-interactive"),
+                names_the_session: false,
+                resume: None,
+                tail,
+            }
+        }
     }
+}
+
+/// The session-only settings an Antigravity CLI session is launched with, as
+/// the JSON `--settings` takes: what running unattended in a Worktree needs of
+/// agy, said for this session and never saved into the account.
+///
+/// - `toolPermission: always-proceed`, so no tool call waits on an approval
+///   nobody is there to give — the setting beside the flag that says the same.
+/// - `allowNonWorkspaceAccess`, because the skills a session reads and the
+///   handoff it writes to are outside the Worktree.
+/// - `trustedWorkspaces`, the Worktree and every companion, so none of them
+///   stops the session on a question about trusting it.
+/// - `altScreenMode: never`, so agy draws inline and the Capture is the record
+///   of what the session did, as `--no-alt-screen` is for codex and grok.
+/// - `runningLightSpeed: off`, the light agy runs along its at-work line, which
+///   would repaint the Screen for nothing every few frames.
+/// - `enableTerminalSandbox: false`: agy's own sandbox for its shell tool,
+///   nested inside bwrap, which is already the boundary.
+///
+/// The mode is left as agy's default — `auto` turns that same sandbox on — and
+/// effort and telemetry are left as the account has them. Key names read off
+/// agy 1.4.12.
+fn agy_settings<'a>(trusted: impl Iterator<Item = &'a Path>) -> String {
+    serde_json::json!({
+        "toolPermission": "always-proceed",
+        "allowNonWorkspaceAccess": true,
+        "trustedWorkspaces": trusted
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>(),
+        "altScreenMode": "never",
+        "runningLightSpeed": "off",
+        "enableTerminalSandbox": false,
+    })
+    .to_string()
 }
 
 /// Where codex keeps the credentials a login writes, which inside the sandbox
@@ -2992,7 +3090,27 @@ impl Sessions {
                     session.as_deref(),
                     named,
                     conversation.worktree.as_deref(),
+                    &conversation
+                        .companions
+                        .iter()
+                        .filter_map(|companion| companion.worktree.clone())
+                        .collect::<Vec<_>>(),
                 )?;
+
+                // And what the harness writes inside the Worktree, kept out of
+                // the Diff and every commit before it has written any of it.
+                if let (Some(pattern), Some(worktree)) = (
+                    written_in_worktree(pairing.profile.agent_type()),
+                    conversation.worktree.as_deref(),
+                ) && !crate::worktrees::excluded(worktree, pattern)
+                {
+                    tracing::warn!(
+                        conversation_id,
+                        pattern,
+                        "what this session's harness writes inside the Worktree could not be \
+                         excluded from git, so it will show in the Diff"
+                    );
+                }
 
                 agents.sandboxed(&conversation, &pairing.profile, &argv)
             }
@@ -3834,7 +3952,7 @@ async fn carried_on(
         );
     }
 
-    if line(continued.agent_type, conversation.worktree.as_deref())
+    if line(continued.agent_type, conversation.worktree.as_deref(), &[])
         .resume
         .is_none()
     {
@@ -4692,7 +4810,7 @@ mod tests {
             named: Named,
             worktree: Option<&Path>,
         ) -> Vec<String> {
-            self.argv(CONVERSATION, pairing, prompt, session, named, worktree)
+            self.argv(CONVERSATION, pairing, prompt, session, named, worktree, &[])
                 .expect("a prompt that stays on the command line is always a line")
         }
     }
@@ -4775,6 +4893,24 @@ mod tests {
                 minted: None,
             },
             model: Some("opencode/big-pickle".to_owned()),
+        }
+    }
+
+    /// And an Antigravity CLI one, whose account is one `~/.gemini`.
+    fn agy_pairing() -> store::Pairing {
+        store::Pairing {
+            profile: store::Profile {
+                id: "5".to_owned(),
+                name: None,
+                account: store::Account::Agy {
+                    home: PathBuf::from("/srv/accounts/gemini/.gemini"),
+                },
+                models: vec!["gemini-pro".to_owned()],
+                memory: true,
+                unbound: None,
+                minted: None,
+            },
+            model: Some("gemini-pro".to_owned()),
         }
     }
 
@@ -5273,6 +5409,105 @@ mod tests {
         );
     }
 
+    /// An Antigravity CLI session takes agy's own line: the model, the Brief
+    /// run as the first turn of an interactive session, the approvals
+    /// bypassed, a directory added per Companion Repo, and what the session
+    /// needs of agy's settings as a JSON said for this session alone — the
+    /// Worktree and every companion trusted, the drawing inline, the running
+    /// light and agy's own sandbox off. No session id: agy takes none.
+    #[test]
+    fn an_agy_session_takes_the_line_agy_takes() {
+        let state = tempfile::tempdir().unwrap();
+        let companions = [
+            PathBuf::from("/state/worktrees/docs-x"),
+            PathBuf::from("/state/worktrees/infra-x"),
+        ];
+
+        let argv = agents(vec!["agy".to_owned()], state.path())
+            .argv(
+                CONVERSATION,
+                &agy_pairing(),
+                "# Rate limiting\n",
+                Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+                Named::Opening,
+                worktree(),
+                &companions,
+            )
+            .unwrap();
+
+        let (settings, line) = argv.split_last().unwrap();
+
+        assert_eq!(
+            line,
+            [
+                "agy",
+                "--model",
+                "gemini-pro",
+                "--prompt-interactive",
+                "# Rate limiting\n",
+                "--dangerously-skip-permissions",
+                "--add-dir",
+                "/state/worktrees/docs-x",
+                "--add-dir",
+                "/state/worktrees/infra-x",
+                "--settings",
+            ]
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(settings).unwrap(),
+            serde_json::json!({
+                "toolPermission": "always-proceed",
+                "allowNonWorkspaceAccess": true,
+                "trustedWorkspaces": [
+                    WORKTREE,
+                    "/state/worktrees/docs-x",
+                    "/state/worktrees/infra-x",
+                ],
+                "altScreenMode": "never",
+                "runningLightSpeed": "off",
+                "enableTerminalSandbox": false,
+            })
+        );
+    }
+
+    /// And a launch continuing an agy conversation opens one of its own for
+    /// now: there is no resume on agy's line until its conversation's id is
+    /// read, so the Brief is there and no `--conversation` is.
+    #[test]
+    fn an_agy_session_has_no_resume_yet() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["agy".to_owned()], state.path()).resumed(
+            &agy_pairing(),
+            "# Rate limiting\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
+
+        assert!(argv.contains(&"--prompt-interactive".to_owned()));
+        assert!(!argv.contains(&"--conversation".to_owned()));
+        assert!(
+            line(store::AgentType::Agy, worktree(), &[])
+                .resume
+                .is_none()
+        );
+    }
+
+    /// Only an agy session's Worktree has a directory of the harness's kept
+    /// out of git.
+    #[test]
+    fn only_agy_writes_inside_the_worktree() {
+        assert_eq!(written_in_worktree(store::AgentType::Agy), Some(".gemini/"));
+
+        for agent_type in [
+            store::AgentType::Claude,
+            store::AgentType::Codex,
+            store::AgentType::Grok,
+            store::AgentType::OpenCode,
+        ] {
+            assert_eq!(written_in_worktree(agent_type), None);
+        }
+    }
+
     /// A server told it is running on `platform`, which is the whole of what
     /// decides whether a prompt goes on the command line or into a file.
     ///
@@ -5337,6 +5572,7 @@ mod tests {
                 None,
                 Named::Opening,
                 worktree(),
+                &[],
             )
             .expect("a prompt that could be written down");
 
@@ -5394,6 +5630,7 @@ mod tests {
                 None,
                 Named::Opening,
                 worktree(),
+                &[],
             )
             .expect("a prompt that could be written down");
 
@@ -5427,6 +5664,7 @@ mod tests {
                     None,
                     Named::Opening,
                     worktree(),
+                    &[],
                 )
                 .expect("a prompt that stays on the command line");
 
@@ -5488,6 +5726,7 @@ exit 1
                 None,
                 Named::Opening,
                 worktree(),
+                &[],
             )
             .expect("a prompt that could be written down");
 

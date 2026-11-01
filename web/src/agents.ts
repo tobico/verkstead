@@ -52,6 +52,7 @@ export const AGENT_NAME: Record<AgentType, string> = {
   Codex: "Codex",
   Grok: "Grok Build",
   OpenCode: "OpenCode",
+  Agy: "Antigravity CLI",
 };
 
 /// What one session was, or would be, run under: the three recorded facts the

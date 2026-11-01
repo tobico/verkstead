@@ -72,6 +72,12 @@ export const KNOWN_MODELS: KnownModel[] = [
   { id: "grok-4.5", name: "Grok 4.5", agent: "Grok" },
   { id: "minimax/minimax-m2.1", name: "Minimax M2.1", agent: "OpenCode" },
   { id: "opencode/gpt-5.1-codex", name: "GPT-5.1 Codex", agent: "OpenCode" },
+  // Placeholders for the Antigravity CLI's Pro and Flash tiers, the same two
+  // the server's pairing defaults name: `agy models` lists nothing for an
+  // account that is not signed in, so the ids it really launches are read off
+  // one that is.
+  { id: "gemini-pro", name: "Gemini Pro", agent: "Agy" },
+  { id: "gemini-flash", name: "Gemini Flash", agent: "Agy" },
 ];
 
 /// What each known id reads as, by id.

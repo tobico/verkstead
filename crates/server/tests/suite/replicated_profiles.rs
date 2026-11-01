@@ -739,7 +739,8 @@ fn landed(rows: &[ProfileEntry], name: &str) -> bool {
         verkstead_render::ProfileAccount::Claude { claude_dir, .. } => !claude_dir.is_empty(),
         verkstead_render::ProfileAccount::Codex { home }
         | verkstead_render::ProfileAccount::Grok { home }
-        | verkstead_render::ProfileAccount::OpenCode { home } => !home.is_empty(),
+        | verkstead_render::ProfileAccount::OpenCode { home }
+        | verkstead_render::ProfileAccount::Agy { home } => !home.is_empty(),
     })
 }
 

@@ -60,6 +60,7 @@ pub enum AgentType {
     Codex,
     Grok,
     OpenCode,
+    Agy,
 }
 
 impl AgentType {
@@ -75,6 +76,7 @@ impl AgentType {
             Self::Codex => "codex",
             Self::Grok => "grok",
             Self::OpenCode => "opencode",
+            Self::Agy => "agy",
         }
     }
 
@@ -85,6 +87,7 @@ impl AgentType {
             "codex" => Self::Codex,
             "grok" => Self::Grok,
             "opencode" => Self::OpenCode,
+            "agy" => Self::Agy,
             other => bail!("a Profile names the unknown agent type {other:?}"),
         })
     }
@@ -98,7 +101,10 @@ impl AgentType {
     /// Set answer the question the same way.
     pub fn channel(self) -> Channel {
         match self {
-            Self::Claude | Self::OpenCode => Channel::Blocking,
+            // The Antigravity CLI's is not yet measured, and blocking is what
+            // a session asks on until it is: see ADR-0011's amendment of
+            // 2026-11-01.
+            Self::Claude | Self::OpenCode | Self::Agy => Channel::Blocking,
             Self::Codex | Self::Grok => Channel::StoreAndNudge,
         }
     }
@@ -171,6 +177,15 @@ pub enum Account {
     /// how such an account is made in the first place. Which of them are bound
     /// where the sandbox says, as every other account's mounting is.
     OpenCode { home: PathBuf },
+
+    /// The Antigravity CLI's one relocatable home, bind-mounted over
+    /// `~/.gemini`, resolved.
+    ///
+    /// Codex's shape again: agy keeps its settings, its conversations and its
+    /// global customisation under `antigravity-cli/` and `config/` inside it.
+    /// **A `~/.gemini` is an account only where it holds `antigravity-cli/`**:
+    /// a bare one is what Gemini CLI left behind, which is another program's.
+    Agy { home: PathBuf },
 }
 
 impl Account {
@@ -181,6 +196,7 @@ impl Account {
             Self::Codex { .. } => AgentType::Codex,
             Self::Grok { .. } => AgentType::Grok,
             Self::OpenCode { .. } => AgentType::OpenCode,
+            Self::Agy { .. } => AgentType::Agy,
         }
     }
 
@@ -200,6 +216,9 @@ impl Account {
                 home: PathBuf::new(),
             },
             AgentType::OpenCode => Self::OpenCode {
+                home: PathBuf::new(),
+            },
+            AgentType::Agy => Self::Agy {
                 home: PathBuf::new(),
             },
         }
@@ -568,7 +587,10 @@ impl Binding {
                 home: None,
                 login: holding(),
             },
-            Account::Codex { home } | Account::Grok { home } | Account::OpenCode { home } => Self {
+            Account::Codex { home }
+            | Account::Grok { home }
+            | Account::OpenCode { home }
+            | Account::Agy { home } => Self {
                 claude_dir: None,
                 config_file: None,
                 home: Some(text(home)?.to_owned()),
@@ -611,6 +633,7 @@ impl Binding {
             AgentType::Codex => Account::Codex { home: home()? },
             AgentType::Grok => Account::Grok { home: home()? },
             AgentType::OpenCode => Account::OpenCode { home: home()? },
+            AgentType::Agy => Account::Agy { home: home()? },
         })
     }
 }
@@ -1646,6 +1669,9 @@ fn read_row(row: Row, listed: Vec<String>, home: Option<String>) -> Result<Profi
             home: PathBuf::from(kept(agent_type, &id, home)?),
         },
         AgentType::OpenCode => Account::OpenCode {
+            home: PathBuf::from(kept(agent_type, &id, home)?),
+        },
+        AgentType::Agy => Account::Agy {
             home: PathBuf::from(kept(agent_type, &id, home)?),
         },
     };

@@ -68,7 +68,10 @@ const CLAUDE_SIGNED_OUT: &str = "please run /login";
 fn signed_out_phrase(agent_type: store::AgentType) -> Option<&'static str> {
     match agent_type {
         store::AgentType::Claude => Some(CLAUDE_SIGNED_OUT),
-        store::AgentType::Codex | store::AgentType::Grok | store::AgentType::OpenCode => None,
+        store::AgentType::Codex
+        | store::AgentType::Grok
+        | store::AgentType::OpenCode
+        | store::AgentType::Agy => None,
     }
 }
 

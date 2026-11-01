@@ -29,11 +29,12 @@ use crate::store::{self, AgentType, Picked, Profile, Role};
 ///
 /// Fixed rather than read off anything, so that saving a second harness's
 /// Profile does not quietly move every fresh Repo's default on to it.
-const HARNESSES: [AgentType; 4] = [
+const HARNESSES: [AgentType; 5] = [
     AgentType::Claude,
     AgentType::Codex,
     AgentType::Grok,
     AgentType::OpenCode,
+    AgentType::Agy,
 ];
 
 /// The model a harness's default Pairing runs for a role.
@@ -41,7 +42,9 @@ const HARNESSES: [AgentType; 4] = [
 /// Ids as a Profile lists them, since a Profile's list is what the default is
 /// matched against. Codex has one model it is known to run, so both tiers are
 /// it; Grok 4.6 is Grok Build's value tier because the older 4.5 reads as older
-/// rather than cheaper.
+/// rather than cheaper. The Antigravity CLI's two are placeholders for its Pro
+/// and Flash tiers, `agy models` saying nothing to an account that is not
+/// signed in — Pro for the grilling, Flash for the rest.
 fn model(harness: AgentType, role: Role) -> &'static str {
     match (harness, role) {
         (AgentType::Claude, Role::Grilling) => "claude-fable-5",
@@ -50,6 +53,8 @@ fn model(harness: AgentType, role: Role) -> &'static str {
         (AgentType::Grok, _) => "grok-4.6",
         (AgentType::OpenCode, Role::Grilling) => "opencode/gpt-5.1-codex",
         (AgentType::OpenCode, Role::Implementation | Role::Review) => "minimax/minimax-m2.1",
+        (AgentType::Agy, Role::Grilling) => "gemini-pro",
+        (AgentType::Agy, Role::Implementation | Role::Review) => "gemini-flash",
     }
 }
 

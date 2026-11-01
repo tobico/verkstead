@@ -2206,6 +2206,24 @@ async fn grilling_spilling_on_opencode_forgetting(
     .await
 }
 
+/// And the same again on the fifth, the Antigravity CLI, whose account is the
+/// one `~/.gemini`.
+async fn grilling_on_agy(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::EverythingOnAgy,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
 /// What Verkstead is told this backend has on its Screen when it is sitting at
 /// its prompt — one line, the whole of the coupling to somebody else's display.
 const AT_THE_PROMPT: &str = "▌ ready for anything";
@@ -2242,6 +2260,12 @@ const OPENCODE_MODEL: &str = "opencode/big-pickle";
 
 /// See [`OPENCODE_MODEL`].
 const OPENCODE_GRILLING_MODEL: &str = "opencode/big-pickle-grilling";
+
+/// And the pair an Antigravity CLI Profile lists.
+const AGY_MODEL: &str = "gemini-flash";
+
+/// See [`AGY_MODEL`].
+const AGY_GRILLING_MODEL: &str = "gemini-pro-grilling";
 
 /// The same, with a second repository registered beside this one and added to
 /// the Conversation as a companion before the press — which is a companion in
@@ -2776,6 +2800,9 @@ enum Pickers {
     /// And on the fourth — see [`Bench::everything_on_opencode`].
     EverythingOnOpenCode,
 
+    /// And on the fifth — see [`Bench::everything_on_agy`].
+    EverythingOnAgy,
+
     /// Every role under a Pairing of its own, and the grilling Profile's memory
     /// switched off — see [`Bench::forgetting`].
     GrillingForgetting,
@@ -3061,6 +3088,7 @@ async fn grilling_on(
         Pickers::EverythingOnCodex => bench.everything_on_codex(id).await,
         Pickers::EverythingOnGrok => bench.everything_on_grok(id).await,
         Pickers::EverythingOnOpenCode => bench.everything_on_opencode(id).await,
+        Pickers::EverythingOnAgy => bench.everything_on_agy(id).await,
         Pickers::GrillingForgetting => bench.forgetting("grilling").await,
         Pickers::GrillingOnCodexForgetting => {
             bench.grilling_on_codex(id).await;
@@ -3346,6 +3374,24 @@ impl Bench {
                 ("grilling", OPENCODE_GRILLING_MODEL),
                 ("implementation", OPENCODE_MODEL),
                 ("review", OPENCODE_MODEL),
+            ],
+        )
+        .await;
+    }
+
+    /// And every role on an Antigravity CLI Profile, the same again on the
+    /// fifth backend, its home holding the directory agy keeps its own in.
+    async fn everything_on_agy(&self, id: i64) {
+        self.on_one_home(
+            id,
+            "Agy",
+            "agy",
+            &["antigravity-cli"],
+            &[AGY_MODEL, AGY_GRILLING_MODEL],
+            &[
+                ("grilling", AGY_GRILLING_MODEL),
+                ("implementation", AGY_MODEL),
+                ("review", AGY_MODEL),
             ],
         )
         .await;
@@ -4941,6 +4987,80 @@ async fn a_codex_session_is_launched_with_the_line_codex_takes() {
         "and its `.codex` is a root holding the configuration Verkstead wrote and \
          the account's memory store, with no login where the account has none: \
          {said:?}"
+    );
+}
+
+/// And an Antigravity CLI session is launched with agy's own line: the model
+/// under `--model`, the Brief under `--prompt-interactive`, the approvals
+/// bypassed and the session's settings as a JSON said for it alone, the
+/// Worktree it runs in trusted there — and no session id.
+///
+/// **And `.gemini/` is kept out of git before agy has written any of it**: the
+/// stub reads the Worktree's own `info/exclude` back, which is the file git
+/// reads for it, and finds the line there.
+#[tokio::test]
+async fn an_agy_session_is_launched_with_the_line_agy_takes() {
+    let fixture = grilling_on_agy(
+        r#"
+        printf 'where=%s\n' "$(pwd)"
+        printf 'root=%s\n' "$(ls -A "$HOME/.gemini" | tr '\n' ' ')"
+        printf 'excluded=%s\n' "$(cat "$(git rev-parse --path-format=absolute --git-path info/exclude)" | tr '\n' ' ')"
+        for arg in "$0" "$@"; do printf 'arg=%s\n' "$arg" | tr -d '\n'; printf '\n'; done
+        "#,
+    )
+    .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains(&format!("arg=--model\narg={AGY_GRILLING_MODEL}\n")),
+        "agy is told its model with --model: {said:?}"
+    );
+    assert!(
+        said.contains("arg=--prompt-interactive\n"),
+        "and the Brief under --prompt-interactive: {said:?}"
+    );
+    assert!(
+        said.contains("arg=--dangerously-skip-permissions\n"),
+        "and its approvals bypassed: {said:?}"
+    );
+    assert!(
+        !said.contains("--session-id") && !said.contains("--conversation"),
+        "agy takes no session id, so it is told none: {said:?}"
+    );
+
+    let where_it_ran = said
+        .lines()
+        .find_map(|line| line.strip_prefix("where="))
+        .expect("the session says where it ran");
+    let settings = said
+        .lines()
+        .skip_while(|line| *line != "arg=--settings")
+        .nth(1)
+        .and_then(|line| line.strip_prefix("arg="))
+        .expect("the line ends on its settings");
+    let settings: serde_json::Value = serde_json::from_str(settings).unwrap();
+
+    assert_eq!(
+        settings["trustedWorkspaces"],
+        serde_json::json!([where_it_ran]),
+        "the settings trust the Worktree it was launched in: {said:?}"
+    );
+    assert_eq!(settings["altScreenMode"], "never");
+
+    assert!(
+        said.contains("root=antigravity-cli config \n"),
+        "its `.gemini` is a root of agy's own two directories: {said:?}"
+    );
+    assert!(
+        said.lines()
+            .find_map(|line| line.strip_prefix("excluded="))
+            .is_some_and(|excluded| excluded.split(' ').any(|line| line == ".gemini/")),
+        "and `.gemini/` is excluded from git in the Worktree by the time agy starts: {said:?}"
     );
 }
 

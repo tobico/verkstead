@@ -127,6 +127,11 @@ fn running(agent_type: Option<store::AgentType>) -> &'static str {
     match agent_type {
         None | Some(store::AgentType::Claude) => RUNNING_CLAUDE,
         Some(store::AgentType::OpenCode) => RUNNING_OPENCODE,
+
+        // Not yet measured: agy's shell tool takes a timeout, which is
+        // opencode's mechanism, and it reads opencode's section until a session
+        // has shown whether it holds an ask that way for free.
+        Some(store::AgentType::Agy) => RUNNING_OPENCODE,
         Some(store::AgentType::Codex | store::AgentType::Grok) => RUNNING_STORE_AND_NUDGE,
     }
 }

@@ -52,8 +52,46 @@ everything here is provable at its sign-in screen.
 
 ## Acceptance criteria
 
-- [ ] A Profile of type `agy` saves over the form and the API, pairs, and launches; the Capture shows agy's own sign-in screen drawn inline, no alternate screen taken.
-- [ ] The root under `homes/<id>` holds exactly the allowlist above and nothing else of the account; with memory on, the three joined entries are the account's and with it off they are the root's own and empty.
-- [ ] The written `settings.json` carries only the provider keys the account has, the Instructions text lands where agy reads a global rule, and an attached MCP server appears in `config/mcp_config.json`.
-- [ ] The launch line and the `--settings` JSON are as above, with one `--add-dir` per companion, and `.gemini/` is in the Worktree's `info/exclude` after a launch.
-- [ ] The onboarding probe offers a Profile for a `~/.gemini` holding `antigravity-cli/` and not for a bare one; the pairing defaults name a placeholder Pro and Flash for task 03 to correct.
+- [x] A Profile of type `agy` saves over the form and the API, pairs, and launches; the Capture shows agy's own sign-in screen drawn inline, no alternate screen taken.
+- [x] The root under `homes/<id>` holds exactly the allowlist above and nothing else of the account; with memory on, the three joined entries are the account's and with it off they are the root's own and empty.
+- [x] The written `settings.json` carries only the provider keys the account has, the Instructions text lands where agy reads a global rule, and an attached MCP server appears in `config/mcp_config.json`.
+- [x] The launch line and the `--settings` JSON are as above, with one `--add-dir` per companion, and `.gemini/` is in the Worktree's `info/exclude` after a launch.
+- [x] The onboarding probe offers a Profile for a `~/.gemini` holding `antigravity-cli/` and not for a bare one; the pairing defaults name a placeholder Pro and Flash for task 03 to correct.
+
+## What was measured, and what is still waiting
+
+**agy 1.4.12**, signed out, at `~/.local/bin/agy` on this machine.
+
+- **The launch, on the real thing.** The `bwrap` line `Sandbox::command` renders
+  for an agy Profile, with the line `line()` writes, run under a pty: agy drew
+  its own *Welcome to the Antigravity CLI. You are currently not signed in.*
+  login picker inline, with no `?1049h` anywhere in what it sent. The account
+  was left with nothing but what the joins put there; the root on the host held
+  `antigravity-cli/` and `config/`, agy making its own `builtin/`, `log/`,
+  `cache/`, `jetski_state.pbtxt` and `config/projects/` there for itself.
+- **Nothing to seed for onboarding, signed out.** A run in a fresh root writes
+  all four `POST_ONBOARDING_STEP_TYPE_*` steps into `jetski_state.pbtxt` as
+  completed before it draws the sign-in screen, so a fresh root parks on
+  nothing but the sign-in itself. What a signed-in fresh account shows after
+  the sign-in (the billing choice, the telemetry opt-in the changelog names) is
+  only measurable signed in.
+- **The summaries database runs in write-ahead-log mode**, so it is joined
+  with its `-wal` and `-shm`, each made empty in the account where missing.
+  Proved on the real binary: started on three empty joined files, agy built its
+  `conversation_summaries` table and its log landed in the account.
+- **The global rule is `~/.gemini/GEMINI.md`, not a file under `config/`** —
+  read off the binary (`/.gemini/GEMINI.md`, `/.gemini/AGENTS.md`) and agy's
+  own `rules.md`, which documents only directory rules. Not yet confirmed by a
+  signed-in session that a rule there reaches the model.
+- **The login is not linked yet.** `AGY_LOGIN` names `authstore.enc` under
+  `antigravity-cli/`, a name the binary carries, and nothing has been seen
+  written there. Signed out inside the sandbox, agy's log says *Using
+  file-based secret storage at `$HOME/.config/antigravity/plugin-secrets.json`*
+  for plugin secrets — outside `~/.gemini` — so the login's file may be beside
+  it rather than in the account; task 02 measures it.
+- **Placeholders for later tasks**: the channel is blocking and the Guide
+  reads opencode's *Running the ask*; no idle signature (silence judges it);
+  the MCP tool naming is `mcp_<server>_<tool>`, unread off a run; the pairing
+  defaults and the viewer's known models are `gemini-pro` and `gemini-flash`;
+  there is no resume line and no Transcript search; the onboarding probe offers
+  the account without a wizard row, its tick asked of the machine directly.

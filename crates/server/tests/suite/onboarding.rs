@@ -275,6 +275,7 @@ fn an_account(dir: &Path, agent_type: AgentType) {
             home.join(".config/opencode"),
             home.join(".local/share/opencode"),
         ],
+        AgentType::Agy => vec![home.join(".gemini/antigravity-cli")],
     };
 
     for path in dirs {

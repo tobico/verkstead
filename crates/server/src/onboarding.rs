@@ -262,6 +262,12 @@ const HARNESSES: &[(Dependency, store::AgentType)] = &[
     (Dependency::OpenCode, store::AgentType::OpenCode),
 ];
 
+/// And the harnesses whose account is offered before the wizard draws a row of
+/// theirs: the Antigravity CLI, whose Profile can be made and launched before
+/// its install is the wizard's to make. Its tick is asked of the machine
+/// directly, the same probe a row would have read.
+const UNROWED: &[store::AgentType] = &[store::AgentType::Agy];
+
 /// The machine the probes are made against: whose rules a name is read by,
 /// where a session would look for one, and what this box calls itself.
 ///
@@ -629,7 +635,7 @@ impl Machine {
     ///
     /// A home holds at most one account per harness — see
     /// [`sandbox::account_in_home`], which is where the shapes are — so this is
-    /// four looks and never a search. Each carries whether its harness is
+    /// five looks and never a search. Each carries whether its harness is
     /// there, read off the row that was already probed rather than probed
     /// again: one answer, so the tick and the row cannot disagree.
     ///
@@ -640,12 +646,20 @@ impl Machine {
             return Vec::new();
         };
 
-        HARNESSES
+        let rowed = HARNESSES
             .iter()
-            .filter_map(|(dependency, agent_type)| {
+            .map(|(dependency, agent_type)| (*agent_type, there(dependencies, *dependency)));
+
+        let unrowed = UNROWED
+            .iter()
+            .map(|agent_type| (*agent_type, self.harness(*agent_type)));
+
+        rowed
+            .chain(unrowed)
+            .filter_map(|(agent_type, harness)| {
                 Some(AccountView {
-                    account: profiles::account(&sandbox::account_in_home(*agent_type, home)?),
-                    harness: there(dependencies, *dependency),
+                    account: profiles::account(&sandbox::account_in_home(agent_type, home)?),
+                    harness,
                 })
             })
             .collect()
@@ -1912,6 +1926,7 @@ mod tests {
                     home.join(".local/share/opencode"),
                 ]
             }
+            store::AgentType::Agy => vec![home.join(".gemini/antigravity-cli")],
         };
 
         for dir in dirs {
@@ -1935,6 +1950,7 @@ mod tests {
                 verkstead_render::ProfileAccount::Codex { .. } => store::AgentType::Codex,
                 verkstead_render::ProfileAccount::Grok { .. } => store::AgentType::Grok,
                 verkstead_render::ProfileAccount::OpenCode { .. } => store::AgentType::OpenCode,
+                verkstead_render::ProfileAccount::Agy { .. } => store::AgentType::Agy,
             })
             .collect()
     }
@@ -2525,6 +2541,13 @@ echo {token}
                     .iter()
                     .map(|(_, agent_type)| sessions::binary(*agent_type)),
             )
+            // And the harness whose account is offered before its row is
+            // drawn, which is followed all the same: its sessions launch.
+            .chain(
+                UNROWED
+                    .iter()
+                    .map(|agent_type| sessions::binary(*agent_type)),
+            )
             .chain(std::iter::once(sandbox::GH))
             .collect();
 
@@ -3025,7 +3048,7 @@ echo {token}
         }
     }
 
-    /// Each of the four shapes in the server's home is offered as the Profile
+    /// Each of the five shapes in the server's home is offered as the Profile
     /// it would be saved as, in the order the harness rows are drawn.
     ///
     /// The paths are the account's own — the wizard hands them straight back to
@@ -3041,6 +3064,7 @@ echo {token}
             store::AgentType::Codex,
             store::AgentType::Grok,
             store::AgentType::OpenCode,
+            store::AgentType::Agy,
         ] {
             an_account(dir.path(), agent_type);
         }
@@ -3059,8 +3083,9 @@ echo {token}
                 store::AgentType::Codex,
                 store::AgentType::Grok,
                 store::AgentType::OpenCode,
+                store::AgentType::Agy,
             ],
-            "a home holds one account per harness, and all four are here",
+            "a home holds one account per harness, and all five are here",
         );
 
         assert_eq!(
@@ -3084,6 +3109,13 @@ echo {token}
             "and opencode's is the home its XDG directories are under, which is \
              the home itself",
         );
+        assert_eq!(
+            accounts[4].account,
+            verkstead_render::ProfileAccount::Agy {
+                home: dir.path().join(".gemini").to_string_lossy().into_owned(),
+            },
+            "and agy's is `~/.gemini`, the directory it keeps its own inside",
+        );
 
         assert!(
             accounts[0].harness,
@@ -3091,7 +3123,7 @@ echo {token}
         );
         assert!(
             accounts[1..].iter().all(|found| !found.harness),
-            "and the three whose binaries are missing are not accounts to make a \
+            "and the four whose binaries are missing are not accounts to make a \
              Profile of yet",
         );
     }
@@ -3112,10 +3144,15 @@ echo {token}
         // directory, which is the half of it the account is *not* in.
         std::fs::create_dir_all(dir.path().join(".config/opencode")).unwrap();
 
+        // And a bare `~/.gemini`, which is what Gemini CLI leaves behind
+        // rather than an Antigravity CLI account.
+        std::fs::create_dir_all(dir.path().join(".gemini")).unwrap();
+        std::fs::write(dir.path().join(".gemini/settings.json"), "{}\n").unwrap();
+
         assert_eq!(
             offered(&machine(Platform::Linux, dir.path())),
             Vec::new(),
-            "neither is a whole account, so neither is offered",
+            "none is a whole account, so none is offered",
         );
     }
 

@@ -587,7 +587,9 @@ fn broken(
             (claude_dir.clone(), Broken::DirMissing),
             (config_file.clone(), Broken::ConfigMissing),
         ],
-        store::Account::Codex { home } | store::Account::Grok { home } => {
+        store::Account::Codex { home }
+        | store::Account::Grok { home }
+        | store::Account::Agy { home } => {
             vec![(home.clone(), Broken::HomeMissing)]
         }
 
@@ -726,6 +728,8 @@ fn inspect(account: &ProfileAccount) -> Result<store::Account, ProfileSaved> {
         ProfileAccount::Codex { home } => Ok(store::Account::Codex { home: kept(home)? }),
 
         ProfileAccount::Grok { home } => Ok(store::Account::Grok { home: kept(home)? }),
+
+        ProfileAccount::Agy { home } => Ok(store::Account::Agy { home: kept(home)? }),
 
         // An OpenCode home is the directory the two opencode keeps an account
         // in sit under, so both of those are judged as well as the home itself
@@ -924,6 +928,9 @@ pub(crate) fn account(account: &store::Account) -> ProfileAccount {
         store::Account::OpenCode { home } => ProfileAccount::OpenCode {
             home: home.to_string_lossy().into_owned(),
         },
+        store::Account::Agy { home } => ProfileAccount::Agy {
+            home: home.to_string_lossy().into_owned(),
+        },
     }
 }
 
@@ -948,5 +955,6 @@ pub(crate) fn agent_type(agent_type: store::AgentType) -> AgentType {
         store::AgentType::Codex => AgentType::Codex,
         store::AgentType::Grok => AgentType::Grok,
         store::AgentType::OpenCode => AgentType::OpenCode,
+        store::AgentType::Agy => AgentType::Agy,
     }
 }

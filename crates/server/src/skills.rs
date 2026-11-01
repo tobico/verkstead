@@ -1311,11 +1311,15 @@ pub(crate) fn served(prompt: &str, servers: &[String], agent: store::AgentType) 
 /// - Grok Build (1.0.34) drops the prefix: `<server>__<tool>`, which is the
 ///   name its `use_tool` takes.
 /// - OpenCode (1.18.31) joins the two with one underscore: `<server>_<tool>`.
+/// - The Antigravity CLI (1.4.12) is **not yet read off a run**, there being no
+///   signed-in session to run one in: `mcp_<server>_<tool>` is the Antigravity
+///   family's own spelling, and stands until a session says otherwise.
 pub(crate) fn tools_named(agent: store::AgentType) -> &'static str {
     match agent {
         store::AgentType::Claude | store::AgentType::Codex => "mcp__<server>__<tool>",
         store::AgentType::Grok => "<server>__<tool>",
         store::AgentType::OpenCode => "<server>_<tool>",
+        store::AgentType::Agy => "mcp_<server>_<tool>",
     }
 }
 

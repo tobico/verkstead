@@ -4075,8 +4075,8 @@ before there was such a declaration.
 **The settings page's Instructions text, written as the file that harness
 reads** for its global instructions: `CLAUDE.md` in a Claude root,
 `AGENTS.md` in a Codex or a Grok Build one, `AGENTS.md` in OpenCode's
-config directory, and the global rules file agy reads under the Antigravity
-CLI's `config/`. Verbatim and alone, with no heading over it and no line
+config directory, and `GEMINI.md` in an Antigravity CLI one, beside its
+`config/` rather than inside it. Verbatim and alone, with no heading over it and no line
 saying where it came from, and written rather than joined the way the
 configuration file beside it is — Verkstead's own, never the account's, and
 nothing of it written back. The account's own such file is left out with the

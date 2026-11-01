@@ -82,6 +82,7 @@ const LOGIN: Record<AgentType, string> = {
   Codex: "codex",
   Grok: "grok",
   OpenCode: "opencode auth login",
+  Agy: "agy",
 };
 
 /// Where each shape of account is kept, said as the paths a human would
@@ -94,6 +95,7 @@ const KEPT: Record<AgentType, string[]> = {
   Codex: ["~/.codex"],
   Grok: ["~/.grok"],
   OpenCode: ["~/.config/opencode", "~/.local/share/opencode"],
+  Agy: ["~/.gemini"],
 };
 
 /// Why the press is held, beside it.

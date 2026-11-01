@@ -374,6 +374,12 @@ const CLAUDE_DIR_INSIDE_HOME: &str = ".claude";
 const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
 const CODEX_INSIDE_HOME: &str = ".codex";
 const GROK_INSIDE_HOME: &str = ".grok";
+const AGY_INSIDE_HOME: &str = ".gemini";
+
+/// What makes a `~/.gemini` the Antigravity CLI's account rather than what
+/// Gemini CLI left behind: the directory agy keeps its own state in, which
+/// Gemini CLI never writes. Read off agy 1.4.12, which makes it at every start.
+const AGY_ACCOUNT_MARK: &str = "antigravity-cli";
 
 /// And OpenCode's, which is two of them rather than one: it keeps no
 /// dot-directory of its own and reads the XDG base directories instead,
@@ -1423,7 +1429,7 @@ fn system(platform: Platform) -> &'static [&'static str] {
     }
 }
 
-/// Every program a session is launched as or reaches for by name: the four
+/// Every program a session is launched as or reaches for by name: the five
 /// harnesses, then `git` and `gh`.
 ///
 /// **One list, and it is every name the wizard has a row for** — see
@@ -1441,6 +1447,7 @@ pub(crate) const PROGRAMS: &[&str] = &[
     crate::sessions::binary(store::AgentType::Codex),
     crate::sessions::binary(store::AgentType::Grok),
     crate::sessions::binary(store::AgentType::OpenCode),
+    crate::sessions::binary(store::AgentType::Agy),
     GIT,
     GH,
 ];
@@ -2552,6 +2559,14 @@ fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBu
                 .map(|inside| (account.join(inside), home.join(inside)))
                 .collect()
         }
+        // agy's own directory inside `~/.gemini` rather than the whole of it:
+        // that is what a session is given the memory of, and what tells an
+        // account from a bare `~/.gemini` Gemini CLI left — see
+        // [`AGY_ACCOUNT_MARK`].
+        store::Account::Agy { home: account } => vec![(
+            account.join(AGY_ACCOUNT_MARK),
+            home.join(AGY_INSIDE_HOME).join(AGY_ACCOUNT_MARK),
+        )],
     }
 }
 
@@ -2608,6 +2623,9 @@ pub(crate) fn kept_in(agent_type: store::AgentType, home: &Path) -> store::Accou
         },
         store::AgentType::OpenCode => store::Account::OpenCode {
             home: home.to_owned(),
+        },
+        store::AgentType::Agy => store::Account::Agy {
+            home: home.join(AGY_INSIDE_HOME),
         },
     }
 }
@@ -4219,6 +4237,7 @@ impl Sandbox {
             store::Account::Codex { home } => root::Root::codex(home),
             store::Account::Grok { home } => root::Root::grok(home),
             store::Account::OpenCode { home } => root::Root::opencode(home),
+            store::Account::Agy { home } => root::Root::agy(home),
         }
         .remembering(profile.memory);
 
@@ -4381,6 +4400,7 @@ impl Sandbox {
             store::Account::Codex { home } => root::Root::codex(home),
             store::Account::Grok { home } => root::Root::grok(home),
             store::Account::OpenCode { home } => root::Root::opencode(home),
+            store::Account::Agy { home } => root::Root::agy(home),
         }
         .remembering(profile.memory);
 
@@ -5172,8 +5192,15 @@ impl Sandbox {
                 surface.made(Access::Built(built.join(directory)));
             }
 
-            let (path, contents) = root.written(built, &self.mcp_servers);
-            surface.made(Access::Written { path, contents });
+            // And the directories inside it the files below go into, where
+            // the harness writes them deeper than the root itself.
+            for furnished in root.furnished_in(built) {
+                surface.made(Access::Built(furnished));
+            }
+
+            for (path, contents) in root.written(built, &self.mcp_servers) {
+                surface.made(Access::Written { path, contents });
+            }
 
             // And the settings page's one text, as the file this harness reads
             // for global instructions — where there is a text to give.
@@ -7448,8 +7475,8 @@ mod tests {
     fn the_names_a_session_is_followed_into_are_the_harnesses_and_the_two_tools() {
         assert_eq!(
             PROGRAMS,
-            &["claude", "codex", "grok", "opencode", "git", "gh"],
-            "the four harnesses, then the one every session works with and the \
+            &["claude", "codex", "grok", "opencode", "agy", "git", "gh"],
+            "the five harnesses, then the one every session works with and the \
              one it opens a pull request with",
         );
     }

@@ -47,6 +47,7 @@ import claudeMarkFile from "../src/marks/claude-color.svg?raw";
 import codexMarkFile from "../src/marks/codex.svg?raw";
 import grokMarkFile from "../src/marks/grok.svg?raw";
 import opencodeMarkFile from "../src/marks/opencode.svg?raw";
+import antigravityMarkFile from "../src/marks/antigravity.svg?raw";
 import card from "../src/CardButton.module.css";
 import button from "../src/IconButton.module.css";
 import { ProfileList, ProfilePane } from "../src/profiles/ProfileList";
@@ -352,6 +353,18 @@ const NEW_OPENCODE: ProfileEdit = {
   account: {
     agent_type: "OpenCode",
     home: "/home/you/accounts/zen/opencode",
+  },
+};
+
+/// And one of the fifth, whose one home is the `~/.gemini` agy keeps its own
+/// directory inside.
+const NEW_AGY: ProfileEdit = {
+  name: "gemini",
+  models: ["gemini-pro"],
+  memory: true,
+  account: {
+    agent_type: "Agy",
+    home: "/home/you/accounts/gemini/.gemini",
   },
 };
 
@@ -1361,6 +1374,7 @@ describe("the pane a card opens", () => {
       "Codex",
       "Grok Build",
       "OpenCode",
+      "Antigravity CLI",
     ]);
   });
 
@@ -1378,6 +1392,7 @@ describe("the pane a card opens", () => {
       art(codexMarkFile),
       art(grokMarkFile),
       art(opencodeMarkFile),
+      art(antigravityMarkFile),
     ]);
   });
 
@@ -1614,7 +1629,7 @@ describe("the pane the plus opens", () => {
   ///
   /// Every one of the types that keep one, because the shape they share is the
   /// whole of what could make the form send one of them as another.
-  it.each([NEW_CODEX, NEW_GROK, NEW_OPENCODE])(
+  it.each([NEW_CODEX, NEW_GROK, NEW_OPENCODE, NEW_AGY])(
     "saves a $account.agent_type profile of the type that was picked",
     async (profile) => {
       const fetching = theProfiles(json("Saved"));

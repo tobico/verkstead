@@ -110,6 +110,14 @@ fn opencode_home(root: &Path, account: &str) -> PathBuf {
     home
 }
 
+/// And the same for an Antigravity CLI one: a `~/.gemini` agy has run in,
+/// which holds its own directory.
+fn agy_home(root: &Path, account: &str) -> PathBuf {
+    let home = root.join(account).join(".gemini");
+    made(home.join("antigravity-cli"));
+    home
+}
+
 fn made(home: PathBuf) -> PathBuf {
     std::fs::create_dir_all(&home).unwrap();
     home
@@ -139,6 +147,15 @@ fn opencode_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value 
     serde_json::json!({
         "name": name,
         "account": { "agent_type": "OpenCode", "home": home },
+        "models": models,
+    })
+}
+
+/// And an Antigravity CLI one, its one home under a fourth word.
+fn agy_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "account": { "agent_type": "Agy", "home": home },
         "models": models,
     })
 }
@@ -836,7 +853,7 @@ async fn a_profile_whose_account_is_one_home_saves_and_reads_back_with_it() {
 
 /// Types keeping one home apiece stay the types they are over the wire.
 ///
-/// The account carries the type it is, and all three of these carry the same
+/// The account carries the type it is, and all four of these carry the same
 /// field under it — so what this settles is that a Profile saved as one of them
 /// is listed as that one, rather than coming back as another type that keeps a
 /// home.
@@ -872,6 +889,14 @@ async fn a_home_account_saves_and_reads_back_as_its_own_type() {
         .await,
         ProfileSaved::Saved
     );
+    assert_eq!(
+        save(
+            &app,
+            &agy_edit("vertex", &agy_home(accounts.path(), "vertex"), &MODELS)
+        )
+        .await,
+        ProfileSaved::Saved
+    );
 
     let listed = listed(&app).await;
     let resolved = accounts.path().canonicalize().unwrap();
@@ -894,6 +919,9 @@ async fn a_home_account_saves_and_reads_back_as_its_own_type() {
                     .to_str()
                     .unwrap()
                     .to_owned(),
+            },
+            ProfileAccount::Agy {
+                home: resolved.join("vertex/.gemini").to_str().unwrap().to_owned(),
             },
         ]
     );

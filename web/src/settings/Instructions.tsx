@@ -6,7 +6,8 @@
 //! refining are not there, and a session starts knowing only what its Repo
 //! carries. This is what takes their place: one text, written into each root as
 //! the file that harness reads — `.claude/CLAUDE.md`, `.codex/AGENTS.md`,
-//! `.grok/AGENTS.md`, or `AGENTS.md` in OpenCode's config directory.
+//! `.grok/AGENTS.md`, `AGENTS.md` in OpenCode's config directory, or
+//! `.gemini/GEMINI.md`.
 //!
 //! **One text for every Agent Profile**, rather than one per Profile. It is a
 //! thing Verkstead is *told* — like the git author and the sandbox binds, and

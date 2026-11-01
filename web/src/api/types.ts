@@ -404,7 +404,7 @@ agent_type: AgentType | null, };
  * Event says which agent ran a session and holds no account at all, the
  * Profile it was launched from being a thing that can since have gone.
  */
-export type AgentType = "Claude" | "Codex" | "Grok" | "OpenCode";
+export type AgentType = "Claude" | "Codex" | "Grok" | "OpenCode" | "Agy";
 
 /**
  * The Annex's row: how its box stands, the release it runs and the disk it
@@ -4933,7 +4933,7 @@ export type ProcessPicked = "Picked" | "NoSuchConversation" | "NotDrafting" | "N
  * written it carries what they typed, but they are the same fields either way,
  * and two types for one shape would be two opinions about what an account is.
  */
-export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, config_file: string, } | { "agent_type": "Codex", home: string, } | { "agent_type": "Grok", home: string, } | { "agent_type": "OpenCode", home: string, };
+export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, config_file: string, } | { "agent_type": "Codex", home: string, } | { "agent_type": "Grok", home: string, } | { "agent_type": "OpenCode", home: string, } | { "agent_type": "Agy", home: string, };
 
 /**
  * Which Profile and model a Conversation is pairing for one of its roles.
