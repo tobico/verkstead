@@ -4985,9 +4985,11 @@ it over and has finished with it, and is refused where that one is still at work
 see **Steer**. Taking
 it up puts the
 Conversation on the pull request's head branch, named for it and never
-invented — made off origin's, or a local one fast-forwarded where it is behind;
-one ahead, diverged or not on origin at all is refused by name, on the composer
-where the press was. **One the human is standing on is theirs to give up, and they
+invented — made off origin's, or a local one fast-forwarded where it is behind —
+with the head at take-up as its base commit and GitHub's base branch beside it,
+so the Timeline draws only what Verkstead adds from here and a conflict merge of
+the base drags nothing. One ahead, diverged or not on origin at all is refused by
+name, on the composer where the press was. **One the human is standing on is theirs to give up, and they
 are asked once**: the head branch checked out somewhere that is no Conversation's —
 their own checkout of the Repo, or a worktree they made by hand — stops the press
 naming the checkout and the branch it is on, with nothing switched, closed or
@@ -5003,9 +5005,7 @@ with nothing closed; never a stash, never a discard. Switched before anything is
 closed, and switched back where the start is refused further on. The Timeline
 says which checkouts were moved and that `git switch <branch>` there returns
 them, and nothing moves them back at the close. A checkout on the default branch
-itself, which no switch could free, is still refused by name — with the head at take-up as its
-base commit and GitHub's base branch beside it, so the Timeline draws only what
-Verkstead adds from here and a conflict merge of the base drags nothing.
+itself, which no switch could free, is still refused by name.
 Recording the pull request is the move, from Draft straight into **Wrapping**,
 and the wrap-up is the Process's from there: the ordinary one with its review for
 Review, and one narrowed to Mergeable and the checks for Fix Merge Issues. No
