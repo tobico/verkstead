@@ -14,11 +14,13 @@
 //! sentence, and the sentence with the links. See [`takeUpRefusal`] and
 //! [`TakeUpRefusal`].
 //!
-//! And one of them is not a refusal at all. `WouldDiscard` is the press stopping
-//! to ask: the start goes ahead on the press after it, which is why the press
-//! reads as going ahead while it is drawn. See [`goingAhead`].
+//! And two of them are not refusals at all. `WouldDiscard` and `WouldSwitch` are
+//! the press stopping to ask — what a close would throw away, and which of the
+//! human's own checkouts would be moved off a branch the start needs — and the
+//! start goes ahead on the press after it, which is why the press reads as going
+//! ahead while either is drawn. See [`goingAhead`] and [`confirming`].
 //!
-//! Which is the one the create replay does *not* carry as a sentence. What answers
+//! Which are the ones the create replay does *not* carry as a sentence. What answers
 //! it is a press rather than anything to go and fix, so it travels whole and the
 //! draft's own take-up picks it up as its starting outcome — see `stoppedOnCreate`
 //! in [`composing`](./composing.ts). Carried as a sentence it would have told the
@@ -28,7 +30,12 @@
 import { A } from "@solidjs/router";
 import { For, Show, type JSX } from "solid-js";
 
-import type { TakenUp, Uncommitted } from "../api/types";
+import type {
+  CheckedOut,
+  Confirming,
+  TakenUp,
+  Uncommitted,
+} from "../api/types";
 import { pathOf } from "./openings";
 import {
   authorGone,
@@ -111,6 +118,16 @@ export function takeUpRefusal(outcome: TakenUp): string {
       return `${held(outcome.WouldDiscard.uncommitted)} ${closingThem(outcome.WouldDiscard.uncommitted.length)} Press Start anyway to go ahead.`;
     }
 
+    if ("WouldSwitch" in outcome) {
+      const { checkouts, to } = outcome.WouldSwitch;
+
+      return `${standing(checkouts)} Press Start anyway to ${moving(checkouts, to)}.`;
+    }
+
+    if ("SwitchRefused" in outcome) {
+      return `Git wouldn't switch your checkout at ${outcome.SwitchRefused.at}, so nothing was started. ${outcome.SwitchRefused.said}`;
+    }
+
     if ("ProfileBroken" in outcome) {
       return profileRefusal(outcome.ProfileBroken);
     }
@@ -164,6 +181,50 @@ function held(uncommitted: Uncommitted[]): string {
     : `The conversations on ${branches}`;
 }
 
+/// Which of the human's own checkouts are in the way, as the sentence names them:
+/// the one by where it is and the branch it is on, several by where they are.
+function standing(checkouts: CheckedOut[]): string {
+  const [one, ...more] = checkouts;
+
+  return one !== undefined && more.length === 0 ?
+      `Your checkout at ${one.at} is on ${one.branch}, and git holds one checkout per branch.`
+    : `Your checkouts at ${checkouts.map((each) => each.at).join(", ")} are on branches this start needs, and git holds one checkout per branch.`;
+}
+
+/// What pressing again does to them: each switched to the default branch, or
+/// detached at its tip where the default branch is checked out already.
+function moving(checkouts: CheckedOut[], to: string): string {
+  const one = (each: CheckedOut, it: string): string =>
+    each.detaching ? `detach ${it} at ${to}` : `switch ${it} to ${to}`;
+
+  const [only, ...more] = checkouts;
+
+  if (only !== undefined && more.length === 0) {
+    return only.detaching ?
+        `${one(only, "it")}, since ${to} is checked out already`
+      : one(only, "it");
+  }
+
+  const each = checkouts.map((checkout) => one(checkout, checkout.at));
+  const last = each.pop();
+
+  return `${each.join(", ")} and ${last}`;
+}
+
+/// The checkouts a press was stopped over, or `null` where it was not stopped
+/// over any.
+function wouldSwitch(
+  outcome: TakenUp | null,
+): { checkouts: CheckedOut[]; to: string } | null {
+  return (
+      outcome !== null &&
+        typeof outcome === "object" &&
+        "WouldSwitch" in outcome
+    ) ?
+      outcome.WouldSwitch
+    : null;
+}
+
 /// The conversations a press was stopped over, or `null` where it was not
 /// stopped at all.
 ///
@@ -183,17 +244,46 @@ function wouldDiscard(outcome: TakenUp | null): Uncommitted[] | null {
 /// Whether an outcome is the press stopping to ask rather than refusing.
 ///
 /// What the composer reads it for is the button: a start that has been stopped
-/// over what a close would discard is one press away from going ahead, so the
-/// press says so. Every refusal answers `false` — there is nothing to press
-/// through, only something to go and fix.
+/// over what a close would discard, or over the human's own checkouts standing
+/// on a branch it needs, is one press away from going ahead, so the press says
+/// so. Every refusal answers `false` — there is nothing to press through, only
+/// something to go and fix.
 export function goingAhead(outcome: TakenUp | null): boolean {
-  return wouldDiscard(outcome) !== null;
+  return wouldDiscard(outcome) !== null || wouldSwitch(outcome) !== null;
 }
 
-/// And which conversations a press that goes ahead is agreeing to lose, for the
-/// body of that press. Empty for everything else.
-export function discarding(outcome: TakenUp | null): number[] {
-  return (wouldDiscard(outcome) ?? []).map((one) => one.conversation);
+/// Nothing confirmed, which is the body of every first press.
+export const NOTHING_CONFIRMED: Confirming = { discarding: [], switching: [] };
+
+/// The body of the press after `outcome`: what it stopped over, confirmed, on top
+/// of whatever the press before it confirmed.
+///
+/// On top of rather than instead of, because the two stops are asked one after
+/// the other: a start that needs a close and a switch both stops over the discard
+/// first and the switch on the press after, and the third press has to carry both
+/// answers or the server asks the first question again. Everything that is not a
+/// stop confirms nothing.
+export function confirming(
+  outcome: TakenUp | null,
+  before: Confirming,
+): Confirming {
+  const discard = wouldDiscard(outcome);
+  const switching = wouldSwitch(outcome);
+
+  if (discard === null && switching === null) {
+    return NOTHING_CONFIRMED;
+  }
+
+  return {
+    discarding:
+      discard === null ?
+        before.discarding
+      : discard.map((one) => one.conversation),
+    switching:
+      switching === null ?
+        before.switching
+      : switching.checkouts.map((one) => one.at),
+  };
 }
 
 /// The same, as the line a composer draws under its press — which is the one
@@ -219,18 +309,42 @@ export function TakeUpRefusal(props: { outcome: TakenUp }): JSX.Element {
 
   const holding = (): Uncommitted[] | null => wouldDiscard(props.outcome);
 
+  const refusedSwitch = (): { at: string; said: string } | null =>
+    typeof props.outcome === "object" && "SwitchRefused" in props.outcome
+      ? props.outcome.SwitchRefused
+      : null;
+
+  const plain = (): JSX.Element => (
+    <Show when={stillAtWork()} fallback={takeUpRefusal(props.outcome)}>
+      {(conversation) => (
+        <>
+          <A href={pathOf(conversation())}>Another conversation</A> is still at
+          work on that pull request. Carry on there rather than starting a
+          second one on the same branch.
+        </>
+      )}
+    </Show>
+  );
+
   return (
     <Show
       when={holding()}
       fallback={
-        <Show when={stillAtWork()} fallback={takeUpRefusal(props.outcome)}>
-          {(conversation) => (
-            <>
-              <A href={pathOf(conversation())}>Another conversation</A> is still
-              at work on that pull request. Carry on there rather than starting
-              a second one on the same branch.
-            </>
-          )}
+        <Show
+          when={wouldSwitch(props.outcome)}
+          fallback={
+            <Show when={refusedSwitch()} fallback={plain()}>
+              {(refused) => (
+                <>
+                  Git wouldn't switch your checkout at{" "}
+                  <code>{refused().at}</code>, so nothing was started.
+                  <pre>{refused().said}</pre>
+                </>
+              )}
+            </Show>
+          }
+        >
+          {(switching) => <Switching {...switching()} />}
         </Show>
       }
     >
@@ -249,6 +363,63 @@ export function TakeUpRefusal(props: { outcome: TakenUp }): JSX.Element {
           </For>{" "}
           {closingThem(uncommitted().length)} Press <strong>Start anyway</strong>{" "}
           to go ahead.
+        </>
+      )}
+    </Show>
+  );
+}
+
+/// A stop over the human's own checkouts, with each path and branch in code: the
+/// sentence [`takeUpRefusal`] says, drawn.
+function Switching(props: { checkouts: CheckedOut[]; to: string }): JSX.Element {
+  const each = (checkout: CheckedOut, it: JSX.Element): JSX.Element =>
+    checkout.detaching ?
+      <>
+        detach {it} at <code>{props.to}</code>
+      </>
+    : <>
+        switch {it} to <code>{props.to}</code>
+      </>;
+
+  return (
+    <Show
+      when={props.checkouts.length === 1 ? props.checkouts[0] : null}
+      fallback={
+        <>
+          Your checkouts at{" "}
+          <For each={props.checkouts}>
+            {(checkout, at) => (
+              <>
+                <Show when={at() > 0}>, </Show>
+                <code>{checkout.at}</code>
+              </>
+            )}
+          </For>{" "}
+          are on branches this start needs, and git holds one checkout per
+          branch. Press <strong>Start anyway</strong> to{" "}
+          <For each={props.checkouts}>
+            {(checkout, at) => (
+              <>
+                <Show when={at() > 0}>
+                  {at() === props.checkouts.length - 1 ? " and " : ", "}
+                </Show>
+                {each(checkout, <code>{checkout.at}</code>)}
+              </>
+            )}
+          </For>
+          .
+        </>
+      }
+    >
+      {(only) => (
+        <>
+          Your checkout at <code>{only().at}</code> is on{" "}
+          <code>{only().branch}</code>, and git holds one checkout per branch.
+          Press <strong>Start anyway</strong> to {each(only(), <>it</>)}
+          <Show when={only().detaching}>
+            , since <code>{props.to}</code> is checked out already
+          </Show>
+          .
         </>
       )}
     </Show>

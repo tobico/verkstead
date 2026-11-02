@@ -3277,7 +3277,7 @@ describe("the page of a draft from before, holding a pull request", () => {
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${HOLDING.id}/take-up`),
-      ).toEqual({ discarding: [] }),
+      ).toEqual({ discarding: [], switching: [] }),
     );
 
     expect(writes(fetching, `/api/ui/conversations/${HOLDING.id}/grill`)).toBe(
@@ -7763,7 +7763,7 @@ describe("starting the work", () => {
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
-      ).toEqual({ discarding: [] }),
+      ).toEqual({ discarding: [], switching: [] }),
     );
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
   });
@@ -7793,7 +7793,7 @@ describe("starting the work", () => {
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
-      ).toEqual({ discarding: [] }),
+      ).toEqual({ discarding: [], switching: [] }),
     );
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
   });
@@ -7906,8 +7906,150 @@ describe("starting the work", () => {
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`, 1),
-      ).toEqual({ discarding: [77] }),
+      ).toEqual({ discarding: [77], switching: [] }),
     );
+  });
+
+  /// And a stop over the human's own checkout names where it is and the branch it
+  /// is on, says what pressing again does to it, and the press after it sends the
+  /// checkout back by where it is.
+  it("names a checkout of the human's own, and switches it on the press after", async () => {
+    const fetching = theWorkbenchWith(
+      { process: "FixMergeIssues" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json({
+          WouldSwitch: {
+            checkouts: [
+              {
+                at: "/home/you/verkstead",
+                branch: "rate-limiting",
+                detaching: false,
+              },
+            ],
+            to: "main",
+          },
+        } satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(
+      container,
+      `.${composer.startGrilling} .${composer.start}`,
+    );
+
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(screen.getByText("/home/you/verkstead").tagName).toBe("CODE"),
+    );
+    expect(start.closest("form, div")?.parentElement?.textContent).toMatch(
+      /is on rate-limiting, and git holds one checkout per branch\. Press Start anyway to switch it to main\./,
+    );
+
+    await waitFor(() => expect(start.textContent).toContain("Start anyway"));
+
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`, 1),
+      ).toEqual({ discarding: [], switching: ["/home/you/verkstead"] }),
+    );
+  });
+
+  /// And a start stopped over a discard and then over a switch carries both
+  /// answers on the third press: the second stop does not take back the first.
+  it("carries the discard it confirmed into the press that confirms the switch", async () => {
+    const answers: TakenUp[] = [
+      {
+        WouldDiscard: {
+          uncommitted: [{ conversation: 77, branch: "stage-01" }],
+        },
+      },
+      {
+        WouldSwitch: {
+          checkouts: [
+            { at: "/home/you/verkstead", branch: "stage-02", detaching: false },
+            { at: "/home/you/by-hand", branch: "stage-03", detaching: true },
+          ],
+          to: "main",
+        },
+      },
+      "TakenUp",
+    ];
+    let pressed = 0;
+
+    const fetching = theWorkbenchWith(
+      { process: "FixMergeIssues" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        () => json(answers[Math.min(pressed++, answers.length - 1)])(),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(
+      container,
+      `.${composer.startGrilling} .${composer.start}`,
+    );
+
+    fireEvent.click(start);
+    await waitFor(() => expect(start.textContent).toContain("Start anyway"));
+
+    fireEvent.click(start);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/are on branches this start needs/).textContent,
+      ).toMatch(/switch \/home\/you\/verkstead to main and detach \/home\/you\/by-hand at main\./),
+    );
+
+    const again = await drawn(
+      container,
+      `.${composer.startGrilling} .${composer.start}`,
+    );
+    await waitFor(() => expect((again as HTMLButtonElement).disabled).toBe(false));
+
+    fireEvent.click(again);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`, 2),
+      ).toEqual({
+        discarding: [77],
+        switching: ["/home/you/verkstead", "/home/you/by-hand"],
+      }),
+    );
+  });
+
+  /// And a switch git refused is said in git's own words, which name the files.
+  it("says a refused switch in git's words", async () => {
+    theWorkbenchWith(
+      { process: "FixMergeIssues" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json({
+          SwitchRefused: {
+            at: "/home/you/verkstead",
+            said: "error: Your local changes to the following files would be overwritten by checkout:\n\tlimits.md",
+          },
+        } satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${composer.startGrilling} .${composer.start}`),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(/limits\.md/).tagName).toBe("PRE"),
+    );
+    expect(screen.getByText(/so nothing was started/)).toBeTruthy();
   });
 
   /// And a stack named in the one list reads as several conversations rather than
