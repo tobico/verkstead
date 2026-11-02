@@ -19,7 +19,7 @@
 //! of a shape this build cannot read finds no conversation, which leaves the
 //! session Capture-only — said in the log by the caller.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use sqlx::ConnectOptions;
@@ -90,11 +90,49 @@ fn names(workspaces: &str, worktree: &Path) -> bool {
         return false;
     };
 
+    let worktree = worktree.to_string_lossy();
+
     workspaces
         .iter()
         .filter_map(|uri| uri.strip_prefix(FILE))
         .filter_map(crate::transcript::decoded)
-        .any(|path| PathBuf::from(path) == worktree)
+        .any(|path| stands_for(&path, &worktree))
+}
+
+/// Whether `path`, read out of a workspace's address, is the path `worktree`.
+///
+/// **A Windows path is spelt in an address the way a Unix one is**: a slash in
+/// front of the drive, forward slashes after it — `file:///C:/Users/…` — and
+/// the drive's colon sometimes escaped and its letter sometimes lowered, as in
+/// `file:///c%3A/Users/…`. So a path that is a drive once that slash is off is
+/// compared as Windows compares one, slashes either way and case aside, and
+/// any other path exactly as it was written.
+fn stands_for(path: &str, worktree: &str) -> bool {
+    match on_a_drive(path) {
+        Some(path) => windows(path) == windows(worktree),
+        None => Path::new(path) == Path::new(worktree),
+    }
+}
+
+/// `path` without the slash an address puts in front of a drive, where it is a
+/// path on one.
+fn on_a_drive(path: &str) -> Option<&str> {
+    let path = path.strip_prefix('/').unwrap_or(path);
+
+    match path.as_bytes() {
+        [letter, b':'] | [letter, b':', b'/' | b'\\', ..] if letter.is_ascii_alphabetic() => {
+            Some(path)
+        }
+        _ => None,
+    }
+}
+
+/// A Windows path as it compares: one separator, one case, no separator on
+/// the end.
+fn windows(path: &str) -> String {
+    path.replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
 }
 
 /// What a workspace's address opens with, before the path. Somebody else's
@@ -230,6 +268,35 @@ mod tests {
             Path::new("/srv/work trees/verkstead-a"),
         ));
         assert!(!names("not a list", Path::new("/srv")));
+    }
+
+    /// A Windows Worktree is found however the address spells its drive: a
+    /// slash in front of it, its colon escaped or not, its letter either case —
+    /// and a Unix path that merely looks like one is not mistaken for it.
+    #[test]
+    fn a_windows_workspace_is_read_back_as_the_path_it_stands_for() {
+        let worktree = r"C:\Users\user\AppData\Roaming\Verkstead\worktrees\verkstead-a";
+
+        for uri in [
+            "file:///C:/Users/user/AppData/Roaming/Verkstead/worktrees/verkstead-a",
+            "file:///c%3A/Users/user/AppData/Roaming/Verkstead/worktrees/verkstead-a",
+            "file:///C:/Users/user/AppData/Roaming/Verkstead/worktrees/verkstead-a/",
+            "file://C:%5CUsers%5Cuser%5CAppData%5CRoaming%5CVerkstead%5Cworktrees%5Cverkstead-a",
+        ] {
+            assert!(
+                names(&serde_json::json!([uri]).to_string(), Path::new(worktree)),
+                "{uri} names {worktree}"
+            );
+        }
+
+        assert!(!names(
+            r#"["file:///C:/Users/user/AppData/Roaming/Verkstead/worktrees/verkstead-b"]"#,
+            Path::new(worktree),
+        ));
+        assert!(!names(
+            r#"["file:///srv/C:/verkstead-a"]"#,
+            Path::new(r"C:\verkstead-a"),
+        ));
     }
 
     /// No index yet is no conversation yet, rather than an error.
