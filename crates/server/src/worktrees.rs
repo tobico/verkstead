@@ -658,6 +658,61 @@ pub(crate) fn checked_out_at(repo: &Path, branch: &str) -> Option<PathBuf> {
     None
 }
 
+/// Switch the checkout at `at` to `branch` — or, `detaching`, to `branch`'s tip
+/// with no branch checked out — or say in git's words why not.
+///
+/// What a take-up does to a checkout that is no Conversation's and is standing
+/// on a branch the take-up needs — the human's own, or a worktree they made by
+/// hand — once they have said to: git holds one checkout per branch, so theirs is
+/// moved off it. `branch` is the Repo's default branch, switched to as it stands
+/// locally, and where there is no local one git's own guess at a single remote's
+/// is left to make it: whatever git does is the answer.
+///
+/// **Detached where the default branch is checked out already**, which a
+/// hand-made worktree nearly always stands beside: git holds one checkout per
+/// branch for the default branch too, so a plain switch would be refused. The
+/// caller decides which — see the take-up's own `planned` — and the way back is
+/// the same `git switch <branch>` either way.
+///
+/// **Git decides about whatever is uncommitted there**, and nothing here
+/// pre-judges it: a plain switch carries a change across where the file is the
+/// same on both branches and refuses where it is not, and refuses a checkout in
+/// the middle of a merge or a rebase. Never a stash and never a discard.
+///
+/// Not [`crate::repos::git`], which throws git's stderr away: a switch git
+/// refused is said to the human in git's own words, those naming the files. And
+/// without `--no-optional-locks`, this being a write.
+pub(crate) fn switch(at: &Path, branch: &str, detaching: bool) -> Result<(), String> {
+    let mut command = Command::new("git");
+    command.args(["switch", "--quiet"]);
+
+    if detaching {
+        command.arg("--detach");
+    }
+
+    let output = command
+        .arg(branch)
+        .unseen()
+        .current_dir(at)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let said = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+
+    Err(if said.is_empty() {
+        format!("git switch exited with {}", output.status)
+    } else {
+        said
+    })
+}
+
 /// Move `branch` on to `to` in `repo`, and say whether it went.
 ///
 /// What a take-up does to a local head branch that stands behind origin's: the

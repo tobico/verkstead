@@ -11006,6 +11006,17 @@ async fn press_take_up_confirming(app: &Router, id: i64, discarding: &[i64]) -> 
     .await
 }
 
+/// And the press that confirms switching the human's own checkouts off the
+/// branches the last press stopped over, named by where they are.
+async fn press_take_up_switching(app: &Router, id: i64, switching: &[&str]) -> TakenUp {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/take-up"),
+        &serde_json::json!({ "discarding": [], "switching": switching }),
+    )
+    .await
+}
+
 /// Put the pull request's head branch on the upstream, which is where a pull
 /// request's branch lives: this checkout has heard nothing about it until it
 /// fetches.
@@ -12892,10 +12903,12 @@ async fn a_review_over_a_branch_that_is_not_on_origin_is_refused_by_name() {
 }
 
 /// And the local branch refusals are the same road over a bare branch as over a
-/// pull request's head: one that is ahead, one that has gone its own way and one
-/// checked out somewhere else are each refused by the name they already had.
+/// pull request's head: one that is ahead and one that has gone its own way are
+/// each refused by the name they already had — and one checked out on the default
+/// branch, which no switch to the default branch could free, still meets the
+/// `CheckedOutElsewhere` that `settled` keeps as its backstop.
 ///
-/// Three in one test because they are one question asked of one branch — see the
+/// In one test because they are one question asked of one branch — see the
 /// server's `settled` — and what is worth proving is that a branch target reaches
 /// it, rather than each answer over again.
 #[cfg(unix)]
@@ -12954,15 +12967,9 @@ async fn a_review_over_a_branch_git_will_not_move_is_refused_by_name() {
         nothing_taken_up(&app, id, &repo).await;
     }
 
-    // And standing: a worktree of the human's own on it, git holding one checkout
-    // per branch. Made after the two above, so that what they are checked against
-    // is a repository with one checkout in it.
-    let theirs = elsewhere.path().join("their-worktree");
-    git(
-        &repo,
-        &["worktree", "add", &theirs.to_string_lossy(), "standing"],
-    );
-
+    // And the default branch itself, which the human's own checkout is on: there
+    // is no switching that checkout to the default branch to free it, so nothing
+    // is asked and the press is refused naming where it is, as it always was.
     let id = ready_to_review_under(
         &app,
         repo_id,
@@ -12972,7 +12979,7 @@ async fn a_review_over_a_branch_git_will_not_move_is_refused_by_name() {
     )
     .await;
     assert_eq!(
-        name_target(&app, id, "standing").await,
+        name_target(&app, id, "main").await,
         TargetRecorded::Recorded,
     );
 
@@ -12982,9 +12989,242 @@ async fn a_review_over_a_branch_git_will_not_move_is_refused_by_name() {
     };
     assert_eq!(
         PathBuf::from(at).canonicalize().unwrap(),
-        theirs.canonicalize().unwrap(),
+        repo.canonicalize().unwrap(),
     );
     assert_eq!(opened(&app, id).await.state, Lifecycle::Draft);
+}
+
+/// The branch on the human's own checkout of the Repo — the case this was built
+/// for: they are on the branch and press Start on a **Fix Merge Issues** over its
+/// pull request. The first press stops naming their checkout and the branch it is
+/// on, having switched, closed and made nothing; **Start anyway** switches it to
+/// the default branch and the take-up goes ahead on the branch.
+///
+/// And the Timeline says what was done to their checkout and how to undo it, and
+/// the close leaves it where it is: nothing is switched back.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_take_up_over_the_humans_own_checkout_stops_once_and_switches_it() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    git(&repo, &["fetch", "--quiet", "origin"]);
+    git(&repo, &["switch", "--quiet", "rate-limiting"]);
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", &implementation).await;
+
+    let stopped = press_take_up(&app, fixing).await;
+    let TakenUp::WouldSwitch { checkouts, to } = &stopped else {
+        panic!("expected the press to stop over the checkout, got {stopped:?}");
+    };
+    assert_eq!(to, "main");
+    assert_eq!(checkouts.len(), 1, "{checkouts:?}");
+    assert_eq!(checkouts[0].branch, "rate-limiting");
+    assert_eq!(
+        PathBuf::from(&checkouts[0].at).canonicalize().unwrap(),
+        repo.canonicalize().unwrap(),
+        "named by where it is",
+    );
+
+    nothing_taken_up(&app, fixing, &repo).await;
+    assert_eq!(
+        on_branch(&repo),
+        "rate-limiting",
+        "and nothing was switched"
+    );
+
+    let at = checkouts[0].at.clone();
+
+    assert_eq!(
+        press_take_up_switching(&app, fixing, &[&at]).await,
+        TakenUp::TakenUp,
+    );
+
+    assert_eq!(on_branch(&repo), "main", "their checkout was switched");
+
+    let view = opened(&app, fixing).await;
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.branch, "rate-limiting");
+
+    let said = notices(&view).join("\n");
+    assert!(
+        said.contains(&format!(
+            "Your checkout at <code>{at}</code> was on <code>rate-limiting</code>, so it was \
+             switched to <code>main</code>"
+        )),
+        "the Timeline names the checkout: {said}",
+    );
+    assert!(
+        said.contains("<code>git switch rate-limiting</code> there takes it back"),
+        "and the way back: {said}",
+    );
+
+    assert_eq!(close(&app, fixing).await, ConversationClosed::Closed);
+    assert_eq!(
+        on_branch(&repo),
+        "main",
+        "the close leaves their checkout where it is",
+    );
+}
+
+/// A checkout with changes git will carry across — a file the same on both
+/// branches — is switched with them: git decides, and nothing is stashed or
+/// discarded.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_switch_carries_what_git_will_carry() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    git(&repo, &["fetch", "--quiet", "origin"]);
+    git(&repo, &["switch", "--quiet", "rate-limiting"]);
+    std::fs::write(repo.join("README.md"), "# a repository, edited\n").unwrap();
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", &implementation).await;
+
+    let TakenUp::WouldSwitch { checkouts, .. } = press_take_up(&app, fixing).await else {
+        panic!("expected the press to stop over the checkout");
+    };
+
+    assert_eq!(
+        press_take_up_switching(&app, fixing, &[&checkouts[0].at]).await,
+        TakenUp::TakenUp,
+    );
+
+    assert_eq!(on_branch(&repo), "main");
+    assert_eq!(
+        std::fs::read_to_string(repo.join("README.md")).unwrap(),
+        "# a repository, edited\n",
+        "the change came across with the switch",
+    );
+}
+
+/// And a checkout with a change git will not carry — a file that differs between
+/// the two branches — refuses the start in git's own words, naming the file, with
+/// nothing taken up, nothing switched and the change where it was.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_switch_git_refuses_refuses_the_start_in_gits_words() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    git(&repo, &["fetch", "--quiet", "origin"]);
+    git(&repo, &["switch", "--quiet", "rate-limiting"]);
+
+    // `limits.md` is the head's own, and not on `main` at all.
+    std::fs::write(repo.join("limits.md"), "# mine, uncommitted\n").unwrap();
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", &implementation).await;
+
+    let TakenUp::WouldSwitch { checkouts, .. } = press_take_up(&app, fixing).await else {
+        panic!("expected the press to stop over the checkout");
+    };
+    let at = checkouts[0].at.clone();
+
+    let refused = press_take_up_switching(&app, fixing, &[&at]).await;
+    let TakenUp::SwitchRefused { at: named, said } = &refused else {
+        panic!("expected git's refusal, got {refused:?}");
+    };
+    assert_eq!(named, &at);
+    assert!(said.contains("limits.md"), "git's own words: {said}");
+
+    nothing_taken_up(&app, fixing, &repo).await;
+    assert_eq!(on_branch(&repo), "rate-limiting");
+    assert_eq!(
+        std::fs::read_to_string(repo.join("limits.md")).unwrap(),
+        "# mine, uncommitted\n",
+        "and the change is untouched",
+    );
+}
+
+/// A checkout that has moved off the branch between the two presses is read
+/// again rather than trusted: it needs no switch, so it is left on whatever the
+/// human moved it to.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_checkout_that_moved_off_between_the_presses_is_not_switched() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    git(&repo, &["fetch", "--quiet", "origin"]);
+    git(&repo, &["switch", "--quiet", "rate-limiting"]);
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", &implementation).await;
+
+    let TakenUp::WouldSwitch { checkouts, .. } = press_take_up(&app, fixing).await else {
+        panic!("expected the press to stop over the checkout");
+    };
+
+    git(
+        &repo,
+        &["switch", "--quiet", "-c", "something-else", "main"],
+    );
+
+    assert_eq!(
+        press_take_up_switching(&app, fixing, &[&checkouts[0].at]).await,
+        TakenUp::TakenUp,
+    );
+    assert_eq!(
+        on_branch(&repo),
+        "something-else",
+        "nothing switched a checkout that was no longer in the way",
+    );
+
+    let said = notices(&opened(&app, fixing).await).join("\n");
+    assert!(
+        !said.contains("Your checkout"),
+        "and the Timeline says nothing about one: {said}",
+    );
+}
+
+/// A take-up that switched the human's checkout and was then refused further on
+/// puts the checkout back where it was: nothing was taken up, so nothing of
+/// theirs should have moved. Here the local branch is ahead of origin, which only
+/// the settling after the switch finds out.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_take_up_refused_after_the_switch_switches_the_checkout_back() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    git(&repo, &["fetch", "--quiet", "origin"]);
+    git(&repo, &["switch", "--quiet", "rate-limiting"]);
+    commit(&repo, "unpushed.md");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", &implementation).await;
+
+    let TakenUp::WouldSwitch { checkouts, .. } = press_take_up(&app, fixing).await else {
+        panic!("expected the press to stop over the checkout");
+    };
+
+    assert_eq!(
+        press_take_up_switching(&app, fixing, &[&checkouts[0].at]).await,
+        TakenUp::BranchAhead,
+    );
+
+    nothing_taken_up(&app, fixing, &repo).await;
+    assert_eq!(
+        on_branch(&repo),
+        "rate-limiting",
+        "their checkout is back on the branch it was on",
+    );
+}
+
+/// The branch `repo`'s own checkout is on.
+fn on_branch(repo: &Path) -> String {
+    git(repo, &["symbolic-ref", "--short", "HEAD"])
+        .trim()
+        .to_owned()
 }
 
 /// The Target field takes a pull request URL — which is the one value the
@@ -13817,29 +14057,29 @@ async fn a_neighbour_still_at_work_refuses_the_start_and_nothing_is_closed() {
     );
 }
 
-/// And a link checked out by somebody who is no Conversation refuses the start
-/// the way the branch being taken up already does — said about the neighbour.
+/// And a link checked out by hand is asked about in the same stop as the head
+/// branch, and switched by the same **Start anyway** — all of them in one press.
 ///
-/// Which is the refusal Verkstead cannot work round: a Conversation that has
-/// finished is closed and its Worktree given back, and a checkout that is nobody's
-/// here is one nothing may take away. Git will refuse the sync over it all the
-/// same.
+/// The human's own checkout is on the head, and a worktree they made by hand on
+/// the link below it. Their checkout goes onto the default branch, and so the
+/// worktree, which git will not put on a branch already checked out, is detached
+/// at the default branch's tip. And a press confirming only some of them is
+/// stopped again over all of them, the list being read again on every press.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_link_checked_out_by_nobody_refuses_the_start_naming_where() {
+async fn a_link_checked_out_by_hand_is_switched_with_the_head_in_one_press() {
     let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
     a_stack_on_origin(&upstream);
     a_stack_on_github(&repo);
 
     let implementation = profile(&app, elsewhere.path(), "opus").await;
 
+    git(&repo, &["fetch", "--quiet", "origin"]);
+    git(&repo, &["switch", "--quiet", "stage-02"]);
+
     // Somebody's own checkout of the link below, made by hand and belonging to no
     // Conversation.
     let theirs = elsewhere.path().join("somebody-elses-checkout");
-    git(
-        &repo,
-        &["fetch", "--quiet", "origin", "stage-01:refs/heads/stage-01"],
-    );
     git(
         &repo,
         &[
@@ -13853,14 +14093,64 @@ async fn a_link_checked_out_by_nobody_refuses_the_start_naming_where() {
 
     let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", &implementation).await;
 
+    let stopped = press_take_up(&app, fixing).await;
+    let TakenUp::WouldSwitch { checkouts, to } = &stopped else {
+        panic!("expected one stop naming both checkouts, got {stopped:?}");
+    };
+    assert_eq!(to, "main");
     assert_eq!(
-        press_take_up(&app, fixing).await,
-        TakenUp::CheckedOutElsewhere {
-            at: theirs.to_string_lossy().into_owned(),
-        },
+        checkouts
+            .iter()
+            .map(|one| (
+                PathBuf::from(&one.at).canonicalize().unwrap(),
+                one.branch.as_str(),
+                one.detaching,
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (repo.canonicalize().unwrap(), "stage-02", false),
+            (theirs.canonicalize().unwrap(), "stage-01", true),
+        ],
+        "the head's checkout first, onto the default branch, and the link's detached",
     );
 
     nothing_taken_up_alongside(&app, fixing).await;
+
+    let ats: Vec<&str> = checkouts.iter().map(|one| one.at.as_str()).collect();
+
+    assert_eq!(
+        press_take_up_switching(&app, fixing, &ats[..1]).await,
+        stopped,
+        "confirming one of the two is no confirmation of the other",
+    );
+    assert_eq!(on_branch(&repo), "stage-02", "and nothing was switched");
+
+    assert_eq!(
+        press_take_up_switching(&app, fixing, &ats).await,
+        TakenUp::TakenUp,
+    );
+
+    assert_eq!(on_branch(&repo), "main");
+    assert_eq!(
+        git(&theirs, &["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "HEAD",
+        "their worktree is detached",
+    );
+    assert_eq!(
+        git(&theirs, &["rev-parse", "HEAD"]),
+        git(&repo, &["rev-parse", "main"]),
+        "at the default branch's tip",
+    );
+
+    let view = opened(&app, fixing).await;
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.branch, "stage-02");
+
+    let said = notices(&view).join("\n");
+    assert!(
+        said.contains("was on <code>stage-01</code> and was detached at <code>main</code>"),
+        "the Timeline says what became of each: {said}",
+    );
 }
 
 /// A Conversation refused a take-up has not moved and has checked nothing out —

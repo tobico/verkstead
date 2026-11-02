@@ -5899,6 +5899,51 @@ pub enum TakenUp {
         uncommitted: Vec<Uncommitted>,
     },
 
+    /// The branch this start needs — the head, or a link of the stack around it —
+    /// is checked out somewhere that is no Conversation's: the human's own
+    /// checkout of the Repo, or a worktree they made by hand. Git holds one
+    /// checkout per branch, so the press stops and names each of them. Nothing is
+    /// switched, closed or made: the Draft is still a Draft.
+    ///
+    /// **The way on is moving that checkout off the branch**, and the press that
+    /// follows is the human saying to: it sends these checkouts back as
+    /// [`Confirming::switching`], and the server runs `git switch` onto the Repo's
+    /// default branch in each before it takes up — or `git switch --detach` at its
+    /// tip, where the default branch is checked out somewhere already. See
+    /// [`CheckedOut::detaching`]. Read again on that press rather
+    /// than trusted from this one, as [`Self::WouldDiscard`]'s list is: a checkout
+    /// that has moved off the branch since needs no switch, and one this list did
+    /// not name stops the press all over again.
+    ///
+    /// Asked after [`Self::WouldDiscard`] where both would stop the press, so a
+    /// start that needs both is two confirming presses — which takes a stack with
+    /// one link held dirty by a Done Conversation and another checked out by hand.
+    WouldSwitch {
+        /// Every checkout to switch, the head branch's first and then the
+        /// stack's from the bottom.
+        checkouts: Vec<CheckedOut>,
+
+        /// The branch each would be switched to, or detached at the tip of: the
+        /// Repo's default branch.
+        to: String,
+    },
+
+    /// Git would not switch a checkout off the branch this start needs, so
+    /// nothing was taken up and nothing closed. Git's own words, because what it
+    /// refuses over is the human's files — a change it could not carry across,
+    /// or a merge or rebase in progress — and which files is the whole of what
+    /// to go and see to.
+    ///
+    /// Verkstead never stashes and never discards to get past this: a checkout
+    /// git will not switch is one only the human can tidy.
+    SwitchRefused {
+        /// The checkout, as git named it.
+        at: String,
+
+        /// What git said, as it said it.
+        said: String,
+    },
+
     /// No Agent Profile is chosen for the implementation, which is what a red
     /// check and a conflict are fixed under.
     ///
@@ -5969,6 +6014,12 @@ pub enum TakenUp {
     /// The head branch is checked out somewhere already — the human's own
     /// checkout, or another worktree — and git holds one checkout per branch.
     /// Which place it is, is the whole of what the human needs.
+    ///
+    /// **A backstop now rather than the answer.** A checkout that is no
+    /// Conversation's stops the press as [`Self::WouldSwitch`] and is switched
+    /// off the branch on the press after it, so what reaches this is the branch
+    /// checked out again between that switch and the worktree being made — or a
+    /// checkout already on the default branch, which no switch would free.
     CheckedOutElsewhere {
         /// Where it is checked out, as git named it.
         at: String,
@@ -6009,6 +6060,29 @@ pub struct Uncommitted {
     pub branch: String,
 }
 
+/// A checkout that is no Conversation's, standing on a branch a take-up needs.
+///
+/// What [`TakenUp::WouldSwitch`] is made of: where it is, which is what the human
+/// knows it by, the branch it is on, which is what pressing again moves it off,
+/// and whether it lands on the default branch or detached at its tip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CheckedOut {
+    /// Where it is, as `git worktree list` names it.
+    pub at: String,
+
+    /// The branch checked out there.
+    pub branch: String,
+
+    /// Whether it is detached at the default branch's tip rather than switched
+    /// onto it, which is what happens where the default branch is checked out
+    /// somewhere already — the human's own checkout of the Repo, nearly always,
+    /// beside a worktree they made by hand. Git holds one checkout per branch for
+    /// the default branch too, so the files are the default branch's and the
+    /// branch itself stays where it is.
+    pub detaching: bool,
+}
+
 /// What a take-up's press says beyond which Draft is making it.
 ///
 /// Empty on a first press, which is every press that has not been stopped — so
@@ -6027,6 +6101,16 @@ pub struct Confirming {
     /// named here stops the press all over again.
     #[serde(default)]
     pub discarding: Vec<i64>,
+
+    /// The checkouts that may be switched to the Repo's default branch: the ones
+    /// a [`TakenUp::WouldSwitch`] named, by where they are, sent back by the
+    /// press that confirms them.
+    ///
+    /// Read again on this press, as [`Self::discarding`] is: a checkout no longer
+    /// on the branch is left alone, and one standing there that this does not
+    /// name stops the press all over again.
+    #[serde(default)]
+    pub switching: Vec<String>,
 }
 
 /// What became of pressing Stop or Force stop.
