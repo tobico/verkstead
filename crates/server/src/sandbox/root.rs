@@ -280,11 +280,25 @@ const AGY_MEMORY: [&str; 2] = ["antigravity-cli/conversations", "antigravity-cli
 const AGY_SUMMARIES: &str = "antigravity-cli/conversation_summaries.db";
 
 /// The database and its two siblings, which is what is joined of it.
-const AGY_SUMMARIES_JOINED: [&str; 3] = [
-    AGY_SUMMARIES,
-    "antigravity-cli/conversation_summaries.db-wal",
-    "antigravity-cli/conversation_summaries.db-shm",
-];
+///
+/// **None of it on a Mac.** A join there is a symlink, and agy 1.4.12 will not
+/// open its database through one: measured on cat.local, it says *unable to
+/// open database file*, takes the link for a corrupt database, removes it and
+/// makes one of its own in the root. So on a Mac the database is the root's,
+/// made fresh by each session, and the Transcript finds the conversation in it
+/// there — see `transcript::agy_index`. The record and the brain directory are
+/// still joined, which is all `--conversation <id>` resumes from; what the
+/// account's own index misses is the row of a session Verkstead ran, which agy
+/// writes for itself the next time the human resumes that conversation.
+const AGY_SUMMARIES_JOINED: &[&str] = if cfg!(target_os = "macos") {
+    &[]
+} else {
+    &[
+        AGY_SUMMARIES,
+        "antigravity-cli/conversation_summaries.db-wal",
+        "antigravity-cli/conversation_summaries.db-shm",
+    ]
+};
 
 /// Where agy records that the account has been through its first run, inside
 /// `~/.gemini`, and what a root writes there to say it has.
@@ -1066,7 +1080,7 @@ impl Root {
             Harness::OpenCode => vec![PathBuf::from(OPENCODE_DATA)],
             Harness::Agy => AGY_MEMORY
                 .iter()
-                .chain(&AGY_SUMMARIES_JOINED)
+                .chain(AGY_SUMMARIES_JOINED)
                 .map(PathBuf::from)
                 .collect(),
         }
@@ -3246,16 +3260,25 @@ mod tests {
 
         let inside = |path: &str| PathBuf::from("/inside/.gemini").join(path);
 
-        assert_eq!(
-            remembering.joined(Path::new("/inside")),
-            [
-                "antigravity-cli/conversations",
-                "antigravity-cli/brain",
+        // The database is joined everywhere but a Mac, where agy will not
+        // open it through the link a join is there.
+        let database: &[&str] = if cfg!(target_os = "macos") {
+            &[]
+        } else {
+            &[
                 "antigravity-cli/conversation_summaries.db",
                 "antigravity-cli/conversation_summaries.db-wal",
                 "antigravity-cli/conversation_summaries.db-shm",
             ]
-            .map(|path| (account.join(path), inside(path)))
+        };
+
+        assert_eq!(
+            remembering.joined(Path::new("/inside")),
+            ["antigravity-cli/conversations", "antigravity-cli/brain"]
+                .iter()
+                .chain(database)
+                .map(|path| (account.join(path), inside(path)))
+                .collect::<Vec<_>>()
         );
         assert!(account.join("antigravity-cli/conversations").is_dir());
         assert!(account.join("antigravity-cli/brain").is_dir());
@@ -3264,14 +3287,16 @@ mod tests {
             b"SQLite format 3\0",
             "a database already there is the account's, untouched"
         );
-        assert!(
+        assert_eq!(
             account
                 .join("antigravity-cli/conversation_summaries.db-wal")
                 .is_file()
                 && account
                     .join("antigravity-cli/conversation_summaries.db-shm")
                     .is_file(),
-            "and the two siblings are made as files, so each has something to join"
+            !database.is_empty(),
+            "and the two siblings are made as files where they are joined, so \
+             each has something to join"
         );
         assert!(remembering.unshared_in(Path::new("/built")).is_empty());
 

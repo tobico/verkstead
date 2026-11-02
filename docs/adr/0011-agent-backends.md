@@ -40,14 +40,23 @@ a section of its own, measured against agy 1.4.12 on this machine signed out:
   `config/` is the global customisation root — `mcp_config.json`, `hooks.json`,
   `skills/`, `plugins/`. Both are built; with memory on, `conversations/`,
   `brain/` and `conversation_summaries.db` are joined as one, the record being
-  what `--conversation <id>` resumes from and the database what finds it.
+  what `--conversation <id>` resumes from and the database what finds it. On a
+  Mac the database is the root's own instead: a join there is a symlink, and
+  agy 1.4.12 refuses to open its database through one, deletes the link and
+  makes its own — so the conversation is found in the root's, and the
+  human's index gains a Verkstead session's row only when agy next resumes
+  it, which it does from the record and `brain/` alone.
 - **The login is a file in the account, because the keyring is unreachable.**
   agy keeps its token in the system keyring — Secret Service over D-Bus on
   Linux, Keychain on a Mac, Credential Manager on Windows — and falls to a file
   store where the keyring cannot be reached. A Linux sandbox has no session bus,
   so it cannot; a Mac session is given a seatbelt policy that refuses the
   Keychain's mach services, the first narrowing of that policy's `mach-lookup`,
-  so it cannot either; and the file both then write is the Profile's login,
+  so it cannot either — *measured on macOS 15.8:* `com.apple.SecurityServer`
+  and `com.apple.securityd.xpc`, refused, leave `security` unable to read or
+  write an item and `curl`, `git` over https, name lookups and `id` as they
+  were, and agy 1.4.12 signed in by the card on cat.local wrote its token to
+  the account's file with no Keychain prompt; and the file both then write is the Profile's login,
   linked into every root and written back as any login is. Windows is measured
   before it is decided: whether the session account's vault or a forced file
   store is what agy reaches there, and the rule that decides is that a login is

@@ -20,5 +20,5 @@ proved there.
 - [x] 03: A session on agy: the Brief, the ask channel, idle — [details](03-a-session-on-agy.md)
 - [x] 04: The Transcript and the resume — [details](04-the-transcript-and-the-resume.md)
 - [x] 05: The wizard row and the installers — [details](05-the-wizard-row-and-installers.md)
-- [ ] 06: The Mac — [details](06-the-mac.md) — on macos
+- [x] 06: The Mac — [details](06-the-mac.md) — on macos
 - [ ] 07: Windows — [details](07-windows.md) — on windows

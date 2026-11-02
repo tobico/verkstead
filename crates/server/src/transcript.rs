@@ -358,6 +358,7 @@ impl Tail {
             // Codex's reason. Found by Worktree and moment, as opencode's are.
             (store::Account::Agy { home: account }, Some(worktree)) => Search::Brain(Brain {
                 store: agy_store(account, profile.memory, home),
+                index: agy_index(account, profile.memory, home),
                 worktree: worktree.to_owned(),
                 launched,
                 conversation: None,
@@ -978,6 +979,18 @@ fn agy_store(account: &Path, memory: bool, home: &crate::sandbox::Home) -> PathB
     }
 }
 
+/// And where its index of conversations is, which is in that store but on a
+/// Mac: there the database is the root's own whatever the switch says, agy
+/// refusing to open it through the link a join would be — see
+/// `sandbox::root::AGY_SUMMARIES_JOINED`.
+fn agy_index(account: &Path, memory: bool, home: &crate::sandbox::Home) -> PathBuf {
+    match memory && !cfg!(target_os = "macos") {
+        true => account.join(AGY_CLI),
+        false => home.agy_store(),
+    }
+    .join(AGY_SUMMARIES)
+}
+
 /// The log agy keeps of the conversation `conversation`, inside its store.
 fn agy_log(store: &Path, conversation: &str) -> PathBuf {
     store.join(AGY_BRAIN).join(conversation).join(AGY_LOG)
@@ -1000,6 +1013,9 @@ struct Brain {
     /// agy's own directory inside the account, or the root's on the host.
     store: PathBuf,
 
+    /// Its index of conversations — see [`agy_index`].
+    index: PathBuf,
+
     /// The Worktree the session was launched in, and when — what the index is
     /// asked by.
     worktree: PathBuf,
@@ -1019,12 +1035,9 @@ impl Brain {
         let conversation = match &self.conversation {
             Some(conversation) => conversation.clone(),
             None => {
-                let found = crate::summaries::conversation(
-                    &self.store.join(AGY_SUMMARIES),
-                    &self.worktree,
-                    self.launched,
-                )
-                .await?;
+                let found =
+                    crate::summaries::conversation(&self.index, &self.worktree, self.launched)
+                        .await?;
 
                 if let Err(error) = store::found_as(pool, event_id, &found).await {
                     tracing::error!(error = ?error, event_id, conversation = found, "writing down which conversation an Antigravity CLI session is having failed, so nothing on another device could carry it on");

@@ -25,6 +25,12 @@
 //! or a backtick comes after it, and ASCII punctuation is not decoration. See
 //! [`says_so`].
 //!
+//! **And agy's needs its picker under it.** agy greets every start with the
+//! same sentence, signed in or not, and only then looks for its login: signed
+//! in, the next thing it draws is `Signing in...`, and the line is drawn over a
+//! moment later; signed out, it is its login picker. So agy's sentence counts
+//! only with [`AGY_PICKER`] as the next line drawn — see [`Phrase::then`].
+//!
 //! **A login resumes what it unblocks.** Once a login on the Profile has
 //! landed, every run stopped as Signed out on it is started again through
 //! Resume — see [`logged_in`]. Each one builds a fresh root, which is what
@@ -70,28 +76,71 @@ const CLAUDE_SIGNED_OUT: &str = "please run /login";
 ///
 /// Drawn the same for an account that never had a login and for one whose
 /// token was refused when agy went to refresh it — both read off the real
-/// binary, the second with Google's token endpoint answered by a stand-in. A
-/// session signed in draws no such line on its way up.
+/// binary, the second with Google's token endpoint answered by a stand-in.
+/// **And drawn by a session signed in too**, on its way up: measured on a Mac,
+/// where the Keychain agy is refused first holds it long enough to be seen,
+/// the sentence is followed by `Signing in...` and drawn over once the login
+/// file is read. What tells the two apart is [`AGY_PICKER`].
 const AGY_SIGNED_OUT: &str = "you are currently not signed in.";
 
-/// The sentence a session of `agent_type` ends a line with when its account has
-/// signed out — or nothing, where Verkstead cannot run that harness's login.
-fn signed_out_phrase(agent_type: store::AgentType) -> Option<&'static str> {
+/// The line agy 1.4.12 draws next when it really has no login: the head of
+/// its sign-in picker, `Select login method:`, over the methods to pick from.
+const AGY_PICKER: &str = "select login method:";
+
+/// What a session of one harness says when its account has signed out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Phrase {
+    /// The sentence a line ends with.
+    ends: &'static str,
+
+    /// The line that has to be the next one drawn after it, blank lines
+    /// aside, where the sentence alone is also said by a session signed in.
+    then: Option<&'static str>,
+}
+
+/// What a session of `agent_type` says when its account has signed out — or
+/// nothing, where Verkstead cannot run that harness's login.
+fn signed_out_phrase(agent_type: store::AgentType) -> Option<Phrase> {
     match agent_type {
-        store::AgentType::Claude => Some(CLAUDE_SIGNED_OUT),
-        store::AgentType::Agy => Some(AGY_SIGNED_OUT),
+        store::AgentType::Claude => Some(Phrase {
+            ends: CLAUDE_SIGNED_OUT,
+            then: None,
+        }),
+        store::AgentType::Agy => Some(Phrase {
+            ends: AGY_SIGNED_OUT,
+            then: Some(AGY_PICKER),
+        }),
         store::AgentType::Codex | store::AgentType::Grok | store::AgentType::OpenCode => None,
     }
 }
 
 /// The line in `text` that says the account signed out, tidied of the
 /// terminal's own sequences — or `None`.
-fn saying(text: &str, phrase: Option<&str>) -> Option<String> {
+fn saying(text: &str, phrase: Option<Phrase>) -> Option<String> {
     let phrase = phrase?;
+    let lines: Vec<String> = text.lines().map(crate::capture::plain).collect();
 
-    text.lines()
-        .map(crate::capture::plain)
-        .find(|line| says_so(line, phrase))
+    lines.iter().enumerate().find_map(|(at, line)| {
+        let said = says_so(line, phrase.ends)
+            && phrase
+                .then
+                .is_none_or(|then| followed_by(&lines[at + 1..], then));
+
+        said.then(|| line.clone())
+    })
+}
+
+/// Whether the first line of `after` that is not blank is `then`, once the
+/// decoration is off both ends of it.
+fn followed_by(after: &[String], then: &str) -> bool {
+    after
+        .iter()
+        .map(|line| {
+            line.trim_start_matches(DECORATION)
+                .trim_end_matches(DECORATION)
+        })
+        .find(|line| !line.is_empty())
+        .is_some_and(|line| line.eq_ignore_ascii_case(then))
 }
 
 /// Whether one tidied line *says* the account signed out, rather than
@@ -237,7 +286,7 @@ pub(crate) struct Watch {
     home: Home,
 
     /// The phrase, off the agent the Profile runs — see [`signed_out_phrase`].
-    phrase: Option<&'static str>,
+    phrase: Option<Phrase>,
 
     /// The account's login as the root was built, where a sign-out may find it
     /// replaced since — see [`Login`].
@@ -658,9 +707,12 @@ mod tests {
             " Welcome to the Antigravity CLI. You are currently not signed in.",
             "\u{1b}[1mWelcome to the Antigravity CLI.\u{1b}[0m You are currently not signed in.",
         ] {
-            assert!(
-                saying(line, signed_out_phrase(Agy)).is_some(),
-                "{line:?} was not recognised"
+            let drawn = format!("{line}\r\n\n Select login method:\n > 1. Google OAuth\n");
+
+            assert_eq!(
+                saying(&drawn, signed_out_phrase(Agy)),
+                Some(crate::capture::plain(line)),
+                "{drawn:?} was not recognised"
             );
         }
 
@@ -670,7 +722,24 @@ mod tests {
             "Welcome to the Antigravity CLI. You are currently not signed in. Pick one.",
             "Not logged in · Please run /login",
         ] {
-            assert_eq!(saying(line, signed_out_phrase(Agy)), None, "{line:?}");
+            let drawn = format!("{line}\n Select login method:\n");
+
+            assert_eq!(saying(&drawn, signed_out_phrase(Agy)), None, "{line:?}");
+        }
+    }
+
+    /// agy greets a start signed in with the same sentence, under which it
+    /// draws `Signing in...` rather than its picker — as a session on a Mac
+    /// drew it, the Keychain refused first. That is no sign-out, and nor is the
+    /// sentence with nothing yet under it.
+    #[test]
+    fn agy_signing_in_is_not_signed_out() {
+        for drawn in [
+            "\n Welcome to the \u{1b}[38;5;69mAntigravity CLI\u{1b}[m. You are currently not signed in.\r\n\n \u{28f7}  Signing in...\u{1b}[0 q\r",
+            " Welcome to the Antigravity CLI. You are currently not signed in.\n",
+            " Welcome to the Antigravity CLI. You are currently not signed in.",
+        ] {
+            assert_eq!(saying(drawn, signed_out_phrase(Agy)), None, "{drawn:?}");
         }
     }
 

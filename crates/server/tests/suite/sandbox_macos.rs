@@ -1224,6 +1224,62 @@ async fn the_network_is_the_hosts_own() {
     answering.join().unwrap();
 }
 
+/// The Keychain is the one service a session is refused, and a keychain of
+/// the session's own making is no way round it: what refuses is the lookup of
+/// the service every keychain is read and written through, not the file.
+///
+/// A keychain made inside HOME rather than the human's own, so the probe holds
+/// on a runner with no login keychain and touches nothing of anybody's — and
+/// so that it fails without the narrowing, which a probe of the human's
+/// keychain would not: a session's HOME has no search list to find one by.
+/// Beside it, what the narrowing must leave alone: who the user is and what a
+/// name resolves to, both of which are mach lookups too.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn the_keychain_is_refused_and_nothing_else_is() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox();
+
+    let reported = probe(
+        &sandbox,
+        r#"
+        k="$HOME/probe.keychain"
+        if /usr/bin/security create-keychain -p probe "$k" 2>/dev/null \
+            && /usr/bin/security add-generic-password -s verkstead -a probe -w secret "$k" 2>/dev/null \
+            && /usr/bin/security find-generic-password -s verkstead -a probe -w "$k" >/dev/null 2>&1; then
+            say keychain reached
+        else
+            say keychain refused
+        fi
+
+        if /usr/bin/id -un >/dev/null 2>&1; then say user known; else say user unknown; fi
+
+        if /usr/bin/dscacheutil -q host -a name localhost | grep -q ip_address; then
+            say name resolved
+        else
+            say name unresolved
+        fi
+        "#,
+    );
+
+    assert_eq!(
+        reported["keychain"], "refused",
+        "a session that reaches the Keychain reaches the human's secrets, and a \
+         harness keeps its login there rather than in the Profile's account"
+    );
+    assert_eq!(
+        reported["user"], "known",
+        "who the user is is not the Keychain"
+    );
+    assert_eq!(
+        reported["name"], "resolved",
+        "and nor is what a name resolves to"
+    );
+}
+
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),

@@ -83,7 +83,10 @@ device can open.
   `~/.gemini/antigravity-cli/antigravity-oauth-token` by itself, written in
   place. `agy models` is its `auth status`, read as signed out only where it
   says *Please sign in*, and a session has signed out when a line ends
-  *You are currently not signed in.* A
+  *You are currently not signed in.* with its picker, *Select login method:*,
+  the next line drawn — a session signed in greets with the same sentence and
+  draws *Signing in...* under it, which on a Mac, the Keychain refused first,
+  is on screen long enough to be read. A
   mirrored Profile's account is a copy, refreshed from its home device before
   each launch, so a login written into it would be overwritten by the next
   refresh. It is logged in on the device it is at home on, and its card offers
