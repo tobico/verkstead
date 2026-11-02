@@ -249,7 +249,7 @@ pub enum InstallState {
 /// What a row is about.
 ///
 /// Flat rather than a harness variant carrying an [`crate::AgentType`]: the
-/// step draws eight rows with an instruction apiece, and which of them are
+/// step draws nine rows with an instruction apiece, and which of them are
 /// harnesses is a fact about the objective rather than about the drawing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -267,6 +267,7 @@ pub enum Dependency {
     Codex,
     Grok,
     OpenCode,
+    Agy,
 
     /// The one row that never gates, GitHub being a choice rather than a
     /// dependency — see the objective in ADR-0016.
@@ -454,7 +455,7 @@ pub struct AccountView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct StepsView {
-    /// A sandbox, `git`, and at least one of the four harnesses.
+    /// A sandbox, `git`, and at least one of the five harnesses.
     pub dependencies: bool,
 
     /// At least one Agent Profile, however it was made — a **mirror** of a

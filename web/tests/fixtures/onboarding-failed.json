@@ -74,6 +74,17 @@
       }
     },
     {
+      "dependency": "Agy",
+      "state": {
+        "state": "Absent",
+        "trouble": null,
+        "seen": null
+      },
+      "install": {
+        "install": "Idle"
+      }
+    },
+    {
       "dependency": "Gh",
       "state": {
         "state": "Absent",

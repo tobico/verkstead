@@ -14,7 +14,7 @@
 //! copied into this repository rather than depended on. Its React package cannot
 //! run in a SolidJS app and carries the drawing inside each component; the
 //! `@lobehub/icons-static-svg` sibling publishes the same art as plain files, and
-//! those four files are what sit in [`./marks/`](./marks) under lobehub's own
+//! those five files are what sit in [`./marks/`](./marks) under lobehub's own
 //! names — so updating one is copying it again. Its licence sits beside them, in
 //! [`./marks/LICENSE`](./marks/LICENSE), MIT asking for the notice to travel with
 //! the copy.
@@ -27,14 +27,16 @@
 //!
 //! ## Colour, and the one mark that keeps its own
 //!
-//! Three of the four are the mono cut, drawn the way [`./Icon.tsx`](./Icon.tsx)
+//! Four of the five are the mono cut, drawn the way [`./Icon.tsx`](./Icon.tsx)
 //! draws a Font Awesome icon: `currentColor` and `1em`, so a mark sits in
 //! whatever ink surrounds it — the ordinary ink on a card's second line, the
 //! heading's own in the pane that card opens. Claude Code's is lobehub's colour
 //! variant, which names its fill and so stands in its own orange wherever it is
 //! drawn. That was
 //! the pick: colour where lobehub has it, and lobehub has it for Claude alone of
-//! these four.
+//! these four. The Antigravity CLI's is the mono cut of Antigravity's mark even
+//! so: lobehub's colour one is a stack of masked, blurred gradients, which at
+//! `1em` is a smudge of four colours rather than a shape.
 
 import { Show, type JSX } from "solid-js";
 
@@ -44,6 +46,7 @@ import styles from "./HarnessMark.module.css";
 import claude from "./marks/claude-color.svg?raw";
 import codex from "./marks/codex.svg?raw";
 import grok from "./marks/grok.svg?raw";
+import antigravity from "./marks/antigravity.svg?raw";
 import opencode from "./marks/opencode.svg?raw";
 
 /// Which drawing belongs to which harness.
@@ -56,6 +59,7 @@ const MARK: Record<AgentType, string> = {
   Codex: codex,
   Grok: grok,
   OpenCode: opencode,
+  Agy: antigravity,
 };
 
 export function HarnessMark(props: {

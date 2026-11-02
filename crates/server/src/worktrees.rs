@@ -967,6 +967,52 @@ pub(crate) fn common_git_dir(worktree: &Path) -> Option<PathBuf> {
     (!dir.is_empty()).then(|| PathBuf::from(dir))
 }
 
+/// Have git ignore `pattern` in `worktree` without a word of it in the
+/// Repo: a line of the repository's `info/exclude`, written once.
+///
+/// **Git's own file for what one checkout ignores**, never a `.gitignore`:
+/// what is excluded is a directory a harness writes inside the Worktree, which
+/// is Verkstead's business rather than the Repo's, so neither the Diff nor a
+/// commit picks it up and nothing about it reaches a branch. Which file that
+/// is, is git's answer — `--git-path` says where a worktree's is read from.
+///
+/// **Idempotent**: a line already there, written by an earlier launch or by
+/// the human, is left as the only one. False where git will not say where the
+/// file is or it cannot be written, which leaves the directory to be seen.
+pub(crate) fn excluded(worktree: &Path, pattern: &str) -> bool {
+    let Some(path) = git(
+        worktree,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "info/exclude",
+        ],
+    ) else {
+        return false;
+    };
+
+    let path = PathBuf::from(path.trim());
+    let held = std::fs::read_to_string(&path).unwrap_or_default();
+
+    if held.lines().any(|line| line.trim() == pattern) {
+        return true;
+    }
+
+    let mut written = held;
+
+    if !written.is_empty() && !written.ends_with('\n') {
+        written.push('\n');
+    }
+
+    written.push_str(pattern);
+    written.push('\n');
+
+    path.parent()
+        .is_some_and(|holding| std::fs::create_dir_all(holding).is_ok())
+        && std::fs::write(&path, written).is_ok()
+}
+
 /// Take the worktree at `path` away, and tell `repo` it has gone.
 ///
 /// True when there is no longer a worktree there, which includes there never
@@ -2555,6 +2601,50 @@ mod tests {
         // A name no branch has, and a directory that is no repository at all.
         assert_eq!(pushed_to(&repo, "nothing-here"), None);
         assert_eq!(pushed_to(Path::new("/nowhere-at-all"), "main"), None);
+    }
+
+    /// What a harness writes inside a Worktree is excluded once, in the file
+    /// git reads for that Worktree, and seen by git as excluded: a second
+    /// launch adds nothing, and the human's own lines are kept.
+    #[test]
+    fn a_harness_directory_is_excluded_once_and_git_ignores_it() {
+        let (dir, repo) = repository();
+        let worktree = dir.path().join("worktree");
+        run(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature",
+                worktree.to_str().unwrap(),
+            ],
+        );
+
+        let exclude = repo.join(".git/info/exclude");
+        std::fs::create_dir_all(exclude.parent().unwrap()).unwrap();
+        std::fs::write(&exclude, "# the human's own\n*.swp").unwrap();
+
+        assert!(excluded(&worktree, ".gemini/"));
+        assert!(excluded(&worktree, ".gemini/"));
+
+        assert_eq!(
+            std::fs::read_to_string(&exclude).unwrap(),
+            "# the human's own\n*.swp\n.gemini/\n",
+        );
+
+        std::fs::create_dir_all(worktree.join(".gemini/antigravity-cli")).unwrap();
+        std::fs::write(
+            worktree.join(".gemini/antigravity-cli/transcript.jsonl"),
+            "{}\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            git(&worktree, &["status", "--porcelain"]).as_deref(),
+            Some(""),
+            "nothing under `.gemini/` should reach the Diff"
+        );
     }
 
     /// A repository with one commit on it and a branch to check out, and the

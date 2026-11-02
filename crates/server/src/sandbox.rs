@@ -374,6 +374,12 @@ const CLAUDE_DIR_INSIDE_HOME: &str = ".claude";
 const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
 const CODEX_INSIDE_HOME: &str = ".codex";
 const GROK_INSIDE_HOME: &str = ".grok";
+const AGY_INSIDE_HOME: &str = ".gemini";
+
+/// What makes a `~/.gemini` the Antigravity CLI's account rather than what
+/// Gemini CLI left behind: the directory agy keeps its own state in, which
+/// Gemini CLI never writes. Read off agy 1.4.12, which makes it at every start.
+const AGY_ACCOUNT_MARK: &str = "antigravity-cli";
 
 /// And OpenCode's, which is two of them rather than one: it keeps no
 /// dot-directory of its own and reads the XDG base directories instead,
@@ -472,6 +478,27 @@ const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
 /// moving it costs one edit. Nothing but that backend reads it, so nothing else
 /// is told it.
 const DISABLE_AUTOUPDATER: &str = "DISABLE_AUTOUPDATER";
+
+/// What sends an Antigravity CLI process on Windows to its file store rather
+/// than the Credential Manager, and the value it is given.
+///
+/// **The Credential Manager is per user and nothing refuses it**: a session
+/// runs as Verkstead's session account, and every Profile's login would land
+/// in that one account's vault — one login per device rather than per Profile,
+/// and none of it in the account the root links. agy has no switch for its
+/// store, but it reads where it is: measured on agy 1.4.12 on Windows 11
+/// 26200, a process with `SSH_CONNECTION` in its environment logs *Using
+/// file-based token storage because SSH session detected* and keeps its token
+/// in `~/.gemini/antigravity-cli/antigravity-oauth-token`, the file the root
+/// already links — so the Linux design stands there unchanged. Its sign-in
+/// address is offered to a piped standard input on Windows either way.
+///
+/// Said to every agy process on Windows — a session, its login and its
+/// signed-out check alike — and to nothing else: no other harness reads it,
+/// and on the two Unixes agy finds no keyring inside a sandbox by itself. The
+/// value is the shape `sshd` gives it, a loopback to a loopback, since a
+/// reader that went further than *is it set* would find nothing to follow.
+const AGY_FILE_STORE: (&str, &str) = ("SSH_CONNECTION", "127.0.0.1 0 127.0.0.1 22");
 
 /// Which backend a session is running, in its own environment.
 ///
@@ -1423,7 +1450,7 @@ fn system(platform: Platform) -> &'static [&'static str] {
     }
 }
 
-/// Every program a session is launched as or reaches for by name: the four
+/// Every program a session is launched as or reaches for by name: the five
 /// harnesses, then `git` and `gh`.
 ///
 /// **One list, and it is every name the wizard has a row for** — see
@@ -1441,6 +1468,7 @@ pub(crate) const PROGRAMS: &[&str] = &[
     crate::sessions::binary(store::AgentType::Codex),
     crate::sessions::binary(store::AgentType::Grok),
     crate::sessions::binary(store::AgentType::OpenCode),
+    crate::sessions::binary(store::AgentType::Agy),
     GIT,
     GH,
 ];
@@ -2474,6 +2502,7 @@ const SANDBOX_NAMES: &[&str] = &[
     DISABLE_AUTOUPDATER,
     OPENCODE_DB,
     OPENCODE_BASH_DEFAULT_TIMEOUT,
+    AGY_FILE_STORE.0,
     RUSTUP_HOME,
     "GH_TOKEN",
     "GIT_CONFIG_COUNT",
@@ -2552,6 +2581,14 @@ fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBu
                 .map(|inside| (account.join(inside), home.join(inside)))
                 .collect()
         }
+        // agy's own directory inside `~/.gemini` rather than the whole of it:
+        // that is what a session is given the memory of, and what tells an
+        // account from a bare `~/.gemini` Gemini CLI left — see
+        // [`AGY_ACCOUNT_MARK`].
+        store::Account::Agy { home: account } => vec![(
+            account.join(AGY_ACCOUNT_MARK),
+            home.join(AGY_INSIDE_HOME).join(AGY_ACCOUNT_MARK),
+        )],
     }
 }
 
@@ -2608,6 +2645,9 @@ pub(crate) fn kept_in(agent_type: store::AgentType, home: &Path) -> store::Accou
         },
         store::AgentType::OpenCode => store::Account::OpenCode {
             home: home.to_owned(),
+        },
+        store::AgentType::Agy => store::Account::Agy {
+            home: home.join(AGY_INSIDE_HOME),
         },
     }
 }
@@ -3238,6 +3278,13 @@ impl Home {
         self.built
             .join(OPENCODE_DATA_INSIDE_HOME)
             .join(OPENCODE_DB_FILE)
+    }
+
+    /// And the root's own `antigravity-cli/` on the host, which is where an
+    /// Antigravity CLI session's conversations are written when its Profile
+    /// shares no memory.
+    pub(crate) fn agy_store(&self) -> PathBuf {
+        self.built.join(AGY_INSIDE_HOME).join("antigravity-cli")
     }
 }
 
@@ -4219,6 +4266,7 @@ impl Sandbox {
             store::Account::Codex { home } => root::Root::codex(home),
             store::Account::Grok { home } => root::Root::grok(home),
             store::Account::OpenCode { home } => root::Root::opencode(home),
+            store::Account::Agy { home } => root::Root::agy(home),
         }
         .remembering(profile.memory);
 
@@ -4381,6 +4429,7 @@ impl Sandbox {
             store::Account::Codex { home } => root::Root::codex(home),
             store::Account::Grok { home } => root::Root::grok(home),
             store::Account::OpenCode { home } => root::Root::opencode(home),
+            store::Account::Agy { home } => root::Root::agy(home),
         }
         .remembering(profile.memory);
 
@@ -5032,6 +5081,14 @@ impl Sandbox {
             );
         }
 
+        // And an Antigravity CLI process on Windows, that its login is the
+        // account's file rather than the session account's vault — see
+        // [`AGY_FILE_STORE`].
+        if self.platform == Platform::Windows && matches!(self.account, store::Account::Agy { .. })
+        {
+            surface.set(AGY_FILE_STORE.0, AGY_FILE_STORE.1);
+        }
+
         // And where the toolchain that build runs is, on a machine whose Rust
         // is rustup's — see [`toolchains`], which is where the rule is and
         // which granted the directory a moment ago as part of what the `PATH`
@@ -5172,8 +5229,15 @@ impl Sandbox {
                 surface.made(Access::Built(built.join(directory)));
             }
 
-            let (path, contents) = root.written(built, &self.mcp_servers);
-            surface.made(Access::Written { path, contents });
+            // And the directories inside it the files below go into, where
+            // the harness writes them deeper than the root itself.
+            for furnished in root.furnished_in(built) {
+                surface.made(Access::Built(furnished));
+            }
+
+            for (path, contents) in root.written(built, &self.mcp_servers) {
+                surface.made(Access::Written { path, contents });
+            }
 
             // And the settings page's one text, as the file this harness reads
             // for global instructions — where there is a text to give.
@@ -7448,8 +7512,8 @@ mod tests {
     fn the_names_a_session_is_followed_into_are_the_harnesses_and_the_two_tools() {
         assert_eq!(
             PROGRAMS,
-            &["claude", "codex", "grok", "opencode", "git", "gh"],
-            "the four harnesses, then the one every session works with and the \
+            &["claude", "codex", "grok", "opencode", "agy", "git", "gh"],
+            "the five harnesses, then the one every session works with and the \
              one it opens a pull request with",
         );
     }

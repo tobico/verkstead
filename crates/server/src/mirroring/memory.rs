@@ -480,6 +480,7 @@ pub(crate) fn here(
         store::Account::Codex { home } => Root::codex(home),
         store::Account::Grok { home } => Root::grok(home),
         store::Account::OpenCode { home } => Root::opencode(home),
+        store::Account::Agy { home } => Root::agy(home),
     };
 
     // What the question settled, which on this end is what a path could be named
@@ -623,6 +624,26 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
                         &mut files,
                         &mut held,
                     )?;
+                }
+            }
+
+            // A database apiece, named for the conversation it records, and the
+            // siblings SQLite keeps beside each — the rule above, once per id.
+            Whose::Databases(ids) => {
+                for id in ids {
+                    for beside in [
+                        format!("{id}.db"),
+                        format!("{id}.db-wal"),
+                        format!("{id}.db-shm"),
+                    ] {
+                        taken(
+                            &under,
+                            &under.join(beside),
+                            part.label,
+                            &mut files,
+                            &mut held,
+                        )?;
+                    }
                 }
             }
         }
@@ -1108,6 +1129,50 @@ mod tests {
                 "memory/verkstead/index.sqlite",
                 "sessions/-srv-worktrees-verkstead/abc123/updates.jsonl",
                 "sessions/def456/updates.jsonl",
+            ],
+        );
+    }
+
+    /// agy keeps a database per conversation and a brain directory per
+    /// conversation, each named for the id it gave the conversation — so the
+    /// ids are what pick this Conversation's out, the database's two siblings
+    /// travelling with it. Not the summaries database, which indexes every
+    /// conversation the human has had.
+    #[test]
+    fn an_agy_store_carries_the_conversations_it_named_and_their_brains() {
+        let account = store(&[
+            ("antigravity-cli/conversations/ours.db", b"the record"),
+            ("antigravity-cli/conversations/ours.db-wal", b"its log"),
+            ("antigravity-cli/conversations/theirs.db", b"another's"),
+            (
+                "antigravity-cli/brain/ours/.system_generated/logs/transcript_full.jsonl",
+                b"{}\n",
+            ),
+            (
+                "antigravity-cli/brain/theirs/.system_generated/logs/transcript_full.jsonl",
+                b"{}\n",
+            ),
+            (
+                "antigravity-cli/conversation_summaries.db",
+                b"the human's index",
+            ),
+            ("antigravity-cli/antigravity-oauth-token", b"the login"),
+        ]);
+
+        let root = Root::agy(account.path());
+        let wanted = wanted("verkstead-rate-limiting", &["ours"]);
+        let parts = carried(
+            root.synced(wanted.worktree.as_deref(), &wanted.sessions),
+            wanted.repo.is_some(),
+            wanted.worktree.is_some(),
+        );
+
+        assert_eq!(
+            carrying(account.path(), &parts),
+            [
+                "brain/ours/.system_generated/logs/transcript_full.jsonl",
+                "conversations/ours.db",
+                "conversations/ours.db-wal",
             ],
         );
     }

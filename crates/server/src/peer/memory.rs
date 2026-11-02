@@ -296,6 +296,7 @@ async fn named(
             store::Account::Codex { home } => Root::codex(home),
             store::Account::Grok { home } => Root::grok(home),
             store::Account::OpenCode { home } => Root::opencode(home),
+            store::Account::Agy { home } => Root::agy(home),
         };
 
         let parts = carried(

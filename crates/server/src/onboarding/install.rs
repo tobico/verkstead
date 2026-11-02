@@ -30,9 +30,10 @@
 //! machine has no command for is failed before anything is raised, with a
 //! sentence saying so where the hint screen draws it.
 //!
-//! **And the two rows that are not a package run as the user, after it.** Claude
-//! Code is Anthropic's own installer and Grok Build is xAI's — see [`CLAUDE`]
-//! and [`GROK`] — and each of them installs under the home of whoever ran it, so
+//! **And the three rows that are not a package run as the user, after it.**
+//! Claude Code is Anthropic's own installer, Grok Build is xAI's and the
+//! Antigravity CLI is Google's — see [`CLAUDE`], [`GROK`] and [`AGY`] — and each
+//! of them installs under the home of whoever ran it, so
 //! raising either behind the password dialog would leave a harness in root's
 //! home where no session could reach it. Neither needs the privilege in the
 //! first place. What they land in is written to `session_path` instead, which is
@@ -100,6 +101,7 @@ const ROWS: &[Dependency] = &[
     Dependency::Codex,
     Dependency::Grok,
     Dependency::OpenCode,
+    Dependency::Agy,
     Dependency::Gh,
     Dependency::Wsl,
 ];
@@ -166,6 +168,26 @@ const OPENCODE: Vendor = Vendor {
     lands: ".opencode/bin",
 };
 
+/// And Google's, which is what a ticked Antigravity CLI row runs on a Linux and
+/// on either Mac.
+///
+/// The line and the directory are the ones the script really uses: one file at
+/// `$HOME/.local/bin/agy`, with no versions directory beside it and no link, and
+/// no shell profile edited — `agy install` after it may, which this runs none
+/// of. The script downloads from Google's manifest service, checks a SHA-512,
+/// and refuses to overwrite an `agy` already there, agy updating itself in the
+/// background. `.local/bin` is on the floor every session is composed from, so
+/// what the unit writes to `session_path` is a directory a session reaches
+/// already.
+///
+/// No distribution, Homebrew or npm carries agy, so this is the row's only arm
+/// everywhere but Windows.
+const AGY: Vendor = Vendor {
+    who: "Google",
+    line: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+    lands: LOCAL_BIN,
+};
+
 /// Anthropic's installer on Windows, which is the PowerShell one.
 ///
 /// The same install and the same landing place said the way this platform
@@ -183,6 +205,22 @@ const GROK_ON_WINDOWS: Vendor = Vendor {
     who: "xAI",
     line: "irm https://x.ai/cli/install.ps1 | iex",
     lands: r".grok\bin",
+};
+
+/// And Google's, which is the PowerShell one too.
+///
+/// It lands `agy.exe` in `%LOCALAPPDATA%\agy\bin`, per user, and that directory
+/// is what a ticked row writes to `session_path`. Read off the script on winvm
+/// (agy 1.4.12): it copies the binary there and then runs `agy install`, which
+/// puts the directory in front of the user's own `PATH` in the registry — a
+/// `PATH` the server already running never rereads, so `session_path` is still
+/// what a session finds it by. Said under the home, as every vendor's landing
+/// place is here: `%LOCALAPPDATA%` is `%USERPROFILE%\AppData\Local` unless a
+/// roaming profile has moved it, and the elevated run is the same user's.
+const AGY_ON_WINDOWS: Vendor = Vendor {
+    who: "Google",
+    line: "irm https://antigravity.google/cli/install.ps1 | iex",
+    lands: r"AppData\Local\agy\bin",
 };
 
 /// What installs a package on Windows: the word in front of every id, and what
@@ -606,9 +644,9 @@ enum How {
 /// A vendor's own installer: the command a ticked row runs, and where it puts
 /// what it installs.
 ///
-/// **Two of the eight rows are one of these rather than a package.** Neither
-/// Claude Code nor Grok Build is carried by a distribution under a name that is
-/// really the vendor's, so what a tick runs is the script the vendor publishes —
+/// **Three of the nine rows are one of these rather than a package.** None of
+/// Claude Code, Grok Build and the Antigravity CLI is carried by a distribution
+/// under a name that is really the vendor's, so what a tick runs is the script the vendor publishes —
 /// the same one the hint screen tells a human to run where Verkstead cannot run
 /// it for them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1815,6 +1853,7 @@ fn on_a_mac(dependency: Dependency) -> OnAMac {
         // stays current — see [`CLAUDE`], and ADR-0016's *Macs*.
         Dependency::Claude => OnAMac::Vendor(CLAUDE),
         Dependency::Grok => OnAMac::Vendor(GROK),
+        Dependency::Agy => OnAMac::Vendor(AGY),
 
         Dependency::Wsl => unreachable!("the WSL row is worked by `annexing`"),
     }
@@ -1906,6 +1945,7 @@ fn on_an_intel_mac(dependency: Dependency) -> OnAnIntelMac {
 
         Dependency::Claude => OnAnIntelMac::Vendor(CLAUDE),
         Dependency::Grok => OnAnIntelMac::Vendor(GROK),
+        Dependency::Agy => OnAnIntelMac::Vendor(AGY),
         Dependency::OpenCode => OnAnIntelMac::Vendor(OPENCODE),
         Dependency::Gh => OnAnIntelMac::Release,
 
@@ -2125,6 +2165,7 @@ fn on_windows(dependency: Dependency) -> OnWindows {
 
         Dependency::Claude => OnWindows::Vendor(CLAUDE_ON_WINDOWS),
         Dependency::Grok => OnWindows::Vendor(GROK_ON_WINDOWS),
+        Dependency::Agy => OnWindows::Vendor(AGY_ON_WINDOWS),
 
         Dependency::Wsl => unreachable!("the WSL row is worked by `annexing`"),
     }
@@ -2217,6 +2258,7 @@ fn installs(packager: Packager, dependency: Dependency) -> Installs {
 
         Dependency::Claude => Installs::Vendor(CLAUDE),
         Dependency::Grok => Installs::Vendor(GROK),
+        Dependency::Agy => Installs::Vendor(AGY),
 
         Dependency::Wsl => unreachable!("the WSL row is worked by `annexing`"),
     }
@@ -2269,7 +2311,7 @@ fn no_command(distro: Distro) -> String {
 /// And what goes under a row whose installer would land under a home this
 /// machine does not name.
 ///
-/// The two vendors' installers both write under `$HOME`, so a server started
+/// The vendors' installers all write under `$HOME`, so a server started
 /// with none — a unit file's environment with the variable unset — has nowhere
 /// to put what they install and nothing to write to `session_path` afterwards.
 fn no_home(dependency: Dependency) -> String {
@@ -2289,6 +2331,7 @@ fn named(dependency: Dependency) -> &'static str {
         Dependency::Codex => "Codex",
         Dependency::Grok => "Grok Build",
         Dependency::OpenCode => "OpenCode",
+        Dependency::Agy => "The Antigravity CLI",
         Dependency::Gh => "The GitHub CLI",
         Dependency::Wsl => "WSL",
     }
@@ -2694,6 +2737,35 @@ mod tests {
         assert_eq!(grok.lands, Some(PathBuf::from(HOME).join(".grok/bin")));
     }
 
+    /// And the Antigravity CLI is Google's own installer, the same unit: run as
+    /// the user after the batch, landing in the home's `.local/bin`, which is
+    /// where its script puts `agy` and nowhere else.
+    #[test]
+    fn the_antigravity_cli_is_googles_installer_landing_in_local_bin() {
+        let plan = plan(
+            &machine(Distro::Fedora),
+            &[Dependency::Git, Dependency::Agy],
+        );
+
+        assert!(plan.beyond.is_empty(), "{plan:?}");
+
+        let [batch, agy] = plan.units.as_slice() else {
+            panic!("the batch and Google's installer: {plan:?}");
+        };
+
+        assert_eq!(batch.line, "dnf install -y git");
+
+        assert_eq!(
+            agy.line,
+            "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+        );
+        assert_eq!(agy.how, How::AsTheUser);
+        assert_eq!(agy.doing, "Running Google's installer…");
+        assert_eq!(agy.covers, [Dependency::Agy]);
+        assert_eq!(agy.lands, Some(PathBuf::from(HOME).join(".local/bin")));
+        assert_eq!(agy.chain, None);
+    }
+
     /// And on a machine that names no home there is nowhere for either of them
     /// to land, so both are the hint screen's, the packages going ahead without
     /// them.
@@ -2773,6 +2845,30 @@ mod tests {
         assert_eq!(grok.line, "curl -fsSL https://x.ai/cli/install.sh | bash");
         assert_eq!(grok.lands, Some(PathBuf::from(HOME).join(".grok/bin")));
         assert_eq!(grok.chain, None, "xAI's installer wants no Homebrew");
+    }
+
+    /// And Google's installer for the Antigravity CLI on both Macs, the same
+    /// unit as on a Linux: Homebrew carries no agy, so neither Mac wants a
+    /// `brew` for it, and `.local/bin` is on the Mac floor.
+    #[test]
+    fn both_macs_install_the_antigravity_cli_with_googles_own() {
+        for distro in [Distro::MacOs, Distro::MacOsIntel] {
+            let plan = plan(&machine(distro), &[Dependency::Agy]);
+
+            assert!(plan.beyond.is_empty(), "{distro:?}: {plan:?}");
+
+            let [agy] = plan.units.as_slice() else {
+                panic!("{distro:?}: Google's installer and no Homebrew: {plan:?}");
+            };
+
+            assert_eq!(
+                agy.line,
+                "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+            );
+            assert_eq!(agy.how, How::AsTheUser, "{distro:?}");
+            assert_eq!(agy.lands, Some(PathBuf::from(HOME).join(".local/bin")));
+            assert_eq!(agy.chain, None, "{distro:?}");
+        }
     }
 
     /// And a Mac with no `brew` and Claude alone ticked installs no Homebrew:
@@ -3786,6 +3882,30 @@ mod tests {
         assert_eq!(grok.line, "irm https://x.ai/cli/install.ps1 | iex");
         assert_eq!(grok.how, How::Raised);
         assert_eq!(grok.lands, Some(PathBuf::from(PROFILE).join(r".grok\bin")));
+    }
+
+    /// And Google's for the Antigravity CLI, which lands `agy.exe` in
+    /// `%LOCALAPPDATA%\agy\bin`: that directory is what the row writes to
+    /// `session_path`, the user's own `PATH` it adds it to being one a running
+    /// server never rereads.
+    #[test]
+    fn the_windows_antigravity_cli_lands_in_local_app_data() {
+        let plan = plan(&windows_machine(&PathBuf::new()), &[Dependency::Agy]);
+
+        let [agy] = plan.units.as_slice() else {
+            panic!("Google's installer: {plan:?}");
+        };
+
+        assert_eq!(
+            agy.line,
+            "irm https://antigravity.google/cli/install.ps1 | iex"
+        );
+        assert_eq!(agy.how, How::Raised);
+        assert_eq!(agy.doing, "Running Google's installer…");
+        assert_eq!(
+            agy.lands,
+            Some(PathBuf::from(PROFILE).join(r"AppData\Local\agy\bin")),
+        );
     }
 
     /// And a Windows command crosses as one encoded word, because what raises

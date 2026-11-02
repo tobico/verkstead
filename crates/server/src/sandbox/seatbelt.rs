@@ -61,12 +61,15 @@ const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
 ///   on Linux and for the reason the sandbox module gives: an agent has to
 ///   reach GitHub, a registry and a model's API, and an allowlist that has to
 ///   hold all of that is one nobody will keep honest.
-/// - **Mach lookups**, unrestricted. Everything on a Mac that resolves a name,
-///   finds a font or asks who the user is goes through one, and the narrow
-///   allowlist that would cover a coding session is a list nobody can write
-///   without watching a real one fail. What it costs is a session that can talk
-///   to the machine's own services — which is a narrowing worth making once
-///   there is a probe to say what a session actually needs.
+/// - **Mach lookups, all but the Keychain's.** Everything on a Mac that
+///   resolves a name, finds a font or asks who the user is goes through one,
+///   and the narrow allowlist that would cover a coding session is a list
+///   nobody can write without watching a real one fail — so a session may look
+///   up any service but the two the Keychain is reached through, which are
+///   [`KEYCHAIN`]'s. A session that can reach the Keychain can read whatever
+///   the human keeps in it, and a harness that can reach it keeps its login
+///   there rather than in the account, where no other Profile's session and no
+///   other device could ever find it (ADR-0011).
 /// - **The devices**, which are named rather than a directory: `/dev` on a Mac
 ///   is the machine's own and holds every disk on it.
 /// - **The root directory itself**, which is the one rule here that reads as
@@ -95,8 +98,28 @@ const FLOOR: &str = r#"(version 1)
 
 (allow system-socket)
 (allow network*)
-(allow mach-lookup)
+(allow mach-lookup
+       (require-not (require-any (global-name "com.apple.SecurityServer")
+                                 (global-name "com.apple.securityd.xpc"))))
 "#;
+
+/// The mach services a session is refused, because they are the Keychain.
+///
+/// **Measured rather than assumed**, on macOS 15.8 with `security` under a
+/// policy that reported every lookup: an item is read and written through
+/// `com.apple.SecurityServer`, and the framework reaches for
+/// `com.apple.securityd.xpc` beside it. Refused both, `find-generic-password`
+/// answers that nothing was found and `add-generic-password` that the
+/// authorization was denied — and `curl` and `git` over https, a name looked up
+/// and `id` are exactly as they were, the trust a certificate is checked
+/// against being `trustd`'s and not the Keychain's. agy reaches the Keychain
+/// through `security` and, refused, keeps its login in a file of the account,
+/// as it does with no session bus on Linux.
+///
+/// Written into [`FLOOR`] by name rather than spliced into it, so that the
+/// policy reads whole where it is declared; this is what the tests hold it to.
+#[cfg_attr(not(test), allow(dead_code))]
+const KEYCHAIN: [&str; 2] = ["com.apple.SecurityServer", "com.apple.securityd.xpc"];
 
 /// And what [`Access::Devices`] renders as: the nodes a program opens by name,
 /// and the pseudo-terminal a session is on.
@@ -347,6 +370,31 @@ mod tests {
             policy.starts_with("(version 1)\n\n(deny default)"),
             "the first thing a policy says is that nothing is allowed, and \
              every rule after it is an exception to that:\n{policy}",
+        );
+    }
+
+    /// Every lookup but the Keychain's, rather than every lookup: the one
+    /// narrowing of the floor, and nothing else refused by it.
+    #[test]
+    fn the_keychain_is_the_one_service_a_session_cannot_look_up() {
+        let policy = policy(&Surface::starting_in(PathBuf::from("/")));
+
+        assert!(
+            !policy.contains("(allow mach-lookup)\n"),
+            "a lookup allowed whole would reach the Keychain too:\n{policy}",
+        );
+
+        for service in KEYCHAIN {
+            assert!(
+                policy.contains(&format!("(global-name \"{service}\")")),
+                "{service} is how the Keychain is reached:\n{policy}",
+            );
+        }
+
+        assert_eq!(
+            policy.matches("(global-name ").count(),
+            KEYCHAIN.len(),
+            "and the Keychain is all a session is refused:\n{policy}",
         );
     }
 

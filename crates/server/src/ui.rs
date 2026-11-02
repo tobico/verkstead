@@ -2529,6 +2529,7 @@ pub(crate) async fn conversation_view(
             Ok(Some(profile)) if profile.unbound.is_none() => Some((
                 notice,
                 verkstead_render::NoticeLogIn {
+                    agent_type: crate::profiles::agent_type(profile.agent_type()),
                     profile: profile.id,
                     name: profile.name,
                 },
@@ -6228,8 +6229,8 @@ async fn edit_profile(
 /// A device opening a Profile's login modal: the login already running for it,
 /// or a new one — see [`crate::logins::Logins::opened`].
 ///
-/// Refused for anything but a Claude Profile bound on this device — see
-/// [`crate::sandbox::Sandbox::for_login`].
+/// Refused for anything but a Claude or an Antigravity CLI Profile bound on this
+/// device — see [`crate::sandbox::Sandbox::for_login`].
 async fn login_opened(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -6244,10 +6245,12 @@ async fn login_opened(
         }
     };
 
-    if profile.agent_type() != store::AgentType::Claude {
+    if !crate::logins::logs_in(profile.agent_type()) {
         return refused(
             StatusCode::CONFLICT,
-            ApiError::new("Only a Claude profile can be logged in from here."),
+            ApiError::new(
+                "Only a Claude Code or an Antigravity CLI profile can be logged in from here.",
+            ),
         );
     }
 

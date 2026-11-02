@@ -82,6 +82,13 @@ fn opencode(name: &str) -> Account {
     }
 }
 
+/// And an Antigravity CLI one, the `~/.gemini` agy keeps its own directory in.
+fn agy(name: &str) -> Account {
+    Account::Agy {
+        home: PathBuf::from(format!("/watched/accounts/{name}/.gemini")),
+    }
+}
+
 async fn saved(pool: &SqlitePool, name: &str) -> Profile {
     create_profile(pool, &facts(name))
         .await
@@ -251,7 +258,8 @@ async fn a_profile_whose_account_is_one_home_round_trips_with_it() {
 /// columns, one row in `profile_homes` — so the word in `agent_type` is the
 /// whole of what says which account a home is. A Grok Profile read back as a
 /// Codex one would be a session launched on the wrong binary under the right
-/// directory, and an OpenCode one is a third word over the same two columns.
+/// directory, and an OpenCode one and an Antigravity CLI one are a third and a
+/// fourth word over the same two columns.
 #[tokio::test]
 async fn the_types_that_each_keep_one_home_read_back_as_themselves() {
     let (_dir, pool) = fresh_pool().await;
@@ -277,7 +285,15 @@ async fn the_types_that_each_keep_one_home_read_back_as_themselves() {
     assert_eq!(latest.account, opencode("zen"));
     assert_eq!(latest.agent_type(), AgentType::OpenCode);
 
-    for profile in [&saved, &latest] {
+    let antigravity = create_profile(&pool, &facts_for("zz-gemini", agy("zz-gemini")))
+        .await
+        .unwrap()
+        .expect("nothing is called that yet");
+
+    assert_eq!(antigravity.account, agy("zz-gemini"));
+    assert_eq!(antigravity.agent_type(), AgentType::Agy);
+
+    for profile in [&saved, &latest, &antigravity] {
         let loaded = load_profile(&pool, &profile.id)
             .await
             .unwrap()
@@ -292,7 +308,12 @@ async fn the_types_that_each_keep_one_home_read_back_as_themselves() {
             .into_iter()
             .map(|profile| profile.agent_type())
             .collect::<Vec<_>>(),
-        vec![AgentType::Codex, AgentType::Grok, AgentType::OpenCode],
+        vec![
+            AgentType::Codex,
+            AgentType::Grok,
+            AgentType::OpenCode,
+            AgentType::Agy
+        ],
         "and each of them off the list is its own type"
     );
 }

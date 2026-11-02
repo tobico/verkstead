@@ -66,7 +66,27 @@ device can open.
   as it goes.
 
 - **Claude only, and only Profiles at home on this device.** The other
-  harnesses log in differently, and none of them has needed this yet. A
+  harnesses log in differently, and none of them has needed this yet.
+  Amended (2026-11-01): **and the Antigravity CLI.** agy's headless sign-in is
+  the same conversation — an address printed, a code read from standard
+  input — and its login has to be made where the keyring is unreachable so
+  that it lands in a file the root can link, which is exactly the Built Root
+  this runs in. See ADR-0011's amendment of the same date; the other two still
+  log in differently. Measured on agy 1.4.12, three things differ. What runs
+  is `agy -p /help`: agy has no command that only signs in, and `/help` is
+  answered by agy itself once it has, with no model asked anything. It offers
+  the address only to a standard input that is a terminal, so that one stream
+  is given a terminal and the other two stay pipes. And it waits a minute for
+  the code before giving up; a fresh address replaces the one that ran out
+  while a device is still looking, all of it inside the one ten-minute limit.
+  Without a session bus it keeps the token in
+  `~/.gemini/antigravity-cli/antigravity-oauth-token` by itself, written in
+  place. `agy models` is its `auth status`, read as signed out only where it
+  says *Please sign in*, and a session has signed out when a line ends
+  *You are currently not signed in.* with its picker, *Select login method:*,
+  the next line drawn — a session signed in greets with the same sentence and
+  draws *Signing in...* under it, which on a Mac, the Keychain refused first,
+  is on screen long enough to be read. A
   mirrored Profile's account is a copy, refreshed from its home device before
   each launch, so a login written into it would be overwritten by the next
   refresh. It is logged in on the device it is at home on, and its card offers

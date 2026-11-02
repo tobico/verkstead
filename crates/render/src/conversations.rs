@@ -2493,9 +2493,12 @@ pub struct NoticeEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct NoticeLogIn {
-    /// The Profile, by its uuid. Always a Claude one: that is the one harness
-    /// Verkstead runs a login for.
+    /// The Profile, by its uuid. Always a Claude or an Antigravity CLI one:
+    /// those are the harnesses Verkstead runs a login for.
     pub profile: String,
+
+    /// What it runs, which the modal names.
+    pub agent_type: crate::AgentType,
 
     /// What the human called it, where they called it anything — which the
     /// modal reads beside the harness, the way the Profile's card does.

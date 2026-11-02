@@ -111,6 +111,9 @@ fn exhausted_phrase(agent_type: store::AgentType) -> Option<&'static str> {
         // this mapping's other answer rather than a gap in it, and leaves such
         // a stop landing as the ordinary stall it would have been anyway.
         store::AgentType::OpenCode => None,
+
+        // Nor the Antigravity CLI, which nobody has watched run out yet.
+        store::AgentType::Agy => None,
     }
 }
 

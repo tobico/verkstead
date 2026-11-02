@@ -212,6 +212,126 @@ const OPENCODE_CONFIGS: [&str; 2] = ["opencode.json", "opencode.jsonc"];
 /// none of it is a session's.
 const OPENCODE_CARRIED: &str = "provider";
 
+/// The two directories of the Antigravity CLI's account a root is made of,
+/// inside `~/.gemini`, each built empty for the files written into it: agy's own
+/// directory, where its settings and its record of conversations are, and the
+/// global customisation root.
+///
+/// **And nothing else of `~/.gemini`.** Read off agy 1.4.12 run in a fresh
+/// HOME: `antigravity-cli/` holds `settings.json`, `conversations/`, `brain/`,
+/// `conversation_summaries.db`, the logs, a `builtin/` of agy's own skills it
+/// unpacks at every start, and `jetski_state.pbtxt`; `config/` holds
+/// `mcp_config.json`, `hooks.json`, `skills/`, `plugins/` and `projects/`. A
+/// root is given the first's memory and the settings Verkstead writes, and the
+/// second's MCP servers Verkstead writes — none of the account's plugins,
+/// hooks, skills, rules or servers. What agy makes for itself in either, it
+/// makes fresh: a run with neither marks its own post-onboarding steps done in
+/// `jetski_state.pbtxt` before it draws the sign-in screen.
+const AGY_CLI: &str = "antigravity-cli";
+const AGY_CUSTOMISATION: &str = "config";
+
+/// The settings file agy reads for the user, inside `~/.gemini`.
+const AGY_SETTINGS: &str = "antigravity-cli/settings.json";
+
+/// Of the account's own `settings.json`, the keys a root's carries over.
+///
+/// **An allowlist**, for [`CARRIED`]'s reason. These three are how an account
+/// reaches a model other than through its Google sign-in: `modelProvider`
+/// names the provider, `customModelsConfig` lists models reached elsewhere, and
+/// `gcp` names the Cloud project a Business sign-in bills. Everything else is
+/// how the human works — the theme, the permissions, the trusted workspaces,
+/// telemetry — and what a session needs of those goes on its line as a
+/// session-only `--settings` instead (ADR-0011), never into this file.
+const AGY_CARRIED: [&str; 3] = ["modelProvider", "customModelsConfig", "gcp"];
+
+/// The file agy reads its MCP servers from, inside `~/.gemini`: the global
+/// configuration its own documentation names, keyed `mcpServers`.
+const AGY_MCP: &str = "config/mcp_config.json";
+
+/// The file agy reads as its global rules, inside `~/.gemini`.
+///
+/// **`GEMINI.md` at the top of `~/.gemini`, beside the two directories rather
+/// than inside `config/`.** agy 1.4.12's own `rules.md` documents only the
+/// directory rules a Worktree's `GEMINI.md` or `AGENTS.md` are, walked up from
+/// where it runs; the binary names `/.gemini/GEMINI.md` and `/.gemini/AGENTS.md`
+/// as the global pair, which is the Antigravity family's own place for a
+/// global rule. One of the two, and the first of them, written alone. Proved
+/// on a signed-in agy 1.4.12: a rule written here alone reached the model,
+/// which answered from it without reading a file.
+const AGY_INSTRUCTIONS: &str = "GEMINI.md";
+
+/// The memory agy keeps, inside `~/.gemini`: the record of each conversation,
+/// what a conversation leaves behind it, and the database of summaries that
+/// finds a conversation again — the three of them as one, since the record
+/// is what `--conversation <id>` resumes from and the database is what names
+/// it.
+///
+/// Read off agy 1.4.12, which makes all three at every start.
+const AGY_MEMORY: [&str; 2] = ["antigravity-cli/conversations", "antigravity-cli/brain"];
+
+/// And the database of the three, which is a file rather than a directory.
+///
+/// **In write-ahead-log mode**: a run leaves `conversation_summaries.db-wal`
+/// and `-shm` beside it, and a database joined apart from those writes its log
+/// into the root, which is emptied as the next session starts. So the two
+/// siblings are joined with it — see [`AGY_SUMMARIES_JOINED`] — and each is
+/// made in the account first, empty, where it is missing: SQLite reads an
+/// empty log as one with nothing in it, and an empty index as one to build.
+const AGY_SUMMARIES: &str = "antigravity-cli/conversation_summaries.db";
+
+/// The database and its two siblings, which is what is joined of it.
+///
+/// **None of it on a Mac.** A join there is a symlink, and agy 1.4.12 will not
+/// open its database through one: measured on cat.local, it says *unable to
+/// open database file*, takes the link for a corrupt database, removes it and
+/// makes one of its own in the root. So on a Mac the database is the root's,
+/// made fresh by each session, and the Transcript finds the conversation in it
+/// there — see `transcript::agy_index`. The record and the brain directory are
+/// still joined, which is all `--conversation <id>` resumes from; what the
+/// account's own index misses is the row of a session Verkstead ran, which agy
+/// writes for itself the next time the human resumes that conversation.
+const AGY_SUMMARIES_JOINED: &[&str] = if cfg!(target_os = "macos") {
+    &[]
+} else {
+    &[
+        AGY_SUMMARIES,
+        "antigravity-cli/conversation_summaries.db-wal",
+        "antigravity-cli/conversation_summaries.db-shm",
+    ]
+};
+
+/// Where agy records that the account has been through its first run, inside
+/// `~/.gemini`, and what a root writes there to say it has.
+///
+/// **A signed-in account's first TUI session parks on two screens** before it
+/// reads anything: a colour-scheme picker, and then the terms of service with
+/// the data-use opt-in under them. Read off agy 1.4.12 freshly signed in: what
+/// getting past them changes is this file, from `false` to `true`, and nothing
+/// else — the choice of colours left at its default writes nothing, and the
+/// opt-in is not written to the account at all. A fresh account given only
+/// this file starts at its composer with the Brief submitted.
+///
+/// Written rather than joined, as the settings beside it are, and written into
+/// every root rather than only a fresh one's: a root is built fresh each time,
+/// and agy keeps the file under `cache/`, so the account's own may be gone
+/// whatever the account has seen. The telemetry the second screen offers is
+/// left where agy's default leaves it, as ADR-0011 has it.
+const AGY_ONBOARDED: &str = "antigravity-cli/cache/onboarding.json";
+const AGY_ONBOARDED_AS: &str = "{\"onboardingComplete\":true}\n";
+
+/// The file agy falls to for its login where its keyring is unreachable,
+/// inside `~/.gemini`.
+///
+/// **Read off agy 1.4.12 signing in with no session bus**, which is what a
+/// sandbox is: its log says *Using file-based token storage because no D-Bus
+/// session bus detected*, and the token lands here as JSON — the OAuth token
+/// with its refresh token, and the account's address — readable by its owner
+/// alone. Nothing about it has to be asked for: the fallback is agy's own.
+///
+/// **Written in place**, opened for writing and truncated rather than renamed
+/// over, so a bind of it on Linux takes the write the way a Codex login's does.
+const AGY_LOGIN: &str = "antigravity-cli/antigravity-oauth-token";
+
 /// Of the account's `.claude.json`, the key its MCP servers are under: at the top
 /// level, and again under each `projects` entry.
 ///
@@ -253,8 +373,9 @@ const TYPE: &str = "type";
 /// configuration whatever this file did — see ADR-0021. What keeps it is the
 /// root, which is no more readable than the login beside it.
 ///
-/// **Three of the four harnesses spell it this way** — Claude Code here, Grok
-/// Build in its `config.toml` and OpenCode in its `opencode.json`. Codex alone
+/// **Four of the five harnesses spell it this way** — Claude Code here, Grok
+/// Build in its `config.toml`, OpenCode in its `opencode.json` and the
+/// Antigravity CLI in its `mcp_config.json`. Codex alone
 /// spells it something else, which is the whole of what its form differs in:
 /// see [`CODEX_HEADERS`].
 const HEADERS: &str = "headers";
@@ -400,6 +521,11 @@ enum Harness {
     /// `auth.json` alone linked into it — see [`OPENCODE_DATA`]. And its config
     /// directory built, with an `opencode.json` written.
     OpenCode,
+
+    /// The Antigravity CLI: its conversations, `brain/` and summaries database
+    /// as its memory, joined as one, and a `settings.json` written, with the
+    /// MCP servers in `config/mcp_config.json` — see [`AGY_MEMORY`].
+    Agy,
 }
 
 impl Root {
@@ -499,6 +625,20 @@ impl Root {
         }
     }
 
+    /// The Antigravity CLI root for a session logged in as the account at
+    /// `account`.
+    ///
+    /// Nothing about the Worktree is in it, for Codex's reason: agy keeps one
+    /// `conversations/` for every directory it runs in, and its trust is said
+    /// on the launch line.
+    pub(crate) fn agy(account: &Path) -> Root {
+        Root {
+            account: account.to_owned(),
+            harness: Harness::Agy,
+            memory: true,
+        }
+    }
+
     /// The same root, sharing the account's memory or not.
     ///
     /// **On**, which is what every constructor above makes: the
@@ -522,6 +662,7 @@ impl Root {
             Harness::Codex => super::CODEX_INSIDE_HOME,
             Harness::Grok => super::GROK_INSIDE_HOME,
             Harness::OpenCode => "opencode",
+            Harness::Agy => super::AGY_INSIDE_HOME,
         }
     }
 
@@ -530,7 +671,7 @@ impl Root {
     /// and HOME itself for OpenCode, whose account is a home.
     fn landing(&self) -> &'static Path {
         Path::new(match self.harness {
-            Harness::Claude { .. } | Harness::Codex | Harness::Grok => self.named(),
+            Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::Agy => self.named(),
             Harness::OpenCode => "",
         })
     }
@@ -539,15 +680,40 @@ impl Root {
     /// HOME. Each is emptied and made on the host as a session starts, in the
     /// Conversation's own directory, and is put at the same path inside.
     ///
-    /// One for Claude, Codex and Grok Build: the account's directory. Two for
+    /// One for Claude, Codex, Grok Build and the Antigravity CLI: the account's
+    /// directory, the last with two of its own inside it — see
+    /// [`Root::furnished_in`]. Two for
     /// OpenCode where memory is not shared: its config directory and its data
     /// directory. And the config directory alone where memory is shared, the
     /// data directory then being the account's, joined whole.
     pub(crate) fn built(&self) -> Vec<&'static str> {
         match (&self.harness, self.memory) {
-            (Harness::Claude { .. } | Harness::Codex | Harness::Grok, _) => vec![self.named()],
+            (Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::Agy, _) => {
+                vec![self.named()]
+            }
             (Harness::OpenCode, true) => vec![OPENCODE_CONFIG],
             (Harness::OpenCode, false) => vec![OPENCODE_CONFIG, OPENCODE_DATA],
+        }
+    }
+
+    /// The directories inside a root built in the Conversation's own directory
+    /// at `built` that are made empty in it as it is built, for what is written
+    /// there and joined there to be put in: an Antigravity CLI root's two — see
+    /// [`AGY_CLI`] — with the `cache/` inside the first that holds
+    /// [`AGY_ONBOARDED`], and none for any other, whose files are written straight
+    /// into a directory [`Root::built`] already names.
+    pub(crate) fn furnished_in(&self, built: &Path) -> Vec<PathBuf> {
+        let root = built.join(self.landing());
+
+        match self.harness {
+            Harness::Agy => vec![
+                root.join(AGY_CLI),
+                root.join(AGY_CUSTOMISATION),
+                root.join(AGY_ONBOARDED).parent().unwrap().to_owned(),
+            ],
+            Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::OpenCode => {
+                Vec::new()
+            }
         }
     }
 
@@ -605,19 +771,22 @@ impl Root {
             Harness::Claude { .. } => CREDENTIALS,
             Harness::Codex | Harness::Grok => AUTH,
             Harness::OpenCode => OPENCODE_AUTH,
+            Harness::Agy => AGY_LOGIN,
         }
     }
 
-    /// The configuration file a root is given: where it goes in a root built in
-    /// the Conversation's own directory at `built`, and what it holds. It is
-    /// Verkstead's own, written as each session starts, and neither joined nor
-    /// written back.
+    /// The configuration files a root is given: where each goes in a root built
+    /// in the Conversation's own directory at `built`, and what it holds. Each
+    /// is Verkstead's own, written as each session starts, and neither joined
+    /// nor written back.
     ///
     /// Read off the account's own file as it is at this moment, so a key the
     /// human changes reaches the next session. Claude's is a `settings.json` —
     /// see [`settings`]. Codex's and Grok Build's is a `config.toml` — see
     /// [`toml_carrying`]. OpenCode's is an `opencode.json` — see
-    /// [`opencode_config`].
+    /// [`opencode_config`]. The Antigravity CLI's is a `settings.json` — see
+    /// [`agy_settings`] — and, where the Conversation attached any, an
+    /// `mcp_config.json` beside it holding the servers — see [`agy_servers`].
     ///
     /// **And `servers` is where the other three harnesses are launched with the
     /// Conversation's MCP servers**, one entry apiece in the form that harness
@@ -629,10 +798,14 @@ impl Root {
     /// than in the settings beside it — see [`Root::config`].
     ///
     /// Blocking: one read, or two for OpenCode.
-    pub(crate) fn written(&self, built: &Path, servers: &[AttachedServer]) -> (PathBuf, Vec<u8>) {
+    pub(crate) fn written(
+        &self,
+        built: &Path,
+        servers: &[AttachedServer],
+    ) -> Vec<(PathBuf, Vec<u8>)> {
         let root = built.join(self.landing());
 
-        match self.harness {
+        let written = match self.harness {
             Harness::Claude { .. } => (
                 root.join(SETTINGS),
                 settings(std::fs::read(self.account.join(SETTINGS)).ok().as_deref()),
@@ -672,7 +845,30 @@ impl Root {
                     ),
                 )
             }
-        }
+            Harness::Agy => {
+                let settings = (
+                    root.join(AGY_SETTINGS),
+                    agy_settings(
+                        std::fs::read(self.account.join(AGY_SETTINGS))
+                            .ok()
+                            .as_deref(),
+                    ),
+                );
+
+                let onboarded = (root.join(AGY_ONBOARDED), AGY_ONBOARDED_AS.into());
+
+                return match servers.is_empty() {
+                    true => vec![settings, onboarded],
+                    false => vec![
+                        settings,
+                        (root.join(AGY_MCP), agy_servers(servers)),
+                        onboarded,
+                    ],
+                };
+            }
+        };
+
+        vec![written]
     }
 
     /// The global instructions file a root is given: where it goes in a root
@@ -688,7 +884,8 @@ impl Root {
     /// Each harness names its own, and each is inside a directory the root
     /// already builds: `.claude/CLAUDE.md` for Claude, `.codex/AGENTS.md` for
     /// Codex, `.grok/AGENTS.md` for Grok Build, and the config directory's
-    /// `AGENTS.md` for OpenCode.
+    /// `AGENTS.md` for OpenCode, and `.gemini/GEMINI.md` for the Antigravity
+    /// CLI — see [`AGY_INSTRUCTIONS`].
     ///
     /// **Written rather than joined**, exactly as the configuration file
     /// beside it is: it is Verkstead's own file, it is never the account's,
@@ -715,6 +912,7 @@ impl Root {
             Harness::Claude { .. } => root.join(CLAUDE_INSTRUCTIONS),
             Harness::Codex | Harness::Grok => root.join(AGENTS),
             Harness::OpenCode => root.join(OPENCODE_CONFIG).join(AGENTS),
+            Harness::Agy => root.join(AGY_INSTRUCTIONS),
         };
 
         Some((path, text.as_bytes().to_vec()))
@@ -760,7 +958,7 @@ impl Root {
     pub(crate) fn config(&self, config_file: &Path, servers: &[AttachedServer]) -> Vec<u8> {
         let trusted = match &self.harness {
             Harness::Claude { trusted, .. } => trusted.as_slice(),
-            Harness::Codex | Harness::Grok | Harness::OpenCode => &[],
+            Harness::Codex | Harness::Grok | Harness::OpenCode | Harness::Agy => &[],
         };
 
         config(std::fs::read(config_file).ok().as_deref(), trusted, servers)
@@ -779,10 +977,29 @@ impl Root {
     /// **Nothing at all where memory is off**: nothing is joined, so nothing of
     /// the account's is written to make a join of.
     ///
+    /// **A file of it is made empty** rather than as a directory: the Antigravity
+    /// CLI's summaries database and its two siblings — see [`AGY_SUMMARIES`].
+    /// One already there is left exactly as it is.
+    ///
     /// Blocking.
     pub(crate) fn made_in_account(&self) -> io::Result<()> {
+        let files = self.joined_files();
+
         for store in self.joined_store() {
-            std::fs::create_dir_all(self.account.join(store))?;
+            let path = self.account.join(&store);
+
+            if files.contains(&store) {
+                if let Some(holding) = path.parent() {
+                    std::fs::create_dir_all(holding)?;
+                }
+
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)?;
+            } else {
+                std::fs::create_dir_all(path)?;
+            }
         }
 
         Ok(())
@@ -838,6 +1055,9 @@ impl Root {
             Harness::Codex => CODEX_MEMORY.iter().map(|store| root.join(store)).collect(),
             Harness::Grok => GROK_MEMORY.iter().map(|store| root.join(store)).collect(),
             Harness::OpenCode => Vec::new(),
+            // The two directories, and not the database: agy makes its own
+            // where there is none, and a database of nothing is no file.
+            Harness::Agy => AGY_MEMORY.iter().map(|store| root.join(store)).collect(),
         }
     }
 
@@ -858,6 +1078,23 @@ impl Root {
             Harness::Codex => CODEX_MEMORY.iter().map(PathBuf::from).collect(),
             Harness::Grok => GROK_MEMORY.iter().map(PathBuf::from).collect(),
             Harness::OpenCode => vec![PathBuf::from(OPENCODE_DATA)],
+            Harness::Agy => AGY_MEMORY
+                .iter()
+                .chain(AGY_SUMMARIES_JOINED)
+                .map(PathBuf::from)
+                .collect(),
+        }
+    }
+
+    /// Which of [`Root::joined_store`] are files rather than directories: the
+    /// Antigravity CLI's summaries database and its two siblings, and nothing
+    /// of any other harness's.
+    fn joined_files(&self) -> Vec<PathBuf> {
+        match self.harness {
+            Harness::Agy => AGY_SUMMARIES_JOINED.iter().map(PathBuf::from).collect(),
+            Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::OpenCode => {
+                Vec::new()
+            }
         }
     }
 
@@ -873,7 +1110,7 @@ impl Root {
         match &self.harness {
             Harness::Claude { repo, worktree, .. } if repo == worktree => vec![repo],
             Harness::Claude { repo, worktree, .. } => vec![repo, worktree],
-            Harness::Codex | Harness::Grok | Harness::OpenCode => Vec::new(),
+            Harness::Codex | Harness::Grok | Harness::OpenCode | Harness::Agy => Vec::new(),
         }
     }
 
@@ -922,6 +1159,13 @@ impl Root {
     ///   crosses is narrower than it was and is still the whole store, and the
     ///   bound in [`crate::mirroring::memory::MOST_A_STORE_IS`] is what stands
     ///   in front of a big one.
+    /// - **Antigravity CLI** — Grok's rule twice over, by the ids agy gave this
+    ///   Conversation's sessions (see [`crate::transcript`]): the one database
+    ///   per conversation under `conversations/`, and the conversation's own
+    ///   directory under `brain/`, where its Transcript is. Not the summaries
+    ///   database beside them, for the reason Grok's index stays: it is the
+    ///   human's list of every conversation, and agy 1.4.12 resumes one it has no
+    ///   row for, writing the row as it does.
     ///
     /// **Nothing at all where the memory switch is off**, which is the reading
     /// [`Root::joined_store`] makes of the same switch: a session that runs from a
@@ -980,6 +1224,25 @@ impl Root {
                 PathBuf::from(OPENCODE_DATA),
                 Whose::Database(super::OPENCODE_DB_FILE),
             )],
+
+            // The record `--conversation` resumes from and the brain directory
+            // the Transcript is followed in, each picked out by the ids agy
+            // gave this Conversation's sessions. Not the summaries database,
+            // which is the human's index of every conversation they have had:
+            // agy 1.4.12 resumes a conversation that has no row in it and
+            // writes the row itself.
+            Harness::Agy => vec![
+                part(
+                    CONVERSATIONS,
+                    PathBuf::from(AGY_MEMORY[0]),
+                    Whose::Databases(sessions.to_vec()),
+                ),
+                part(
+                    BRAIN,
+                    PathBuf::from(AGY_MEMORY[1]),
+                    Whose::Called(sessions.to_vec()),
+                ),
+            ],
         }
     }
 }
@@ -996,6 +1259,8 @@ pub(crate) const WORKTREE: &str = "worktree";
 pub(crate) const SESSIONS_PART: &str = "sessions";
 pub(crate) const MEMORY: &str = "memory";
 pub(crate) const DATA: &str = "data";
+pub(crate) const CONVERSATIONS: &str = "conversations";
+pub(crate) const BRAIN: &str = "brain";
 
 /// One part of a memory store, as the device it is on names it.
 ///
@@ -1055,6 +1320,14 @@ pub(crate) enum Whose {
     /// A sibling that is not there is nothing to carry rather than a failure,
     /// which is a database whose log has been folded back into it.
     Database(&'static str),
+
+    /// And a database apiece directly under the part, `<id>.db` for each of
+    /// these ids, with the two siblings SQLite keeps beside each.
+    ///
+    /// The Antigravity CLI's record of a conversation: agy 1.4.12 keeps one
+    /// SQLite file per conversation under `conversations/`, named for the id it
+    /// gave the conversation, and that file is what `--conversation` resumes.
+    Databases(Vec<String>),
 }
 
 /// Where an account keeps its login, whatever else is true of it.
@@ -1078,6 +1351,7 @@ pub(crate) fn login_at(account: &crate::store::Account) -> PathBuf {
             home.join(AUTH)
         }
         crate::store::Account::OpenCode { home } => home.join(OPENCODE_AUTH),
+        crate::store::Account::Agy { home } => home.join(AGY_LOGIN),
     }
 }
 
@@ -1143,6 +1417,10 @@ pub(crate) fn mirrored_of(agent_type: crate::store::AgentType) -> Vec<PathBuf> {
 
         crate::store::AgentType::OpenCode => {
             vec![login, Path::new(OPENCODE_CONFIG).join(OPENCODE_CONFIGS[0])]
+        }
+
+        crate::store::AgentType::Agy => {
+            vec![login, Path::new(super::AGY_INSIDE_HOME).join(AGY_SETTINGS)]
         }
     }
 }
@@ -1213,6 +1491,11 @@ pub(crate) fn mirrored(account: &crate::store::Account) -> Vec<(PathBuf, Option<
                 OPENCODE_CONFIGS.map(|file| text(home.join(OPENCODE_CONFIG).join(file))),
                 &[],
             )),
+        ],
+
+        crate::store::Account::Agy { home } => vec![
+            read(home.join(AGY_LOGIN)),
+            Some(agy_settings(read(home.join(AGY_SETTINGS)).as_deref())),
         ],
     };
 
@@ -1543,6 +1826,52 @@ fn settings(account: Option<&[u8]>) -> Vec<u8> {
     }
 
     self::written(&serde_json::Value::Object(written))
+}
+
+/// The `settings.json` an Antigravity CLI root is given, out of the account's
+/// own where there is one to read: its [`AGY_CARRIED`] keys and nothing else.
+///
+/// An account with no such file, or one that does not read as a JSON object, is
+/// given an empty object — which agy reads as every setting at its default.
+fn agy_settings(account: Option<&[u8]>) -> Vec<u8> {
+    let mut written = Object::new();
+
+    if let Some(serde_json::Value::Object(own)) =
+        account.and_then(|bytes| serde_json::from_slice(bytes).ok())
+    {
+        for key in AGY_CARRIED {
+            if let Some(value) = own.get(key) {
+                written.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+
+    self::written(&serde_json::Value::Object(written))
+}
+
+/// The `mcp_config.json` an Antigravity CLI root is given: the Conversation's
+/// `servers` under [`MCP_SERVERS`], one entry apiece, in agy's own schema.
+///
+/// `{"url": …}`, with the headers it is spoken to with beside it where it has
+/// any — agy 1.4.12's documentation gives `url` for a Streamable HTTP server,
+/// which is the one transport a declaration can be, and its configuration
+/// reads `headers` beside it. No `type`: agy tells the transport by which of
+/// `url` and `command` an entry has. The account's own file is never read, so
+/// what a session finds here is the Conversation's and nothing else.
+fn agy_servers(servers: &[AttachedServer]) -> Vec<u8> {
+    let mut ours = Object::new();
+
+    for server in servers {
+        let mut entry = serde_json::json!({ URL: server.url() });
+
+        if !server.headers().is_empty() {
+            entry[HEADERS] = serde_json::Value::Object(sent(server));
+        }
+
+        ours.insert(server.name().to_owned(), entry);
+    }
+
+    written(&serde_json::json!({ MCP_SERVERS: ours }))
 }
 
 /// A JSON object, as `serde_json` holds one.
@@ -1939,7 +2268,7 @@ mod tests {
     fn entries(root: &Root) -> Vec<String> {
         match &root.harness {
             Harness::Claude { .. } => root.entries().into_iter().map(str::to_owned).collect(),
-            Harness::Codex | Harness::Grok | Harness::OpenCode => {
+            Harness::Codex | Harness::Grok | Harness::OpenCode | Harness::Agy => {
                 panic!("only a Claude root has `projects/` entries")
             }
         }
@@ -1949,7 +2278,7 @@ mod tests {
     fn trusted(root: &Root) -> Vec<String> {
         match &root.harness {
             Harness::Claude { trusted, .. } => trusted.clone(),
-            Harness::Codex | Harness::Grok | Harness::OpenCode => {
+            Harness::Codex | Harness::Grok | Harness::OpenCode | Harness::Agy => {
                 panic!("only a Claude root has a `.claude.json` to trust in")
             }
         }
@@ -2895,6 +3224,212 @@ mod tests {
         assert!(remembering.unshared_in(Path::new("/built")).is_empty());
     }
 
+    /// An Antigravity CLI root joins its conversations, its `brain/` and its
+    /// summaries database as one where memory is shared, the database with
+    /// the two siblings its log is kept in, each made in the account where it
+    /// is not there — and with memory off, the two directories are the root's
+    /// own and empty, and nothing of the account's is joined or made.
+    ///
+    /// The login is joined only where the account has the file, and this one
+    /// has none.
+    #[test]
+    fn an_agy_root_joins_its_memory_as_one_by_the_switch() {
+        let dir = tempfile::tempdir().unwrap();
+        let account = dir.path().join("account/.gemini");
+        std::fs::create_dir_all(account.join("antigravity-cli")).unwrap();
+
+        let forgetting = Root::agy(&account).remembering(false);
+        forgetting.made_in_account().unwrap();
+
+        assert!(forgetting.joined(Path::new("/inside")).is_empty());
+        assert!(!account.join("antigravity-cli/conversations").exists());
+        assert!(!account.join(AGY_SUMMARIES).exists());
+        assert_eq!(
+            forgetting.unshared_in(Path::new("/built")),
+            [
+                PathBuf::from("/built/.gemini/antigravity-cli/conversations"),
+                PathBuf::from("/built/.gemini/antigravity-cli/brain"),
+            ]
+        );
+
+        // A database already there, which the making must leave alone.
+        std::fs::write(account.join(AGY_SUMMARIES), "SQLite format 3\0").unwrap();
+
+        let remembering = Root::agy(&account);
+        remembering.made_in_account().unwrap();
+
+        let inside = |path: &str| PathBuf::from("/inside/.gemini").join(path);
+
+        // The database is joined everywhere but a Mac, where agy will not
+        // open it through the link a join is there.
+        let database: &[&str] = if cfg!(target_os = "macos") {
+            &[]
+        } else {
+            &[
+                "antigravity-cli/conversation_summaries.db",
+                "antigravity-cli/conversation_summaries.db-wal",
+                "antigravity-cli/conversation_summaries.db-shm",
+            ]
+        };
+
+        assert_eq!(
+            remembering.joined(Path::new("/inside")),
+            ["antigravity-cli/conversations", "antigravity-cli/brain"]
+                .iter()
+                .chain(database)
+                .map(|path| (account.join(path), inside(path)))
+                .collect::<Vec<_>>()
+        );
+        assert!(account.join("antigravity-cli/conversations").is_dir());
+        assert!(account.join("antigravity-cli/brain").is_dir());
+        assert_eq!(
+            std::fs::read(account.join(AGY_SUMMARIES)).unwrap(),
+            b"SQLite format 3\0",
+            "a database already there is the account's, untouched"
+        );
+        assert_eq!(
+            account
+                .join("antigravity-cli/conversation_summaries.db-wal")
+                .is_file()
+                && account
+                    .join("antigravity-cli/conversation_summaries.db-shm")
+                    .is_file(),
+            !database.is_empty(),
+            "and the two siblings are made as files where they are joined, so \
+             each has something to join"
+        );
+        assert!(remembering.unshared_in(Path::new("/built")).is_empty());
+
+        // And a login, once the account has one, linked beside them.
+        std::fs::write(account.join(AGY_LOGIN), "token").unwrap();
+
+        assert_eq!(
+            remembering.joined(Path::new("/inside"))[0],
+            (account.join(AGY_LOGIN), inside(AGY_LOGIN))
+        );
+    }
+
+    /// An Antigravity CLI root is `~/.gemini` with agy's own two directories
+    /// made inside it, and the files written go into them: its `settings.json`
+    /// carrying only the keys that name a provider, and the Conversation's
+    /// servers in `config/mcp_config.json` in agy's own schema.
+    #[test]
+    fn an_agy_root_is_written_its_provider_and_its_servers() {
+        let dir = tempfile::tempdir().unwrap();
+        let account = dir.path().join(".gemini");
+        std::fs::create_dir_all(account.join("antigravity-cli")).unwrap();
+        std::fs::write(
+            account.join(AGY_SETTINGS),
+            r#"{
+                "modelProvider": "vertex",
+                "gcp": { "project": "work-123" },
+                "theme": "solarized light",
+                "toolPermission": "ask",
+                "trustedWorkspaces": ["/home/you/src"]
+            }"#,
+        )
+        .unwrap();
+
+        let root = Root::agy(&account);
+        let built = Path::new("/built");
+
+        assert_eq!(root.built(), [".gemini"]);
+        assert_eq!(
+            root.furnished_in(built),
+            [
+                PathBuf::from("/built/.gemini/antigravity-cli"),
+                PathBuf::from("/built/.gemini/config"),
+                PathBuf::from("/built/.gemini/antigravity-cli/cache"),
+            ]
+        );
+
+        let written = root.written(built, NONE);
+
+        assert_eq!(written.len(), 2, "no servers, no `mcp_config.json`");
+        assert_eq!(
+            written[0].0,
+            PathBuf::from("/built/.gemini/antigravity-cli/settings.json")
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&written[0].1).unwrap(),
+            serde_json::json!({
+                "modelProvider": "vertex",
+                "gcp": { "project": "work-123" },
+            }),
+            "the provider keys the account has, and none of how the human works"
+        );
+
+        let written = root.written(
+            built,
+            &[
+                AttachedServer::of(
+                    "docs",
+                    "https://mcp.example.com/docs",
+                    &[("Authorization", "Bearer sk-averysecretkey")],
+                ),
+                AttachedServer::of("open", "https://mcp.example.com/open", &[]),
+            ],
+        );
+
+        assert_eq!(
+            written[1].0,
+            PathBuf::from("/built/.gemini/config/mcp_config.json")
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&written[1].1).unwrap(),
+            serde_json::json!({
+                "mcpServers": {
+                    "docs": {
+                        "url": "https://mcp.example.com/docs",
+                        "headers": { "Authorization": "Bearer sk-averysecretkey" },
+                    },
+                    "open": { "url": "https://mcp.example.com/open" },
+                },
+            })
+        );
+
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &Root::agy(&dir.path().join("nowhere")).written(built, NONE)[0].1
+            )
+            .unwrap(),
+            serde_json::json!({}),
+            "and an account with no settings is given an empty object"
+        );
+    }
+
+    /// And every Antigravity CLI root says the account's first run is over,
+    /// servers or none, so no session parks on the colour picker and the terms
+    /// a freshly signed-in account is otherwise shown first.
+    #[test]
+    fn an_agy_root_is_written_past_the_first_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let account = dir.path().join(".gemini");
+        let root = Root::agy(&account);
+        let built = Path::new("/built");
+
+        for servers in [
+            NONE,
+            &[AttachedServer::of(
+                "open",
+                "https://mcp.example.com/open",
+                &[],
+            )][..],
+        ] {
+            let written = root.written(built, servers);
+            let (path, bytes) = written.last().unwrap();
+
+            assert_eq!(
+                *path,
+                PathBuf::from("/built/.gemini/antigravity-cli/cache/onboarding.json")
+            );
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(bytes).unwrap(),
+                serde_json::json!({ "onboardingComplete": true }),
+            );
+        }
+    }
+
     /// Only a Grok Build root on Linux is given its login as a copy: grok saves
     /// one by a rename a bind refuses, and the other harnesses and platforms are
     /// served by a link.
@@ -3070,7 +3605,7 @@ mod tests {
             "the data directory whole, with the login inside it"
         );
         assert_eq!(
-            remembering.written(Path::new("/built"), NONE).0,
+            remembering.written(Path::new("/built"), NONE)[0].0,
             Path::new("/built/.config/opencode/opencode.json")
         );
 
@@ -3181,6 +3716,7 @@ mod tests {
             (Root::codex(account), "/built/.codex/AGENTS.md"),
             (Root::grok(account), "/built/.grok/AGENTS.md"),
             (Root::opencode(account), "/built/.config/opencode/AGENTS.md"),
+            (Root::agy(account), "/built/.gemini/GEMINI.md"),
         ] {
             assert_eq!(
                 root.instructed(built, text),

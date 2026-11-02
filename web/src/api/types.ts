@@ -404,7 +404,7 @@ agent_type: AgentType | null, };
  * Event says which agent ran a session and holds no account at all, the
  * Profile it was launched from being a thing that can since have gone.
  */
-export type AgentType = "Claude" | "Codex" | "Grok" | "OpenCode";
+export type AgentType = "Claude" | "Codex" | "Grok" | "OpenCode" | "Agy";
 
 /**
  * The Annex's row: how its box stands, the release it runs and the disk it
@@ -2489,10 +2489,10 @@ author?: string, };
  * What a row is about.
  *
  * Flat rather than a harness variant carrying an [`crate::AgentType`]: the
- * step draws eight rows with an instruction apiece, and which of them are
+ * step draws nine rows with an instruction apiece, and which of them are
  * harnesses is a fact about the objective rather than about the drawing.
  */
-export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Gh" | "Wsl";
+export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Agy" | "Gh" | "Wsl";
 
 /**
  * And whether the machine has it.
@@ -4304,10 +4304,14 @@ log_in: NoticeLogIn | null, };
  */
 export type NoticeLogIn = { 
 /**
- * The Profile, by its uuid. Always a Claude one: that is the one harness
- * Verkstead runs a login for.
+ * The Profile, by its uuid. Always a Claude or an Antigravity CLI one:
+ * those are the harnesses Verkstead runs a login for.
  */
 profile: string, 
+/**
+ * What it runs, which the modal names.
+ */
+agent_type: AgentType, 
 /**
  * What the human called it, where they called it anything — which the
  * modal reads beside the harness, the way the Profile's card does.
@@ -4933,7 +4937,7 @@ export type ProcessPicked = "Picked" | "NoSuchConversation" | "NotDrafting" | "N
  * written it carries what they typed, but they are the same fields either way,
  * and two types for one shape would be two opinions about what an account is.
  */
-export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, config_file: string, } | { "agent_type": "Codex", home: string, } | { "agent_type": "Grok", home: string, } | { "agent_type": "OpenCode", home: string, };
+export type ProfileAccount = { "agent_type": "Claude", claude_dir: string, config_file: string, } | { "agent_type": "Codex", home: string, } | { "agent_type": "Grok", home: string, } | { "agent_type": "OpenCode", home: string, } | { "agent_type": "Agy", home: string, };
 
 /**
  * Which Profile and model a Conversation is pairing for one of its roles.
@@ -7540,7 +7544,7 @@ branch: string, };
  */
 export type StepsView = { 
 /**
- * A sandbox, `git`, and at least one of the four harnesses.
+ * A sandbox, `git`, and at least one of the five harnesses.
  */
 dependencies: boolean, 
 /**

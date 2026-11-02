@@ -157,6 +157,10 @@ const THE_LOGIN: &str = "{\"the\": \"login\"}";
 /// And where Codex keeps one inside `~/.codex`, and Grok Build inside `~/.grok`.
 const AUTH: &str = "auth.json";
 
+/// And where the Antigravity CLI keeps one inside `~/.gemini/antigravity-cli`,
+/// its file store being where a Windows session is sent — read off agy 1.4.12.
+const AGY_LOGIN: &str = "antigravity-oauth-token";
+
 /// Another repository's `projects/` entry in the account, which is no session's
 /// business.
 const ANOTHER_REPOSITORY: &str = "C--somewhere-else";
@@ -756,6 +760,62 @@ impl Grilling {
     /// profile.
     fn grok_root_inside(&self) -> PathBuf {
         self.profile_dir().join(".grok")
+    }
+
+    /// Run this fixture's sessions under an Antigravity CLI account instead,
+    /// holding what an agy 1.4.12 account that has been used holds in
+    /// `~/.gemini`: a login, a record and a brain directory and the summaries
+    /// database, settings naming a provider beside the human's own preferences,
+    /// and in `config/` the human's MCP servers and skills — really there, so
+    /// that a probe finding them refused or absent has found the boundary.
+    async fn under_agy(&mut self, memory: bool) {
+        let gemini = self.agy_dir();
+        let cli = gemini.join("antigravity-cli");
+
+        for dir in ["conversations", "brain"] {
+            std::fs::create_dir_all(cli.join(dir)).unwrap();
+            std::fs::write(cli.join(dir).join(MARKER), SAID).unwrap();
+        }
+
+        std::fs::create_dir_all(gemini.join("config").join("skills")).unwrap();
+        std::fs::write(gemini.join("config").join("skills").join(MARKER), SAID).unwrap();
+        std::fs::write(
+            gemini.join("config").join("mcp_config.json"),
+            "{\"mcpServers\": {\"the-humans\": {}}}\n",
+        )
+        .unwrap();
+
+        std::fs::write(cli.join(AGY_LOGIN), THE_LOGIN).unwrap();
+        std::fs::write(cli.join("conversation_summaries.db"), SAID).unwrap();
+        std::fs::write(
+            cli.join("settings.json"),
+            "{\"modelProvider\": \"the-proxy\", \"theme\": \"the humans\"}\n",
+        )
+        .unwrap();
+
+        self.profile = store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: Some("agy".to_owned()),
+                account: store::Account::Agy { home: gemini },
+                models: vec!["gemini-3.8-flash-medium".to_owned()],
+                memory,
+            },
+        )
+        .await
+        .unwrap()
+        .expect("the Profile saves");
+    }
+
+    /// The Antigravity CLI account's own `~/.gemini` on the host — see
+    /// [`Grilling::under_agy`].
+    fn agy_dir(&self) -> PathBuf {
+        self._watched.path().join("agy-account/.gemini")
+    }
+
+    /// And the root an agy session is given in its place, inside the profile.
+    fn agy_root_inside(&self) -> PathBuf {
+        self.profile_dir().join(".gemini")
     }
 
     /// `config.yaml`, which among other things is the one text every session
@@ -1945,6 +2005,117 @@ async fn a_codex_login_written_inside_is_the_accounts() {
     assert_eq!(said(&classified, "written"), "yes");
     assert_eq!(
         std::fs::read_to_string(fixture.codex_dir().join(AUTH)).unwrap(),
+        "{\"refreshed\": true}",
+        "the login written inside is the account's"
+    );
+}
+
+/// An Antigravity CLI session's `.gemini` is a root of Verkstead's own: the
+/// login hard-linked in with an entry of its own, the record and the brain
+/// directory junctioned in and the summaries database linked beside them, and
+/// a `settings.json` Verkstead wrote carrying the account's provider and none
+/// of its preferences. The human's skills and MCP servers are not in it, and
+/// nothing grants the account's own directory — so reached by its real path,
+/// it is refused, and what the session writes lands only where it was joined.
+///
+/// **And it is told to keep its login in that file**: a session on Windows runs
+/// as the session account, whose Credential Manager nothing refuses, so agy is
+/// given what sends it to its file store instead.
+#[tokio::test]
+async fn an_agy_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let mut fixture = grilling().await;
+    fixture.under_agy(true).await;
+
+    let root = fixture.agy_root_inside();
+    let cli = root.join("antigravity-cli");
+    let account = fixture.agy_dir();
+    let settings = cli.join("settings.json");
+    let brain = cli.join("brain").join("the-conversation");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        directory("root", &root),
+        file("login", cli.join(AGY_LOGIN)),
+        directory("conversations", cli.join("conversations")),
+        directory("brain", cli.join("brain")),
+        file("summaries", cli.join("conversation_summaries.db")),
+        directory("skills", root.join("config").join("skills")),
+        directory("the-accounts-own", &account),
+        directory("the-accounts-skills", account.join("config").join("skills")),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}{}\
+         Report 'file-store' $env:SSH_CONNECTION\r\n\
+         [void][System.IO.Directory]::CreateDirectory('{brain}')\r\n\
+         [System.IO.File]::WriteAllText('{brain}\\transcript_full.jsonl', '{{}}')\r\n",
+        classifying(&asked),
+        reading("settings", &quoted(&settings)),
+        brain = quoted(&brain),
+    ));
+
+    for (name, word) in [
+        ("root", "write"),
+        ("login", "write"),
+        ("conversations", "write"),
+        ("brain", "write"),
+        ("summaries", "write"),
+        ("skills", "absent"),
+        ("the-accounts-own", "refused"),
+        ("the-accounts-skills", "refused"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    assert!(
+        !said(&classified, "file-store").is_empty(),
+        "agy is told what sends it to its file store, and the probe said: {classified:?}"
+    );
+
+    let settings = said(&classified, "settings");
+    assert!(
+        settings.contains("the-proxy") && !settings.contains("the humans"),
+        "the written settings carry the provider and nothing else: {settings}"
+    );
+    assert!(
+        account
+            .join("antigravity-cli")
+            .join("brain")
+            .join("the-conversation")
+            .join("transcript_full.jsonl")
+            .is_file(),
+        "and a transcript a session writes is on the account"
+    );
+}
+
+/// An agy login written inside, in place as agy writes its file store, is the
+/// account's login through the hard link and its entry.
+#[tokio::test]
+async fn an_agy_login_written_inside_is_the_accounts() {
+    let mut fixture = grilling().await;
+    fixture.under_agy(true).await;
+
+    let login = fixture
+        .agy_root_inside()
+        .join("antigravity-cli")
+        .join(AGY_LOGIN);
+    let quoted = login.display().to_string().replace('\'', "''");
+
+    let classified = fixture.probe_running(&format!(
+        "{CLASSIFYING}\r\n\
+         Report 'read' ([System.IO.File]::ReadAllText('{quoted}'))\r\n\
+         [System.IO.File]::WriteAllText('{quoted}', '{{\"refreshed\": true}}')\r\n\
+         Report 'written' 'yes'\r\n"
+    ));
+
+    assert_eq!(said(&classified, "read"), THE_LOGIN);
+    assert_eq!(said(&classified, "written"), "yes");
+    assert_eq!(
+        std::fs::read_to_string(fixture.agy_dir().join("antigravity-cli").join(AGY_LOGIN)).unwrap(),
         "{\"refreshed\": true}",
         "the login written inside is the account's"
     );

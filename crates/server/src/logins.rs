@@ -49,10 +49,20 @@
 //! on. A login from the card clears it; the press is then the human's to make
 //! again, there being no run to resume.
 //!
-//! Claude only, and only a Profile bound on this device: one not bound here runs
-//! from a copy of its account fetched before every launch, and a login written
-//! into the copy is one the next fetch writes over — its login is made on a
-//! device it is bound on.
+//! **And the Antigravity CLI the same way**, with three differences read off
+//! agy 1.4.12 — see [`AGY`]. Its login is behind any command that needs one,
+//! so what runs is `agy -p /help`, which signs in and then prints the commands
+//! without asking a model anything. It offers the address only to a standard
+//! input that is a terminal, so that is the one stream it is given a terminal
+//! for — and on Windows, where it reads the code off its console whatever its
+//! standard input is, the whole of it runs on one (see `Harness::on_a_console`).
+//! And it waits a minute for the code, then gives up; while a device is still
+//! looking, a fresh address takes the place of the one that ran out.
+//!
+//! Claude and the Antigravity CLI only, and only a Profile bound on this device:
+//! one not bound here runs from a copy of its account fetched before every
+//! launch, and a login written into the copy is one the next fetch writes over —
+//! its login is made on a device it is bound on.
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -79,16 +89,110 @@ use crate::store;
 /// holding the Profile's login for the rest of the day.
 pub(crate) const LIMIT: Duration = Duration::from_secs(10 * 60);
 
-/// What the harness prints in front of the address to log in at.
-///
-/// Read off Claude Code 2.1.283, which prints it on a line of its own —
-/// `If the browser didn't open, visit: <url>` — and then the prompt for the
-/// code, `Paste code here if prompted > `, with no line ending after it.
-const VISIT: &str = "visit: ";
+/// How one harness's login goes: what runs it, what it prints, and what it
+/// says back — the whole of what tells one harness's login from another's.
+struct Speaking {
+    /// What the modal and its refusals call the harness.
+    name: &'static str,
 
-/// What the harness says on standard error to a code with no `#` in it, before
-/// it goes on waiting for another — see the module note.
-const CUT_SHORT: &str = "Invalid code";
+    /// The words of the harness's line a login runs.
+    logging_in: &'static [&'static str],
+
+    /// And the words that ask whether the account is logged in.
+    status: &'static [&'static str],
+
+    /// What a failing answer to those says where the account is signed out —
+    /// or `None` where the exit status is the whole answer. Where it is said,
+    /// a failure that does not say it is no answer, rather than a sign-out.
+    signed_out: Option<&'static str>,
+
+    /// What the harness prints in front of the address on the line that
+    /// carries it — or `None` where the address is a line of its own.
+    visit: Option<&'static str>,
+
+    /// What the harness says to a code cut short, before it goes on waiting
+    /// on the same address — or `None` where it says nothing of the kind.
+    cut_short: Option<&'static str>,
+
+    /// What it says as it gives up waiting for a code — or `None` where it
+    /// waits for as long as it is left.
+    expired: Option<&'static str>,
+
+    /// Whether the code is read off a terminal rather than a pipe.
+    typed_on_a_terminal: bool,
+}
+
+/// Claude Code 2.1.283, checked against the real harness with a throwaway HOME.
+///
+/// It prints `If the browser didn't open, visit: <url>` on a line of its own,
+/// and then the prompt for the code, `Paste code here if prompted > `, with no
+/// line ending after it. A code with no `#` in it gets `Invalid code` on
+/// standard error, and the harness waits on — see the module note. `auth
+/// status` answers by its exit status: `0` logged in, `1` not. An API key, in
+/// the environment or from an `apiKeyHelper`, reads as logged in.
+const CLAUDE: Speaking = Speaking {
+    name: "Claude",
+    logging_in: &["auth", "login", "--claudeai"],
+    status: &["auth", "status"],
+    signed_out: None,
+    visit: Some("visit: "),
+    cut_short: Some("Invalid code"),
+    expired: None,
+    typed_on_a_terminal: false,
+};
+
+/// The Antigravity CLI 1.4.12, checked against the real binary with a
+/// throwaway HOME and its token exchange answered by a stand-in for Google.
+///
+/// **`-p /help` is the login.** agy has no command that only signs in: every
+/// one that needs the account signs it in first. `/help` in print mode is
+/// answered by agy itself, so what follows the sign-in is a list of commands
+/// and no model is asked anything.
+///
+/// **On standard error, and only to a terminal.** agy prints
+/// `Authentication required. Please visit the URL to log in:`, the address
+/// indented on the next line, then `Waiting for authentication (timeout
+/// 60s)...` and `Or, paste the authorization code here and press Enter:` — all
+/// on standard error — and reads the code off standard input. Only where that
+/// is a terminal, though: given a pipe it says `Error: authentication
+/// required. Run 'agy' to log in, then retry.` and exits `1`.
+///
+/// **A wrong code and a cut one are the same to it**: Google refuses either,
+/// and agy says `Error: authentication failed: token exchange failed: …` and
+/// exits `1`. An empty line it ignores, which the modal never sends. And after
+/// a minute with no code it says `Error: authentication timed out.` and exits
+/// `1`.
+///
+/// **`models` asks the account**, and signed out says `Error: Please sign in
+/// to view available models. Launch the CLI without arguments to sign in.` and
+/// exits `1`. It fails other ways too — no network, Google not answering — so
+/// only that sentence reads as signed out.
+const AGY: Speaking = Speaking {
+    name: "Antigravity",
+    logging_in: &["-p", "/help"],
+    status: &["models"],
+    signed_out: Some("Please sign in"),
+    visit: None,
+    cut_short: None,
+    expired: Some("Error: authentication timed out."),
+    typed_on_a_terminal: true,
+};
+
+/// How a login of `agent_type` goes, or `None` for a harness whose login
+/// Verkstead does not run.
+fn speaking(agent_type: store::AgentType) -> Option<&'static Speaking> {
+    match agent_type {
+        store::AgentType::Claude => Some(&CLAUDE),
+        store::AgentType::Agy => Some(&AGY),
+        store::AgentType::Codex | store::AgentType::Grok | store::AgentType::OpenCode => None,
+    }
+}
+
+/// Whether Verkstead runs the login of a Profile of `agent_type` — see
+/// [`crate::ui`], which refuses to open one for any other.
+pub(crate) fn logs_in(agent_type: store::AgentType) -> bool {
+    speaking(agent_type).is_some()
+}
 
 /// What the modal says when the harness asked again for a code cut short.
 const CUT_SHORT_SAID: &str =
@@ -96,16 +200,18 @@ const CUT_SHORT_SAID: &str =
 
 /// What the modal says when the harness refused a code and a fresh login has
 /// taken its place.
-const REFUSED_SAID: &str = "Claude didn't accept that code. Open the new address below, \
-                            log in again, and paste the code it gives you.";
+fn refused_said(speaking: &Speaking) -> String {
+    format!(
+        "{} didn't accept that code. Open the new address below, log in again, and paste \
+         the code it gives you.",
+        speaking.name
+    )
+}
 
-/// The words of the harness's line a login runs.
-const LOGGING_IN: &[&str] = &["auth", "login", "--claudeai"];
-
-/// And the words that ask whether the account is logged in, which Claude Code
-/// 2.1.283 answers by its exit status: `0` logged in, `1` not. An API key, in
-/// the environment or from an `apiKeyHelper`, reads as logged in.
-const STATUS: &[&str] = &["auth", "status"];
+/// And when the harness gave up waiting for a code and a fresh login has taken
+/// its place.
+const EXPIRED_SAID: &str = "That address ran out. Open the new one below, log in, and paste \
+                            the code within a minute.";
 
 /// How long that question is waited on before a press goes ahead without the
 /// answer. It reads files and answers at once; one that hangs is a harness
@@ -210,6 +316,12 @@ impl Logins {
         profile: store::Profile,
         viewer: String,
     ) -> LoginState {
+        let Some(speaking) = speaking(profile.agent_type()) else {
+            return LoginState::Failed {
+                reason: "Verkstead doesn't run this harness's login.".to_owned(),
+            };
+        };
+
         let mut held = self
             .held
             .lock()
@@ -249,6 +361,7 @@ impl Logins {
                 state,
                 agents,
                 profile,
+                speaking,
                 run,
             },
             coded,
@@ -432,28 +545,36 @@ impl Logins {
     ) {
         let mut refused = None;
 
+        // One limit for every harness of the login rather than one apiece, so
+        // that a modal nobody closed is not kept going for ever by a harness
+        // that gives up on its own, minute after minute.
+        let deadline = tokio::time::Instant::now() + run.agents.login_limit();
+
         let ending = loop {
             match self
-                .logging_in(&run, &mut coded, &mut stopped, refused.take())
+                .logging_in(&run, &mut coded, &mut stopped, refused.take(), deadline)
                 .await
             {
                 // A fresh harness, now the one that refused the code has gone.
                 // The modal reads as checking until it prints its address.
-                Ending::Refused => refused = Some(REFUSED_SAID.to_owned()),
+                Ending::Refused => refused = Some(refused_said(run.speaking)),
+                // Or now the one whose address ran out has.
+                Ending::Expired => refused = Some(EXPIRED_SAID.to_owned()),
                 ending => break ending,
             }
         };
 
         let state = match ending {
-            Ending::Stopped | Ending::Refused => None,
+            Ending::Stopped | Ending::Refused | Ending::Expired => None,
             Ending::Failed(reason) => Some(LoginState::Failed { reason }),
             Ending::Exited => Some(
                 match status(run.agents.clone(), run.profile.clone(), LANDED_LIMIT).await {
                     Some(true) => LoginState::LoggedIn,
                     _ => LoginState::Failed {
-                        reason: "Claude finished, but the account still reads as logged out. \
-                                 Try again."
-                            .to_owned(),
+                        reason: format!(
+                            "{} finished, but the account still reads as logged out. Try again.",
+                            run.speaking.name
+                        ),
                     },
                 },
             ),
@@ -495,12 +616,14 @@ impl Logins {
         coded: &mut mpsc::UnboundedReceiver<String>,
         stopped: &mut oneshot::Receiver<()>,
         refused: Option<String>,
+        deadline: tokio::time::Instant,
     ) -> Ending {
+        let speaking = run.speaking;
         let agents = run.agents.clone();
         let profile = run.profile.clone();
 
         let built = tokio::task::spawn_blocking(move || {
-            let (sandbox, argv) = agents.logging_in(&profile, LOGGING_IN)?;
+            let (sandbox, argv) = agents.logging_in(&profile, speaking.logging_in)?;
             let (mut rendering, closing) = sandbox.command(&argv).ok()?;
             rendering.set("BROWSER", NO_BROWSER);
 
@@ -517,7 +640,7 @@ impl Logins {
             );
         };
 
-        let mut child = match Harness::start(rendering).await {
+        let mut child = match Harness::start(rendering, speaking.typed_on_a_terminal).await {
             Ok(child) => child,
             Err(error) => {
                 tracing::error!(
@@ -526,24 +649,38 @@ impl Logins {
                     "a Profile's login could not be started"
                 );
                 closed(closing).await;
-                return Ending::Failed(format!("Claude couldn't be started: {error}."));
+                return Ending::Failed(format!("{} couldn't be started: {error}.", speaking.name));
             }
         };
 
         let mut stdin = child.typing.take();
 
-        // The address, off the harness's output as it prints it. Read on a
-        // task of its own, because what is printed after it is a prompt with
-        // no line ending, which a read waiting for one would wait on for ever.
-        if let Some(stdout) = child.printed.take() {
+        // What it says on standard error, kept for the reason a failure gives.
+        let said = Arc::new(Mutex::new(Vec::<String>::new()));
+
+        // The address, off whichever of its two outputs the harness prints it
+        // on — Claude's standard output, agy's standard error — and the rest
+        // of what it says read for a code it asks for again and an address
+        // that has run out. Each read on a task of its own, because what is
+        // printed after the address is a prompt with no line ending, which a
+        // read waiting for one would wait on for ever.
+        let reading: Vec<_> = [
+            (child.printed.take(), false),
+            (child.complained.take(), true),
+        ]
+        .into_iter()
+        .filter_map(|(output, kept)| Some((output?, kept)))
+        .map(|(output, kept)| {
+            let said = said.clone();
             let logins = self.clone();
             let shown = run.again();
+            let refused = refused.clone();
 
             tokio::spawn(async move {
-                let mut lines = BufReader::new(stdout).lines();
+                let mut lines = BufReader::new(output).lines();
 
                 while let Ok(Some(line)) = lines.next_line().await {
-                    if let Some(url) = address_in(&line) {
+                    if let Some(url) = address_in(&line, speaking) {
                         logins.moved(
                             &shown,
                             LoginState::Waiting {
@@ -552,56 +689,57 @@ impl Logins {
                             },
                         );
                     }
-                }
-            });
-        }
 
-        // And what it says on standard error, kept for the reason a failure
-        // gives — and watched for a code it is asking for again.
-        let said = Arc::new(Mutex::new(Vec::<String>::new()));
-
-        if let Some(stderr) = child.complained.take() {
-            let said = said.clone();
-            let logins = self.clone();
-            let shown = run.again();
-
-            tokio::spawn(async move {
-                let mut lines = BufReader::new(stderr).lines();
-
-                while let Ok(Some(line)) = lines.next_line().await {
                     let line = line.trim().to_owned();
 
-                    if line.starts_with(CUT_SHORT) {
+                    if speaking.cut_short.is_some_and(|cut| line.starts_with(cut)) {
                         logins.cut_short(&shown);
                     }
 
-                    if !line.is_empty() {
+                    if kept && !line.is_empty() {
                         said.lock().expect("not poisoned").push(line);
                     }
                 }
-            });
-        }
+            })
+        })
+        .collect();
 
-        let limit = tokio::time::sleep(run.agents.login_limit());
+        let limit = tokio::time::sleep_until(deadline);
         tokio::pin!(limit);
 
         let ending = loop {
             tokio::select! {
-                exited = child.process.wait() => break match exited {
-                    Ok(status) if status.success() => Ending::Exited,
-                    // Exiting badly with a code in hand is the harness
-                    // refusing it — see the module note.
-                    Ok(status) if self.checking(run) => {
-                        tracing::info!(
-                            profile_id = run.profile.id,
-                            said = %failure(status, &said),
-                            "a login code was refused; starting a fresh login"
-                        );
-                        Ending::Refused
+                exited = child.process.wait() => {
+                    // What it said on its way out read to the end before it is
+                    // judged on, which is what says an address ran out. Not
+                    // waited on for ever: a process of its own can still be
+                    // holding the pipe.
+                    for read in reading {
+                        let _ = tokio::time::timeout(Duration::from_secs(2), read).await;
                     }
-                    Ok(status) => Ending::Failed(failure(status, &said)),
-                    Err(error) => Ending::Failed(format!("Claude couldn't be waited on: {error}.")),
-                },
+
+                    break match exited {
+                        Ok(status) if status.success() => Ending::Exited,
+                        // Exiting badly with a code in hand is the harness
+                        // refusing it — see the module note.
+                        Ok(status) if self.checking(run) => {
+                            tracing::info!(
+                                profile_id = run.profile.id,
+                                said = %failure(speaking, status, &said),
+                                "a login code was refused; starting a fresh login"
+                            );
+                            Ending::Refused
+                        }
+                        // And without one, having said it was done waiting, is
+                        // the address running out.
+                        Ok(_) if expired(speaking, &said) => Ending::Expired,
+                        Ok(status) => Ending::Failed(failure(speaking, status, &said)),
+                        Err(error) => Ending::Failed(format!(
+                            "{} couldn't be waited on: {error}.",
+                            speaking.name
+                        )),
+                    };
+                }
 
                 Some(code) = coded.recv() => {
                     if let Some(input) = stdin.as_mut() {
@@ -646,6 +784,7 @@ struct Run {
     state: AppState,
     agents: Arc<Agents>,
     profile: store::Profile,
+    speaking: &'static Speaking,
     run: u64,
 }
 
@@ -656,6 +795,7 @@ impl Run {
             state: self.state.clone(),
             agents: self.agents.clone(),
             profile: self.profile.clone(),
+            speaking: self.speaking,
             run: self.run,
         }
     }
@@ -670,6 +810,9 @@ enum Ending {
 
     /// It refused the code it was handed and exited, and a fresh one is due.
     Refused,
+
+    /// It gave up waiting for a code and exited, and a fresh one is due.
+    Expired,
 
     /// The last device closed the modal, and nobody is left to tell.
     Stopped,
@@ -710,19 +853,32 @@ impl Harness {
     /// code. On Windows the logon blocks, and what ends the harness with the
     /// server is a Job rather than the thread — see
     /// [`crate::sandbox::outliving`].
-    async fn start(rendering: Rendering) -> io::Result<Harness> {
+    ///
+    /// **With a terminal for its standard input** where `on_a_terminal` says
+    /// the harness reads its code off one, and pipes for the other two all the same: the harness
+    /// asks only whether its input is a terminal, and the address is still
+    /// read off what it prints. On Windows the whole of it is on a console
+    /// instead — see [`Harness::on_a_console`].
+    async fn start(rendering: Rendering, on_a_terminal: bool) -> io::Result<Harness> {
         match Platform::HERE {
-            Platform::Windows => tokio::task::spawn_blocking(move || Harness::started(&rendering))
-                .await
-                .map_err(io::Error::other)?,
-            Platform::Linux | Platform::MacOs => Harness::started(&rendering),
+            Platform::Windows => {
+                tokio::task::spawn_blocking(move || Harness::started(&rendering, on_a_terminal))
+                    .await
+                    .map_err(io::Error::other)?
+            }
+            Platform::Linux | Platform::MacOs => Harness::started(&rendering, on_a_terminal),
         }
     }
 
     /// `rendering` started. Blocks on Windows, where the logon is made.
-    fn started(rendering: &Rendering) -> io::Result<Harness> {
+    #[cfg_attr(windows, allow(unused_variables))]
+    fn started(rendering: &Rendering, on_a_terminal: bool) -> io::Result<Harness> {
         #[cfg(windows)]
         if let Some(logon) = rendering.account() {
+            if on_a_terminal {
+                return Harness::on_a_console(rendering);
+            }
+
             let held = crate::sandbox::starting::held_open(rendering, logon)?;
             let running = Arc::new(held.running);
 
@@ -741,18 +897,38 @@ impl Harness {
             });
         }
 
-        let mut child = tokio::process::Command::from(std::process::Command::try_from(rendering)?)
+        let mut command =
+            tokio::process::Command::from(std::process::Command::try_from(rendering)?);
+        command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()?;
+            .kill_on_drop(true);
+
+        // The end a code is written to, where it is a terminal rather than the
+        // pipe above.
+        #[cfg(unix)]
+        let keys = match on_a_terminal {
+            true => {
+                let (keys, keyboard) = keyboard()?;
+                command.stdin(Stdio::from(keyboard));
+                Some(keys)
+            }
+            false => None,
+        };
+        #[cfg(not(unix))]
+        let keys: Option<tokio::fs::File> = None;
+
+        let mut child = command.spawn()?;
 
         Ok(Harness {
-            typing: child
-                .stdin
-                .take()
-                .map(|stdin| Box::new(stdin) as Box<dyn AsyncWrite + Send + Unpin>),
+            typing: match keys {
+                Some(keys) => Some(Box::new(keys) as Box<dyn AsyncWrite + Send + Unpin>),
+                None => child
+                    .stdin
+                    .take()
+                    .map(|stdin| Box::new(stdin) as Box<dyn AsyncWrite + Send + Unpin>),
+            },
             printed: child
                 .stdout
                 .take()
@@ -762,6 +938,70 @@ impl Harness {
                 .take()
                 .map(|stderr| Box::new(stderr) as Box<dyn AsyncRead + Send + Unpin>),
             process: Process::Ordinarily(Box::new(child)),
+        })
+    }
+
+    /// `rendering` started as the account on a console, for a harness that
+    /// reads its code off one.
+    ///
+    /// **Because on Windows that is not its standard input.** agy 1.4.12 reads
+    /// the code from `CONIN$`, the console's own input, whatever its standard
+    /// input is; and the console `CreateProcessWithLogonW` gives a process is a
+    /// hidden one nothing can type into. Handed the code down a pipe, it went
+    /// on waiting until its minute was up — measured on Windows 11 build 26200.
+    /// So the login runs where a session does, on a pseudoconsole a launcher
+    /// makes as the account (see [`crate::terminal::launcher`]): the code is
+    /// typed into it, its line ending made the Enter a console reads, and what
+    /// it draws is read back as lines — see [`Drawn`]. Everything the harness
+    /// says is on the console, so all of it comes back as what it complained.
+    #[cfg(windows)]
+    fn on_a_console(rendering: &Rendering) -> io::Result<Harness> {
+        use tokio::io::AsyncReadExt;
+
+        let mut terminal = crate::terminal::Terminal::open()?;
+        terminal.resize(DRAWN_WIDE, crate::terminal::ROWS)?;
+
+        let child = terminal.spawn(rendering)?;
+        let terminal = Arc::new(terminal);
+
+        let (typing, mut typed) = tokio::io::duplex(1024);
+        let (mut drawing, drawn) = tokio::io::duplex(64 * 1024);
+
+        tokio::spawn({
+            let terminal = terminal.clone();
+
+            async move {
+                let mut buffer = [0u8; 1024];
+
+                while let Ok(read @ 1..) = typed.read(&mut buffer).await {
+                    let keys: Vec<u8> = buffer[..read]
+                        .iter()
+                        .map(|&key| if key == b'\n' { b'\r' } else { key })
+                        .collect();
+
+                    if terminal.write(&keys).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+
+        // Read to the end whether or not anybody is still reading what it
+        // comes to: a console nobody reads is one whose harness stops.
+        tokio::spawn(async move {
+            let mut buffer = vec![0u8; 16 * 1024];
+            let mut seen = Drawn::default();
+
+            while let Ok(read @ 1..) = terminal.read(&mut buffer).await {
+                let _ = drawing.write_all(&seen.plain(&buffer[..read])).await;
+            }
+        });
+
+        Ok(Harness {
+            typing: Some(Box::new(typing)),
+            printed: None,
+            complained: Some(Box::new(drawn)),
+            process: Process::OnAConsole(child),
         })
     }
 }
@@ -779,6 +1019,11 @@ enum Process {
         running: Arc<crate::sandbox::starting::Running>,
         exited: oneshot::Receiver<io::Result<ExitStatus>>,
     },
+
+    /// Or as the account on a console — see [`Harness::on_a_console`]. Its Job
+    /// ends it as it is dropped.
+    #[cfg(windows)]
+    OnAConsole(crate::terminal::Child),
 }
 
 impl Process {
@@ -792,6 +1037,9 @@ impl Process {
             Process::AsTheAccount { exited, .. } => exited
                 .await
                 .unwrap_or_else(|_| Err(io::Error::other("nothing was left waiting for it"))),
+
+            #[cfg(windows)]
+            Process::OnAConsole(child) => child.wait().await,
         }
     }
 
@@ -805,6 +1053,11 @@ impl Process {
             #[cfg(windows)]
             Process::AsTheAccount { running, .. } => {
                 let _ = running.kill();
+            }
+
+            #[cfg(windows)]
+            Process::OnAConsole(child) => {
+                let _ = child.start_kill();
             }
         }
     }
@@ -820,16 +1073,158 @@ impl Drop for Process {
     }
 }
 
+/// A terminal for a harness to read its code off: the end a code is written
+/// to, and the end that is its standard input.
+///
+/// **Nothing typed is echoed**, there being nobody to read it back: an echo
+/// left unread is one that fills the terminal's buffer, and a terminal whose
+/// buffer is full takes no more typing. Both ends close on exec, so nothing
+/// else the server starts holds either, and the one that is handed to the
+/// harness is its standard input by the time it runs.
+#[cfg(unix)]
+fn keyboard() -> io::Result<(tokio::fs::File, std::os::fd::OwnedFd)> {
+    use rustix::fs::{Mode, OFlags};
+    use rustix::pty::OpenptFlags;
+    use rustix::termios::{LocalModes, OptionalActions};
+
+    let held = rustix::pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)?;
+    rustix::io::fcntl_setfd(&held, rustix::io::FdFlags::CLOEXEC)?;
+    rustix::pty::grantpt(&held)?;
+    rustix::pty::unlockpt(&held)?;
+
+    let name = rustix::pty::ptsname(&held, Vec::new())?;
+    let keyboard = rustix::fs::open(
+        name.as_c_str(),
+        OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+
+    let mut modes = rustix::termios::tcgetattr(&keyboard)?;
+    modes.local_modes.remove(LocalModes::ECHO);
+    rustix::termios::tcsetattr(&keyboard, OptionalActions::Now, &modes)?;
+
+    Ok((
+        tokio::fs::File::from_std(std::fs::File::from(held)),
+        keyboard,
+    ))
+}
+
+/// What a pseudoconsole draws, made back into the plain lines a pipe would have
+/// carried — see [`Harness::on_a_console`].
+///
+/// **A console draws a screen rather than printing lines**: colours, a cursor
+/// that is hidden and shown, a title, and a cursor moved to where the next line
+/// goes as often as a line ending. So every sequence is dropped, a move of the
+/// cursor to a place is read as a line ending, a move of it forward as a space,
+/// and a carriage return as nothing. Kept from one read to the next, because a
+/// sequence can be cut between two of them.
+#[derive(Default)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct Drawn {
+    within: Within,
+}
+
+/// Where in a sequence the last read left off.
+#[derive(Default, Clone, Copy, PartialEq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+enum Within {
+    /// Text.
+    #[default]
+    Nothing,
+    /// An escape, and nothing yet after it.
+    Escape,
+    /// An escape and one byte more to come — a character set chosen.
+    Chosen,
+    /// A control sequence, up to its final byte.
+    Control,
+    /// An operating system command, up to its bell or its terminator.
+    Command,
+    /// An escape inside one of those, which is the first half of its
+    /// terminator.
+    Ending,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl Drawn {
+    /// `bytes` as plain text. Bytes rather than a string, because a character
+    /// can be cut between two reads as well.
+    fn plain(&mut self, bytes: &[u8]) -> Vec<u8> {
+        const ESCAPE: u8 = 0x1b;
+        const BELL: u8 = 0x07;
+
+        let mut plain = Vec::with_capacity(bytes.len());
+
+        for &byte in bytes {
+            self.within = match (self.within, byte) {
+                (Within::Nothing, ESCAPE) => Within::Escape,
+                (Within::Nothing, b'\n' | b'\t') => {
+                    plain.push(byte);
+                    Within::Nothing
+                }
+                (Within::Nothing, byte) if byte < 0x20 || byte == 0x7f => Within::Nothing,
+                (Within::Nothing, byte) => {
+                    plain.push(byte);
+                    Within::Nothing
+                }
+
+                (Within::Escape, b'[') => Within::Control,
+                (Within::Escape, b']') => Within::Command,
+                (Within::Escape, b'(' | b')' | b'*' | b'+') => Within::Chosen,
+                (Within::Escape | Within::Chosen, _) => Within::Nothing,
+
+                // The final byte, which says what the sequence was.
+                (Within::Control, 0x40..=0x7e) => {
+                    match byte {
+                        b'H' | b'f' => plain.push(b'\n'),
+                        b'C' => plain.push(b' '),
+                        _ => {}
+                    }
+                    Within::Nothing
+                }
+                (Within::Control, _) => Within::Control,
+
+                (Within::Command, BELL) => Within::Nothing,
+                (Within::Command, ESCAPE) => Within::Ending,
+                (Within::Command, _) => Within::Command,
+                (Within::Ending, _) => Within::Nothing,
+            };
+        }
+
+        plain
+    }
+}
+
+/// How wide the console a login is drawn on is: wider than the address agy
+/// 1.4.12 prints, 704 characters, so that it is drawn as one line of it rather
+/// than cut where a window of [`crate::terminal::COLUMNS`] would wrap it.
+#[cfg(windows)]
+const DRAWN_WIDE: u16 = 2048;
+
 /// The address in a line the harness printed, where it is the line that
-/// carries one — see [`VISIT`].
-fn address_in(line: &str) -> Option<String> {
-    let (_, url) = line.split_once(VISIT)?;
-    let url = url.trim();
+/// carries one — see [`Speaking::visit`].
+fn address_in(line: &str, speaking: &Speaking) -> Option<String> {
+    let url = match speaking.visit {
+        Some(visit) => line.split_once(visit)?.1,
+        None => line,
+    }
+    .trim();
 
     url.starts_with("https://").then(|| url.to_owned())
 }
 
-/// Ask each of `profiles` that is a Claude account bound here whether it is
+/// Whether the harness said, on its way out, that it had given up waiting for
+/// a code — see [`Speaking::expired`].
+fn expired(speaking: &Speaking, said: &Mutex<Vec<String>>) -> bool {
+    speaking.expired.is_some_and(|expired| {
+        said.lock()
+            .expect("not poisoned")
+            .iter()
+            .any(|line| line.starts_with(expired))
+    })
+}
+
+/// Ask each of `profiles` that is an account bound here whose login Verkstead
+/// runs whether it is
 /// logged in, before a press starts a session under it, and remember the
 /// answer for its row — see the module note.
 ///
@@ -864,7 +1259,7 @@ pub(crate) async fn asked<'a>(
 
     for profile in profiles {
         if profile.unbound.is_some()
-            || profile.agent_type() != store::AgentType::Claude
+            || !logs_in(profile.agent_type())
             || !seen.insert(profile.id.clone())
         {
             continue;
@@ -875,7 +1270,7 @@ pub(crate) async fn asked<'a>(
         // that failure would read as `auth status` saying no. What is wrong
         // there is the machine, and the dependencies step is what says so.
         let machine = state.onboarding.machine().clone();
-        let program = agents.harness(store::AgentType::Claude);
+        let program = agents.harness(profile.agent_type());
 
         if !tokio::task::spawn_blocking(move || machine.runs(&program))
             .await
@@ -895,8 +1290,10 @@ pub(crate) async fn asked<'a>(
 /// given it, waited on for `limit`. `None` where nothing could answer: see
 /// [`asked`].
 async fn status(agents: Arc<Agents>, profile: store::Profile, limit: Duration) -> Option<bool> {
+    let speaking = speaking(profile.agent_type())?;
+
     let built = tokio::task::spawn_blocking(move || {
-        let (sandbox, argv) = agents.logging_in(&profile, STATUS)?;
+        let (sandbox, argv) = agents.logging_in(&profile, speaking.status)?;
         sandbox.command(&argv).ok()
     })
     .await
@@ -905,26 +1302,47 @@ async fn status(agents: Arc<Agents>, profile: store::Profile, limit: Duration) -
 
     let (rendering, closing) = built?;
 
-    let status = match Harness::start(rendering).await {
+    // Asked over pipes whatever the login reads its code off: nothing is typed.
+    let status = match Harness::start(rendering, false).await {
         Ok(mut asking) => {
-            // Nothing to type, and what it says is read and thrown away
-            // rather than left unread: a harness writing into a pipe nobody
-            // reads is one that stops when the pipe is full.
+            // Nothing to type, and what it says is read rather than left
+            // unread: a harness writing into a pipe nobody reads is one that
+            // stops when the pipe is full. Kept, where what it says is half
+            // the answer.
             drop(asking.typing.take());
 
-            for mut said in [asking.printed.take(), asking.complained.take()]
+            let reading: Vec<_> = [asking.printed.take(), asking.complained.take()]
                 .into_iter()
                 .flatten()
-            {
-                tokio::spawn(async move {
-                    let _ = tokio::io::copy(&mut said, &mut tokio::io::sink()).await;
-                });
-            }
+                .map(|mut said| {
+                    tokio::spawn(async move {
+                        let mut kept = Vec::new();
+                        let _ = tokio::io::copy(&mut said, &mut kept).await;
+                        String::from_utf8_lossy(&kept).into_owned()
+                    })
+                })
+                .collect();
 
             // A harness that did not answer in time is killed as it is
             // dropped — see [`Harness`].
             match tokio::time::timeout(limit, asking.process.wait()).await {
-                Ok(Ok(status)) => Some(status.success()),
+                Ok(Ok(status)) if status.success() => Some(true),
+                Ok(Ok(_)) => match speaking.signed_out {
+                    None => Some(false),
+                    Some(signed_out) => {
+                        let mut said = String::new();
+
+                        for read in reading {
+                            if let Ok(Ok(read)) =
+                                tokio::time::timeout(Duration::from_secs(2), read).await
+                            {
+                                said.push_str(&read);
+                            }
+                        }
+
+                        said.contains(signed_out).then_some(false)
+                    }
+                },
                 Ok(Err(_)) | Err(_) => None,
             }
         }
@@ -944,15 +1362,20 @@ async fn closed(closing: crate::sandbox::Closing) {
 
 /// The reason a harness that exited badly gives: the last thing it said on
 /// standard error, or its exit status where it said nothing.
-fn failure(status: std::process::ExitStatus, said: &Mutex<Vec<String>>) -> String {
+fn failure(
+    speaking: &Speaking,
+    status: std::process::ExitStatus,
+    said: &Mutex<Vec<String>>,
+) -> String {
     let said = said.lock().expect("not poisoned");
 
     match said.last() {
         Some(line) => format!(
-            "Claude stopped without logging in: {}",
+            "{} stopped without logging in: {}",
+            speaking.name,
             crate::stopping::ended(line)
         ),
-        None => format!("Claude stopped without logging in ({status})."),
+        None => format!("{} stopped without logging in ({status}).", speaking.name),
     }
 }
 
@@ -964,7 +1387,8 @@ mod tests {
     fn the_address_is_read_off_the_line_that_carries_it() {
         assert_eq!(
             address_in(
-                "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true"
+                "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true",
+                &CLAUDE
             ),
             Some("https://claude.com/cai/oauth/authorize?code=true".to_owned())
         );
@@ -972,8 +1396,98 @@ mod tests {
 
     #[test]
     fn a_line_without_an_address_carries_none() {
-        assert_eq!(address_in("Opening browser to sign in…"), None);
-        assert_eq!(address_in("Paste code here if prompted > "), None);
-        assert_eq!(address_in("visit: somewhere"), None);
+        assert_eq!(address_in("Opening browser to sign in…", &CLAUDE), None);
+        assert_eq!(address_in("Paste code here if prompted > ", &CLAUDE), None);
+        assert_eq!(address_in("visit: somewhere", &CLAUDE), None);
+    }
+
+    /// agy 1.4.12 prints the address indented on a line of its own, under the
+    /// line that asks for it.
+    #[test]
+    fn agy_prints_its_address_on_a_line_of_its_own() {
+        assert_eq!(
+            address_in(
+                "  https://accounts.google.com/o/oauth2/auth?access_type=offline&state=x",
+                &AGY
+            ),
+            Some(
+                "https://accounts.google.com/o/oauth2/auth?access_type=offline&state=x".to_owned()
+            )
+        );
+        assert_eq!(
+            address_in(
+                "Authentication required. Please visit the URL to log in:",
+                &AGY
+            ),
+            None
+        );
+        assert_eq!(
+            address_in(
+                "Or, paste the authorization code here and press Enter:",
+                &AGY
+            ),
+            None
+        );
+    }
+
+    /// What a pseudoconsole draws, read back as the lines a pipe would have
+    /// carried: its colours and its cursor gone, a move of the cursor read as
+    /// a line ending, and a sequence cut between two reads still taken whole.
+    #[test]
+    fn what_a_console_draws_is_read_as_lines() {
+        let mut drawn = Drawn::default();
+
+        let first = drawn.plain(
+            b"\x1b[?25l\x1b[2J\x1b[m\x1b[HAuthentication required. Please visit the URL to log in:\
+              \r\n\x1b[2Chttps://accounts.google.com/o/oauth2/auth?state=x\x1b[K\r\n\x1b]0;agy\x07\
+              \x1b[4;1HWaiting for authentication (timeout 60s)...\x1b",
+        );
+        let second = drawn.plain(b"[KOr,\x1b[1Cpaste the authorization code here:\x1b[?25h");
+
+        let lines: Vec<String> = String::from_utf8([first, second].concat())
+            .expect("what was drawn is text")
+            .lines()
+            .map(str::to_owned)
+            .collect();
+
+        assert_eq!(
+            lines,
+            [
+                "",
+                "Authentication required. Please visit the URL to log in:",
+                " https://accounts.google.com/o/oauth2/auth?state=x",
+                "",
+                "Waiting for authentication (timeout 60s)...Or, paste the authorization code here:",
+            ]
+        );
+        assert_eq!(
+            address_in(&lines[2], &AGY),
+            Some("https://accounts.google.com/o/oauth2/auth?state=x".to_owned())
+        );
+    }
+
+    #[test]
+    fn an_address_that_ran_out_is_told_from_a_login_that_failed() {
+        let said =
+            |lines: &[&str]| Mutex::new(lines.iter().map(|line| (*line).to_owned()).collect());
+
+        assert!(expired(
+            &AGY,
+            &said(&[
+                "Error: authentication timed out.",
+                "error: authentication failed or timed out"
+            ])
+        ));
+        assert!(!expired(
+            &AGY,
+            &said(&[
+                "Error: authentication failed: token exchange failed: oauth2: \"invalid_grant\"",
+                "error: authentication failed or timed out"
+            ])
+        ));
+        assert!(!expired(
+            &CLAUDE,
+            &said(&["Error: authentication timed out."])
+        ));
     }
 }

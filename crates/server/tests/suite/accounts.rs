@@ -913,13 +913,13 @@ fn no_tailscale() -> Tailscale {
 /// and exactly not what this suite is about: what runs a session here is the
 /// stub the agents handle names, and whether the box this runs on happens to
 /// have `claude` installed is nothing to do with it. So every device says it
-/// has all four. The suite that asks what a device *without* one does is
+/// has all five. The suite that asks what a device *without* one does is
 /// `tests/suite/mirroring.rs`.
 fn probing(dir: &Path) -> Machine {
     let bin = dir.join("probed");
     std::fs::create_dir_all(&bin).unwrap();
 
-    for harness in ["claude", "codex", "grok", "opencode"] {
+    for harness in ["claude", "codex", "grok", "opencode", "agy"] {
         let at = bin.join(harness);
 
         std::fs::write(&at, "#!/bin/sh\nexit 0\n").unwrap();

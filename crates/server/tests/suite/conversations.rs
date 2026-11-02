@@ -7173,6 +7173,7 @@ async fn a_signed_out_stop_offers_the_login_only_for_an_account_at_home_here() {
         vec![(
             notice,
             Some(verkstead_render::NoticeLogIn {
+                agent_type: verkstead_render::AgentType::Claude,
                 profile: here.id,
                 name: here.name.clone(),
             })

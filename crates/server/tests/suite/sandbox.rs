@@ -107,6 +107,17 @@ screen_mode = "minimal"
 /// top-level keys are the scopes a login is for.
 const GROK_LOGIN: &str = "{\"https://auth.x.ai::the-humans\": {\"key\": \"the login\"}}\n";
 
+/// What the fixture's Antigravity CLI account keeps in its `settings.json`: a
+/// provider and a Cloud project, which a session needs, and the human's own
+/// theme, approvals and trusted workspaces, which a session is not given.
+const AGY_ACCOUNT_SETTINGS: &str = r#"{
+  "modelProvider": "vertex",
+  "gcp": { "project": "the-humans-123" },
+  "theme": "solarized light",
+  "toolPermission": "ask",
+  "trustedWorkspaces": ["/src/the-humans"]
+}"#;
+
 /// What the fixture's OpenCode account keeps in its `opencode.jsonc`, comments
 /// and all: a provider of its own, which a session needs, and the human's own
 /// MCP servers, plugins and instructions, which a session is not given.
@@ -498,6 +509,11 @@ fi
         self.elsewhere.path().join("opencode-account/opencode")
     }
 
+    /// And the `~/.gemini` the Antigravity CLI Profile names.
+    fn agy_dir(&self) -> PathBuf {
+        self.elsewhere.path().join("agy-account/.gemini")
+    }
+
     /// Write `secrets.yaml` as the settings page would, so that the sandboxes
     /// built after this carry the token.
     fn configure_github_token(&self, yaml: &str) {
@@ -763,6 +779,79 @@ fi
                 name: Some("opencode".to_owned()),
                 account: store::Account::OpenCode { home },
                 models: vec!["opencode/big-pickle".to_owned()],
+                memory: true,
+            },
+        )
+        .await
+        .unwrap()
+        .expect("nothing is called that yet")
+    }
+
+    /// And one of the fifth, whose account is the `~/.gemini` agy keeps its own
+    /// directory inside.
+    ///
+    /// Holding what an agy 1.4.12 account that has been used holds: settings
+    /// naming a provider beside the human's own preferences, a conversation's
+    /// record, `brain/` and the summaries database with its two siblings, the
+    /// logs, agy's own unpacked skills and its state — and under `config/` the
+    /// human's MCP servers, hooks, skills and plugins, and a global rule — so
+    /// that what a session's root leaves out is a claim about files that are
+    /// there.
+    async fn agy_profile(&self) -> store::Profile {
+        let home = self.agy_dir();
+
+        for dir in [
+            "antigravity-cli/conversations",
+            "antigravity-cli/brain/0123-the-humans",
+            "antigravity-cli/builtin/skills",
+            "antigravity-cli/log",
+            "config/skills/the-accounts-own",
+            "config/plugins",
+        ] {
+            std::fs::create_dir_all(home.join(dir)).unwrap();
+        }
+
+        for (file, contents) in [
+            ("antigravity-cli/settings.json", AGY_ACCOUNT_SETTINGS),
+            (
+                "antigravity-cli/conversations/0123-the-humans.pb",
+                "a record\n",
+            ),
+            (
+                "antigravity-cli/brain/0123-the-humans/task.md",
+                "- [ ] theirs\n",
+            ),
+            (
+                "antigravity-cli/conversation_summaries.db",
+                "the human's summaries\n",
+            ),
+            ("antigravity-cli/conversation_summaries.db-wal", "\n"),
+            ("antigravity-cli/conversation_summaries.db-shm", "\n"),
+            (
+                "antigravity-cli/jetski_state.pbtxt",
+                "post_onboarding: {}\n",
+            ),
+            ("antigravity-cli/log/cli.log", "logged\n"),
+            (
+                "config/mcp_config.json",
+                r#"{"mcpServers":{"the-humans":{"command":"npx"}}}"#,
+            ),
+            ("config/hooks.json", "{}\n"),
+            (
+                "config/skills/the-accounts-own/SKILL.md",
+                "# what agy found there\n",
+            ),
+            ("GEMINI.md", "The human's own rule.\n"),
+        ] {
+            std::fs::write(home.join(file), contents).unwrap();
+        }
+
+        store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: Some("agy".to_owned()),
+                account: store::Account::Agy { home },
+                models: vec!["gemini-pro".to_owned()],
                 memory: true,
             },
         )
@@ -3224,6 +3313,151 @@ async fn a_shared_root_is_given_the_directory_a_switched_off_memory_adds_to_it()
     drop(terminal);
 }
 
+/// An Antigravity CLI session's `.gemini` is a root of Verkstead's own: agy's
+/// own directory, holding the settings Verkstead wrote and the account's
+/// conversations, `brain/` and summaries database joined as one, and an empty
+/// `config/` — and nothing else of the account's at all. And it is the whole
+/// of what HOME holds.
+///
+/// The human's settings, rules, servers, hooks, skills, plugins, logs and
+/// agy's own state are how *they* work, or agy's to make again, so none of it
+/// is there.
+#[tokio::test]
+async fn an_agy_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let fixture = grilling().await;
+    let profile = fixture.agy_profile().await;
+    let sandbox = fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]);
+
+    let reported = probe(
+        &sandbox,
+        r#"
+            say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+            say root "$(ls -A "$HOME/.gemini" | sort | tr '\n' ' ')"
+            say cli "$(ls -A "$HOME/.gemini/antigravity-cli" | sort | tr '\n' ' ')"
+            say config "$(ls -A "$HOME/.gemini/config" | sort | tr '\n' ' ')"
+            say settings "$(tr -d '\n' < "$HOME/.gemini/antigravity-cli/settings.json")"
+            say onboarded "$(tr -d '\n' < "$HOME/.gemini/antigravity-cli/cache/onboarding.json")"
+            file "$HOME/.gemini/antigravity-cli/conversations/0123-the-humans.pb" record
+            file "$HOME/.gemini/antigravity-cli/brain/0123-the-humans/task.md" brain
+            file "$HOME/.gemini/antigravity-cli/conversation_summaries.db" summaries
+            file "$HOME/.gemini/antigravity-cli/conversation_summaries.db-wal" log
+            say agent "${VERKSTEAD_AGENT-unset}"
+            printf 'a record\n' > "$HOME/.gemini/antigravity-cli/conversations/4567-the-session.pb"
+            printf 'summarised inside\n' >> "$HOME/.gemini/antigravity-cli/conversation_summaries.db"
+        "#,
+    );
+
+    assert_eq!(reported["home"], ".gemini ");
+    assert_eq!(
+        reported["root"], "antigravity-cli config ",
+        "agy's own two directories are the whole of the root"
+    );
+    assert_eq!(
+        reported["cli"],
+        "brain cache conversation_summaries.db conversation_summaries.db-shm \
+         conversation_summaries.db-wal conversations settings.json ",
+        "the written settings, the first run marked over and the memory store, \
+         and nothing else of agy's own"
+    );
+    assert_eq!(
+        reported["config"], "",
+        "and none of the human's customisation"
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&reported["settings"]).unwrap(),
+        serde_json::json!({
+            "modelProvider": "vertex",
+            "gcp": { "project": "the-humans-123" },
+        }),
+        "the provider the account names, and none of how the human works"
+    );
+    assert_eq!(
+        reported["onboarded"], r#"{"onboardingComplete":true}"#,
+        "and the first run marked over, so a freshly signed-in account's session \
+         is not parked on its colour picker and terms"
+    );
+
+    for write in ["record", "brain", "summaries", "log"] {
+        assert_eq!(
+            reported[write], "write",
+            "the account's {write} is there, and a session can write it"
+        );
+    }
+
+    assert_eq!(reported["agent"], "agy");
+
+    assert!(
+        fixture
+            .agy_dir()
+            .join("antigravity-cli/conversations/4567-the-session.pb")
+            .is_file(),
+        "a conversation a session records is on the account, where it is resumed from"
+    );
+    assert_eq!(
+        std::fs::read_to_string(
+            fixture
+                .agy_dir()
+                .join("antigravity-cli/conversation_summaries.db")
+        )
+        .unwrap(),
+        "the human's summaries\nsummarised inside\n",
+        "and so is what it summarised"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.agy_dir().join("antigravity-cli/settings.json")).unwrap(),
+        AGY_ACCOUNT_SETTINGS,
+        "while the account's own settings are as they were"
+    );
+}
+
+/// With the Profile's memory switched off, an Antigravity CLI session's
+/// conversations and `brain/` are the root's own and start empty, and there is
+/// no summaries database until agy makes its own: nothing of the account's is
+/// joined, and what the session records stays out of the account.
+#[tokio::test]
+async fn an_agy_root_without_memory_has_a_store_of_its_own() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.agy_profile().await
+    };
+
+    let reported = probe(
+        &fixture.sandbox_under(&forgetting, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            say cli "$(ls -A "$HOME/.gemini/antigravity-cli" | sort | tr '\n' ' ')"
+            say conversations "$(ls -A "$HOME/.gemini/antigravity-cli/conversations" | tr '\n' ' ')"
+            say brain "$(ls -A "$HOME/.gemini/antigravity-cli/brain" | tr '\n' ' ')"
+            printf 'a record\n' > "$HOME/.gemini/antigravity-cli/conversations/4567-the-session.pb"
+        "#,
+    );
+
+    assert_eq!(
+        reported["cli"], "brain cache conversations settings.json ",
+        "the same root, with no database of the account's in it"
+    );
+    assert_eq!(
+        reported["conversations"], "",
+        "and conversations that start empty"
+    );
+    assert_eq!(reported["brain"], "", "and so does `brain/`");
+
+    assert!(
+        fixture
+            .windows_profile()
+            .join(".gemini/antigravity-cli/conversations/4567-the-session.pb")
+            .is_file(),
+        "the record is in the root on the host"
+    );
+    assert!(
+        !fixture
+            .agy_dir()
+            .join("antigravity-cli/conversations/4567-the-session.pb")
+            .exists(),
+        "and not in the account"
+    );
+}
+
 /// A Grok Build session's `.grok` is a root of Verkstead's own, holding the
 /// account's login, its `sessions/` and `memory/`, and a `config.toml`
 /// Verkstead wrote — and nothing else of the account's at all. And it is the
@@ -4675,6 +4909,38 @@ async fn a_grok_session_is_launched_with_the_servers_its_conversation_attached()
     assert!(
         written.contains("[model.the-proxy]"),
         "beside what the file is written for: {written}"
+    );
+}
+
+/// And an Antigravity CLI session, whose form is a JSON entry apiece under
+/// `mcpServers` in `config/mcp_config.json`, the URL and the headers beside
+/// it — agy 1.4.12's own schema for a Streamable HTTP server.
+#[tokio::test]
+async fn an_agy_session_is_launched_with_the_servers_its_conversation_attached() {
+    let mut fixture = grilling().await;
+    let profile = fixture.agy_profile().await;
+
+    fixture.declaring_headers(&THE_TWO_DECLARED);
+    fixture.attaching(&["docs", "tickets"]).await;
+
+    let written = config_inside(&fixture, &profile, ".gemini/config/mcp_config.json");
+    let read: serde_json::Value = serde_json::from_str(&written).expect("agy is given JSON");
+
+    assert_eq!(
+        read,
+        serde_json::json!({
+            "mcpServers": {
+                "docs": {
+                    "url": "https://mcp.example.com/docs",
+                    "headers": {
+                        "Authorization": "Bearer sk-averysecretkey",
+                        "X-Tenant": "verkstead",
+                    },
+                },
+                "tickets": { "url": "https://mcp.example.com/tickets" },
+            },
+        }),
+        "the Conversation's servers and none of the account's own: {written}"
     );
 }
 

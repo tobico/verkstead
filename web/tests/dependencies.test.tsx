@@ -336,7 +336,7 @@ afterEach(() => {
 });
 
 describe("the checkbox screen", () => {
-  /// The two rows nothing can run without start ticked; which of the four
+  /// The two rows nothing can run without start ticked; which of the five
   /// harnesses somebody wants is theirs to say, and `gh` is a choice.
   it("ticks the sandbox and git, and leaves the harnesses and gh alone", () => {
     const { container } = mount(FRESH);
@@ -344,7 +344,14 @@ describe("the checkbox screen", () => {
     expect(box(container, "Sandbox")!.checked).toBe(true);
     expect(box(container, "Git")!.checked).toBe(true);
 
-    for (const row of ["Claude", "Codex", "Grok", "OpenCode", "Gh"] as const) {
+    for (const row of [
+      "Claude",
+      "Codex",
+      "Grok",
+      "OpenCode",
+      "Agy",
+      "Gh",
+    ] as const) {
       expect(box(container, row)!.checked).toBe(false);
     }
 
@@ -402,7 +409,7 @@ describe("the checkbox screen", () => {
   });
 
   /// Three groups, each under its own label: the two rows nothing runs
-  /// without, the four harnesses as tiles, and the rest.
+  /// without, the five harnesses as tiles, and the rest.
   it("draws the rows in three groups, the harnesses as tiles", () => {
     const { container } = mount(FRESH);
     const group = (label: string) =>
@@ -414,6 +421,7 @@ describe("the checkbox screen", () => {
       "Codex",
       "Grok",
       "OpenCode",
+      "Agy",
     ]);
     expect(drawn(group("Optional"))).toEqual(["Gh"]);
 
@@ -427,6 +435,9 @@ describe("the checkbox screen", () => {
     // Each tile names the command a session launches.
     expect(row(container, "OpenCode").querySelector("code")!.textContent).toBe(
       "opencode",
+    );
+    expect(row(container, "Agy").querySelector("code")!.textContent).toBe(
+      "agy",
     );
   });
 
@@ -480,7 +491,7 @@ describe("the checkbox screen", () => {
 
     byHand(container);
 
-    expect(drawn(container)).toEqual(["Codex", "Grok", "OpenCode", "Gh"]);
+    expect(drawn(container)).toEqual(["Codex", "Grok", "OpenCode", "Agy", "Gh"]);
     expect(tabs(container).length).toBeGreaterThan(0);
     expect(container.querySelector("progress")).toBeNull();
     expect(fetching).not.toHaveBeenCalled();
@@ -1020,6 +1031,7 @@ describe("the hint screen", () => {
       "Codex",
       "Grok",
       "OpenCode",
+      "Agy",
       "Gh",
     ]);
     expect(onwards(container).disabled).toBe(true);
@@ -1030,7 +1042,7 @@ describe("the hint screen", () => {
     read(landed(landed(landed(FRESH, "Sandbox"), "Git"), "Grok"));
     expect(onwards(container).disabled).toBe(false);
     expect(container.querySelector("[data-detected]")!.textContent).toBe(
-      "3 of 7 found",
+      "3 of 8 found",
     );
   });
 
@@ -1090,7 +1102,7 @@ describe("the hint screen", () => {
 
     byHand(container);
 
-    expect(drawn(container)).toEqual(["Codex", "Grok", "OpenCode", "Gh"]);
+    expect(drawn(container)).toEqual(["Codex", "Grok", "OpenCode", "Agy", "Gh"]);
     expect(onwards(container).textContent).toBe("Next");
     expect(onwards(container).disabled).toBe(false);
   });
@@ -1105,7 +1117,7 @@ describe("the hint screen", () => {
 
     const { container } = mount(PART_WAY);
 
-    expect(drawn(container)).toEqual(["Codex", "Grok", "OpenCode", "Gh"]);
+    expect(drawn(container)).toEqual(["Codex", "Grok", "OpenCode", "Agy", "Gh"]);
     expect(onwards(container).textContent).toBe("Next");
   });
 
@@ -1151,6 +1163,7 @@ describe("the hint screen", () => {
       "Codex",
       "Grok",
       "OpenCode",
+      "Agy",
       "Gh",
     ]);
     expect(box(container, "Codex")!.checked).toBe(true);
@@ -1449,6 +1462,25 @@ describe("what each machine is told to run", () => {
   /// proxy around claude-code: either would install a different program under
   /// the name a session launches. So Grok Build is xAI's own page on all nine
   /// tabs and a command on none of them.
+  /// Nothing carries agy but Google's own installer, so that is the line on
+  /// every tab: the shell script on the Linuxes and both Macs, the PowerShell
+  /// one on Windows, and no alternative under either.
+  it("gives the Antigravity CLI Google's installer on every one of them", () => {
+    for (const distro of DISTROS) {
+      const agy = GUIDES[distro].rows.Agy;
+
+      expect(agy.command).toBe(
+        distro === "Windows"
+          ? "irm https://antigravity.google/cli/install.ps1 | iex"
+          : "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+      );
+      expect(agy.alternative).toBeUndefined();
+      expect(agy.note).toContain(
+        distro === "Windows" ? "%LOCALAPPDATA%\\agy\\bin" : "~/.local/bin",
+      );
+    }
+  });
+
   it("gives Grok Build the vendor's page on every one of them", () => {
     for (const distro of DISTROS) {
       const grok = GUIDES[distro].rows.Grok;

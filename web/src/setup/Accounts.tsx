@@ -1,7 +1,7 @@
 //! The wizard's second step: the agent accounts already on this machine,
 //! offered as Agent Profiles.
 //!
-//! **The accounts are the server's.** It looks in its own home for the four
+//! **The accounts are the server's.** It looks in its own home for the five
 //! shapes an account comes in — `crates/server/src/sandbox.rs` says what each is
 //! made of, and the wizard reads that same list — so at most one per harness is
 //! ever found, and each arrives here as the account the profile create would be
@@ -82,6 +82,7 @@ const LOGIN: Record<AgentType, string> = {
   Codex: "codex",
   Grok: "grok",
   OpenCode: "opencode auth login",
+  Agy: "agy",
 };
 
 /// Where each shape of account is kept, said as the paths a human would
@@ -94,6 +95,7 @@ const KEPT: Record<AgentType, string[]> = {
   Codex: ["~/.codex"],
   Grok: ["~/.grok"],
   OpenCode: ["~/.config/opencode", "~/.local/share/opencode"],
+  Agy: ["~/.gemini"],
 };
 
 /// Why the press is held, beside it.
@@ -497,15 +499,15 @@ function Nothing(props: { reading: OnboardingView }): JSX.Element {
 }
 
 /// The harnesses a login could be run under here: those on the machine, or all
-/// four where none is.
+/// five where none is.
 ///
 /// Read off the dependency rows rather than said again, which is what keeps
 /// this list and the step above from disagreeing about what is installed. A
-/// harness row and an agent type are written in the same four words on purpose
+/// harness row and an agent type are written in the same five words on purpose
 /// — see `crates/render/src/profiles.rs` — so one is read as the other rather
 /// than through a table nobody would maintain.
 function runnable(reading: OnboardingView): AgentType[] {
-  const harnesses: AgentType[] = ["Claude", "Codex", "Grok", "OpenCode"];
+  const harnesses: AgentType[] = ["Claude", "Codex", "Grok", "OpenCode", "Agy"];
   const there = harnesses.filter((agent) =>
     reading.dependencies.some(
       (row) => row.dependency === agent && row.state.state === "Present",

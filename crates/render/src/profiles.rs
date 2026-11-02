@@ -36,6 +36,7 @@ pub enum AgentType {
     Codex,
     Grok,
     OpenCode,
+    Agy,
 }
 
 /// The account a Profile names, in the shape the agent type running it keeps
@@ -75,6 +76,10 @@ pub enum ProfileAccount {
     /// `.config/opencode` and `.local/share/opencode`, each bound where
     /// opencode's XDG defaults look for it inside the sandbox.
     OpenCode { home: String },
+
+    /// And the Antigravity CLI's, bind-mounted over `~/.gemini`: the one-home
+    /// shape again, a `~/.gemini` holding `antigravity-cli/`.
+    Agy { home: String },
 }
 
 impl ProfileAccount {
@@ -90,6 +95,7 @@ impl ProfileAccount {
             ProfileAccount::Codex { .. } => AgentType::Codex,
             ProfileAccount::Grok { .. } => AgentType::Grok,
             ProfileAccount::OpenCode { .. } => AgentType::OpenCode,
+            ProfileAccount::Agy { .. } => AgentType::Agy,
         }
     }
 }
@@ -141,8 +147,8 @@ pub enum Broken {
     /// rather than in a second vocabulary for one fact.
     HarnessMissing,
 
-    /// The Claude account bound here has no login: `claude auth status` said
-    /// so when a press was about to start a session under it.
+    /// The account bound here has no login: `claude auth status` or `agy
+    /// models` said so when a press was about to start a session under it.
     ///
     /// Remembered from that press rather than asked at every read, the asking
     /// being a run of the harness. It goes when a login from the card lands,

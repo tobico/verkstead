@@ -300,6 +300,19 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
       placeholder: "/home/you/accounts/work/opencode",
     },
   ],
+  Agy: [
+    {
+      key: "home",
+      label: "Home directory",
+      note: (
+        <>
+          Mounted at <code>~/.gemini</code>. It holds{" "}
+          <code>antigravity-cli</code> once agy has run in it.
+        </>
+      ),
+      placeholder: "/home/you/accounts/work/.gemini",
+    },
+  ],
 };
 
 /// An account of each type with nothing typed into it: what picking that type
@@ -313,6 +326,7 @@ const BLANK_ACCOUNT: Record<AgentType, ProfileAccount> = {
   Codex: { agent_type: "Codex", home: "" },
   Grok: { agent_type: "Grok", home: "" },
   OpenCode: { agent_type: "OpenCode", home: "" },
+  Agy: { agent_type: "Agy", home: "" },
 };
 
 /// An empty form: what "add a profile" starts from.
@@ -343,7 +357,7 @@ export const BLANK_PROFILE: ProfileEdit = {
 /// So the stage that lands a backend adds it here, last, as the last thing it
 /// does — and a discriminator that arrives ahead of its stage is drawable
 /// without being offered, which is what it was always meant to be.
-const AGENT_TYPES: AgentType[] = ["Claude", "Codex", "Grok", "OpenCode"];
+const AGENT_TYPES: AgentType[] = ["Claude", "Codex", "Grok", "OpenCode", "Agy"];
 
 /// One of an account's paths, by the key the table above named it with.
 ///
@@ -531,10 +545,11 @@ function ProfileCard(props: {
           </span>
           <span class={styles.end}>
             {/* The login, which the server runs in the Profile's own sandbox —
-                see `LoggingIn.tsx`. A Claude account bound here only: one bound
-                elsewhere runs from a copy, and its login is made on a machine it
-                is bound on. A press of its own inside the card, so it stands out
-                of the card's press and the card's keys alike. */}
+                see `LoggingIn.tsx`. A Claude or an Antigravity CLI account bound
+                here only: one bound elsewhere runs from a copy, and its login is
+                made on a machine it is bound on. A press of its own inside the
+                card, so it stands out of the card's press and the card's keys
+                alike. */}
             <Show when={loggable(props.profile)}>
               <Show
                 when={!loggedIn(props.profile)}
@@ -575,6 +590,7 @@ function ProfileCard(props: {
       <Show when={loggingIn()}>
         <LoggingIn
           profile={props.profile.id}
+          agentType={props.profile.account.agent_type}
           called={summary(props.profile)}
           close={() => setLoggingIn(false)}
         />
@@ -639,10 +655,12 @@ function notLendable(profile: ProfileEntry): boolean {
   return !profile.login && profile.bound;
 }
 
-/// Whether a card offers a login: a Claude Profile bound on this device — see
-/// ADR-0022 for why no other.
+/// Whether a card offers a login: a Claude or an Antigravity CLI Profile bound
+/// on this device — see ADR-0022 for why no other.
 function loggable(profile: ProfileEntry): boolean {
-  return profile.account.agent_type === "Claude" && profile.bound;
+  const runs = profile.account.agent_type;
+
+  return (runs === "Claude" || runs === "Agy") && profile.bound;
 }
 
 /// Whether the account is logged in here: it holds a login file, and the server
@@ -784,6 +802,7 @@ export function ProfilePane(props: {
               <Show when={loggingIn()}>
                 <LoggingIn
                   profile={profile().id}
+                  agentType={profile().account.agent_type}
                   called={summary(profile())}
                   close={() => setLoggingIn(false)}
                 />

@@ -447,6 +447,9 @@ fn unpathed(account: ProfileAccount) -> ProfileAccount {
         ProfileAccount::OpenCode { .. } => ProfileAccount::OpenCode {
             home: String::new(),
         },
+        ProfileAccount::Agy { .. } => ProfileAccount::Agy {
+            home: String::new(),
+        },
     }
 }
 

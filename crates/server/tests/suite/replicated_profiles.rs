@@ -592,7 +592,7 @@ fn no_tailscale() -> Tailscale {
 
 /// Every harness a device in this suite is normally taken to have, named the
 /// way a session launches one.
-const EVERY_HARNESS: &[&str] = &["claude", "codex", "grok", "opencode"];
+const EVERY_HARNESS: &[&str] = &["claude", "codex", "grok", "opencode", "agy"];
 
 /// The machine a device here is judged on: one directory on the `PATH` a
 /// session would search, holding a program for each of `harnesses`.
@@ -739,7 +739,8 @@ fn landed(rows: &[ProfileEntry], name: &str) -> bool {
         verkstead_render::ProfileAccount::Claude { claude_dir, .. } => !claude_dir.is_empty(),
         verkstead_render::ProfileAccount::Codex { home }
         | verkstead_render::ProfileAccount::Grok { home }
-        | verkstead_render::ProfileAccount::OpenCode { home } => !home.is_empty(),
+        | verkstead_render::ProfileAccount::OpenCode { home }
+        | verkstead_render::ProfileAccount::Agy { home } => !home.is_empty(),
     })
 }
 

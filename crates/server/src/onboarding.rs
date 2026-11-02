@@ -2,7 +2,7 @@
 //! answered by, and the mode a server that cannot enters at startup.
 //!
 //! **The objective is three things** (ADR-0016): a sandbox, `git` and at least
-//! one of the four harnesses present; at least one Agent Profile; a git author.
+//! one of the five harnesses present; at least one Agent Profile; a git author.
 //! The GitHub token is not among them — GitHub may not be in use at all, while
 //! git is not optional and its author is what git asks for.
 //!
@@ -250,7 +250,7 @@ fn sysctl(platform: Platform) -> Option<String> {
 /// the program a session of that type is launched as.
 ///
 /// The names themselves are the sandbox module's — [`sandbox::PROGRAMS`], which
-/// holds these four with the `git` and `gh` a row is drawn for beside them —
+/// holds these five with the `git` and `gh` a row is drawn for beside them —
 /// because what is done with a name is that module's: every name here is
 /// followed into its install and granted where that install is the human's own.
 /// What holds the two lists together is
@@ -260,6 +260,7 @@ const HARNESSES: &[(Dependency, store::AgentType)] = &[
     (Dependency::Codex, store::AgentType::Codex),
     (Dependency::Grok, store::AgentType::Grok),
     (Dependency::OpenCode, store::AgentType::OpenCode),
+    (Dependency::Agy, store::AgentType::Agy),
 ];
 
 /// The machine the probes are made against: whose rules a name is read by,
@@ -593,7 +594,7 @@ impl Machine {
     }
 
     /// Every row of the dependencies step, in the order it is drawn: the
-    /// sandbox, `git`, the four harnesses, `gh`, and WSL on Windows.
+    /// sandbox, `git`, the five harnesses, `gh`, and WSL on Windows.
     ///
     /// Blocks: a `PATH` walk apiece, one `bwrap` run on Linux, and one
     /// `xcode-select` on a Mac whose `git` is Apple's.
@@ -629,7 +630,7 @@ impl Machine {
     ///
     /// A home holds at most one account per harness — see
     /// [`sandbox::account_in_home`], which is where the shapes are — so this is
-    /// four looks and never a search. Each carries whether its harness is
+    /// five looks and never a search. Each carries whether its harness is
     /// there, read off the row that was already probed rather than probed
     /// again: one answer, so the tick and the row cannot disagree.
     ///
@@ -642,10 +643,11 @@ impl Machine {
 
         HARNESSES
             .iter()
-            .filter_map(|(dependency, agent_type)| {
+            .map(|(dependency, agent_type)| (*agent_type, there(dependencies, *dependency)))
+            .filter_map(|(agent_type, harness)| {
                 Some(AccountView {
-                    account: profiles::account(&sandbox::account_in_home(*agent_type, home)?),
-                    harness: there(dependencies, *dependency),
+                    account: profiles::account(&sandbox::account_in_home(agent_type, home)?),
+                    harness,
                 })
             })
             .collect()
@@ -710,7 +712,7 @@ impl Machine {
     /// what could be launched here at all — see [`crate::peer::harnesses`].
     ///
     /// **The dependency step's own list**, walked in the order those rows are
-    /// drawn: a second spelling of *the four harnesses* is a list that would go
+    /// drawn: a second spelling of *the five harnesses* is a list that would go
     /// out of step with the one the wizard installs from.
     ///
     /// Blocks: one `PATH` walk apiece.
@@ -1480,11 +1482,11 @@ fn met(steps: StepsView) -> bool {
     steps.dependencies && steps.accounts && steps.git
 }
 
-/// And the first of them: a sandbox, `git`, and at least one of the four
+/// And the first of them: a sandbox, `git`, and at least one of the five
 /// harnesses.
 ///
 /// *At least one*, because a session runs under one Profile and a Profile is of
-/// one agent type: three rows left unticked hold nothing up. And `gh` holds
+/// one agent type: four rows left unticked hold nothing up. And `gh` holds
 /// nothing up at all, GitHub being a choice rather than a dependency.
 fn dependencies_met(dependencies: &[DependencyView]) -> bool {
     there(dependencies, Dependency::Sandbox)
@@ -1912,6 +1914,7 @@ mod tests {
                     home.join(".local/share/opencode"),
                 ]
             }
+            store::AgentType::Agy => vec![home.join(".gemini/antigravity-cli")],
         };
 
         for dir in dirs {
@@ -1935,6 +1938,7 @@ mod tests {
                 verkstead_render::ProfileAccount::Codex { .. } => store::AgentType::Codex,
                 verkstead_render::ProfileAccount::Grok { .. } => store::AgentType::Grok,
                 verkstead_render::ProfileAccount::OpenCode { .. } => store::AgentType::OpenCode,
+                verkstead_render::ProfileAccount::Agy { .. } => store::AgentType::Agy,
             })
             .collect()
     }
@@ -3025,7 +3029,7 @@ echo {token}
         }
     }
 
-    /// Each of the four shapes in the server's home is offered as the Profile
+    /// Each of the five shapes in the server's home is offered as the Profile
     /// it would be saved as, in the order the harness rows are drawn.
     ///
     /// The paths are the account's own — the wizard hands them straight back to
@@ -3041,6 +3045,7 @@ echo {token}
             store::AgentType::Codex,
             store::AgentType::Grok,
             store::AgentType::OpenCode,
+            store::AgentType::Agy,
         ] {
             an_account(dir.path(), agent_type);
         }
@@ -3059,8 +3064,9 @@ echo {token}
                 store::AgentType::Codex,
                 store::AgentType::Grok,
                 store::AgentType::OpenCode,
+                store::AgentType::Agy,
             ],
-            "a home holds one account per harness, and all four are here",
+            "a home holds one account per harness, and all five are here",
         );
 
         assert_eq!(
@@ -3084,6 +3090,13 @@ echo {token}
             "and opencode's is the home its XDG directories are under, which is \
              the home itself",
         );
+        assert_eq!(
+            accounts[4].account,
+            verkstead_render::ProfileAccount::Agy {
+                home: dir.path().join(".gemini").to_string_lossy().into_owned(),
+            },
+            "and agy's is `~/.gemini`, the directory it keeps its own inside",
+        );
 
         assert!(
             accounts[0].harness,
@@ -3091,7 +3104,7 @@ echo {token}
         );
         assert!(
             accounts[1..].iter().all(|found| !found.harness),
-            "and the three whose binaries are missing are not accounts to make a \
+            "and the four whose binaries are missing are not accounts to make a \
              Profile of yet",
         );
     }
@@ -3112,10 +3125,15 @@ echo {token}
         // directory, which is the half of it the account is *not* in.
         std::fs::create_dir_all(dir.path().join(".config/opencode")).unwrap();
 
+        // And a bare `~/.gemini`, which is what Gemini CLI leaves behind
+        // rather than an Antigravity CLI account.
+        std::fs::create_dir_all(dir.path().join(".gemini")).unwrap();
+        std::fs::write(dir.path().join(".gemini/settings.json"), "{}\n").unwrap();
+
         assert_eq!(
             offered(&machine(Platform::Linux, dir.path())),
             Vec::new(),
-            "neither is a whole account, so neither is offered",
+            "none is a whole account, so none is offered",
         );
     }
 
@@ -3176,7 +3194,7 @@ echo {token}
         }
     }
 
-    /// The objective wants a sandbox, `git` and *one* harness — so three rows
+    /// The objective wants a sandbox, `git` and *one* harness — so four rows
     /// left unticked hold nothing up, and `gh` holds nothing up at all.
     #[test]
     fn one_harness_meets_the_step_and_gh_never_gates() {
@@ -3188,6 +3206,7 @@ echo {token}
                 row(Dependency::Codex, NOT_THERE),
                 row(Dependency::Grok, NOT_THERE),
                 row(Dependency::OpenCode, NOT_THERE),
+                row(Dependency::Agy, NOT_THERE),
                 row(Dependency::Gh, gh),
             ]
         };

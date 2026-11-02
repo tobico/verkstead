@@ -605,7 +605,7 @@ fn the_guides_quoted_memo_contract_is_the_real_one() {
 /// session reads it in.
 #[test]
 fn the_guide_says_how_to_leave_a_memo() {
-    for agent_type in ["claude", "codex", "grok", "opencode"] {
+    for agent_type in ["claude", "codex", "grok", "opencode", "agy"] {
         let guide = stdout(&run_as(agent_type, &["guide"]));
         let memo = section(&guide, "## Leaving a memo for the sessions after you");
         let flowed = memo.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -665,7 +665,7 @@ fn the_guides_quoted_preview_contract_is_the_real_one() {
 /// the heading a building session reads them under.
 #[test]
 fn the_guide_says_how_to_suggest_a_preview() {
-    for agent_type in ["claude", "codex", "grok", "opencode"] {
+    for agent_type in ["claude", "codex", "grok", "opencode", "agy"] {
         let guide = stdout(&run_as(agent_type, &["guide"]));
         let preview = section(&guide, "## Suggesting a preview");
         let flowed = preview.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -878,6 +878,54 @@ fn opencode_reads_how_it_holds_an_ask_rather_than_how_claude_does() {
     );
 }
 
+/// And the Antigravity CLI reads how *it* holds an ask, which is neither of the
+/// two before it.
+///
+/// agy's shell tool, `run_command`, waits `WaitMsBeforeAsync` for a command and
+/// then turns it into a background task and hands the turn back; agy wakes the
+/// model with the output when the task ends. Measured on agy 1.4.12: a command
+/// held for four minutes and then for over an hour came back whole, with no
+/// model turn spent between. So what an agy session has to be told is to let
+/// that happen and end its turn — not to pass a timeout, which `run_command`
+/// has none of, and not to background the call itself, which it cannot.
+#[test]
+fn agy_reads_how_it_holds_an_ask_rather_than_how_the_others_do() {
+    let agy = stdout(&run_as("agy", &["guide"]));
+    let claude = stdout(&run_as("claude", &["guide"]));
+    let opencode = stdout(&run_as("opencode", &["guide"]));
+
+    let running = section(&agy, "## Running the ask");
+
+    assert!(
+        running.contains("run_command") && running.contains("WaitMsBeforeAsync"),
+        "the section should name agy's shell tool and the argument that turns a \
+         call into a background task, got:\n{running}"
+    );
+    assert!(
+        running.contains("end your turn"),
+        "and say the turn is ended rather than spent polling, which is what keeps \
+         a wait of hours free, got:\n{running}"
+    );
+    assert!(
+        !running.contains("run_in_background") && !running.contains("86400000"),
+        "and neither Claude Code's mechanism nor opencode's should survive, \
+         got:\n{running}"
+    );
+    assert!(
+        running.contains("verkstead answers"),
+        "and hand it the fetch for a wait that is lost, got:\n{running}"
+    );
+    for other in [&claude, &opencode] {
+        assert_ne!(running, section(other, "## Running the ask"));
+    }
+
+    assert_eq!(
+        section(&agy, "## Two kinds of ask"),
+        section(&claude, "## Two kinds of ask"),
+        "agy blocks, as Claude Code does",
+    );
+}
+
 /// Every backend reads one Guide, so everything about writing a Set is written
 /// once and read the same whichever is reading. What differs is this end and
 /// nothing else.
@@ -1005,7 +1053,7 @@ fn bare_verkstead_is_tailored_the_same_way() {
 /// last.
 #[test]
 fn every_backends_guide_stands_alone() {
-    for agent_type in ["claude", "codex", "grok", "opencode"] {
+    for agent_type in ["claude", "codex", "grok", "opencode", "agy"] {
         stands_alone(&stdout(&run_as(agent_type, &["guide"])));
     }
 }
