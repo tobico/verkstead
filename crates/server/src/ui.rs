@@ -5557,9 +5557,10 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
 /// **And the one press of the three that takes a body**: a take-up may close the
 /// Conversation that had the pull request, and a close takes its Worktree with
 /// whatever was left uncommitted in it. So a press that was stopped over that
-/// comes back naming what the human is agreeing to lose — see
-/// [`verkstead_render::Confirming`], which is empty on every press that was not
-/// stopped.
+/// comes back naming what the human is agreeing to lose — and one stopped over a
+/// checkout of theirs standing on the branch comes back naming the checkouts they
+/// are agreeing to have switched. See [`verkstead_render::Confirming`], which is
+/// empty on every press that was not stopped.
 async fn take_up(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -5569,7 +5570,7 @@ async fn take_up(
         return Json(TakenUp::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::take_up(&state, id, &confirming.discarding).await {
+    match crate::conversations::take_up(&state, id, &confirming).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "taking a pull request up failed");

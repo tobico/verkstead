@@ -114,6 +114,7 @@ import type {
   AttachmentView,
   BriefEvent,
   BriefSaved,
+  Confirming,
   ConversationView,
   GrillingStarted,
   McpServer,
@@ -136,7 +137,12 @@ import { refusedOnCreate, stoppedOnCreate } from "./composing";
 import { PaneHead } from "./PaneHead";
 import { DRAFT, chosen } from "./naming";
 import { Setup, SetupNotes } from "./Setup";
-import { discarding, goingAhead, TakeUpRefusal } from "./TakeUp";
+import {
+  confirming,
+  goingAhead,
+  NOTHING_CONFIRMED,
+  TakeUpRefusal,
+} from "./TakeUp";
 import { needed, targeted } from "./processes";
 import { keeping } from "./settling";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
@@ -671,19 +677,26 @@ function StartTakeUp(props: {
     stoppedOnCreate(device(), props.conversation.id),
   );
 
+  // What the presses before this one confirmed, kept while each is stopped in
+  // turn: a start can stop over a discard and then over a switch, and the press
+  // that answers the second has to carry the first answer with it.
+  const [confirmed, setConfirmed] = createSignal<Confirming>(NOTHING_CONFIRMED);
+
   const start = useMutation(() => ({
     // What the last press was stopped over, sent back: this press is the human
     // saying to go ahead with it. Empty on every press the last one did not stop,
-    // which is every first press — and the server reads the worktrees again
-    // regardless, so a list that has moved since stops this press in its turn.
-    mutationFn: () =>
-      takeUpPullRequest(device(), props.conversation.id, discarding(said())),
-    onSuccess: (outcome: TakenUp) => {
+    // which is every first press — and the server reads the worktrees and the
+    // checkouts again regardless, so a list that has moved since stops this
+    // press in its turn.
+    mutationFn: (body: Confirming) =>
+      takeUpPullRequest(device(), props.conversation.id, body),
+    onSuccess: (outcome: TakenUp, body: Confirming) => {
       // Whatever it came back with, the page is read again: what the take-up
       // did is a conversation that has moved, and what refused it is a
       // repository — or a GitHub — that has moved, and reading it again is the
       // correction either way.
       setSaid(outcome === "TakenUp" ? null : outcome);
+      setConfirmed(goingAhead(outcome) ? body : NOTHING_CONFIRMED);
 
       void queries.invalidateQueries({
         queryKey: keyOf(device(), "conversation"),
@@ -700,7 +713,7 @@ function StartTakeUp(props: {
       conversation={props.conversation}
       files={props.files}
       pending={start.isPending}
-      press={() => start.mutate()}
+      press={() => start.mutate(confirming(said(), confirmed()))}
       label={goingAhead(said()) ? "Start anyway" : undefined}
       refused={
         said() === null ? undefined : (

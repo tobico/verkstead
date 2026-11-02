@@ -5000,11 +5000,27 @@ it over and has finished with it, and is refused where that one is still at work
 see **Steer**. Taking
 it up puts the
 Conversation on the pull request's head branch, named for it and never
-invented — made off origin's, or a local one fast-forwarded where it is behind;
-one ahead, diverged, not on origin at all or checked out anywhere else is refused
-by name, on the composer where the press was — with the head at take-up as its
-base commit and GitHub's base branch beside it, so the Timeline draws only what
-Verkstead adds from here and a conflict merge of the base drags nothing.
+invented — made off origin's, or a local one fast-forwarded where it is behind —
+with the head at take-up as its base commit and GitHub's base branch beside it,
+so the Timeline draws only what Verkstead adds from here and a conflict merge of
+the base drags nothing. One ahead, diverged or not on origin at all is refused by
+name, on the composer where the press was. **One the human is standing on is theirs to give up, and they
+are asked once**: the head branch checked out somewhere that is no Conversation's —
+their own checkout of the Repo, or a worktree they made by hand — stops the press
+naming the checkout and the branch it is on, with nothing switched, closed or
+made, and the press under it reads *Start anyway*. That one runs a plain
+`git switch` onto the Repo's default branch in the checkout, or detaches it at the
+default branch's tip where the default branch is checked out already, and takes
+up. Read again on that press, as the discard is: a checkout that has moved off the
+branch since is left alone, and one the stop did not name stops it again. **Git
+decides about the human's uncommitted files** — carried across where they are the
+same on both branches, and refused where they are not, as a checkout mid-merge or
+mid-rebase is — and a switch git refuses refuses the start in git's own words,
+with nothing closed; never a stash, never a discard. Switched before anything is
+closed, and switched back where the start is refused further on. The Timeline
+says which checkouts were moved and that `git switch <branch>` there returns
+them, and nothing moves them back at the close. A checkout on the default branch
+itself, which no switch could free, is still refused by name.
 Recording the pull request is the move, from Draft straight into **Wrapping**,
 and the wrap-up is the Process's from there: the ordinary one with its review for
 Review, and one narrowed to Mergeable and the checks for Fix Merge Issues. No
@@ -5040,17 +5056,23 @@ on, and any Conversation whose worktree has that branch checked out. Each Done
 one is closed, a Closed or Archived one has nothing to give up, and one still at
 work refuses the whole start naming it, **before anything is closed** — all or
 nothing, a sync that cannot move one branch being a sync that moves none. A
-checkout that is no Conversation's is refused over by where it is, the way the
-branch being taken up already is. Neighbours holding uncommitted changes join the
+checkout that is no Conversation's is asked about the way the head branch's is,
+in the **one** stop that names the head's: every such checkout of the chain is
+named together and switched by the one *Start anyway*, and one switch git refuses
+refuses the whole start. Neighbours holding uncommitted changes join the
 one list the named pull request's holder is in, so a stack of five is asked about
 once, and the Timeline names what was closed where it already says what the stack
-is and whose each link was. Which is why the chain is read before anything is
+is and whose each link was. A start that would both close a dirty holder and
+switch a checkout of the human's is asked about in two presses, the discard
+first. Which is why the chain is read before anything is
 recorded or closed: the press needs to know the links to know who is standing on
 them. **Over a bare branch the walk waits**, there being nothing to walk from
 until the `submitting` session has opened one: it runs where that pull request is
 recorded, with a Notice of its own — and with nobody left to ask, a neighbour
 holding uncommitted changes stops the run with a Notice exactly as one still at
-work does, rather than dispatching a sync that cannot move the branch.
+work does, rather than dispatching a sync that cannot move the branch — and so
+does a link checked out by hand, switching the human's checkout unasked having
+been rejected.
 
 **A branch is taken up the same way, with nothing at the end of it.** A Target
 that is neither a URL nor a `#number` is a branch: nothing is asked of GitHub,

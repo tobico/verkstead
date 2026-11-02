@@ -1069,6 +1069,32 @@ export type CheckRollup = "Passed" | "Running" | "Failed";
 export type Checked = "Passed" | "Running" | "Failed";
 
 /**
+ * A checkout that is no Conversation's, standing on a branch a take-up needs.
+ *
+ * What [`TakenUp::WouldSwitch`] is made of: where it is, which is what the human
+ * knows it by, the branch it is on, which is what pressing again moves it off,
+ * and whether it lands on the default branch or detached at its tip.
+ */
+export type CheckedOut = { 
+/**
+ * Where it is, as `git worktree list` names it.
+ */
+at: string, 
+/**
+ * The branch checked out there.
+ */
+branch: string, 
+/**
+ * Whether it is detached at the default branch's tip rather than switched
+ * onto it, which is what happens where the default branch is checked out
+ * somewhere already — the human's own checkout of the Repo, nearly always,
+ * beside a worktree they made by hand. Git holds one checkout per branch for
+ * the default branch too, so the files are the default branch's and the
+ * branch itself stays where it is.
+ */
+detaching: boolean, };
+
+/**
  * And the Cleanup as the human has just set it.
  *
  * The days are a string because that is what a form holds, and an empty one is
@@ -1524,7 +1550,17 @@ export type Confirming = {
  * closed without this having meant anything, and one that is dirty and not
  * named here stops the press all over again.
  */
-discarding: Array<number>, };
+discarding: Array<number>, 
+/**
+ * The checkouts that may be switched to the Repo's default branch: the ones
+ * a [`TakenUp::WouldSwitch`] named, by where they are, sent back by the
+ * press that confirms them.
+ *
+ * Read again on this press, as [`Self::discarding`] is: a checkout no longer
+ * on the branch is left alone, and one standing there that this does not
+ * name stops the press all over again.
+ */
+switching: Array<string>, };
 
 /**
  * How a merge conflict between a pull request and its base branch is resolved.
@@ -7632,7 +7668,25 @@ conversation: number, } } | { "WouldDiscard": {
  * every Conversation standing on a link of it is closed by the one
  * press.
  */
-uncommitted: Array<Uncommitted>, } } | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+uncommitted: Array<Uncommitted>, } } | { "WouldSwitch": { 
+/**
+ * Every checkout to switch, the head branch's first and then the
+ * stack's from the bottom.
+ */
+checkouts: Array<CheckedOut>, 
+/**
+ * The branch each would be switched to, or detached at the tip of: the
+ * Repo's default branch.
+ */
+to: string, } } | { "SwitchRefused": { 
+/**
+ * The checkout, as git named it.
+ */
+at: string, 
+/**
+ * What git said, as it said it.
+ */
+said: string, } } | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
 /**
  * Where it is checked out, as git named it.
  */

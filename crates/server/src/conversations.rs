@@ -41,11 +41,12 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
     Adopted, Attached, AttachedServerView, AttachmentRemoved, AttachmentView, BaseRecorded,
-    BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
-    CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed,
-    ConversationMove, GrillingStarted, OtherAuthor, PairingView, PickedView, Process,
-    ProcessPicked, ProfileEntry, ProfileTrouble, RepoPairingsView, RepoSwitched, ServerAttached,
-    ServerRemoved, Started, TakenUp, TargetRecorded, Uncommitted, Worktree,
+    BranchRenamed, BriefSaved, CheckedOut, CompanionAdded, CompanionBaseRecorded,
+    CompanionBranchRenamed, CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved,
+    Confirming, ConversationClosed, ConversationMove, GrillingStarted, OtherAuthor, PairingView,
+    PickedView, Process, ProcessPicked, ProfileEntry, ProfileTrouble, RepoPairingsView,
+    RepoSwitched, ServerAttached, ServerRemoved, Started, TakenUp, TargetRecorded, Uncommitted,
+    Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -3459,8 +3460,21 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// local one standing behind origin's, that branch is fast-forwarded on to it;
 /// and one that is ahead, or that has gone its own way, is refused rather than
 /// moved — those commits are somebody's, and Verkstead is not the thing to
-/// decide what becomes of them. A branch already checked out somewhere is
-/// refused naming the place, git holding one checkout per branch.
+/// decide what becomes of them.
+///
+/// **And a branch the human is standing on is theirs to give up, once they have
+/// said to.** Git holds one checkout per branch, so the head branch — or a link of
+/// the stack around it — checked out somewhere that is no Conversation's, the
+/// human's own checkout of the Repo or a worktree they made by hand, stops the
+/// press as [`TakenUp::WouldSwitch`], naming every such checkout at once and
+/// having switched, closed and made nothing. The press after it carries them in
+/// `confirming.switching`, and each is moved onto the Repo's default branch with
+/// a plain `git switch` — or detached at its tip, where the default branch is
+/// checked out already, see [`planned`] — before anything is closed — so a switch git refuses, over
+/// the human's own uncommitted files, refuses the whole start with nothing
+/// closed, in git's own words. Read again on that press, as the discard is; and
+/// left where it is when the Conversation closes, the Timeline having said how to
+/// go back. See [`to_switch`] and [`worktrees::switch`].
 ///
 /// **The base recorded is the head at take-up, with the branch it goes into
 /// beside it.** Which is not the pair any other start writes, and deliberately:
@@ -3482,7 +3496,7 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// transaction, which is how every wrapping Conversation gets there; a take-up
 /// is that ending reached by the other door. A branch has no such record to make,
 /// so [`store::take_up`] makes the move itself — see [`store::Landing`].
-pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Result<TakenUp> {
+pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) -> Result<TakenUp> {
     let pool = &state.pool;
 
     let Some(conversation) = store::load_conversation(pool, id).await? else {
@@ -3608,6 +3622,23 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
     let mut giving_way = Vec::new();
     let mut named_holder = None;
 
+    // The branch the work is on: a pull request's head, or the name the field
+    // held. Which is what everything below this turns on — who is standing on
+    // it, the checkout, the record and the branch the Conversation is named for.
+    let head = taking.head().to_owned();
+
+    // And whether the human is standing on it, which git answers rather than the
+    // record. A checkout that is no Conversation's is theirs, and the way past it
+    // is to move it off the branch with their say-so — gathered here with the
+    // stack's below, so that one stop names all of them. One that *is* a
+    // Conversation's is the holder above, or [`settled`]'s refusal as it always
+    // was. See [`elsewhere`].
+    let mut switching = Vec::new();
+
+    if let Some(standing) = elsewhere(state, &conversation.repo, &head).await? {
+        switching.push(standing);
+    }
+
     if let Some(number) = number
         && let Some(other) =
             store::conversation_on_pull_request(pool, conversation.repo.id, number).await?
@@ -3642,10 +3673,10 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
                 Some(WillNotMakeWay::StillAtWork { conversation }) => {
                     return Ok(TakenUp::AlreadyHeld { conversation });
                 }
-                Some(WillNotMakeWay::CheckedOutElsewhere { at }) => {
-                    return Ok(TakenUp::CheckedOutElsewhere { at });
+                None => {
+                    giving_way.extend(standing.giving_way);
+                    switching.extend(standing.elsewhere);
                 }
-                None => giving_way.extend(standing.giving_way),
             }
         }
     }
@@ -3661,12 +3692,38 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
     // now is this moment's question. Which is also why it is read after everything
     // that could refuse the start — nothing is asked about a press that was never
     // going to go through.
-    let holding = to_lose(&giving_way, discarding).await;
+    let holding = to_lose(&giving_way, &confirming.discarding).await;
 
     if !holding.is_empty() {
         return Ok(TakenUp::WouldDiscard {
             uncommitted: holding,
         });
+    }
+
+    // And the human's own checkouts, asked about by the same rule: every one of
+    // them confirmed, or the press stops naming all of them. After the discard
+    // rather than beside it, so that a start that needs both is two presses —
+    // which takes a stack with a link held dirty by a Done Conversation and
+    // another checked out by hand.
+    let default = conversation.repo.default_branch.clone();
+
+    let switching = planned(&conversation.repo.path, &default, switching).await?;
+
+    let unconfirmed = to_switch(&switching, &confirming.switching);
+
+    if !unconfirmed.is_empty() {
+        return Ok(TakenUp::WouldSwitch {
+            checkouts: unconfirmed,
+            to: default,
+        });
+    }
+
+    // Confirmed, so each is switched — before anything is closed, so that a
+    // switch git refuses over the human's own files refuses the whole start with
+    // every Done Conversation left Done. All or nothing, as the closes are: the
+    // ones already switched when one is refused are switched back.
+    if let Err(refusal) = switch_all(&switching, &default).await? {
+        return Ok(refusal);
     }
 
     // Nothing left to ask about, so the way is made: each holder closed by the
@@ -3701,11 +3758,6 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
     // named pull request's holder alone: a stack's neighbours are closed here too,
     // and a refusal after that moved as many Conversations as it closed.
     let refused = |refusal: TakenUp| refused_having_made_way(refusal, id, &branches);
-
-    // The branch the work is on: a pull request's head, or the name the field
-    // held. Which is what everything below this turns on — the checkout, the
-    // record and the branch the Conversation is named for.
-    let head = taking.head().to_owned();
 
     let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &head);
 
@@ -3770,7 +3822,15 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
 
     let (commit, checkouts, making) = match made {
         Ok(made) => made,
-        Err(refusal) => return Ok(refused(refusal)),
+        Err(refusal) => {
+            // Nothing was taken up, so the human's checkouts go back on the
+            // branches they were on: a switch made for a start that did not
+            // happen is a switch nobody asked for. Closes stay closed, a close
+            // being the one thing here that is never undone.
+            switch_back(&switching).await;
+
+            return Ok(refused(refusal));
+        }
     };
 
     // And now the store, in the order the record is read in: the branch it is
@@ -3910,6 +3970,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
         &taking,
         &named,
         made_way.as_deref().zip(number),
+        (&switching, &default),
         narrowed,
         stack,
     );
@@ -4157,6 +4218,204 @@ fn holds(worktree: &std::path::Path) -> bool {
     }
 }
 
+/// Where `branch` is checked out somewhere that is no Conversation's, and so the
+/// human's to give up — or `None` where nothing holds it, or a Conversation does.
+///
+/// The test is [`standing_on`]'s: git says where the branch is checked out, and
+/// [`store::conversation_at_worktree`] finding nobody there makes it the human's
+/// own checkout of the Repo or a worktree they made by hand. A Conversation's own
+/// Worktree is never switched; it is closed to make way, or refused over, as it
+/// always was.
+///
+/// **Nor is a checkout on the default branch**, which is the one branch switching
+/// to the default branch cannot free: that is left to [`settled`] to refuse by
+/// name, as [`TakenUp::CheckedOutElsewhere`].
+async fn elsewhere(
+    state: &AppState,
+    repo: &store::Repo,
+    branch: &str,
+) -> Result<Option<CheckedOut>> {
+    if branch == repo.default_branch {
+        return Ok(None);
+    }
+
+    let at = tokio::task::spawn_blocking({
+        let repo = repo.path.clone();
+        let branch = branch.to_owned();
+
+        move || worktrees::checked_out_at(&repo, &branch)
+    })
+    .await?;
+
+    let Some(at) = at else {
+        return Ok(None);
+    };
+
+    if store::conversation_at_worktree(&state.pool, &at)
+        .await?
+        .is_some()
+    {
+        return Ok(None);
+    }
+
+    Ok(Some(CheckedOut {
+        at: at.display().to_string(),
+        branch: branch.to_owned(),
+        detaching: false,
+    }))
+}
+
+/// Which of `switching` go onto the default branch and which are detached at its
+/// tip.
+///
+/// Git holds one checkout per branch for the default branch as much as for any
+/// other, so only one checkout can be on it: where it is checked out already —
+/// the human's own checkout of the Repo, nearly always, beside a worktree they
+/// made by hand — every one of these is detached at its tip, and where it is not,
+/// the first is switched onto it and the rest are detached. The human's answer to
+/// a hand-made worktree a plain switch would only ever be refused for.
+///
+/// Read on the press that switches as on the one that stops, so what the stop
+/// said is what the switch does unless the repository has moved in between.
+async fn planned(
+    repo: &std::path::Path,
+    default: &str,
+    switching: Vec<CheckedOut>,
+) -> Result<Vec<CheckedOut>> {
+    if switching.is_empty() {
+        return Ok(switching);
+    }
+
+    let held = tokio::task::spawn_blocking({
+        let repo = repo.to_owned();
+        let default = default.to_owned();
+
+        move || worktrees::checked_out_at(&repo, &default).is_some()
+    })
+    .await?;
+
+    let mut taken = held;
+
+    Ok(switching
+        .into_iter()
+        .map(|checkout| {
+            let detaching = taken;
+            taken = true;
+
+            CheckedOut {
+                detaching,
+                ..checkout
+            }
+        })
+        .collect())
+}
+
+/// Every checkout to switch that this press has not confirmed — or none at all,
+/// where it has confirmed each of them.
+///
+/// [`to_lose`]'s rule over the human's checkouts rather than over Conversations:
+/// `switching` is where the checkouts the stopped press named are, sent back by
+/// the press that confirms them, and what is standing on the branches is read
+/// again regardless. A checkout that has moved off the branch since is not in
+/// `found` and needs nothing; one in `found` that the press did not name stops it
+/// all over again, naming every one, because what the next press sends back is
+/// the list it was shown.
+fn to_switch(found: &[CheckedOut], switching: &[String]) -> Vec<CheckedOut> {
+    if found
+        .iter()
+        .all(|checkout| switching.contains(&checkout.at))
+    {
+        return Vec::new();
+    }
+
+    found.to_vec()
+}
+
+/// Switch each of the human's checkouts to `default`, or refuse in git's words
+/// over the first git will not.
+///
+/// **All or nothing.** A start needs every one of these branches free — a sync
+/// that cannot move one branch of a stack moves none — so one switch refused
+/// means none is wanted, and the ones already made are switched back to the
+/// branch each was on. That way back is the same plain switch, which carries back
+/// whatever it carried over; one that fails is logged, there being nothing
+/// further to do about the human's checkout from here.
+///
+/// Blocking, all of it, so it goes to a worker of its own.
+async fn switch_all(switching: &[CheckedOut], default: &str) -> Result<Result<(), TakenUp>> {
+    if switching.is_empty() {
+        return Ok(Ok(()));
+    }
+
+    let switching = switching.to_vec();
+    let default = default.to_owned();
+
+    let switched = tokio::task::spawn_blocking(move || {
+        for (done, checkout) in switching.iter().enumerate() {
+            let at = std::path::Path::new(&checkout.at);
+
+            if let Err(said) = worktrees::switch(at, &default, checkout.detaching) {
+                tracing::info!(
+                    at = checkout.at,
+                    branch = checkout.branch,
+                    said,
+                    "git would not switch a checkout off a branch a take-up needs, so nothing \
+                     is being taken up",
+                );
+
+                switching_back(&switching[..done]);
+
+                return Err(TakenUp::SwitchRefused {
+                    at: checkout.at.clone(),
+                    said,
+                });
+            }
+
+            tracing::info!(
+                at = checkout.at,
+                from = checkout.branch,
+                to = default,
+                "a checkout that is no Conversation's was switched off a branch a take-up needs",
+            );
+        }
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(switched)
+}
+
+/// Put the human's checkouts back on the branches they were on, after a take-up
+/// that switched them was refused further on.
+async fn switch_back(switched: &[CheckedOut]) {
+    if switched.is_empty() {
+        return;
+    }
+
+    let switched = switched.to_vec();
+
+    if let Err(error) = tokio::task::spawn_blocking(move || switching_back(&switched)).await {
+        tracing::error!(error = ?error, "switching checkouts back after a refused take-up failed");
+    }
+}
+
+/// [`switch_back`]'s body, for a caller already on a worker.
+fn switching_back(switched: &[CheckedOut]) {
+    for checkout in switched.iter().rev() {
+        if let Err(said) =
+            worktrees::switch(std::path::Path::new(&checkout.at), &checkout.branch, false)
+        {
+            tracing::error!(
+                at = checkout.at,
+                branch = checkout.branch,
+                said,
+                "a checkout switched for a take-up that was refused could not be switched back",
+            );
+        }
+    }
+}
+
 /// Close a Conversation that has finished with a pull request, to make way for a
 /// take-up of it — or for a Steer back onto it.
 ///
@@ -4216,6 +4475,12 @@ struct Standing {
     /// The first link somebody will not give up, where there is one. Which stops
     /// the whole start: see [`WillNotMakeWay`].
     refused: Option<WillNotMakeWay>,
+
+    /// The links checked out somewhere that is no Conversation's — the human's
+    /// own checkout, or a worktree made by hand — from the bottom. Nothing here
+    /// may close those: at a press they are the human's to switch off the branch
+    /// once asked, and with nobody at a press they stop the run.
+    elsewhere: Vec<CheckedOut>,
 }
 
 /// Why a link of the chain cannot be made way on.
@@ -4233,15 +4498,6 @@ enum WillNotMakeWay {
         /// The Conversation, for the way there.
         conversation: i64,
     },
-
-    /// A link's branch is checked out somewhere that is no Conversation's — the
-    /// human's own clone, or a worktree made by hand. Nothing here may close it
-    /// and git will not move the branch under it, so this is the refusal a take-up
-    /// already gives over its own head branch, said about the neighbour.
-    CheckedOutElsewhere {
-        /// Where it is checked out, as git named it.
-        at: String,
-    },
 }
 
 /// Read who is standing on each of `links`, and say whether they can make way.
@@ -4258,7 +4514,10 @@ enum WillNotMakeWay {
 /// chain is closed once rather than twice.
 ///
 /// Nothing is closed and nothing is refused for. The first link that will not
-/// make way stops the walk, because the start is refused whole either way.
+/// make way stops the walk, because the start is refused whole either way. A link
+/// checked out somewhere that is no Conversation's is no refusal here: it is
+/// gathered into [`Standing::elsewhere`], for the caller to ask about or refuse
+/// over.
 async fn standing_on(
     state: &AppState,
     taking_up: i64,
@@ -4270,6 +4529,7 @@ async fn standing_on(
 
     let mut gathered: Vec<i64> = already.iter().map(|holder| holder.id).collect();
     let mut giving_way = Vec::new();
+    let mut elsewhere = Vec::new();
 
     for link in links {
         // Whose the pull request is, which is the record's answer.
@@ -4289,6 +4549,7 @@ async fn standing_on(
                         refused: Some(WillNotMakeWay::StillAtWork {
                             conversation: other,
                         }),
+                        elsewhere,
                     });
                 }
             }
@@ -4323,23 +4584,22 @@ async fn standing_on(
                         refused: Some(WillNotMakeWay::StillAtWork {
                             conversation: other,
                         }),
+                        elsewhere,
                     });
                 }
             },
-            None => {
-                return Ok(Standing {
-                    giving_way,
-                    refused: Some(WillNotMakeWay::CheckedOutElsewhere {
-                        at: at.display().to_string(),
-                    }),
-                });
-            }
+            None => elsewhere.push(CheckedOut {
+                at: at.display().to_string(),
+                branch: link.head.clone(),
+                detaching: false,
+            }),
         }
     }
 
     Ok(Standing {
         giving_way,
         refused: None,
+        elsewhere,
     })
 }
 
@@ -4387,15 +4647,19 @@ pub(crate) async fn neighbours_give_way(
                 whose = by_branch(state, conversation).await,
             ));
         }
-        Some(WillNotMakeWay::CheckedOutElsewhere { at }) => {
-            return Err(format!(
-                "A branch of this stack is checked out at {at}, which is no conversation's, so \
-                 Verkstead can't give it back. Nothing was closed and no sync was dispatched, \
-                 because a sync rebases every branch of the chain and git won't move one that's \
-                 checked out elsewhere.",
-            ));
-        }
         None => {}
+    }
+
+    // A checkout that is no Conversation's is the human's to move, and at the
+    // press they are asked to. Here nobody is, and switching their checkout
+    // unasked was rejected, so it stops the run as it always has.
+    if let Some(CheckedOut { at, .. }) = standing.elsewhere.first() {
+        return Err(format!(
+            "A branch of this stack is checked out at {at}, which is no conversation's, so \
+             Verkstead can't give it back. Nothing was closed and no sync was dispatched, \
+             because a sync rebases every branch of the chain and git won't move one that's \
+             checked out elsewhere.",
+        ));
     }
 
     // And the one thing a close cannot give back. At the press the human is asked
@@ -4847,10 +5111,19 @@ fn standing(head: &str, upstream: String) -> Holds {
 /// human pressed Start on this Conversation and a different one moved, and this
 /// Timeline is the one they are looking at when it did. `None` is every take-up
 /// over a pull request nobody had, which is most of them.
+///
+/// **And the human's own checkouts this take-up moved, where it moved any.**
+/// `switched` is every checkout that was no Conversation's and stood on a branch
+/// this start needed, each switched to `to`, the Repo's default branch — see
+/// [`switch_all`]. Said here rather than at the close, because nothing switches
+/// them back then and the close may come hours later, somewhere the human is not
+/// looking: what is worth knowing is that it was done and the one command that
+/// undoes it.
 fn taken(
     taking: &Target,
     named: &str,
     made_way: Option<(&str, i64)>,
+    (switched, to): (&[CheckedOut], &str),
     narrowed: bool,
     stack: Option<String>,
 ) -> String {
@@ -4886,6 +5159,46 @@ fn taken(
             )
         }
         None => taken,
+    };
+
+    // Where each one went, which is the default branch itself or its tip with no
+    // branch, that one being checked out already — see [`planned`].
+    let moved = |one: &CheckedOut| {
+        if one.detaching {
+            format!("detached at `{to}`")
+        } else {
+            format!("switched to `{to}`")
+        }
+    };
+
+    let taken = match switched {
+        [] => taken,
+        [one] => format!(
+            "{taken} Your checkout at `{at}` was on `{branch}`, so it was {moved} to free the \
+             branch. Once this conversation closes, `git switch {branch}` there takes it back.",
+            at = one.at,
+            branch = one.branch,
+            moved = moved(one),
+        ),
+        several => {
+            let which: Vec<String> = several
+                .iter()
+                .map(|one| {
+                    format!(
+                        "`{}` was on `{}` and was {}",
+                        one.at,
+                        one.branch,
+                        moved(one)
+                    )
+                })
+                .collect();
+
+            format!(
+                "{taken} Your checkouts were moved off the branches this needed: {which}. Once \
+                 this conversation closes, `git switch <branch>` in each takes it back.",
+                which = which.join("; "),
+            )
+        }
     };
 
     let taken = match stack {

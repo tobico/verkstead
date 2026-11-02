@@ -123,7 +123,7 @@ import {
   TICK_REFUSAL,
 } from "./Setup";
 import { chosen } from "./naming";
-import { takeUpRefusal } from "./TakeUp";
+import { goingAhead, takeUpRefusal } from "./TakeUp";
 import { pullRequestIn } from "./targets";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
 
@@ -687,14 +687,15 @@ export async function create(
       // is the Develop every draft defaults to, which is pointed at nothing.
       const outcome = await takeUpPullRequest(to, id);
 
-      // And the one outcome that is not a refusal: the press stopped to ask what
-      // closing another conversation would discard, and the answer is a press. So
-      // it travels as the outcome rather than as a sentence about it — the draft's
-      // own composer takes it up, draws it with a link per conversation, and the
-      // first press there is the confirming one. Left as a sentence it would have
-      // read *press start again to go ahead* over a press that could only ask the
-      // same question over again.
-      if (typeof outcome === "object" && "WouldDiscard" in outcome) {
+      // And the two outcomes that are not refusals: the press stopped to ask what
+      // closing another conversation would discard, or whether to move the
+      // human's own checkout off a branch it needs, and the answer is a press. So
+      // each travels as the outcome rather than as a sentence about it — the
+      // draft's own composer takes it up and draws it, and the first press there
+      // is the confirming one. Left as a sentence it would have read *press start
+      // again to go ahead* over a press that could only ask the same question
+      // over again.
+      if (goingAhead(outcome)) {
         stopped = outcome;
       } else {
         said(

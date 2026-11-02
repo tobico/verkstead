@@ -2106,6 +2106,7 @@ describe("the target a compose page is pointed at", () => {
 
     expect(JSON.parse(String(pressed[1]![1]?.body))).toEqual({
       discarding: [77],
+      switching: [],
     });
   });
 
