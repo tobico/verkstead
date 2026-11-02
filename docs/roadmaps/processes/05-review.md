@@ -9,7 +9,8 @@ it up. The Brief is scanned for the first pull request URL or `#number`; a
 while empty; Start is refused, saying so on the composer, while neither names
 anything. Start runs
 today's take-up — fetch, the head cut or fast-forwarded and a head that is
-ahead, diverged, checked out elsewhere or from a fork refused by name, the head
+ahead, diverged or from a fork refused by name, one the human's own checkout is
+standing on stopped once and switched off it on *Start anyway*, the head
 at take-up as the base commit and GitHub's base beside it — and records the
 pull request, which moves the Conversation into Wrapping for the ordinary
 wrap-up with its review. A bare branch is taken up the same way with no pull
