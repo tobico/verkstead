@@ -248,14 +248,16 @@ const AGY_ON_A_MAC: Instruction = {
 };
 
 /// And on Windows, where it is the PowerShell one, landing per user in
-/// `%LOCALAPPDATA%\agy\bin` and leaving the `PATH` alone.
+/// `%LOCALAPPDATA%\agy\bin` and adding that to the user's own `PATH` — read off
+/// the script on winvm, whose last step runs `agy install` to do it. A
+/// Verkstead already running reads that `PATH` only as it starts.
 const AGY_WINDOWS: Instruction = {
   command: "irm https://antigravity.google/cli/install.ps1 | iex",
   note:
     "Google's own installer, which keeps agy current. It puts agy.exe in " +
-    "%LOCALAPPDATA%\\agy\\bin and doesn't add it to your PATH. Tick the row " +
-    "and Verkstead puts it on every session's PATH, or add it to the PATH of " +
-    "the shell Verkstead is started from and start Verkstead again.",
+    "%LOCALAPPDATA%\\agy\\bin and adds that to your PATH. Tick the row and " +
+    "Verkstead puts it on every session's PATH, or start Verkstead again " +
+    "once it is installed.",
 };
 
 /// OpenCode the way OpenCode installs it, which is what the one tab with no

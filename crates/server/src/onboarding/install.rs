@@ -209,11 +209,14 @@ const GROK_ON_WINDOWS: Vendor = Vendor {
 
 /// And Google's, which is the PowerShell one too.
 ///
-/// It lands `agy.exe` in `%LOCALAPPDATA%\agy\bin`, per user, and leaves the
-/// `PATH` alone, so that directory is what a ticked row writes to
-/// `session_path`. Said under the home, as every vendor's landing place is
-/// here: `%LOCALAPPDATA%` is `%USERPROFILE%\AppData\Local` unless a roaming
-/// profile has moved it, and the elevated run is the same user's.
+/// It lands `agy.exe` in `%LOCALAPPDATA%\agy\bin`, per user, and that directory
+/// is what a ticked row writes to `session_path`. Read off the script on winvm
+/// (agy 1.4.12): it copies the binary there and then runs `agy install`, which
+/// puts the directory in front of the user's own `PATH` in the registry — a
+/// `PATH` the server already running never rereads, so `session_path` is still
+/// what a session finds it by. Said under the home, as every vendor's landing
+/// place is here: `%LOCALAPPDATA%` is `%USERPROFILE%\AppData\Local` unless a
+/// roaming profile has moved it, and the elevated run is the same user's.
 const AGY_ON_WINDOWS: Vendor = Vendor {
     who: "Google",
     line: "irm https://antigravity.google/cli/install.ps1 | iex",
@@ -3882,8 +3885,9 @@ mod tests {
     }
 
     /// And Google's for the Antigravity CLI, which lands `agy.exe` in
-    /// `%LOCALAPPDATA%\agy\bin` and leaves the `PATH` alone: that directory is
-    /// what the row writes to `session_path`.
+    /// `%LOCALAPPDATA%\agy\bin`: that directory is what the row writes to
+    /// `session_path`, the user's own `PATH` it adds it to being one a running
+    /// server never rereads.
     #[test]
     fn the_windows_antigravity_cli_lands_in_local_app_data() {
         let plan = plan(&windows_machine(&PathBuf::new()), &[Dependency::Agy]);

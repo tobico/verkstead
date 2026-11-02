@@ -479,6 +479,27 @@ const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
 /// is told it.
 const DISABLE_AUTOUPDATER: &str = "DISABLE_AUTOUPDATER";
 
+/// What sends an Antigravity CLI process on Windows to its file store rather
+/// than the Credential Manager, and the value it is given.
+///
+/// **The Credential Manager is per user and nothing refuses it**: a session
+/// runs as Verkstead's session account, and every Profile's login would land
+/// in that one account's vault — one login per device rather than per Profile,
+/// and none of it in the account the root links. agy has no switch for its
+/// store, but it reads where it is: measured on agy 1.4.12 on Windows 11
+/// 26200, a process with `SSH_CONNECTION` in its environment logs *Using
+/// file-based token storage because SSH session detected* and keeps its token
+/// in `~/.gemini/antigravity-cli/antigravity-oauth-token`, the file the root
+/// already links — so the Linux design stands there unchanged. Its sign-in
+/// address is offered to a piped standard input on Windows either way.
+///
+/// Said to every agy process on Windows — a session, its login and its
+/// signed-out check alike — and to nothing else: no other harness reads it,
+/// and on the two Unixes agy finds no keyring inside a sandbox by itself. The
+/// value is the shape `sshd` gives it, a loopback to a loopback, since a
+/// reader that went further than *is it set* would find nothing to follow.
+const AGY_FILE_STORE: (&str, &str) = ("SSH_CONNECTION", "127.0.0.1 0 127.0.0.1 22");
+
 /// Which backend a session is running, in its own environment.
 ///
 /// Set for the Guide alone. Nothing else inside a sandbox needs to know — the
@@ -2481,6 +2502,7 @@ const SANDBOX_NAMES: &[&str] = &[
     DISABLE_AUTOUPDATER,
     OPENCODE_DB,
     OPENCODE_BASH_DEFAULT_TIMEOUT,
+    AGY_FILE_STORE.0,
     RUSTUP_HOME,
     "GH_TOKEN",
     "GIT_CONFIG_COUNT",
@@ -5057,6 +5079,14 @@ impl Sandbox {
                 OPENCODE_BASH_DEFAULT_TIMEOUT,
                 OPENCODE_BASH_DEFAULT_TIMEOUT_MS,
             );
+        }
+
+        // And an Antigravity CLI process on Windows, that its login is the
+        // account's file rather than the session account's vault — see
+        // [`AGY_FILE_STORE`].
+        if self.platform == Platform::Windows && matches!(self.account, store::Account::Agy { .. })
+        {
+            surface.set(AGY_FILE_STORE.0, AGY_FILE_STORE.1);
         }
 
         // And where the toolchain that build runs is, on a machine whose Rust

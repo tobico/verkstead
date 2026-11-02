@@ -57,10 +57,25 @@ a section of its own, measured against agy 1.4.12 on this machine signed out:
   write an item and `curl`, `git` over https, name lookups and `id` as they
   were, and agy 1.4.12 signed in by the card on cat.local wrote its token to
   the account's file with no Keychain prompt; and the file both then write is the Profile's login,
-  linked into every root and written back as any login is. Windows is measured
-  before it is decided: whether the session account's vault or a forced file
-  store is what agy reaches there, and the rule that decides is that a login is
-  the Profile's rather than the device's. **Verkstead runs the login** for this
+  linked into every root and written back as any login is. On Windows nothing
+  refuses the keyring — a session runs as Verkstead's session account, whose
+  Credential Manager it reaches like any other, which would make every agy
+  Profile on a device share that one vault — so the file store is *asked for*
+  there instead. *Measured on agy 1.4.12, Windows 11 build 26200, on winvm:*
+  agy has no switch for its store, but it skips the keyring in a session it
+  takes for remote, and a process with `SSH_CONNECTION` in its environment
+  logs *Using file-based token storage because SSH session detected* and keeps
+  its token in the same `antigravity-oauth-token` as on Linux. So every agy
+  process on Windows — session, login and signed-out check — is given that
+  variable, and the Linux design stands unchanged there: one login file per
+  Profile, linked into the root and written back. Rejected: the session
+  account's vault, one login per device. agy offers its sign-in address to a
+  piped standard input on Windows, but it reads the code off its console
+  (`CONIN$`) and never off the pipe, and the console a process started as the
+  session account gets is a hidden one nobody can type into. So on Windows the
+  login runs where a session does, on a pseudoconsole the launcher makes as the
+  account: the code is typed into it, and the address is read off what it
+  draws. **Verkstead runs the login** for this
   harness as ADR-0022 runs Claude's — agy's headless sign-in prints an address
   and reads a code from standard input, the same conversation over pipes — and
   ADR-0022's *Claude only* is amended to say so. Rejected: lending the human's

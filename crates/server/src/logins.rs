@@ -54,8 +54,10 @@
 //! so what runs is `agy -p /help`, which signs in and then prints the commands
 //! without asking a model anything. It offers the address only to a standard
 //! input that is a terminal, so that is the one stream it is given a terminal
-//! for. And it waits a minute for the code, then gives up; while a device is
-//! still looking, a fresh address takes the place of the one that ran out.
+//! for — and on Windows, where it reads the code off its console whatever its
+//! standard input is, the whole of it runs on one (see `Harness::on_a_console`).
+//! And it waits a minute for the code, then gives up; while a device is still
+//! looking, a fresh address takes the place of the one that ran out.
 //!
 //! Claude and the Antigravity CLI only, and only a Profile bound on this device:
 //! one not bound here runs from a copy of its account fetched before every
@@ -855,8 +857,8 @@ impl Harness {
     /// **With a terminal for its standard input** where `on_a_terminal` says
     /// the harness reads its code off one, and pipes for the other two all the same: the harness
     /// asks only whether its input is a terminal, and the address is still
-    /// read off what it prints. Not on Windows, where the logon hands back
-    /// pipes alone.
+    /// read off what it prints. On Windows the whole of it is on a console
+    /// instead — see [`Harness::on_a_console`].
     async fn start(rendering: Rendering, on_a_terminal: bool) -> io::Result<Harness> {
         match Platform::HERE {
             Platform::Windows => {
@@ -873,6 +875,10 @@ impl Harness {
     fn started(rendering: &Rendering, on_a_terminal: bool) -> io::Result<Harness> {
         #[cfg(windows)]
         if let Some(logon) = rendering.account() {
+            if on_a_terminal {
+                return Harness::on_a_console(rendering);
+            }
+
             let held = crate::sandbox::starting::held_open(rendering, logon)?;
             let running = Arc::new(held.running);
 
@@ -934,6 +940,70 @@ impl Harness {
             process: Process::Ordinarily(Box::new(child)),
         })
     }
+
+    /// `rendering` started as the account on a console, for a harness that
+    /// reads its code off one.
+    ///
+    /// **Because on Windows that is not its standard input.** agy 1.4.12 reads
+    /// the code from `CONIN$`, the console's own input, whatever its standard
+    /// input is; and the console `CreateProcessWithLogonW` gives a process is a
+    /// hidden one nothing can type into. Handed the code down a pipe, it went
+    /// on waiting until its minute was up — measured on Windows 11 build 26200.
+    /// So the login runs where a session does, on a pseudoconsole a launcher
+    /// makes as the account (see [`crate::terminal::launcher`]): the code is
+    /// typed into it, its line ending made the Enter a console reads, and what
+    /// it draws is read back as lines — see [`Drawn`]. Everything the harness
+    /// says is on the console, so all of it comes back as what it complained.
+    #[cfg(windows)]
+    fn on_a_console(rendering: &Rendering) -> io::Result<Harness> {
+        use tokio::io::AsyncReadExt;
+
+        let mut terminal = crate::terminal::Terminal::open()?;
+        terminal.resize(DRAWN_WIDE, crate::terminal::ROWS)?;
+
+        let child = terminal.spawn(rendering)?;
+        let terminal = Arc::new(terminal);
+
+        let (typing, mut typed) = tokio::io::duplex(1024);
+        let (mut drawing, drawn) = tokio::io::duplex(64 * 1024);
+
+        tokio::spawn({
+            let terminal = terminal.clone();
+
+            async move {
+                let mut buffer = [0u8; 1024];
+
+                while let Ok(read @ 1..) = typed.read(&mut buffer).await {
+                    let keys: Vec<u8> = buffer[..read]
+                        .iter()
+                        .map(|&key| if key == b'\n' { b'\r' } else { key })
+                        .collect();
+
+                    if terminal.write(&keys).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+
+        // Read to the end whether or not anybody is still reading what it
+        // comes to: a console nobody reads is one whose harness stops.
+        tokio::spawn(async move {
+            let mut buffer = vec![0u8; 16 * 1024];
+            let mut seen = Drawn::default();
+
+            while let Ok(read @ 1..) = terminal.read(&mut buffer).await {
+                let _ = drawing.write_all(&seen.plain(&buffer[..read])).await;
+            }
+        });
+
+        Ok(Harness {
+            typing: Some(Box::new(typing)),
+            printed: None,
+            complained: Some(Box::new(drawn)),
+            process: Process::OnAConsole(child),
+        })
+    }
 }
 
 /// The process of a [`Harness`].
@@ -949,6 +1019,11 @@ enum Process {
         running: Arc<crate::sandbox::starting::Running>,
         exited: oneshot::Receiver<io::Result<ExitStatus>>,
     },
+
+    /// Or as the account on a console — see [`Harness::on_a_console`]. Its Job
+    /// ends it as it is dropped.
+    #[cfg(windows)]
+    OnAConsole(crate::terminal::Child),
 }
 
 impl Process {
@@ -962,6 +1037,9 @@ impl Process {
             Process::AsTheAccount { exited, .. } => exited
                 .await
                 .unwrap_or_else(|_| Err(io::Error::other("nothing was left waiting for it"))),
+
+            #[cfg(windows)]
+            Process::OnAConsole(child) => child.wait().await,
         }
     }
 
@@ -975,6 +1053,11 @@ impl Process {
             #[cfg(windows)]
             Process::AsTheAccount { running, .. } => {
                 let _ = running.kill();
+            }
+
+            #[cfg(windows)]
+            Process::OnAConsole(child) => {
+                let _ = child.start_kill();
             }
         }
     }
@@ -1025,6 +1108,97 @@ fn keyboard() -> io::Result<(tokio::fs::File, std::os::fd::OwnedFd)> {
         keyboard,
     ))
 }
+
+/// What a pseudoconsole draws, made back into the plain lines a pipe would have
+/// carried — see [`Harness::on_a_console`].
+///
+/// **A console draws a screen rather than printing lines**: colours, a cursor
+/// that is hidden and shown, a title, and a cursor moved to where the next line
+/// goes as often as a line ending. So every sequence is dropped, a move of the
+/// cursor to a place is read as a line ending, a move of it forward as a space,
+/// and a carriage return as nothing. Kept from one read to the next, because a
+/// sequence can be cut between two of them.
+#[derive(Default)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct Drawn {
+    within: Within,
+}
+
+/// Where in a sequence the last read left off.
+#[derive(Default, Clone, Copy, PartialEq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+enum Within {
+    /// Text.
+    #[default]
+    Nothing,
+    /// An escape, and nothing yet after it.
+    Escape,
+    /// An escape and one byte more to come — a character set chosen.
+    Chosen,
+    /// A control sequence, up to its final byte.
+    Control,
+    /// An operating system command, up to its bell or its terminator.
+    Command,
+    /// An escape inside one of those, which is the first half of its
+    /// terminator.
+    Ending,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl Drawn {
+    /// `bytes` as plain text. Bytes rather than a string, because a character
+    /// can be cut between two reads as well.
+    fn plain(&mut self, bytes: &[u8]) -> Vec<u8> {
+        const ESCAPE: u8 = 0x1b;
+        const BELL: u8 = 0x07;
+
+        let mut plain = Vec::with_capacity(bytes.len());
+
+        for &byte in bytes {
+            self.within = match (self.within, byte) {
+                (Within::Nothing, ESCAPE) => Within::Escape,
+                (Within::Nothing, b'\n' | b'\t') => {
+                    plain.push(byte);
+                    Within::Nothing
+                }
+                (Within::Nothing, byte) if byte < 0x20 || byte == 0x7f => Within::Nothing,
+                (Within::Nothing, byte) => {
+                    plain.push(byte);
+                    Within::Nothing
+                }
+
+                (Within::Escape, b'[') => Within::Control,
+                (Within::Escape, b']') => Within::Command,
+                (Within::Escape, b'(' | b')' | b'*' | b'+') => Within::Chosen,
+                (Within::Escape | Within::Chosen, _) => Within::Nothing,
+
+                // The final byte, which says what the sequence was.
+                (Within::Control, 0x40..=0x7e) => {
+                    match byte {
+                        b'H' | b'f' => plain.push(b'\n'),
+                        b'C' => plain.push(b' '),
+                        _ => {}
+                    }
+                    Within::Nothing
+                }
+                (Within::Control, _) => Within::Control,
+
+                (Within::Command, BELL) => Within::Nothing,
+                (Within::Command, ESCAPE) => Within::Ending,
+                (Within::Command, _) => Within::Command,
+                (Within::Ending, _) => Within::Nothing,
+            };
+        }
+
+        plain
+    }
+}
+
+/// How wide the console a login is drawn on is: wider than the address agy
+/// 1.4.12 prints, 704 characters, so that it is drawn as one line of it rather
+/// than cut where a window of [`crate::terminal::COLUMNS`] would wrap it.
+#[cfg(windows)]
+const DRAWN_WIDE: u16 = 2048;
 
 /// The address in a line the harness printed, where it is the line that
 /// carries one — see [`Speaking::visit`].
@@ -1253,6 +1427,42 @@ mod tests {
                 &AGY
             ),
             None
+        );
+    }
+
+    /// What a pseudoconsole draws, read back as the lines a pipe would have
+    /// carried: its colours and its cursor gone, a move of the cursor read as
+    /// a line ending, and a sequence cut between two reads still taken whole.
+    #[test]
+    fn what_a_console_draws_is_read_as_lines() {
+        let mut drawn = Drawn::default();
+
+        let first = drawn.plain(
+            b"\x1b[?25l\x1b[2J\x1b[m\x1b[HAuthentication required. Please visit the URL to log in:\
+              \r\n\x1b[2Chttps://accounts.google.com/o/oauth2/auth?state=x\x1b[K\r\n\x1b]0;agy\x07\
+              \x1b[4;1HWaiting for authentication (timeout 60s)...\x1b",
+        );
+        let second = drawn.plain(b"[KOr,\x1b[1Cpaste the authorization code here:\x1b[?25h");
+
+        let lines: Vec<String> = String::from_utf8([first, second].concat())
+            .expect("what was drawn is text")
+            .lines()
+            .map(str::to_owned)
+            .collect();
+
+        assert_eq!(
+            lines,
+            [
+                "",
+                "Authentication required. Please visit the URL to log in:",
+                " https://accounts.google.com/o/oauth2/auth?state=x",
+                "",
+                "Waiting for authentication (timeout 60s)...Or, paste the authorization code here:",
+            ]
+        );
+        assert_eq!(
+            address_in(&lines[2], &AGY),
+            Some("https://accounts.google.com/o/oauth2/auth?state=x".to_owned())
         );
     }
 
