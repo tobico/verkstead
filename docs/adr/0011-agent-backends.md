@@ -57,7 +57,13 @@ a section of its own, measured against agy 1.4.12 on this machine signed out:
   write an item and `curl`, `git` over https, name lookups and `id` as they
   were, and agy 1.4.12 signed in by the card on cat.local wrote its token to
   the account's file with no Keychain prompt; and the file both then write is the Profile's login,
-  linked into every root and written back as any login is. On Windows nothing
+  linked into every root and written back as any login is. **The refusal is
+  every Mac session's, not agy's alone**, Claude's included: a session that
+  reaches the Keychain reaches whatever the human keeps in it. So a Claude
+  login kept only in a Mac's Keychain no longer reaches a session there, and
+  reads as signed out in it; the fix is the card's login, which runs inside
+  the same policy and so writes `.credentials.json` into the account, the file
+  every other platform's Claude login already is. On Windows nothing
   refuses the keyring — a session runs as Verkstead's session account, whose
   Credential Manager it reaches like any other, which would make every agy
   Profile on a device share that one vault — so the file store is *asked for*

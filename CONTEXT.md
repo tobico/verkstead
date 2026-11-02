@@ -3979,7 +3979,10 @@ this device's own reading of its membership — the reading a machine is drawn
 unreachable off in the sidebar — and **names no device**: what is missing is a
 source, any of them. A binding whose account holds no login file is no source,
 which is what a Claude login in the macOS Keychain comes to, and a sign-out
-there with it; the fix is a login on that machine. **Or the harness is not on
+there with it; the fix is a login on that machine. And a Claude login kept only
+in a Mac's Keychain runs no session even there: every Mac session is refused
+the Keychain (ADR-0011), so it reads as signed out, and the card's login, which
+writes `.credentials.json` into the account, is the fix there too. **Or the harness is not on
 this machine**, which is the onboarding probe's own question answered in the
 onboarding probe's own words, rather than a second vocabulary for one fact.
 **Whether an account holds a login file is its binding's to say**, and the
@@ -3987,7 +3990,7 @@ device bound on it is the one that looks — at every read of its Profiles, at i
 start, and as a login written back lands — writing it on its binding where it
 moved, which replicates. On the device it is bound on an account with none says
 *it cannot be used from another device*, which is a note rather than a trouble:
-it is perfectly runnable there.
+it is perfectly runnable there, the Mac Keychain's Claude login above aside.
 **Refused rather than hidden.** Neither takes the row out of a picker or out of
 the Profiles section, and a Conversation paired with one reads as paired with a
 **broken** Profile rather than as one nothing was picked for: a row saying why
