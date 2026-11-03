@@ -70,6 +70,7 @@
           "author": null,
           "author_unpicked": false,
           "default_branch": "trunk",
+          "github": null,
           "id": 2,
           "name": "askance",
           "path": ""
@@ -100,6 +101,7 @@
       "author": null,
       "author_unpicked": false,
       "default_branch": "main",
+      "github": null,
       "id": 1,
       "name": "verkstead",
       "path": ""
