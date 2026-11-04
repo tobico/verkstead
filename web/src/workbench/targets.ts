@@ -10,6 +10,8 @@
 //!   opened against.
 //! - [`pullRequestIn`] scans *prose* for the first name in it, which is what
 //!   fills an empty Target from the Brief.
+//! - [`pullRequestRepository`] asks whether the whole of a Brief is one pull
+//!   request URL, which is what fills the Repo and the Process from it.
 //!
 //! **A second copy of a reading the server has** — `crates/server/src/targets.rs`,
 //! which is the one that decides anything. It is here because the compose page
@@ -27,7 +29,7 @@
 /// the `/files` tab, a trailing slash — because those are what is in the
 /// address bar when somebody copies one.
 const FIELD =
-  /^(?:(?:https?:\/\/)?(?:www\.)?github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)(?:[/?#].*)?|#(\d+))$/i;
+  /^(?:(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?:[/?#].*)?|#(\d+))$/i;
 
 /// And the same two anywhere in a sentence, for the Brief.
 ///
@@ -63,4 +65,22 @@ export function pullRequestIn(brief: string): string | null {
   return owner !== undefined && repo !== undefined && numbered !== undefined
     ? `https://github.com/${owner}/${repo}/pull/${numbered}`
     : `#${hashed}`;
+}
+
+/// And the `owner/repo` of the pull request a Brief is, where the whole of the
+/// Brief is one pull request URL and nothing else.
+///
+/// `null` for prose with a URL in it, and for a bare `#41`: writing about a
+/// pull request is not asking for its merge to be fixed, and a number names no
+/// repository. The server's own reading is `pull_request_named` over the
+/// trimmed Brief — see `save_brief` in `crates/server/src/conversations.rs`.
+export function pullRequestRepository(brief: string): string | null {
+  const found = FIELD.exec(brief.trim());
+  if (found === null) {
+    return null;
+  }
+
+  const [, owner, repo] = found;
+
+  return owner !== undefined && repo !== undefined ? `${owner}/${repo}` : null;
 }

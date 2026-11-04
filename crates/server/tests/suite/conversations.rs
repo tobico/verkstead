@@ -13353,6 +13353,272 @@ async fn a_brief_leaves_a_target_somebody_typed_exactly_as_it_was() {
     );
 }
 
+/// Register one more repository beside the workbench's, under `name` with
+/// `origin` as its `origin` remote where one is given, and hand back its id.
+async fn registered_with_origin(
+    app: &Router,
+    elsewhere: &Path,
+    name: &str,
+    origin: Option<&str>,
+) -> i64 {
+    let path = repository(elsewhere.join(name));
+
+    if let Some(origin) = origin {
+        git(&path, &["remote", "add", "origin", origin]);
+    }
+
+    match post(app, "/api/ui/repos", &serde_json::json!({ "path": path })).await {
+        Registered::Added(entry) => entry.id,
+        other => panic!("expected {name} to register, got {other:?}"),
+    }
+}
+
+/// A Brief that is one pull request URL and nothing else moves the Draft onto
+/// the Repo whose origin is that repository, and makes it a Fix Merge Issues —
+/// with the Target filled beside them as it always was.
+#[tokio::test]
+async fn a_brief_that_is_one_pull_request_url_picks_its_repo_and_process() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let limiter = registered_with_origin(
+        &app,
+        elsewhere.path(),
+        "limiter",
+        Some("git@github.com:Tobico/Limiter.git"),
+    )
+    .await;
+
+    // The list says which repository on GitHub each Repo is, and nothing for
+    // one with no origin.
+    let repos: Vec<RepoEntry> = get(&app, "/api/ui/repos").await;
+    let github = |id: i64| {
+        repos
+            .iter()
+            .find(|repo| repo.id == id)
+            .and_then(|repo| repo.github.clone())
+    };
+    assert_eq!(github(limiter).as_deref(), Some("Tobico/Limiter"));
+    assert_eq!(github(repo_id), None);
+
+    let id = started(&app, repo_id).await;
+    assert_eq!(
+        write_brief(
+            &app,
+            id,
+            "  https://github.com/tobico/limiter/pull/41/files\n",
+        )
+        .await,
+        BriefSaved::Saved,
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(
+        view.repo.id, limiter,
+        "matched by origin, whatever its case"
+    );
+    assert_eq!(view.process, Process::FixMergeIssues);
+    assert_eq!(
+        view.target.as_deref(),
+        Some("https://github.com/tobico/limiter/pull/41"),
+    );
+
+    // And the URL leaving the Brief undoes none of it.
+    assert_eq!(
+        write_brief(&app, id, "Something else entirely.\n").await,
+        BriefSaved::Saved,
+    );
+    let view = opened(&app, id).await;
+    assert_eq!(view.repo.id, limiter);
+    assert_eq!(view.process, Process::FixMergeIssues);
+}
+
+/// Prose around the URL, and a bare number, fill the Target and nothing else:
+/// writing about a pull request is not asking for its merge to be fixed, and
+/// `#41` names no repository.
+#[tokio::test]
+async fn a_brief_naming_a_pull_request_among_other_words_picks_neither() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    registered_with_origin(
+        &app,
+        elsewhere.path(),
+        "limiter",
+        Some("https://github.com/tobico/limiter"),
+    )
+    .await;
+
+    for brief in [
+        "Wrap up https://github.com/tobico/limiter/pull/41 please.\n",
+        "#41\n",
+    ] {
+        let id = started(&app, repo_id).await;
+        assert_eq!(write_brief(&app, id, brief).await, BriefSaved::Saved);
+
+        let view = opened(&app, id).await;
+        assert_eq!(view.repo.id, repo_id, "{brief:?} moves nothing");
+        assert_eq!(view.process, Process::Develop, "{brief:?} picks nothing");
+        assert!(view.target.is_some(), "{brief:?} still fills the Target");
+    }
+}
+
+/// The fill owns what it wrote and goes on correcting it while it does, and
+/// lets go of whatever the human picks by hand.
+#[tokio::test]
+async fn a_brief_fill_corrects_itself_and_leaves_a_hand_pick_standing() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let limiter = registered_with_origin(
+        &app,
+        elsewhere.path(),
+        "limiter",
+        Some("https://github.com/tobico/limiter.git"),
+    )
+    .await;
+    let askance = registered_with_origin(
+        &app,
+        elsewhere.path(),
+        "askance",
+        Some("https://github.com/tobico/askance"),
+    )
+    .await;
+
+    // Pasted over: the Repo and the Target follow the URL while they are the
+    // fill's.
+    let id = started(&app, repo_id).await;
+    write_brief(&app, id, "https://github.com/tobico/limiter/pull/4").await;
+    write_brief(&app, id, "https://github.com/tobico/askance/pull/7").await;
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.repo.id, askance);
+    assert_eq!(
+        view.target.as_deref(),
+        Some("https://github.com/tobico/askance/pull/7"),
+    );
+
+    // Picked by hand, and a further paste leaves both standing.
+    let switched: RepoSwitched = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/repo"),
+        &serde_json::json!({ "repo_id": repo_id }),
+    )
+    .await;
+    assert_eq!(switched, RepoSwitched::Switched);
+    assert_eq!(
+        pick_process(&app, id, Process::Review).await,
+        ProcessPicked::Picked,
+    );
+
+    write_brief(&app, id, "https://github.com/tobico/limiter/pull/9").await;
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.repo.id, repo_id, "the human's Repo stands");
+    assert_eq!(view.process, Process::Review, "the human's Process stands");
+
+    // A Process picked before any URL arrived stands just the same.
+    let second = started(&app, repo_id).await;
+    pick_process(&app, second, Process::Investigate).await;
+    write_brief(&app, second, "https://github.com/tobico/limiter/pull/9").await;
+
+    let view = opened(&app, second).await;
+    assert_eq!(view.process, Process::Investigate);
+    assert_eq!(view.repo.id, limiter);
+
+    // And so does a Repo switched by hand before any URL arrived.
+    let third = started(&app, repo_id).await;
+    let switched: RepoSwitched = post(
+        &app,
+        &format!("/api/ui/conversations/{third}/repo"),
+        &serde_json::json!({ "repo_id": askance }),
+    )
+    .await;
+    assert_eq!(switched, RepoSwitched::Switched);
+    write_brief(&app, third, "https://github.com/tobico/limiter/pull/9").await;
+
+    let view = opened(&app, third).await;
+    assert_eq!(view.repo.id, askance, "the human's Repo stands");
+    assert_eq!(view.process, Process::FixMergeIssues);
+}
+
+/// A URL of a repository nothing registered is a clone of moves nothing, and
+/// still makes the work a Fix Merge Issues.
+#[tokio::test]
+async fn a_brief_url_no_repo_matches_leaves_the_repo_alone() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    registered_with_origin(
+        &app,
+        elsewhere.path(),
+        "limiter",
+        Some("https://gitlab.com/tobico/limiter"),
+    )
+    .await;
+
+    let id = started(&app, repo_id).await;
+    write_brief(&app, id, "https://github.com/tobico/limiter/pull/41").await;
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.repo.id, repo_id);
+    assert_eq!(view.process, Process::FixMergeIssues);
+}
+
+/// Two clones of the one repository: the Draft already on one of them stays
+/// there, and a Draft on neither takes the first the registry lists.
+#[tokio::test]
+async fn a_brief_url_two_clones_match_keeps_the_one_picked() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = registered_with_origin(
+        &app,
+        elsewhere.path(),
+        "limiter",
+        Some("https://github.com/tobico/limiter"),
+    )
+    .await;
+    let second = registered_with_origin(
+        &app,
+        elsewhere.path(),
+        "limiter-again",
+        Some("git@github.com:tobico/limiter.git"),
+    )
+    .await;
+
+    let on_second = started(&app, second).await;
+    write_brief(&app, on_second, "https://github.com/tobico/limiter/pull/41").await;
+    assert_eq!(opened(&app, on_second).await.repo.id, second);
+
+    let on_neither = started(&app, repo_id).await;
+    write_brief(
+        &app,
+        on_neither,
+        "https://github.com/tobico/limiter/pull/41",
+    )
+    .await;
+    let listed: Vec<RepoEntry> = get(&app, "/api/ui/repos").await;
+    let first_listed = listed
+        .iter()
+        .find(|repo| repo.id == first || repo.id == second)
+        .unwrap()
+        .id;
+    assert_eq!(opened(&app, on_neither).await.repo.id, first_listed);
+}
+
+/// A Draft's Target follows a name being typed, `#4` on the way to `#41`, while
+/// it still holds what the Brief last filled it with.
+#[tokio::test]
+async fn a_drafts_target_follows_a_name_being_typed() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    write_brief(&app, id, "Wrap up #4").await;
+    assert_eq!(opened(&app, id).await.target.as_deref(), Some("#4"));
+
+    write_brief(&app, id, "Wrap up #41").await;
+    assert_eq!(opened(&app, id).await.target.as_deref(), Some("#41"));
+
+    // And once typed in, it is the human's.
+    name_target(&app, id, "rate-limiting").await;
+    write_brief(&app, id, "Wrap up #42").await;
+    assert_eq!(
+        opened(&app, id).await.target.as_deref(),
+        Some("rate-limiting"),
+    );
+}
+
 /// A Review's Start waits on the Target as well as on the Brief and the two
 /// Pairings, and the press takes up what the *field* names — not what the Brief
 /// happens to say.

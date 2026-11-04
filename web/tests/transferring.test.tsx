@@ -246,6 +246,7 @@ const CLONED_THERE: RepoEntry = {
   default_branch: "main",
   author: "work",
   author_unpicked: false,
+  github: null,
 };
 
 const NO_HARNESS = {

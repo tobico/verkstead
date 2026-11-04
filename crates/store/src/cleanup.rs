@@ -199,6 +199,7 @@ const CONVERSATION_KEYED: &[&str] = &[
     "directions",
     "processes",
     "targets",
+    "brief_fills",
     "stage_branches",
     "stage_roadmaps",
     "stage_joinings",

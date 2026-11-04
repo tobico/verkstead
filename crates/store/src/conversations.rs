@@ -1469,6 +1469,32 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the targets table")?;
 
+    // And what the Brief last filled the Target, the Repo and the Process with,
+    // each where it has filled one: what a fill reads to say whether the field
+    // is still its own to write. A field holding what the fill last wrote is
+    // the fill's, and goes on being corrected as the Brief is typed; one holding
+    // anything else is the human's, and is never written over. See
+    // [`fill_target`], [`fill_repo`] and [`fill_process`].
+    //
+    // Never written by the human's own picks — those are what it is compared
+    // against — but for `repo_picked`: every Conversation has a Repo from birth,
+    // so nothing standing says whether one was picked, and the human's own
+    // [`switch_repo`] sets it to say so. And no foreign key on the Repo, which may since have left the
+    // registry: a mark naming a Repo nothing is on is a Repo the fill does not
+    // own, which is the right answer.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS brief_fills (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             target          TEXT,
+             repo_id         INTEGER,
+             repo_picked     INTEGER NOT NULL DEFAULT 0,
+             process         TEXT
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the brief_fills table")?;
+
     // What a roadmap stage's branch was put on top of, where it was put on top
     // of anything. A table of its own for the reason the direction is one, and
     // one row per stage Conversation — written by [`start_stage`] and by nothing
@@ -3113,29 +3139,247 @@ pub async fn set_target(pool: &SqlitePool, id: i64, target: Option<&str>) -> Res
     Ok(Edited::Saved)
 }
 
-/// Fill an empty Target, and leave a filled one exactly as it is.
+/// Fill the Target from the Brief, while it is the Brief's to fill.
 ///
-/// What a saved Brief does with the pull request its prose names. The human's
-/// own typing is never overwritten — a branch somebody named survives a URL
-/// arriving in the Brief afterwards — so this is the insert that does nothing
-/// where there is a row, rather than a read followed by a write that could race
-/// the keystroke between them.
+/// What a saved Brief does with the pull request its prose names. **The Target
+/// is the fill's while it holds what the fill last wrote**, or is empty and the
+/// fill has written nothing — so a name typed a character at a time, `#4` on
+/// the way to `#41`, is corrected as the Brief is saved, and stops being
+/// corrected the moment the human types in the field. Their own typing is
+/// never overwritten: a branch somebody named survives a URL arriving in the
+/// Brief afterwards. The compose page keeps the same rule for a page that has
+/// no Conversation yet.
 ///
-/// Refused for nothing, and asked only where a Brief has just been saved: that
-/// save is refused past drafting, so a Conversation this is reached for is one
-/// whose Target is still its own to change.
+/// Read and written in one transaction, so a keystroke in the field cannot land
+/// between the look and the write.
+///
+/// Refused for nothing it does not say: a Conversation past drafting, or with
+/// its branch cut, is left alone, and so is one whose field is the human's.
 pub async fn fill_target(pool: &SqlitePool, id: i64, target: &str) -> Result<()> {
+    let mut tx = super::writing(pool, "filling a Target from its Brief").await?;
+
+    if not_drafting(&mut tx, id).await?.is_some() || branch_made(&mut tx, id).await? {
+        return Ok(());
+    }
+
+    let standing: Option<(String,)> =
+        sqlx::query_as("SELECT target FROM targets WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await
+            .with_context(|| format!("reading what Conversation {id} is pointed at"))?;
+    let standing = standing.map(|(target,)| target);
+    let filled = brief_filled(&mut tx, id).await?;
+
+    if standing != filled.target {
+        return Ok(());
+    }
+
     sqlx::query(
         "INSERT INTO targets (conversation_id, target) VALUES (?, ?)
-         ON CONFLICT (conversation_id) DO NOTHING",
+         ON CONFLICT (conversation_id) DO UPDATE SET target = excluded.target",
     )
     .bind(id)
     .bind(target)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .with_context(|| format!("filling the Target of Conversation {id} out of its Brief"))?;
 
+    sqlx::query(
+        "INSERT INTO brief_fills (conversation_id, target) VALUES (?, ?)
+         ON CONFLICT (conversation_id) DO UPDATE SET target = excluded.target",
+    )
+    .bind(id)
+    .bind(target)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("marking the Target of Conversation {id} as filled"))?;
+
+    tx.commit()
+        .await
+        .context("filling a Target from its Brief")?;
+
     Ok(())
+}
+
+/// Fill the Process from the Brief, while it is the Brief's to fill.
+///
+/// What a Brief that is one pull request URL and nothing else does: that is
+/// asking for the pull request to be made mergeable, so the Process becomes
+/// Fix Merge Issues. The rule [`fill_target`] keeps — the Process is the fill's
+/// while it is what the fill last wrote, or is still nobody's pick and the fill
+/// has written nothing — so a Process somebody picked by hand stands.
+///
+/// "Nobody's pick" is no row in `processes`, which is what every Draft starts
+/// as and what reads as Develop.
+pub async fn fill_process(pool: &SqlitePool, id: i64, process: Process) -> Result<()> {
+    let mut tx = super::writing(pool, "filling a Process from its Brief").await?;
+
+    if not_drafting(&mut tx, id).await?.is_some() || branch_made(&mut tx, id).await? {
+        return Ok(());
+    }
+
+    let standing: Option<(String,)> =
+        sqlx::query_as("SELECT process FROM processes WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await
+            .with_context(|| format!("reading the Process of Conversation {id}"))?;
+    let standing = standing.map(|(word,)| word);
+    let filled = brief_filled(&mut tx, id).await?;
+
+    if standing != filled.process {
+        return Ok(());
+    }
+
+    sqlx::query(
+        "INSERT INTO processes (conversation_id, process) VALUES (?, ?)
+         ON CONFLICT (conversation_id) DO UPDATE SET process = excluded.process",
+    )
+    .bind(id)
+    .bind(process.stored())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("filling the Process of Conversation {id} out of its Brief"))?;
+
+    sqlx::query(
+        "INSERT INTO brief_fills (conversation_id, process) VALUES (?, ?)
+         ON CONFLICT (conversation_id) DO UPDATE SET process = excluded.process",
+    )
+    .bind(id)
+    .bind(process.stored())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("marking the Process of Conversation {id} as filled"))?;
+
+    tx.commit()
+        .await
+        .context("filling a Process from its Brief")?;
+
+    Ok(())
+}
+
+/// Whether the Repo is still the Brief's to fill: the Repo it stands on, where
+/// it is, and `None` where the human has moved it since the fill last did.
+///
+/// **Every Conversation has a Repo from birth**, so there is no empty Repo to
+/// say "nobody picked" the way an empty Target does: a Repo the fill has never
+/// written, and nobody has switched by hand, is the fill's to write once, and
+/// from then on it is the fill's only while it is still the one the fill wrote.
+/// A switch by hand makes it the human's for good, whenever it came. Asked by the server before it
+/// moves the work, the move itself being [`fill_repo`].
+pub async fn repo_to_fill(pool: &SqlitePool, id: i64) -> Result<Option<i64>> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .with_context(|| format!("reading whether Conversation {id}'s Repo is its Brief's"))?;
+
+    let standing: Option<(i64,)> = sqlx::query_as("SELECT repo_id FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *connection)
+        .await
+        .with_context(|| format!("reading the Repo of Conversation {id}"))?;
+
+    let Some((standing,)) = standing else {
+        return Ok(None);
+    };
+
+    Ok(brief_filled(&mut connection, id)
+        .await?
+        .owns_repo(standing)
+        .then_some(standing))
+}
+
+/// Move a drafting Conversation onto `repo_id` as the Brief's fill, and mark it
+/// so: `true` where it did, and `false` where [`switch_repo`] would have refused
+/// the move or the human has moved the Repo by hand.
+///
+/// The same move as the human's own, the base going back to the rule and a
+/// companion equal to the Repo dropping away, in the same transaction as the
+/// look that says the Repo is still the fill's. A Conversation already on
+/// `repo_id` is only marked, so the fill owns the Repo it agreed with.
+pub async fn fill_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<bool> {
+    let mut tx = super::writing(pool, "filling a Repo from its Brief").await?;
+
+    let standing: Option<(i64,)> = sqlx::query_as("SELECT repo_id FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the Repo of Conversation {id}"))?;
+
+    let Some((standing,)) = standing else {
+        return Ok(false);
+    };
+
+    if !brief_filled(&mut tx, id).await?.owns_repo(standing) {
+        return Ok(false);
+    }
+
+    if standing != repo_id && switching(&mut tx, id, repo_id).await?.is_some() {
+        return Ok(false);
+    }
+
+    sqlx::query(
+        "INSERT INTO brief_fills (conversation_id, repo_id) VALUES (?, ?)
+         ON CONFLICT (conversation_id) DO UPDATE SET repo_id = excluded.repo_id",
+    )
+    .bind(id)
+    .bind(repo_id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("marking the Repo of Conversation {id} as filled"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("moving Conversation {id} onto Repo {repo_id} from its Brief"))?;
+
+    Ok(true)
+}
+
+/// What the Brief last filled each field with — nothing in each where it has
+/// filled nothing.
+#[derive(Debug, Default)]
+struct BriefFilled {
+    target: Option<String>,
+    repo_id: Option<i64>,
+    /// Whether the human has switched the Repo by hand, which takes it from the
+    /// fill for good.
+    repo_picked: bool,
+    process: Option<String>,
+}
+
+impl BriefFilled {
+    /// Whether the Repo standing at `standing` is still the fill's: nobody has
+    /// switched it by hand, and the fill has either written nothing or wrote
+    /// this one.
+    fn owns_repo(&self, standing: i64) -> bool {
+        !self.repo_picked && self.repo_id.is_none_or(|filled| filled == standing)
+    }
+}
+
+/// A `brief_fills` row as it is read: target, repo, whether the Repo was picked
+/// by hand, and process.
+type BriefFillsRow = (Option<String>, Option<i64>, bool, Option<String>);
+
+/// Read [`BriefFilled`] for one Conversation.
+async fn brief_filled(tx: &mut sqlx::SqliteConnection, id: i64) -> Result<BriefFilled> {
+    let row: Option<BriefFillsRow> = sqlx::query_as(
+        "SELECT target, repo_id, repo_picked, process FROM brief_fills
+         WHERE conversation_id = ?",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| format!("reading what Conversation {id}'s Brief last filled"))?;
+
+    Ok(row
+        .map(|(target, repo_id, repo_picked, process)| BriefFilled {
+            target,
+            repo_id,
+            repo_picked,
+            process,
+        })
+        .unwrap_or_default())
 }
 
 /// Which roadmap a Conversation is adopting, where it is adopting one.
@@ -4413,30 +4657,60 @@ pub enum Switched {
 pub async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Switched> {
     let mut tx = super::writing(pool, "moving a Conversation onto another Repo").await?;
 
-    if let Some(refusal) = not_drafting(&mut tx, id).await? {
-        return Ok(match refusal {
+    if let Some(refused) = switching(&mut tx, id, repo_id).await? {
+        return Ok(refused);
+    }
+
+    // A move by hand, which the Brief's fill never moves again — see
+    // [`fill_repo`].
+    sqlx::query(
+        "INSERT INTO brief_fills (conversation_id, repo_picked) VALUES (?, 1)
+         ON CONFLICT (conversation_id) DO UPDATE SET repo_picked = 1",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("marking the Repo of Conversation {id} as picked"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("moving Conversation {id} onto Repo {repo_id}"))?;
+
+    Ok(Switched::Switched)
+}
+
+/// [`switch_repo`]'s move inside a transaction already open, and the refusal
+/// where there is one — shared with [`fill_repo`], which marks the move as the
+/// Brief's in the same transaction.
+async fn switching(
+    tx: &mut sqlx::SqliteConnection,
+    id: i64,
+    repo_id: i64,
+) -> Result<Option<Switched>> {
+    if let Some(refusal) = not_drafting(&mut *tx, id).await? {
+        return Ok(Some(match refusal {
             Edited::NoSuchConversation => Switched::NoSuchConversation,
             _ => Switched::NotDrafting,
-        });
+        }));
     }
 
-    if branch_made(&mut tx, id).await? {
-        return Ok(Switched::NotDrafting);
+    if branch_made(&mut *tx, id).await? {
+        return Ok(Some(Switched::NotDrafting));
     }
 
-    if adopting_on(&mut tx, id).await?.is_some() {
-        return Ok(Switched::Adopting);
+    if adopting_on(&mut *tx, id).await?.is_some() {
+        return Ok(Some(Switched::Adopting));
     }
 
     // On the registry rather than merely in the table, for the reason a
     // companion is: what a Conversation may be moved onto is what the human has
     // registered, and one taken off it is no more choosable than one that was
     // never there.
-    if super::repos::registered_on(&mut tx, repo_id)
+    if super::repos::registered_on(&mut *tx, repo_id)
         .await?
         .is_none()
     {
-        return Ok(Switched::NoSuchRepo);
+        return Ok(Some(Switched::NoSuchRepo));
     }
 
     sqlx::query("UPDATE conversations SET repo_id = ?, base_commit = NULL WHERE id = ?")
@@ -4453,11 +4727,7 @@ pub async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Swi
         .await
         .with_context(|| format!("dropping Repo {repo_id} as a companion of Conversation {id}"))?;
 
-    tx.commit()
-        .await
-        .with_context(|| format!("moving Conversation {id} onto Repo {repo_id}"))?;
-
-    Ok(Switched::Switched)
+    Ok(None)
 }
 
 /// The reason this Conversation is not the human's to edit, or `None` where it

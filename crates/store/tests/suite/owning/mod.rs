@@ -28,14 +28,14 @@ use verkstead_store::{
     Rollup, Settlements, Standing, Summary, WaitingOn, add_companion, add_to_set, append_capture,
     append_transcript, archive_conversation, ask, ask_on_our_own, ask_to_transfer, attach,
     attach_mcp_server, close_conversation, continue_on_arrival, create_profile, end_session,
-    leave_memo, lock_set, lock_set_saying, nothing_else, open_database, open_pending_steer,
-    permit_device, pick_direction, record_addressed_comments, record_backlog, record_check_rollup,
-    record_commit, record_conflict_fix_attempt, record_delivery, record_fix_attempt,
-    record_merging, record_pull_request, record_share, record_share_comment, record_standing,
-    register_repo, save_brief, save_pending_steer, set_grilling_pairing, set_process, set_target,
-    settle_wrap_up, skip_review, stamp_unseen, start_capture, start_conversation, start_grilling,
-    start_implementing, stop, submit_response, suggest_preview, tell, trim_conversation,
-    unarchive_conversation,
+    fill_target, leave_memo, lock_set, lock_set_saying, nothing_else, open_database,
+    open_pending_steer, permit_device, pick_direction, record_addressed_comments, record_backlog,
+    record_check_rollup, record_commit, record_conflict_fix_attempt, record_delivery,
+    record_fix_attempt, record_merging, record_pull_request, record_share, record_share_comment,
+    record_standing, register_repo, save_brief, save_pending_steer, set_grilling_pairing,
+    set_process, set_target, settle_wrap_up, skip_review, stamp_unseen, start_capture,
+    start_conversation, start_grilling, start_implementing, stop, submit_response, suggest_preview,
+    tell, trim_conversation, unarchive_conversation,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -257,6 +257,10 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
         set_process(pool, id, Process::Develop).await.unwrap(),
         Edited::Saved,
     );
+
+    // Filled from the Brief first and typed over after, which leaves a mark of
+    // what the Brief filled beside what the human typed.
+    fill_target(pool, id, "#4").await.unwrap();
 
     assert_eq!(
         set_target(pool, id, Some("#41")).await.unwrap(),

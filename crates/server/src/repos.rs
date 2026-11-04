@@ -143,7 +143,7 @@ async fn registering(
 ) -> Result<Registered> {
     let facts = match tokio::task::spawn_blocking(move || inspect(&asked)).await? {
         Ok(facts) => facts,
-        Err(refusal) => return Ok(refusal),
+        Err(refusal) => return Ok(*refusal),
     };
 
     // The Repo goes back either way, because both of these leave one registered
@@ -202,6 +202,21 @@ pub(crate) fn entry(repo: store::Repo, authors: &[Author]) -> RepoEntry {
         default_branch: repo.default_branch,
         author_unpicked: unpicked(repo.author.as_deref(), authors),
         author: repo.author,
+        github: None,
+    }
+}
+
+/// And the same row with the GitHub repository its origin is filled in: what
+/// the list of Repos draws, and nothing else.
+///
+/// One `git remote get-url` per Repo, which is the list's cost and no other
+/// page's — see [`RepoEntry::github`].
+pub(crate) fn listed(repo: store::Repo, authors: &[Author]) -> RepoEntry {
+    let github = origin(&repo.path).and_then(|origin| crate::matching::github_repository(&origin));
+
+    RepoEntry {
+        github,
+        ..entry(repo, authors)
     }
 }
 
@@ -746,19 +761,19 @@ struct Facts {
 
 /// Everything the filesystem and git have to say about a path someone wants
 /// registered — or the reason it is not going to be.
-fn inspect(asked: &Path) -> Result<Facts, Registered> {
+fn inspect(asked: &Path) -> Result<Facts, Box<Registered>> {
     let path = match resolve(asked) {
         Resolved::At(path) => path,
-        Resolved::NotAbsolute => return Err(Registered::NotAbsolute),
-        Resolved::Missing => return Err(Registered::Missing),
+        Resolved::NotAbsolute => return Err(Box::new(Registered::NotAbsolute)),
+        Resolved::Missing => return Err(Box::new(Registered::Missing)),
     };
 
     if !is_repository_root(&path) {
-        return Err(Registered::NotARepository);
+        return Err(Box::new(Registered::NotARepository));
     }
 
     let Some(default_branch) = default_branch(&path) else {
-        return Err(Registered::NoDefaultBranch);
+        return Err(Box::new(Registered::NoDefaultBranch));
     };
 
     Ok(Facts {

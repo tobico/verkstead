@@ -180,6 +180,22 @@ Conversation's branch is called, and take-up decides that from the pull
 request's head. The Target field says which work to take up, and is read once,
 at Start.
 
+**A Brief that is one pull request URL picks the Repo and the Process too.**
+Pasted as the whole Brief, trimmed, with GitHub's own tail allowed as the
+Target field allows it, a URL fills the Repo with the registered one whose
+`origin` is that `owner/repo` on GitHub — the one already picked where two are
+clones of it, the first listed otherwise, and nothing where none is — and the
+Process with Fix Merge Issues, on the compose page and on a saved Draft alike.
+The Target's own rule governs both: each is the fill's while it holds what the
+fill last wrote, and the human's once they pick; the fill corrects itself as the
+URL changes and is never undone when it leaves the Brief. A saved Draft records
+what its Brief last filled on the server, so a Draft's Target now follows `#4`
+to `#41` as the compose page's does. Two other triggers were considered and
+rejected: switching whenever the Brief names a pull request, because prose
+about one is not a request to fix its merge, and moving the Repo for any URL
+while the Process followed only a bare one. A bare `#41` switches nothing, as it
+names no repository.
+
 ## The composer: Repo, Process, Agent
 
 The setup row reads **Repo**, **Process**, **Agent**. The three role pickers
