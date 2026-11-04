@@ -1859,6 +1859,63 @@ describe("the target a compose page is pointed at", () => {
     );
   });
 
+  /// The draft a press makes fills its Repo from the same Brief on the server,
+  /// where nothing yet says the page's Repo was picked by hand — so a Repo
+  /// picked over the page's fill is sent back after the Brief, and one the
+  /// fill picked is not.
+  it("puts back a repo picked over the fill on the draft it creates", async () => {
+    const url = "https://github.com/tobico/limiter/pull/41";
+    const press = async (repo: number) => {
+      localStorage.clear();
+      composedAsReview({
+        brief: url,
+        target: url,
+        filled: url,
+        repo,
+        repoFilled: REPOS[1]!.id,
+        process: "FixMergeIssues",
+        processFilled: "FixMergeIssues",
+      });
+      const fetching = creating(
+        whenever(
+          `/api/ui/conversations/${OPEN.id}/process`,
+          json("Picked"),
+          "POST",
+        ),
+        whenever(
+          `/api/ui/conversations/${OPEN.id}/target`,
+          json("Recorded"),
+          "POST",
+        ),
+        whenever(
+          `/api/ui/conversations/${OPEN.id}/repo`,
+          json("Switched"),
+          "POST",
+        ),
+      );
+      const { container, unmount } = mount("/compose");
+
+      await composing(container);
+      fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+      await waitFor(() =>
+        expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toBe(
+          1,
+        ),
+      );
+      unmount();
+
+      return fetching;
+    };
+
+    const picked = await press(REPOS[0]!.id);
+    expect(sent(picked, `/api/ui/conversations/${OPEN.id}/repo`)).toEqual({
+      repo_id: REPOS[0]!.id,
+    });
+
+    const filled = await press(REPOS[1]!.id);
+    expect(writes(filled, `/api/ui/conversations/${OPEN.id}/repo`)).toBe(0);
+  });
+
   /// And it lets go the moment the human types in the field, whatever the box
   /// says afterwards: correcting its own fill is not the same as overwriting
   /// theirs.
