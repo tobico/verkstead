@@ -13519,6 +13519,21 @@ async fn a_brief_fill_corrects_itself_and_leaves_a_hand_pick_standing() {
     let view = opened(&app, second).await;
     assert_eq!(view.process, Process::Investigate);
     assert_eq!(view.repo.id, limiter);
+
+    // And so does a Repo switched by hand before any URL arrived.
+    let third = started(&app, repo_id).await;
+    let switched: RepoSwitched = post(
+        &app,
+        &format!("/api/ui/conversations/{third}/repo"),
+        &serde_json::json!({ "repo_id": askance }),
+    )
+    .await;
+    assert_eq!(switched, RepoSwitched::Switched);
+    write_brief(&app, third, "https://github.com/tobico/limiter/pull/9").await;
+
+    let view = opened(&app, third).await;
+    assert_eq!(view.repo.id, askance, "the human's Repo stands");
+    assert_eq!(view.process, Process::FixMergeIssues);
 }
 
 /// A URL of a repository nothing registered is a clone of moves nothing, and

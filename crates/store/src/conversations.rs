@@ -1477,7 +1477,9 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // [`fill_target`], [`fill_repo`] and [`fill_process`].
     //
     // Never written by the human's own picks — those are what it is compared
-    // against. And no foreign key on the Repo, which may since have left the
+    // against — but for `repo_picked`: every Conversation has a Repo from birth,
+    // so nothing standing says whether one was picked, and the human's own
+    // [`switch_repo`] sets it to say so. And no foreign key on the Repo, which may since have left the
     // registry: a mark naming a Repo nothing is on is a Repo the fill does not
     // own, which is the right answer.
     sqlx::query(
@@ -1485,6 +1487,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
              target          TEXT,
              repo_id         INTEGER,
+             repo_picked     INTEGER NOT NULL DEFAULT 0,
              process         TEXT
          ) STRICT",
     )
@@ -3261,8 +3264,9 @@ pub async fn fill_process(pool: &SqlitePool, id: i64, process: Process) -> Resul
 ///
 /// **Every Conversation has a Repo from birth**, so there is no empty Repo to
 /// say "nobody picked" the way an empty Target does: a Repo the fill has never
-/// written is the fill's to write once, and from then on it is the fill's only
-/// while it is still the one the fill wrote. Asked by the server before it
+/// written, and nobody has switched by hand, is the fill's to write once, and
+/// from then on it is the fill's only while it is still the one the fill wrote.
+/// A switch by hand makes it the human's for good, whenever it came. Asked by the server before it
 /// moves the work, the move itself being [`fill_repo`].
 pub async fn repo_to_fill(pool: &SqlitePool, id: i64) -> Result<Option<i64>> {
     let mut connection = pool
@@ -3280,15 +3284,15 @@ pub async fn repo_to_fill(pool: &SqlitePool, id: i64) -> Result<Option<i64>> {
         return Ok(None);
     };
 
-    Ok(match brief_filled(&mut connection, id).await?.repo_id {
-        None => Some(standing),
-        Some(filled) => (filled == standing).then_some(standing),
-    })
+    Ok(brief_filled(&mut connection, id)
+        .await?
+        .owns_repo(standing)
+        .then_some(standing))
 }
 
 /// Move a drafting Conversation onto `repo_id` as the Brief's fill, and mark it
 /// so: `true` where it did, and `false` where [`switch_repo`] would have refused
-/// the move or the human has moved the Repo since the fill last did.
+/// the move or the human has moved the Repo by hand.
 ///
 /// The same move as the human's own, the base going back to the rule and a
 /// companion equal to the Repo dropping away, in the same transaction as the
@@ -3307,9 +3311,7 @@ pub async fn fill_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<bool>
         return Ok(false);
     };
 
-    if let Some(filled) = brief_filled(&mut tx, id).await?.repo_id
-        && filled != standing
-    {
+    if !brief_filled(&mut tx, id).await?.owns_repo(standing) {
         return Ok(false);
     }
 
@@ -3340,13 +3342,30 @@ pub async fn fill_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<bool>
 struct BriefFilled {
     target: Option<String>,
     repo_id: Option<i64>,
+    /// Whether the human has switched the Repo by hand, which takes it from the
+    /// fill for good.
+    repo_picked: bool,
     process: Option<String>,
 }
 
+impl BriefFilled {
+    /// Whether the Repo standing at `standing` is still the fill's: nobody has
+    /// switched it by hand, and the fill has either written nothing or wrote
+    /// this one.
+    fn owns_repo(&self, standing: i64) -> bool {
+        !self.repo_picked && self.repo_id.is_none_or(|filled| filled == standing)
+    }
+}
+
+/// A `brief_fills` row as it is read: target, repo, whether the Repo was picked
+/// by hand, and process.
+type BriefFillsRow = (Option<String>, Option<i64>, bool, Option<String>);
+
 /// Read [`BriefFilled`] for one Conversation.
 async fn brief_filled(tx: &mut sqlx::SqliteConnection, id: i64) -> Result<BriefFilled> {
-    let row: Option<(Option<String>, Option<i64>, Option<String>)> = sqlx::query_as(
-        "SELECT target, repo_id, process FROM brief_fills WHERE conversation_id = ?",
+    let row: Option<BriefFillsRow> = sqlx::query_as(
+        "SELECT target, repo_id, repo_picked, process FROM brief_fills
+         WHERE conversation_id = ?",
     )
     .bind(id)
     .fetch_optional(&mut *tx)
@@ -3354,9 +3373,10 @@ async fn brief_filled(tx: &mut sqlx::SqliteConnection, id: i64) -> Result<BriefF
     .with_context(|| format!("reading what Conversation {id}'s Brief last filled"))?;
 
     Ok(row
-        .map(|(target, repo_id, process)| BriefFilled {
+        .map(|(target, repo_id, repo_picked, process)| BriefFilled {
             target,
             repo_id,
+            repo_picked,
             process,
         })
         .unwrap_or_default())
@@ -4640,6 +4660,17 @@ pub async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Swi
     if let Some(refused) = switching(&mut tx, id, repo_id).await? {
         return Ok(refused);
     }
+
+    // A move by hand, which the Brief's fill never moves again — see
+    // [`fill_repo`].
+    sqlx::query(
+        "INSERT INTO brief_fills (conversation_id, repo_picked) VALUES (?, 1)
+         ON CONFLICT (conversation_id) DO UPDATE SET repo_picked = 1",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("marking the Repo of Conversation {id} as picked"))?;
 
     tx.commit()
         .await
