@@ -3367,6 +3367,40 @@ describe("moving a saved draft to another device", () => {
     expect(writes(fetching, at(`/conversations/${MOVED}/target`))).toBe(0);
   });
 
+  /// A Brief that is one pull request URL is filled from over there as it is
+  /// saved, so the Repo picked for the move and a Develop are both sent after
+  /// it, and stand as the human's.
+  it("keeps the repo it was moved onto, and develop, under a url brief", async () => {
+    const url = "https://github.com/tobico/limiter/pull/41";
+    const fetching = moving(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}`,
+        json({
+          ...OPEN,
+          timeline: OPEN.timeline.map((event) =>
+            "Brief" in event
+              ? { ...event, Brief: { ...event.Brief, markdown: url } }
+              : event,
+          ),
+        }),
+      ),
+      whenever(at(`/conversations/${MOVED}/repo`), json("Switched"), "POST"),
+      whenever(at(`/conversations/${MOVED}/process`), json("Picked"), "POST"),
+    );
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[1]!);
+
+    await waitFor(() => expect(writes(fetching, moved)).toBe(1));
+    expect(sent(fetching, at(`/conversations/${MOVED}/repo`))).toEqual({
+      repo_id: THEIRS[1]!.id,
+    });
+    expect(sent(fetching, at(`/conversations/${MOVED}/process`))).toEqual({
+      process: "Develop",
+    });
+  });
+
   /// And its MCP servers, by name: a name means the declaration of that name
   /// wherever the work goes, so the draft over there is given the same ones —
   /// a chip already saying its server is gone included, the reference being

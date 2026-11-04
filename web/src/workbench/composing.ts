@@ -1017,6 +1017,18 @@ export async function moveTo(
     );
   }
 
+  // A Brief that is one pull request URL fills the Repo over there as it is
+  // saved, and the Repo the human picked for the move is theirs: so it is put
+  // back, which the server then reads as their pick — as `create` does.
+  const oneUrl = pullRequestRepository(brief) !== null;
+  if (oneUrl) {
+    const outcome = await switchRepo(to.reaching, id, repo);
+    said(
+      outcome === "Switched",
+      `The repo couldn't be picked. ${repoSwitchRefusal(outcome)}`,
+    );
+  }
+
   // The name the human settled on rather than whatever the record is carrying:
   // a branch nobody chose is Verkstead's own invention, and the new Conversation
   // was started under an invention of the target's — see `chosen` in
@@ -1046,7 +1058,9 @@ export async function moveTo(
   // ids — a URL, a `#number` or a branch, and one of a fixed list — so they mean
   // the same over there. Develop is what the new Conversation already arrived
   // under, and no target is what it already has, so either left alone sends
-  // nothing, as the compose page's do.
+  // nothing, as the compose page's do — except Develop under a Brief that is one
+  // pull request URL, which the fill over there would otherwise have made Fix
+  // Merge Issues.
   if (draft.target !== null && draft.target !== "") {
     const outcome = await nameTarget(to.reaching, id, draft.target);
     said(
@@ -1055,7 +1069,7 @@ export async function moveTo(
     );
   }
 
-  if (draft.process !== "Develop") {
+  if (draft.process !== "Develop" || oneUrl) {
     const outcome = await pickProcess(to.reaching, id, draft.process);
     said(
       outcome === "Picked",
