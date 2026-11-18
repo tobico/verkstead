@@ -2800,9 +2800,9 @@ wizard is the page), setup mode, install wizard, onboarding flow, skip
 
 **Components**:
 A settings card, and the pane behind it, for what Verkstead installs onto
-this machine after the wizard has done its one pass — the place a harness
-added later will live, and today the one row that is there: the **Annex**,
-reading *Linux development (WSL)* on a Windows machine (ADR-0024). The row
+this machine after the wizard has done its one pass, and today the one row
+that is there: the **Annex**, reading *Linux development (WSL)* on a Windows
+machine (ADR-0024). The row
 carries its status — running or stopped, the release it runs, the disk it
 takes — **Install** where there is none, which is the wizard's own install run
 started from here, and **Update**, which moves both nixpkgs inputs — NixOS-WSL
@@ -2919,8 +2919,10 @@ Declarative first — the manifest says who it is, by a **uuid** that is its
 identity, a display name, an author and a semantic version, the **dependencies**
 it needs by uuid and version specifier, what it **provides**, a list each of one
 **Category**, the **capabilities** it asks for and the settings fields it
-wants drawn — and a WebAssembly component where a piece is code, run by
-wasmtime over a WIT interface whose version the manifest names. Installed into
+wants drawn — and a **wasm component** where a piece is code, run by
+wasmtime over a WIT interface whose version the manifest names. Always *wasm
+component*, never a bare *component*: **Components** is the settings card for
+what Verkstead installs onto a machine, a different thing on the same page. Installed into
 `plugins/` under the Data Directory, tracked as a Replicated record so the
 cluster has it, enabled or disabled by its checkbox on the **Plugins** page,
 and listed there with its trouble where it failed to load or a dependency is
@@ -2938,8 +2940,8 @@ its manifest declares and a Plugin ships no viewer code.
 _Avoid_: kind, type, plugin type, slot
 
 **Activity**:
-What a Process's state runs: a component the server drives, started with the
-Conversation's facts and its Timeline, handed events, lent sessions — one
+What a Process's state runs: a wasm component the server drives, started with
+the Conversation's facts and its Timeline, handed events, lent sessions — one
 launched under a named Skill and role, waited on for its Done signal — the
 Forge, Question Sets of Verkstead's own, Timeline notices, the Worktree's git
 facts and the capabilities its manifest asked for, and ending in one of the
@@ -2965,8 +2967,8 @@ tool and token variable to lend a session, and the **capabilities** it has —
 checks, review, publish, stacks, create — a wrap-up watcher over an absent one
 being settled at once. A Repo is on the Forge whose hosts its remote names,
 and on none where none match, which is a Repo with no wrap-up. An Author holds
-one token per Forge. GitHub is the one Verkstead ships, a component over HTTP
-since `gh` left the server; GitLab is the demonstration written against it.
+one token per Forge. GitHub is the one Verkstead ships, a wasm component over
+HTTP since `gh` left the server; GitLab is the demonstration written against it.
 _Avoid_: git host, provider, remote, backend, SCM, platform
 
 **Skill Pack**:
