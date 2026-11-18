@@ -1371,7 +1371,13 @@ nothing could read is still text somebody is about to fix — and while it is
 there the **Build caches** part of the Sandbox pane draws that language's box off with the
 reason under it, naming the variable where a variable is what was
 refused, and saying which of the two became of it.
-_Avoid_: language plugin, language definition, toolchain, language config
+**From the plugins roadmap on a descriptor is a Language Plugin's**: the
+`language` block of its `provides:` list, in the grammar above, the seven
+shipping as six built-in Plugins with Rust and C/C++ sharing one for their
+Compile Server, and an installer's `languages:` entry still merging over the
+Plugin of its name. The Plugins page's tick replaces the Build caches box, and
+`size` becomes the Plugin's declared setting. See ADR-0030.
+_Avoid_: language definition, toolchain, language config
 
 **Build Cache**:
 One directory of Verkstead's own that every Sandbox gets writable, so what a
