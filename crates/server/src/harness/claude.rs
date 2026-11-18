@@ -3,10 +3,18 @@
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
-use super::{Harness, Line, ReadIn, Resume, SignedOut};
+use verkstead_render::Broken;
+
+use super::{Carrying, Harness, Line, ReadIn, Resume, SignedOut};
+use crate::logins::Speaking;
 use crate::platform::Platform;
+use crate::sandbox::root::{self, Part, Place, Whose};
+use crate::sandbox::{self, Home};
+use crate::settings::AttachedServer;
 use crate::store;
+use crate::transcript::{self, Search};
 
 /// The program a Claude session is run as.
 pub(crate) const BINARY: &str = "claude";
@@ -150,6 +158,192 @@ impl Harness for Claude {
             .any(|name| called(name, ANTHROPIC_CLAUDE))
             || directory.join(SQUIRREL_UPDATE).is_file()
     }
+
+    fn kept_in(&self, home: &Path) -> store::Account {
+        store::Account::Claude {
+            claude_dir: home.join(sandbox::CLAUDE_DIR_INSIDE_HOME),
+            config_file: home.join(sandbox::CLAUDE_CONFIG_INSIDE_HOME),
+        }
+    }
+
+    /// A directory and a file — which is exactly the distinction the Windows
+    /// arm of the mounting turns on: a directory is joined in by a junction and
+    /// a file by a hard link, and only the second of those cares what volume
+    /// anything is on.
+    fn account_inside(&self, account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBuf)> {
+        let [claude_dir, config_file] = paired(account);
+
+        vec![
+            (
+                claude_dir.to_owned(),
+                home.join(sandbox::CLAUDE_DIR_INSIDE_HOME),
+            ),
+            (
+                config_file.to_owned(),
+                home.join(sandbox::CLAUDE_CONFIG_INSIDE_HOME),
+            ),
+        ]
+    }
+
+    fn judged(&self, account: &store::Account) -> Vec<(PathBuf, Broken)> {
+        let [claude_dir, config_file] = paired(account);
+
+        vec![
+            (claude_dir.to_owned(), Broken::DirMissing),
+            (config_file.to_owned(), Broken::ConfigMissing),
+        ]
+    }
+
+    /// `.claude.json`, copied rather than joined, so the trust seeded into it
+    /// is not written straight into the account — see
+    /// [`root::merged_back`].
+    fn copied<'a>(&self, account: &'a store::Account) -> Option<&'a Path> {
+        let [_, config_file] = paired(account);
+
+        Some(config_file)
+    }
+
+    fn root(&self) -> &str {
+        sandbox::CLAUDE_DIR_INSIDE_HOME
+    }
+
+    fn login(&self) -> &str {
+        root::CREDENTIALS
+    }
+
+    fn configuration(&self) -> Vec<PathBuf> {
+        vec![PathBuf::from(root::SETTINGS)]
+    }
+
+    /// A `settings.json`, and nothing of `servers`: Claude's go in the
+    /// `.claude.json` copy beside it — see [`root::Root::config`].
+    fn configured(
+        &self,
+        found: Vec<Option<Vec<u8>>>,
+        _servers: &[AttachedServer],
+    ) -> Vec<(PathBuf, Vec<u8>)> {
+        let [settings] = <[_; 1]>::try_from(found).expect("one file asked for");
+
+        vec![(
+            PathBuf::from(root::SETTINGS),
+            root::settings(settings.as_deref()),
+        )]
+    }
+
+    fn instructions(&self) -> PathBuf {
+        PathBuf::from(root::CLAUDE_INSTRUCTIONS)
+    }
+
+    /// Its store is a `projects/` entry per directory a session runs in.
+    fn placed(&self) -> bool {
+        true
+    }
+
+    /// The two `projects/` entries the place names — see [`Place::entries`].
+    fn memory(&self, place: Option<&Place>) -> Vec<PathBuf> {
+        place.map_or_else(Vec::new, |place| {
+            place
+                .entries()
+                .into_iter()
+                .map(|entry| Path::new(root::PROJECTS).join(entry))
+                .collect()
+        })
+    }
+
+    /// The whole of `projects/`, the entries being named inside it as the
+    /// session writes them.
+    fn unshared(&self) -> Vec<&str> {
+        vec![root::PROJECTS]
+    }
+
+    fn synced(
+        &self,
+        place: Option<&Place>,
+        _worktree: Option<&str>,
+        _sessions: &[String],
+    ) -> Vec<Part> {
+        let Some(place) = place else {
+            return Vec::new();
+        };
+
+        vec![
+            Part {
+                label: root::REPO,
+                inside: Path::new(root::PROJECTS).join(&place.repo),
+                whose: Whose::Everything,
+            },
+            Part {
+                label: root::WORKTREE,
+                inside: Path::new(root::PROJECTS).join(&place.worktree),
+                whose: Whose::Everything,
+            },
+        ]
+    }
+
+    fn mirrored(&self) -> Vec<PathBuf> {
+        vec![
+            Path::new(sandbox::CLAUDE_DIR_INSIDE_HOME).join(root::SETTINGS),
+            PathBuf::from(sandbox::CLAUDE_CONFIG_INSIDE_HOME),
+        ]
+    }
+
+    fn mirroring(&self, account: &store::Account) -> Vec<Option<Vec<u8>>> {
+        let [claude_dir, config_file] = paired(account);
+        let read = |path: PathBuf| std::fs::read(path).ok();
+
+        vec![
+            Some(root::settings(
+                read(claude_dir.join(root::SETTINGS)).as_deref(),
+            )),
+            Some(root::mirrored_config(
+                read(config_file.to_owned()).as_deref(),
+            )),
+        ]
+    }
+
+    fn speaking(&self) -> Option<&'static Speaking> {
+        Some(&crate::logins::CLAUDE)
+    }
+
+    fn search(
+        &self,
+        account: &Path,
+        memory: bool,
+        home: &Home,
+        session: &str,
+        worktree: Option<&Path>,
+        launched: SystemTime,
+    ) -> Search {
+        transcript::claude_search(account, memory, home, session, worktree, launched)
+    }
+
+    fn carried<'a>(
+        &'a self,
+        account: &'a Path,
+        memory: bool,
+        session: &'a str,
+        worktree: &'a Path,
+        home: &'a Home,
+    ) -> Carrying<'a> {
+        Box::pin(transcript::claude_carried(
+            account, memory, session, worktree, home,
+        ))
+    }
+
+    fn model(&self, role: store::Role) -> &str {
+        match role {
+            store::Role::Grilling => "claude-fable-5",
+            store::Role::Implementation | store::Role::Review => "claude-opus-5",
+        }
+    }
+}
+
+/// A Claude account's two paths: the directory, and the file beside it.
+fn paired(account: &store::Account) -> [&Path; 2] {
+    account
+        .paths()
+        .try_into()
+        .expect("a Claude account is a directory and a file")
 }
 
 /// Whether a path component is `against`, the way Windows reads one: without

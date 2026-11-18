@@ -48,16 +48,7 @@ const HARNESSES: [AgentType; 5] = [
 /// starter quota, which lists those three, two Claude models and GPT-OSS, and
 /// no Pro to grill on.
 fn model(harness: AgentType, role: Role) -> &'static str {
-    match (harness, role) {
-        (AgentType::Claude, Role::Grilling) => "claude-fable-5",
-        (AgentType::Claude, Role::Implementation | Role::Review) => "claude-opus-5",
-        (AgentType::Codex, _) => "gpt-5-codex",
-        (AgentType::Grok, _) => "grok-4.6",
-        (AgentType::OpenCode, Role::Grilling) => "opencode/gpt-5.1-codex",
-        (AgentType::OpenCode, Role::Implementation | Role::Review) => "minimax/minimax-m2.1",
-        (AgentType::Agy, Role::Grilling) => "gemini-3.8-flash-high",
-        (AgentType::Agy, Role::Implementation | Role::Review) => "gemini-3.8-flash-medium",
-    }
+    crate::harness::of(harness).model(role)
 }
 
 /// The platform default for `role`, out of the Profiles in the order they were

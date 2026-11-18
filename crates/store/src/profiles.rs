@@ -173,6 +173,31 @@ pub enum Account {
 }
 
 impl Account {
+    /// The account's paths, in the order its harness declares them: Claude's
+    /// directory and then its file, and every other harness's one home.
+    ///
+    /// What a harness reads its account through, so that what it asks of one
+    /// is a path it declared rather than a field of a shape it was matched
+    /// into.
+    pub fn paths(&self) -> Vec<&Path> {
+        match self {
+            Self::Claude {
+                claude_dir,
+                config_file,
+            } => vec![claude_dir, config_file],
+            Self::Codex { home }
+            | Self::Grok { home }
+            | Self::OpenCode { home }
+            | Self::Agy { home } => vec![home],
+        }
+    }
+
+    /// And the first of them, which is the directory the account is: what its
+    /// login and its memory are said from.
+    pub fn directory(&self) -> &Path {
+        self.paths()[0]
+    }
+
     /// Which agent runs an account of this shape.
     pub fn agent_type(&self) -> AgentType {
         match self {

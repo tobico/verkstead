@@ -102,7 +102,7 @@ fn reader() -> Result<Option<store::AgentType>> {
 /// asserted rather than skipped past, and the suite is what catches it.
 fn tailored(agent_type: Option<store::AgentType>) -> String {
     let channel = agent_type.map_or(store::Channel::Blocking, |agent_type| {
-        verkstead_server::harness::of(agent_type).channel()
+        verkstead_server::harness::channel(agent_type)
     });
 
     let kinds = match channel {

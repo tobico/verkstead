@@ -10,6 +10,16 @@
 //! harness described by a plugin's manifest can give them as readily as one
 //! written here.
 //!
+//! **And its account, the other half.** What an account of it is made of and
+//! where each path is joined, what a Profile is judged broken by, which file
+//! holds the login and whether Verkstead runs that login, what a Built Root
+//! holds of the account — its configuration composed out of the files as found
+//! with the attached MCP servers, its instructions file, its memory store, and
+//! what of that store is synced and mirrored — and where the record of a
+//! session is found. What is done with those answers stays the host's: the
+//! mounting, the strip-and-never-write-back of ADR-0011 and the merging back
+//! are [`crate::sandbox`]'s, whichever harness it is.
+//!
 //! **Five implementations, the built-ins**, a module apiece: [`claude`],
 //! [`codex`], [`grok`], [`opencode`] and [`agy`]. Each holds everything
 //! about its harness that used to be an arm of somebody else's `match`, and the
@@ -17,10 +27,18 @@
 //! place, and moving it costs one edit there. [`of`] is the one place a type is
 //! turned into its harness.
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::time::SystemTime;
 
+use crate::logins::Speaking;
 use crate::platform::Platform;
+use crate::sandbox::Home;
+use crate::sandbox::root::{Part, Place};
+use crate::settings::AttachedServer;
 use crate::store;
+use crate::transcript::{Carried, Search};
 
 mod agy;
 mod claude;
@@ -29,8 +47,8 @@ mod grok;
 mod opencode;
 
 /// One harness: everything about it the server needs to launch a session on
-/// it and to watch that session run.
-pub trait Harness: Send + Sync {
+/// it and to watch that session run, and what it keeps of an account.
+pub(crate) trait Harness: Send + Sync {
     /// The program a session is run as.
     ///
     /// The host provides them, as it provides `claude` (ADR-0011): the installer
@@ -117,13 +135,217 @@ pub trait Harness: Send + Sync {
     fn desktop_app(&self, _platform: Platform, _at: &Path) -> bool {
         false
     }
+
+    // The account half: what an account of this harness is made of, and what a
+    // session is given of it — see [`crate::sandbox::root`].
+
+    /// The account this harness keeps directly in `home`, rooted where the
+    /// harness itself would have written it — see [`crate::sandbox::kept_in`].
+    fn kept_in(&self, home: &Path) -> store::Account;
+
+    /// Each of `account`'s own paths, and where it is joined into a session's
+    /// HOME at `home` — see [`crate::sandbox`]'s `account_inside`, which says
+    /// why one list answers both the onboarding wizard and the mounting.
+    fn account_inside(&self, account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBuf)>;
+
+    /// The paths a Profile of `account` is judged by, in order, each with what
+    /// the Profile is broken as where that path is not there — see
+    /// [`crate::profiles`]'s `broken`.
+    fn judged(&self, account: &store::Account) -> Vec<(PathBuf, verkstead_render::Broken)>;
+
+    /// The file of `account` a session is given a copy of beside its root,
+    /// with the trust it needs seeded and what it changes merged back as it
+    /// ends — Claude's `.claude.json` — or `None` for a harness with none.
+    fn copied<'a>(&self, _account: &'a store::Account) -> Option<&'a Path> {
+        None
+    }
+
+    /// What a root of this harness is called among a Conversation's roots —
+    /// see [`crate::sandbox::root::Root::named`].
+    fn root(&self) -> &str;
+
+    /// Where the account's directory lands inside HOME, which every path of
+    /// the account's is said from there: its root's name, and HOME itself for
+    /// a harness whose account is a home.
+    fn landing(&self) -> &str {
+        self.root()
+    }
+
+    /// The directories of Verkstead's own a root is made of, each said from
+    /// HOME, with the Profile's `memory` switch — see
+    /// [`crate::sandbox::root::Root::built`].
+    fn built(&self, _memory: bool) -> Vec<&str> {
+        vec![self.root()]
+    }
+
+    /// The directories made empty inside a root as it is built, said from
+    /// [`Harness::landing`], for what is written and joined there.
+    fn furnished(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    /// The file the account keeps its login in, said from the account's
+    /// directory.
+    fn login(&self) -> &str;
+
+    /// Whether the login is inside the memory store, so that a root sharing
+    /// its memory joins it with the store rather than as a file of its own.
+    fn login_in_memory(&self) -> bool {
+        false
+    }
+
+    /// Whether a session on `platform` is given a copy of the login rather
+    /// than a link to it — see [`crate::sandbox::root::Root::login_copied`].
+    fn login_copied(&self, _platform: Platform) -> bool {
+        false
+    }
+
+    /// The account's own configuration files, said from its directory, that
+    /// are read as they are found and handed to [`Harness::configured`].
+    fn configuration(&self) -> Vec<PathBuf>;
+
+    /// What a root holds of the account's configuration: each file said from
+    /// [`Harness::landing`], and its contents.
+    ///
+    /// **What the later `write-configuration` export answers** (ADR-0030):
+    /// `found` is each of [`Harness::configuration`]'s files as the account
+    /// holds it, or nothing where it has none, and `servers` the MCP servers
+    /// the Conversation attached. The account's own servers are never carried
+    /// across, which is ADR-0011's rule and the host's: what is written back to
+    /// the account is decided there, and nothing composed here is.
+    fn configured(
+        &self,
+        found: Vec<Option<Vec<u8>>>,
+        servers: &[AttachedServer],
+    ) -> Vec<(PathBuf, Vec<u8>)>;
+
+    /// The file the harness reads as its global instructions, said from
+    /// [`Harness::landing`] — see [`crate::sandbox::root::Root::instructed`].
+    fn instructions(&self) -> PathBuf;
+
+    /// Whether the harness keys its memory store by the directory a session
+    /// runs in, so that a root is told the [`Place`] it runs in.
+    fn placed(&self) -> bool {
+        false
+    }
+
+    /// The memory store a root sharing its memory joins from the account,
+    /// each said from the account's directory, for a session at `place`.
+    fn memory(&self, place: Option<&Place>) -> Vec<PathBuf>;
+
+    /// Which of [`Harness::memory`] are files rather than directories, each
+    /// made empty in the account where it is missing.
+    fn memory_files(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    /// The directories of the memory store a root not sharing its memory
+    /// makes empty of its own, said from [`Harness::landing`].
+    fn unshared(&self) -> Vec<&str>;
+
+    /// The parts of the memory store a session that runs from a copy syncs —
+    /// see [`crate::sandbox::root::Root::synced`].
+    ///
+    /// **The unit is the smallest one each harness's store has**, because only
+    /// one of them keys its store by path:
+    ///
+    /// - **Claude** — the two entries a root already names, one for the Repo and
+    ///   one for the Worktree.
+    /// - **Codex** — the memory files whole, and out of the one flat directory
+    ///   of rollouts the ones this Conversation's sessions wrote, which is what
+    ///   `worktree` picks out: the store is filed by date and holds every
+    ///   repository the human has ever worked in, and none of the rest of it is
+    ///   this Repo's anything.
+    /// - **Grok Build** — the same, its sessions picked out by the ids Verkstead
+    ///   named them with, which is what its store files a session's directory
+    ///   under. Not `session_search.sqlite` at the top of it, which is the
+    ///   human's index of the whole store: a copy of a mirror's partial one
+    ///   written over it on the bound device would be a search that had lost the rest.
+    /// - **OpenCode** — the one database Verkstead pins every session it runs
+    ///   onto, and the two siblings SQLite keeps beside it: the store runs in
+    ///   write-ahead-log mode, and a database carried without its `-wal` and
+    ///   `-shm` will not open. Not the data directory whole, which also holds
+    ///   the login the account mirror carries and whatever other channel of
+    ///   opencode the host has installed — see [`crate::sandbox::OPENCODE_DB_FILE`].
+    ///
+    ///   **And this is the one harness whose unit is not this Repo's.** opencode
+    ///   keeps a row per session in that one database rather than a directory
+    ///   per working directory, so the sessions of every repository the human
+    ///   has run it in are inside the file, and the file is the smallest thing
+    ///   there is to carry. Narrowing further means reading and writing rows of
+    ///   a schema that is opencode's own and moves between releases — which is
+    ///   the dependency [`crate::records`] deliberately does not take, it being
+    ///   allowed to stop reading where this would have to keep writing. So what
+    ///   crosses is narrower than it was and is still the whole store, and the
+    ///   bound in [`crate::mirroring::memory::MOST_A_STORE_IS`] is what stands
+    ///   in front of a big one.
+    /// - **Antigravity CLI** — Grok's rule twice over, by the ids agy gave this
+    ///   Conversation's sessions (see [`crate::transcript`]): the one database
+    ///   per conversation under `conversations/`, and the conversation's own
+    ///   directory under `brain/`, where its Transcript is. Not the summaries
+    ///   database beside them, for the reason Grok's index stays: it is the
+    ///   human's list of every conversation, and agy 1.4.12 resumes one it has no
+    ///   row for, writing the row as it does.
+    fn synced(
+        &self,
+        place: Option<&Place>,
+        worktree: Option<&str>,
+        sessions: &[String],
+    ) -> Vec<Part>;
+
+    /// The paths a mirror of an account holds beside its login, each said
+    /// from the home the mirror is — see [`crate::sandbox::root::mirrored_of`].
+    fn mirrored(&self) -> Vec<PathBuf>;
+
+    /// And what a mirror of `account` holds at each of them, read off the
+    /// account as it is at this moment, or nothing where it has no such file —
+    /// see [`crate::sandbox::root::mirrored`].
+    fn mirroring(&self, account: &store::Account) -> Vec<Option<Vec<u8>>>;
+
+    /// How a login of this harness goes, or `None` for a harness whose login
+    /// Verkstead does not run — see [`crate::logins`].
+    fn speaking(&self) -> Option<&'static Speaking> {
+        None
+    }
+
+    /// How the record of a session is looked for, under the account at
+    /// `account` with the Profile's `memory` switch, in the Conversation's own
+    /// `home` — see [`crate::transcript::Tail::of`].
+    fn search(
+        &self,
+        account: &Path,
+        memory: bool,
+        home: &Home,
+        session: &str,
+        worktree: Option<&Path>,
+        launched: SystemTime,
+    ) -> Search;
+
+    /// The record of an earlier session a resumed one carries on from — see
+    /// [`crate::transcript::carried`].
+    fn carried<'a>(
+        &'a self,
+        account: &'a Path,
+        memory: bool,
+        session: &'a str,
+        worktree: &'a Path,
+        home: &'a Home,
+    ) -> Carrying<'a>;
+
+    /// The model a default Pairing on this harness runs for `role` — see
+    /// [`crate::pairing_defaults`].
+    fn model(&self, role: store::Role) -> &str;
 }
+
+/// What [`Harness::carried`] answers: the record found, once it has been
+/// looked for.
+pub(crate) type Carrying<'a> = Pin<Box<dyn Future<Output = Option<Carried>> + Send + 'a>>;
 
 /// The harness a Profile of `agent_type` runs.
 ///
 /// The one place a type is turned into its harness, and the one `match` on it
 /// this module has.
-pub fn of(agent_type: store::AgentType) -> &'static dyn Harness {
+pub(crate) fn of(agent_type: store::AgentType) -> &'static dyn Harness {
     match agent_type {
         store::AgentType::Claude => &claude::Claude,
         store::AgentType::Codex => &codex::Codex,
@@ -131,6 +353,13 @@ pub fn of(agent_type: store::AgentType) -> &'static dyn Harness {
         store::AgentType::OpenCode => &opencode::OpenCode,
         store::AgentType::Agy => &agy::Agy,
     }
+}
+
+/// How a session of `agent_type` puts a Question Set to the human — see
+/// [`Harness::channel`] — said for the CLI's Guide, which is outside the crate
+/// the trait is reached in.
+pub fn channel(agent_type: store::AgentType) -> store::Channel {
+    of(agent_type).channel()
 }
 
 /// Every harness built into this binary.

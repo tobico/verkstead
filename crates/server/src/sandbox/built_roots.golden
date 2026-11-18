@@ -1,0 +1,668 @@
+# claude
+in home: true
+inside: <tmp>/home/.claude -> <tmp>/inside/.claude
+inside: <tmp>/home/.claude.json -> <tmp>/inside/.claude.json
+login at: <tmp>/home/.claude/.credentials.json
+login inside: .claude/.credentials.json
+mirrored of: .claude/.credentials.json
+mirrored of: .claude/settings.json
+mirrored of: .claude.json
+mirrored: .claude/.credentials.json = {"claudeAiOauth":{"accessToken":"a"}}
+mirrored: .claude/settings.json = {
+  "apiKeyHelper": "print-key",
+  "env": {
+    "A": "1"
+  },
+  "skipDangerousModePermissionPrompt": true
+}
+
+mirrored: .claude.json = {
+  "numStartups": 3,
+  "oauthAccount": {
+    "accountUuid": "u"
+  }
+}
+
+## memory true
+named: .claude
+built: [".claude"]
+account: <tmp>/home/.claude
+credentials: <tmp>/home/.claude/.credentials.json
+credentials in: <tmp>/inside/.claude/.credentials.json
+login alone: true
+login of: Some("<tmp>/home/.claude/.credentials.json")
+login copied on Linux: false
+login copied on MacOs: false
+login copied on Windows: false
+written (none): <tmp>/built/.claude/settings.json
+{
+  "apiKeyHelper": "print-key",
+  "env": {
+    "A": "1"
+  },
+  "skipDangerousModePermissionPrompt": true
+}
+
+.
+written (one): <tmp>/built/.claude/settings.json
+{
+  "apiKeyHelper": "print-key",
+  "env": {
+    "A": "1"
+  },
+  "skipDangerousModePermissionPrompt": true
+}
+
+.
+config (none):
+{
+  "numStartups": 3,
+  "oauthAccount": {
+    "accountUuid": "u"
+  },
+  "projects": {
+    "/elsewhere": {
+      "hasTrustDialogAccepted": true
+    },
+    "<tmp>/repo": {
+      "hasTrustDialogAccepted": true
+    },
+    "<tmp>/worktrees/repo-branch": {
+      "hasTrustDialogAccepted": true
+    }
+  }
+}
+
+.
+config (one):
+{
+  "mcpServers": {
+    "tracker": {
+      "headers": {
+        "Authorization": "Bearer s"
+      },
+      "type": "http",
+      "url": "http://127.0.0.1:9/mcp"
+    }
+  },
+  "numStartups": 3,
+  "oauthAccount": {
+    "accountUuid": "u"
+  },
+  "projects": {
+    "/elsewhere": {
+      "hasTrustDialogAccepted": true
+    },
+    "<tmp>/repo": {
+      "hasTrustDialogAccepted": true
+    },
+    "<tmp>/worktrees/repo-branch": {
+      "hasTrustDialogAccepted": true
+    }
+  }
+}
+
+.
+instructed "": None
+instructed "Be kind.": Some(("<tmp>/built/.claude/CLAUDE.md", "Be kind."))
+synced: repo at projects/<tmp-entry>-repo for Everything
+synced: worktree at projects/<tmp-entry>-worktrees-repo-branch for Everything
+joined: <tmp>/home/.claude/.credentials.json -> <tmp>/inside/.claude/.credentials.json
+joined: <tmp>/home/.claude/projects/<tmp-entry>-repo -> <tmp>/inside/.claude/projects/<tmp-entry>-repo
+joined: <tmp>/home/.claude/projects/<tmp-entry>-worktrees-repo-branch -> <tmp>/inside/.claude/projects/<tmp-entry>-worktrees-repo-branch
+## memory false
+named: .claude
+built: [".claude"]
+account: <tmp>/home/.claude
+credentials: <tmp>/home/.claude/.credentials.json
+credentials in: <tmp>/inside/.claude/.credentials.json
+login alone: true
+login of: Some("<tmp>/home/.claude/.credentials.json")
+login copied on Linux: false
+login copied on MacOs: false
+login copied on Windows: false
+written (none): <tmp>/built/.claude/settings.json
+{
+  "apiKeyHelper": "print-key",
+  "env": {
+    "A": "1"
+  },
+  "skipDangerousModePermissionPrompt": true
+}
+
+.
+written (one): <tmp>/built/.claude/settings.json
+{
+  "apiKeyHelper": "print-key",
+  "env": {
+    "A": "1"
+  },
+  "skipDangerousModePermissionPrompt": true
+}
+
+.
+config (none):
+{
+  "numStartups": 3,
+  "oauthAccount": {
+    "accountUuid": "u"
+  },
+  "projects": {
+    "/elsewhere": {
+      "hasTrustDialogAccepted": true
+    },
+    "<tmp>/repo": {
+      "hasTrustDialogAccepted": true
+    },
+    "<tmp>/worktrees/repo-branch": {
+      "hasTrustDialogAccepted": true
+    }
+  }
+}
+
+.
+config (one):
+{
+  "mcpServers": {
+    "tracker": {
+      "headers": {
+        "Authorization": "Bearer s"
+      },
+      "type": "http",
+      "url": "http://127.0.0.1:9/mcp"
+    }
+  },
+  "numStartups": 3,
+  "oauthAccount": {
+    "accountUuid": "u"
+  },
+  "projects": {
+    "/elsewhere": {
+      "hasTrustDialogAccepted": true
+    },
+    "<tmp>/repo": {
+      "hasTrustDialogAccepted": true
+    },
+    "<tmp>/worktrees/repo-branch": {
+      "hasTrustDialogAccepted": true
+    }
+  }
+}
+
+.
+instructed "": None
+instructed "Be kind.": Some(("<tmp>/built/.claude/CLAUDE.md", "Be kind."))
+unshared: <tmp>/built/.claude/projects
+joined: <tmp>/home/.claude/.credentials.json -> <tmp>/inside/.claude/.credentials.json
+# codex
+in home: true
+inside: <tmp>/home/.codex -> <tmp>/inside/.codex
+login at: <tmp>/home/.codex/auth.json
+login inside: .codex/auth.json
+mirrored of: .codex/auth.json
+mirrored of: .codex/config.toml
+mirrored: .codex/auth.json = {"OPENAI_API_KEY":"k"}
+mirrored: .codex/config.toml = model_provider = "mine"
+
+[model_providers.mine]
+base_url = "http://m"
+
+## memory true
+named: .codex
+built: [".codex"]
+account: <tmp>/home/.codex
+credentials: <tmp>/home/.codex/auth.json
+credentials in: <tmp>/inside/.codex/auth.json
+login alone: true
+login of: Some("<tmp>/home/.codex/auth.json")
+login copied on Linux: false
+login copied on MacOs: false
+login copied on Windows: false
+written (none): <tmp>/built/.codex/config.toml
+model_provider = "mine"
+
+[model_providers.mine]
+base_url = "http://m"
+
+.
+written (one): <tmp>/built/.codex/config.toml
+model_provider = "mine"
+
+[mcp_servers.tracker]
+url = "http://127.0.0.1:9/mcp"
+
+[mcp_servers.tracker.http_headers]
+Authorization = "Bearer s"
+
+[model_providers.mine]
+base_url = "http://m"
+
+.
+instructed "": None
+instructed "Be kind.": Some(("<tmp>/built/.codex/AGENTS.md", "Be kind."))
+synced: memory at memories for Everything
+synced: sessions at sessions for Naming("repo-branch")
+joined: <tmp>/home/.codex/auth.json -> <tmp>/inside/.codex/auth.json
+joined: <tmp>/home/.codex/sessions -> <tmp>/inside/.codex/sessions
+joined: <tmp>/home/.codex/memories -> <tmp>/inside/.codex/memories
+## memory false
+named: .codex
+built: [".codex"]
+account: <tmp>/home/.codex
+credentials: <tmp>/home/.codex/auth.json
+credentials in: <tmp>/inside/.codex/auth.json
+login alone: true
+login of: Some("<tmp>/home/.codex/auth.json")
+login copied on Linux: false
+login copied on MacOs: false
+login copied on Windows: false
+written (none): <tmp>/built/.codex/config.toml
+model_provider = "mine"
+
+[model_providers.mine]
+base_url = "http://m"
+
+.
+written (one): <tmp>/built/.codex/config.toml
+model_provider = "mine"
+
+[mcp_servers.tracker]
+url = "http://127.0.0.1:9/mcp"
+
+[mcp_servers.tracker.http_headers]
+Authorization = "Bearer s"
+
+[model_providers.mine]
+base_url = "http://m"
+
+.
+instructed "": None
+instructed "Be kind.": Some(("<tmp>/built/.codex/AGENTS.md", "Be kind."))
+unshared: <tmp>/built/.codex/sessions
+unshared: <tmp>/built/.codex/memories
+joined: <tmp>/home/.codex/auth.json -> <tmp>/inside/.codex/auth.json
+# grok
+in home: true
+inside: <tmp>/home/.grok -> <tmp>/inside/.grok
+login at: <tmp>/home/.grok/auth.json
+login inside: .grok/auth.json
+mirrored of: .grok/auth.json
+mirrored of: .grok/config.toml
+mirrored: .grok/auth.json = {"grok":{"token":"t"}}
+mirrored: .grok/config.toml = [endpoints]
+models_base_url = "http://b"
+
+[model.custom]
+base_url = "http://g"
+
+## memory true
+named: .grok
+built: [".grok"]
+account: <tmp>/home/.grok
+credentials: <tmp>/home/.grok/auth.json
+credentials in: <tmp>/inside/.grok/auth.json
+login alone: true
+login of: Some("<tmp>/home/.grok/auth.json")
+login copied on Linux: true
+login copied on MacOs: false
+login copied on Windows: false
+written (none): <tmp>/built/.grok/config.toml
+[endpoints]
+models_base_url = "http://b"
+
+[model.custom]
+base_url = "http://g"
+
+.
+written (one): <tmp>/built/.grok/config.toml
+[endpoints]
+models_base_url = "http://b"
+
+[mcp_servers.tracker]
+url = "http://127.0.0.1:9/mcp"
+
+[mcp_servers.tracker.headers]
+Authorization = "Bearer s"
+
+[model.custom]
+base_url = "http://g"
+
+.
+instructed "": None
+instructed "Be kind.": Some(("<tmp>/built/.grok/AGENTS.md", "Be kind."))
+synced: memory at memory for Everything
+synced: sessions at sessions for Called(["s1", "s2"])
+joined: <tmp>/home/.grok/auth.json -> <tmp>/inside/.grok/auth.json
+joined: <tmp>/home/.grok/sessions -> <tmp>/inside/.grok/sessions
+joined: <tmp>/home/.grok/memory -> <tmp>/inside/.grok/memory
+## memory false
+named: .grok
+built: [".grok"]
+account: <tmp>/home/.grok
+credentials: <tmp>/home/.grok/auth.json
+credentials in: <tmp>/inside/.grok/auth.json
+login alone: true
+login of: Some("<tmp>/home/.grok/auth.json")
+login copied on Linux: true
+login copied on MacOs: false
+login copied on Windows: false
+written (none): <tmp>/built/.grok/config.toml
+[endpoints]
+models_base_url = "http://b"
+
+[model.custom]
+base_url = "http://g"
+
+.
+written (one): <tmp>/built/.grok/config.toml
+[endpoints]
+models_base_url = "http://b"
+
+[mcp_servers.tracker]
+url = "http://127.0.0.1:9/mcp"
+
+[mcp_servers.tracker.headers]
+Authorization = "Bearer s"
+
+[model.custom]
+base_url = "http://g"
+
+.
+instructed "": None
+instructed "Be kind.": Some(("<tmp>/built/.grok/AGENTS.md", "Be kind."))
+unshared: <tmp>/built/.grok/sessions
+unshared: <tmp>/built/.grok/memory
+joined: <tmp>/home/.grok/auth.json -> <tmp>/inside/.grok/auth.json
+# opencode
+in home: true
+inside: <tmp>/home/.config/opencode -> <tmp>/inside/.config/opencode
+inside: <tmp>/home/.local/share/opencode -> <tmp>/inside/.local/share/opencode
+login at: <tmp>/home/.local/share/opencode/auth.json
+login inside: .local/share/opencode/auth.json
+mirrored of: .local/share/opencode/auth.json
+mirrored of: .config/opencode/opencode.json
+mirrored: .local/share/opencode/auth.json = {"opencode":{}}
+mirrored: .config/opencode/opencode.json = {
+  "provider": {
+    "p": {
+      "name": "first"
+    },
+    "q": {
+      "name": "second"
+    }
+  }
+}
+
+## memory true
+named: opencode
+built: [".config/opencode"]
+account: <tmp>/home
+credentials: <tmp>/home/.local/share/opencode/auth.json
+credentials in: <tmp>/inside/.local/share/opencode/auth.json
+login alone: false
+login of: None
+login copied on Linux: false
+login copied on MacOs: false
+login copied on Windows: false
+written (none): <tmp>/built/.config/opencode/opencode.json
+{
+  "provider": {
+    "p": {
+      "name": "first"
+    },
+    "q": {
+      "name": "second"
+    }
+  }
+}
+
+.
+written (one): <tmp>/built/.config/opencode/opencode.json
+{
+  "mcp": {
+    "tracker": {
+      "headers": {
+        "Authorization": "Bearer s"
+      },
+      "oauth": false,
+      "type": "remote",
+      "url": "http://127.0.0.1:9/mcp"
+    }
+  },
+  "provider": {
+    "p": {
+      "name": "first"
+    },
+    "q": {
+      "name": "second"
+    }
+  }
+}
+
+.
+instructed "": None
+instructed "Be kind.": Some(("<tmp>/built/.config/opencode/AGENTS.md", "Be kind."))
+synced: data at .local/share/opencode for Database("opencode.db")
+joined: <tmp>/home/.local/share/opencode -> <tmp>/inside/.local/share/opencode
+## memory false
+named: opencode
+built: [".config/opencode", ".local/share/opencode"]
+account: <tmp>/home
+credentials: <tmp>/home/.local/share/opencode/auth.json
+credentials in: <tmp>/inside/.local/share/opencode/auth.json
+login alone: true
+login of: Some("<tmp>/home/.local/share/opencode/auth.json")
+login copied on Linux: false
+login copied on MacOs: false
+login copied on Windows: false
+written (none): <tmp>/built/.config/opencode/opencode.json
+{
+  "provider": {
+    "p": {
+      "name": "first"
+    },
+    "q": {
+      "name": "second"
+    }
+  }
+}
+
+.
+written (one): <tmp>/built/.config/opencode/opencode.json
+{
+  "mcp": {
+    "tracker": {
+      "headers": {
+        "Authorization": "Bearer s"
+      },
+      "oauth": false,
+      "type": "remote",
+      "url": "http://127.0.0.1:9/mcp"
+    }
+  },
+  "provider": {
+    "p": {
+      "name": "first"
+    },
+    "q": {
+      "name": "second"
+    }
+  }
+}
+
+.
+instructed "": None
+instructed "Be kind.": Some(("<tmp>/built/.config/opencode/AGENTS.md", "Be kind."))
+joined: <tmp>/home/.local/share/opencode/auth.json -> <tmp>/inside/.local/share/opencode/auth.json
+# agy
+in home: true
+inside: <tmp>/home/.gemini/antigravity-cli -> <tmp>/inside/.gemini/antigravity-cli
+login at: <tmp>/home/.gemini/antigravity-cli/antigravity-oauth-token
+login inside: .gemini/antigravity-cli/antigravity-oauth-token
+mirrored of: .gemini/antigravity-cli/antigravity-oauth-token
+mirrored of: .gemini/antigravity-cli/settings.json
+mirrored: .gemini/antigravity-cli/antigravity-oauth-token = {"token":"t"}
+mirrored: .gemini/antigravity-cli/settings.json = {
+  "gcp": {
+    "project": "p"
+  },
+  "modelProvider": "m"
+}
+
+## memory true
+named: .gemini
+built: [".gemini"]
+furnished: <tmp>/built/.gemini/antigravity-cli
+furnished: <tmp>/built/.gemini/config
+furnished: <tmp>/built/.gemini/antigravity-cli/cache
+account: <tmp>/home/.gemini
+credentials: <tmp>/home/.gemini/antigravity-cli/antigravity-oauth-token
+credentials in: <tmp>/inside/.gemini/antigravity-cli/antigravity-oauth-token
+login alone: true
+login of: Some("<tmp>/home/.gemini/antigravity-cli/antigravity-oauth-token")
+login copied on Linux: false
+login copied on MacOs: false
+login copied on Windows: false
+written (none): <tmp>/built/.gemini/antigravity-cli/settings.json
+{
+  "gcp": {
+    "project": "p"
+  },
+  "modelProvider": "m"
+}
+
+.
+written (none): <tmp>/built/.gemini/antigravity-cli/cache/onboarding.json
+{"onboardingComplete":true}
+
+.
+written (one): <tmp>/built/.gemini/antigravity-cli/settings.json
+{
+  "gcp": {
+    "project": "p"
+  },
+  "modelProvider": "m"
+}
+
+.
+written (one): <tmp>/built/.gemini/config/mcp_config.json
+{
+  "mcpServers": {
+    "tracker": {
+      "headers": {
+        "Authorization": "Bearer s"
+      },
+      "url": "http://127.0.0.1:9/mcp"
+    }
+  }
+}
+
+.
+written (one): <tmp>/built/.gemini/antigravity-cli/cache/onboarding.json
+{"onboardingComplete":true}
+
+.
+instructed "": None
+instructed "Be kind.": Some(("<tmp>/built/.gemini/GEMINI.md", "Be kind."))
+synced: conversations at antigravity-cli/conversations for Databases(["s1", "s2"])
+synced: brain at antigravity-cli/brain for Called(["s1", "s2"])
+joined: <tmp>/home/.gemini/antigravity-cli/antigravity-oauth-token -> <tmp>/inside/.gemini/antigravity-cli/antigravity-oauth-token
+joined: <tmp>/home/.gemini/antigravity-cli/conversations -> <tmp>/inside/.gemini/antigravity-cli/conversations
+joined: <tmp>/home/.gemini/antigravity-cli/brain -> <tmp>/inside/.gemini/antigravity-cli/brain
+joined: <tmp>/home/.gemini/antigravity-cli/conversation_summaries.db -> <tmp>/inside/.gemini/antigravity-cli/conversation_summaries.db
+joined: <tmp>/home/.gemini/antigravity-cli/conversation_summaries.db-wal -> <tmp>/inside/.gemini/antigravity-cli/conversation_summaries.db-wal
+joined: <tmp>/home/.gemini/antigravity-cli/conversation_summaries.db-shm -> <tmp>/inside/.gemini/antigravity-cli/conversation_summaries.db-shm
+## memory false
+named: .gemini
+built: [".gemini"]
+furnished: <tmp>/built/.gemini/antigravity-cli
+furnished: <tmp>/built/.gemini/config
+furnished: <tmp>/built/.gemini/antigravity-cli/cache
+account: <tmp>/home/.gemini
+credentials: <tmp>/home/.gemini/antigravity-cli/antigravity-oauth-token
+credentials in: <tmp>/inside/.gemini/antigravity-cli/antigravity-oauth-token
+login alone: true
+login of: Some("<tmp>/home/.gemini/antigravity-cli/antigravity-oauth-token")
+login copied on Linux: false
+login copied on MacOs: false
+login copied on Windows: false
+written (none): <tmp>/built/.gemini/antigravity-cli/settings.json
+{
+  "gcp": {
+    "project": "p"
+  },
+  "modelProvider": "m"
+}
+
+.
+written (none): <tmp>/built/.gemini/antigravity-cli/cache/onboarding.json
+{"onboardingComplete":true}
+
+.
+written (one): <tmp>/built/.gemini/antigravity-cli/settings.json
+{
+  "gcp": {
+    "project": "p"
+  },
+  "modelProvider": "m"
+}
+
+.
+written (one): <tmp>/built/.gemini/config/mcp_config.json
+{
+  "mcpServers": {
+    "tracker": {
+      "headers": {
+        "Authorization": "Bearer s"
+      },
+      "url": "http://127.0.0.1:9/mcp"
+    }
+  }
+}
+
+.
+written (one): <tmp>/built/.gemini/antigravity-cli/cache/onboarding.json
+{"onboardingComplete":true}
+
+.
+instructed "": None
+instructed "Be kind.": Some(("<tmp>/built/.gemini/GEMINI.md", "Be kind."))
+unshared: <tmp>/built/.gemini/antigravity-cli/conversations
+unshared: <tmp>/built/.gemini/antigravity-cli/brain
+joined: <tmp>/home/.gemini/antigravity-cli/antigravity-oauth-token -> <tmp>/inside/.gemini/antigravity-cli/antigravity-oauth-token
+# the home, made in
+.claude.json
+.claude/
+.claude/.credentials.json
+.claude/CLAUDE.md
+.claude/projects/
+.claude/projects/<tmp-entry>-repo/
+.claude/projects/<tmp-entry>-worktrees-repo-branch/
+.claude/settings.json
+.codex/
+.codex/auth.json
+.codex/config.toml
+.codex/memories/
+.codex/sessions/
+.config/
+.config/opencode/
+.config/opencode/opencode.json
+.config/opencode/opencode.jsonc
+.gemini/
+.gemini/antigravity-cli/
+.gemini/antigravity-cli/antigravity-oauth-token
+.gemini/antigravity-cli/brain/
+.gemini/antigravity-cli/conversation_summaries.db
+.gemini/antigravity-cli/conversation_summaries.db-shm
+.gemini/antigravity-cli/conversation_summaries.db-wal
+.gemini/antigravity-cli/conversations/
+.gemini/antigravity-cli/settings.json
+.grok/
+.grok/auth.json
+.grok/config.toml
+.grok/memory/
+.grok/sessions/
+.local/
+.local/share/
+.local/share/opencode/
+.local/share/opencode/auth.json

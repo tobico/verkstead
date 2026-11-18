@@ -129,6 +129,8 @@ mod surface;
 // And what a session is given of its account: a `.claude`, a `.codex`, a `.grok`
 // or OpenCode's two directories of Verkstead's own, built out of an allowlist —
 // see [`root`].
+#[cfg(test)]
+mod built_roots;
 pub(crate) mod root;
 mod sharing;
 
@@ -370,16 +372,16 @@ const COMPLAINT: usize = 500;
 /// Claude's pair, and the one directory each backend after it keeps its whole
 /// account under. Written out rather than derived, because they are the paths
 /// those programs look in and not a scheme any of them follows.
-const CLAUDE_DIR_INSIDE_HOME: &str = ".claude";
-const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
-const CODEX_INSIDE_HOME: &str = ".codex";
-const GROK_INSIDE_HOME: &str = ".grok";
-const AGY_INSIDE_HOME: &str = ".gemini";
+pub(crate) const CLAUDE_DIR_INSIDE_HOME: &str = ".claude";
+pub(crate) const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
+pub(crate) const CODEX_INSIDE_HOME: &str = ".codex";
+pub(crate) const GROK_INSIDE_HOME: &str = ".grok";
+pub(crate) const AGY_INSIDE_HOME: &str = ".gemini";
 
 /// What makes a `~/.gemini` the Antigravity CLI's account rather than what
 /// Gemini CLI left behind: the directory agy keeps its own state in, which
 /// Gemini CLI never writes. Read off agy 1.4.12, which makes it at every start.
-const AGY_ACCOUNT_MARK: &str = "antigravity-cli";
+pub(crate) const AGY_ACCOUNT_MARK: &str = "antigravity-cli";
 
 /// And OpenCode's, which is two of them rather than one: it keeps no
 /// dot-directory of its own and reads the XDG base directories instead,
@@ -2511,39 +2513,7 @@ pub fn sets_itself(name: &str) -> bool {
 /// turns on: a directory is joined in by a junction and a file by a hard link,
 /// and only the second of those cares what volume anything is on.
 fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBuf)> {
-    match account {
-        store::Account::Claude {
-            claude_dir,
-            config_file,
-        } => vec![
-            (claude_dir.clone(), home.join(CLAUDE_DIR_INSIDE_HOME)),
-            (config_file.clone(), home.join(CLAUDE_CONFIG_INSIDE_HOME)),
-        ],
-        store::Account::Codex { home: account } => {
-            vec![(account.clone(), home.join(CODEX_INSIDE_HOME))]
-        }
-        store::Account::Grok { home: account } => {
-            vec![(account.clone(), home.join(GROK_INSIDE_HOME))]
-        }
-        // Two rather than one, and the same relative path on both sides of
-        // each: an OpenCode Profile's home is an opencode home, and the XDG
-        // defaults resolve inside the fresh HOME — see
-        // [`OPENCODE_CONFIG_INSIDE_HOME`].
-        store::Account::OpenCode { home: account } => {
-            [OPENCODE_CONFIG_INSIDE_HOME, OPENCODE_DATA_INSIDE_HOME]
-                .into_iter()
-                .map(|inside| (account.join(inside), home.join(inside)))
-                .collect()
-        }
-        // agy's own directory inside `~/.gemini` rather than the whole of it:
-        // that is what a session is given the memory of, and what tells an
-        // account from a bare `~/.gemini` Gemini CLI left — see
-        // [`AGY_ACCOUNT_MARK`].
-        store::Account::Agy { home: account } => vec![(
-            account.join(AGY_ACCOUNT_MARK),
-            home.join(AGY_INSIDE_HOME).join(AGY_ACCOUNT_MARK),
-        )],
-    }
+    crate::harness::of(account.agent_type()).account_inside(account, home)
 }
 
 /// The account an agent of `agent_type` keeps directly in `home`, where the
@@ -2586,24 +2556,7 @@ pub(crate) fn account_in_home(agent_type: store::AgentType, home: &Path) -> Opti
 /// made of into a directory under its Data Directory and this is the account
 /// they go in — see [`Homes::account_mirror`] and [`root::mirrored_of`].
 pub(crate) fn kept_in(agent_type: store::AgentType, home: &Path) -> store::Account {
-    match agent_type {
-        store::AgentType::Claude => store::Account::Claude {
-            claude_dir: home.join(CLAUDE_DIR_INSIDE_HOME),
-            config_file: home.join(CLAUDE_CONFIG_INSIDE_HOME),
-        },
-        store::AgentType::Codex => store::Account::Codex {
-            home: home.join(CODEX_INSIDE_HOME),
-        },
-        store::AgentType::Grok => store::Account::Grok {
-            home: home.join(GROK_INSIDE_HOME),
-        },
-        store::AgentType::OpenCode => store::Account::OpenCode {
-            home: home.to_owned(),
-        },
-        store::AgentType::Agy => store::Account::Agy {
-            home: home.join(AGY_INSIDE_HOME),
-        },
-    }
+    crate::harness::of(agent_type).kept_in(home)
 }
 
 /// Whichever of `account`'s own paths cannot be joined into a profile at
@@ -4231,16 +4184,8 @@ impl Sandbox {
         // not start. Nothing is made where the Profile shares no memory, there
         // being no join to make. Refused the way a handoff directory that cannot
         // be made is.
-        let root = match &profile.account {
-            store::Account::Claude { claude_dir, .. } => {
-                root::Root::claude(homes.platform(), claude_dir, &git_dir, &worktree)
-            }
-            store::Account::Codex { home } => root::Root::codex(home),
-            store::Account::Grok { home } => root::Root::grok(home),
-            store::Account::OpenCode { home } => root::Root::opencode(home),
-            store::Account::Agy { home } => root::Root::agy(home),
-        }
-        .remembering(profile.memory);
+        let root = root::Root::of(&profile.account, homes.platform(), &git_dir, &worktree)
+            .remembering(profile.memory);
 
         if let Err(error) = root.made_in_account() {
             tracing::error!(
@@ -4401,16 +4346,8 @@ impl Sandbox {
         // Started in the place and named after it: Claude names a `projects/`
         // entry for the directory it was started in and trusts it, and a login
         // has the one directory to name, which is said as both halves.
-        let root = match &profile.account {
-            store::Account::Claude { claude_dir, .. } => {
-                root::Root::claude(homes.platform(), claude_dir, &place, &place)
-            }
-            store::Account::Codex { home } => root::Root::codex(home),
-            store::Account::Grok { home } => root::Root::grok(home),
-            store::Account::OpenCode { home } => root::Root::opencode(home),
-            store::Account::Agy { home } => root::Root::agy(home),
-        }
-        .remembering(profile.memory);
+        let root = root::Root::of(&profile.account, homes.platform(), &place, &place)
+            .remembering(profile.memory);
 
         if root.made_in_account().is_err() {
             return None;
@@ -4894,7 +4831,9 @@ impl Sandbox {
         // it — see [`Sandbox::config_described`].
         self.root_described(&self.root, launch.builds, &mut surface);
 
-        if let store::Account::Claude { config_file, .. } = &self.account {
+        if let Some(config_file) =
+            crate::harness::of(self.account.agent_type()).copied(&self.account)
+        {
             self.config_described(&self.root, config_file, launch.builds, &mut surface);
         }
 
@@ -5424,9 +5363,7 @@ impl Sandbox {
         surface: &Surface,
         baseline: &sharing::Baseline,
     ) -> Option<(PathBuf, PathBuf)> {
-        let store::Account::Claude { config_file, .. } = &self.account else {
-            return None;
-        };
+        let config_file = crate::harness::of(self.account.agent_type()).copied(&self.account)?;
 
         let copy = self.config_copy();
 
@@ -5441,7 +5378,7 @@ impl Sandbox {
                 .expect("a baseline nothing has panicked holding") = contents;
         }
 
-        Some((config_file.clone(), copy))
+        Some((config_file.to_owned(), copy))
     }
 
     /// What a session's ending has to see to about its login, on top of

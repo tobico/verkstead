@@ -2,9 +2,17 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{Harness, Line, Resume, SignedOut};
+use std::time::SystemTime;
+
+use verkstead_render::Broken;
+
+use super::{Carrying, Harness, Line, Resume, SignedOut};
 use crate::platform::Platform;
+use crate::sandbox::root::{self, Part, Place, Whose};
+use crate::sandbox::{self, Home};
+use crate::settings::AttachedServer;
 use crate::store;
+use crate::transcript::{self, Search};
 
 /// The program a Codex session is run as.
 pub(crate) const BINARY: &str = "codex";
@@ -189,5 +197,132 @@ impl Harness for Codex {
 
     fn written_in_worktree(&self) -> Option<&str> {
         None
+    }
+
+    fn kept_in(&self, home: &Path) -> store::Account {
+        store::Account::Codex {
+            home: home.join(sandbox::CODEX_INSIDE_HOME),
+        }
+    }
+
+    fn account_inside(&self, account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBuf)> {
+        vec![(
+            account.directory().to_owned(),
+            home.join(sandbox::CODEX_INSIDE_HOME),
+        )]
+    }
+
+    fn judged(&self, account: &store::Account) -> Vec<(PathBuf, Broken)> {
+        vec![(account.directory().to_owned(), Broken::HomeMissing)]
+    }
+
+    fn root(&self) -> &str {
+        sandbox::CODEX_INSIDE_HOME
+    }
+
+    fn login(&self) -> &str {
+        root::AUTH
+    }
+
+    fn configuration(&self) -> Vec<PathBuf> {
+        vec![PathBuf::from(root::CODEX_CONFIG)]
+    }
+
+    /// A `config.toml`, carrying the account's own keys that reach a model
+    /// and the Conversation's servers — see [`root::toml_carrying`].
+    fn configured(
+        &self,
+        found: Vec<Option<Vec<u8>>>,
+        servers: &[AttachedServer],
+    ) -> Vec<(PathBuf, Vec<u8>)> {
+        let [config] = <[_; 1]>::try_from(found).expect("one file asked for");
+
+        vec![(
+            PathBuf::from(root::CODEX_CONFIG),
+            root::toml_carrying(
+                config
+                    .and_then(|bytes| String::from_utf8(bytes).ok())
+                    .as_deref(),
+                &root::CODEX_CARRIED,
+                servers,
+                root::CODEX_HEADERS,
+            ),
+        )]
+    }
+
+    fn instructions(&self) -> PathBuf {
+        PathBuf::from(root::AGENTS)
+    }
+
+    fn memory(&self, _place: Option<&Place>) -> Vec<PathBuf> {
+        root::CODEX_MEMORY.iter().map(PathBuf::from).collect()
+    }
+
+    fn unshared(&self) -> Vec<&str> {
+        root::CODEX_MEMORY.to_vec()
+    }
+
+    fn synced(
+        &self,
+        _place: Option<&Place>,
+        worktree: Option<&str>,
+        _sessions: &[String],
+    ) -> Vec<Part> {
+        vec![
+            Part {
+                label: root::MEMORY,
+                inside: PathBuf::from(root::CODEX_MEMORY[1]),
+                whose: Whose::Everything,
+            },
+            Part {
+                label: root::SESSIONS_PART,
+                inside: PathBuf::from(root::SESSIONS),
+                whose: Whose::Naming(worktree.unwrap_or_default().to_owned()),
+            },
+        ]
+    }
+
+    fn mirrored(&self) -> Vec<PathBuf> {
+        vec![Path::new(sandbox::CODEX_INSIDE_HOME).join(root::CODEX_CONFIG)]
+    }
+
+    fn mirroring(&self, account: &store::Account) -> Vec<Option<Vec<u8>>> {
+        let config = std::fs::read_to_string(account.directory().join(root::CODEX_CONFIG)).ok();
+
+        vec![Some(root::toml_carrying(
+            config.as_deref(),
+            &root::CODEX_CARRIED,
+            &[],
+            root::CODEX_HEADERS,
+        ))]
+    }
+
+    fn search(
+        &self,
+        account: &Path,
+        memory: bool,
+        home: &Home,
+        session: &str,
+        worktree: Option<&Path>,
+        launched: SystemTime,
+    ) -> Search {
+        transcript::codex_search(account, memory, home, session, worktree, launched)
+    }
+
+    fn carried<'a>(
+        &'a self,
+        account: &'a Path,
+        memory: bool,
+        session: &'a str,
+        worktree: &'a Path,
+        home: &'a Home,
+    ) -> Carrying<'a> {
+        Box::pin(transcript::codex_carried(
+            account, memory, session, worktree, home,
+        ))
+    }
+
+    fn model(&self, _role: store::Role) -> &str {
+        "gpt-5-codex"
     }
 }
