@@ -49,7 +49,7 @@ harness's login runs under — the brief says to re-verify there by hand.
 - [ ] 04: Codex across — [brief](04-codex-across.md) — after 03
 - [ ] 05: Grok, OpenCode and Antigravity across — [brief](05-grok-opencode-antigravity-across.md) — after 04 — on windows
 - [ ] 06: Claude across — [brief](06-claude-across.md) — after 05
-- [ ] 07: Skill packs — [brief](07-skill-packs.md) — after 01
+- [ ] 07: Skill packs — [brief](07-skill-packs.md) — after 01 *(in progress: `roadmaps/plugins/07-skill-packs`)*
 - [ ] 08: The Activity interface and follow-up rounds across — [brief](08-the-activity-interface.md) — after 07
 - [ ] 09: The interview, one session and the wrap-up across — [brief](09-interview-session-wrap-up-across.md) — after 08
 - [ ] 10: The backlog and stage runners across — [brief](10-runners-across.md) — after 08
