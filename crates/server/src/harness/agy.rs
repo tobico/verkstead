@@ -2,9 +2,18 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{Harness, Line, Resume, SignedOut};
+use std::time::SystemTime;
+
+use verkstead_render::Broken;
+
+use super::{Carrying, Harness, Line, Resume, SignedOut};
+use crate::logins::Speaking;
 use crate::platform::Platform;
+use crate::sandbox::root::{self, Part, Place, Whose};
+use crate::sandbox::{self, Home};
+use crate::settings::AttachedServer;
 use crate::store;
+use crate::transcript::{self, Search};
 
 /// The program an Antigravity CLI session is run as.
 pub(crate) const BINARY: &str = "agy";
@@ -153,6 +162,181 @@ impl Harness for Agy {
     /// whatever else it files under the workspace.
     fn written_in_worktree(&self) -> Option<&str> {
         Some(".gemini/")
+    }
+
+    fn kept_in(&self, home: &Path) -> store::Account {
+        store::Account::Agy {
+            home: home.join(sandbox::AGY_INSIDE_HOME),
+        }
+    }
+
+    /// agy's own directory inside `~/.gemini` rather than the whole of it:
+    /// that is what a session is given the memory of, and what tells an
+    /// account from a bare `~/.gemini` Gemini CLI left — see
+    /// [`sandbox::AGY_ACCOUNT_MARK`].
+    fn account_inside(&self, account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBuf)> {
+        vec![(
+            account.directory().join(sandbox::AGY_ACCOUNT_MARK),
+            home.join(sandbox::AGY_INSIDE_HOME)
+                .join(sandbox::AGY_ACCOUNT_MARK),
+        )]
+    }
+
+    fn judged(&self, account: &store::Account) -> Vec<(PathBuf, Broken)> {
+        vec![(account.directory().to_owned(), Broken::HomeMissing)]
+    }
+
+    fn root(&self) -> &str {
+        sandbox::AGY_INSIDE_HOME
+    }
+
+    /// Its two directories — see [`root::AGY_CLI`] — with the `cache/` inside
+    /// the first that holds [`root::AGY_ONBOARDED`].
+    fn furnished(&self) -> Vec<PathBuf> {
+        vec![
+            PathBuf::from(root::AGY_CLI),
+            PathBuf::from(root::AGY_CUSTOMISATION),
+            Path::new(root::AGY_ONBOARDED).parent().unwrap().to_owned(),
+        ]
+    }
+
+    fn login(&self) -> &str {
+        root::AGY_LOGIN
+    }
+
+    fn configuration(&self) -> Vec<PathBuf> {
+        vec![PathBuf::from(root::AGY_SETTINGS)]
+    }
+
+    /// A `settings.json` — see [`root::agy_settings`] — and, where the
+    /// Conversation attached any, an `mcp_config.json` beside it holding the
+    /// servers — see [`root::agy_servers`] — and the record that the account
+    /// has been through its first run.
+    fn configured(
+        &self,
+        found: Vec<Option<Vec<u8>>>,
+        servers: &[AttachedServer],
+    ) -> Vec<(PathBuf, Vec<u8>)> {
+        let [settings] = <[_; 1]>::try_from(found).expect("one file asked for");
+
+        let settings = (
+            PathBuf::from(root::AGY_SETTINGS),
+            root::agy_settings(settings.as_deref()),
+        );
+
+        let onboarded = (
+            PathBuf::from(root::AGY_ONBOARDED),
+            root::AGY_ONBOARDED_AS.into(),
+        );
+
+        match servers.is_empty() {
+            true => vec![settings, onboarded],
+            false => vec![
+                settings,
+                (PathBuf::from(root::AGY_MCP), root::agy_servers(servers)),
+                onboarded,
+            ],
+        }
+    }
+
+    fn instructions(&self) -> PathBuf {
+        PathBuf::from(root::AGY_INSTRUCTIONS)
+    }
+
+    fn memory(&self, _place: Option<&Place>) -> Vec<PathBuf> {
+        root::AGY_MEMORY
+            .iter()
+            .chain(root::AGY_SUMMARIES_JOINED)
+            .map(PathBuf::from)
+            .collect()
+    }
+
+    /// The summaries database and its two siblings — see
+    /// [`root::AGY_SUMMARIES_JOINED`].
+    fn memory_files(&self) -> Vec<PathBuf> {
+        root::AGY_SUMMARIES_JOINED
+            .iter()
+            .map(PathBuf::from)
+            .collect()
+    }
+
+    /// The two directories, and not the database: agy makes its own where
+    /// there is none, and a database of nothing is no file.
+    fn unshared(&self) -> Vec<&str> {
+        root::AGY_MEMORY.to_vec()
+    }
+
+    /// The record `--conversation` resumes from and the brain directory the
+    /// Transcript is followed in, each picked out by the ids agy gave this
+    /// Conversation's sessions. Not the summaries database, which is the
+    /// human's index of every conversation they have had: agy 1.4.12 resumes a
+    /// conversation that has no row in it and writes the row itself.
+    fn synced(
+        &self,
+        _place: Option<&Place>,
+        _worktree: Option<&str>,
+        sessions: &[String],
+    ) -> Vec<Part> {
+        vec![
+            Part {
+                label: root::CONVERSATIONS,
+                inside: PathBuf::from(root::AGY_MEMORY[0]),
+                whose: Whose::Databases(sessions.to_vec()),
+            },
+            Part {
+                label: root::BRAIN,
+                inside: PathBuf::from(root::AGY_MEMORY[1]),
+                whose: Whose::Called(sessions.to_vec()),
+            },
+        ]
+    }
+
+    fn mirrored(&self) -> Vec<PathBuf> {
+        vec![Path::new(sandbox::AGY_INSIDE_HOME).join(root::AGY_SETTINGS)]
+    }
+
+    fn mirroring(&self, account: &store::Account) -> Vec<Option<Vec<u8>>> {
+        let settings = std::fs::read(account.directory().join(root::AGY_SETTINGS)).ok();
+
+        vec![Some(root::agy_settings(settings.as_deref()))]
+    }
+
+    fn speaking(&self) -> Option<&'static Speaking> {
+        Some(&crate::logins::AGY)
+    }
+
+    fn search(
+        &self,
+        account: &Path,
+        memory: bool,
+        home: &Home,
+        session: &str,
+        worktree: Option<&Path>,
+        launched: SystemTime,
+    ) -> Search {
+        transcript::agy_search(account, memory, home, session, worktree, launched)
+    }
+
+    fn carried<'a>(
+        &'a self,
+        account: &'a Path,
+        memory: bool,
+        session: &'a str,
+        worktree: &'a Path,
+        home: &'a Home,
+    ) -> Carrying<'a> {
+        Box::pin(transcript::agy_carried(
+            account, memory, session, worktree, home,
+        ))
+    }
+
+    /// Gemini 3.8 Flash at two of its three thinking levels, high for the
+    /// grilling and medium for the rest — see [`crate::pairing_defaults`].
+    fn model(&self, role: store::Role) -> &str {
+        match role {
+            store::Role::Grilling => "gemini-3.8-flash-high",
+            store::Role::Implementation | store::Role::Review => "gemini-3.8-flash-medium",
+        }
     }
 }
 

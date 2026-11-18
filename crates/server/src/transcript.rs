@@ -164,7 +164,7 @@ pub(crate) struct Tail {
 /// see [`crate::records`]. The Antigravity CLI takes none and finds its
 /// conversation as opencode's is found, in an index, and then keeps a log
 /// named for it as Claude does — see [`Brain`].
-enum Search {
+pub(crate) enum Search {
     /// Claude's: the Profile's directory of projects, and the name Verkstead
     /// gave the session, which is what the file is called.
     Named { projects: PathBuf, session: String },
@@ -286,88 +286,18 @@ impl Tail {
             };
         }
 
-        // One arm per agent type rather than one path every type is assumed to
-        // keep: where a backend puts its record, and what it calls it, is that
-        // backend's own business, and a backend arriving with a fourth answer
-        // lands here.
-        let search = match (&profile.account, worktree) {
-            // Where Claude Code keeps its logs: under the directory the account
-            // is where the Profile shares its memory, and under the session's
-            // own root on the host where it does not. A shared entry is a join,
-            // and on Linux a join is a bind inside the namespace only, so on the
-            // host the log is in the account; an unshared `projects/` is the
-            // root's own directory, so the log is there and nowhere else.
-            (store::Account::Claude { claude_dir, .. }, _) => Search::Named {
-                projects: claude_projects(claude_dir, profile.memory, home),
-                session: session.to_owned(),
-            },
-
-            // And where codex keeps its rollouts: under the one directory its
-            // account is where the Profile shares its memory, and under the
-            // session's own root on the host where it does not — for Claude's
-            // reason above, `sessions/` being joined whole rather than by entry.
-            (store::Account::Codex { home: account }, Some(worktree)) => Search::Rollout {
-                sessions: codex_rollouts(account, profile.memory, home),
-                worktree: worktree.to_owned(),
-                launched: to_the_second(launched),
-            },
-
-            // A Codex session with no Worktree has nothing to match a rollout
-            // against, and a session with no Worktree never starts — see
-            // [`crate::sessions::Sessions::start`]. So this is a case that
-            // cannot happen rather than one that is given up on, and it is
-            // given up on rather than guessed at.
-            (store::Account::Codex { .. }, None) => Search::Nowhere,
-
-            // And where grok keeps its sessions: under the one directory its
-            // account is where the Profile shares its memory, and under the
-            // session's own root on the host where it does not, for Codex's
-            // reason. Grok Build names its session at launch, so the log is
-            // named rather than found — the Worktree and the moment are
-            // nothing to it.
-            (store::Account::Grok { home: account }, _) => Search::Updates {
-                sessions: match profile.memory {
-                    true => account.join(SESSIONS),
-                    false => home.grok_sessions(),
-                },
-                session: session.to_owned(),
-            },
-
-            // And where opencode keeps its sessions, which is one database
-            // under the data half of the two directories its account is where
-            // the Profile shares its memory, and in the session's own root on
-            // the host where it does not — the data directory being joined
-            // whole, for Codex's reason. The name of the file is the one the
-            // sandbox pinned rather than the one opencode would have chosen for
-            // itself — see [`crate::sandbox`].
-            (store::Account::OpenCode { home: account }, Some(worktree)) => Search::Records {
-                database: opencode_database(account, profile.memory, home),
-                worktree: worktree.to_owned(),
-                launched,
-            },
-
-            // And an OpenCode session with no Worktree has nothing to match a
-            // session in that store against, which is the Codex case above word
-            // for word: it cannot happen, and it is given up on rather than
-            // guessed at.
-            (store::Account::OpenCode { .. }, None) => Search::Nowhere,
-
-            // And where agy keeps its conversations: under the one directory of
-            // the account it writes in where the Profile shares its memory, and
-            // under the session's own root on the host where it does not, for
-            // Codex's reason. Found by Worktree and moment, as opencode's are.
-            (store::Account::Agy { home: account }, Some(worktree)) => Search::Brain(Brain {
-                store: agy_store(account, profile.memory, home),
-                index: agy_index(account, profile.memory, home),
-                worktree: worktree.to_owned(),
-                launched,
-                conversation: None,
-                unwritten: 0,
-            }),
-
-            // An agy session with no Worktree is the Codex case word for word.
-            (store::Account::Agy { .. }, None) => Search::Nowhere,
-        };
+        // Asked of the harness rather than assumed of every one: where a
+        // backend puts its record, and what it calls it, is that backend's own
+        // business, and a backend arriving with an answer of its own gives it
+        // there — see [`crate::harness::Harness::search`].
+        let search = crate::harness::of(profile.agent_type()).search(
+            profile.account.directory(),
+            profile.memory,
+            home,
+            session,
+            worktree,
+            launched,
+        );
 
         Tail {
             conversation,
@@ -706,59 +636,92 @@ pub(crate) async fn carried(
     worktree: &Path,
     home: &crate::sandbox::Home,
 ) -> Option<Carried> {
-    match &profile.account {
-        store::Account::Claude { claude_dir, .. } => {
-            as_far_as_it_got(
-                named(&claude_projects(claude_dir, profile.memory, home), session).await?,
-            )
-            .await
-        }
+    crate::harness::of(profile.agent_type())
+        .carried(
+            profile.account.directory(),
+            profile.memory,
+            session,
+            worktree,
+            home,
+        )
+        .await
+}
 
-        store::Account::Grok { home: account } => {
-            as_far_as_it_got(
-                relocated(
-                    &grok_sessions(account, profile.memory, home),
-                    session,
-                    worktree,
-                )
-                .await?,
-            )
-            .await
-        }
+/// Claude's log of `session`, under the account at `claude_dir` — see
+/// [`carried`], which is every harness's.
+pub(crate) async fn claude_carried(
+    claude_dir: &Path,
+    memory: bool,
+    session: &str,
+    _worktree: &Path,
+    home: &crate::sandbox::Home,
+) -> Option<Carried> {
+    as_far_as_it_got(named(&claude_projects(claude_dir, memory, home), session).await?).await
+}
 
-        store::Account::Codex { home: account } => {
-            as_far_as_it_got(
-                in_the_store(&codex_rollouts(account, profile.memory, home), session).await?,
-            )
-            .await
-        }
+/// Grok Build's, relocated to `worktree` first — see [`relocated`].
+pub(crate) async fn grok_carried(
+    account: &Path,
+    memory: bool,
+    session: &str,
+    worktree: &Path,
+    home: &crate::sandbox::Home,
+) -> Option<Carried> {
+    as_far_as_it_got(relocated(&grok_sessions(account, memory, home), session, worktree).await?)
+        .await
+}
 
-        store::Account::OpenCode { home: account } => {
-            let database = opencode_database(account, profile.memory, home);
-            let taken = records::carried(&database, session, worktree).await?;
+/// Codex's, searched for in its store by the id it gave itself — see
+/// [`in_the_store`].
+pub(crate) async fn codex_carried(
+    account: &Path,
+    memory: bool,
+    session: &str,
+    _worktree: &Path,
+    home: &crate::sandbox::Home,
+) -> Option<Carried> {
+    as_far_as_it_got(in_the_store(&codex_rollouts(account, memory, home), session).await?).await
+}
 
-            Some(Carried::Records {
-                database,
-                session: session.to_owned(),
-                taken,
-            })
-        }
+/// OpenCode's, a row of its one database — see [`records::carried`].
+pub(crate) async fn opencode_carried(
+    account: &Path,
+    memory: bool,
+    session: &str,
+    worktree: &Path,
+    home: &crate::sandbox::Home,
+) -> Option<Carried> {
+    let database = opencode_database(account, memory, home);
+    let taken = records::carried(&database, session, worktree).await?;
 
-        // agy resumes from the conversation's own database, and the
-        // Transcript carries on in the log under its brain directory — both
-        // named for the id, and both crossing with the memory sync by it. Each
-        // is proved to be here: a record without its log would be a Transcript
-        // that began again, and a log without its record a resume agy refuses.
-        store::Account::Agy { home: account } => {
-            let store = agy_store(account, profile.memory, home);
+    Some(Carried::Records {
+        database,
+        session: session.to_owned(),
+        taken,
+    })
+}
 
-            if !is_file(&store.join(AGY_CONVERSATIONS).join(format!("{session}.db"))).await {
-                return None;
-            }
+/// agy's.
+///
+/// agy resumes from the conversation's own database, and the Transcript
+/// carries on in the log under its brain directory — both named for the id,
+/// and both crossing with the memory sync by it. Each is proved to be here: a
+/// record without its log would be a Transcript that began again, and a log
+/// without its record a resume agy refuses.
+pub(crate) async fn agy_carried(
+    account: &Path,
+    memory: bool,
+    session: &str,
+    _worktree: &Path,
+    home: &crate::sandbox::Home,
+) -> Option<Carried> {
+    let store = agy_store(account, memory, home);
 
-            as_far_as_it_got(agy_log(&store, session)).await
-        }
+    if !is_file(&store.join(AGY_CONVERSATIONS).join(format!("{session}.db"))).await {
+        return None;
     }
+
+    as_far_as_it_got(agy_log(&store, session)).await
 }
 
 /// A log that is there, as the record a resumed session is already part way
@@ -919,6 +882,140 @@ pub(crate) fn decoded(name: &str) -> Option<String> {
     String::from_utf8(read).ok()
 }
 
+/// The arguments every search below is made of: the account's directory, the
+/// Profile's memory switch, the Conversation's own home, the session id
+/// Verkstead named, the Worktree the session runs in and the moment it was
+/// launched. Each harness's search reads the ones its record is found by and
+/// none of the rest — see [`Tail::of`].
+///
+/// Where Claude Code keeps its logs: under the directory the account is where
+/// the Profile shares its memory, and under the session's own root on the host
+/// where it does not. A shared entry is a join, and on Linux a join is a bind
+/// inside the namespace only, so on the host the log is in the account; an
+/// unshared `projects/` is the root's own directory, so the log is there and
+/// nowhere else.
+pub(crate) fn claude_search(
+    claude_dir: &Path,
+    memory: bool,
+    home: &crate::sandbox::Home,
+    session: &str,
+    _worktree: Option<&Path>,
+    _launched: SystemTime,
+) -> Search {
+    Search::Named {
+        projects: claude_projects(claude_dir, memory, home),
+        session: session.to_owned(),
+    }
+}
+
+/// And where codex keeps its rollouts: under the one directory its account is
+/// where the Profile shares its memory, and under the session's own root on the
+/// host where it does not — for Claude's reason above, `sessions/` being joined
+/// whole rather than by entry.
+///
+/// A Codex session with no Worktree has nothing to match a rollout against,
+/// and a session with no Worktree never starts — see
+/// [`crate::sessions::Sessions::start`]. So that is a case that cannot happen
+/// rather than one that is given up on, and it is given up on rather than
+/// guessed at.
+pub(crate) fn codex_search(
+    account: &Path,
+    memory: bool,
+    home: &crate::sandbox::Home,
+    _session: &str,
+    worktree: Option<&Path>,
+    launched: SystemTime,
+) -> Search {
+    let Some(worktree) = worktree else {
+        return Search::Nowhere;
+    };
+
+    Search::Rollout {
+        sessions: codex_rollouts(account, memory, home),
+        worktree: worktree.to_owned(),
+        launched: to_the_second(launched),
+    }
+}
+
+/// And where grok keeps its sessions: under the one directory its account is
+/// where the Profile shares its memory, and under the session's own root on the
+/// host where it does not, for Codex's reason. Grok Build names its session at
+/// launch, so the log is named rather than found — the Worktree and the moment
+/// are nothing to it.
+pub(crate) fn grok_search(
+    account: &Path,
+    memory: bool,
+    home: &crate::sandbox::Home,
+    session: &str,
+    _worktree: Option<&Path>,
+    _launched: SystemTime,
+) -> Search {
+    Search::Updates {
+        sessions: match memory {
+            true => account.join(SESSIONS),
+            false => home.grok_sessions(),
+        },
+        session: session.to_owned(),
+    }
+}
+
+/// And where opencode keeps its sessions, which is one database under the data
+/// half of the two directories its account is where the Profile shares its
+/// memory, and in the session's own root on the host where it does not — the
+/// data directory being joined whole, for Codex's reason. The name of the file
+/// is the one the sandbox pinned rather than the one opencode would have chosen
+/// for itself — see [`crate::sandbox`].
+///
+/// And an OpenCode session with no Worktree has nothing to match a session in
+/// that store against, which is the Codex case word for word: it cannot
+/// happen, and it is given up on rather than guessed at.
+pub(crate) fn opencode_search(
+    account: &Path,
+    memory: bool,
+    home: &crate::sandbox::Home,
+    _session: &str,
+    worktree: Option<&Path>,
+    launched: SystemTime,
+) -> Search {
+    let Some(worktree) = worktree else {
+        return Search::Nowhere;
+    };
+
+    Search::Records {
+        database: opencode_database(account, memory, home),
+        worktree: worktree.to_owned(),
+        launched,
+    }
+}
+
+/// And where agy keeps its conversations: under the one directory of the
+/// account it writes in where the Profile shares its memory, and under the
+/// session's own root on the host where it does not, for Codex's reason. Found
+/// by Worktree and moment, as opencode's are.
+///
+/// An agy session with no Worktree is the Codex case word for word.
+pub(crate) fn agy_search(
+    account: &Path,
+    memory: bool,
+    home: &crate::sandbox::Home,
+    _session: &str,
+    worktree: Option<&Path>,
+    launched: SystemTime,
+) -> Search {
+    let Some(worktree) = worktree else {
+        return Search::Nowhere;
+    };
+
+    Search::Brain(Brain {
+        store: agy_store(account, memory, home),
+        index: agy_index(account, memory, home),
+        worktree: worktree.to_owned(),
+        launched,
+        conversation: None,
+        unwritten: 0,
+    })
+}
+
 /// Where Claude Code keeps its logs for a session run under a Profile: under the
 /// directory the account is where that Profile shares its memory, and under the
 /// session's own root on the host where it does not.
@@ -1009,7 +1106,7 @@ fn agy_log(store: &Path, conversation: &str) -> PathBuf {
 /// for the reason Codex's and opencode's do: it is what a device that never ran
 /// this session resumes by, and a conversation can be resumed whether or not
 /// its log was ever written.
-struct Brain {
+pub(crate) struct Brain {
     /// agy's own directory inside the account, or the root's on the host.
     store: PathBuf,
 

@@ -579,28 +579,7 @@ fn broken(
         return None;
     }
 
-    let paths: Vec<(PathBuf, Broken)> = match &profile.account {
-        store::Account::Claude {
-            claude_dir,
-            config_file,
-        } => vec![
-            (claude_dir.clone(), Broken::DirMissing),
-            (config_file.clone(), Broken::ConfigMissing),
-        ],
-        store::Account::Codex { home }
-        | store::Account::Grok { home }
-        | store::Account::Agy { home } => {
-            vec![(home.clone(), Broken::HomeMissing)]
-        }
-
-        // An OpenCode home is judged by the two directories opencode keeps an
-        // account in rather than by the directory holding them: those are what
-        // is mounted, and a home that has never had opencode run in it has
-        // neither. See [`crate::sandbox::OPENCODE_CONFIG_INSIDE_HOME`].
-        store::Account::OpenCode { home } => {
-            xdg(home).map(|path| (path, Broken::HomeMissing)).collect()
-        }
-    };
+    let paths = crate::harness::of(profile.agent_type()).judged(&profile.account);
 
     for (path, missing) in paths {
         if !matches!(resolve(&path), Resolved::At(_)) {

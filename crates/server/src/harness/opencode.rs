@@ -2,9 +2,17 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{Harness, Line, Resume, SignedOut};
+use std::time::SystemTime;
+
+use verkstead_render::Broken;
+
+use super::{Carrying, Harness, Line, Resume, SignedOut};
 use crate::platform::Platform;
+use crate::sandbox::root::{self, Part, Place, Whose};
+use crate::sandbox::{self, Home};
+use crate::settings::AttachedServer;
 use crate::store;
+use crate::transcript::{self, Search};
 
 /// The program an OpenCode session is run as.
 pub(crate) const BINARY: &str = "opencode";
@@ -165,4 +173,162 @@ impl Harness for OpenCode {
     fn written_in_worktree(&self) -> Option<&str> {
         None
     }
+
+    /// A home, which is the one the XDG defaults resolve inside.
+    fn kept_in(&self, home: &Path) -> store::Account {
+        store::Account::OpenCode {
+            home: home.to_owned(),
+        }
+    }
+
+    /// Two rather than one, and the same relative path on both sides of
+    /// each: an OpenCode Profile's home is an opencode home, and the XDG
+    /// defaults resolve inside the fresh HOME — see
+    /// [`sandbox::OPENCODE_CONFIG_INSIDE_HOME`].
+    fn account_inside(&self, account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBuf)> {
+        XDG.into_iter()
+            .map(|inside| (account.directory().join(inside), home.join(inside)))
+            .collect()
+    }
+
+    /// An OpenCode home is judged by the two directories opencode keeps an
+    /// account in rather than by the directory holding them: those are what
+    /// is mounted, and a home that has never had opencode run in it has
+    /// neither.
+    fn judged(&self, account: &store::Account) -> Vec<(PathBuf, Broken)> {
+        XDG.into_iter()
+            .map(|inside| (account.directory().join(inside), Broken::HomeMissing))
+            .collect()
+    }
+
+    fn root(&self) -> &str {
+        "opencode"
+    }
+
+    /// HOME itself, the account being a home.
+    fn landing(&self) -> &str {
+        ""
+    }
+
+    /// Its config directory, and its data directory as well where memory is
+    /// not shared — where it is, the data directory is the account's, joined
+    /// whole.
+    fn built(&self, memory: bool) -> Vec<&str> {
+        match memory {
+            true => vec![root::OPENCODE_CONFIG],
+            false => vec![root::OPENCODE_CONFIG, root::OPENCODE_DATA],
+        }
+    }
+
+    fn login(&self) -> &str {
+        root::OPENCODE_AUTH
+    }
+
+    /// The login is in the data directory, which a root sharing its memory
+    /// joins whole.
+    fn login_in_memory(&self) -> bool {
+        true
+    }
+
+    fn configuration(&self) -> Vec<PathBuf> {
+        root::OPENCODE_CONFIGS
+            .iter()
+            .map(|file| Path::new(root::OPENCODE_CONFIG).join(file))
+            .collect()
+    }
+
+    /// An `opencode.json` — see [`root::opencode_config`].
+    fn configured(
+        &self,
+        found: Vec<Option<Vec<u8>>>,
+        servers: &[AttachedServer],
+    ) -> Vec<(PathBuf, Vec<u8>)> {
+        let found = <[_; 2]>::try_from(found)
+            .expect("two files asked for")
+            .map(|file| file.and_then(|bytes| String::from_utf8(bytes).ok()));
+
+        vec![(
+            Path::new(root::OPENCODE_CONFIG).join(root::OPENCODE_CONFIGS[0]),
+            root::opencode_config(found, servers),
+        )]
+    }
+
+    fn instructions(&self) -> PathBuf {
+        Path::new(root::OPENCODE_CONFIG).join(root::AGENTS)
+    }
+
+    fn memory(&self, _place: Option<&Place>) -> Vec<PathBuf> {
+        vec![PathBuf::from(root::OPENCODE_DATA)]
+    }
+
+    /// None: its data directory is then one of the root's own directories
+    /// already — see [`Harness::built`].
+    fn unshared(&self) -> Vec<&str> {
+        Vec::new()
+    }
+
+    fn synced(
+        &self,
+        _place: Option<&Place>,
+        _worktree: Option<&str>,
+        _sessions: &[String],
+    ) -> Vec<Part> {
+        vec![Part {
+            label: root::DATA,
+            inside: PathBuf::from(root::OPENCODE_DATA),
+            whose: Whose::Database(sandbox::OPENCODE_DB_FILE),
+        }]
+    }
+
+    fn mirrored(&self) -> Vec<PathBuf> {
+        vec![Path::new(root::OPENCODE_CONFIG).join(root::OPENCODE_CONFIGS[0])]
+    }
+
+    fn mirroring(&self, account: &store::Account) -> Vec<Option<Vec<u8>>> {
+        let config = account.directory().join(root::OPENCODE_CONFIG);
+
+        vec![Some(root::opencode_config(
+            root::OPENCODE_CONFIGS.map(|file| std::fs::read_to_string(config.join(file)).ok()),
+            &[],
+        ))]
+    }
+
+    fn search(
+        &self,
+        account: &Path,
+        memory: bool,
+        home: &Home,
+        session: &str,
+        worktree: Option<&Path>,
+        launched: SystemTime,
+    ) -> Search {
+        transcript::opencode_search(account, memory, home, session, worktree, launched)
+    }
+
+    fn carried<'a>(
+        &'a self,
+        account: &'a Path,
+        memory: bool,
+        session: &'a str,
+        worktree: &'a Path,
+        home: &'a Home,
+    ) -> Carrying<'a> {
+        Box::pin(transcript::opencode_carried(
+            account, memory, session, worktree, home,
+        ))
+    }
+
+    fn model(&self, role: store::Role) -> &str {
+        match role {
+            store::Role::Grilling => "opencode/gpt-5.1-codex",
+            store::Role::Implementation | store::Role::Review => "minimax/minimax-m2.1",
+        }
+    }
 }
+
+/// The two directories opencode keeps an account in, inside its home: its
+/// config and its data — see [`sandbox::OPENCODE_CONFIG_INSIDE_HOME`].
+const XDG: [&str; 2] = [
+    sandbox::OPENCODE_CONFIG_INSIDE_HOME,
+    sandbox::OPENCODE_DATA_INSIDE_HOME,
+];

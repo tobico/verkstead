@@ -91,7 +91,7 @@ pub(crate) const LIMIT: Duration = Duration::from_secs(10 * 60);
 
 /// How one harness's login goes: what runs it, what it prints, and what it
 /// says back — the whole of what tells one harness's login from another's.
-struct Speaking {
+pub(crate) struct Speaking {
     /// What the modal and its refusals call the harness.
     name: &'static str,
 
@@ -130,7 +130,7 @@ struct Speaking {
 /// standard error, and the harness waits on — see the module note. `auth
 /// status` answers by its exit status: `0` logged in, `1` not. An API key, in
 /// the environment or from an `apiKeyHelper`, reads as logged in.
-const CLAUDE: Speaking = Speaking {
+pub(crate) const CLAUDE: Speaking = Speaking {
     name: "Claude",
     logging_in: &["auth", "login", "--claudeai"],
     status: &["auth", "status"],
@@ -167,7 +167,7 @@ const CLAUDE: Speaking = Speaking {
 /// to view available models. Launch the CLI without arguments to sign in.` and
 /// exits `1`. It fails other ways too — no network, Google not answering — so
 /// only that sentence reads as signed out.
-const AGY: Speaking = Speaking {
+pub(crate) const AGY: Speaking = Speaking {
     name: "Antigravity",
     logging_in: &["-p", "/help"],
     status: &["models"],
@@ -181,11 +181,7 @@ const AGY: Speaking = Speaking {
 /// How a login of `agent_type` goes, or `None` for a harness whose login
 /// Verkstead does not run.
 fn speaking(agent_type: store::AgentType) -> Option<&'static Speaking> {
-    match agent_type {
-        store::AgentType::Claude => Some(&CLAUDE),
-        store::AgentType::Agy => Some(&AGY),
-        store::AgentType::Codex | store::AgentType::Grok | store::AgentType::OpenCode => None,
-    }
+    crate::harness::of(agent_type).speaking()
 }
 
 /// Whether Verkstead runs the login of a Profile of `agent_type` — see
