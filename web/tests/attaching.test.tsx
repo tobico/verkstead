@@ -146,7 +146,7 @@ describe("the files on a draft", () => {
     await openComposer();
 
     expect(
-      screen.getByRole("list", { name: "Attached files and MCP servers" }),
+      screen.getByRole("list", { name: "Attached to the brief" }),
     ).toBeTruthy();
     for (const attachment of ATTACHED) {
       expect(
@@ -731,7 +731,7 @@ describe("the files on a frozen brief", () => {
 
     // Named for whoever is not looking at it, the way the composer's row is.
     expect(
-      screen.getByRole("list", { name: "Attached files and MCP servers" }),
+      screen.getByRole("list", { name: "Attached to the brief" }),
     ).toBeTruthy();
   });
 
@@ -781,7 +781,7 @@ describe("the files on a frozen brief", () => {
 
     expect(pane.querySelector(`.${pill.attachments}`)).toBeNull();
     expect(
-      screen.queryByRole("list", { name: "Attached files and MCP servers" }),
+      screen.queryByRole("list", { name: "Attached to the brief" }),
     ).toBeNull();
   });
 

@@ -4171,6 +4171,117 @@ async fn a_grilling_session_is_told_about_the_attached_mcp_servers_too() {
     );
 }
 
+/// And what a Conversation with a Skill Pack attached gives its grilling
+/// session: the pack mounted at `/verkstead/skills/<pack>/`, and listed under
+/// `# Skill packs` with each skill's path — the grilling session for the
+/// servers' reason, its prompt being built nowhere near the rest.
+///
+/// The pack is an installed plugin's, put on through the routes the Plugins
+/// page and the Attach menu press, while the Conversation drafts.
+#[tokio::test]
+async fn a_grilling_session_reads_an_attached_skill_pack() {
+    let bench = bench_at_pace(
+        tempfile::tempdir().unwrap(),
+        r#"printf 'prompt=%s\n' "$2"; printf 'skill=%s\n' "$(cat /verkstead/skills/rust-review/reviewing/SKILL.md)""#,
+        PULL_REQUEST,
+        *BRISKLY,
+        None,
+    )
+    .await;
+    let app = bench.app.clone();
+
+    let plugin = bench.elsewhere.path().join("rust-review");
+    std::fs::create_dir_all(plugin.join("skills/reviewing")).unwrap();
+    std::fs::write(
+        plugin.join("plugin.yaml"),
+        "uuid: 0b6f6b7e-5c3a-4d0e-9a51-2f7d8c1e4a90\n\
+         name: Rust review\n\
+         author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
+         version: 1.0.0\n\
+         interface: 1\n\
+         provides:\n  - category: skills\n    name: rust-review\n    directory: skills\n\
+         capabilities: []\n",
+    )
+    .unwrap();
+    std::fs::write(
+        plugin.join("skills/reviewing/SKILL.md"),
+        "---\nname: reviewing\ndescription: Review Rust.\n---\n\nReview the Rust.\n",
+    )
+    .unwrap();
+    let consent: verkstead_render::PluginConsent = post(
+        &app,
+        "/api/ui/plugins/read",
+        &serde_json::json!({ "source": plugin }),
+    )
+    .await;
+    let _: verkstead_render::PluginsView = post(
+        &app,
+        "/api/ui/plugins",
+        &serde_json::json!({ "source": plugin, "granted": consent.capabilities }),
+    )
+    .await;
+
+    let started: Started = post(
+        &app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+    bench.under_every_pairing(id).await;
+    let saved: BriefSaved = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let attached: verkstead_render::PackAttached = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/skill-packs/rust-review"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(attached, verkstead_render::PackAttached::Attached);
+
+    let grilling: GrillingStarted = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(grilling, GrillingStarted::Started);
+    let fixture = bench.holding(id);
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("# Skill packs"),
+        "the pack is listed under a heading of its own: {said:?}"
+    );
+    assert!(
+        said.contains(
+            "- `rust-review`\n  - `rust-review/reviewing`: \
+             `/verkstead/skills/rust-review/reviewing/SKILL.md`"
+        ),
+        "each skill by its name and the path of its SKILL.md: {said:?}"
+    );
+    assert!(
+        said.contains("skill=---"),
+        "and the session reads it at that path: {said:?}"
+    );
+    assert!(
+        said.contains("Review the Rust."),
+        "the pack's own text: {said:?}"
+    );
+}
+
 /// And the files outlive a Close: a Conversation steered back out of Closed
 /// runs a session told about the same files, at the same path.
 ///

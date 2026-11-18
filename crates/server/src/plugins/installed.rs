@@ -89,6 +89,12 @@ pub(crate) struct Installed {
     /// Held across one load, so two never interleave their writes of the
     /// troubles.
     loading: Arc<tokio::sync::Mutex<()>>,
+
+    /// The Skill Packs the last load wrote out, which the Attach menu offers
+    /// — the same list the sessions' [`crate::skills::Skills::holding`] is
+    /// handed, held here too because a server with no agents still draws the
+    /// composer.
+    packs: Arc<Mutex<Vec<crate::skills::LoadedPack>>>,
 }
 
 impl Installed {
@@ -109,6 +115,15 @@ impl Installed {
                 .get(uuid)
                 .cloned()
         })
+    }
+
+    /// The installed plugins' Skill Packs loaded on this device, as of the
+    /// last load.
+    pub(crate) fn packs(&self) -> Vec<crate::skills::LoadedPack> {
+        self.packs
+            .lock()
+            .expect("nothing panics holding the packs")
+            .clone()
     }
 
     /// The presses that would put right the dependencies `uuid` is in
@@ -224,9 +239,34 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
             })
         })
         .collect();
-    if let Err(error) = crate::skills::placed(Platform::HERE, &state.data_dir, &placing) {
-        tracing::error!(error = ?error, "the installed plugins' skill packs couldn't be written out");
+    // And what was written out held as what a launch mounts and lists, and
+    // what the Attach menu offers: nothing, where the writing failed, rather
+    // than a pack a bind would find missing.
+    let packs = match crate::skills::placed(Platform::HERE, &state.data_dir, &placing) {
+        Ok(()) => manifests
+            .iter()
+            .filter(|(uuid, _)| dirs.contains_key(*uuid))
+            .flat_map(|(_, manifest)| {
+                manifest.packs.iter().map(|pack| crate::skills::LoadedPack {
+                    name: pack.name.clone(),
+                    plugin: manifest.name.clone(),
+                    skills: pack.skills.clone(),
+                })
+            })
+            .collect(),
+        Err(error) => {
+            tracing::error!(error = ?error, "the installed plugins' skill packs couldn't be written out");
+            Vec::new()
+        }
+    };
+    if let Some(skills) = state.sessions.skills() {
+        skills.holding(packs.clone());
     }
+    *state
+        .plugins
+        .packs
+        .lock()
+        .expect("nothing panics holding the packs") = packs;
 
     let moved = {
         let mut held = state

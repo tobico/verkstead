@@ -844,7 +844,9 @@ impl Grilling {
         granted.extend(self.joined_entries());
         granted.extend([
             self.claude_dir().join(CREDENTIALS),
-            self.skills.path().to_owned(),
+            // The shipped pack, which is granted a pack at a time rather than
+            // as the whole skills directory.
+            self.skills.path().join("verkstead"),
             self.verkstead.path().to_owned(),
             self.writable.clone(),
             self.readable.clone(),
@@ -1276,7 +1278,7 @@ async fn every_access_kind_is_classified_as_the_description_said() {
         file("config", profile.join(".claude.json")),
         directory("handoffs", fixture.handoffs_inside()),
         directory("bind", &fixture.writable),
-        directory("skills", fixture.skills.path()),
+        directory("skills", fixture.skills.path().join("verkstead")),
         directory("attachments", fixture.attachments_dir()),
         directory("readable-bind", &fixture.readable),
         file("verkstead", fixture.verkstead.path()),

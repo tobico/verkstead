@@ -2849,6 +2849,15 @@ impl Sessions {
             pairing.profile.agent_type(),
         );
 
+        // And the Skill Packs it attached, listed beside them — read against
+        // the packs loaded on this device, as the bind is: one gone since is
+        // neither mounted nor named. See [`skills::packed`].
+        let prompt = skills::packed(
+            &prompt,
+            &agents.skills.among(&conversation.skill_packs),
+            &agents.skills,
+        );
+
         // And, where the branch is still on the name Verkstead invented for it,
         // the instruction to pick a better one. Here for the reason the listing
         // above is here — it is not any one prompt's, and the three starts that

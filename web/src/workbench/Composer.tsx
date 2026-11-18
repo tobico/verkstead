@@ -61,6 +61,13 @@
 //! would be a control the human had to find twice. The section is
 //! [`ServerRows`], which both pages draw.
 //!
+//! **And under the servers a *Skill packs* section**, the same shape again:
+//! the packs the plugins installed and enabled on this device provide, a pick
+//! a chip, and the chip's × the way back. No row to add one from — a pack
+//! arrives with a plugin, and installing one is the settings page's business
+//! rather than a card's — and so no section at all where nothing is installed:
+//! see [`PackRows`], which both pages draw as well.
+//!
 //! What is this pane's alone is that a pick lands on the server as it is made:
 //! there is a Conversation under this composer, so the chip comes back off the
 //! record. The compose page holds its picks until a press, having nothing yet
@@ -100,9 +107,12 @@ import {
 
 import {
   attachFile,
+  attachPack,
   attachServer,
   loadSettings,
+  loadSkillPacks,
   removeAttachment,
+  removePack,
   removeServer,
   saveBrief,
   startGrilling,
@@ -118,6 +128,9 @@ import type {
   ConversationView,
   GrillingStarted,
   McpServer,
+  OfferedPack,
+  PackAttached,
+  PackRemoved,
   Process,
   ServerAttached,
   ServerRemoved,
@@ -207,6 +220,13 @@ export function Composer(props: {
     frozen: () => props.brief.frozen,
   });
 
+  // And the Skill Packs, which are a third: chips after the servers', rows
+  // after theirs, and frozen with the Brief the same way.
+  const packs = packsOn({
+    conversation: () => props.conversation,
+    frozen: () => props.brief.frozen,
+  });
+
   // And the card the menu's *Add a server…* opens, which declares one and puts
   // it on this Conversation the way picking its row would have. Drawn beside
   // the menu rather than inside it, the menu's rows going with the press that
@@ -218,7 +238,7 @@ export function Composer(props: {
   // row of presses, and the drop the box itself takes. See `Attaching.tsx`.
   const files = attaching({
     shown: sending.shown,
-    chips: servers.chips,
+    chips: () => [...servers.chips(), ...packs.chips()],
     add: sending.send,
     offered: () => !props.brief.frozen,
     // Which is what makes this control a menu rather than a button — as it is
@@ -228,21 +248,31 @@ export function Composer(props: {
     // open it — the adopting draft's press is the Adoption, and a round that
     // has started has this whole pane replaced by the Brief's own.
     offering: (shut) => (
-      <ServerRows
-        attached={props.conversation.mcp_servers.map((one) => one.name)}
-        attach={(name) => {
-          // The menu first, because the press has done its work: the row that
-          // was pressed is about to go — the server it named has a chip now —
-          // and a card still hanging under the trigger would be a list
-          // rearranging itself under the hand that had finished with it.
-          shut();
-          servers.attach(name);
-        }}
-        add={() => {
-          shut();
-          adding.open();
-        }}
-      />
+      <>
+        <ServerRows
+          attached={props.conversation.mcp_servers.map((one) => one.name)}
+          attach={(name) => {
+            // The menu first, because the press has done its work: the row
+            // that was pressed is about to go — the server it named has a chip
+            // now — and a card still hanging under the trigger would be a list
+            // rearranging itself under the hand that had finished with it.
+            shut();
+            servers.attach(name);
+          }}
+          add={() => {
+            shut();
+            adding.open();
+          }}
+        />
+        <PackRows
+          attached={props.conversation.skill_packs.map((one) => one.name)}
+          attach={(name) => {
+            // The menu first, for the servers' reason.
+            shut();
+            packs.attach(name);
+          }}
+        />
+      </>
     ),
   });
 
@@ -292,6 +322,9 @@ export function Composer(props: {
               what went wrong with attaching one and with taking one off is the
               same sentence about the same row. */}
           <Show when={servers.refused()}>
+            {(said) => <ErrorLine class={styles.failure}>{said()}</ErrorLine>}
+          </Show>
+          <Show when={packs.refused()}>
             {(said) => <ErrorLine class={styles.failure}>{said()}</ErrorLine>}
           </Show>
 
@@ -984,6 +1017,179 @@ export function ServerRows(props: {
         Add a server…
       </button>
     </div>
+  );
+}
+
+/// What could not be done about a Skill Pack, one sentence per way of being
+/// refused — [`SERVER_REFUSAL`]'s one table for both presses, said of a pack.
+export const PACK_REFUSAL: Record<
+  Exclude<PackAttached | PackRemoved, "Attached" | "Removed">,
+  string
+> = {
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting: "The work has started, so its skill packs are settled.",
+  NoSuchPack: "No plugin installed here provides that skill pack.",
+};
+
+/// What a draft's composer does about its Skill Packs, held once for the pane:
+/// [`Servers`] again, the chips and the presses and the one line of refusal.
+type Packs = Servers;
+
+/// The whole of that, made once by the composer.
+///
+/// [`serversOn`] said of a pack, request for request: a name put on the
+/// Conversation or taken off it, each press its own request with its own
+/// answer, and the Conversation read again after either — the chip is drawn
+/// from the record, so the read is how it arrives and how it goes. Held apart
+/// rather than folded into the servers' because the two are different routes
+/// with different refusals, and one table of sentences for both would have a
+/// row in it no press of the other kind could meet.
+function packsOn(what: {
+  conversation: () => ConversationView;
+
+  /// Whether the round's Brief has frozen, which takes the × off every chip
+  /// exactly as it does a server's.
+  frozen: () => boolean;
+}): Packs {
+  const queries = useQueryClient();
+  const device = useDevice();
+
+  const [refused, setRefused] = createSignal<string | null>(null);
+  const [working, setWorking] = createSignal<Array<string>>([]);
+
+  const press = (
+    name: string,
+    made: Promise<PackAttached | PackRemoved>,
+    said: string,
+  ) => {
+    setWorking((was) => [...was, name]);
+
+    void made
+      .then((outcome: PackAttached | PackRemoved) => {
+        setRefused(
+          outcome === "Attached" || outcome === "Removed"
+            ? null
+            : PACK_REFUSAL[outcome],
+        );
+
+        // Either way, for the servers' reason: the read is both the correction
+        // and the whole of what there was to do.
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+      })
+      .catch((error: unknown) =>
+        setRefused(
+          `${name} ${said}. ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ),
+      )
+      .finally(() => setWorking((was) => was.filter((one) => one !== name)));
+  };
+
+  const attach = (name: string) => {
+    setRefused(null);
+    press(
+      name,
+      attachPack(device(), what.conversation().id, name),
+      "couldn't be attached",
+    );
+  };
+
+  const forget = (name: string) =>
+    press(
+      name,
+      removePack(device(), what.conversation().id, name),
+      "couldn't be removed",
+    );
+
+  const chips = (): Array<Chip> =>
+    what.conversation().skill_packs.map((pack) => ({
+      name: pack.name,
+      kind: "pack" as const,
+      gone: !pack.installed,
+      remove: what.frozen() ? undefined : () => forget(pack.name),
+      removing: working().includes(pack.name),
+    }));
+
+  return { chips, attach, refused };
+}
+
+/// The section an Attach menu holds under the servers: **Skill packs**, one row
+/// per pack an installed, enabled plugin provides on the device the work is on
+/// that is not on already.
+///
+/// [`ServerRows`] for everything it shares with it — both pages draw it, what
+/// is on already arrives as a list of names, a section of its own under its
+/// own heading, read when the menu opens rather than when the pane does, and a
+/// pack already attached left out for its chip to stand for. Drawn in that
+/// section's own styles, being that section's shape again.
+///
+/// Read off the device the page is about rather than off this one: a plugin is
+/// loaded — or in trouble — on each machine apart, and the server attaches only
+/// what the Conversation's own device has loaded. Which is the page's device on
+/// both pages: the composer's Conversation, and the compose page's pick.
+///
+/// **No *Add…* row**, unlike the servers: a pack comes with a plugin, and a
+/// plugin is installed on the settings page with a consent card of its own —
+/// nothing a row of this menu could stand in for.
+///
+/// **And no section at all where there is nothing to pick**: no plugin
+/// providing one, or every one on already. The servers' section stays drawn
+/// empty because its last row is still something to do; this one's would be a
+/// heading over nothing, on a menu most people open without having installed a
+/// plugin ever, and a row there saying so would be telling them about a
+/// feature every time they went to attach a file. Nothing is drawn while the
+/// read is in flight either, for the same reason — a row saying it was reading
+/// that went on to vanish would be the menu jumping under the hand. A read
+/// that failed is the one thing said, it being the one thing that is not
+/// simply true of the device.
+export function PackRows(props: {
+  /// The names that are on already, in whatever the page holds them in.
+  attached: Array<string>;
+  attach: (name: string) => void;
+}): JSX.Element {
+  const device = useDevice();
+
+  const offered = useReading(() => ({
+    queryKey: keyOf(device(), "skill-packs"),
+    queryFn: () => loadSkillPacks(device()),
+    freshness: { reconcile: "name" } as const,
+  }));
+
+  const offerable = (): Array<OfferedPack> =>
+    (offered.data ?? []).filter((pack) => !props.attached.includes(pack.name));
+
+  const heading = createUniqueId();
+
+  return (
+    <Show when={offered.isError || offerable().length > 0}>
+      <div role="group" aria-labelledby={heading} class={styles.servers}>
+        <div id={heading} role="presentation" class={styles.serversHead}>
+          Skill packs
+        </div>
+
+        <Show
+          when={!offered.isError}
+          fallback={
+            <button type="button" role="menuitem" disabled>
+              The skill packs couldn't be read.
+            </button>
+          }
+        >
+          <For each={offerable()}>
+            {(pack) => (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => props.attach(pack.name)}
+              >
+                {pack.name}
+              </button>
+            )}
+          </For>
+        </Show>
+      </div>
+    </Show>
   );
 }
 

@@ -29,19 +29,20 @@ use crate::{
     FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
     FileWrite, FileWritten, FolderListing, ForwardsView, GrillingStarted, InstallPress,
     LanguageCleared, LinkedDevice, Locked, LoginClosed, LoginCode, LoginOpened, LoginState,
-    MemoPressed, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, OfferedView,
-    OnboardingView, OpenTerminal, PendingJoin, Permitting, Picking, PluginAt, PluginConsent,
-    PluginEnabled, PluginInstall, PluginSettingsSave, PluginSettingsSaved, PluginSettingsView,
-    PluginUpdate, PluginUpdated, PluginsView, PortsView, PrefillView, Preflight, ProcessChoice,
-    ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
-    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Repointed,
-    Repointing, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
-    ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown,
-    Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted,
-    Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
-    TerminalsView, TranscriptView, Transferring, Unsubscribe, UpdateNotice, Watching,
+    MemoPressed, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack,
+    OfferedView, OnboardingView, OpenTerminal, PackAttached, PackRemoved, PendingJoin, Permitting,
+    Picking, PluginAt, PluginConsent, PluginEnabled, PluginInstall, PluginSettingsSave,
+    PluginSettingsSaved, PluginSettingsView, PluginUpdate, PluginUpdated, PluginsView, PortsView,
+    PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
+    Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView,
+    RepoRemoved, RepoSwitched, RepoView, Repointed, Repointing, Resolved, Resumed, RoadmapPane,
+    RoleChoice, Screen, ServeEdit, ServePress, ServerAttached, ServerRemoved, SetReading,
+    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
+    ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened,
+    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
+    TargetRecorded, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Transferring,
+    Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -207,6 +208,9 @@ fn the_viewers_types_are_written_from_these() {
     // inside the view above.
     ServerAttached::export_all(&config).unwrap();
     ServerRemoved::export_all(&config).unwrap();
+    PackAttached::export_all(&config).unwrap();
+    PackRemoved::export_all(&config).unwrap();
+    OfferedPack::export_all(&config).unwrap();
 
     // And the two actions that make and unmake what a Conversation works in.
     // Neither takes a request shape — which Conversation is in the path, and

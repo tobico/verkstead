@@ -189,6 +189,13 @@ A pack name is one plugin's: a plugin whose pack has the name of one already
 loaded loads in trouble, saying whose it is. A pack asks for no capability
 and needs no component.
 
+A loaded pack is offered on a Brief's Attach menu, under **Skill packs**
+beside the MCP servers. Attached, every session of that Conversation has it
+mounted read-only at `/verkstead/skills/<pack>/` and listed in its prompt with
+each skill's path; a Conversation that did not attach it cannot reach it. A
+pack disabled or removed after it was attached keeps its chip, marked *no
+longer installed*, and is neither mounted nor listed until it is back.
+
 ### What its wasm component may reach
 
 **`component`** — optional. A path to a `.wasm` file inside the plugin's

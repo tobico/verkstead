@@ -507,9 +507,19 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
       return [];
     // The installed Plugins moved: one installed, updated or ticked on this
     // device, a record of one pulled off a member, or what loading them here
-    // came to. The Plugins section draws them, and nothing else does yet.
+    // came to. The Plugins section draws them, and so does the Attach menu's
+    // Skill packs section, off the packs they provide.
+    //
+    // **And every Conversation of that device**, for the declarations' reason
+    // above: a pack chip says whether anything loaded here still provides it,
+    // read with the Conversation, and a plugin disabled or removed moves that
+    // with nothing else here moving.
     case "plugins":
-      return [keyOf(device, "plugins")];
+      return [
+        keyOf(device, "plugins"),
+        keyOf(device, "skill-packs"),
+        keyOf(device, "conversation"),
+      ];
 
     // Where a Profile's login has got to moved — which is what shows a second
     // device's modal the address the first one's login printed. This device's

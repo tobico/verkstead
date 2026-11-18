@@ -675,6 +675,28 @@ places_taken: number, };
 export type Attached = { "Attached": { attachment: AttachmentView, } } | "NoSuchConversation" | "NotDrafting" | "TooLarge" | "NotAName";
 
 /**
+ * One Skill Pack a Conversation has attached, as the composer draws it: the
+ * name it was attached under, and whether a plugin loaded on this device
+ * still provides it.
+ *
+ * [`AttachedServerView`]'s shape for its reasons: a pack whose plugin was
+ * disabled or removed since — or a local plugin's, on a device without its
+ * directory after a Transfer — keeps its chip, drawn saying it is gone, and is
+ * neither mounted nor listed to a session.
+ */
+export type AttachedPackView = { 
+/**
+ * What it is called, which is the directory its skills are under:
+ * `/verkstead/skills/<name>/`.
+ */
+name: string, 
+/**
+ * Whether a plugin loaded on this device provides it, read at the moment
+ * the Conversation is.
+ */
+installed: boolean, };
+
+/**
  * One MCP server a Conversation has attached, as the composer draws it: the
  * name it was attached under, and whether anything is still declared by it.
  *
@@ -2386,6 +2408,13 @@ attachments: Array<AttachmentView>,
  * about reaching it stays in this installation's settings.
  */
 mcp_servers: Array<AttachedServerView>, 
+/**
+ * And the Skill Packs it has attached, in the order they were attached in
+ * — chips beside the servers', settled at the same control and frozen at
+ * the same moment. Names, read beside whether this device has each pack
+ * loaded — see [`AttachedPackView`].
+ */
+skill_packs: Array<AttachedPackView>, 
 /**
  * The steer somebody has started on this Conversation and not yet decided,
  * where there is one.
@@ -4390,6 +4419,25 @@ export type Nudged = {
 device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "heirs" } | { "kind": "plugins" } | { "kind": "login", profile: string, } | { "kind": "logged_in", profile: string, } | { "kind": "everything" });
 
 /**
+ * One Skill Pack the Attach menu offers: an enabled installed plugin's, loaded
+ * on this device. The built-in `verkstead` is never one — every session has
+ * it already.
+ */
+export type OfferedPack = { 
+/**
+ * The pack's name, which is what a pick attaches.
+ */
+name: string, 
+/**
+ * The plugin providing it, by its manifest's name.
+ */
+plugin: string, 
+/**
+ * Its skills, by name, in the order the pack lists them.
+ */
+skills: Array<string>, };
+
+/**
  * And the same of every Conversation at once: what a member offers the device
  * asking, read over the link whenever that device's knowledge of it may be
  * stale — its Nudge stream to the member taken up, or the member answering
@@ -4551,6 +4599,20 @@ author: string, };
  * is: what is here is what the machine is.
  */
 export type Owed = "Restart" | "Annex";
+
+/**
+ * What became of attaching an installed Skill Pack to a Conversation.
+ *
+ * [`ServerAttached`]'s shape, with *no such pack* in place of its two about
+ * declarations: a pack is installed or it is not, and two plugins never hold
+ * one name — the second is refused as it loads.
+ */
+export type PackAttached = "Attached" | "NoSuchConversation" | "NotDrafting" | "NoSuchPack";
+
+/**
+ * And of taking one off again — [`ServerRemoved`]'s reasons, said of a pack.
+ */
+export type PackRemoved = "Removed" | "NoSuchConversation" | "NotDrafting";
 
 /**
  * Which of a Conversation's three roles a Pairing is for.
