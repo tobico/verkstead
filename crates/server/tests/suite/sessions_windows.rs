@@ -1853,7 +1853,7 @@ async fn a_session_reaches_what_the_description_names_and_is_refused_what_it_doe
         Note 'worktree' (Reading (Under (Here) 'README.md'))
         Note 'git' (Reading (Under '{git}' 'HEAD'))
         Note 'account' (Reading (Under $env:USERPROFILE '.claude\.credentials.json'))
-        Note 'skills' (Reading (Under '{skills}' 'grilling\SKILL.md'))
+        Note 'skills' (Reading (Under '{skills}' 'verkstead\grilling\SKILL.md'))
 
         Note 'documents' (Reading (Under '{documents}' 'private.txt'))
         Note 'their-skills' (Reading (Under '{their-skills}' 'theirs.md'))
