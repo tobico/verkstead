@@ -322,7 +322,7 @@ impl Harness for Agy {
         vec![Some(root::agy_settings(settings.as_deref()))]
     }
 
-    fn speaking(&self) -> Option<&'static Speaking> {
+    fn speaking(&self) -> Option<&Speaking> {
         Some(&crate::logins::AGY)
     }
 

@@ -356,7 +356,7 @@ pub(crate) trait Harness: Send + Sync {
 
     /// How a login of this harness goes, or `None` for a harness whose login
     /// Verkstead does not run — see [`crate::logins`].
-    fn speaking(&self) -> Option<&'static Speaking> {
+    fn speaking(&self) -> Option<&Speaking> {
         None
     }
 

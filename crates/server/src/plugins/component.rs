@@ -134,6 +134,14 @@ impl Again {
 
         started(self.clone(), grant, STARTING).await
     }
+
+    /// The component started again under what its manifest was granted and
+    /// nothing more: a store of its own, for an export whose answers build on
+    /// what it was asked before — a harness's `login`, one per login.
+    pub async fn afresh(&self) -> Result<Loaded, Trouble> {
+        let grant = grant(&self.capabilities, self.home.as_deref())?;
+        started(self.clone(), grant, STARTING).await
+    }
 }
 
 /// What a component's store holds: its WASI context, built from the grant, and

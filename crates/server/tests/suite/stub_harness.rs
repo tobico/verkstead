@@ -52,6 +52,12 @@ pub(crate) enum StubHarness {
     /// At work while [`AT_WORK`] is on its Screen, and asking by holding
     /// `verkstead ask` open.
     DrawingBlocking,
+
+    /// Idle once it has written nothing for a while, asking by holding
+    /// `verkstead ask` open, and logged in by Verkstead: `auth login` its
+    /// login and `auth status` the question of whether it has one. The only
+    /// one declaring a login.
+    LoggingIn,
 }
 
 impl StubHarness {
@@ -61,12 +67,13 @@ impl StubHarness {
             StubHarness::Silent => "5b0c1a2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
             StubHarness::Drawing => "6c1d2b3e-4f5a-4b6c-9d7e-8f9a0b1c2d3e",
             StubHarness::DrawingBlocking => "7d2e3c4f-5a6b-4c7d-8e8f-9a0b1c2d3e4f",
+            StubHarness::LoggingIn => "8e3f4d5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a",
         }
     }
 
     fn idle(self) -> String {
         match self {
-            StubHarness::Silent => "    idle: silence\n".to_owned(),
+            StubHarness::Silent | StubHarness::LoggingIn => "    idle: silence\n".to_owned(),
             StubHarness::Drawing | StubHarness::DrawingBlocking => {
                 format!("    idle:\n      signature: \"{AT_WORK}\"\n")
             }
@@ -76,7 +83,18 @@ impl StubHarness {
     fn channel(self) -> &'static str {
         match self {
             StubHarness::Drawing => "store-and-nudge",
-            StubHarness::Silent | StubHarness::DrawingBlocking => "blocking",
+            StubHarness::Silent | StubHarness::DrawingBlocking | StubHarness::LoggingIn => {
+                "blocking"
+            }
+        }
+    }
+
+    fn login(self) -> &'static str {
+        match self {
+            StubHarness::LoggingIn => {
+                "    login:\n      line: [auth, login]\n      status: [auth, status]\n"
+            }
+            StubHarness::Silent | StubHarness::Drawing | StubHarness::DrawingBlocking => "",
         }
     }
 
@@ -138,11 +156,12 @@ provides:
       {says}: {said}
     instructions: STUB.md
     excluded: [.stub-work/]
-"#,
+{login}"#,
             uuid = self.uuid(),
             variant = self,
             idle = self.idle(),
             channel = self.channel(),
+            login = self.login(),
             says = SAYS.0,
             said = SAYS.1,
         )

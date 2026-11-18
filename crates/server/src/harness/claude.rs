@@ -327,7 +327,7 @@ impl Harness for Claude {
         ]
     }
 
-    fn speaking(&self) -> Option<&'static Speaking> {
+    fn speaking(&self) -> Option<&Speaking> {
         Some(&crate::logins::CLAUDE)
     }
 

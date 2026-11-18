@@ -329,7 +329,7 @@ impl Agents {
     pub(crate) fn logging_in(
         &self,
         profile: &store::Profile,
-        words: &[&str],
+        words: &[String],
     ) -> Option<(Sandbox, Vec<String>)> {
         let sandbox = Sandbox::for_login(
             profile,
@@ -343,7 +343,7 @@ impl Agents {
             Some(standing) => standing.clone(),
             None => vec![binary(profile.agent_type()).to_owned()],
         };
-        argv.extend(words.iter().map(|word| (*word).to_owned()));
+        argv.extend(words.iter().cloned());
 
         Some((sandbox, argv))
     }
