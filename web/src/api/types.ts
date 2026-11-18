@@ -4914,7 +4914,12 @@ export type PluginField = {
 /**
  * What the value is kept under, unique among the plugin's fields.
  */
-key: string, label: string, description: string | null, value: PluginFieldValue, };
+key: string, label: string, description: string | null, 
+/**
+ * What an empty box shows: the value in force where none is set, where
+ * there is one — a Language plugin's default size.
+ */
+placeholder: string | null, value: PluginFieldValue, };
 
 /**
  * One field's new value.

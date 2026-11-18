@@ -42,6 +42,7 @@ use verkstead_schema::Nudge;
 use super::Replicating;
 use super::authors::{digest, writing_held};
 use crate::AppState;
+use crate::languages::SIZE_SETTING;
 use crate::peer::plugins::SECRETS;
 use crate::plugins::built_in;
 use crate::plugins::manifest::SettingKind;
@@ -61,11 +62,19 @@ impl Kind for Plugins {
     /// every device, rather than being refused for good.
     const REVIVES: bool = true;
 
-    /// Two devices' take-ups of a built-in's switch: on where either was on
-    /// (Set 1784, Q4), so a take-up only ever moves a record toward on.
+    /// Two devices' take-ups of a built-in's switch and size: on where either
+    /// was on (Set 1784, Q4), and the larger size where either had one, so a
+    /// take-up only ever moves a record toward on and never shrinks a cache
+    /// somebody was using.
     fn taken_up_together(winner: &Fields, loser: &Fields) -> Option<Fields> {
+        let mut values = winner.values.clone();
+        if let Some(size) = larger(size_of(winner), size_of(loser)) {
+            values.insert(SIZE_SETTING.to_owned(), SettingValue::Line(size.to_owned()));
+        }
+
         Some(Fields {
             enabled: winner.enabled || loser.enabled,
+            values,
             ..winner.clone()
         })
     }
@@ -182,24 +191,50 @@ pub enum Source {
     BuiltIn,
 }
 
+/// The size `fields` holds for its languages' stores, where it holds one.
+fn size_of(fields: &Fields) -> Option<&str> {
+    match fields.values.get(SIZE_SETTING) {
+        Some(SettingValue::Line(size)) => Some(size),
+        _ => None,
+    }
+}
+
+/// The larger of two sizes, a size that will not read counting as none.
+fn larger<'a>(one: Option<&'a str>, other: Option<&'a str>) -> Option<&'a str> {
+    [one, other]
+        .into_iter()
+        .flatten()
+        .filter_map(|size| Some((crate::languages::bytes(size).ok()?, size)))
+        .max_by_key(|(bytes, _)| *bytes)
+        .map(|(_, size)| size)
+}
+
 /// What a built-in's switch is taken up as, apart from the installed
 /// Plugins, which were records from the start.
 const LANGUAGES_TAKEN_UP: &str = "plugins.languages";
 
-/// Take each built-in Language plugin's switch up out of `config.yaml` — its
-/// languages' `enabled`, and `rust_build_cache`'s for Rust — where it has not
-/// been already, and hold which languages are off for the settings either way.
+/// Take each built-in Language plugin's switch and size up out of
+/// `config.yaml` — its languages' `enabled` and `size`, and
+/// `rust_build_cache`'s for Rust, the map winning where both are written —
+/// where they have not been already, and hold what the records say for the
+/// settings either way.
 ///
 /// **Once**, and stamped older than any press: a plugin is on where any of its
-/// languages was on here, written as this device's take-up, and put together
-/// with every other device's by on winning — see [`Plugins`]. The file's
-/// `enabled` is not read again from here on, and a save of the settings page
-/// takes it out — see [`crate::settings::Config::languages`].
+/// languages was on here, and sized at the largest size any of them was given
+/// — a size that will not read being none, so the default stands — written as
+/// this device's take-up, and put together with every other device's by on
+/// winning and the larger size winning — see [`Plugins`]. The file's `enabled`
+/// and `size` are not read again from here on, and a save of the settings page
+/// takes them out — see [`crate::settings::Config::languages`].
 pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> Result<()> {
     if !replicated::taken_up_as(pool, LANGUAGES_TAKEN_UP).await? {
         let settings_ = settings.clone();
         let config = tokio::task::spawn_blocking(move || settings_.config()).await?;
         let languages = crate::languages::configured(&config);
+        // The file's own sizes, `rust_build_cache`'s under the map: what
+        // `configured` holds for a built-in once the records are held is the
+        // record's, and these are what goes into it.
+        let written = config.languages();
 
         let kept: Vec<(String, Fields)> = built_in::listed()
             .iter()
@@ -210,10 +245,17 @@ pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> R
                         .get(&provided.name)
                         .is_none_or(crate::languages::Descriptor::enabled)
                 });
-                (
-                    manifest.uuid.clone(),
-                    crate::plugins::installed::built_in_fields(manifest, on, None),
-                )
+                let size = built_in::languages(manifest)
+                    .filter_map(|provided| written.get(&provided.name)?.size_configured())
+                    .fold(None, |largest, size| larger(largest, Some(size)));
+
+                let mut fields = crate::plugins::installed::built_in_fields(manifest, on, None);
+                if let Some(size) = size {
+                    fields
+                        .values
+                        .insert(SIZE_SETTING.to_owned(), SettingValue::Line(size.to_owned()));
+                }
+                (manifest.uuid.clone(), fields)
             })
             .collect();
 
@@ -225,28 +267,31 @@ pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> R
     held(pool, settings).await
 }
 
-/// Hand the languages whose built-in plugin is unticked on to the settings,
-/// which is what every session's languages are read out of.
+/// Hand what the built-in Language plugins' records say — which languages
+/// are unticked, and each one's size — on to the settings, which is what
+/// every session's languages are read out of.
 pub async fn held(pool: &SqlitePool, settings: &Settings) -> Result<()> {
     let records = replicated::live_records::<Plugins>(pool).await?;
 
-    let off = built_in::listed()
-        .iter()
-        .filter(|manifest| {
-            records.iter().any(|record| {
-                record.uuid == manifest.uuid
-                    && matches!(record.fields.source, Source::BuiltIn)
-                    && !record.fields.enabled
-            })
-        })
-        .flat_map(|manifest| {
-            built_in::languages(manifest)
-                .map(|provided| provided.name.clone())
-                .collect::<Vec<_>>()
-        })
-        .collect();
+    let mut held = crate::languages::Held::default();
+    for manifest in built_in::listed() {
+        let Some(record) = records.iter().find(|record| {
+            record.uuid == manifest.uuid && matches!(record.fields.source, Source::BuiltIn)
+        }) else {
+            continue;
+        };
 
-    settings.holding_unticked_languages(off);
+        for provided in built_in::languages(manifest) {
+            if !record.fields.enabled {
+                held.off.insert(provided.name.clone());
+            }
+            if let Some(size) = size_of(&record.fields) {
+                held.sizes.insert(provided.name.clone(), size.to_owned());
+            }
+        }
+    }
+
+    settings.holding_plugin_languages(held);
 
     Ok(())
 }
@@ -467,6 +512,15 @@ mod tests {
             .enabled
     }
 
+    async fn size(pool: &SqlitePool, uuid: &str) -> Option<String> {
+        replicated::live_records::<Plugins>(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|record| record.uuid == uuid)
+            .and_then(|record| size_of(&record.fields).map(str::to_owned))
+    }
+
     fn on(config: &crate::settings::Config, language: &str) -> bool {
         crate::languages::configured(config)
             .get(language)
@@ -577,5 +631,100 @@ mod tests {
             .await
             .unwrap();
         assert!(!enabled(&later, GO_PLUGIN).await);
+    }
+
+    /// A plugin's size is taken up as the largest any of its languages was
+    /// given here — `rust_build_cache`'s read as Rust's, the map winning — and
+    /// one that will not read as none; from then on the record's size is what
+    /// every session reads, and the file's is not.
+    #[tokio::test]
+    async fn each_plugins_size_is_taken_up_and_read_from_the_record() {
+        let (_dir, pool, settings) = fresh(
+            "rust_build_cache:\n  size: 50G\nlanguages:\n  rust:\n    size: 40G\n  \
+             go:\n    size: 20G\n  node:\n    size: 1.5g\n",
+        )
+        .await;
+
+        taken_up(&pool, &settings, "a").await.unwrap();
+
+        assert_eq!(size(&pool, RUST_CPP).await.as_deref(), Some("40G"));
+        assert_eq!(size(&pool, GO_PLUGIN).await.as_deref(), Some("20G"));
+        let node = built_in::providing(crate::languages::NODE).unwrap();
+        assert_eq!(size(&pool, &node.uuid).await, None, "1.5g is no size");
+
+        // What a session reads is the record's: the file changed since
+        // changes nothing.
+        std::fs::write(settings.config_path(), "languages:\n  go:\n    size: 99G\n").unwrap();
+        let languages = crate::languages::configured(&settings.config());
+        assert_eq!(languages.get(RUST).unwrap().size(RUST), "40G");
+        assert_eq!(languages.get(CPP).unwrap().size(CPP), "40G");
+        assert_eq!(languages.get(GO).unwrap().size(GO), "20G");
+        assert_eq!(
+            languages
+                .get(crate::languages::NODE)
+                .unwrap()
+                .size(crate::languages::NODE),
+            "10G",
+        );
+
+        // And `rust_build_cache` alone is Rust's.
+        let (_old, old, settings) = fresh("rust_build_cache:\n  size: 50G\n").await;
+        taken_up(&old, &settings, "b").await.unwrap();
+        assert_eq!(size(&old, RUST_CPP).await.as_deref(), Some("50G"));
+    }
+
+    /// Two devices' sizes take up as the larger, whichever arrives where; and
+    /// a size saved since stands over a device upgrading later.
+    #[tokio::test]
+    async fn the_larger_size_wins_across_devices_and_a_save_since_stands() {
+        let (_one, smaller, settings) = fresh("languages:\n  go:\n    size: 20G\n").await;
+        taken_up(&smaller, &settings, "a").await.unwrap();
+        let (_two, larger_here, settings) = fresh("languages:\n  go:\n    size: 40G\n").await;
+        taken_up(&larger_here, &settings, "b").await.unwrap();
+        let (_three, none_said, settings) = fresh("").await;
+        taken_up(&none_said, &settings, "z").await.unwrap();
+
+        let theirs = replicated::records::<Plugins>(&larger_here).await.unwrap();
+        let ours = replicated::records::<Plugins>(&smaller).await.unwrap();
+        let nobodys = replicated::records::<Plugins>(&none_said).await.unwrap();
+        replicated::merge::<Plugins>(&smaller, &theirs)
+            .await
+            .unwrap();
+        replicated::merge::<Plugins>(&larger_here, &ours)
+            .await
+            .unwrap();
+        replicated::merge::<Plugins>(&none_said, &ours)
+            .await
+            .unwrap();
+        replicated::merge::<Plugins>(&smaller, &nobodys)
+            .await
+            .unwrap();
+        assert_eq!(size(&smaller, GO_PLUGIN).await.as_deref(), Some("40G"));
+        assert_eq!(size(&larger_here, GO_PLUGIN).await.as_deref(), Some("40G"));
+        assert_eq!(
+            size(&none_said, GO_PLUGIN).await.as_deref(),
+            Some("20G"),
+            "a size beats none",
+        );
+
+        // A human saves 5G on `a`; `c`, upgrading later at 80G, stays at 5G.
+        let mut saved = replicated::live_records::<Plugins>(&smaller)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|record| record.uuid == GO_PLUGIN)
+            .unwrap()
+            .fields;
+        saved
+            .values
+            .insert(SIZE_SETTING.to_owned(), SettingValue::Line("5G".to_owned()));
+        replicated::write::<Plugins>(&smaller, "a", GO_PLUGIN, &saved)
+            .await
+            .unwrap();
+        let pressed = replicated::records::<Plugins>(&smaller).await.unwrap();
+        let (_four, late, settings) = fresh("languages:\n  go:\n    size: 80G\n").await;
+        taken_up(&late, &settings, "c").await.unwrap();
+        replicated::merge::<Plugins>(&late, &pressed).await.unwrap();
+        assert_eq!(size(&late, GO_PLUGIN).await.as_deref(), Some("5G"));
     }
 }

@@ -13,7 +13,7 @@
       "provides": [
         "language"
       ],
-      "settings": 0,
+      "settings": 1,
       "source": {
         "kind": "BuiltIn"
       },
@@ -34,7 +34,7 @@
       "provides": [
         "language"
       ],
-      "settings": 0,
+      "settings": 1,
       "source": {
         "kind": "BuiltIn"
       },
@@ -55,7 +55,7 @@
       "provides": [
         "language"
       ],
-      "settings": 0,
+      "settings": 1,
       "source": {
         "kind": "BuiltIn"
       },
@@ -76,7 +76,7 @@
       "provides": [
         "language"
       ],
-      "settings": 0,
+      "settings": 1,
       "source": {
         "kind": "BuiltIn"
       },
@@ -97,7 +97,7 @@
       "provides": [
         "language"
       ],
-      "settings": 0,
+      "settings": 1,
       "source": {
         "kind": "BuiltIn"
       },
@@ -119,7 +119,7 @@
       "provides": [
         "language"
       ],
-      "settings": 0,
+      "settings": 1,
       "source": {
         "kind": "BuiltIn"
       },

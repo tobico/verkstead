@@ -586,7 +586,11 @@ async fn taken_up_records_a_kind_puts_together_come_to_one() {
         assert!(taken_up_as(&pool, "switches.taken").await.unwrap());
         assert!(!taken_up::<Switches>(&pool).await.unwrap());
 
-        assert!(merge::<Switches>(&pool, std::slice::from_ref(&there)).await.unwrap());
+        assert!(
+            merge::<Switches>(&pool, std::slice::from_ref(&there))
+                .await
+                .unwrap()
+        );
         let held = records::<Switches>(&pool).await.unwrap();
         assert_eq!(held.len(), 1);
         assert_eq!(

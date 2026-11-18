@@ -251,10 +251,10 @@ struct Held {
     /// reads any more.
     ignoring_servers_said: AtomicBool,
 
-    /// And the languages whose built-in plugin is unticked, out of the
-    /// plugins' records — see [`Settings::holding_unticked_languages`]. `None`
-    /// until they first are.
-    unticked_languages: RwLock<Option<BTreeSet<String>>>,
+    /// And what the built-in Language plugins' records say of their
+    /// languages — see [`Settings::holding_plugin_languages`]. `None` until
+    /// they first are.
+    plugin_languages: RwLock<Option<crate::languages::Held>>,
 }
 
 /// Every Data Directory's held lists, so that every handle on one directory
@@ -380,19 +380,21 @@ impl Settings {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(servers);
     }
 
-    /// Hold `off` as the languages whose built-in plugin is unticked, for
+    /// Hold `held` as what the built-in Language plugins' records say — which
+    /// languages are unticked, and the size each was saved at — for
     /// [`Settings::config`] to lay beside whatever `config.yaml` says.
     ///
-    /// **And from then on a built-in language's `enabled` in `config.yaml` is
-    /// not read**: the plugin's tick is its switch, cluster-wide — see
+    /// **And from then on a built-in language's `enabled` and `size` in
+    /// `config.yaml` are not read**: the plugin's tick is its switch and its
+    /// `size` setting its size, cluster-wide — see
     /// [`crate::replicating::plugins::taken_up`] and
     /// [`crate::languages::configured`].
-    pub fn holding_unticked_languages(&self, off: BTreeSet<String>) {
+    pub fn holding_plugin_languages(&self, held: crate::languages::Held) {
         *self
             .held
-            .unticked_languages
+            .plugin_languages
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(off);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(held);
     }
 
     /// Forget the declarations held, as a new start of the server would.
@@ -519,10 +521,11 @@ impl Settings {
             config.mcp_servers = servers;
         }
 
-        // And which built-in languages are off, out of their plugins' records.
-        config.unticked = self
+        // And which built-in languages are off, and at what size, out of
+        // their plugins' records.
+        config.plugin_languages = self
             .held
-            .unticked_languages
+            .plugin_languages
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
@@ -1473,13 +1476,13 @@ pub struct Config {
     #[serde(skip)]
     awaited: BTreeSet<String>,
 
-    /// The built-in languages whose plugin is unticked, once the plugins'
-    /// records are held — never read from this file nor written to it, but
+    /// What the built-in Language plugins' records say of their languages,
+    /// once they are held — never read from this file nor written to it, but
     /// laid beside it by [`Settings::config`]. `None` before then, when each
-    /// language's `enabled` here is still its switch. See
+    /// language's `enabled` and `size` here are still its own. See
     /// [`crate::languages::configured`].
     #[serde(skip)]
-    unticked: Option<BTreeSet<String>>,
+    plugin_languages: Option<crate::languages::Held>,
 
     /// And how the shared Rust build cache is set: whether sessions get one at
     /// all, and how big its compiled half may grow — see [`crate::build_cache`].
@@ -1726,7 +1729,7 @@ impl Config {
             // dropped — see [`authors_kept`].
             authors: authors_kept(config.authors),
             awaited: BTreeSet::new(),
-            unticked: None,
+            plugin_languages: None,
             rust_build_cache: RustBuildCache {
                 enabled: config.rust_build_cache.enabled,
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
@@ -1784,7 +1787,7 @@ impl Config {
             // installer's descriptor keys are.
             authors: author.into_iter().collect(),
             awaited: BTreeSet::new(),
-            unticked: None,
+            plugin_languages: None,
             // And nothing for the key the map replaced: the two keys the page
             // draws of Rust are in `languages` below now, so writing this one
             // as well would leave a second opinion about them in the file. A
@@ -1956,10 +1959,10 @@ impl Config {
         .merged(&self.languages)
     }
 
-    /// The built-in languages whose plugin is unticked, where the plugins'
-    /// records are held — see [`Config::unticked`].
-    pub fn unticked_languages(&self) -> Option<&BTreeSet<String>> {
-        self.unticked.as_ref()
+    /// What the built-in Language plugins' records say of their languages,
+    /// where they are held — see [`Config::plugin_languages`].
+    pub fn plugin_languages(&self) -> Option<&crate::languages::Held> {
+        self.plugin_languages.as_ref()
     }
 
     /// And what the Cleanup is to do after an archiving, which is a trim at

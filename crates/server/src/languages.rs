@@ -31,9 +31,10 @@
 //! Rust's switch and size used to be said, is still read as Rust's two, and
 //! the map wins where both are written: see
 //! [`crate::settings::Config::languages`], where the two are put together.
-//! **A built-in language's `enabled` is its plugin's tick now**, cluster-wide:
-//! the file's was taken up into the plugin's record once and is not read
-//! again — see [`configured`] and [`crate::replicating::plugins::taken_up`].
+//! **A built-in language's `enabled` is its plugin's tick now, and its `size`
+//! its plugin's `size` setting**, cluster-wide: the file's were taken up into
+//! the plugin's record once and are not read again — see [`configured`] and
+//! [`crate::replicating::plugins::taken_up`].
 //!
 //! **A descriptor cannot say a command to run.** It says a label, the manifests
 //! that detect the language in a Repo, the variables a session is given, and
@@ -414,18 +415,37 @@ fn known(value: Option<&Raw>, field: &str, allowed: &[&str]) -> Result<(), Refus
 /// applies to the next session, and so does a descriptor a hand-edit added an
 /// hour ago.
 ///
-/// **A built-in language's switch is its plugin's tick** once the plugins'
-/// records are held, whatever `enabled` the file still says: unticked, none
-/// of its variables, stores or grants reach a session, and the Compile Server
-/// is not wanted for it. A language no plugin provides — an installer's own —
-/// is still switched by its entry here.
+/// **A built-in language's switch is its plugin's tick, and its size its
+/// plugin's `size` setting**, once the plugins' records are held, whatever
+/// `enabled` and `size` the file still says: unticked, none of its variables,
+/// stores or grants reach a session, and the Compile Server is not wanted for
+/// it; and `{size}`, the Compile Server's start and the trimming all read the
+/// record's size, or the default where it holds none. A language no plugin
+/// provides — an installer's own — is still switched and sized by its entry
+/// here.
 pub fn configured(config: &crate::settings::Config) -> Languages {
     let languages = built_in().merged(&config.languages());
 
-    match config.unticked_languages() {
-        Some(off) => languages.ticked(off),
+    match config.plugin_languages() {
+        Some(held) => languages.held(held),
         None => languages,
     }
+}
+
+/// The key of the settings field a Language plugin declares for its store's
+/// size, of kind `size`: what `{size}` reads for every language it provides.
+pub const SIZE_SETTING: &str = "size";
+
+/// What the built-in Language plugins' records say of their languages, held
+/// for every session to read — see
+/// [`crate::replicating::plugins::held`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Held {
+    /// The languages whose plugin is unticked.
+    pub off: std::collections::BTreeSet<String>,
+    /// The size each language's plugin has saved, by language. A language
+    /// whose plugin holds none is not here, and runs at its default.
+    pub sizes: std::collections::BTreeMap<String, String>,
 }
 
 /// A map of descriptors keyed by language, in the order they were written.
@@ -571,9 +591,10 @@ impl Languages {
         )
     }
 
-    /// This with every built-in language's switch as its plugin's tick says:
-    /// off where it is among `off`, and on otherwise.
-    fn ticked(self, off: &std::collections::BTreeSet<String>) -> Languages {
+    /// This with every built-in language's switch and size as its plugin's
+    /// record says: off where it is among `held.off`, and on otherwise; sized
+    /// as its plugin saved, and at its default where it saved nothing.
+    fn held(self, held: &Held) -> Languages {
         Languages(Ordered(
             self.0
                 .0
@@ -581,7 +602,8 @@ impl Languages {
                 .map(|(name, descriptor)| {
                     let descriptor = match built_in().get(&name).is_some() {
                         true => Descriptor {
-                            enabled: Some(!off.contains(&name)),
+                            enabled: Some(!held.off.contains(&name)),
+                            size: held.sizes.get(&name).cloned(),
                             ..descriptor
                         },
                         false => descriptor,

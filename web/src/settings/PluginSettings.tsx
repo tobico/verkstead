@@ -1,8 +1,9 @@
 //! **A Plugin's settings pane** (ADR-0030, Set 1769, Q43), opened from its row
 //! on the Plugins pane: the fields its manifest declares, each drawn by kind.
 //!
-//! - **text** is a line, and **size** a line the server reads as a size, the
-//!   way the Sandbox page's build cache size is read: `30G`.
+//! - **text** is a line, and **size** a line the server reads as a size, in
+//!   sccache's grammar: `30G`. A Language plugin's `size` is its languages'
+//!   store size, its placeholder their default.
 //! - **list** is a box of lines, one value per line.
 //! - **secret** is stored where the GitHub token is, and never shown again.
 //!   What comes back is only whether one is set, so a set one is drawn as
@@ -162,7 +163,9 @@ export function PluginSettingsPane(props: {
             type="text"
             autocapitalize="off"
             spellcheck={false}
-            placeholder="30G"
+            // The value in force while none is set, where there is one: a
+            // Language plugin's default size.
+            placeholder={field.placeholder ?? undefined}
             value={value()}
             onInput={write}
           />

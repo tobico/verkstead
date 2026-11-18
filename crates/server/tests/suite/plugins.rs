@@ -498,6 +498,7 @@ async fn a_uuid_installed_or_built_in_is_refused() {
 }
 
 const GO_PLUGIN: &str = "01b5328a-3524-457d-ab88-1af1c65079ea";
+const RUST_CPP: &str = "795515ae-96cd-4d7c-8071-e6753b3f4624";
 
 fn built_in<'a>(view: &'a PluginsView, name: &str) -> &'a PluginRow {
     view.built_in
@@ -589,6 +590,120 @@ async fn the_tick_on_a_built_in_is_whether_sessions_get_its_language() {
     assert_eq!(status, StatusCode::OK, "{said}");
     assert!(built_in(&page(&app).await, "Go").enabled);
     assert!(given(&settings).contains(&"GOMODCACHE".to_owned()));
+}
+
+/// A Language plugin's size is a field on its pane, drawn before anything was
+/// written to it with its default as the placeholder. A size that is not one
+/// is refused and nothing is written; one saved is what the next session's
+/// `SCCACHE_CACHE_SIZE` reads and what Rust's stores are held to — and Go's
+/// own, saved on its own pane, what Go's are.
+#[tokio::test]
+async fn a_size_saved_on_a_language_plugins_pane_is_what_sessions_read() {
+    use verkstead_server::languages::{self, CPP, GO, Machine, RUST, SCCACHE};
+
+    let (app, dir) = kept().await;
+    let settings = Settings::in_data_dir(dir.path());
+    let machine = Machine::of(
+        &dir.path().join("cache"),
+        dir.path(),
+        Some(dir.path().join("sccache")),
+    );
+    let sccache_size = |settings: &Settings| {
+        languages::configured(&settings.config())
+            .given(&machine)
+            .env()
+            .iter()
+            .find(|(name, _)| name == "SCCACHE_CACHE_SIZE")
+            .map(|(_, value)| value.clone())
+    };
+    assert_eq!(sccache_size(&settings).as_deref(), Some("30G"));
+
+    let at = |uuid: &str| format!("{PLUGINS}/{uuid}/settings");
+    let read = |uuid: &str| {
+        let app = app.clone();
+        let uri = at(uuid);
+        async move {
+            let answered = app
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(answered.status(), StatusCode::OK);
+            let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+            serde_json::from_slice::<PluginSettingsView>(&bytes).unwrap()
+        }
+    };
+    let sized = |size: &str| {
+        serde_json::json!({ "fields": [
+        { "key": "size", "value": { "kind": "Size", "value": size } },
+    ] })
+    };
+
+    // Drawn before anything is written to it, empty with its default under.
+    let view = read(RUST_CPP).await;
+    let field = &view.fields[0];
+    assert_eq!(field.key, "size");
+    assert_eq!(field.placeholder.as_deref(), Some("30G"));
+    assert_eq!(
+        field.value,
+        PluginFieldValue::Size {
+            value: String::new()
+        }
+    );
+    assert_eq!(
+        read(GO_PLUGIN).await.fields[0].placeholder.as_deref(),
+        Some("10G")
+    );
+
+    // Not a size: refused with the reason, and nothing written.
+    let (status, said) = pressing(&app, &at(RUST_CPP), sized("1.5g")).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let saved: PluginSettingsSaved = serde_json::from_str(&said).unwrap();
+    assert_eq!(
+        saved.refused,
+        [PluginFieldRefused {
+            key: "size".to_owned(),
+            why: "1.5g isn't a size. Write a whole number with K, M, G or T after it, such as \
+                  30G."
+                .to_owned(),
+        }],
+    );
+    assert_eq!(
+        read(RUST_CPP).await.fields[0].value,
+        PluginFieldValue::Size {
+            value: String::new()
+        }
+    );
+    assert_eq!(sccache_size(&settings).as_deref(), Some("30G"));
+
+    // A size: what the next session reads, for both of its languages, and
+    // the plugin still on.
+    let (status, said) = pressing(&app, &at(RUST_CPP), sized("12G")).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert_eq!(
+        read(RUST_CPP).await.fields[0].value,
+        PluginFieldValue::Size {
+            value: "12G".to_owned()
+        }
+    );
+    assert_eq!(sccache_size(&settings).as_deref(), Some("12G"));
+    let configured = languages::configured(&settings.config());
+    assert_eq!(configured.get(RUST).unwrap().size(RUST), "12G");
+    assert_eq!(configured.get(CPP).unwrap().size(CPP), "12G");
+    assert_eq!(configured.wanting(SCCACHE), Some("12G"));
+    assert!(built_in(&page(&app).await, "Rust & C/C++").enabled);
+    assert_eq!(configured.get(GO).unwrap().size(GO), "10G");
+
+    // Go's own, on Go's pane.
+    let (status, said) = pressing(&app, &at(GO_PLUGIN), sized("3G")).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let configured = languages::configured(&settings.config());
+    assert_eq!(configured.get(GO).unwrap().size(GO), "3G");
+    assert_eq!(configured.get(RUST).unwrap().size(RUST), "12G");
+
+    // And cleared, the default again.
+    let (status, said) = pressing(&app, &at(RUST_CPP), sized("")).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert_eq!(sccache_size(&settings).as_deref(), Some("30G"));
 }
 
 /// A directory with no manifest is refused with the reader's own sentence.

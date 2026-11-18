@@ -3320,6 +3320,19 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .unwrap();
 
+    // And Rust's size, which is its plugin's `size` setting, saved on the Rust
+    // & C/C++ pane: a store an sccache bounds with a size somebody typed. The
+    // save holds the plugins' records too, so the read below is of them
+    // whenever the router's own load of them lands.
+    post(
+        &app,
+        "/api/ui/plugins/795515ae-96cd-4d7c-8071-e6753b3f4624/settings",
+        &serde_json::json!({ "fields": [
+            { "key": "size", "value": { "kind": "Size", "value": "50G" } },
+        ] }),
+    )
+    .await;
+
     // And of one that has been told both — about the one Author, which is
     // there already so that its uuid is pinned rather than minted. The token goes in through the endpoint
     // rather than into the file, because writing it is what stamps `secrets.yaml`
@@ -3338,9 +3351,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // Every language the page was given, which is how it saves: the
             // switch and the size of each, and the size of **every** one of them
             // whether the pane drew a field for it or not — see `held.ts`'s
-            // `asEdit`. So the fixture carries a size the human typed on Rust,
-            // whose store an sccache bounds, a size on an installer's own
-            // language, and `settings-unset.json` above for the defaults.
+            // `asEdit`. Rust's is not written, its size being its plugin's,
+            // saved above; an installer's own language's is, and
+            // `settings-unset.json` above holds the defaults.
             "languages": [
                 { "name": "rust", "enabled": true, "size": "50G" },
                 { "name": "gleam", "enabled": true, "size": "8G" },

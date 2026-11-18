@@ -1378,8 +1378,8 @@ their Compile Server, and an installer's `languages:` entry merging over the
 language of its name. A plugin's entry is refused by field where an
 installer's falls back, and cannot hold `enabled` or `size`, which are the
 installation's. A built-in Language plugin's tick on the Plugins page is its
-languages' switch, cluster-wide, in place of a Build caches box, and `size` is
-to become the Plugin's declared setting. See ADR-0030.
+languages' switch, cluster-wide, in place of a Build caches box, and its
+declared `size` setting, drawn in its pane, their size. See ADR-0030.
 _Avoid_: language definition, toolchain, language config
 
 **Build Cache**:
@@ -1411,7 +1411,8 @@ machines. The packaged unit says `/var/cache/verkstead`); which languages a
 Sandbox gets at all, and how big each one's stores may grow, is the human's, in
 the workbench settings — a row per descriptor under **Build caches**: its
 box, and on every one that has a store of its own a link saying what the store
-holds against its size, which opens the size, a Clear and the rest (C/C++'s
+holds against its size, which opens the size (a built-in language's being
+its plugin's, set on its pane), a Clear and the rest (C/C++'s
 link saying instead that its objects are Rust's sccache's). It is kept under those sizes
 by sccache for the compiled half and by the **Sweep** for the rest. The one control
 there that only ever *closes* a hole — the **Sandbox

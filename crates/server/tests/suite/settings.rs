@@ -207,6 +207,22 @@ fn languages_unset() -> serde_json::Value {
 
 /// And one language as a save about it sends it, which is the checkbox's own
 /// press and the size's.
+/// An installer's own language, as the page sends it: a language no plugin
+/// provides is the one whose size is still the page's — a built-in's is its
+/// plugin's `size` setting once the plugins' records are held, which a router
+/// here does as soon as its background load lands.
+fn gleam(size: &str) -> serde_json::Value {
+    serde_json::json!([{ "name": "gleam", "enabled": true, "size": size }])
+}
+
+fn gleam_told(settings: &SettingsView) -> &LanguageView {
+    settings
+        .languages
+        .iter()
+        .find(|language| language.name == "gleam")
+        .unwrap_or_else(|| panic!("Gleam was written into config.yaml: {settings:?}"))
+}
+
 fn rust(enabled: bool, size: &str) -> serde_json::Value {
     serde_json::json!([{ "name": "rust", "enabled": enabled, "size": size }])
 }
@@ -1188,19 +1204,19 @@ async fn each_store_says_how_it_is_held_to_its_size() {
 async fn a_size_that_is_not_one_is_refused_at_the_save() {
     let (dir, app) = app().await;
 
-    save_languages(&app, rust(true, "40G")).await;
+    save_languages(&app, gleam("40G")).await;
 
-    let saved = save_languages(&app, rust(true, "1.5G")).await;
+    let saved = save_languages(&app, gleam("1.5G")).await;
 
     assert_eq!(saved.refused_sizes.len(), 1, "{saved:?}");
-    assert_eq!(saved.refused_sizes[0].language, "rust");
+    assert_eq!(saved.refused_sizes[0].language, "gleam");
     assert!(
         saved.refused_sizes[0].why.starts_with("isn't a size"),
         "{:?}",
         saved.refused_sizes[0],
     );
     assert_eq!(
-        rust_told(&saved.settings).size,
+        gleam_told(&saved.settings).size,
         "40G",
         "and what is drawn is how things stood",
     );
@@ -1222,19 +1238,20 @@ async fn a_hand_written_size_that_is_not_one_is_the_default_and_survives_a_save(
     hand_edit(
         dir.path(),
         "config.yaml",
-        "languages:\n  rust:\n    size: lots\n",
+        "languages:\n  gleam:\n    size: lots\n",
     );
 
     let told = settings(&app).await;
-    let rust = rust_told(&told);
+    let gleam = gleam_told(&told);
 
-    assert_eq!((rust.size.as_str(), rust.size_configured), ("lots", true));
-    assert_eq!(rust.default_size, "30G");
+    assert_eq!((gleam.size.as_str(), gleam.size_configured), ("lots", true));
+    assert_eq!(gleam.default_size, "10G");
     assert!(
-        rust.size_unread
+        gleam
+            .size_unread
             .as_deref()
             .is_some_and(|why| why.starts_with("isn't a size")),
-        "the pane says why: {rust:?}",
+        "the pane says why: {gleam:?}",
     );
 
     let saved = save_languages(&app, as_the_page_saves(&told)).await;
@@ -1245,11 +1262,12 @@ async fn a_hand_written_size_that_is_not_one_is_the_default_and_survives_a_save(
     assert!(written.contains("lots"), "kept as written: {written}");
 }
 
-/// And what a save of it says: the size comes back off the file — and once
-/// the plugins' ticks are held, Rust's switch is its plugin's, so what the
-/// page sends for it is not written and Rust stays on.
+/// And what a save of it says once the plugins' records are held: Rust's
+/// switch is its plugin's tick and its size its plugin's `size` setting, so
+/// what the page sends for either is not written — Rust stays on, at its
+/// default.
 #[tokio::test]
-async fn a_languages_switch_and_size_go_in_and_come_back() {
+async fn a_built_in_languages_switch_and_size_are_not_the_pages() {
     let (dir, app) = app().await;
 
     // A tick on Go, which is what has the server hold every built-in's.
@@ -1290,24 +1308,16 @@ async fn a_languages_switch_and_size_go_in_and_come_back() {
         rust_told(&saved.settings).plugin.as_deref(),
         Some("Rust & C/C++")
     );
-    assert_eq!(rust_told(&saved.settings).size, "5G");
-    assert!(rust_told(&saved.settings).size_configured);
+    assert_eq!(rust_told(&saved.settings).size, "30G");
+    assert!(!rust_told(&saved.settings).size_configured);
 
-    // In the file the next session reads, rather than only in the answer — and
-    // the size alone: the switch is the plugin's.
+    // Nor in the file: neither the switch nor the size is the page's.
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-    assert!(
-        written.contains("languages") && written.contains("rust") && written.contains("5G"),
-        "the size is Rust's entry in config.yaml: {written}"
-    );
-    assert!(
-        written.contains("languages:\n  rust:\n    size: 5G\n"),
-        "and no switch in it: {written}"
-    );
+    assert!(!written.contains("5G"), "no size in config.yaml: {written}");
 
     let read_back = settings(&app).await;
     assert!(rust_told(&read_back).enabled);
-    assert_eq!(rust_told(&read_back).size, "5G");
+    assert_eq!(rust_told(&read_back).size, "30G");
 }
 
 /// A language an installer wrote a descriptor for is on the page, under the
@@ -1451,16 +1461,13 @@ async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file(
     );
 }
 
-/// The key the map replaced is read where it is written, and a save carries
-/// what it said into the map and leaves it out of the file.
-///
-/// Which is the migration, done by the one press that was always going to
-/// rewrite the file: a `config.yaml` written by the released version says what
-/// it always said until somebody presses something, and says it in the new
-/// place afterwards. Leaving both would leave two opinions about Rust's switch
-/// in one file.
+/// The key the map replaced is read as Rust's two until the plugins' records
+/// are held, and a save then writes it away and carries nothing of it into
+/// the map: Rust's switch and size were taken up into its plugin's record at
+/// the start — see `replicating::plugins`' own tests — and are not the
+/// page's.
 #[tokio::test]
-async fn a_save_carries_the_old_key_into_the_map_and_writes_it_away() {
+async fn a_save_writes_the_old_key_away() {
     let (dir, app) = app().await;
 
     hand_edit(
@@ -1469,19 +1476,29 @@ async fn a_save_carries_the_old_key_into_the_map_and_writes_it_away() {
         "rust_build_cache:\n  enabled: false\n  size: 5G\n",
     );
 
-    // Read as Rust's two before anything is saved, which is the compatibility
-    // rule: an install that wrote one keeps exactly what it said.
-    let told = settings(&app).await;
-    assert!(!rust_told(&told).enabled);
-    assert_eq!(rust_told(&told).size, "5G");
+    // A tick on Go, which is what has the server hold every built-in's.
+    let ticked = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/ui/plugins/01b5328a-3524-457d-ab88-1af1c65079ea/enabled")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"enabled":true}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ticked.status(), StatusCode::OK);
 
     // And the page saves what it was just given, the way every pane does.
-    let saved = save(
+    let told = settings(&app).await;
+    save(
         &app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": rust(false, "5G"),
+            "languages": as_the_page_saves(&told),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -1494,17 +1511,10 @@ async fn a_save_carries_the_old_key_into_the_map_and_writes_it_away() {
     )
     .await;
 
-    assert!(!rust_told(&saved.settings).enabled, "nothing changed");
-    assert_eq!(rust_told(&saved.settings).size, "5G");
-
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
     assert!(
-        !written.contains("rust_build_cache"),
-        "the key the map replaced is out of the file: {written}"
-    );
-    assert!(
-        written.contains("languages") && written.contains("5G"),
-        "and what it said is Rust's entry: {written}"
+        !written.contains("rust_build_cache") && !written.contains("5G"),
+        "the key the map replaced is out of the file, and nothing of it in the map: {written}"
     );
 }
 
@@ -1636,7 +1646,6 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
     )
     .await;
 
-    assert_eq!(rust_told(&saved.settings).size, "5G");
     assert!(!saved.settings.cleanup.trim.enabled, "the switch stands");
     assert_eq!(saved.settings.cleanup.delete.days, 90, "and the duration");
 }
@@ -1763,7 +1772,6 @@ async fn a_save_carrying_the_limit_as_it_stands_leaves_it() {
     )
     .await;
 
-    assert_eq!(saved.settings.languages[0].size, "5G");
     assert_eq!(
         saved.settings.at_once.roadmap_stages, 1,
         "and the limit stands"
@@ -1984,7 +1992,6 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
     )
     .await;
 
-    assert_eq!(rust_told(&saved.settings).size, "5G");
     assert!(saved.settings.share_on_done, "the switch stands");
 }
 
@@ -2087,7 +2094,6 @@ async fn a_save_from_another_section_leaves_the_instructions() {
     )
     .await;
 
-    assert_eq!(rust_told(&saved.settings).size, "5G");
     assert_eq!(
         saved.settings.instructions, "Prefer the smallest change.",
         "the text stands",
@@ -2272,7 +2278,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": rust(true, "5G"),
+            "languages": gleam("5G"),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2290,7 +2296,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": rust(true, "  "),
+            "languages": gleam("  "),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2303,8 +2309,8 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
     )
     .await;
 
-    assert_eq!(rust_told(&saved.settings).size, "30G");
-    assert!(!rust_told(&saved.settings).size_configured);
+    assert_eq!(gleam_told(&saved.settings).size, "10G");
+    assert!(!gleam_told(&saved.settings).size_configured);
 }
 
 /// The Sandbox binds half of the page: every Sandbox Configuration bind, from

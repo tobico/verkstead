@@ -197,6 +197,9 @@ pub struct PluginField {
     pub key: String,
     pub label: String,
     pub description: Option<String>,
+    /// What an empty box shows: the value in force where none is set, where
+    /// there is one — a Language plugin's default size.
+    pub placeholder: Option<String>,
     pub value: PluginFieldValue,
 }
 
