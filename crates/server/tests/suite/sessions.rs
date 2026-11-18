@@ -3444,7 +3444,7 @@ impl Bench {
             "/api/ui/profiles",
             &serde_json::json!({
                 "name": name,
-                "account": { "agent_type": agent_type, "home": home },
+                "account": { "agent_type": agent_type, "paths": { "home": home } },
                 "models": models,
             }),
         )
@@ -3882,8 +3882,10 @@ async fn profile(app: &Router, root: &Path, name: &str) -> String {
             "name": name,
             "account": {
                 "agent_type": "Claude",
-                "claude_dir": claude_dir,
-                "config_file": config_file,
+                "paths": {
+                    "claude_dir": claude_dir,
+                    "config_file": config_file,
+                },
             },
             "models": [format!("claude-{name}-5"), format!("claude-{name}-4.8")],
         }),
@@ -18019,7 +18021,7 @@ async fn an_account_that_signs_out_stops_the_run_with_a_log_in_press() {
     assert_eq!(
         notice.log_in,
         Some(verkstead_render::NoticeLogIn {
-            agent_type: verkstead_render::AgentType::Claude,
+            agent_type: verkstead_render::AgentType::CLAUDE,
             profile: implementation.id,
             name: Some("implementation".to_owned()),
         }),

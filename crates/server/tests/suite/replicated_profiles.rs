@@ -382,8 +382,10 @@ impl Verkstead {
                     "name": name,
                     "account": {
                         "agent_type": "Claude",
-                        "claude_dir": claude_dir,
-                        "config_file": config_file,
+                        "paths": {
+                            "claude_dir": claude_dir,
+                            "config_file": config_file,
+                        },
                     },
                     "models": [MODEL],
                     "memory": true,
@@ -416,8 +418,10 @@ impl Verkstead {
                     "name": to,
                     "account": {
                         "agent_type": "Claude",
-                        "claude_dir": claude_dir,
-                        "config_file": config_file,
+                        "paths": {
+                            "claude_dir": claude_dir,
+                            "config_file": config_file,
+                        },
                     },
                     "models": [MODEL],
                     "memory": true,
@@ -450,8 +454,10 @@ impl Verkstead {
                     "name": null,
                     "account": {
                         "agent_type": "Claude",
-                        "claude_dir": claude_dir,
-                        "config_file": config_file,
+                        "paths": {
+                            "claude_dir": claude_dir,
+                            "config_file": config_file,
+                        },
                     },
                     "models": [MODEL],
                     "memory": true,
@@ -735,13 +741,7 @@ fn called<'a>(rows: &'a [ProfileEntry], name: &str) -> Option<&'a ProfileEntry> 
 /// any device's paths for it have arrived — empty paths, and no device to
 /// fetch its account from.
 fn landed(rows: &[ProfileEntry], name: &str) -> bool {
-    called(rows, name).is_some_and(|row| match &row.account {
-        verkstead_render::ProfileAccount::Claude { claude_dir, .. } => !claude_dir.is_empty(),
-        verkstead_render::ProfileAccount::Codex { home }
-        | verkstead_render::ProfileAccount::Grok { home }
-        | verkstead_render::ProfileAccount::OpenCode { home }
-        | verkstead_render::ProfileAccount::Agy { home } => !home.is_empty(),
-    })
+    called(rows, name).is_some_and(|row| row.account.paths.values().all(|path| !path.is_empty()))
 }
 
 /// And what every row on it is called, for an assertion that says what it did
@@ -979,10 +979,10 @@ async fn a_member_that_stops_answering_keeps_its_records() {
     assert!(!theirs.device.reachable, "drawn as not answering");
     assert_eq!(
         theirs.bound,
-        Some(verkstead_render::ProfileAccount::Claude {
-            claude_dir: "/home/you/accounts/work/.claude".to_owned(),
-            config_file: "/home/you/accounts/work/.claude.json".to_owned(),
-        }),
+        Some(verkstead_render::ProfileAccount::claude(
+            "/home/you/accounts/work/.claude".to_owned(),
+            "/home/you/accounts/work/.claude.json".to_owned()
+        )),
         "from the last binding of it this device holds",
     );
 }
@@ -1698,10 +1698,10 @@ async fn a_profile_of_as(on: &Verkstead, home: &str) -> String {
         home,
         &store::ProfileFacts {
             name: Some("work".to_owned()),
-            account: store::Account::Claude {
-                claude_dir: PathBuf::from("/home/you/accounts/work/.claude"),
-                config_file: PathBuf::from("/home/you/accounts/work/.claude.json"),
-            },
+            account: store::Account::claude(
+                PathBuf::from("/home/you/accounts/work/.claude"),
+                PathBuf::from("/home/you/accounts/work/.claude.json"),
+            ),
             models: vec![MODEL.to_owned()],
             memory: true,
         },

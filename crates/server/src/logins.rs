@@ -93,7 +93,7 @@ pub(crate) const LIMIT: Duration = Duration::from_secs(10 * 60);
 /// says back — the whole of what tells one harness's login from another's.
 pub(crate) struct Speaking {
     /// What the modal and its refusals call the harness.
-    name: &'static str,
+    pub(crate) name: &'static str,
 
     /// The words of the harness's line a login runs.
     logging_in: &'static [&'static str],
@@ -181,7 +181,7 @@ pub(crate) const AGY: Speaking = Speaking {
 /// How a login of `agent_type` goes, or `None` for a harness whose login
 /// Verkstead does not run.
 fn speaking(agent_type: store::AgentType) -> Option<&'static Speaking> {
-    crate::harness::of(agent_type).speaking()
+    crate::harness::of(agent_type).and_then(|harness| harness.speaking())
 }
 
 /// Whether Verkstead runs the login of a Profile of `agent_type` — see

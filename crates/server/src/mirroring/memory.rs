@@ -472,13 +472,14 @@ pub(crate) fn here(
     // The common git directory is asked for only by a harness whose store is
     // keyed by where a session runs, which is the one a Worktree without one
     // leaves with nothing to name.
-    let git_dir = if crate::harness::of(account.agent_type()).placed() {
-        crate::worktrees::common_git_dir(worktree)?
-    } else {
-        PathBuf::new()
-    };
+    let git_dir =
+        if crate::harness::of(account.agent_type()).is_some_and(|harness| harness.placed()) {
+            crate::worktrees::common_git_dir(worktree)?
+        } else {
+            PathBuf::new()
+        };
 
-    let root = Root::of(account, crate::platform::Platform::HERE, &git_dir, worktree);
+    let root = Root::of(account, crate::platform::Platform::HERE, &git_dir, worktree)?;
 
     // What the question settled, which on this end is what a path could be named
     // off: the Repo's entry is named off the match across devices, and the

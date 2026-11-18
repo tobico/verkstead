@@ -61,6 +61,43 @@ pub(crate) trait Harness: Send + Sync {
     /// *Grok Build*.
     fn named(&self) -> &str;
 
+    /// Its mark, as an SVG document the viewer draws in front of its name.
+    ///
+    /// **The built-ins' are lobehub's**:
+    /// [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons), MIT
+    /// licensed, copied out of `@lobehub/icons-static-svg` into `marks/` beside
+    /// this module rather than depended on, under lobehub's own names — so
+    /// updating one is copying it again — with its licence beside them, MIT
+    /// asking for the notice to travel with the copy. Verbatim but for one
+    /// edit: each file's `<title>` is taken out, being what a browser draws as
+    /// a tooltip, and a mark whose tooltip said "Claude" beside words already
+    /// reading *Claude Code Fable 5 — Work* would be the line saying itself
+    /// twice.
+    ///
+    /// Four of the five are the mono cut, painted in `currentColor` so a mark
+    /// sits in whatever ink surrounds it. Claude Code's is lobehub's colour
+    /// variant, which names its fill and so stands in its own orange. The
+    /// Antigravity CLI's is the mono cut even so: lobehub's colour one is a
+    /// stack of masked, blurred gradients, which at `1em` is a smudge.
+    fn mark(&self) -> &str;
+
+    /// The paths an account of it is made of, in the order it declares them:
+    /// what the Profile form draws a field apiece for, and what a save judges
+    /// — see [`crate::profiles`]. Every key is one [`store::Account`] holds a
+    /// path under.
+    fn paths(&self) -> Vec<Declared<'_>>;
+
+    /// Where an account of it is kept in a home of the human's, said from
+    /// `~` as they would recognise it — what onboarding draws under an account
+    /// it found.
+    fn found_at(&self) -> Vec<&str>;
+
+    /// What to run in a terminal to make an account of it: the program
+    /// itself, once, where its first start is its login.
+    fn first_run(&self) -> &str {
+        self.binary()
+    }
+
     /// Its launch line, for a session working in `worktree` beside the
     /// Worktrees of its Companion Repos, `companions`.
     ///
@@ -341,25 +378,35 @@ pub(crate) trait Harness: Send + Sync {
 /// looked for.
 pub(crate) type Carrying<'a> = Pin<Box<dyn Future<Output = Option<Carried>> + Send + 'a>>;
 
-/// The harness a Profile of `agent_type` runs.
+/// The harness a Profile of `agent_type` runs, or `None` where this server
+/// has no harness of that id — a Profile written on a device with a plugin
+/// this one has not got, which is broken here rather than run (see
+/// [`crate::profiles`]'s `broken`).
 ///
-/// The one place a type is turned into its harness, and the one `match` on it
-/// this module has.
-pub(crate) fn of(agent_type: store::AgentType) -> &'static dyn Harness {
-    match agent_type {
-        store::AgentType::Claude => &claude::Claude,
-        store::AgentType::Codex => &codex::Codex,
-        store::AgentType::Grok => &grok::Grok,
-        store::AgentType::OpenCode => &opencode::OpenCode,
-        store::AgentType::Agy => &agy::Agy,
-    }
+/// The one place an id is turned into its harness.
+pub(crate) fn of(agent_type: store::AgentType) -> Option<&'static dyn Harness> {
+    BUILT_IN
+        .iter()
+        .zip(store::BUILT_IN)
+        .find(|(_, built_in)| built_in.agent_type == agent_type)
+        .map(|(harness, _)| *harness)
+}
+
+/// Every harness this server can run, each with its id, in the order the
+/// pickers offer them.
+pub(crate) fn every() -> impl Iterator<Item = (store::AgentType, &'static dyn Harness)> {
+    store::BUILT_IN
+        .iter()
+        .zip(BUILT_IN)
+        .map(|(built_in, harness)| (built_in.agent_type, harness))
 }
 
 /// How a session of `agent_type` puts a Question Set to the human — see
 /// [`Harness::channel`] — said for the CLI's Guide, which is outside the crate
-/// the trait is reached in.
+/// the trait is reached in. Blocking for a harness this binary has not got,
+/// which is how the Guide has always been printed outside a sandbox.
 pub fn channel(agent_type: store::AgentType) -> store::Channel {
-    of(agent_type).channel()
+    of(agent_type).map_or(store::Channel::Blocking, |harness| harness.channel())
 }
 
 /// Every harness built into this binary.
@@ -379,6 +426,42 @@ pub(crate) const BINARIES: [&str; 5] = [
     grok::BINARY,
     opencode::BINARY,
     agy::BINARY,
+];
+
+/// One path an account of a harness is made of — see [`Harness::paths`].
+pub(crate) struct Declared<'a> {
+    /// The key the account holds it under.
+    pub(crate) key: &'a str,
+
+    /// What the Profile form labels its field.
+    pub(crate) label: &'a str,
+
+    /// What it is for, said under the field, with what is to be read as code
+    /// between backticks.
+    pub(crate) purpose: &'a str,
+
+    /// What the field shows before anything is typed into it.
+    pub(crate) placeholder: &'a str,
+
+    /// Whether it is a file rather than a directory.
+    pub(crate) file: bool,
+
+    /// What a save of it is refused as, where it was named relatively, where
+    /// nothing is there, and where what is there is the wrong kind of thing —
+    /// each its own sentence on the form, so that a refusal says which field.
+    pub(crate) refused: [verkstead_render::ProfileSaved; 3],
+
+    /// Directories inside it a save judges as well, said from it, refused as
+    /// it is: what is mounted of an account kept somewhere inside a home.
+    pub(crate) within: &'a [&'a str],
+}
+
+/// What a home an account is kept under is refused as — see
+/// [`Declared::refused`].
+pub(crate) const HOME_REFUSED: [verkstead_render::ProfileSaved; 3] = [
+    verkstead_render::ProfileSaved::HomeNotAbsolute,
+    verkstead_render::ProfileSaved::HomeMissing,
+    verkstead_render::ProfileSaved::HomeNotADirectory,
 ];
 
 /// What a session says when its account has signed out — see
@@ -485,4 +568,26 @@ pub enum Resume {
         /// question it is not asking.
         also: Vec<String>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each built-in declares the paths the store reads its binding by, in the
+    /// same order: the store keeps the keys so that a binding an older release
+    /// wrote reads as an account, and the harness declares them so that the
+    /// form asks for them — two statements of one fact, held to each other here.
+    #[test]
+    fn every_built_in_declares_the_paths_the_store_reads_it_by() {
+        for (agent_type, harness) in every() {
+            let declared: Vec<&str> = harness.paths().iter().map(|path| path.key).collect();
+
+            assert_eq!(
+                declared,
+                agent_type.built_in().expect("a built-in").paths,
+                "{agent_type}"
+            );
+        }
+    }
 }

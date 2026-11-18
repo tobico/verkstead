@@ -2547,10 +2547,10 @@ async fn profiles_of_before(dir: &Path) {
 /// A Claude account under `name`, which is the shape every Profile in this file
 /// has.
 fn claude(name: &str) -> Account {
-    Account::Claude {
-        claude_dir: PathBuf::from(format!("/watched/accounts/{name}/.claude")),
-        config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
-    }
+    Account::claude(
+        PathBuf::from(format!("/watched/accounts/{name}/.claude")),
+        PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
+    )
 }
 
 /// The integer a Profile of this device's own had before the uuids, as its
@@ -3000,6 +3000,7 @@ async fn arrived(pool: &SqlitePool, uuid: &str, device: &str, name: Option<&str>
                 claude_dir: Some("/theirs/.claude".to_owned()),
                 config_file: Some("/theirs/.claude.json".to_owned()),
                 home: None,
+                paths: Default::default(),
                 login: true,
             },
         }],
@@ -3184,10 +3185,7 @@ async fn the_sessions_of_before_keep_their_names_and_a_new_one_may_have_none() {
         &pool,
         &ProfileFacts {
             name: None,
-            account: Account::Claude {
-                claude_dir: account.clone(),
-                config_file: account.join("claude.json"),
-            },
+            account: Account::claude(account.clone(), account.join("claude.json")),
             models: vec!["claude-opus-5".to_owned()],
             memory: true,
         },

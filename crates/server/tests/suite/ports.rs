@@ -430,10 +430,7 @@ async fn paired(on: &Verkstead, root: &Path, conversation: i64) {
         &on.pool,
         &store::ProfileFacts {
             name: Some("tests".to_owned()),
-            account: store::Account::Claude {
-                claude_dir,
-                config_file,
-            },
+            account: store::Account::claude(claude_dir, config_file),
             models: vec!["claude-tests-5".to_owned()],
             memory: false,
         },

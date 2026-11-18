@@ -37,10 +37,10 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, Arrival, ArrivingPicked, Birth, CompanionWorktree, Deletion, Lifecycle, Picked,
-    ProfileFacts, Replacing, Transferred, arrive, birth, born_as, conversation_rank, conversations,
-    create_profile, delete_conversation, load_conversation, open_database, register_repo, replace,
-    start_conversation, sweep_arrival, transfer_away, transferred,
+    Account, AgentType, Arrival, ArrivingPicked, Birth, CompanionWorktree, Deletion, Lifecycle,
+    Picked, ProfileFacts, Replacing, Transferred, arrive, birth, born_as, conversation_rank,
+    conversations, create_profile, delete_conversation, load_conversation, open_database,
+    register_repo, replace, start_conversation, sweep_arrival, transfer_away, transferred,
 };
 
 /// The device this database belongs to.
@@ -79,9 +79,7 @@ async fn profile(pool: &SqlitePool, name: &str) -> String {
         pool,
         &ProfileFacts {
             name: Some(name.to_owned()),
-            account: Account::Codex {
-                home: Path::new("/here/accounts").join(name),
-            },
+            account: Account::home(AgentType::CODEX, Path::new("/here/accounts").join(name)),
             models: vec!["gpt-5".to_owned()],
             memory: true,
         },

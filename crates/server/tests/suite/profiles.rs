@@ -68,8 +68,10 @@ fn edit(name: &str, claude_dir: &Path, config_file: &Path, models: &[&str]) -> s
         "name": name,
         "account": {
             "agent_type": "Claude",
-            "claude_dir": claude_dir,
-            "config_file": config_file,
+            "paths": {
+                "claude_dir": claude_dir,
+                "config_file": config_file,
+            },
         },
         "models": models,
     })
@@ -82,8 +84,10 @@ fn unnamed(claude_dir: &Path, config_file: &Path) -> serde_json::Value {
         "name": null,
         "account": {
             "agent_type": "Claude",
-            "claude_dir": claude_dir,
-            "config_file": config_file,
+            "paths": {
+                "claude_dir": claude_dir,
+                "config_file": config_file,
+            },
         },
         "models": ["claude-opus-5"],
     })
@@ -128,7 +132,7 @@ fn made(home: PathBuf) -> PathBuf {
 fn codex_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "name": name,
-        "account": { "agent_type": "Codex", "home": home },
+        "account": { "agent_type": "Codex", "paths": { "home": home } },
         "models": models,
     })
 }
@@ -137,7 +141,7 @@ fn codex_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
 fn grok_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "name": name,
-        "account": { "agent_type": "Grok", "home": home },
+        "account": { "agent_type": "Grok", "paths": { "home": home } },
         "models": models,
     })
 }
@@ -146,7 +150,7 @@ fn grok_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
 fn opencode_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "name": name,
-        "account": { "agent_type": "OpenCode", "home": home },
+        "account": { "agent_type": "OpenCode", "paths": { "home": home } },
         "models": models,
     })
 }
@@ -155,7 +159,7 @@ fn opencode_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value 
 fn agy_edit(name: &str, home: &Path, models: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "name": name,
-        "account": { "agent_type": "Agy", "home": home },
+        "account": { "agent_type": "Agy", "paths": { "home": home } },
         "models": models,
     })
 }
@@ -367,14 +371,14 @@ async fn a_saved_profile_appears_on_the_list_with_everything_it_was_given() {
     let resolved = accounts.path().canonicalize().unwrap();
     assert_eq!(
         profile.account,
-        ProfileAccount::Claude {
-            claude_dir: resolved.join("work/.claude").to_str().unwrap().to_owned(),
-            config_file: resolved
+        ProfileAccount::claude(
+            resolved.join("work/.claude").to_str().unwrap().to_owned(),
+            resolved
                 .join("work/.claude.json")
                 .to_str()
                 .unwrap()
-                .to_owned(),
-        }
+                .to_owned()
+        )
     );
 
     // Its pair is where it was left, which is the ordinary case.
@@ -548,10 +552,10 @@ async fn a_pair_under_a_home_the_server_was_never_told_about_saves_and_reads_unb
     let resolved = home.path().canonicalize().unwrap();
     assert_eq!(
         listed[0].account,
-        ProfileAccount::Claude {
-            claude_dir: resolved.join(".claude").to_str().unwrap().to_owned(),
-            config_file: resolved.join(".claude.json").to_str().unwrap().to_owned(),
-        }
+        ProfileAccount::claude(
+            resolved.join(".claude").to_str().unwrap().to_owned(),
+            resolved.join(".claude.json").to_str().unwrap().to_owned()
+        )
     );
 }
 
@@ -580,12 +584,16 @@ async fn a_pair_reached_through_a_symlink_is_stored_where_it_really_is() {
         ProfileSaved::Saved
     );
 
-    let ProfileAccount::Claude { claude_dir, .. } = &listed(&app).await[0].account else {
-        panic!("a Claude Profile should come back as a Claude account");
-    };
+    let account = &listed(&app).await[0].account;
 
     assert_eq!(
-        claude_dir,
+        account.agent_type,
+        verkstead_render::AgentType::CLAUDE,
+        "a Claude Profile should come back as a Claude account"
+    );
+
+    assert_eq!(
+        &account.paths["claude_dir"],
         real_dir.canonicalize().unwrap().to_str().unwrap()
     );
 }
@@ -752,7 +760,7 @@ async fn a_harness_takes_one_profile_nobody_named() {
                 "name": null,
                 "account": {
                     "agent_type": "Codex",
-                    "home": home(accounts.path(), "codex"),
+                    "paths": { "home": home(accounts.path(), "codex") },
                 },
                 "models": ["gpt-5.2-codex"],
             })
@@ -844,9 +852,10 @@ async fn a_profile_whose_account_is_one_home_saves_and_reads_back_with_it() {
     assert_eq!(profile.models, MODELS);
     assert_eq!(
         profile.account,
-        ProfileAccount::Codex {
-            home: resolved.join("codex/.codex").to_str().unwrap().to_owned(),
-        }
+        ProfileAccount::home(
+            verkstead_render::AgentType::CODEX,
+            resolved.join("codex/.codex").to_str().unwrap().to_owned()
+        )
     );
     assert_eq!(profile.broken, None);
 }
@@ -907,22 +916,26 @@ async fn a_home_account_saves_and_reads_back_as_its_own_type() {
             .map(|profile| profile.account.clone())
             .collect::<Vec<_>>(),
         vec![
-            ProfileAccount::Codex {
-                home: resolved.join("codex/.codex").to_str().unwrap().to_owned(),
-            },
-            ProfileAccount::Grok {
-                home: resolved.join("grok/.grok").to_str().unwrap().to_owned(),
-            },
-            ProfileAccount::OpenCode {
-                home: resolved
+            ProfileAccount::home(
+                verkstead_render::AgentType::CODEX,
+                resolved.join("codex/.codex").to_str().unwrap().to_owned()
+            ),
+            ProfileAccount::home(
+                verkstead_render::AgentType::GROK,
+                resolved.join("grok/.grok").to_str().unwrap().to_owned()
+            ),
+            ProfileAccount::home(
+                verkstead_render::AgentType::OPENCODE,
+                resolved
                     .join("opencode/opencode")
                     .to_str()
                     .unwrap()
-                    .to_owned(),
-            },
-            ProfileAccount::Agy {
-                home: resolved.join("vertex/.gemini").to_str().unwrap().to_owned(),
-            },
+                    .to_owned()
+            ),
+            ProfileAccount::home(
+                verkstead_render::AgentType::AGY,
+                resolved.join("vertex/.gemini").to_str().unwrap().to_owned()
+            ),
         ]
     );
     assert!(listed.iter().all(|profile| profile.broken.is_none()));
@@ -1979,8 +1992,10 @@ async fn the_platform_default_prefers_claude_code_and_its_unnamed_profile() {
                 "name": null,
                 "account": {
                     "agent_type": "Claude",
-                    "claude_dir": claude_dir,
-                    "config_file": config_file,
+                    "paths": {
+                        "claude_dir": claude_dir,
+                        "config_file": config_file,
+                    },
                 },
                 "models": MODELS,
             }),
@@ -2135,4 +2150,105 @@ async fn an_unusable_candidate_falls_through_to_the_default_and_then_to_nothing(
     );
     assert_eq!(offered.implementation, None);
     assert_eq!(offered.review, PickedView::Nothing);
+}
+
+/// **A Profile naming a harness this server has not got** — a plugin installed
+/// on the device that saved it — is listed like any other, its paths as its
+/// binding holds them, and broken: there is nothing here to launch it with.
+/// The viewer leaves it off every picker on that word.
+#[tokio::test]
+async fn a_profile_of_a_harness_this_server_has_not_got_is_listed_broken() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let plugin = "3f0c7a52-9d14-4b8e-a6f1-2c5d8e9b7a40";
+
+    store::create_profile(
+        &pool,
+        &store::ProfileFacts {
+            name: Some("plugged".to_owned()),
+            account: store::Account::new(
+                store::AgentType::read(plugin),
+                [("state", PathBuf::from("/home/you/accounts/plugged"))],
+            ),
+            models: vec!["gemini-code".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let app = router_keeping(pool, dir.path().to_owned());
+
+    let [row] = <[_; 1]>::try_from(listed(&app).await).unwrap();
+
+    assert_eq!(row.account.agent_type.as_str(), plugin);
+    assert_eq!(
+        row.account.paths.get("state").map(String::as_str),
+        Some("/home/you/accounts/plugged")
+    );
+    assert_eq!(row.broken, Some(Broken::HarnessUnknown));
+}
+
+/// And saving one names the harness that is not here rather than judging
+/// paths nothing here declared.
+#[tokio::test]
+async fn a_profile_of_a_harness_this_server_has_not_got_is_refused_a_save() {
+    let (_accounts, _dir, app) = workbench().await;
+
+    let saved: ProfileSaved = post(
+        &app,
+        "/api/ui/profiles",
+        &serde_json::json!({
+            "name": "plugged",
+            "account": {
+                "agent_type": "3f0c7a52-9d14-4b8e-a6f1-2c5d8e9b7a40",
+                "paths": { "state": "/home/you/accounts/plugged" },
+            },
+            "models": ["gemini-code"],
+        }),
+    )
+    .await;
+
+    assert_eq!(saved, ProfileSaved::NoSuchHarness);
+}
+
+/// The harnesses the server can run, as the viewer draws them: each built-in
+/// under the word the wire has always spelled it in, with its name, its mark
+/// and the paths its account is made of.
+#[tokio::test]
+async fn the_harness_list_names_every_built_in_with_its_paths_and_mark() {
+    let (_accounts, _dir, app) = workbench().await;
+
+    let harnesses: Vec<verkstead_render::HarnessEntry> = get(&app, "/api/ui/harnesses").await;
+
+    let ids: Vec<&str> = harnesses.iter().map(|entry| entry.id.as_str()).collect();
+    assert_eq!(ids, ["Claude", "Codex", "Grok", "OpenCode", "Agy"]);
+
+    let claude = &harnesses[0];
+    assert_eq!(claude.name, "Claude Code");
+    assert!(claude.mark.starts_with("<svg"));
+    assert_eq!(
+        claude
+            .paths
+            .iter()
+            .map(|path| path.key.as_str())
+            .collect::<Vec<_>>(),
+        ["claude_dir", "config_file"]
+    );
+    assert_eq!(claude.login.as_deref(), Some("Claude"));
+
+    let codex = &harnesses[1];
+    assert_eq!(
+        codex
+            .paths
+            .iter()
+            .map(|path| path.key.as_str())
+            .collect::<Vec<_>>(),
+        ["home"]
+    );
+    assert_eq!(codex.login, None);
 }

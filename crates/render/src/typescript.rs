@@ -27,22 +27,22 @@ use crate::{
     ConversationUnarchived, ConversationView, Created, Creation, DeviceIdentity, DevicesView,
     DirectoryListing, DiscoveredDevice, DroppedRow, FileDeleted, FileDeleting, FileListsView,
     FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
-    FileWrite, FileWritten, FolderListing, ForwardsView, GrillingStarted, InstallPress,
-    LanguageCleared, LinkedDevice, Locked, LoginClosed, LoginCode, LoginOpened, LoginState,
-    MemoPressed, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack,
-    OfferedView, OnboardingView, OpenTerminal, PackAttached, PackRemoved, PendingJoin, Permitting,
-    Picking, PluginAt, PluginConsent, PluginEnabled, PluginInstall, PluginLanguageCache,
-    PluginSettingsSave, PluginSettingsSaved, PluginSettingsView, PluginUpdate, PluginUpdated,
-    PluginsView, PortsView, PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Repointed, Repointing, Resolved,
-    Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, ServerAttached, ServerRemoved,
-    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
-    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
-    TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView,
-    Transferring, Unsubscribe, UpdateNotice, Watching,
+    FileWrite, FileWritten, FolderListing, ForwardsView, GrillingStarted, HarnessEntry,
+    InstallPress, LanguageCleared, LinkedDevice, Locked, LoginClosed, LoginCode, LoginOpened,
+    LoginState, MemoPressed, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank,
+    OfferedPack, OfferedView, OnboardingView, OpenTerminal, PackAttached, PackRemoved, PendingJoin,
+    Permitting, Picking, PluginAt, PluginConsent, PluginEnabled, PluginInstall,
+    PluginLanguageCache, PluginSettingsSave, PluginSettingsSaved, PluginSettingsView, PluginUpdate,
+    PluginUpdated, PluginsView, PortsView, PrefillView, Preflight, ProcessChoice, ProcessPicked,
+    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
+    PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Repointed, Repointing,
+    Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, ServerAttached,
+    ServerRemoved, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown, Started,
+    SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed,
+    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
+    TerminalsView, TranscriptView, Transferring, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -407,9 +407,11 @@ fn the_viewers_types_are_written_from_these() {
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the choices a Conversation makes of them —
     // a Pairing, or the row that runs no session where the role offers one.
-    // A `ProfileEntry` writes the account it carries — the agent type and that
-    // type's own fields, flat — and the broken-ness beside it.
+    // A `ProfileEntry` writes the account it carries — the harness and its
+    // paths by key — and the broken-ness beside it. And the harnesses the form,
+    // the cards and the pickers draw names, marks and path fields from.
     ProfileEntry::export_all(&config).unwrap();
+    HarnessEntry::export_all(&config).unwrap();
 
     // A Profile's login, as the modal draws it and what it sends.
     LoginState::export_all(&config).unwrap();

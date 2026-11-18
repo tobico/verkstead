@@ -69,7 +69,7 @@ type Phrase = crate::harness::SignedOut<'static>;
 /// What a session of `agent_type` says when its account has signed out — or
 /// nothing, where Verkstead cannot run that harness's login.
 fn signed_out_phrase(agent_type: store::AgentType) -> Option<Phrase> {
-    crate::harness::of(agent_type).signed_out()
+    crate::harness::of(agent_type).and_then(|harness| harness.signed_out())
 }
 
 /// The line in `text` that says the account signed out, tidied of the
@@ -157,7 +157,7 @@ impl Login {
             return None;
         }
 
-        let path = crate::sandbox::root::login_at(&profile.account);
+        let path = crate::sandbox::root::login_at(&profile.account)?;
         let built = written(&path);
 
         Some(Login { path, built })
@@ -579,10 +579,10 @@ async fn home_named(pool: &SqlitePool, device: &str) -> String {
 mod tests {
     use super::*;
 
-    use store::AgentType::{Agy, Claude, Codex, Grok, OpenCode};
+    use store::AgentType;
 
     fn signed_out(text: &str) -> Option<String> {
-        saying(text, signed_out_phrase(Claude))
+        saying(text, signed_out_phrase(AgentType::CLAUDE))
     }
 
     fn watching() -> Watch {
@@ -592,7 +592,7 @@ mod tests {
             "3".to_owned(),
             "fable".to_owned(),
             Home::Here,
-            Claude,
+            AgentType::CLAUDE,
             None,
             Late::default(),
         )
@@ -668,7 +668,7 @@ mod tests {
             let drawn = format!("{line}\r\n\n Select login method:\n > 1. Google OAuth\n");
 
             assert_eq!(
-                saying(&drawn, signed_out_phrase(Agy)),
+                saying(&drawn, signed_out_phrase(AgentType::AGY)),
                 Some(crate::capture::plain(line)),
                 "{drawn:?} was not recognised"
             );
@@ -682,7 +682,11 @@ mod tests {
         ] {
             let drawn = format!("{line}\n Select login method:\n");
 
-            assert_eq!(saying(&drawn, signed_out_phrase(Agy)), None, "{line:?}");
+            assert_eq!(
+                saying(&drawn, signed_out_phrase(AgentType::AGY)),
+                None,
+                "{line:?}"
+            );
         }
     }
 
@@ -697,14 +701,18 @@ mod tests {
             " Welcome to the Antigravity CLI. You are currently not signed in.\n",
             " Welcome to the Antigravity CLI. You are currently not signed in.",
         ] {
-            assert_eq!(saying(drawn, signed_out_phrase(Agy)), None, "{drawn:?}");
+            assert_eq!(
+                saying(drawn, signed_out_phrase(AgentType::AGY)),
+                None,
+                "{drawn:?}"
+            );
         }
     }
 
     /// Only the sessions of a harness whose login Verkstead runs are read.
     #[test]
     fn only_a_session_whose_login_verkstead_runs_is_read() {
-        for agent_type in [Codex, Grok, OpenCode] {
+        for agent_type in [AgentType::CODEX, AgentType::GROK, AgentType::OPENCODE] {
             assert_eq!(
                 saying(
                     "Login expired · Please run /login",

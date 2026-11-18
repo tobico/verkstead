@@ -628,7 +628,8 @@ pub(crate) fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String
                 PairingRole::Implementation => "Implementation",
                 PairingRole::Review => "Review",
             };
-            let agent = crate::harness::of(crate::profiles::stored(*agent_type)).named();
+            let stored = crate::profiles::stored(agent_type);
+            let agent = crate::harness::of(stored).map_or(stored.word(), |harness| harness.named());
 
             format!(
                 "{role} is paired with {profile}, which runs {agent}. {agent} is not on {device}.",

@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use verkstead_render::Broken;
 
-use super::{Carrying, Harness, Line, Resume, SignedOut};
+use super::{Carrying, Declared, HOME_REFUSED, Harness, Line, Resume, SignedOut};
 use crate::platform::Platform;
 use crate::sandbox::root::{self, Part, Place, Whose};
 use crate::sandbox::{self, Home};
@@ -86,6 +86,26 @@ impl Harness for Codex {
 
     fn named(&self) -> &str {
         "Codex"
+    }
+
+    fn mark(&self) -> &str {
+        include_str!("marks/codex.svg")
+    }
+
+    fn paths(&self) -> Vec<Declared<'_>> {
+        vec![Declared {
+            key: store::HOME,
+            label: "Home directory",
+            purpose: "Mounted at `~/.codex`.",
+            placeholder: "/home/you/accounts/work/.codex",
+            file: false,
+            refused: HOME_REFUSED,
+            within: &[],
+        }]
+    }
+
+    fn found_at(&self) -> Vec<&str> {
+        vec!["~/.codex"]
     }
 
     /// **Codex's is a subcommand rather than a flag**, which is the one line in this
@@ -200,9 +220,10 @@ impl Harness for Codex {
     }
 
     fn kept_in(&self, home: &Path) -> store::Account {
-        store::Account::Codex {
-            home: home.join(sandbox::CODEX_INSIDE_HOME),
-        }
+        store::Account::home(
+            store::AgentType::CODEX,
+            home.join(sandbox::CODEX_INSIDE_HOME),
+        )
     }
 
     fn account_inside(&self, account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBuf)> {

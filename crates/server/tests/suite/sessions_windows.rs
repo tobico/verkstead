@@ -1076,8 +1076,10 @@ async fn profile(app: &Router, account: &Path, name: &str) -> String {
             "name": name,
             "account": {
                 "agent_type": "Claude",
-                "claude_dir": account.join(".claude"),
-                "config_file": account.join(".claude.json"),
+                "paths": {
+                    "claude_dir": account.join(".claude"),
+                    "config_file": account.join(".claude.json"),
+                },
             },
             "models": [format!("claude-{name}-5"), format!("claude-{name}-4.8")],
         }),

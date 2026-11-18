@@ -11,14 +11,14 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_store::replicated::{Record, merge, records};
 use verkstead_store::{
-    Account, AgentType, Binding, Bindings, Chosen, Clash, Deleting, Event, Lifecycle, Linking,
-    Pairing, PendingForm, PendingPairing, Picked, Profile, ProfileFacts, ProfileRecord, Profiles,
-    Saving, Settled, Unbound, binding_uuid, create_profile, create_profile_holding, delete_profile,
-    load_conversation, load_profile, logins_held, open_database, open_pending_steer,
-    profile_arrived, profiles, record_member, register_repo, save_pending_steer,
-    set_grilling_pairing, set_implementation_pairing, set_review_pairing, settle, skip_review,
-    stamp_the_profiles, start_capture, start_conversation, start_grilling, this_device_called,
-    timeline, update_profile, update_profile_holding,
+    Account, AgentType, BUILT_IN, Binding, Bindings, CLAUDE_DIR, CONFIG_FILE, Chosen, Clash,
+    Deleting, Event, Lifecycle, Linking, Pairing, PendingForm, PendingPairing, Picked, Profile,
+    ProfileFacts, ProfileRecord, Profiles, Saving, Settled, Unbound, binding_uuid, create_profile,
+    create_profile_holding, delete_profile, load_conversation, load_profile, logins_held,
+    open_database, open_pending_steer, profile_arrived, profiles, record_member, register_repo,
+    save_pending_steer, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
+    settle, skip_review, stamp_the_profiles, start_capture, start_conversation, start_grilling,
+    this_device_called, timeline, update_profile, update_profile_holding,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -54,39 +54,43 @@ fn facts_for(name: &str, account: Account) -> ProfileFacts {
 /// The Claude account those Profiles run as: the pair, under the account's own
 /// directory.
 fn claude(name: &str) -> Account {
-    Account::Claude {
-        claude_dir: PathBuf::from(format!("/watched/accounts/{name}/.claude")),
-        config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
-    }
+    Account::claude(
+        PathBuf::from(format!("/watched/accounts/{name}/.claude")),
+        PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
+    )
 }
 
 /// And a Codex one: the single home its whole account is kept under.
 fn codex(name: &str) -> Account {
-    Account::Codex {
-        home: PathBuf::from(format!("/watched/accounts/{name}/.codex")),
-    }
+    Account::home(
+        AgentType::CODEX,
+        PathBuf::from(format!("/watched/accounts/{name}/.codex")),
+    )
 }
 
 /// And a Grok Build one, which is the same shape under a directory of its own.
 fn grok(name: &str) -> Account {
-    Account::Grok {
-        home: PathBuf::from(format!("/watched/accounts/{name}/.grok")),
-    }
+    Account::home(
+        AgentType::GROK,
+        PathBuf::from(format!("/watched/accounts/{name}/.grok")),
+    )
 }
 
 /// And an OpenCode one, which keeps one home too — the directory opencode's
 /// XDG paths resolve inside rather than a dot-directory of its own.
 fn opencode(name: &str) -> Account {
-    Account::OpenCode {
-        home: PathBuf::from(format!("/watched/accounts/{name}/opencode")),
-    }
+    Account::home(
+        AgentType::OPENCODE,
+        PathBuf::from(format!("/watched/accounts/{name}/opencode")),
+    )
 }
 
 /// And an Antigravity CLI one, the `~/.gemini` agy keeps its own directory in.
 fn agy(name: &str) -> Account {
-    Account::Agy {
-        home: PathBuf::from(format!("/watched/accounts/{name}/.gemini")),
-    }
+    Account::home(
+        AgentType::AGY,
+        PathBuf::from(format!("/watched/accounts/{name}/.gemini")),
+    )
 }
 
 async fn saved(pool: &SqlitePool, name: &str) -> Profile {
@@ -133,17 +137,17 @@ async fn a_saved_profile_holds_its_account_and_its_models() {
     assert_eq!(profile.name.as_deref(), Some("work"));
     assert_eq!(
         profile.account,
-        Account::Claude {
-            claude_dir: PathBuf::from("/watched/accounts/work/.claude"),
-            config_file: PathBuf::from("/watched/accounts/work/.claude.json"),
-        }
+        Account::claude(
+            PathBuf::from("/watched/accounts/work/.claude"),
+            PathBuf::from("/watched/accounts/work/.claude.json")
+        )
     );
     assert_eq!(profile.models, ["claude-opus-5"]);
 
     // One value, and the point of it is that the column is there and the shape
     // hangs off it — the second backend slots in beside `claude` rather than
     // being migrated in under it.
-    assert_eq!(profile.agent_type(), AgentType::Claude);
+    assert_eq!(profile.agent_type(), AgentType::CLAUDE);
 
     assert_eq!(
         load_profile(&pool, &profile.id).await.unwrap(),
@@ -151,24 +155,177 @@ async fn a_saved_profile_holds_its_account_and_its_models() {
     );
 }
 
-/// A Profile of a type this binary does not have is a database written by a
-/// newer Verkstead. Refused by the word that is in the record, rather than read
-/// past as though it were a Claude row with a pair it has not got.
+/// A Profile of a harness this binary does not have — a plugin installed on
+/// the device that saved it — is read like any other, by the id the record
+/// holds and the paths its binding maps: whether there is a harness to run it
+/// on is decided above the store, which draws it broken rather than stopping
+/// the read.
 #[tokio::test]
-async fn a_profile_naming_an_agent_type_this_binary_has_not_got_is_refused_by_name() {
+async fn a_profile_naming_a_harness_this_binary_has_not_got_is_read_as_it_is() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let plugin = "3f0c7a52-9d14-4b8e-a6f1-2c5d8e9b7a40";
+
+    written_by_hand(
+        &pool,
+        &format!(
+            r#"{{"name":"work","harness":"{plugin}","models":["gemini-code"],"memory":true}}"#
+        ),
+        r#"{"paths":{"state":"/watched/accounts/work/.gemini"}}"#,
+    )
+    .await;
+
+    let [profile] = <[_; 1]>::try_from(profiles(&pool).await.unwrap()).unwrap();
+
+    assert_eq!(profile.agent_type().word(), plugin);
+    assert_eq!(
+        profile.account,
+        Account::new(
+            AgentType::read(plugin),
+            [("state", "/watched/accounts/work/.gemini")]
+        )
+    );
+}
+
+/// A built-in's uuid reads as the built-in, so a record that names it by the
+/// uuid its plugin is known by is the same harness as one naming it by word.
+#[tokio::test]
+async fn a_built_in_named_by_its_uuid_is_that_built_in() {
+    for built_in in BUILT_IN {
+        assert_eq!(AgentType::read(built_in.uuid), built_in.agent_type);
+        assert_eq!(
+            AgentType::read(&built_in.uuid.to_uppercase()),
+            built_in.agent_type
+        );
+        assert_eq!(
+            AgentType::read(built_in.agent_type.word()),
+            built_in.agent_type
+        );
+    }
+}
+
+/// **A Claude Profile with its binding as the previous release wrote it** — the
+/// pair as two fields and no map — reads back with both paths, under the keys
+/// the harness declares them by.
+#[tokio::test]
+async fn a_claude_binding_the_previous_release_wrote_reads_as_both_paths() {
     let (_dir, pool) = fresh_pool().await;
 
     written_by_hand(
         &pool,
-        r#"{"name":"work","harness":"gemini","models":["gemini-code"],"memory":true}"#,
-        r#"{"home":"/watched/accounts/work/.gemini"}"#,
+        r#"{"name":"work","harness":"claude","models":["claude-opus-5"],"memory":true}"#,
+        r#"{"claude_dir":"/watched/.claude","config_file":"/watched/.claude.json","login":true}"#,
     )
     .await;
 
-    let refused = profiles(&pool).await.unwrap_err().to_string();
-    assert!(
-        refused.contains("gemini"),
-        "the refusal should name the word it did not know, and said {refused:?}"
+    let [profile] = <[_; 1]>::try_from(profiles(&pool).await.unwrap()).unwrap();
+
+    assert_eq!(profile.agent_type(), AgentType::CLAUDE);
+    assert_eq!(
+        profile.account.path(CLAUDE_DIR),
+        Some(Path::new("/watched/.claude"))
+    );
+    assert_eq!(
+        profile.account.path(CONFIG_FILE),
+        Some(Path::new("/watched/.claude.json"))
+    );
+    assert_eq!(
+        profile.account,
+        Account::claude("/watched/.claude", "/watched/.claude.json")
+    );
+}
+
+/// **And a Profile saved now is one the previous release still reads**: the
+/// record carries the built-in's word, and the binding the fields it had
+/// beside the map of paths. A plugin harness's binding is the map alone.
+#[tokio::test]
+async fn a_saved_built_in_writes_its_word_and_its_old_binding_fields_beside_the_map() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let claude = saved(&pool, "work").await;
+
+    let codex = create_profile(
+        &pool,
+        &ProfileFacts {
+            name: Some("home".to_owned()),
+            account: Account::home(AgentType::CODEX, "/watched/accounts/home/.codex"),
+            models: vec!["gpt-5".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let plugin = create_profile(
+        &pool,
+        &ProfileFacts {
+            name: None,
+            account: Account::new(
+                AgentType::read("3f0c7a52-9d14-4b8e-a6f1-2c5d8e9b7a40"),
+                [("state", "/watched/accounts/plugin")],
+            ),
+            models: vec!["gemini-code".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let body = |kind: &'static str, uuid: String| {
+        let pool = pool.clone();
+
+        async move {
+            let (body,): (String,) =
+                sqlx::query_as("SELECT body FROM replicated WHERE kind = ? AND uuid = ?")
+                    .bind(kind)
+                    .bind(uuid)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()
+        }
+    };
+
+    let record = body("profiles", claude.id.clone()).await;
+    assert_eq!(record["harness"], "claude");
+
+    let binding = body("profile_bindings", binding_uuid(&claude.id, "")).await;
+    assert_eq!(binding["claude_dir"], "/watched/accounts/work/.claude");
+    assert_eq!(
+        binding["config_file"],
+        "/watched/accounts/work/.claude.json"
+    );
+    assert_eq!(
+        binding["paths"],
+        serde_json::json!({
+            "claude_dir": "/watched/accounts/work/.claude",
+            "config_file": "/watched/accounts/work/.claude.json",
+        })
+    );
+
+    let record = body("profiles", codex.id.clone()).await;
+    assert_eq!(record["harness"], "codex");
+
+    let binding = body("profile_bindings", binding_uuid(&codex.id, "")).await;
+    assert_eq!(binding["home"], "/watched/accounts/home/.codex");
+    assert_eq!(
+        binding["paths"],
+        serde_json::json!({ "home": "/watched/accounts/home/.codex" })
+    );
+
+    let record = body("profiles", plugin.id.clone()).await;
+    assert_eq!(record["harness"], "3f0c7a52-9d14-4b8e-a6f1-2c5d8e9b7a40");
+
+    let binding = body("profile_bindings", binding_uuid(&plugin.id, "")).await;
+    assert_eq!(
+        binding,
+        serde_json::json!({
+            "paths": { "state": "/watched/accounts/plugin" },
+            "login": true,
+        })
     );
 }
 
@@ -236,7 +393,7 @@ async fn a_profile_whose_account_is_one_home_round_trips_with_it() {
         .expect("nothing is called that yet");
 
     assert_eq!(saved.account, codex("work"));
-    assert_eq!(saved.agent_type(), AgentType::Codex);
+    assert_eq!(saved.agent_type(), AgentType::CODEX);
 
     let loaded = load_profile(&pool, &saved.id)
         .await
@@ -280,10 +437,10 @@ async fn the_types_that_each_keep_one_home_read_back_as_themselves() {
         .expect("nothing is called that yet");
 
     assert_eq!(saved.account, grok("xai"));
-    assert_eq!(saved.agent_type(), AgentType::Grok);
+    assert_eq!(saved.agent_type(), AgentType::GROK);
 
     assert_eq!(latest.account, opencode("zen"));
-    assert_eq!(latest.agent_type(), AgentType::OpenCode);
+    assert_eq!(latest.agent_type(), AgentType::OPENCODE);
 
     let antigravity = create_profile(&pool, &facts_for("zz-gemini", agy("zz-gemini")))
         .await
@@ -291,7 +448,7 @@ async fn the_types_that_each_keep_one_home_read_back_as_themselves() {
         .expect("nothing is called that yet");
 
     assert_eq!(antigravity.account, agy("zz-gemini"));
-    assert_eq!(antigravity.agent_type(), AgentType::Agy);
+    assert_eq!(antigravity.agent_type(), AgentType::AGY);
 
     for profile in [&saved, &latest, &antigravity] {
         let loaded = load_profile(&pool, &profile.id)
@@ -309,10 +466,10 @@ async fn the_types_that_each_keep_one_home_read_back_as_themselves() {
             .map(|profile| profile.agent_type())
             .collect::<Vec<_>>(),
         vec![
-            AgentType::Codex,
-            AgentType::Grok,
-            AgentType::OpenCode,
-            AgentType::Agy
+            AgentType::CODEX,
+            AgentType::GROK,
+            AgentType::OPENCODE,
+            AgentType::AGY
         ],
         "and each of them off the list is its own type"
     );
@@ -1217,7 +1374,7 @@ async fn a_session_under_a_profile_nobody_named_records_no_name() {
     let ran = ran.expect("and it says what it ran under");
     assert_eq!(ran.profile, None);
     assert_eq!(ran.model.as_deref(), Some(MODEL));
-    assert_eq!(ran.agent_type, Some(AgentType::Claude));
+    assert_eq!(ran.agent_type, Some(AgentType::CLAUDE));
 }
 
 /// Nothing anywhere still names a removed Profile, and the schema is what says
@@ -1837,13 +1994,8 @@ async fn arrived(
 
 /// And that member's binding of it, its paths for `name`'s account.
 async fn bound_at_home(pool: &SqlitePool, name: &str) {
-    let Account::Claude {
-        claude_dir,
-        config_file,
-    } = claude(name)
-    else {
-        unreachable!()
-    };
+    let account = claude(name);
+    let [claude_dir, config_file] = account.paths().try_into().unwrap();
 
     merge::<Bindings>(
         pool,
@@ -1856,6 +2008,7 @@ async fn bound_at_home(pool: &SqlitePool, name: &str) {
                 claude_dir: Some(claude_dir.to_string_lossy().into_owned()),
                 config_file: Some(config_file.to_string_lossy().into_owned()),
                 home: None,
+                paths: Default::default(),
                 login: true,
             },
         }],
@@ -2042,7 +2195,7 @@ async fn editing_a_profile_not_bound_here_writes_the_record_alone() {
 
     let held = load_profile(&pool, AT_HOME).await.unwrap().unwrap();
     assert_eq!(held.name.as_deref(), Some("renamed"));
-    assert_eq!(held.agent_type(), AgentType::Claude, "its harness kept");
+    assert_eq!(held.agent_type(), AgentType::CLAUDE, "its harness kept");
     assert_eq!(held.account, claude("theirs"), "and the member's paths");
     assert!(held.unbound.is_some(), "and still no binding here");
 

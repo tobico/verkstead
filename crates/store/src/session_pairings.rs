@@ -153,11 +153,7 @@ pub async fn newest_agent(
         format!("reading which agent ran the newest session of Conversation {conversation_id}")
     })?;
 
-    row.map(|(word,)| super::AgentType::read(&word))
-        .transpose()
-        .with_context(|| {
-            format!("reading which agent ran the newest session of Conversation {conversation_id}")
-        })
+    Ok(row.map(|(word,)| super::AgentType::read(&word)))
 }
 
 /// One row of the join below: the Event, the Profile's name, the model, and the
@@ -192,16 +188,10 @@ pub(crate) async fn on_timeline(
 
     rows.into_iter()
         .map(|(event_id, profile, model, agent_type)| {
-            // Read back into the type rather than passed along as the word, so a
-            // word nothing here wrote is heard about where it is read instead of
-            // reaching the wire as something no reader has a case for.
-            let agent_type = agent_type
-                .as_deref()
-                .map(super::AgentType::read)
-                .transpose()
-                .with_context(|| {
-                    format!("reading which agent ran the session of Event {event_id}")
-                })?;
+            // Read back into the type rather than passed along as the word. An
+            // id no harness here has is read as itself, a harness since removed
+            // having run the session no less.
+            let agent_type = agent_type.as_deref().map(super::AgentType::read);
 
             Ok((
                 event_id,

@@ -256,11 +256,11 @@ fn sysctl(platform: Platform) -> Option<String> {
 /// What holds the two lists together is
 /// `every_name_the_wizard_has_a_row_for_is_a_name_a_session_is_followed_into`.
 const HARNESSES: &[(Dependency, store::AgentType)] = &[
-    (Dependency::Claude, store::AgentType::Claude),
-    (Dependency::Codex, store::AgentType::Codex),
-    (Dependency::Grok, store::AgentType::Grok),
-    (Dependency::OpenCode, store::AgentType::OpenCode),
-    (Dependency::Agy, store::AgentType::Agy),
+    (Dependency::Claude, store::AgentType::CLAUDE),
+    (Dependency::Codex, store::AgentType::CODEX),
+    (Dependency::Grok, store::AgentType::GROK),
+    (Dependency::OpenCode, store::AgentType::OPENCODE),
+    (Dependency::Agy, store::AgentType::AGY),
 ];
 
 /// The machine the probes are made against: whose rules a name is read by,
@@ -1903,23 +1903,24 @@ mod tests {
     /// a session's account is mounted from.
     fn an_account(home: &Path, agent_type: store::AgentType) {
         let dirs: Vec<PathBuf> = match agent_type {
-            store::AgentType::Claude => vec![home.join(".claude")],
-            store::AgentType::Codex => vec![home.join(".codex")],
-            store::AgentType::Grok => vec![home.join(".grok")],
-            store::AgentType::OpenCode => {
+            store::AgentType::CLAUDE => vec![home.join(".claude")],
+            store::AgentType::CODEX => vec![home.join(".codex")],
+            store::AgentType::GROK => vec![home.join(".grok")],
+            store::AgentType::OPENCODE => {
                 vec![
                     home.join(".config/opencode"),
                     home.join(".local/share/opencode"),
                 ]
             }
-            store::AgentType::Agy => vec![home.join(".gemini/antigravity-cli")],
+            store::AgentType::AGY => vec![home.join(".gemini/antigravity-cli")],
+            other => panic!("no account of {other} to make"),
         };
 
         for dir in dirs {
             std::fs::create_dir_all(dir).unwrap();
         }
 
-        if agent_type == store::AgentType::Claude {
+        if agent_type == store::AgentType::CLAUDE {
             std::fs::write(home.join(".claude.json"), "{}\n").unwrap();
         }
     }
@@ -1931,13 +1932,7 @@ mod tests {
             .probed()
             .accounts
             .iter()
-            .map(|found| match found.account {
-                verkstead_render::ProfileAccount::Claude { .. } => store::AgentType::Claude,
-                verkstead_render::ProfileAccount::Codex { .. } => store::AgentType::Codex,
-                verkstead_render::ProfileAccount::Grok { .. } => store::AgentType::Grok,
-                verkstead_render::ProfileAccount::OpenCode { .. } => store::AgentType::OpenCode,
-                verkstead_render::ProfileAccount::Agy { .. } => store::AgentType::Agy,
-            })
+            .map(|found| crate::profiles::stored(&found.account.agent_type))
             .collect()
     }
 
@@ -3039,11 +3034,11 @@ echo {token}
         let dir = tempfile::tempdir().unwrap();
 
         for agent_type in [
-            store::AgentType::Claude,
-            store::AgentType::Codex,
-            store::AgentType::Grok,
-            store::AgentType::OpenCode,
-            store::AgentType::Agy,
+            store::AgentType::CLAUDE,
+            store::AgentType::CODEX,
+            store::AgentType::GROK,
+            store::AgentType::OPENCODE,
+            store::AgentType::AGY,
         ] {
             an_account(dir.path(), agent_type);
         }
@@ -3058,41 +3053,42 @@ echo {token}
         assert_eq!(
             offered(&machine),
             vec![
-                store::AgentType::Claude,
-                store::AgentType::Codex,
-                store::AgentType::Grok,
-                store::AgentType::OpenCode,
-                store::AgentType::Agy,
+                store::AgentType::CLAUDE,
+                store::AgentType::CODEX,
+                store::AgentType::GROK,
+                store::AgentType::OPENCODE,
+                store::AgentType::AGY,
             ],
             "a home holds one account per harness, and all five are here",
         );
 
         assert_eq!(
             accounts[0].account,
-            verkstead_render::ProfileAccount::Claude {
-                claude_dir: dir.path().join(".claude").to_string_lossy().into_owned(),
-                config_file: dir
-                    .path()
+            verkstead_render::ProfileAccount::claude(
+                dir.path().join(".claude").to_string_lossy().into_owned(),
+                dir.path()
                     .join(".claude.json")
                     .to_string_lossy()
-                    .into_owned(),
-            },
+                    .into_owned()
+            ),
             "Claude's is the pair, which is what a session mounts and what the \
              profile create is handed",
         );
         assert_eq!(
             accounts[3].account,
-            verkstead_render::ProfileAccount::OpenCode {
-                home: dir.path().to_string_lossy().into_owned(),
-            },
+            verkstead_render::ProfileAccount::home(
+                verkstead_render::AgentType::OPENCODE,
+                dir.path().to_string_lossy().into_owned()
+            ),
             "and opencode's is the home its XDG directories are under, which is \
              the home itself",
         );
         assert_eq!(
             accounts[4].account,
-            verkstead_render::ProfileAccount::Agy {
-                home: dir.path().join(".gemini").to_string_lossy().into_owned(),
-            },
+            verkstead_render::ProfileAccount::home(
+                verkstead_render::AgentType::AGY,
+                dir.path().join(".gemini").to_string_lossy().into_owned()
+            ),
             "and agy's is `~/.gemini`, the directory it keeps its own inside",
         );
 
@@ -3141,11 +3137,11 @@ echo {token}
     #[test]
     fn a_windows_machine_looks_in_the_user_profile() {
         let dir = tempfile::tempdir().unwrap();
-        an_account(dir.path(), store::AgentType::Codex);
+        an_account(dir.path(), store::AgentType::CODEX);
 
         assert_eq!(
             offered(&machine(Platform::Windows, dir.path())),
-            vec![store::AgentType::Codex],
+            vec![store::AgentType::CODEX],
             "the profile is where a Windows account is kept, and the shape under \
              it is the one a session mounts",
         );

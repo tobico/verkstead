@@ -2134,10 +2134,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                 &pool,
                 &store::ProfileFacts {
                     name: Some(name.to_owned()),
-                    account: store::Account::Claude {
-                        claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
-                        config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
-                    },
+                    account: store::Account::claude(
+                        std::path::PathBuf::from(format!("{home}/.claude")),
+                        std::path::PathBuf::from(format!("{home}/.claude.json")),
+                    ),
                     models: models.iter().map(|model| (*model).to_owned()).collect(),
                     memory: true,
                 },
@@ -2152,6 +2152,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         "profiles.json",
         &pin_health(&get(&app, "/api/ui/profiles").await),
     );
+
+    // And the harnesses the server can run, which every name, mark and path
+    // field the viewer draws is read off.
+    write("harnesses.json", &get(&app, "/api/ui/harnesses").await);
 
     let drafting =
         store::start_conversation(&pool, repos[0].id, "rate-limiting", THIS_DEVICE, None)
@@ -4356,10 +4360,10 @@ async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
                 &pool,
                 &store::ProfileFacts {
                     name: Some(name.to_owned()),
-                    account: store::Account::Claude {
-                        claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
-                        config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
-                    },
+                    account: store::Account::claude(
+                        std::path::PathBuf::from(format!("{home}/.claude")),
+                        std::path::PathBuf::from(format!("{home}/.claude.json")),
+                    ),
                     models: models.iter().map(|model| (*model).to_owned()).collect(),
                     memory: true,
                 },
@@ -4396,10 +4400,10 @@ async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
         A_MEMBER,
         &store::ProfileFacts {
             name: Some("personal".to_owned()),
-            account: store::Account::Claude {
-                claude_dir: std::path::PathBuf::from("/home/you/accounts/personal/.claude"),
-                config_file: std::path::PathBuf::from("/home/you/accounts/personal/.claude.json"),
-            },
+            account: store::Account::claude(
+                std::path::PathBuf::from("/home/you/accounts/personal/.claude"),
+                std::path::PathBuf::from("/home/you/accounts/personal/.claude.json"),
+            ),
             models: vec!["claude-opus-5".to_owned()],
             memory: true,
         },

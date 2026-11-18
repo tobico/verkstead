@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use verkstead_render::Broken;
 
-use super::{Carrying, Harness, Line, Resume, SignedOut};
+use super::{Carrying, Declared, HOME_REFUSED, Harness, Line, Resume, SignedOut};
 use crate::platform::Platform;
 use crate::sandbox::root::{self, Part, Place, Whose};
 use crate::sandbox::{self, Home};
@@ -72,6 +72,26 @@ impl Harness for Grok {
 
     fn named(&self) -> &str {
         "Grok Build"
+    }
+
+    fn mark(&self) -> &str {
+        include_str!("marks/grok.svg")
+    }
+
+    fn paths(&self) -> Vec<Declared<'_>> {
+        vec![Declared {
+            key: store::HOME,
+            label: "Home directory",
+            purpose: "Mounted at `~/.grok`.",
+            placeholder: "/home/you/accounts/work/.grok",
+            file: false,
+            refused: HOME_REFUSED,
+            within: &[],
+        }]
+    }
+
+    fn found_at(&self) -> Vec<&str> {
+        vec!["~/.grok"]
     }
 
     /// **Its resume is Claude's shape under Claude's spelling**, and the exclusion is
@@ -141,9 +161,7 @@ impl Harness for Grok {
     }
 
     fn kept_in(&self, home: &Path) -> store::Account {
-        store::Account::Grok {
-            home: home.join(sandbox::GROK_INSIDE_HOME),
-        }
+        store::Account::home(store::AgentType::GROK, home.join(sandbox::GROK_INSIDE_HOME))
     }
 
     fn account_inside(&self, account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBuf)> {

@@ -29,11 +29,11 @@ const GOLDEN_AT: &str = "src/sandbox/built_roots.golden";
 
 /// The five, in the order they are rendered.
 const TYPES: [store::AgentType; 5] = [
-    store::AgentType::Claude,
-    store::AgentType::Codex,
-    store::AgentType::Grok,
-    store::AgentType::OpenCode,
-    store::AgentType::Agy,
+    store::AgentType::CLAUDE,
+    store::AgentType::CODEX,
+    store::AgentType::GROK,
+    store::AgentType::OPENCODE,
+    store::AgentType::AGY,
 ];
 
 /// What every account in the home holds, said from the home.
@@ -85,7 +85,7 @@ const FIXTURES: &[(&str, &str)] = &[
 /// A root of `account`'s harness, as a session launched in the Worktree at
 /// `worktree` of the Repo whose common git directory is `git_dir` is given.
 fn root_of(account: &store::Account, git_dir: &Path, worktree: &Path) -> Root {
-    Root::of(account, Platform::Linux, git_dir, worktree)
+    Root::of(account, Platform::Linux, git_dir, worktree).expect("a built-in harness")
 }
 
 /// `said` with the temporary directory it is under as `<tmp>`, and Claude's
@@ -156,7 +156,7 @@ fn rendered() -> String {
     for agent_type in TYPES {
         writeln!(o, "# {}", agent_type.word()).unwrap();
 
-        let account = super::kept_in(agent_type, &home);
+        let account = super::kept_in(agent_type, &home).expect("a built-in harness");
 
         writeln!(
             o,
@@ -169,13 +169,11 @@ fn rendered() -> String {
             writeln!(o, "inside: {} -> {}", said(tmp, &host), said(tmp, &there)).unwrap();
         }
 
-        writeln!(o, "login at: {}", said(tmp, &root::login_at(&account))).unwrap();
-        writeln!(
-            o,
-            "login inside: {}",
-            root::login_inside(agent_type).display()
-        )
-        .unwrap();
+        let login_at = root::login_at(&account).expect("a built-in harness");
+        let login_inside = root::login_inside(agent_type).expect("a built-in harness");
+
+        writeln!(o, "login at: {}", said(tmp, &login_at)).unwrap();
+        writeln!(o, "login inside: {}", login_inside.display()).unwrap();
 
         for path in root::mirrored_of(agent_type) {
             writeln!(o, "mirrored of: {}", path.display()).unwrap();
@@ -240,7 +238,9 @@ fn rendered() -> String {
                 }
             }
 
-            if let Some(config_file) = crate::harness::of(agent_type).copied(&account) {
+            if let Some(config_file) =
+                crate::harness::of(agent_type).and_then(|harness| harness.copied(&account))
+            {
                 for (attached, servers) in [("none", &[][..]), ("one", &servers[..])] {
                     writeln!(
                         o,

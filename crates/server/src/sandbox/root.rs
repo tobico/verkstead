@@ -603,7 +603,7 @@ impl Place {
 impl Root {
     /// The root for a session in `worktree`, whose Repo's common git directory
     /// is `git_dir`, logged in as `account` — on `platform`, which is what the
-    /// two paths are read on.
+    /// two paths are read on. `None` for a harness this server has not got.
     ///
     /// The two paths are what a harness that keys its store by the directory a
     /// session runs in names it by — see [`Place`] — and nothing to any other
@@ -614,14 +614,14 @@ impl Root {
         platform: Platform,
         git_dir: &Path,
         worktree: &Path,
-    ) -> Root {
-        Root::with(
-            crate::harness::of(account.agent_type()),
+    ) -> Option<Root> {
+        Some(Root::with(
+            crate::harness::of(account.agent_type())?,
             account.directory(),
             platform,
             git_dir,
             worktree,
-        )
+        ))
     }
 
     /// The root `harness` gives a session logged in as the account at
@@ -652,7 +652,7 @@ impl Root {
         git_dir: &Path,
         worktree: &Path,
     ) -> Root {
-        let harness = crate::harness::of(crate::store::AgentType::Claude);
+        let harness = crate::harness::of(crate::store::AgentType::CLAUDE).expect("built in");
 
         Root::with(harness, account, platform, git_dir, worktree)
     }
@@ -661,7 +661,7 @@ impl Root {
     /// for a session logged in as the account at `account`.
     #[cfg(test)]
     fn unplaced(agent_type: crate::store::AgentType, account: &Path) -> Root {
-        let harness = crate::harness::of(agent_type);
+        let harness = crate::harness::of(agent_type).expect("built in");
 
         Root::with(
             harness,
@@ -675,27 +675,27 @@ impl Root {
     /// The Codex root for a session logged in as the account at `account`.
     #[cfg(test)]
     pub(crate) fn codex(account: &Path) -> Root {
-        Root::unplaced(crate::store::AgentType::Codex, account)
+        Root::unplaced(crate::store::AgentType::CODEX, account)
     }
 
     /// The Grok Build root for a session logged in as the account at `account`.
     #[cfg(test)]
     pub(crate) fn grok(account: &Path) -> Root {
-        Root::unplaced(crate::store::AgentType::Grok, account)
+        Root::unplaced(crate::store::AgentType::GROK, account)
     }
 
     /// The OpenCode root for a session logged in as the account whose home is
     /// `account`.
     #[cfg(test)]
     pub(crate) fn opencode(account: &Path) -> Root {
-        Root::unplaced(crate::store::AgentType::OpenCode, account)
+        Root::unplaced(crate::store::AgentType::OPENCODE, account)
     }
 
     /// The Antigravity CLI root for a session logged in as the account at
     /// `account`.
     #[cfg(test)]
     pub(crate) fn agy(account: &Path) -> Root {
-        Root::unplaced(crate::store::AgentType::Agy, account)
+        Root::unplaced(crate::store::AgentType::AGY, account)
     }
 
     /// The same root, sharing the account's memory or not.
@@ -791,9 +791,11 @@ impl Root {
     /// `None` for an OpenCode account sharing its memory, whose login is inside
     /// the data directory joined whole — see [`Root::login_alone`].
     pub(crate) fn login_of(account: &crate::store::Account, memory: bool) -> Option<PathBuf> {
-        let harness = crate::harness::of(account.agent_type());
+        let harness = crate::harness::of(account.agent_type())?;
 
-        (!(memory && harness.login_in_memory())).then(|| login_at(account))
+        (!(memory && harness.login_in_memory()))
+            .then(|| login_at(account))
+            .flatten()
     }
 
     /// Whether the login is joined as a file of its own. It always is, except
@@ -1183,10 +1185,12 @@ pub(crate) enum Whose {
 /// its own, which is every root but an OpenCode one sharing its memory — there
 /// the login is inside the data directory joined whole, and this is still where it
 /// is.
-pub(crate) fn login_at(account: &crate::store::Account) -> PathBuf {
-    let harness = crate::harness::of(account.agent_type());
+///
+/// `None` for a harness this server has not got.
+pub(crate) fn login_at(account: &crate::store::Account) -> Option<PathBuf> {
+    let harness = crate::harness::of(account.agent_type())?;
 
-    account.directory().join(harness.login())
+    Some(account.directory().join(harness.login()))
 }
 
 /// And where a **mirror** of an account of `agent_type` keeps its login, said from
@@ -1196,8 +1200,8 @@ pub(crate) fn login_at(account: &crate::store::Account) -> PathBuf {
 /// the login off its mirror at this path, and the device it was fetched from
 /// writes what arrives into its own account's own — see [`login_at`], which is the
 /// same file said of a real account.
-pub(crate) fn login_inside(agent_type: crate::store::AgentType) -> PathBuf {
-    login_at(&crate::harness::of(agent_type).kept_in(Path::new("")))
+pub(crate) fn login_inside(agent_type: crate::store::AgentType) -> Option<PathBuf> {
+    login_at(&crate::harness::of(agent_type)?.kept_in(Path::new("")))
 }
 
 /// Every path a **mirror** of an account of `agent_type` holds, each said from
@@ -1225,8 +1229,15 @@ pub(crate) fn login_inside(agent_type: crate::store::AgentType) -> PathBuf {
 pub(crate) fn mirrored_of(agent_type: crate::store::AgentType) -> Vec<PathBuf> {
     // The login first, by the one name both ends of the write-back hold to — see
     // [`login_inside`] — and the configuration after it.
-    std::iter::once(login_inside(agent_type))
-        .chain(crate::harness::of(agent_type).mirrored())
+    //
+    // Nothing for a harness this server has not got, which no mirror is made of.
+    let Some(harness) = crate::harness::of(agent_type) else {
+        return Vec::new();
+    };
+
+    login_inside(agent_type)
+        .into_iter()
+        .chain(harness.mirrored())
         .collect()
 }
 
@@ -1257,10 +1268,12 @@ pub(crate) fn mirrored_of(agent_type: crate::store::AgentType) -> Vec<PathBuf> {
 ///
 /// Blocking: one read per path.
 pub(crate) fn mirrored(account: &crate::store::Account) -> Vec<(PathBuf, Option<Vec<u8>>)> {
-    let harness = crate::harness::of(account.agent_type());
+    let Some(harness) = crate::harness::of(account.agent_type()) else {
+        return Vec::new();
+    };
 
-    let composed =
-        std::iter::once(std::fs::read(login_at(account)).ok()).chain(harness.mirroring(account));
+    let composed = std::iter::once(login_at(account).and_then(|login| std::fs::read(login).ok()))
+        .chain(harness.mirroring(account));
 
     mirrored_of(account.agent_type())
         .into_iter()
@@ -3371,18 +3384,14 @@ mod tests {
 
         assert_eq!(
             Root::login_of(
-                &crate::store::Account::OpenCode {
-                    home: account.clone()
-                },
+                &crate::store::Account::home(crate::store::AgentType::OPENCODE, account.clone()),
                 true
             ),
             None
         );
         assert_eq!(
             Root::login_of(
-                &crate::store::Account::OpenCode {
-                    home: account.clone()
-                },
+                &crate::store::Account::home(crate::store::AgentType::OPENCODE, account.clone()),
                 false
             ),
             Some(account.join(OPENCODE_AUTH))
@@ -3610,10 +3619,7 @@ mod tests {
         )
         .unwrap();
 
-        let account = crate::store::Account::Claude {
-            claude_dir: claude_dir.clone(),
-            config_file,
-        };
+        let account = crate::store::Account::claude(claude_dir.clone(), config_file);
 
         let held = mirrored(&account);
 
@@ -3631,7 +3637,7 @@ mod tests {
             held.iter()
                 .map(|(inside, _)| inside.clone())
                 .collect::<Vec<_>>(),
-            mirrored_of(crate::store::AgentType::Claude),
+            mirrored_of(crate::store::AgentType::CLAUDE),
             "the paths are the one list both ends hold to",
         );
 
@@ -3686,7 +3692,10 @@ mod tests {
         let home = dir.path().join(".codex");
         std::fs::create_dir_all(&home).unwrap();
 
-        let held = mirrored(&crate::store::Account::Codex { home });
+        let held = mirrored(&crate::store::Account::home(
+            crate::store::AgentType::CODEX,
+            home,
+        ));
 
         assert_eq!(held[0].0, PathBuf::from(".codex/auth.json"));
         assert_eq!(held[0].1, None, "there is no login to hand over");
@@ -3705,12 +3714,12 @@ mod tests {
         let home = Path::new("/home/you");
 
         for agent_type in [
-            crate::store::AgentType::Claude,
-            crate::store::AgentType::Codex,
-            crate::store::AgentType::Grok,
-            crate::store::AgentType::OpenCode,
+            crate::store::AgentType::CLAUDE,
+            crate::store::AgentType::CODEX,
+            crate::store::AgentType::GROK,
+            crate::store::AgentType::OPENCODE,
         ] {
-            let held = mirrored(&crate::sandbox::kept_in(agent_type, home));
+            let held = mirrored(&crate::sandbox::kept_in(agent_type, home).unwrap());
 
             assert_eq!(
                 held.iter()
@@ -3738,19 +3747,19 @@ mod tests {
         let under = Path::new("/var/lib/verkstead/accounts/7");
 
         for agent_type in [
-            crate::store::AgentType::Claude,
-            crate::store::AgentType::Codex,
-            crate::store::AgentType::Grok,
-            crate::store::AgentType::OpenCode,
+            crate::store::AgentType::CLAUDE,
+            crate::store::AgentType::CODEX,
+            crate::store::AgentType::GROK,
+            crate::store::AgentType::OPENCODE,
         ] {
             assert_eq!(
                 mirrored_of(agent_type).first(),
-                Some(&login_inside(agent_type)),
+                login_inside(agent_type).as_ref(),
                 "{agent_type:?} mirrors its login first",
             );
             assert_eq!(
-                under.join(login_inside(agent_type)),
-                login_at(&crate::sandbox::kept_in(agent_type, under)),
+                login_inside(agent_type).map(|inside| under.join(inside)),
+                login_at(&crate::sandbox::kept_in(agent_type, under).unwrap()),
                 "{agent_type:?}: a mirror is a home, so the login in it is the \
                  login of the account that home holds",
             );

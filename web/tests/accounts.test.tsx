@@ -22,7 +22,7 @@ import type {
   ProfileEdit,
   ProfileEntry,
 } from "../src/api/types";
-import { AGENT_NAME } from "../src/agents";
+import { harnessName } from "../src/harnesses";
 import { KNOWN_MODELS, prettify } from "../src/models";
 import { Accounts } from "../src/setup/Accounts";
 import styles from "../src/setup/Accounts.module.css";
@@ -163,7 +163,7 @@ describe("the accounts that were found", () => {
 
     const claude = row(container, "Claude");
 
-    expect(claude.textContent).toContain(AGENT_NAME.Claude);
+    expect(claude.textContent).toContain(harnessName("Claude"));
     expect(claude.textContent).toContain("~/.claude");
     expect(claude.textContent).toContain("~/.claude.json");
   });
@@ -187,7 +187,7 @@ describe("the accounts that were found", () => {
       row(container, "Codex").querySelector(`.${styles.pill}`)!.textContent,
     ).toBe("Not installed");
     expect(row(container, "Codex").textContent).toContain(
-      `${AGENT_NAME.Codex} isn't on this machine.`,
+      `${harnessName("Codex")} isn't on this machine.`,
     );
   });
 

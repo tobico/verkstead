@@ -5233,10 +5233,10 @@ mod tests {
             profile: store::Profile {
                 id: "1".to_owned(),
                 name: Some(model.to_owned()),
-                account: store::Account::Claude {
-                    claude_dir: PathBuf::from("/data/claude"),
-                    config_file: PathBuf::from("/data/claude.json"),
-                },
+                account: store::Account::claude(
+                    PathBuf::from("/data/claude"),
+                    PathBuf::from("/data/claude.json"),
+                ),
                 models: vec![model.to_owned()],
                 memory: true,
                 unbound: None,

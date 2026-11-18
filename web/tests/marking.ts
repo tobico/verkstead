@@ -1,8 +1,8 @@
 //! Reading the harness's brand mark off whatever has drawn one — see
 //! `src/HarnessMark.tsx`.
 //!
-//! What is asserted through here is the drawing rather than a class: lobehub's
-//! four files are read as they were published, so a test naming a mark and the
+//! What is asserted through here is the drawing rather than a class: the mark
+//! files are read as they were published, so a test naming a mark and the
 //! component drawing it are two independent statements about the same art, and a
 //! mark drawn out of the wrong file fails even though both would carry the same
 //! class.
@@ -14,14 +14,25 @@
 
 import styles from "../src/HarnessMark.module.css";
 
-/// The path inside one of lobehub's files, which is the whole of the drawing:
-/// all four are a single path in a 24-square box.
+/// The path inside one of the mark files, which is the whole of the drawing:
+/// each is a single path in a 24-square box.
 export function art(file: string): string {
   return / d="([^"]+)"/.exec(file)![1]!;
 }
 
 /// And the drawing a scope has actually put on the page — `null` where it drew
-/// no mark at all.
+/// no mark at all. The mark is drawn as an image of its document, so what is
+/// read is that document's path.
 export function marked(scope: Element): string | null {
-  return scope.querySelector(`.${styles.mark} path`)?.getAttribute("d") ?? null;
+  const mark = scope.querySelector<HTMLElement>(`.${styles.mark}`);
+
+  return mark === null ? null : art(drawing(mark));
+}
+
+/// The SVG document a mark element draws.
+export function drawing(mark: Element): string {
+  const image = (mark as HTMLElement).style.getPropertyValue("--mark");
+  const data = /data:image\/svg\+xml;charset=utf-8,([^"]*)/.exec(image)![1]!;
+
+  return decodeURIComponent(data);
 }

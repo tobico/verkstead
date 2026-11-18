@@ -63,13 +63,14 @@ async fn ran(pool: &SqlitePool, id: i64, session: &str, agent_type: AgentType) {
         &ProfileFacts {
             name: Some(session.to_owned()),
             account: match agent_type {
-                AgentType::Claude => Account::Claude {
-                    claude_dir: PathBuf::from("/watched/accounts/work/.claude"),
-                    config_file: PathBuf::from("/watched/accounts/work/.claude.json"),
-                },
-                _ => Account::Codex {
-                    home: PathBuf::from("/watched/accounts/work/.codex"),
-                },
+                AgentType::CLAUDE => Account::claude(
+                    PathBuf::from("/watched/accounts/work/.claude"),
+                    PathBuf::from("/watched/accounts/work/.claude.json"),
+                ),
+                _ => Account::home(
+                    AgentType::CODEX,
+                    PathBuf::from("/watched/accounts/work/.codex"),
+                ),
             },
             models: vec!["claude-opus-5".to_owned()],
             memory: true,
@@ -104,14 +105,14 @@ async fn the_last_session_is_the_one_to_carry_on_from() {
         &pool,
         id,
         "11111111-1111-4111-8111-111111111111",
-        AgentType::Claude,
+        AgentType::CLAUDE,
     )
     .await;
     ran(
         &pool,
         id,
         "22222222-2222-4222-8222-222222222222",
-        AgentType::Claude,
+        AgentType::CLAUDE,
     )
     .await;
 
@@ -119,7 +120,7 @@ async fn the_last_session_is_the_one_to_carry_on_from() {
         the_last_session(&pool, id).await.unwrap(),
         Some(Continued {
             session_id: "22222222-2222-4222-8222-222222222222".to_owned(),
-            agent_type: AgentType::Claude,
+            agent_type: AgentType::CLAUDE,
             widened_by: None,
             kept_here_by: None,
         }),
@@ -139,7 +140,7 @@ async fn the_harness_is_the_one_that_ran_that_session() {
         &pool,
         id,
         "33333333-3333-4333-8333-333333333333",
-        AgentType::Codex,
+        AgentType::CODEX,
     )
     .await;
 
@@ -148,7 +149,7 @@ async fn the_harness_is_the_one_that_ran_that_session() {
             .await
             .unwrap()
             .map(|continued| continued.agent_type),
-        Some(AgentType::Codex),
+        Some(AgentType::CODEX),
     );
 }
 
@@ -170,7 +171,7 @@ async fn taking_the_conversation_up_spends_it() {
 
     let continued = Continued {
         session_id: "44444444-4444-4444-8444-444444444444".to_owned(),
-        agent_type: AgentType::Claude,
+        agent_type: AgentType::CLAUDE,
         widened_by: None,
         kept_here_by: None,
     };
@@ -211,7 +212,7 @@ async fn asking_whether_there_is_a_conversation_to_carry_on_does_not_spend_it() 
 
     let continued = Continued {
         session_id: "77777777-7777-4777-8777-777777777777".to_owned(),
-        agent_type: AgentType::Claude,
+        agent_type: AgentType::CLAUDE,
         widened_by: None,
         kept_here_by: None,
     };
@@ -245,7 +246,7 @@ async fn a_conversation_carried_on_for_an_answer_names_its_set() {
 
     let continued = Continued {
         session_id: "88888888-8888-4888-8888-888888888888".to_owned(),
-        agent_type: AgentType::Claude,
+        agent_type: AgentType::CLAUDE,
         widened_by: Some(12),
         kept_here_by: None,
     };
@@ -268,7 +269,7 @@ async fn a_conversation_kept_here_names_its_set() {
 
     let continued = Continued {
         session_id: "99999999-9999-4999-8999-999999999999".to_owned(),
-        agent_type: AgentType::Claude,
+        agent_type: AgentType::CLAUDE,
         widened_by: None,
         kept_here_by: Some(14),
     };
@@ -312,7 +313,7 @@ async fn coming_back_again_carries_on_from_the_newer_session() {
             id,
             &Continued {
                 session_id: session.to_owned(),
-                agent_type: AgentType::Claude,
+                agent_type: AgentType::CLAUDE,
                 widened_by: None,
                 kept_here_by: None,
             },

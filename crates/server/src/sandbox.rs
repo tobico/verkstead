@@ -2512,8 +2512,13 @@ pub fn sets_itself(name: &str) -> bool {
 /// one of them twice over. Which is exactly the distinction the Windows arm
 /// turns on: a directory is joined in by a junction and a file by a hard link,
 /// and only the second of those cares what volume anything is on.
+///
+/// Nothing for a harness this server has not got, whose account is never
+/// mounted here.
 fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBuf)> {
-    crate::harness::of(account.agent_type()).account_inside(account, home)
+    crate::harness::of(account.agent_type())
+        .map(|harness| harness.account_inside(account, home))
+        .unwrap_or_default()
 }
 
 /// The account an agent of `agent_type` keeps directly in `home`, where the
@@ -2534,7 +2539,7 @@ fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBu
 ///
 /// Blocking: one `stat` per path of the shape.
 pub(crate) fn account_in_home(agent_type: store::AgentType, home: &Path) -> Option<store::Account> {
-    let account = kept_in(agent_type, home);
+    let account = kept_in(agent_type, home)?;
 
     account_inside(&account, home)
         .into_iter()
@@ -2555,8 +2560,10 @@ pub(crate) fn account_in_home(agent_type: store::AgentType, home: &Path) -> Opti
 /// launching under a Profile that lives elsewhere fetches the files a root is
 /// made of into a directory under its Data Directory and this is the account
 /// they go in — see [`Homes::account_mirror`] and [`root::mirrored_of`].
-pub(crate) fn kept_in(agent_type: store::AgentType, home: &Path) -> store::Account {
-    crate::harness::of(agent_type).kept_in(home)
+///
+/// `None` for a harness this server has not got.
+pub(crate) fn kept_in(agent_type: store::AgentType, home: &Path) -> Option<store::Account> {
+    crate::harness::of(agent_type).map(|harness| harness.kept_in(home))
 }
 
 /// Whichever of `account`'s own paths cannot be joined into a profile at
@@ -4174,7 +4181,7 @@ impl Sandbox {
         // not start. Nothing is made where the Profile shares no memory, there
         // being no join to make. Refused the way a handoff directory that cannot
         // be made is.
-        let root = root::Root::of(&profile.account, homes.platform(), &git_dir, &worktree)
+        let root = root::Root::of(&profile.account, homes.platform(), &git_dir, &worktree)?
             .remembering(profile.memory);
 
         if let Err(error) = root.made_in_account() {
@@ -4336,7 +4343,7 @@ impl Sandbox {
         // Started in the place and named after it: Claude names a `projects/`
         // entry for the directory it was started in and trusts it, and a login
         // has the one directory to name, which is said as both halves.
-        let root = root::Root::of(&profile.account, homes.platform(), &place, &place)
+        let root = root::Root::of(&profile.account, homes.platform(), &place, &place)?
             .remembering(profile.memory);
 
         if root.made_in_account().is_err() {
@@ -4822,8 +4829,8 @@ impl Sandbox {
         // it — see [`Sandbox::config_described`].
         self.root_described(&self.root, launch.builds, &mut surface);
 
-        if let Some(config_file) =
-            crate::harness::of(self.account.agent_type()).copied(&self.account)
+        if let Some(config_file) = crate::harness::of(self.account.agent_type())
+            .and_then(|harness| harness.copied(&self.account))
         {
             self.config_described(&self.root, config_file, launch.builds, &mut surface);
         }
@@ -4972,8 +4979,9 @@ impl Sandbox {
 
         // And what this session's harness is told about itself, which no
         // other harness reads — see [`crate::harness::Harness::environment`].
-        for (name, value) in
-            crate::harness::of(self.account.agent_type()).environment(self.platform)
+        for (name, value) in crate::harness::of(self.account.agent_type())
+            .map(|harness| harness.environment(self.platform))
+            .unwrap_or_default()
         {
             surface.set(name, value);
         }
@@ -5351,7 +5359,7 @@ impl Sandbox {
         surface: &Surface,
         baseline: &sharing::Baseline,
     ) -> Option<(PathBuf, PathBuf)> {
-        let config_file = crate::harness::of(self.account.agent_type()).copied(&self.account)?;
+        let config_file = crate::harness::of(self.account.agent_type())?.copied(&self.account)?;
 
         let copy = self.config_copy();
 
@@ -7654,9 +7662,8 @@ mod tests {
         // A Claude account named by its paths alone: the login inside the
         // directory half is a file a hard link is asked for too, so the
         // directory has to be on a volume this test can say.
-        let claude_in = |dir: &str, config: &str| store::Account::Claude {
-            claude_dir: PathBuf::from(dir),
-            config_file: PathBuf::from(config),
+        let claude_in = |dir: &str, config: &str| {
+            store::Account::claude(PathBuf::from(dir), PathBuf::from(config))
         };
         let claude = |config: &str| claude_in(r"C:\Users\someone\.claude", config);
 
@@ -7706,9 +7713,7 @@ mod tests {
             across_volumes(
                 Platform::Windows,
                 profile,
-                &store::Account::OpenCode {
-                    home: account.path().to_owned(),
-                },
+                &store::Account::home(store::AgentType::OPENCODE, account.path().to_owned()),
                 true
             ),
             None,
@@ -7721,9 +7726,10 @@ mod tests {
         let opencode = across_volumes(
             Platform::Windows,
             profile,
-            &store::Account::OpenCode {
-                home: PathBuf::from(r"D:\accounts\someone"),
-            },
+            &store::Account::home(
+                store::AgentType::OPENCODE,
+                PathBuf::from(r"D:\accounts\someone"),
+            ),
             false,
         )
         .expect("an OpenCode login on another drive is one a hard link cannot join in");
@@ -7734,9 +7740,10 @@ mod tests {
         let codex = across_volumes(
             Platform::Windows,
             profile,
-            &store::Account::Codex {
-                home: PathBuf::from(r"D:\accounts\someone\.codex"),
-            },
+            &store::Account::home(
+                store::AgentType::CODEX,
+                PathBuf::from(r"D:\accounts\someone\.codex"),
+            ),
             true,
         )
         .expect("a Codex login on another drive is one a hard link cannot join in");
@@ -7746,9 +7753,10 @@ mod tests {
             across_volumes(
                 Platform::Windows,
                 profile,
-                &store::Account::Codex {
-                    home: PathBuf::from(r"C:\Users\someone\.codex"),
-                },
+                &store::Account::home(
+                    store::AgentType::CODEX,
+                    PathBuf::from(r"C:\Users\someone\.codex")
+                ),
                 true
             ),
             None,
@@ -7759,9 +7767,10 @@ mod tests {
         let grok = across_volumes(
             Platform::Windows,
             profile,
-            &store::Account::Grok {
-                home: PathBuf::from(r"D:\accounts\someone\.grok"),
-            },
+            &store::Account::home(
+                store::AgentType::GROK,
+                PathBuf::from(r"D:\accounts\someone\.grok"),
+            ),
             true,
         )
         .expect("a Grok login on another drive is one a hard link cannot join in");
@@ -7794,8 +7803,8 @@ mod tests {
         // Whatever the Profile's binding on the device it is bound on names, which is a
         // path on that machine and may be any drive at all — the thing a mirror exists
         // so that this device never has to join in.
-        for elsewhere in [store::AgentType::Claude, store::AgentType::Codex] {
-            let at_home = kept_in(elsewhere, Path::new(r"Z:\accounts\someone"));
+        for elsewhere in [store::AgentType::CLAUDE, store::AgentType::CODEX] {
+            let at_home = kept_in(elsewhere, Path::new(r"Z:\accounts\someone")).unwrap();
 
             assert!(
                 across_volumes(
@@ -7811,7 +7820,8 @@ mod tests {
             let mirrored = kept_in(
                 elsewhere,
                 &homes.account_mirror("0b0e4c1a-5d2f-4e7b-9a3c-6f1d2e3b4a5c"),
-            );
+            )
+            .unwrap();
 
             assert_eq!(
                 across_volumes(

@@ -6,9 +6,9 @@
 //! carries, and the Profiles the settings already list. A step 3 that is met is
 //! the wizard over, so there is no line for it.
 
-import { AGENT_NAME } from "../agents";
 import type { DependencyView, ProfileEntry } from "../api/types";
-import { NAMES } from "./Dependencies";
+import { harnesses as listedHarnesses } from "../harnesses";
+import { named } from "./Dependencies";
 
 /// A list of names as a sentence reads one, with the serial comma `docs/copy.md`
 /// asks for: *A sandbox, git, and Claude Code*.
@@ -26,7 +26,7 @@ export function present(rows: DependencyView[]): string {
   return listed(
     rows
       .filter((row) => row.state.state === "Present")
-      .map((row) => NAMES[row.dependency]),
+      .map((row) => named(row.dependency)),
   );
 }
 
@@ -36,8 +36,8 @@ export function harnesses(profiles: ProfileEntry[]): string {
   const kept = new Set(profiles.map((profile) => profile.account.agent_type));
 
   return listed(
-    (Object.keys(AGENT_NAME) as Array<keyof typeof AGENT_NAME>)
-      .filter((agent) => kept.has(agent))
-      .map((agent) => AGENT_NAME[agent]),
+    listedHarnesses()
+      .filter((harness) => kept.has(harness.id))
+      .map((harness) => harness.name),
   );
 }

@@ -22,8 +22,9 @@
 //! two answers to it. See [`harnessAbsent`], which the wizard's accounts step
 //! draws from as well.
 
-import { AGENT_NAME, type AgentType } from "./agents";
+import type { AgentType } from "./agents";
 import type { Broken, ProfileEntry, ProfileTrouble } from "./api/types";
+import { harnessName } from "./harnesses";
 
 /// What the onboarding probe says of a harness that is not on this machine.
 ///
@@ -41,7 +42,7 @@ export function harnessAbsent(agent: AgentType): string {
 /// two sentences for one fact — the only difference between them being which
 /// machine is being talked about, which is the argument.
 export function harnessAbsentOn(agent: AgentType, where: string): string {
-  return `${AGENT_NAME[agent]} isn't on ${where}.`;
+  return `${harnessName(agent)} isn't on ${where}.`;
 }
 
 /// And what a machine that has stopped answering is called, which is the word
@@ -85,10 +86,12 @@ export function troubleReading(said: ProfileTrouble): string {
       return "The home it kept its account under is gone.";
     case "NoBoundDevice":
       return "No device it's bound on with a login is reachable, so no session here can run under it.";
+    case "HarnessUnknown":
+      return "Its harness isn't installed on this Verkstead.";
     case "HarnessMissing":
       return harnessAbsent(said.agent_type);
     case "SignedOut":
-      return `Its ${AGENT_NAME[said.agent_type]} account is signed out. Log in to run a session under it.`;
+      return `Its ${harnessName(said.agent_type)} account is signed out. Log in to run a session under it.`;
   }
 }
 
@@ -107,6 +110,8 @@ export function brokenBriefly(broken: Broken): string {
       return "account gone";
     case "NoBoundDevice":
       return "no bound device reachable";
+    case "HarnessUnknown":
+      return "harness not installed";
     case "HarnessMissing":
       return "not on this machine";
     case "SignedOut":

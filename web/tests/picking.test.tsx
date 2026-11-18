@@ -23,8 +23,8 @@ import type { AgentType } from "../src/agents";
 import { Listbox } from "../src/picking";
 import styles from "../src/picking.module.css";
 import css from "../src/picking.module.css?raw";
-import claudeMarkFile from "../src/marks/claude-color.svg?raw";
-import grokMarkFile from "../src/marks/grok.svg?raw";
+import claudeMarkFile from "../../crates/server/src/harness/marks/claude-color.svg?raw";
+import grokMarkFile from "../../crates/server/src/harness/marks/grok.svg?raw";
 import { art, marked } from "./marking";
 import {
   actionRows,

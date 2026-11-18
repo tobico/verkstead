@@ -19,6 +19,7 @@ import { loadOnboarding, retrying } from "./api/client";
 import { useReading } from "./freshness";
 import { dress } from "./head";
 import { Empty } from "./notices";
+import { useHarnesses } from "./harnesses";
 import { follow } from "./opened";
 import { listenForNudges } from "./nudge";
 import { SettingsPage, panes } from "./settings/SettingsPage";
@@ -118,6 +119,10 @@ export function Gate(): JSX.Element {
     // the wizard's own — see `SetupPage.tsx`.
     freshness: { reconcile: "dependency" },
   }));
+
+  // And the harnesses this server can run, which both apps name and draw the
+  // marks of — see `harnesses.ts`.
+  useHarnesses();
 
   return (
     <Show when={!onboarding.isPending} fallback={<DragBar />}>

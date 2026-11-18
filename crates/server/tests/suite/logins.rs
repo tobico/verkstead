@@ -211,8 +211,10 @@ impl Workbench {
                     "name": name,
                     "account": {
                         "agent_type": "Claude",
-                        "claude_dir": claude_dir,
-                        "config_file": config_file,
+                        "paths": {
+                            "claude_dir": claude_dir,
+                            "config_file": config_file,
+                        },
                     },
                     "models": ["claude-opus-5"],
                 }),
@@ -241,7 +243,7 @@ impl Workbench {
                 "/api/ui/profiles",
                 serde_json::json!({
                     "name": name,
-                    "account": { "agent_type": "Agy", "home": home },
+                    "account": { "agent_type": "Agy", "paths": { "home": home } },
                     "models": ["gemini-pro"],
                 }),
             )
@@ -788,10 +790,7 @@ async fn a_profile_bound_on_another_device_is_not_logged_in_here() {
         "0011223344556677889900aabbccddee",
         &store::ProfileFacts {
             name: Some("away".to_owned()),
-            account: store::Account::Claude {
-                claude_dir,
-                config_file,
-            },
+            account: store::Account::claude(claude_dir, config_file),
             models: vec!["claude-opus-5".to_owned()],
             memory: true,
         },
@@ -822,7 +821,7 @@ async fn a_profile_of_another_harness_is_not_logged_in_here() {
             "/api/ui/profiles",
             serde_json::json!({
                 "name": "codex",
-                "account": { "agent_type": "Codex", "home": codex },
+                "account": { "agent_type": "Codex", "paths": { "home": codex } },
                 "models": ["gpt-5"],
             }),
         )
@@ -862,7 +861,7 @@ async fn a_press_under_a_signed_out_account_is_refused_until_it_logs_in() {
         workbench.pressed(conversation).await,
         GrillingStarted::ProfileBroken(ProfileTrouble {
             broken: Broken::SignedOut,
-            agent_type: AgentType::Claude,
+            agent_type: AgentType::CLAUDE,
         }),
     );
     assert_eq!(workbench.broken(&profile).await, Some(Broken::SignedOut));
@@ -1043,7 +1042,7 @@ async fn a_press_under_a_signed_out_agy_account_is_refused_until_it_logs_in() {
         workbench.pressed(conversation).await,
         GrillingStarted::ProfileBroken(ProfileTrouble {
             broken: Broken::SignedOut,
-            agent_type: AgentType::Agy,
+            agent_type: AgentType::AGY,
         }),
     );
     assert_eq!(workbench.broken(&profile).await, Some(Broken::SignedOut));

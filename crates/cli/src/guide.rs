@@ -88,9 +88,11 @@ fn reader() -> Result<Option<store::AgentType>> {
         return Ok(None);
     };
 
-    let Ok(agent_type) = store::AgentType::read(&word) else {
+    let agent_type = store::AgentType::read(&word);
+
+    if agent_type.built_in().is_none() {
         bail!("{AGENT_TYPE} names the agent type {word:?}, which this binary has not got");
-    };
+    }
 
     Ok(Some(agent_type))
 }
@@ -131,10 +133,12 @@ fn tailored(agent_type: Option<store::AgentType>) -> String {
 /// has always been.
 fn running(agent_type: Option<store::AgentType>) -> &'static str {
     match agent_type {
-        None | Some(store::AgentType::Claude) => RUNNING_CLAUDE,
-        Some(store::AgentType::OpenCode) => RUNNING_OPENCODE,
-        Some(store::AgentType::Agy) => RUNNING_AGY,
-        Some(store::AgentType::Codex | store::AgentType::Grok) => RUNNING_STORE_AND_NUDGE,
+        None | Some(store::AgentType::CLAUDE) => RUNNING_CLAUDE,
+        Some(store::AgentType::OPENCODE) => RUNNING_OPENCODE,
+        Some(store::AgentType::AGY) => RUNNING_AGY,
+        // Codex and Grok Build, the two that store and nudge: [`reader`] has
+        // refused every id this binary has not got.
+        Some(_) => RUNNING_STORE_AND_NUDGE,
     }
 }
 

@@ -217,7 +217,13 @@ pub(crate) async fn written(
             .into_response();
     };
 
-    let login = crate::sandbox::root::login_at(&held.account);
+    let Some(login) = crate::sandbox::root::login_at(&held.account) else {
+        return (
+            StatusCode::NOT_FOUND,
+            "this device has no harness for the Agent Profile under that id\n",
+        )
+            .into_response();
+    };
 
     match tokio::task::spawn_blocking({
         let login = login.clone();
