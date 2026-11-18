@@ -42,6 +42,18 @@
           targets = [ "wasm32-wasip2" ];
         };
 
+      # The same release for building the package, with nothing but the
+      # compiler, cargo and the two targets' standard libraries. **No
+      # `rust-src`**: where it is installed, rustc writes std's panic locations
+      # as paths into it rather than as `/rustc/<hash>`, and those store paths
+      # put the whole toolchain in the binary's closure — GUI libraries
+      # included, which `nix.yml`'s headless check refuses.
+      rustBuildToolchain =
+        pkgs:
+        (rust-overlay.lib.mkRustBin { } pkgs).stable."1.97.1".minimal.override {
+          targets = [ "wasm32-wasip2" ];
+        };
+
       # What the viewer under `web/` is built and tested with. Named here because
       # the dev shell and the build both take it, and a pnpm in one that is not
       # the pnpm in the other is a lockfile argument waiting to happen.
@@ -77,8 +89,8 @@
         verkstead-source = pkgs.callPackage ./nix/verkstead-source.nix {
           inherit viewer;
           rustPlatform = pkgs.makeRustPlatform {
-            cargo = rustToolchain pkgs;
-            rustc = rustToolchain pkgs;
+            cargo = rustBuildToolchain pkgs;
+            rustc = rustBuildToolchain pkgs;
           };
         };
         # The viewer's static files on their own. Nothing serves them from here —
