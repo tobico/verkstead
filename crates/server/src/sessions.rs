@@ -2774,6 +2774,14 @@ impl Sessions {
         // [`session_name`].
         let session = session_name();
 
+        // A Conversation with Skill Packs attached waits for the installed
+        // plugins' first load before anything reads them, so a launch just
+        // after a start is not one that runs its whole life without them. One
+        // with none has nothing to wait for. See [`skills::Skills::settled`].
+        if !conversation.skill_packs.is_empty() {
+            agents.skills.settled().await;
+        }
+
         // What earlier sessions of the Conversation left for the ones after them,
         // under the kind's own sections and ahead of the listings below — here
         // for the companions' reason, and read off the record at every launch.

@@ -160,6 +160,11 @@ pub struct Skills {
     /// last load wrote them out — see [`Skills::holding`]. Shared by every
     /// clone, so what a launch reads is what the plugins came to last.
     loaded: Arc<RwLock<Vec<LoadedPack>>>,
+
+    /// Whether the installed plugins have loaded once since the start, which
+    /// is when `loaded` first says what this device has — see
+    /// [`Skills::settled`].
+    settled: Arc<tokio::sync::watch::Sender<bool>>,
 }
 
 /// One installed plugin's Skill Pack, written out under the skills directory
@@ -261,6 +266,7 @@ impl Skills {
             inside,
             shipped,
             loaded: Arc::default(),
+            settled: Arc::new(tokio::sync::watch::Sender::new(false)),
         })
     }
 
@@ -298,6 +304,25 @@ impl Skills {
             .loaded
             .write()
             .expect("nothing panics holding the loaded packs") = packs;
+        self.settle();
+    }
+
+    /// Say the installed plugins' first load is over, whether or not it held
+    /// anything: one that failed has nothing more to say, and a launch waiting
+    /// on it would wait for good.
+    pub fn settle(&self) {
+        self.settled.send_replace(true);
+    }
+
+    /// Once the installed plugins have loaded since the start — at once, ever
+    /// after the first. Until then nothing is held, so a launch reading the
+    /// packs in that window would leave every attached one out of its session
+    /// for the whole of its life, and say nothing (the start loads the plugins
+    /// without waiting, a wasm component taking a moment to compile).
+    pub(crate) async fn settled(&self) {
+        let mut settled = self.settled.subscribe();
+        // The sender is held here, so the wait cannot end for want of one.
+        let _ = settled.wait_for(|settled| *settled).await;
     }
 
     /// The installed plugins' packs loaded here.
@@ -2013,6 +2038,7 @@ mod tests {
             inside: PathBuf::from(INSIDE),
             shipped: vec![crate::plugins::manifest::RESERVED.to_owned()],
             loaded: Arc::default(),
+            settled: Arc::new(tokio::sync::watch::Sender::new(false)),
         }
     }
 
@@ -6235,6 +6261,33 @@ mod tests {
                 "the listing is neutral, and {instructed:?} is not: {prompt:?}"
             );
         }
+    }
+
+    /// A launch reading the packs waits for the installed plugins' first
+    /// load, and is let through once it has held them — or once it is over
+    /// with nothing held, a load that failed being over all the same.
+    #[tokio::test]
+    async fn the_packs_are_read_once_the_first_load_is_over() {
+        let skills = mounted();
+
+        let waiting = tokio::spawn({
+            let skills = skills.clone();
+            async move { skills.settled().await }
+        });
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished(), "nothing has loaded yet");
+
+        skills.holding(Vec::new());
+        tokio::time::timeout(std::time::Duration::from_secs(5), waiting)
+            .await
+            .expect("held, the wait is over")
+            .unwrap();
+
+        let failed = mounted();
+        failed.settle();
+        tokio::time::timeout(std::time::Duration::from_secs(5), failed.settled())
+            .await
+            .expect("a load over without holding anything is over too");
     }
 
     /// The Skill Packs a Conversation attached are listed under a heading of

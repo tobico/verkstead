@@ -318,6 +318,11 @@ pub(crate) fn loading(state: &AppState) {
         if let Err(error) = load(&state).await {
             tracing::error!(error = ?error, "the installed plugins couldn't be loaded");
         }
+        // Over either way, which is what a launch waiting on its packs waits
+        // for — see [`crate::skills::Skills::settled`].
+        if let Some(skills) = state.sessions.skills() {
+            skills.settle();
+        }
     });
 }
 
