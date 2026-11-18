@@ -202,6 +202,91 @@ describe("the Attach menu on a waiting set", () => {
   });
 });
 
+/// The Skill Packs an installed plugin provides, the third kind the menu
+/// offers (ADR-0030, *Skill packs*): rows under a heading of their own, a pick
+/// recorded on the Set as a server's is, and a chip saying where it has gone.
+describe("a skill pack added from an answer", () => {
+  /// A pack as the menu's read offers it.
+  const offering = (name: string) => ({
+    name,
+    plugin: "Review kit",
+    skills: ["reviewing"],
+  });
+
+  const PACKS_READ = whenever(
+    "/api/ui/skill-packs",
+    json([offering("review-kit"), offering("go-review"), offering("docs-kit")]),
+  );
+
+  /// A pack picked on the Set, as the record holds it.
+  function pack(id: number, name: string, label: string | null): AdditionView {
+    return {
+      id,
+      label,
+      added: { Pack: { name, installed: true } },
+      state: "Pending",
+    };
+  }
+
+  /// Every pack the plugins provide that the conversation lacks and the set
+  /// has not had picked, under *Skill packs*.
+  it("offers the packs the conversation lacks under Skill packs", async () => {
+    await answering(
+      { ...WAITING, packs: ["go-review"], additions: [pack(4, "docs-kit", "Q3")] },
+      SETTINGS_READ,
+      PACKS_READ,
+    );
+
+    const menu = await open(menuOf("Q1"));
+    const section = await waitFor(() =>
+      within(menu).getByRole("group", { name: "Skill packs" }),
+    );
+
+    expect(rows(section)).toEqual(["review-kit"]);
+  });
+
+  it("is recorded on the set under that question", async () => {
+    const path = `/api/ui/sets/${WAITING.id}/additions`;
+    const { fetching } = await answering(
+      WAITING,
+      SETTINGS_READ,
+      PACKS_READ,
+      whenever(
+        path,
+        json({ Added: { addition: pack(4, "review-kit", "Q1") } }),
+        "POST",
+      ),
+    );
+
+    const menu = await open(menuOf("Q1"));
+    fireEvent.click(await waitFor(() => within(menu).getByText("review-kit")));
+
+    await waitFor(() =>
+      expect(writes(fetching, path)).toEqual([
+        { label: "Q1", pick: { Pack: { name: "review-kit" } } },
+      ]),
+    );
+  });
+
+  /// Drawn off the record as a pack's chip, saying so where its plugin has
+  /// gone since.
+  it("is drawn as a chip that says where it is no longer installed", async () => {
+    await answering({
+      ...WAITING,
+      additions: [
+        {
+          ...pack(4, "review-kit", "Q1"),
+          added: { Pack: { name: "review-kit", installed: false } },
+        },
+      ],
+    });
+
+    const row = screen.getByRole("list", { name: "Attached to Q1" });
+    expect(row.textContent).toContain("review-kit");
+    expect(row.textContent).toContain("no longer installed");
+  });
+});
+
 describe("a server added from an answer", () => {
   /// The pick goes up at once, under the question it was picked at, and the
   /// chip that comes back is the record's.
@@ -392,6 +477,17 @@ describe("the timeline line under an answered set", () => {
     ).toBe(
       "You added the docs and tickets MCP servers. You let the agent move this to the-laptop.",
     );
+  });
+});
+
+describe("the timeline line under a set that added skill packs", () => {
+  it("names them in a sentence of their own", () => {
+    expect(
+      addedWith([
+        { Server: { name: "docs", declared: true } },
+        { Pack: { name: "review-kit", installed: true } },
+      ]),
+    ).toBe("You added the docs MCP server. You added the review-kit skill pack.");
   });
 });
 

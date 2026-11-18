@@ -1,6 +1,6 @@
 //! What the human adds to a Conversation from a Question Set's sheet: an MCP
-//! server, a companion, a companion opened up to read-write, a device the work
-//! may be moved to (ADR-0028).
+//! server, a Skill Pack, a companion, a companion opened up to read-write, a
+//! device the work may be moved to (ADR-0028).
 //!
 //! **Recorded as it is picked, applied at Submit.** A pick lands here the moment
 //! it is made — so it survives a reload and shows on another device, and the ×
@@ -34,6 +34,10 @@ pub enum Addition {
     /// A declared MCP server, by name — the reference a Conversation holds,
     /// looked up in the settings whenever it is needed.
     Server { name: String },
+
+    /// An installed Skill Pack, by name — the reference a Conversation holds,
+    /// read against the plugins loaded on the device whenever it is needed.
+    Pack { name: String },
 
     /// A registered Repo to become a Companion of the work, in the mode the
     /// human chose, off the base they named — `None` being the Repo's default
@@ -71,6 +75,7 @@ impl Addition {
     fn kind(&self) -> &'static str {
         match self {
             Self::Server { .. } => "server",
+            Self::Pack { .. } => "pack",
             Self::Companion { .. } => "companion",
             Self::OpenedUp { .. } => "opened-up",
             Self::Device { .. } => "device",
@@ -178,7 +183,8 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              state           TEXT NOT NULL,
              added_at        TEXT NOT NULL,
              carried_on      INTEGER NOT NULL DEFAULT 0,
-             repo_name       TEXT
+             repo_name       TEXT,
+             pack            TEXT
          ) STRICT",
     )
     .execute(pool)
@@ -219,12 +225,27 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
             .context("adding the column naming a Repo a Transfer struck")?;
     }
 
+    // The Skill Pack a `pack` row names. The same two paths.
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('set_additions') WHERE name = ?")
+            .bind("pack")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the column naming a Skill Pack picked on a Set")?;
+
+    if there.is_none() {
+        sqlx::query("ALTER TABLE set_additions ADD COLUMN pack TEXT")
+            .execute(pool)
+            .await
+            .context("adding the column naming a Skill Pack picked on a Set")?;
+    }
+
     Ok(())
 }
 
 /// The columns every read takes, in the order [`Row`] holds them.
 const COLUMNS: &str = "id, set_id, label, kind, server, repo_id, mode, base, branch, device, \
-                       state, added_at, repo_name";
+                       state, added_at, repo_name, pack";
 
 type Row = (
     i64,
@@ -239,6 +260,7 @@ type Row = (
     Option<String>,
     String,
     String,
+    Option<String>,
     Option<String>,
 );
 
@@ -259,10 +281,14 @@ fn made(row: Row) -> Result<SetAddition> {
         state,
         added_at,
         repo_name,
+        pack,
     ) = row;
 
     let addition = match (kind.as_str(), server, repo_id, device) {
         ("server", Some(name), _, _) => Addition::Server { name },
+        ("pack", ..) if pack.is_some() => Addition::Pack {
+            name: pack.unwrap_or_default(),
+        },
         ("companion", _, Some(repo_id), _) => Addition::Companion {
             repo_id,
             mode: CompanionMode::read(mode.as_deref().unwrap_or_default())?,
@@ -340,12 +366,13 @@ pub async fn add_to_set(
     }
 
     // One Set adds a thing once, whichever Question it was picked at: a server
-    // by its name, a Repo — added or opened up — by its id, a device by its
+    // or a pack by its name, a Repo — added or opened up — by its id, a device by its
     // Device Id. The second pick is the first one's row rather than a second
     // chip saying the same thing, or two saying different things about the one
     // Repo.
     let (same, key): (&str, Key) = match addition {
         Addition::Server { name } => ("kind = 'server' AND server = ?", Key::Text(name)),
+        Addition::Pack { name } => ("kind = 'pack' AND pack = ?", Key::Text(name)),
         Addition::Companion { repo_id, .. } | Addition::OpenedUp { repo_id, .. } => (
             "kind IN ('companion', 'opened-up') AND repo_id = ?",
             Key::Id(*repo_id),
@@ -372,6 +399,7 @@ pub async fn add_to_set(
 
     let (server, repo_id, mode, base, branch, device) = match addition {
         Addition::Server { name } => (Some(name.as_str()), None, None, None, None, None),
+        Addition::Pack { .. } => (None, None, None, None, None, None),
         Addition::Companion {
             repo_id,
             mode,
@@ -404,8 +432,8 @@ pub async fn add_to_set(
     let row: Row = sqlx::query_as(&format!(
         "INSERT INTO set_additions
              (conversation_id, set_id, label, kind, server, repo_id, mode, base, branch,
-              device, state, added_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+              device, pack, state, added_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          RETURNING {COLUMNS}"
     ))
     .bind(conversation_id)
@@ -418,6 +446,10 @@ pub async fn add_to_set(
     .bind(base)
     .bind(branch)
     .bind(device)
+    .bind(match addition {
+        Addition::Pack { name } => Some(name.as_str()),
+        _ => None,
+    })
     .bind(AdditionState::Pending.stored())
     .fetch_one(&mut *tx)
     .await
@@ -460,13 +492,14 @@ pub async fn take_off_set(pool: &SqlitePool, set_id: i64, id: i64) -> Result<Tak
 /// them land together or not at all, and a Set is applied once because it is
 /// answered once.
 ///
-/// A server is attached by name although the round is no longer drafting,
-/// which is the second moment ADR-0028 adds beside ADR-0021's; a device is
+/// A server or a Skill Pack is attached by name although the round is no
+/// longer drafting, which is the second moment ADR-0028 adds beside ADR-0021's
+/// (and ADR-0030's *Skill packs* for a pack); a device is
 /// ticked exactly as *May be transferred to* ticks one. Either may be on the
 /// Conversation already — the Steer, another Set — and that is the state the
-/// pick asked for. Whether the server is still declared is the server's to
-/// have asked before this, the declarations being in a file this crate has
-/// never heard of.
+/// pick asked for. Whether the server is still declared, or the pack still
+/// installed, is the server's to have asked before this, the declarations and
+/// the plugins being things this crate has never heard of.
 ///
 /// A companion joins the work and an opened-up one turns read-write, past
 /// drafting, as a steer's do — see [`super::companions::join`] — with the
@@ -494,6 +527,19 @@ pub(crate) async fn apply(
     .execute(&mut **tx)
     .await
     .with_context(|| format!("attaching the servers added on Question Set {set_id}"))?;
+
+    sqlx::query(
+        "INSERT INTO conversation_skill_packs (conversation_id, name, attached_at)
+         SELECT conversation_id, pack, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         FROM set_additions
+         WHERE set_id = ? AND kind = 'pack' AND state = 'pending'
+         ORDER BY id
+         ON CONFLICT (conversation_id, name) DO NOTHING",
+    )
+    .bind(set_id)
+    .execute(&mut **tx)
+    .await
+    .with_context(|| format!("attaching the skill packs added on Question Set {set_id}"))?;
 
     sqlx::query(
         "INSERT INTO permitted_devices (conversation_id, device)
@@ -777,6 +823,9 @@ mod tests {
 
         let kinds = [
             server("docs"),
+            Addition::Pack {
+                name: "rust-review".to_owned(),
+            },
             Addition::Companion {
                 repo_id: repos[0],
                 mode: CompanionMode::ReadWrite,
@@ -1033,8 +1082,8 @@ mod tests {
         }
     }
 
-    /// Answering puts the servers, the ticks and the companions on the
-    /// Conversation, in the Response's own transaction.
+    /// Answering puts the servers, the packs, the ticks and the companions on
+    /// the Conversation, in the Response's own transaction.
     #[tokio::test]
     async fn answering_applies_every_kind() {
         let (_dir, pool, conversation, set) = waiting().await;
@@ -1048,6 +1097,17 @@ mod tests {
         add_to_set(&pool, conversation, set, Some("Q1"), &server("docs"))
             .await
             .unwrap();
+        add_to_set(
+            &pool,
+            conversation,
+            set,
+            None,
+            &Addition::Pack {
+                name: "rust-review".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
         add_to_set(
             &pool,
             conversation,
@@ -1099,6 +1159,10 @@ mod tests {
             vec!["docs".to_owned()]
         );
         assert_eq!(
+            crate::skill_packs(&pool, conversation).await.unwrap(),
+            vec!["rust-review".to_owned()]
+        );
+        assert_eq!(
             crate::permitted_devices(&pool, conversation).await.unwrap(),
             vec![laptop.to_owned()]
         );
@@ -1109,14 +1173,7 @@ mod tests {
             .into_iter()
             .map(|one| one.state)
             .collect();
-        assert_eq!(
-            states,
-            vec![
-                AdditionState::Applied,
-                AdditionState::Applied,
-                AdditionState::Applied
-            ]
-        );
+        assert_eq!(states, vec![AdditionState::Applied; 4]);
     }
 
     /// A read-write companion left to mirror joins as mirroring, while the

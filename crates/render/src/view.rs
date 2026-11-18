@@ -162,6 +162,11 @@ pub struct SetView {
     /// Attach menus leave out: what is on already is nothing to add.
     pub servers: Vec<String>,
 
+    /// And the Skill Packs it has already, by name, for the same reason. Empty
+    /// out of [`set_view`], for [`SetView::by_verkstead`]'s reason.
+    #[serde(default)]
+    pub packs: Vec<String>,
+
     /// And the rest of what those menus offer: Repos to work alongside,
     /// read-only Companions to open up, and devices to permit.
     pub addable: crate::conversations::AddableView,
@@ -425,6 +430,7 @@ pub fn set_view(
         attachments,
         additions,
         servers,
+        packs: Vec::new(),
         addable,
         by_verkstead: false,
         lock_line: None,

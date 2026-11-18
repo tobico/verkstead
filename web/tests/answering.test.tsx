@@ -799,6 +799,14 @@ describe("a submit that did not land", () => {
     );
   });
 
+  it("names a skill pack picked on the set that is no longer installed", async () => {
+    const page = await refused({ PackGone: "review-kit" });
+
+    expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
+      "The review-kit skill pack is no longer installed here",
+    );
+  });
+
   it("names a repo picked on the set that is no longer registered", async () => {
     const page = await refused({ RepoGone: "docs" });
 
