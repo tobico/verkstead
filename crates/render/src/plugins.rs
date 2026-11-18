@@ -1,0 +1,130 @@
+//! What the **Plugins** section is drawn from, and what its presses send
+//! (ADR-0030).
+//!
+//! **One row per Plugin**, whatever it provides, in two groups: the ones
+//! installed above the ones Verkstead ships. A row is read off the installed
+//! list, which is a Replicated record, and off what this device made of loading
+//! it — its trouble — which is this device's alone.
+//!
+//! **The consent card is a reading of its own**: the manifest at a path read
+//! without anything being written, so that what the human grants at **Install**
+//! is what they were shown. The grant travels back with the press, and a
+//! manifest asking for more by then is refused rather than installed.
+
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "typescript")]
+use ts_rs::TS;
+
+/// The Plugins page: the installed above the built-in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginsView {
+    pub installed: Vec<PluginRow>,
+
+    /// The ones this binary ships and lists. None yet: the fixture that proves
+    /// the path is not listed, and the group is drawn only once it has a row.
+    pub built_in: Vec<PluginRow>,
+}
+
+/// One Plugin's row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginRow {
+    /// Its identity, which every press names it by.
+    pub uuid: String,
+    pub name: String,
+    pub version: String,
+    /// The author's name.
+    pub author: String,
+    /// The Category of each thing it provides, as the manifest writes it, once
+    /// each.
+    pub provides: Vec<String>,
+    pub source: PluginSource,
+    /// Its checkbox: whether the cluster has it on.
+    pub enabled: bool,
+    /// Why it didn't load here, where it didn't. A plugin with trouble counts
+    /// as disabled.
+    pub trouble: Option<String>,
+    /// The device it is on, by name, where it is a local plugin on another
+    /// device: drawn greyed, and not loaded here.
+    pub elsewhere: Option<String>,
+}
+
+/// Where a Plugin came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+#[serde(tag = "kind")]
+pub enum PluginSource {
+    /// A directory on one device, read where it is.
+    Local { path: String },
+}
+
+/// A path to read a manifest at, for the consent card.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginAt {
+    pub path: String,
+}
+
+/// The consent card: who the plugin is, what it provides, and every
+/// capability it asks for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginConsent {
+    pub uuid: String,
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub email: String,
+    pub description: Option<String>,
+    pub provides: Vec<String>,
+    pub capabilities: Vec<PluginCapability>,
+}
+
+/// One capability a plugin's wasm component asks for.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+#[serde(tag = "kind")]
+pub enum PluginCapability {
+    /// A path on the host.
+    Filesystem { path: String, writable: bool },
+    /// A host it may open connections to.
+    Outbound { host: String },
+    /// An environment variable it may read.
+    Environment { name: String },
+}
+
+/// **Install**: the path, and the capabilities the card showed, which is the
+/// grant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginInstall {
+    pub path: String,
+    pub granted: Vec<PluginCapability>,
+}
+
+/// **Update**: nothing the first time, and the capabilities the card showed
+/// where the manifest asked for more and the card was confirmed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginUpdate {
+    pub granted: Option<Vec<PluginCapability>>,
+}
+
+/// What an **Update** came to: the page read again, or the consent card where
+/// the manifest now asks for more than was granted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+#[serde(tag = "kind")]
+pub enum PluginUpdated {
+    Updated { plugins: PluginsView },
+    Consent { consent: PluginConsent },
+}
+
+/// The checkbox.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginEnabled {
+    pub enabled: bool,
+}

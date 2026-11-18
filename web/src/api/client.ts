@@ -43,6 +43,10 @@ import type {
   CompanionModeChosen,
   CompanionRemoved,
   ComponentsView,
+  PluginCapability,
+  PluginConsent,
+  PluginUpdated,
+  PluginsView,
   Confirming,
   ConversationArchived,
   ConversationClosed,
@@ -2108,6 +2112,45 @@ export function updateAll(): Promise<DevicesView> {
 /// disk a file's size on this machine.
 export function loadComponents(): Promise<ComponentsView> {
   return get<ComponentsView>("/api/ui/components");
+}
+
+/// The Plugins section: the installed above the built-in, each with its trouble
+/// where it didn't load on this device.
+export function loadPlugins(): Promise<PluginsView> {
+  return get<PluginsView>("/api/ui/plugins");
+}
+
+/// The consent card for the plugin at `path`, read with nothing written: who it
+/// is, what it provides and every capability it asks for. Refused where the
+/// directory isn't a plugin, or its uuid is taken.
+export function readPlugin(path: string): Promise<PluginConsent> {
+  return post<PluginConsent>("/api/ui/plugins/read", { path });
+}
+
+/// **Install**: the plugin at `path`, granted what its card showed.
+export function installPlugin(
+  path: string,
+  granted: PluginCapability[],
+): Promise<PluginsView> {
+  return post<PluginsView>("/api/ui/plugins", { path, granted });
+}
+
+/// **Update** on a row: the manifest read again. Answered with the consent card
+/// where it now asks for more than was granted, and the press made again with
+/// what that card showed lands it.
+export function updatePlugin(
+  uuid: string,
+  granted: PluginCapability[] | null,
+): Promise<PluginUpdated> {
+  return post<PluginUpdated>(`/api/ui/plugins/${uuid}/update`, { granted });
+}
+
+/// A row's checkbox, which is the cluster's.
+export function enablePlugin(
+  uuid: string,
+  enabled: boolean,
+): Promise<PluginsView> {
+  return post<PluginsView>(`/api/ui/plugins/${uuid}/enabled`, { enabled });
 }
 
 /// **Install** on the Components pane's Annex row: the wizard's install run

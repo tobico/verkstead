@@ -29,6 +29,7 @@ mod forwarding;
 mod joining;
 mod logins;
 mod onboarding;
+mod plugins;
 mod profiles;
 mod push;
 mod remote;
@@ -92,6 +93,10 @@ pub use onboarding::{
     AccountView, Barred, Dependency, DependencyState, DependencyView, Distro, InstallPress,
     InstallState, OnboardingView, Owed, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen,
     Source, StepsView,
+};
+pub use plugins::{
+    PluginAt, PluginCapability, PluginConsent, PluginEnabled, PluginInstall, PluginRow,
+    PluginSource, PluginUpdate, PluginUpdated, PluginsView,
 };
 pub use profiles::{
     AccountFile, AccountLogin, AccountLoginTaken, AccountSignedOut, AgentType, Broken, LoginOver,

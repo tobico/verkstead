@@ -29,8 +29,8 @@ use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    AuthorEntry, AuthorRemoved, ConversationView, DevicesView, PointingRepo, Registered, RepoEntry,
-    ServerAttached, Started, UnrepointedRepo, Unrepointing,
+    AuthorEntry, AuthorRemoved, ConversationView, DevicesView, PluginSource, PluginsView,
+    PointingRepo, Registered, RepoEntry, ServerAttached, Started, UnrepointedRepo, Unrepointing,
 };
 use verkstead_schema::Nudge;
 use verkstead_server::device::reading::{RUNNING, Reading};
@@ -804,6 +804,62 @@ impl Verkstead {
         .await;
 
         waited.unwrap_or_else(|_| panic!("the Authors never said it: {last:#?}"))
+    }
+
+    /// The Plugins page, read until `what` holds of it.
+    async fn plugins_saying(&self, what: impl Fn(&PluginsView) -> bool) -> PluginsView {
+        let mut last = None;
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                let view: PluginsView = reading(&self.workbench, "/api/ui/plugins").await;
+
+                if what(&view) {
+                    return view;
+                }
+
+                last = Some(view);
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("the Plugins page never said it: {last:#?}"))
+    }
+
+    /// A plugin written into this device's Data Directory, read through the
+    /// consent card and installed with the grant it showed.
+    async fn installs_plugin(&self, uuid: &str, name: &str) -> String {
+        let at = self.dir.path().join("plugin");
+        std::fs::create_dir_all(&at).unwrap();
+        std::fs::write(
+            at.join("plugin.yaml"),
+            format!(
+                "uuid: {uuid}\nname: {name}\nauthor:\n  name: Ada Lovelace\n  email: \
+                 ada@example.com\nversion: 1.4.0\ninterface: 1\nprovides:\n  - category: \
+                 forge\n"
+            ),
+        )
+        .unwrap();
+        let path = at.to_str().unwrap().to_owned();
+
+        let (status, said) = pressing(
+            &self.workbench,
+            "/api/ui/plugins/read",
+            Some(&serde_json::json!({ "path": path }).to_string()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+
+        let (status, said) = pressing(
+            &self.workbench,
+            "/api/ui/plugins",
+            Some(&serde_json::json!({ "path": path, "granted": [] }).to_string()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+
+        path
     }
 
     /// The stamps this device holds for the Author `id`: `updated_at` and the
@@ -2075,4 +2131,44 @@ async fn the_values_route_answers_from_whoever_holds_them() {
     assert!(asked(id("tracker")).await.unwrap().is_empty(), "none held");
     let refused = asked("no-such-uuid".to_owned()).await.unwrap_err();
     assert!(refused.saying.contains("404"), "{}", refused.saying);
+}
+
+const PLUGIN: &str = "0b6f6b7e-5c3a-4d0e-9a51-2f7d8c1e4a90";
+
+/// A plugin installed from a directory on A is listed on B greyed, naming A,
+/// and loaded on neither but A; unticked on B, it reads disabled on A.
+#[tokio::test]
+async fn a_local_plugin_is_listed_on_another_device_as_the_ones_it_is_on() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    let path = a.installs_plugin(PLUGIN, "GitLab").await;
+
+    let on_a = a.plugins_saying(|view| !view.installed.is_empty()).await;
+    assert_eq!(on_a.installed[0].elsewhere, None);
+
+    let on_b = b
+        .plugins_saying(|view| view.installed.iter().any(|row| row.uuid == PLUGIN))
+        .await;
+    let row = &on_b.installed[0];
+    assert_eq!(row.name, "GitLab");
+    assert_eq!(row.version, "1.4.0");
+    assert_eq!(row.provides, ["forge"]);
+    assert_eq!(row.source, PluginSource::Local { path });
+    assert_eq!(row.elsewhere.as_deref(), Some(A_MACHINE));
+    assert_eq!(row.trouble, None, "nothing of it is loaded on B");
+
+    let (status, said) = pressing(
+        &b.workbench,
+        &format!("/api/ui/plugins/{PLUGIN}/enabled"),
+        Some(&serde_json::json!({ "enabled": false }).to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    a.plugins_saying(|view| view.installed.iter().any(|row| !row.enabled))
+        .await;
 }

@@ -4362,7 +4362,7 @@ name: string | null, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "heirs" } | { "kind": "login", profile: string, } | { "kind": "logged_in", profile: string, } | { "kind": "everything" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "heirs" } | { "kind": "plugins" } | { "kind": "login", profile: string, } | { "kind": "logged_in", profile: string, } | { "kind": "everything" };
 
 /**
  * One Nudge as it goes down a stream: what moved, and **whose news it is**.
@@ -4387,7 +4387,7 @@ export type Nudged = {
  * Device Id — absent for this device's own, which is every Nudge a
  * workbench has ever sent about its own work.
  */
-device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "heirs" } | { "kind": "login", profile: string, } | { "kind": "logged_in", profile: string, } | { "kind": "everything" });
+device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "instructions" } | { "kind": "mcp_servers" } | { "kind": "heirs" } | { "kind": "plugins" } | { "kind": "login", profile: string, } | { "kind": "logged_in", profile: string, } | { "kind": "everything" });
 
 /**
  * And the same of every Conversation at once: what a member offers the device
@@ -4814,6 +4814,92 @@ export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": Ta
  * being Apple's own on either.
  */
 export type Platform = "Linux" | "MacOs" | "Windows";
+
+/**
+ * A path to read a manifest at, for the consent card.
+ */
+export type PluginAt = { path: string, };
+
+/**
+ * One capability a plugin's wasm component asks for.
+ */
+export type PluginCapability = { "kind": "Filesystem", path: string, writable: boolean, } | { "kind": "Outbound", host: string, } | { "kind": "Environment", name: string, };
+
+/**
+ * The consent card: who the plugin is, what it provides, and every
+ * capability it asks for.
+ */
+export type PluginConsent = { uuid: string, name: string, version: string, author: string, email: string, description: string | null, provides: Array<string>, capabilities: Array<PluginCapability>, };
+
+/**
+ * The checkbox.
+ */
+export type PluginEnabled = { enabled: boolean, };
+
+/**
+ * **Install**: the path, and the capabilities the card showed, which is the
+ * grant.
+ */
+export type PluginInstall = { path: string, granted: Array<PluginCapability>, };
+
+/**
+ * One Plugin's row.
+ */
+export type PluginRow = { 
+/**
+ * Its identity, which every press names it by.
+ */
+uuid: string, name: string, version: string, 
+/**
+ * The author's name.
+ */
+author: string, 
+/**
+ * The Category of each thing it provides, as the manifest writes it, once
+ * each.
+ */
+provides: Array<string>, source: PluginSource, 
+/**
+ * Its checkbox: whether the cluster has it on.
+ */
+enabled: boolean, 
+/**
+ * Why it didn't load here, where it didn't. A plugin with trouble counts
+ * as disabled.
+ */
+trouble: string | null, 
+/**
+ * The device it is on, by name, where it is a local plugin on another
+ * device: drawn greyed, and not loaded here.
+ */
+elsewhere: string | null, };
+
+/**
+ * Where a Plugin came from.
+ */
+export type PluginSource = { "kind": "Local", path: string, };
+
+/**
+ * **Update**: nothing the first time, and the capabilities the card showed
+ * where the manifest asked for more and the card was confirmed.
+ */
+export type PluginUpdate = { granted: Array<PluginCapability> | null, };
+
+/**
+ * What an **Update** came to: the page read again, or the consent card where
+ * the manifest now asks for more than was granted.
+ */
+export type PluginUpdated = { "kind": "Updated", plugins: PluginsView, } | { "kind": "Consent", consent: PluginConsent, };
+
+/**
+ * The Plugins page: the installed above the built-in.
+ */
+export type PluginsView = { installed: Array<PluginRow>, 
+/**
+ * The ones this binary ships and lists. None yet: the fixture that proves
+ * the path is not listed, and the group is drawn only once it has a row.
+ */
+built_in: Array<PluginRow>, };
 
 /**
  * A Repo an Author's removal found pointing at it, named with its device.

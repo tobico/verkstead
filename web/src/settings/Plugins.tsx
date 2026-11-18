@@ -1,0 +1,519 @@
+//! The **Plugins** section (ADR-0030): the card at the foot of the settings
+//! list, after Repos, and the pane behind it.
+//!
+//! **Two groups, Installed above Built-in**, one row per Plugin whatever it
+//! provides. The Built-in group is drawn only once it has a row (Set 1772, Q4),
+//! so it is absent until a stage ships one that is listed.
+//!
+//! **A row** reads the plugin's name, version and author, the Category of what
+//! it provides, where it came from, its checkbox, and its trouble where it
+//! didn't load on this device — which counts it as disabled and stops nothing
+//! else. The checkbox is the cluster's: unticked here is unticked everywhere. A
+//! local plugin on another device is drawn greyed, naming that device, and
+//! nothing of it is loaded here.
+//!
+//! **Add a plugin…** takes a browsed path, the field the Agent Profiles use,
+//! and reads its manifest into the **consent card**: who it is, what it
+//! provides and every capability it asks for. **Install** is the grant, and
+//! the whole of it (ADR-0030, *Capabilities and trust*); the press carries
+//! back what the card showed, so a manifest asking for more by then is refused
+//! rather than installed. **Update** on a local row reads the manifest again,
+//! and shows the card first where it now asks for more.
+
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createSignal,
+  type JSX,
+} from "solid-js";
+
+import { Check } from "../Check";
+import { PaneSticky } from "../Panes";
+import { PathField } from "../PathField";
+import {
+  enablePlugin,
+  installPlugin,
+  loadPlugins,
+  readPlugin,
+  updatePlugin,
+} from "../api/client";
+import type {
+  PluginCapability,
+  PluginConsent,
+  PluginRow,
+  PluginsView,
+  PluginUpdated,
+} from "../api/types";
+import { useReading } from "../freshness";
+import { Empty, ErrorLine, Note } from "../notices";
+import { PaneHead } from "../workbench/PaneHead";
+import styles from "./Plugins.module.css";
+import { SettingsCard } from "./SettingsCard";
+
+/// The plugins as this device reads them, for the card and the pane.
+function usePlugins() {
+  return useReading(() => ({
+    queryKey: ["plugins"],
+    queryFn: loadPlugins,
+    freshness: { reconcile: "uuid" },
+  }));
+}
+
+/// The card: how many are installed, warning where one is in trouble.
+export function PluginsCard(props: {
+  /// Whether the pane beside this is the one that is open.
+  open: boolean;
+  /// What pressing it does, which is opening that pane.
+  press: () => void;
+}): JSX.Element {
+  const plugins = usePlugins();
+
+  const troubled = (): number =>
+    plugins.data?.installed.filter((row) => row.trouble !== null).length ?? 0;
+
+  const status = (): string => {
+    const installed = plugins.data?.installed.length ?? 0;
+    if (troubled() > 0) {
+      return troubled() === 1 ? "1 in trouble" : `${troubled()} in trouble`;
+    }
+    if (installed === 0) {
+      return "None installed";
+    }
+    return `${installed} installed`;
+  };
+
+  return (
+    <SettingsCard
+      class={styles.pluginsCard}
+      title="Plugins"
+      open={props.open}
+      press={props.press}
+      status={plugins.data === undefined ? "" : status()}
+      warn={troubled() > 0}
+    />
+  );
+}
+
+/// The pane: the groups, and **Add a plugin…** under them.
+export function PluginsPane(props: {
+  /// The way back to the settings, which is the pane this one was entered from.
+  back: () => void;
+}): JSX.Element {
+  const plugins = usePlugins();
+  const queries = useQueryClient();
+
+  // What the server said about a press on a row it wouldn't take, by the row's
+  // uuid.
+  const [refused, setRefused] = createSignal<{
+    uuid: string;
+    why: string;
+  } | null>(null);
+
+  // The consent card an Update came back with, where the manifest now asks
+  // for more than was granted.
+  const [reviewing, setReviewing] = createSignal<{
+    uuid: string;
+    consent: PluginConsent;
+  } | null>(null);
+
+  const read = (view: PluginsView): void => {
+    setRefused(null);
+    queries.setQueryData(["plugins"], view);
+  };
+
+  const enable = useMutation(() => ({
+    mutationFn: (press: { uuid: string; enabled: boolean }) =>
+      enablePlugin(press.uuid, press.enabled),
+    onSuccess: read,
+    onError: (error: Error, press) =>
+      setRefused({ uuid: press.uuid, why: error.message }),
+  }));
+
+  const update = useMutation(() => ({
+    mutationFn: (press: {
+      uuid: string;
+      granted: PluginCapability[] | null;
+    }) => updatePlugin(press.uuid, press.granted),
+    onSuccess: (updated: PluginUpdated, press) => {
+      if (updated.kind === "Consent") {
+        setReviewing({ uuid: press.uuid, consent: updated.consent });
+        return;
+      }
+
+      setReviewing(null);
+      read(updated.plugins);
+    },
+    onError: (error: Error, press) =>
+      setRefused({ uuid: press.uuid, why: error.message }),
+  }));
+
+  return (
+    <>
+      <PaneSticky>
+        <PaneHead back={{ to: "Settings", go: props.back }} title="Plugins" />
+      </PaneSticky>
+
+      <Switch>
+        <Match when={plugins.isPending}>
+          <Empty>Reading the plugins…</Empty>
+        </Match>
+        <Match when={plugins.isError}>
+          <ErrorLine>
+            The plugins couldn't be read. {plugins.error?.message}
+          </ErrorLine>
+        </Match>
+        <Match when={plugins.data}>
+          {(view) => (
+            <>
+              <section class={styles.group}>
+                <h3>Installed</h3>
+                <Show
+                  when={view().installed.length > 0}
+                  fallback={
+                    <Empty>
+                      No plugins are installed yet. Add one from a directory
+                      with a <code>plugin.yaml</code>.
+                    </Empty>
+                  }
+                >
+                  <ul class={styles.list}>
+                    <For each={view().installed}>
+                      {(row) => (
+                        <Row
+                          of={row}
+                          pressing={enable.isPending || update.isPending}
+                          flip={(enabled) =>
+                            enable.mutate({ uuid: row.uuid, enabled })
+                          }
+                          update={() =>
+                            update.mutate({ uuid: row.uuid, granted: null })
+                          }
+                          refused={
+                            refused()?.uuid === row.uuid
+                              ? refused()!.why
+                              : null
+                          }
+                        >
+                          <Show
+                            when={
+                              reviewing()?.uuid === row.uuid
+                                ? reviewing()!.consent
+                                : null
+                            }
+                          >
+                            {(consent) => (
+                              <Consent
+                                of={consent()}
+                                lede="It now asks for more than was granted."
+                                verb="Update"
+                                pressing={update.isPending}
+                                grant={() =>
+                                  update.mutate({
+                                    uuid: row.uuid,
+                                    granted: consent().capabilities,
+                                  })
+                                }
+                                cancel={() => setReviewing(null)}
+                              />
+                            )}
+                          </Show>
+                        </Row>
+                      )}
+                    </For>
+                  </ul>
+                </Show>
+              </section>
+
+              <Show when={view().built_in.length > 0}>
+                <section class={styles.group}>
+                  <h3>Built-in</h3>
+                  <ul class={styles.list}>
+                    <For each={view().built_in}>
+                      {(row) => (
+                        <Row
+                          of={row}
+                          pressing={enable.isPending}
+                          flip={(enabled) =>
+                            enable.mutate({ uuid: row.uuid, enabled })
+                          }
+                          refused={
+                            refused()?.uuid === row.uuid
+                              ? refused()!.why
+                              : null
+                          }
+                        />
+                      )}
+                    </For>
+                  </ul>
+                </section>
+              </Show>
+
+              <Adding installed={read} />
+            </>
+          )}
+        </Match>
+      </Switch>
+    </>
+  );
+}
+
+/// One plugin's row.
+function Row(props: {
+  of: PluginRow;
+  pressing: boolean;
+  flip: (enabled: boolean) => void;
+  /// **Update**, where the row has one: a local plugin on this device.
+  update?: () => void;
+  refused: string | null;
+  /// What is drawn under the row: the consent card an Update came back with.
+  children?: JSX.Element;
+}): JSX.Element {
+  /// The version and the author, as one quiet line beside the name.
+  const facts = (): string => `${props.of.version} · ${props.of.author}`;
+
+  return (
+    <li
+      class={styles.plugin}
+      classList={{ [styles.elsewhere!]: props.of.elsewhere !== null }}
+      data-plugin={props.of.uuid}
+    >
+      <div class={styles.head}>
+        <Check
+          label={
+            <>
+              <span class={styles.name}>{props.of.name}</span>
+              <span class={styles.facts}>{facts()}</span>
+            </>
+          }
+          on={props.of.enabled}
+          disabled={props.pressing}
+          flip={props.flip}
+        />
+
+        <Show when={props.update !== undefined && props.of.elsewhere === null}>
+          <button
+            type="button"
+            class={styles.press}
+            disabled={props.pressing}
+            onClick={() => props.update?.()}
+          >
+            Update
+          </button>
+        </Show>
+      </div>
+
+      <Show when={props.of.provides.length > 0}>
+        <p class={styles.provides}>Provides {props.of.provides.join(", ")}.</p>
+      </Show>
+
+      <p class={styles.source}>{props.of.source.path}</p>
+
+      <Show when={props.of.elsewhere}>
+        {(device) => <Note>On {device()}. It's loaded there.</Note>}
+      </Show>
+
+      <Show when={props.of.trouble}>
+        {(trouble) => <p class={styles.trouble}>{trouble()}</p>}
+      </Show>
+
+      <Show when={props.refused}>{(why) => <ErrorLine>{why()}</ErrorLine>}</Show>
+
+      {props.children}
+    </li>
+  );
+}
+
+/// What one capability is, in a few words.
+function asked(capability: PluginCapability): JSX.Element {
+  switch (capability.kind) {
+    case "Filesystem":
+      return (
+        <>
+          {capability.writable ? "Read and write " : "Read "}
+          <code>{capability.path}</code>
+        </>
+      );
+    case "Outbound":
+      return (
+        <>
+          Connect to <code>{capability.host}</code>
+        </>
+      );
+    case "Environment":
+      return (
+        <>
+          Read the environment variable <code>{capability.name}</code>
+        </>
+      );
+  }
+}
+
+/// The consent card: who the plugin is, what it provides, and every
+/// capability it asks for, over the press that grants them.
+function Consent(props: {
+  of: PluginConsent;
+  /// A sentence above it, where it is shown for a reason of its own.
+  lede?: string;
+  /// The press that grants: **Install**, or **Update**.
+  verb: string;
+  pressing: boolean;
+  grant: () => void;
+  cancel: () => void;
+}): JSX.Element {
+  return (
+    <div class={styles.consent} data-consent={props.of.uuid}>
+      <Show when={props.lede}>{(lede) => <p>{lede()}</p>}</Show>
+
+      <h3>
+        {props.of.name} {props.of.version}
+      </h3>
+      <p class={styles.facts}>
+        {props.of.author} · {props.of.email}
+      </p>
+
+      <Show when={props.of.description}>
+        {(description) => <p>{description()}</p>}
+      </Show>
+
+      <p>
+        {props.of.provides.length > 0
+          ? `Provides ${props.of.provides.join(", ")}.`
+          : "Provides nothing yet."}
+      </p>
+
+      <Show
+        when={props.of.capabilities.length > 0}
+        fallback={<p>It asks for no capabilities.</p>}
+      >
+        <p>It asks to:</p>
+        <ul class={styles.capabilities}>
+          <For each={props.of.capabilities}>
+            {(capability) => <li>{asked(capability)}</li>}
+          </For>
+        </ul>
+      </Show>
+
+      <div class={styles.buttons}>
+        <button
+          type="button"
+          disabled={props.pressing}
+          onClick={() => props.grant()}
+        >
+          {props.verb}
+        </button>
+        <button
+          type="button"
+          class={`${styles.cancel} secondary`}
+          onClick={() => props.cancel()}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/// **Add a plugin…**: a browsed path, its consent card, and **Install**.
+function Adding(props: { installed: (view: PluginsView) => void }): JSX.Element {
+  const [open, setOpen] = createSignal(false);
+  const [path, setPath] = createSignal("");
+  const [consent, setConsent] = createSignal<PluginConsent | null>(null);
+  const [refused, setRefused] = createSignal<string | null>(null);
+
+  const close = (): void => {
+    setOpen(false);
+    setPath("");
+    setConsent(null);
+    setRefused(null);
+  };
+
+  const reading = useMutation(() => ({
+    mutationFn: readPlugin,
+    onSuccess: (read: PluginConsent) => {
+      setRefused(null);
+      setConsent(read);
+    },
+    onError: (error: Error) => setRefused(error.message),
+  }));
+
+  const installing = useMutation(() => ({
+    mutationFn: (granted: PluginCapability[]) =>
+      installPlugin(path(), granted),
+    onSuccess: (view: PluginsView) => {
+      props.installed(view);
+      close();
+    },
+    onError: (error: Error) => setRefused(error.message),
+  }));
+
+  return (
+    <Show
+      when={open()}
+      fallback={
+        <button
+          type="button"
+          class={`${styles.add} secondary`}
+          onClick={() => setOpen(true)}
+        >
+          Add a plugin…
+        </button>
+      }
+    >
+      <form
+        class={styles.adding}
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          reading.mutate(path());
+        }}
+      >
+        <label for="plugin-path">Directory</label>
+        <PathField
+          id="plugin-path"
+          placeholder="/home/you/src/my-plugin"
+          value={path()}
+          write={(asked) => {
+            setPath(asked);
+            setConsent(null);
+            setRefused(null);
+          }}
+        />
+
+        <Show when={refused()}>{(why) => <ErrorLine>{why()}</ErrorLine>}</Show>
+
+        <Show
+          when={consent()}
+          fallback={
+            <div class={styles.buttons}>
+              <button
+                type="submit"
+                disabled={path().trim() === "" || reading.isPending}
+              >
+                Read manifest
+              </button>
+              <button
+                type="button"
+                class={`${styles.cancel} secondary`}
+                onClick={close}
+              >
+                Cancel
+              </button>
+            </div>
+          }
+        >
+          {(card) => (
+            <Consent
+              of={card()}
+              verb="Install"
+              pressing={installing.isPending}
+              grant={() => installing.mutate(card().capabilities)}
+              cancel={close}
+            />
+          )}
+        </Show>
+      </form>
+    </Show>
+  );
+}

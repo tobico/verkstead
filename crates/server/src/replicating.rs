@@ -8,7 +8,8 @@
 //! here is each kind's own: what its fields are, where it was kept before it
 //! was a record, and who holds it in memory. Authors are the first, the
 //! Agent Profiles with their bindings the second, the Instructions text the
-//! third, the declared MCP servers the fourth, and the Heirs the fifth.
+//! third, the declared MCP servers the fourth, the Heirs the fifth, and
+//! the installed Plugins the sixth.
 //!
 //! **Every device serves its whole table** of a kind on [`RECORDS`], behind
 //! the Member Gate — live records and removed ones, whoever wrote them — so a
@@ -33,6 +34,7 @@ pub mod authors;
 pub mod heirs;
 pub mod instructions;
 pub mod mcp_servers;
+pub mod plugins;
 pub mod profiles;
 
 use std::future::Future;
@@ -103,6 +105,7 @@ async fn served(State(state): State<AppState>, Path(kind): Path<String>) -> Resp
         instructions::Instructions::NAME => table::<instructions::Instructions>(&state).await,
         mcp_servers::McpServers::NAME => table::<mcp_servers::McpServers>(&state).await,
         crate::store::Heirs::NAME => table::<crate::store::Heirs>(&state).await,
+        plugins::Plugins::NAME => table::<plugins::Plugins>(&state).await,
         _ => (
             StatusCode::NOT_FOUND,
             "this device keeps no records of that kind\n",
@@ -180,7 +183,8 @@ pub(crate) fn pulling(state: &AppState) {
         tokio::spawn(pulled::<crate::store::Bindings>(state.clone()));
         tokio::spawn(pulled::<instructions::Instructions>(state.clone()));
         tokio::spawn(pulled::<crate::store::Heirs>(state.clone()));
-        tokio::spawn(pulled::<mcp_servers::McpServers>(state));
+        tokio::spawn(pulled::<mcp_servers::McpServers>(state.clone()));
+        tokio::spawn(pulled::<plugins::Plugins>(state));
     });
 }
 

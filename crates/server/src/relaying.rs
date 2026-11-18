@@ -617,6 +617,7 @@ pub(crate) enum Read {
     Instructions,
     McpServers,
     Heirs,
+    Plugins,
     Conversations,
 }
 
@@ -628,6 +629,7 @@ impl Read {
             Read::Instructions => "Instructions",
             Read::McpServers => "MCP servers",
             Read::Heirs => "Heirs",
+            Read::Plugins => "Plugins",
             Read::Conversations => "Conversations",
         }
     }
