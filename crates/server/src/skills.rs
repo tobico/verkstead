@@ -381,19 +381,55 @@ pub(crate) fn placed(platform: Platform, data_dir: &Path, packs: &[Placing<'_>])
         }
     }
 
+    // Each pack rewritten in place rather than deleted and made again: a
+    // running session is bound the pack's directory itself, so one made anew
+    // would leave its bind on the deleted one, empty — and on Windows take
+    // the grant on it away. What the pack no longer has is all that goes.
     for placing in packs {
         let pack = path.join(&placing.pack.name);
-        match std::fs::remove_dir_all(&pack) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("clearing the pack at {}", pack.display()));
-            }
-        }
+        let kept = placing
+            .files
+            .within(&placing.pack.directory)
+            .unwrap_or_default();
+        pruned(&pack, Path::new(""), &kept)?;
         written(placing.files, placing.pack, &path, &inside, handoffs)?;
     }
 
+    Ok(())
+}
+
+/// Everything under `dir` that is not one of `kept` nor a directory holding
+/// one, taken away — `at` being `dir`'s place in the pack, and every path in
+/// `kept` relative to the pack. Nothing there at all is nothing to take.
+fn pruned(dir: &Path, at: &Path, kept: &[PathBuf]) -> Result<()> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let inside = at.join(entry.file_name());
+        let directory = entry.file_type().is_ok_and(|kind| kind.is_dir());
+        let gone = if directory {
+            !kept
+                .iter()
+                .any(|file| file.starts_with(&inside) && *file != inside)
+        } else {
+            !kept.contains(&inside)
+        };
+
+        if !gone {
+            if directory {
+                pruned(&entry.path(), &inside, kept)?;
+            }
+            continue;
+        }
+
+        if directory {
+            std::fs::remove_dir_all(entry.path())
+        } else {
+            std::fs::remove_file(entry.path())
+        }
+        .with_context(|| format!("taking {} out of its pack", entry.path().display()))?;
+    }
     Ok(())
 }
 

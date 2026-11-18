@@ -242,6 +242,56 @@ async fn an_installed_plugins_pack_lands_under_its_name_until_it_is_disabled() {
     assert!(!pack.exists(), "a removed plugin's pack is not there");
 }
 
+/// A load rewrites a pack in place: its directory is the one a running
+/// session is bound, so it is the same directory afterwards, and only what the
+/// pack no longer has is taken out of it.
+#[tokio::test]
+async fn a_reload_rewrites_a_pack_in_its_own_directory() {
+    let (app, dir) = kept().await;
+    let path = packing(dir.path(), PLUGIN, "Rust review", "rust-review");
+    installs(&app, &path).await;
+
+    let pack = dir.path().join("skills/rust-review");
+    #[cfg(unix)]
+    let before = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&pack).unwrap());
+
+    std::fs::remove_file(Path::new(&path).join("skills/reviewing/notes.md")).unwrap();
+    let linting = Path::new(&path).join("skills/linting");
+    std::fs::create_dir_all(&linting).unwrap();
+    std::fs::write(
+        linting.join("SKILL.md"),
+        "---\nname: linting\ndescription: Lint Rust.\n---\n",
+    )
+    .unwrap();
+
+    // Any load writes every pack again, so another plugin's install is one.
+    installs(
+        &app,
+        &plugin(
+            dir.path(),
+            "gitlab",
+            &manifest(ANOTHER, "GitLab", &["outbound: gitlab.com"]),
+        ),
+    )
+    .await;
+
+    #[cfg(unix)]
+    assert_eq!(
+        std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&pack).unwrap()),
+        before,
+        "a session bound the pack's directory is still bound the pack",
+    );
+    assert!(pack.join("reviewing/SKILL.md").is_file());
+    assert!(
+        pack.join("linting/SKILL.md").is_file(),
+        "what it gained lands"
+    );
+    assert!(
+        !pack.join("reviewing/notes.md").exists(),
+        "and what it no longer has is gone"
+    );
+}
+
 /// A pack name is one plugin's: the second plugin claiming it loads in
 /// trouble naming the first, and its pack is not written over the first's.
 #[tokio::test]
