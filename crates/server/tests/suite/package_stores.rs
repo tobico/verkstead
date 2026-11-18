@@ -3029,7 +3029,7 @@ async fn uv_fills_one_store_and_a_third_install_reads_it() {
 /// does: *Failed to hardlink files; falling back to full copy*, with the
 /// filesystem named as the likely reason and `UV_LINK_MODE=copy` offered as the
 /// way to silence it. That variable is deliberately not set — see
-/// `crates/server/languages.yaml` — because this warning is the truest account
+/// `plugins/python/plugin.yaml` — because this warning is the truest account
 /// of the thing this stage found, and the day one mount holds both the Worktree
 /// and the store it stops being printed by itself.
 ///

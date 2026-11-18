@@ -547,9 +547,9 @@ a size.
 
 **None of those variable names are Rust's by name in the server.** A language
 is a **descriptor** — data, in one grammar — and the seven Verkstead ships are
-`crates/server/languages.yaml`, embedded in the binary and read by
-`crates/server/src/languages.rs`, which is the module's documentation as well
-as its data: Rust and C/C++, which compile, the four package stores — Go,
+the `language` entries of six built-in plugins under `plugins/` (Rust and C/C++
+share one), embedded in the binary like every built-in and read by
+`crates/server/src/languages.rs`: Rust and C/C++, which compile, the four package stores — Go,
 Node, Python and .NET —
 whose eleven tools download into this directory the same way, and the JVM,
 whose `jvm` entry moves Maven's local repository and Gradle's whole home into it
@@ -564,8 +564,9 @@ again as each session is spawned, so a descriptor hand-edited in between the two
 is one the next session really starts with. A key the grammar does not have is
 refused like a refused variable, so a misspelled one falls back to the built-in
 with a reason rather than silently setting nothing. The grammar
-is [ADR-0021](adr/0021-language-descriptors.md)'s, and the built-ins in
-`crates/server/languages.yaml` are its worked examples.
+is [ADR-0021](adr/0021-language-descriptors.md)'s, written down in
+[Plugins](plugins.md#language), and the built-ins' `plugin.yaml` files are its
+worked examples.
 
 The sccache **server** is Verkstead's own, not the sessions'. It comes up as a
 child of the running server the first time a session starts while a language
