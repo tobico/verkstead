@@ -3,9 +3,13 @@
 Amends [ADR-0011](0011-agent-backends.md), whose *`AgentType` stays a closed
 word list* no longer holds; [ADR-0020](0020-a-conversation-has-a-process.md),
 whose five Processes become five plugins over one engine rather than five
-entry paths into one shared ladder; and [ADR-0021](0021-declared-mcp-servers.md)
-in one respect, said under *Skill packs*. ADR-0004's one binary stands: the
-binary grows a runtime and the built-ins ride inside it.
+entry paths into one shared ladder; [ADR-0021](0021-declared-mcp-servers.md)
+in one respect, said under *Skill packs*; and
+[ADR-0021](0021-language-descriptors.md)'s descriptors, whose embedded
+`languages.yaml` becomes six built-in Language plugins and whose Build caches
+box on the Sandbox page gives way to the Plugins page's tick, said under
+*Language*. ADR-0004's one binary stands: the binary grows a runtime and the
+built-ins ride inside it.
 
 Every harness Verkstead can run is an arm of a closed Rust enum, matched on in
 some forty-five places across twenty files. Every Process is a variant beside

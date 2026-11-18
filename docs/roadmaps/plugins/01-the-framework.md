@@ -94,9 +94,11 @@ whether a directory is a plugin Verkstead would load, and why not.
   first which ones go with it; Remove is refused while an installed plugin
   depends on it, naming them. The checks that a Process or an Activity
   declares what it names are stages 08 and 11's, over this grammar.
-- **The word is *Plugin*** (Set 1760, Q6). CONTEXT.md's three Avoid entries
-  that name the word — MCP server, Components, Skill — stand, since each says
-  not to call *that* a plugin.
+- **The word is *Plugin*** (Set 1760, Q6). CONTEXT.md has four Avoid entries
+  that name the word. Three — MCP server, Components, Skill — stand, since each
+  says not to call *that* a plugin. The fourth, the **Descriptor**'s *language
+  plugin*, does not, a descriptor being a Language Plugin's block from stage 02
+  on; the entry was revised when this roadmap was staged.
 - **The page sits at the foot of the settings list** beside Agent Profiles and
   Repos, the other two lists of things Verkstead runs on.
 - **The built-in components are built once and embedded everywhere.** A
@@ -167,5 +169,5 @@ whether a directory is a plugin Verkstead would load, and why not.
   `plugins/` must be a sibling it never touches.
 - The MCP servers section is still the model for a list with add and remove
   and for a secret kept beside a record (ADR-0021, ADR-0028).
-- The three Avoid entries naming *plugin* still read as they did, and nothing
-  else in CONTEXT.md has since claimed the word.
+- The three Avoid entries naming *plugin* that stand still read as they did,
+  and nothing else in CONTEXT.md has since claimed the word.
