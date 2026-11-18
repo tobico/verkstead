@@ -46,10 +46,18 @@ descriptor switches on by name.
   from the installer, in the Installed group, so an installer that adds a
   language still gets its box with no code change — the one promise the
   descriptor made that this stage must keep.
-- **The `enabled` key** in `config.yaml` is taken up into the plugin record's
-  enabled flag once at the first start after this lands, the way each
-  Replicated record kind took up its `config.yaml` key (ADR-0028), and is not
-  written again.
+- **Both go cluster-wide** (Set 1771, Q2). A language's tick and its store
+  size live in each device's `config.yaml` today; from here the tick is the
+  plugin record's enabled flag and the size is a plugin setting on that
+  record, so both are the cluster's, like every other plugin's. A device short
+  of disk turns a language off, or its cache down, for every device. Keeping
+  the size per device was offered and turned down.
+- **The `enabled` key and the size** in `config.yaml` are taken up into the
+  record once at the first start after this lands, the way each Replicated
+  record kind took up its `config.yaml` key (ADR-0028), and are not written
+  again. Devices that disagree resolve **on wins** — a language any device had
+  on is on — and **the larger size wins**, so the take-up never turns off or
+  shrinks a cache somebody was using.
 
 ## Proposed tasks (provisional)
 
@@ -69,9 +77,11 @@ descriptor switches on by name.
    language rows; the Compile Server's own state is still shown where it was.
 5. **The override and the take-up** — `languages:` merges over the plugin of
    the same name, an unknown name becomes an installer-provided plugin,
-   `enabled` is taken up once. AC: an installer's variable override still wins;
-   a language enabled `false` before this lands is unticked after it; a
-   `languages:` entry naming an eighth language draws an eighth row.
+   `enabled` and the size are taken up once. AC: an installer's variable
+   override still wins; a language enabled `false` on every device before this
+   lands is unticked after it, and one enabled on any device is ticked; two
+   devices' sizes take up as the larger; a `languages:` entry naming an eighth
+   language draws an eighth row.
 
 ## Re-verify at start
 
