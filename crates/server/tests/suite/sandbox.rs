@@ -4063,12 +4063,13 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
         &sandbox,
         &format!(
             r#"
-            file "/verkstead/skills/grilling/SKILL.md" grilling
+            file "/verkstead/skills/verkstead/grilling/SKILL.md" grilling
+            file "/verkstead/skills/grilling/SKILL.md" unpacked
             say installed "$(ls /verkstead/skills | sort | tr '\n' ' ')"
             say verkstead "$(ls /verkstead | sort | tr '\n' ' ')"
             file "$HOME/.claude/CLAUDE.md" claude-md
             dir {tobico} tobico-skills
-            if {grep} -q 'verkstead ask' "/verkstead/skills/grilling/SKILL.md"; then
+            if {grep} -q 'verkstead ask' "/verkstead/skills/verkstead/grilling/SKILL.md"; then
                 say ask-instruction inside
             else
                 say ask-instruction missing
@@ -4082,6 +4083,14 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
     assert_eq!(
         reported["grilling"], "read",
         "the bundled grilling skill is installed, and is not a session's to rewrite"
+    );
+    assert_eq!(
+        reported["unpacked"], "absent",
+        "a skill is named with its pack, and is not where it was before it had one"
+    );
+    assert_eq!(
+        reported["installed"], "verkstead ",
+        "the mount holds a directory per pack, and the bundled skills are one"
     );
     assert_eq!(
         reported["installed"],

@@ -2946,8 +2946,10 @@ they were installed in where it cannot, which is the whole of the difference: a
 session is put inside a Skill by the prompt it is started on, which names it
 above the Brief, and what a prompt names is where the file really is. What the
 account keeps under its own skills is not reachable at all. **Grouped in Skill
-Packs** from the plugins roadmap on, and named `<pack>/<skill>` — see **Skill
-Pack**, and ADR-0030.
+Packs**, and named `<pack>/<skill>` everywhere one is named: Verkstead's own are
+the pack `verkstead`, so a session is sent to
+`/verkstead/skills/verkstead/grilling/SKILL.md` — see **Skill Pack**, and
+ADR-0030.
 _Avoid_: prompt, instructions, plugin, workflow file
 
 **Plugin**:

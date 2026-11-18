@@ -773,7 +773,11 @@ flowchart LR
   file is the human's own words to every session of every conversation and
   never a place for Verkstead to say which skill this one is running, and the
   host's own is not bound in at all, so the prompt is still where a session is
-  sent into a skill.
+  sent into a skill. *Refined 2026-11-18, building plugins/07-skill-packs*: the
+  thirteen are one Skill Pack named `verkstead`, installed under
+  `skills/verkstead/` and named `<pack>/<skill>` — a session is sent to
+  `/verkstead/skills/verkstead/grilling/SKILL.md` — so the mount holds a
+  directory per pack ([ADR-0030](../adr/0030-plugins.md), *Skill packs*).
 - **Verkstead itself reaches GitHub through host `gh`** (CI status, PR commit
   lists and comments), authenticating as the same configured token the sessions
   get — `GH_TOKEN` in the environment of each call, read from `secrets.yaml` at
