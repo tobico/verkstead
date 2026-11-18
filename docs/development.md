@@ -1694,3 +1694,32 @@ against a newer server; `web/tests/nudging.test.tsx` sweeps the generated
 fixture and fails on a kind the table has forgotten. Nothing polls: what stands
 behind a Nudge that never landed is the catch-up on reconnect and on the page
 becoming visible again.
+
+## Built-in plugins
+
+The **Plugins** Verkstead ships are directories under [`plugins/`](../plugins),
+each a `plugin.yaml` and, where it has code, a crate built as its wasm
+component for `wasm32-wasip2` — the crate in `plugins/<name>/` names its
+`[lib]` `<name>`, and its manifest's `component:` is `<name>.wasm`. They are a
+workspace of their own, never built for the host, and
+[`crates/server/build.rs`](../crates/server/build.rs) embeds every one in the
+server, where the start loads them through the same loader an installed plugin
+goes through ([ADR-0030](adr/0030-plugins.md)). Today there is one, the
+**fixture**, which provides nothing, exports nothing and is listed nowhere: it
+is the proof that the path works on every platform.
+
+The build script looks for the components in `plugins/dist/` first, which is
+where the release and CI workflows put the one build of them every leg
+embeds. Where they are not there it builds them itself, into its own
+`OUT_DIR`, so a plain `cargo build` needs nothing done first — the dev shell's
+toolchain has `wasm32-wasip2`. A toolchain without it refuses the build
+naming `rustup target add wasm32-wasip2`, or the two commands that leave the
+components where the script looks:
+
+```console
+$ cargo build --release --target wasm32-wasip2 --manifest-path plugins/Cargo.toml
+$ mkdir -p plugins/dist && cp plugins/target/wasm32-wasip2/release/*.wasm plugins/dist/
+```
+
+`plugins/dist/` is gitignored and wins whenever it is there, so delete it after
+changing a component's source, or the server goes on embedding the old build.

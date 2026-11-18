@@ -30,7 +30,7 @@ use wasmtime_wasi_http::{
     WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks, WasiHttpView, default_hooks,
 };
 
-use super::manifest::{Access, Capability, Manifest};
+use super::manifest::{Access, Capability, Files, Manifest};
 
 /// The bindings to `wit/plugin.wit`: the base world every component is checked
 /// against, and one world per Category with nothing in it yet.
@@ -157,11 +157,12 @@ impl WasiHttpHooks for Outbound {
 /// The one engine every component is compiled by.
 static ENGINE: LazyLock<Engine> = LazyLock::new(Engine::default);
 
-/// Instantiate `manifest`'s component, read out of `dir`, under its
-/// capabilities, with `home` as what a leading `~` in a granted path means.
-/// `Ok(None)` is a plugin with no component, which has nothing to load.
+/// Instantiate `manifest`'s component, read out of `files` — an installed
+/// plugin's directory or a built-in's embedded files, the one loader for both —
+/// under its capabilities, with `home` as what a leading `~` in a granted path
+/// means. `Ok(None)` is a plugin with no component, which has nothing to load.
 pub async fn load(
-    dir: &Path,
+    files: Files<'_>,
     manifest: &Manifest,
     home: Option<&Path>,
 ) -> Result<Option<Loaded>, Trouble> {
@@ -169,9 +170,9 @@ pub async fn load(
         return Ok(None);
     };
 
-    let bytes = std::fs::read(dir.join(file)).map_err(|error| {
+    let bytes = files.read(file).ok_or_else(|| {
         Trouble::of(format!(
-            "The component `{}` couldn't be read: {error}.",
+            "The component `{}` couldn't be read.",
             file.display()
         ))
     })?;

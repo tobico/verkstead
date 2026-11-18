@@ -24,7 +24,7 @@ use anyhow::{Result, bail};
 use clap::Subcommand;
 use verkstead_server::platform::{Environment, Platform, home_dir};
 use verkstead_server::plugins::component;
-use verkstead_server::plugins::manifest::{Manifest, platform_key};
+use verkstead_server::plugins::manifest::{Files, Manifest, platform_key};
 
 /// Which of the plugin verbs this is.
 #[derive(Debug, Subcommand)]
@@ -54,7 +54,7 @@ fn check(dir: &Path) -> Result<()> {
                 let loaded = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()?
-                    .block_on(component::load(dir, &manifest, home.as_deref()));
+                    .block_on(component::load(Files::Dir(dir), &manifest, home.as_deref()));
                 if let Err(trouble) = loaded {
                     bail!(
                         "{} isn't a plugin Verkstead would load.\n{trouble}",

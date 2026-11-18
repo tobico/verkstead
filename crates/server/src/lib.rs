@@ -2506,6 +2506,26 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     let skills = skills::Skills::installed(platform::Platform::HERE, &data_dir)
         .context("installing the skills every sandbox is given")?;
 
+    // And the Plugins this binary ships, each read and its wasm component
+    // started through the loader an installed plugin goes through — see
+    // [`plugins::built_in`]. One that fails to load is trouble, said here, and
+    // never a start that stops (Set 1762, Q15).
+    let built_ins =
+        plugins::built_in::started(platform::Platform::HERE, Some(homes.servers())).await;
+    for started in &built_ins {
+        if let Some(trouble) = &started.trouble {
+            tracing::warn!(
+                plugin = started.name(),
+                %trouble,
+                "a built-in plugin didn't load, and is left out",
+            );
+        }
+    }
+    let built_ins_loaded = built_ins
+        .iter()
+        .filter(|started| started.trouble.is_none())
+        .count();
+
     // And where the credentials are read from, which is the same directory
     // again — both the ones a session runs with and the one the server's own
     // `gh` authenticates as. Nothing is read here: the files are read as each
@@ -2717,6 +2737,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         build_cache = ?cache.dir(),
         caches_compiles = cache.caches_compiles(),
         skills = %skills.path().display(),
+        built_in_plugins = built_ins_loaded,
         verkstead = ?verkstead.as_ref().map(sandbox::Executable::path),
         "verkstead is listening",
     );
