@@ -15,6 +15,14 @@
 //! its row reads the manifest again, which is the development loop: edit, then
 //! press.
 //!
+//! **A git plugin is every device's** (Set 1762, Q10): the record holds its
+//! URL and the revision pinned at install, and each device clones it for
+//! itself under `plugins/<uuid>/` — see [`super::git`] — loading it once the
+//! clone is at that revision, and in trouble until it can be. **Update** on its
+//! row fetches the default branch and re-pins the record, which the other
+//! devices follow. A fetch that fails, or a manifest there that doesn't read,
+//! leaves the old checkout loaded and the row saying why.
+//!
 //! **Install is the grant, and the whole of it** (ADR-0030, *Capabilities and
 //! trust*). The consent card is read off the manifest with nothing written,
 //! and the press carries back the capabilities the card showed: a manifest
@@ -24,7 +32,7 @@
 //! confirmed.
 
 use std::collections::BTreeMap;
-use std::path::Path as FsPath;
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -42,8 +50,10 @@ use verkstead_schema::{ApiError, Nudge};
 
 use super::built_in::BUILT_INS;
 use super::component;
+use super::git::{self, Staged};
 use super::manifest::{Access, Capability, Files, Manifest};
 use crate::AppState;
+use crate::github::Credential;
 use crate::platform::Platform;
 use crate::replicating::plugins::{Fields, Plugins, Source};
 use crate::store::replicated::{self, Record, Written};
@@ -56,19 +66,42 @@ use crate::ui::refused;
 pub(crate) struct Installed {
     troubles: Arc<Mutex<BTreeMap<String, String>>>,
 
+    /// Why the last **Update** of a git plugin didn't land, by uuid: the old
+    /// checkout stays loaded, and the row says so until an Update does.
+    pulls: Arc<Mutex<BTreeMap<String, String>>>,
+
     /// Held across one load, so two never interleave their writes of the
     /// troubles.
     loading: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Installed {
-    /// Why `uuid` did not load here, where it did not.
+    /// Why `uuid` did not load here, where it did not — or why its last
+    /// Update didn't land, where it loaded at the revision before.
     pub(crate) fn trouble(&self, uuid: &str) -> Option<String> {
-        self.troubles
+        let loading = self
+            .troubles
             .lock()
             .expect("nothing panics holding the troubles")
             .get(uuid)
-            .cloned()
+            .cloned();
+
+        loading.or_else(|| {
+            self.pulls
+                .lock()
+                .expect("nothing panics holding the pulls")
+                .get(uuid)
+                .cloned()
+        })
+    }
+
+    /// What `uuid`'s Update came to: why it didn't land, or nothing.
+    fn pulled(&self, uuid: &str, why: Option<String>) {
+        let mut pulls = self.pulls.lock().expect("nothing panics holding the pulls");
+        match why {
+            Some(why) => pulls.insert(uuid.to_owned(), why),
+            None => pulls.remove(uuid),
+        };
     }
 }
 
@@ -79,6 +112,7 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
 
     let home = crate::sandbox::Homes::of_the_server(&state.data_dir)
         .map(|homes| homes.servers().to_owned());
+    let credential = credential(state);
 
     let mut troubles = BTreeMap::new();
     for record in replicated::live_records::<Plugins>(&state.pool).await? {
@@ -86,7 +120,7 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
             continue;
         }
 
-        if let Err(trouble) = loaded(&record, home.as_deref()).await {
+        if let Err(trouble) = loaded(state, &record, home.as_deref(), &credential).await {
             tracing::warn!(
                 plugin = record.fields.name,
                 uuid = record.uuid,
@@ -134,22 +168,44 @@ fn reachable(state: &AppState, fields: &Fields) -> bool {
 fn on_this_device(state: &AppState, fields: &Fields) -> bool {
     match &fields.source {
         Source::Local { device, .. } => *device == state.device,
+        Source::Git { .. } => true,
     }
 }
 
-/// One plugin read and its wasm component started, or why not.
-async fn loaded(record: &Record<Fields>, home: Option<&FsPath>) -> Result<(), String> {
-    let Source::Local { path, .. } = &record.fields.source;
-    let dir = FsPath::new(path);
+/// What a plugin's clone and pull authenticate as: the one Author where there
+/// is one, the host's login otherwise — a Repo's clone with no Author picked.
+fn credential(state: &AppState) -> Credential {
+    state.github.as_author(None).credential()
+}
 
-    let manifest = Manifest::read(dir, Platform::HERE).map_err(|refusal| refusal.why)?;
+/// One plugin read and its wasm component started, or why not. A git plugin's
+/// clone is put at its pinned revision first, made where this device has none.
+async fn loaded(
+    state: &AppState,
+    record: &Record<Fields>,
+    home: Option<&FsPath>,
+    credential: &Credential,
+) -> Result<(), String> {
+    let dir = match &record.fields.source {
+        Source::Local { path, .. } => PathBuf::from(path),
+        Source::Git { url, revision } => {
+            let (data_dir, uuid, url, revision, credential) = (
+                state.data_dir.clone(),
+                record.uuid.clone(),
+                url.clone(),
+                revision.clone(),
+                credential.clone(),
+            );
+            tokio::task::spawn_blocking(move || {
+                git::pinned(&data_dir, &uuid, &url, &revision, &credential)
+            })
+            .await
+            .map_err(|error| format!("Its clone couldn't be checked: {error}."))??
+        }
+    };
 
-    if manifest.uuid != record.uuid {
-        return Err(format!(
-            "Its `plugin.yaml` now has the uuid `{}`, so it's another plugin. Put back `{}`.",
-            manifest.uuid, record.uuid,
-        ));
-    }
+    let manifest = Manifest::read(&dir, Platform::HERE).map_err(|refusal| refusal.why)?;
+    same_plugin(&manifest, &record.uuid)?;
 
     if !within(&manifest, &record.fields.granted) {
         return Err(
@@ -157,10 +213,23 @@ async fn loaded(record: &Record<Fields>, home: Option<&FsPath>) -> Result<(), St
         );
     }
 
-    component::load(Files::Dir(dir), &manifest, home)
+    component::load(Files::Dir(&dir), &manifest, home)
         .await
         .map(drop)
         .map_err(|trouble| trouble.why)
+}
+
+/// Refused where `manifest` has another uuid than the record `uuid` it was
+/// read for.
+fn same_plugin(manifest: &Manifest, uuid: &str) -> Result<(), String> {
+    if manifest.uuid == uuid {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Its `plugin.yaml` now has the uuid `{}`, so it's another plugin. Put back `{uuid}`.",
+        manifest.uuid,
+    ))
 }
 
 /// Whether every capability `manifest` asks for is among `granted`.
@@ -245,7 +314,19 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
         .into_iter()
         .map(|record| {
             let here = on_this_device(state, &record.fields);
-            let Source::Local { path, device } = &record.fields.source;
+            let (source, elsewhere) = match &record.fields.source {
+                Source::Local { path, device } => (
+                    PluginSource::Local { path: path.clone() },
+                    (!here).then(|| names.get(device).cloned().unwrap_or_else(|| device.clone())),
+                ),
+                Source::Git { url, revision } => (
+                    PluginSource::Git {
+                        url: url.clone(),
+                        revision: revision.clone(),
+                    },
+                    None,
+                ),
+            };
 
             PluginRow {
                 trouble: if here && record.fields.enabled {
@@ -253,9 +334,8 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                 } else {
                     None
                 },
-                elsewhere: (!here)
-                    .then(|| names.get(device).cloned().unwrap_or_else(|| device.clone())),
-                source: PluginSource::Local { path: path.clone() },
+                elsewhere,
+                source,
                 uuid: record.uuid,
                 name: record.fields.name,
                 version: record.fields.version,
@@ -304,22 +384,65 @@ fn failed(error: anyhow::Error) -> Response {
     )
 }
 
-/// The manifest at a path the human typed or browsed to, refused where it
-/// isn't a plugin this device could install.
-async fn readable(state: &AppState, path: &str) -> Result<Manifest, Response> {
+/// Where a plugin being added was read: a directory, or a clone of a URL
+/// staged under `plugins/`, taken back unless **Install** lands it.
+enum Reading {
+    Local(PathBuf),
+    Git { url: String, staged: Staged },
+}
+
+impl Reading {
+    fn dir(&self) -> &FsPath {
+        match self {
+            Reading::Local(dir) => dir,
+            Reading::Git { staged, .. } => staged.path(),
+        }
+    }
+}
+
+/// The manifest at a path the human typed or browsed to, or in a clone of the
+/// git URL they gave, refused where it isn't a plugin this device could
+/// install. Refused before anything is listed or written, a clone that didn't
+/// land included.
+async fn readable(state: &AppState, asked: &str) -> Result<(Manifest, Reading), Response> {
     let refusal = |why: String| refused(StatusCode::BAD_REQUEST, ApiError::new(why));
+    let asked = asked.trim();
 
-    let dir = FsPath::new(path.trim());
-    if !dir.is_absolute() {
-        return Err(refusal(
-            "That isn't an absolute path. Name the plugin's directory from the root.".to_owned(),
-        ));
-    }
-    if !dir.is_dir() {
-        return Err(refusal("There's no directory there.".to_owned()));
-    }
+    let reading = if git::is_url(asked) {
+        let (data_dir, url, credential) =
+            (state.data_dir.clone(), asked.to_owned(), credential(state));
+        let staged =
+            tokio::task::spawn_blocking(move || git::staged(&data_dir, &url, &credential)).await;
 
-    let manifest = Manifest::read(dir, Platform::HERE).map_err(|refusal_| refusal(refusal_.why))?;
+        match staged {
+            Ok(Ok(staged)) => Reading::Git {
+                url: asked.to_owned(),
+                staged,
+            },
+            Ok(Err(why)) => {
+                return Err(refusal(format!(
+                    "That repository couldn't be cloned. Git said: {why}"
+                )));
+            }
+            Err(error) => return Err(failed(error.into())),
+        }
+    } else {
+        let dir = FsPath::new(asked);
+        if !dir.is_absolute() {
+            return Err(refusal(
+                "That isn't an absolute path or a git URL. Name the plugin's directory from the \
+                 root, or give its repository's URL."
+                    .to_owned(),
+            ));
+        }
+        if !dir.is_dir() {
+            return Err(refusal("There's no directory there.".to_owned()));
+        }
+        Reading::Local(dir.to_owned())
+    };
+
+    let manifest =
+        Manifest::read(reading.dir(), Platform::HERE).map_err(|refusal_| refusal(refusal_.why))?;
 
     let built_in = BUILT_INS.iter().any(|built_in| {
         Manifest::parse(
@@ -353,22 +476,25 @@ async fn readable(state: &AppState, path: &str) -> Result<Manifest, Response> {
         ));
     }
 
-    Ok(manifest)
+    Ok((manifest, reading))
 }
 
-/// `POST /api/ui/plugins/read` — the consent card for the plugin at a path.
+/// `POST /api/ui/plugins/read` — the consent card for the plugin at a path or
+/// a git URL, a clone of which is taken back once it is read.
 async fn read(State(state): State<AppState>, Json(at): Json<PluginAt>) -> Response {
-    match readable(&state, &at.path).await {
-        Ok(manifest) => Json(consent(&manifest)).into_response(),
+    match readable(&state, &at.source).await {
+        Ok((manifest, _)) => Json(consent(&manifest)).into_response(),
         Err(refusal) => refusal,
     }
 }
 
-/// `POST /api/ui/plugins` — **Install**: the plugin at the path written down
-/// with the capabilities the card showed granted, and loaded.
+/// `POST /api/ui/plugins` — **Install**: the plugin at the path or URL written
+/// down with the capabilities the card showed granted, and loaded. A git one is
+/// cloned again, and that clone is what lands under `plugins/<uuid>/`, its
+/// revision pinned on the record.
 async fn install(State(state): State<AppState>, Json(press): Json<PluginInstall>) -> Response {
-    let manifest = match readable(&state, &press.path).await {
-        Ok(manifest) => manifest,
+    let (manifest, reading) = match readable(&state, &press.source).await {
+        Ok(read) => read,
         Err(refusal) => return refusal,
     };
 
@@ -379,13 +505,35 @@ async fn install(State(state): State<AppState>, Json(press): Json<PluginInstall>
         );
     }
 
-    let source = Source::Local {
-        path: press.path.trim().to_owned(),
-        device: state.device.clone(),
+    let checkout = git::checkout(&state.data_dir, &manifest.uuid);
+    let source = match reading {
+        Reading::Local(dir) => Source::Local {
+            path: dir.to_string_lossy().into_owned(),
+            device: state.device.clone(),
+        },
+        Reading::Git { url, staged } => {
+            let revision = staged.revision().to_owned();
+            let to = checkout.clone();
+            match tokio::task::spawn_blocking(move || staged.lands(&to)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(why)) => {
+                    return refused(StatusCode::INTERNAL_SERVER_ERROR, ApiError::new(why));
+                }
+                Err(error) => return failed(error.into()),
+            }
+            Source::Git { url, revision }
+        }
     };
+    let git = matches!(source, Source::Git { .. });
     let fields = fields(&manifest, source, true);
 
-    match replicated::write::<Plugins>(&state.pool, &state.device, &manifest.uuid, &fields).await {
+    let written =
+        replicated::write::<Plugins>(&state.pool, &state.device, &manifest.uuid, &fields).await;
+    if git && !matches!(written, Ok(Written::Written | Written::Unchanged)) {
+        taken_back(checkout).await;
+    }
+
+    match written {
         Ok(Written::Removed) => {
             return refused(
                 StatusCode::CONFLICT,
@@ -403,6 +551,14 @@ async fn install(State(state): State<AppState>, Json(press): Json<PluginInstall>
     match moved(&state).await {
         Ok(plugins) => Json(plugins).into_response(),
         Err(refusal) => refusal,
+    }
+}
+
+/// Take back a clone whose record was never written.
+async fn taken_back(checkout: PathBuf) {
+    let gone = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(checkout)).await;
+    if let Ok(Err(error)) = gone {
+        tracing::error!(error = ?error, "a plugin's clone that never installed couldn't be taken back");
     }
 }
 
@@ -431,11 +587,54 @@ async fn held(state: &AppState, uuid: &str) -> Result<Record<Fields>, Response> 
     }
 }
 
-/// `POST /api/ui/plugins/{uuid}/update` — **Update**: a local plugin's
-/// manifest read again. Where it now asks for more than was granted the
-/// consent card comes back first, and the press made again with the grant it
-/// showed lands it. A manifest that doesn't read leaves the record as it was
-/// and the plugin in trouble.
+/// What a manifest read at an **Update** asks of the grant.
+enum Granting {
+    /// Nothing beyond what was granted: that grant stands, rather than
+    /// narrowing to what this read of the manifest happens to name.
+    Stands,
+    /// More, and the press carried the grant the card showed for it.
+    Grants,
+    /// More, and the card is to be shown first.
+    Shows(PluginConsent),
+    /// More than even the card the press carried showed.
+    Short,
+}
+
+fn granting(manifest: &Manifest, granted: &[PluginCapability], press: &PluginUpdate) -> Granting {
+    match &press.granted {
+        _ if within(manifest, granted) => Granting::Stands,
+        None => Granting::Shows(consent(manifest)),
+        Some(granted) if within(manifest, granted) => Granting::Grants,
+        Some(_) => Granting::Short,
+    }
+}
+
+/// The record's fields after an Update read `manifest` from `source`.
+fn updated(
+    record: &Record<Fields>,
+    manifest: &Manifest,
+    source: Source,
+    granting: Granting,
+) -> Fields {
+    let mut fields = fields(manifest, source, record.fields.enabled);
+    if let Granting::Stands = granting {
+        fields.granted = record.fields.granted.clone();
+    }
+    fields
+}
+
+fn short_of_the_card() -> Response {
+    refused(
+        StatusCode::CONFLICT,
+        ApiError::new("Its manifest asks for more than the card showed. Press Update again."),
+    )
+}
+
+/// `POST /api/ui/plugins/{uuid}/update` — **Update**. A local plugin's
+/// manifest is read again; a git plugin's default branch is fetched and read
+/// at its new revision. Where the manifest now asks for more than was granted
+/// the consent card comes back first, and the press made again with the grant
+/// it showed lands it.
 async fn update(
     State(state): State<AppState>,
     Path(uuid): Path<String>,
@@ -453,52 +652,143 @@ async fn update(
         );
     }
 
-    let Source::Local { path, .. } = &record.fields.source;
-
-    if let Ok(manifest) = Manifest::read(FsPath::new(path), Platform::HERE)
-        && manifest.uuid == record.uuid
-    {
-        let granted = match &press.granted {
-            _ if within(&manifest, &record.fields.granted) => None,
-            None => {
-                return Json(PluginUpdated::Consent {
-                    consent: consent(&manifest),
-                })
-                .into_response();
-            }
-            Some(granted) if within(&manifest, granted) => Some(granted),
-            Some(_) => {
-                return refused(
-                    StatusCode::CONFLICT,
-                    ApiError::new(
-                        "Its manifest asks for more than the card showed. Press Update again.",
-                    ),
-                );
-            }
-        };
-
-        let mut fields = fields(
-            &manifest,
-            record.fields.source.clone(),
-            record.fields.enabled,
-        );
-        if granted.is_none() {
-            // Nothing new asked for: what was granted stands, rather than
-            // narrowing to what this read of the manifest happens to name.
-            fields.granted = record.fields.granted.clone();
+    let answered = match &record.fields.source {
+        Source::Local { path, .. } => update_local(&state, &record, path, &press).await,
+        Source::Git { url, revision } => {
+            // Held so that no load puts the clone back at the pinned revision
+            // while the new one is being read.
+            let _one = state.plugins.loading.lock().await;
+            update_git(&state, &record, url, revision, &press).await
         }
-
-        if let Err(error) =
-            replicated::rewrite::<Plugins>(&state.pool, &state.device, &uuid, &fields).await
-        {
-            return failed(error);
-        }
+    };
+    if let Some(refusal) = answered {
+        return refusal;
     }
 
     match moved(&state).await {
         Ok(plugins) => Json(PluginUpdated::Updated { plugins }).into_response(),
         Err(refusal) => refusal,
     }
+}
+
+/// A local plugin's manifest read again, and the record written over what it
+/// says — or the answer that comes first. A manifest that doesn't read leaves
+/// the record as it was, and loading it again is what puts trouble on the row.
+async fn update_local(
+    state: &AppState,
+    record: &Record<Fields>,
+    path: &str,
+    press: &PluginUpdate,
+) -> Option<Response> {
+    let manifest = Manifest::read(FsPath::new(path), Platform::HERE).ok()?;
+    if manifest.uuid != record.uuid {
+        return None;
+    }
+
+    let granting = match granting(&manifest, &record.fields.granted, press) {
+        Granting::Shows(consent) => {
+            return Some(Json(PluginUpdated::Consent { consent }).into_response());
+        }
+        Granting::Short => return Some(short_of_the_card()),
+        granting => granting,
+    };
+
+    let fields = updated(record, &manifest, record.fields.source.clone(), granting);
+    if let Err(error) =
+        replicated::rewrite::<Plugins>(&state.pool, &state.device, &record.uuid, &fields).await
+    {
+        return Some(failed(error));
+    }
+
+    None
+}
+
+/// A git plugin's default branch fetched into this device's clone and read at
+/// its new revision, which the record is re-pinned to — or the answer that
+/// comes first. Anything short of landing puts the clone back at `pinned`, and
+/// a fetch that failed or a manifest that doesn't read is the row's trouble
+/// with the old checkout still loaded.
+async fn update_git(
+    state: &AppState,
+    record: &Record<Fields>,
+    url: &str,
+    pinned: &str,
+    press: &PluginUpdate,
+) -> Option<Response> {
+    let (data_dir, uuid, url_, pinned_, credential) = (
+        state.data_dir.clone(),
+        record.uuid.clone(),
+        url.to_owned(),
+        pinned.to_owned(),
+        credential(state),
+    );
+    let pulled = tokio::task::spawn_blocking(move || {
+        let dir = git::pinned(&data_dir, &uuid, &url_, &pinned_, &credential)?;
+        let revision = git::fetched(&dir, &credential).map_err(|why| {
+            format!(
+                "The pull failed, so it's still at {}. Git said: {why}",
+                git::short(&pinned_)
+            )
+        })?;
+        git::check_out(&dir, &revision)?;
+
+        let manifest = Manifest::read(&dir, Platform::HERE)
+            .map_err(|refusal| refusal.why)
+            .and_then(|manifest| same_plugin(&manifest, &uuid).map(|()| manifest));
+        match manifest {
+            Ok(manifest) => Ok((dir, revision, manifest)),
+            Err(why) => {
+                git::check_out(&dir, &pinned_)?;
+                Err(format!(
+                    "The pull to {} wasn't taken, so it's still at {}. {why}",
+                    git::short(&revision),
+                    git::short(&pinned_),
+                ))
+            }
+        }
+    })
+    .await;
+
+    let (dir, revision, manifest) = match pulled {
+        Ok(Ok(pulled)) => pulled,
+        Ok(Err(why)) => {
+            state.plugins.pulled(&record.uuid, Some(why));
+            return None;
+        }
+        Err(error) => return Some(failed(error.into())),
+    };
+
+    let put_back = |answer: Response| async {
+        let pinned = pinned.to_owned();
+        if let Ok(Err(why)) =
+            tokio::task::spawn_blocking(move || git::check_out(&dir, &pinned)).await
+        {
+            tracing::error!(%why, "a plugin's clone couldn't be put back at its pinned revision");
+        }
+        Some(answer)
+    };
+
+    let granting = match granting(&manifest, &record.fields.granted, press) {
+        Granting::Shows(consent) => {
+            return put_back(Json(PluginUpdated::Consent { consent }).into_response()).await;
+        }
+        Granting::Short => return put_back(short_of_the_card()).await,
+        granting => granting,
+    };
+
+    let source = Source::Git {
+        url: url.to_owned(),
+        revision,
+    };
+    let fields = updated(record, &manifest, source, granting);
+    if let Err(error) =
+        replicated::rewrite::<Plugins>(&state.pool, &state.device, &record.uuid, &fields).await
+    {
+        return put_back(failed(error)).await;
+    }
+
+    state.plugins.pulled(&record.uuid, None);
+    None
 }
 
 /// `POST /api/ui/plugins/{uuid}/enabled` — the checkbox, which is the

@@ -13,12 +13,13 @@
 //! nothing of it is loaded here.
 //!
 //! **Add a plugin…** takes a browsed path, the field the Agent Profiles use,
-//! and reads its manifest into the **consent card**: who it is, what it
-//! provides and every capability it asks for. **Install** is the grant, and
-//! the whole of it (ADR-0030, *Capabilities and trust*); the press carries
-//! back what the card showed, so a manifest asking for more by then is refused
-//! rather than installed. **Update** on a local row reads the manifest again,
-//! and shows the card first where it now asks for more.
+//! or a git URL typed into it, and reads its manifest into the **consent
+//! card**: who it is, what it provides and every capability it asks for.
+//! **Install** is the grant, and the whole of it (ADR-0030, *Capabilities and
+//! trust*); the press carries back what the card showed, so a manifest asking
+//! for more by then is refused rather than installed. **Update** on a local
+//! row reads the manifest again, and on a git row pulls; either shows the card
+//! first where it now asks for more. Nothing fetches on its own.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -175,7 +176,7 @@ export function PluginsPane(props: {
                   fallback={
                     <Empty>
                       No plugins are installed yet. Add one from a directory
-                      with a <code>plugin.yaml</code>.
+                      or a git repository with a <code>plugin.yaml</code>.
                     </Empty>
                   }
                 >
@@ -265,7 +266,8 @@ function Row(props: {
   of: PluginRow;
   pressing: boolean;
   flip: (enabled: boolean) => void;
-  /// **Update**, where the row has one: a local plugin on this device.
+  /// **Update**, where the row has one: a git plugin, or a local plugin on
+  /// this device.
   update?: () => void;
   refused: string | null;
   /// What is drawn under the row: the consent card an Update came back with.
@@ -309,7 +311,7 @@ function Row(props: {
         <p class={styles.provides}>Provides {props.of.provides.join(", ")}.</p>
       </Show>
 
-      <p class={styles.source}>{props.of.source.path}</p>
+      <p class={styles.source}>{source(props.of)}</p>
 
       <Show when={props.of.elsewhere}>
         {(device) => <Note>On {device()}. It's loaded there.</Note>}
@@ -324,6 +326,17 @@ function Row(props: {
       {props.children}
     </li>
   );
+}
+
+/// Where a row's plugin came from: its directory, or its repository and the
+/// revision this cluster is pinned to.
+function source(row: PluginRow): string {
+  switch (row.source.kind) {
+    case "Local":
+      return row.source.path;
+    case "Git":
+      return `${row.source.url} at ${row.source.revision.slice(0, 7)}`;
+  }
 }
 
 /// What one capability is, in a few words.
@@ -416,7 +429,8 @@ function Consent(props: {
   );
 }
 
-/// **Add a plugin…**: a browsed path, its consent card, and **Install**.
+/// **Add a plugin…**: a browsed path or a git URL, its consent card, and
+/// **Install**.
 function Adding(props: { installed: (view: PluginsView) => void }): JSX.Element {
   const [open, setOpen] = createSignal(false);
   const [path, setPath] = createSignal("");
@@ -469,7 +483,7 @@ function Adding(props: { installed: (view: PluginsView) => void }): JSX.Element 
           reading.mutate(path());
         }}
       >
-        <label for="plugin-path">Directory</label>
+        <label for="plugin-path">Directory or git URL</label>
         <PathField
           id="plugin-path"
           placeholder="/home/you/src/my-plugin"

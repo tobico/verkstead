@@ -18,7 +18,8 @@ import consent from "./fixtures/plugin-consent.json" with { type: "json" };
 import plugins from "./fixtures/plugins.json" with { type: "json" };
 import { json, serving, whenever } from "./serving";
 
-/// One plugin that loaded, GitLab, and one whose manifest broke, Broken.
+/// One plugin that loaded, GitLab, one whose manifest broke, Broken, and one
+/// from git, Shared skills.
 const PLUGINS = plugins as PluginsView;
 const CONSENT = consent as PluginConsent;
 
@@ -79,6 +80,18 @@ describe("a row", () => {
       "checked",
       true,
     );
+  });
+
+  it("reads a git plugin's repository and pinned revision, with Update", async () => {
+    serving(whenever("/api/ui/plugins", json(PLUGINS)));
+    pane();
+
+    const row = await theRow("Shared skills");
+
+    expect(row.textContent).toContain(
+      "file:///home/you/src/sources/skills at 133d813",
+    );
+    expect(row.textContent).toContain("Update");
   });
 
   it("draws its trouble where it didn't load", async () => {
@@ -143,7 +156,7 @@ describe("Add a plugin…", () => {
     pane();
 
     fireEvent.click(await waitFor(() => screen.getByText("Add a plugin…")));
-    fireEvent.input(screen.getByLabelText("Directory"), {
+    fireEvent.input(screen.getByLabelText("Directory or git URL"), {
       target: { value: "/home/you/src/card" },
     });
     fireEvent.click(screen.getByText("Read manifest"));
@@ -161,7 +174,7 @@ describe("Add a plugin…", () => {
         String(asked) === "/api/ui/plugins" && init?.method === "POST",
     );
     expect(JSON.parse(String(press![1]!.body))).toEqual({
-      path: "/home/you/src/card",
+      source: "/home/you/src/card",
       granted: CONSENT.capabilities,
     });
   });
@@ -184,7 +197,7 @@ describe("Add a plugin…", () => {
     pane();
 
     fireEvent.click(await waitFor(() => screen.getByText("Add a plugin…")));
-    fireEvent.input(screen.getByLabelText("Directory"), {
+    fireEvent.input(screen.getByLabelText("Directory or git URL"), {
       target: { value: "/home/you/src/shipped" },
     });
     fireEvent.click(screen.getByText("Read manifest"));

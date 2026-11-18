@@ -2120,22 +2120,24 @@ export function loadPlugins(): Promise<PluginsView> {
   return get<PluginsView>("/api/ui/plugins");
 }
 
-/// The consent card for the plugin at `path`, read with nothing written: who it
-/// is, what it provides and every capability it asks for. Refused where the
-/// directory isn't a plugin, or its uuid is taken.
-export function readPlugin(path: string): Promise<PluginConsent> {
-  return post<PluginConsent>("/api/ui/plugins/read", { path });
+/// The consent card for the plugin at `source` — a directory's path, or a git
+/// URL the server clones and takes back once it is read — with nothing
+/// written: who it is, what it provides and every capability it asks for.
+/// Refused where it isn't a plugin, can't be cloned, or its uuid is taken.
+export function readPlugin(source: string): Promise<PluginConsent> {
+  return post<PluginConsent>("/api/ui/plugins/read", { source });
 }
 
-/// **Install**: the plugin at `path`, granted what its card showed.
+/// **Install**: the plugin at `source`, granted what its card showed.
 export function installPlugin(
-  path: string,
+  source: string,
   granted: PluginCapability[],
 ): Promise<PluginsView> {
-  return post<PluginsView>("/api/ui/plugins", { path, granted });
+  return post<PluginsView>("/api/ui/plugins", { source, granted });
 }
 
-/// **Update** on a row: the manifest read again. Answered with the consent card
+/// **Update** on a row: a local plugin's manifest read again, a git plugin's
+/// default branch pulled. Answered with the consent card
 /// where it now asks for more than was granted, and the press made again with
 /// what that card showed lands it.
 export function updatePlugin(

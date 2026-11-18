@@ -34,6 +34,24 @@
       "trouble": "`version` isn't a semantic version. Write one like `1.4.0`.",
       "uuid": "4c1d2e3f-8a9b-4c0d-9e1f-2a3b4c5d6e7f",
       "version": "1.4.0"
+    },
+    {
+      "author": "Ada Lovelace",
+      "elsewhere": null,
+      "enabled": true,
+      "name": "Shared skills",
+      "provides": [
+        "forge",
+        "skills"
+      ],
+      "source": {
+        "kind": "Git",
+        "revision": "133d813ee268b94a39c8df028a5bfa266719fee7",
+        "url": "file:///home/you/src/sources/skills"
+      },
+      "trouble": null,
+      "uuid": "2e4f6a8b-1c3d-4e5f-8a7b-9c0d1e2f3a4b",
+      "version": "1.4.0"
     }
   ]
 }

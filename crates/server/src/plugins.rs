@@ -13,5 +13,6 @@
 
 pub mod built_in;
 pub mod component;
+pub(crate) mod git;
 pub(crate) mod installed;
 pub mod manifest;
