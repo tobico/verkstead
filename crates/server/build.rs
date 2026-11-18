@@ -1,6 +1,15 @@
 //! The built-in plugins, embedded: every directory under the repository's
-//! `plugins/` with a `plugin.yaml` in it is one, and its manifest and its wasm
-//! component are compiled into the server — see `src/plugins/built_in.rs`.
+//! `plugins/` with a `plugin.yaml` in it is one, and its manifest, its wasm
+//! component and every other file in its directory are compiled into the
+//! server — see `src/plugins/built_in.rs`. Every other file but a component
+//! crate's own sources: a `Cargo.toml` and its `src/` are what the component is
+//! built from, and nothing a plugin reads.
+//!
+//! **A debug build is also told where the directory is**, and reads it there
+//! rather than out of the binary, the way the viewer is read — so a Skill Pack's
+//! skills edited in the checkout are what a running debug server installs. Not
+//! for a built-in with a component, which is built rather than written, and
+//! never for a release, which names no path on the machine that built it.
 //!
 //! **A wasm component is built once and embedded everywhere.** It is
 //! platform-neutral bytes, so the release and CI workflows build every one for
@@ -44,6 +53,9 @@ fn main() {
         .unwrap_or_default();
     names.sort();
 
+    // What `rust-embed` goes by to read the viewer off disk, so the two agree.
+    let debug = env::var_os("CARGO_CFG_DEBUG_ASSERTIONS").is_some();
+
     let mut built: Option<PathBuf> = None;
     let mut list = String::from("&[\n");
     for name in &names {
@@ -51,8 +63,27 @@ fn main() {
         let file = format!("{name}.wasm");
         let lib = format!("{}.wasm", name.replace('-', "_"));
 
+        let crate_ = dir.join("Cargo.toml").is_file();
+
         let mut files = String::new();
-        if dir.join("Cargo.toml").is_file() {
+        let mut inside = Vec::new();
+        walked(&dir, Path::new(""), crate_, &mut inside);
+        inside.sort();
+        for file in &inside {
+            let name = file
+                .iter()
+                .map(|component| component.to_str().expect("a built-in's paths are UTF-8"))
+                .collect::<Vec<_>>()
+                .join("/");
+            write!(
+                files,
+                "({name:?}, include_bytes!({:?})),",
+                path(&dir.join(file))
+            )
+            .unwrap();
+        }
+
+        if crate_ {
             let wasm = match plugins.join("dist").join(&lib) {
                 artefact if artefact.is_file() => artefact,
                 _ => built
@@ -62,9 +93,16 @@ fn main() {
             write!(files, "({file:?}, include_bytes!({:?})),", path(&wasm)).unwrap();
         }
 
+        let checkout = if debug && !crate_ {
+            format!("Some({:?})", path(&dir))
+        } else {
+            "None".to_owned()
+        };
+
         writeln!(
             list,
-            "    BuiltIn {{ directory: {name:?}, manifest: include_str!({:?}), files: &[{files}] }},",
+            "    BuiltIn {{ directory: {name:?}, manifest: include_str!({:?}), files: &[{files}], \
+             checkout: {checkout} }},",
             path(&dir.join("plugin.yaml")),
         )
         .unwrap();
@@ -72,6 +110,28 @@ fn main() {
     list.push(']');
 
     fs::write(out.join("built_ins.rs"), list).expect("OUT_DIR is writable");
+}
+
+/// Every file under `dir` but its manifest, relative to the built-in's
+/// directory (`at` being `dir`'s place in it) — and, where the built-in is a
+/// component `crate_`, but its `Cargo.toml` and `src/`.
+fn walked(dir: &Path, at: &Path, crate_: bool, found: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).expect("a built-in's directory reads") {
+        let entry = entry.expect("a built-in's directory reads");
+        let inside = at.join(entry.file_name());
+        let top = at.as_os_str().is_empty();
+        let name = entry.file_name();
+        if top && (name == "plugin.yaml" || (crate_ && (name == "Cargo.toml" || name == "src"))) {
+            continue;
+        }
+
+        let kind = entry.file_type().expect("a built-in's directory reads");
+        if kind.is_dir() {
+            walked(&entry.path(), &inside, crate_, found);
+        } else if kind.is_file() {
+            found.push(inside);
+        }
+    }
 }
 
 /// Build every component under `plugins/` for `wasm32-wasip2`, returning the

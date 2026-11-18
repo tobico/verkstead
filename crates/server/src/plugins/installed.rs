@@ -32,6 +32,13 @@
 //! repository the dependency names, or **Update** on the dependency's row.
 //! Every load resolves again, so a press on the dependency clears it.
 //!
+//! **A plugin's Skill Packs are written out as it loads** (ADR-0030, *Skill
+//! packs*): every pack of every plugin that loaded here, its dependencies met,
+//! lands under `data_dir/skills/<pack>/` beside the built-in `verkstead`, and a
+//! pack whose plugin is disabled, removed or in trouble is taken away — each
+//! load writing them again. A pack name is one plugin's: one already taken, by a
+//! built-in or by a plugin loaded before it, is trouble on the later one.
+//!
 //! **Install is the grant, and the whole of it** (ADR-0030, *Capabilities and
 //! trust*). The consent card is read off the manifest with nothing written,
 //! and the press carries back the capabilities the card showed: a manifest
@@ -57,7 +64,7 @@ use verkstead_render::{
 };
 use verkstead_schema::{ApiError, Nudge};
 
-use super::built_in::BUILT_INS;
+use super::built_in::{BUILT_INS, FIXTURE};
 use super::component;
 use super::git::{self, Staged};
 use super::manifest::{Access, Capability, Dependency, Files, Manifest};
@@ -147,15 +154,37 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         records.into_iter().partition(|record| record.removed());
     forget(state, &removed).await;
 
+    // Each pack name, and the plugin that has it: the built-ins' first, then
+    // each plugin's as it loads, in the order they were installed.
+    let mut claimed: BTreeMap<String, String> = BUILT_INS
+        .iter()
+        .filter_map(|built_in| built_in.manifest(Platform::HERE).ok())
+        .flat_map(|manifest| {
+            let name = manifest.name;
+            manifest
+                .packs
+                .into_iter()
+                .map(move |pack| (pack.name, name.clone()))
+        })
+        .collect();
+
     let mut troubles = BTreeMap::new();
     let mut manifests = BTreeMap::new();
+    let mut dirs = BTreeMap::new();
     for record in &records {
         if !reachable(state, &record.fields) {
             continue;
         }
 
-        match loaded(state, record, home.as_deref(), &credential).await {
-            Ok(manifest) => {
+        let read = loaded(state, record, home.as_deref(), &credential)
+            .await
+            .and_then(|(manifest, dir)| unclaimed(&claimed, &manifest).map(|()| (manifest, dir)));
+        match read {
+            Ok((manifest, dir)) => {
+                for pack in &manifest.packs {
+                    claimed.insert(pack.name.clone(), manifest.name.clone());
+                }
+                dirs.insert(record.uuid.clone(), dir);
                 manifests.insert(record.uuid.clone(), manifest);
             }
             Err(why) => {
@@ -183,6 +212,20 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
             "an installed plugin's dependency isn't there, and it counts as disabled",
         );
         troubles.insert(uuid, trouble);
+    }
+
+    let placing: Vec<crate::skills::Placing<'_>> = manifests
+        .iter()
+        .filter_map(|(uuid, manifest)| Some((dirs.get(uuid)?, manifest)))
+        .flat_map(|(dir, manifest)| {
+            manifest.packs.iter().map(|pack| crate::skills::Placing {
+                files: Files::Dir(dir),
+                pack,
+            })
+        })
+        .collect();
+    if let Err(error) = crate::skills::placed(Platform::HERE, &state.data_dir, &placing) {
+        tracing::error!(error = ?error, "the installed plugins' skill packs couldn't be written out");
     }
 
     let moved = {
@@ -266,14 +309,7 @@ fn resolved(
 ) -> BTreeMap<String, Trouble> {
     let built_ins: BTreeMap<String, semver::Version> = BUILT_INS
         .iter()
-        .filter_map(|built_in| {
-            Manifest::parse(
-                built_in.manifest,
-                Files::Embedded(built_in.files),
-                Platform::HERE,
-            )
-            .ok()
-        })
+        .filter_map(|built_in| built_in.manifest(Platform::HERE).ok())
         .map(|manifest| (manifest.uuid, manifest.version))
         .collect();
 
@@ -405,15 +441,29 @@ fn trouble(unmet: &[(&Dependency, Unmet)]) -> Trouble {
     }
 }
 
-/// One plugin read and its wasm component started, answering its manifest, or
-/// why not. A git plugin's clone is put at its pinned revision first, made
-/// where this device has none.
+/// Refused, naming the plugin that has it, where a pack of `manifest`'s is one
+/// already `claimed`.
+fn unclaimed(claimed: &BTreeMap<String, String>, manifest: &Manifest) -> Result<(), String> {
+    for pack in &manifest.packs {
+        if let Some(by) = claimed.get(&pack.name) {
+            return Err(format!(
+                "Its skill pack is named `{}`, and so is {by}'s. Give it a name of its own.",
+                pack.name
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// One plugin read and its wasm component started, answering its manifest and
+/// the directory it was read from, or why not. A git plugin's clone is put at
+/// its pinned revision first, made where this device has none.
 async fn loaded(
     state: &AppState,
     record: &Record<Fields>,
     home: Option<&FsPath>,
     credential: &Credential,
-) -> Result<Manifest, String> {
+) -> Result<(Manifest, PathBuf), String> {
     let dir = match &record.fields.source {
         Source::Local { path, .. } => PathBuf::from(path),
         Source::Git { url, revision } => {
@@ -443,7 +493,7 @@ async fn loaded(
 
     component::load(Files::Dir(&dir), &manifest, home)
         .await
-        .map(|_| manifest)
+        .map(|_| (manifest, dir))
         .map_err(|trouble| trouble.why)
 }
 
@@ -602,8 +652,48 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
 
     Ok(PluginsView {
         installed,
-        built_in: Vec::new(),
+        built_in: built_ins(),
     })
+}
+
+/// The Built-in group's rows: every built-in this binary ships but the fixture,
+/// which is not listed. Always on — a built-in has no checkbox and no Remove —
+/// and in trouble only where its manifest no longer reads.
+fn built_ins() -> Vec<PluginRow> {
+    BUILT_INS
+        .iter()
+        .filter_map(|built_in| match built_in.manifest(Platform::HERE) {
+            Ok(manifest) if manifest.uuid == FIXTURE => None,
+            Ok(manifest) => Some(PluginRow {
+                uuid: manifest.uuid.clone(),
+                name: manifest.name.clone(),
+                version: manifest.version.to_string(),
+                author: manifest.author.name.clone(),
+                provides: provides(&manifest),
+                source: PluginSource::BuiltIn,
+                enabled: true,
+                trouble: None,
+                needs: Vec::new(),
+                elsewhere: None,
+                dependents: Vec::new(),
+                settings: u32::try_from(manifest.settings.len()).unwrap_or(u32::MAX),
+            }),
+            Err(refusal) => Some(PluginRow {
+                uuid: built_in.directory.to_owned(),
+                name: built_in.directory.to_owned(),
+                version: String::new(),
+                author: String::new(),
+                provides: Vec::new(),
+                source: PluginSource::BuiltIn,
+                enabled: true,
+                trouble: Some(refusal.why),
+                needs: Vec::new(),
+                elsewhere: None,
+                dependents: Vec::new(),
+                settings: 0,
+            }),
+        })
+        .collect()
 }
 
 /// The routes the section reads and presses — mounted beside the rest of the
@@ -705,12 +795,9 @@ async fn readable(state: &AppState, asked: &str) -> Result<(Manifest, Reading), 
         Manifest::read(reading.dir(), Platform::HERE).map_err(|refusal_| refusal(refusal_.why))?;
 
     let built_in = BUILT_INS.iter().any(|built_in| {
-        Manifest::parse(
-            built_in.manifest,
-            Files::Embedded(built_in.files),
-            Platform::HERE,
-        )
-        .is_ok_and(|shipped| shipped.uuid == manifest.uuid)
+        built_in
+            .manifest(Platform::HERE)
+            .is_ok_and(|shipped| shipped.uuid == manifest.uuid)
     });
     if built_in {
         return Err(refused(

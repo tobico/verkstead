@@ -163,6 +163,32 @@ provides:
 
 An empty list, or none, is a plugin that provides nothing.
 
+#### `skills`
+
+A **Skill Pack**: a directory of skills, each a `<skill>/SKILL.md`, that a
+session reads at `/verkstead/skills/<pack>/<skill>/SKILL.md` and names
+`<pack>/<skill>`.
+
+```yaml
+provides:
+  - category: skills
+    name: rust-review      # the pack: lowercase letters, digits and hyphens
+    directory: skills      # relative to the plugin; holds <skill>/SKILL.md
+```
+
+Each directory at the top of `directory` is a skill, and its `SKILL.md` opens
+with frontmatter — a `---` line, the skill's `name`, which is its directory's,
+and a non-empty `description`, then another `---` — the way an agent's skill
+loader reads one. A skill with no `SKILL.md`, no frontmatter, another `name`
+or no `description` is refused, naming the skill. Files beside the skills are
+the pack's own and carried with it; every file under a skill's directory goes
+where its `SKILL.md` does.
+
+`verkstead` is the name of the pack Verkstead ships, and refused for any other.
+A pack name is one plugin's: a plugin whose pack has the name of one already
+loaded loads in trouble, saying whose it is. A pack asks for no capability
+and needs no component.
+
 ### What its wasm component may reach
 
 **`component`** — optional. A path to a `.wasm` file inside the plugin's

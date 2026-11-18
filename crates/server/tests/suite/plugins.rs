@@ -21,7 +21,7 @@ use verkstead_render::{
     PluginCapability, PluginConsent, PluginFieldRefused, PluginFieldValue, PluginFix, PluginNeed,
     PluginRow, PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdated, PluginsView,
 };
-use verkstead_server::plugins::built_in::FIXTURE;
+use verkstead_server::plugins::built_in::{FIXTURE, VERKSTEAD};
 use verkstead_server::settings::Settings;
 use verkstead_server::{open_database, router_keeping};
 
@@ -51,7 +51,7 @@ fn manifest(uuid: &str, name: &str, capabilities: &[&str]) -> String {
          author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
          version: 1.4.0\n\
          interface: 1\n\
-         provides:\n  - category: forge\n  - category: skills\n  - category: forge\n\
+         provides:\n  - category: forge\n  - category: activity\n  - category: forge\n\
          {capabilities}"
     )
 }
@@ -145,6 +145,135 @@ async fn kept() -> (Router, tempfile::TempDir) {
     (router_keeping(pool, dir.path().to_owned()), dir)
 }
 
+/// A plugin under `dir/<name>` called `name`, whose one `provides:` entry is
+/// the Skill Pack `pack` holding the one skill `reviewing`.
+fn packing(dir: &Path, uuid: &str, name: &str, pack: &str) -> String {
+    let text = manifest(uuid, name, &[]).replace(
+        "provides:\n  - category: forge\n  - category: activity\n  - category: forge\n",
+        &format!("provides:\n  - category: skills\n    name: {pack}\n    directory: skills\n"),
+    );
+    let at = plugin(dir, name, &text);
+    let skill = Path::new(&at).join("skills/reviewing");
+    std::fs::create_dir_all(&skill).unwrap();
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: reviewing\ndescription: Review Rust.\n---\n\nRead /verkstead/skills/rust-review/reviewing/notes.md.\n",
+    )
+    .unwrap();
+    std::fs::write(skill.join("notes.md"), "Be kind.\n").unwrap();
+    at
+}
+
+/// The skills Verkstead ships are the Built-in group's row: providing skills,
+/// always on, and with no Remove — and the fixture is not listed.
+#[tokio::test]
+async fn the_verkstead_pack_is_a_built_in_row() {
+    let (app, _dir) = kept().await;
+
+    let view = page(&app).await;
+
+    let [row] = view.built_in.as_slice() else {
+        panic!("one built-in is listed: {view:?}");
+    };
+    assert_eq!(row.uuid, VERKSTEAD);
+    assert_eq!(row.name, "Verkstead");
+    assert_eq!(row.provides, ["skills"]);
+    assert_eq!(row.source, PluginSource::BuiltIn);
+    assert!(row.enabled);
+    assert_eq!(row.trouble, None);
+    assert!(view.installed.iter().all(|row| row.uuid != FIXTURE));
+
+    let (status, _) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{VERKSTEAD}/remove"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "a built-in has no Remove");
+}
+
+/// An enabled plugin's pack is written out under its name, and taken away
+/// again when the plugin is unticked.
+#[tokio::test]
+async fn an_installed_plugins_pack_lands_under_its_name_until_it_is_disabled() {
+    let (app, dir) = kept().await;
+    let path = packing(dir.path(), PLUGIN, "Rust review", "rust-review");
+
+    let view = installs(&app, &path).await;
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+
+    let pack = dir.path().join("skills/rust-review");
+    let skill = std::fs::read_to_string(pack.join("reviewing/SKILL.md")).unwrap();
+    assert!(skill.contains("name: reviewing"), "{skill}");
+    assert_eq!(
+        std::fs::read_to_string(pack.join("reviewing/notes.md")).unwrap(),
+        "Be kind.\n",
+        "every file of the pack lands, not only its SKILL.md files",
+    );
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{PLUGIN}/enabled"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(!pack.exists(), "a disabled plugin's pack is not there");
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{PLUGIN}/enabled"),
+        serde_json::json!({ "enabled": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(
+        pack.join("reviewing/SKILL.md").is_file(),
+        "ticked, it is back"
+    );
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{PLUGIN}/remove"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(!pack.exists(), "a removed plugin's pack is not there");
+}
+
+/// A pack name is one plugin's: the second plugin claiming it loads in
+/// trouble naming the first, and its pack is not written over the first's.
+#[tokio::test]
+async fn a_second_plugin_claiming_a_pack_name_loads_in_trouble() {
+    let (app, dir) = kept().await;
+    installs(
+        &app,
+        &packing(dir.path(), PLUGIN, "Rust review", "rust-review"),
+    )
+    .await;
+
+    let view = installs(
+        &app,
+        &packing(dir.path(), ANOTHER, "Other review", "rust-review"),
+    )
+    .await;
+
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+    assert_eq!(
+        row(&view, ANOTHER).trouble.as_deref(),
+        Some(
+            "Its skill pack is named `rust-review`, and so is Rust review's. Give it a name of \
+             its own."
+        ),
+    );
+    assert!(
+        dir.path()
+            .join("skills/rust-review/reviewing/SKILL.md")
+            .is_file()
+    );
+}
+
 /// A local plugin read through the card and installed is listed with its name,
 /// version, author, what it provides and where it came from, and loads.
 #[tokio::test]
@@ -158,7 +287,7 @@ async fn a_local_plugin_installed_through_the_card_is_listed_on_its_row() {
 
     let consent = read(&app, &path).await;
     assert_eq!(consent.name, "GitLab");
-    assert_eq!(consent.provides, ["forge", "skills"]);
+    assert_eq!(consent.provides, ["forge", "activity"]);
     assert_eq!(
         consent.capabilities,
         [PluginCapability::Outbound {
@@ -176,12 +305,15 @@ async fn a_local_plugin_installed_through_the_card_is_listed_on_its_row() {
     assert_eq!(row.name, "GitLab");
     assert_eq!(row.version, "1.4.0");
     assert_eq!(row.author, "Ada Lovelace");
-    assert_eq!(row.provides, ["forge", "skills"]);
+    assert_eq!(row.provides, ["forge", "activity"]);
     assert_eq!(row.source, PluginSource::Local { path: path.clone() });
     assert!(row.enabled);
     assert_eq!(row.trouble, None);
     assert_eq!(row.elsewhere, None);
-    assert!(view.built_in.is_empty(), "the fixture isn't listed");
+    assert!(
+        view.built_in.iter().all(|row| row.uuid != FIXTURE),
+        "the fixture isn't listed"
+    );
 }
 
 /// Breaking a manifest on disk and pressing Update is trouble on its row, which

@@ -20,6 +20,6 @@ Roadmap stage: [07: Skill packs](docs/roadmaps/plugins/07-skill-packs.md)
 ## Tasks
 
 - [x] 01: One pack named `verkstead` — [details](01-one-pack-named-verkstead.md)
-- [ ] 02: The Skills category — [details](02-the-skills-category.md)
+- [x] 02: The Skills category — [details](02-the-skills-category.md)
 - [ ] 03: Attaching a pack while the round drafts — [details](03-attaching-a-pack-while-drafting.md)
 - [ ] 04: Attaching a pack from an Answer — [details](04-attaching-a-pack-from-an-answer.md)

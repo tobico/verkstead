@@ -1,6 +1,6 @@
 //! The Plugins Verkstead ships, inside the binary: each directory under the
-//! repository's `plugins/`, its manifest and its wasm component embedded by
-//! `build.rs` (ADR-0030, *The shape of a plugin*).
+//! repository's `plugins/`, its manifest, its wasm component and every other
+//! file in it embedded by `build.rs` (ADR-0030, *The shape of a plugin*).
 //!
 //! **A built-in goes through the loader an installed plugin does** — the same
 //! manifest reader, the same [`component::load`] — reading its files out of
@@ -14,7 +14,7 @@
 use std::path::Path;
 
 use super::component::{self, Trouble};
-use super::manifest::{Files, Manifest};
+use super::manifest::{Files, Manifest, Refusal};
 use crate::platform::Platform;
 
 /// One built-in as `build.rs` embedded it.
@@ -25,9 +25,30 @@ pub struct BuiltIn {
     pub directory: &'static str,
     /// Its `plugin.yaml`.
     pub manifest: &'static str,
-    /// The files its manifest names, by their paths in its directory: its
-    /// wasm component, where it has one.
+    /// Every file in its directory but the manifest, by its path there — its
+    /// wasm component where it has one, and a Skill Pack's skills.
     pub files: &'static [(&'static str, &'static [u8])],
+    /// Its directory in the checkout, which a debug build reads instead of
+    /// `files`, exactly as the viewer is read: editing a skill is then visible
+    /// to a running `cargo run -p verkstead-cli -- serve` without a recompile.
+    /// None in a release build, and for a built-in whose component is built
+    /// rather than written, since that is not in its directory.
+    pub checkout: Option<&'static str>,
+}
+
+impl BuiltIn {
+    /// Where the files its manifest names are read from.
+    pub fn files(&self) -> Files<'static> {
+        match self.checkout {
+            Some(dir) => Files::Dir(Path::new(dir)),
+            None => Files::Embedded(self.files),
+        }
+    }
+
+    /// Its manifest as `platform` reads it.
+    pub fn manifest(&self, platform: Platform) -> Result<Manifest, Refusal> {
+        Manifest::parse(self.manifest, self.files(), platform)
+    }
 }
 
 /// Every built-in this binary carries.
@@ -37,6 +58,19 @@ pub const BUILT_INS: &[BuiltIn] = include!(concat!(env!("OUT_DIR"), "/built_ins.
 /// exports nothing, and which is not listed anywhere. It is the proof that
 /// the path above works on every platform a release is built for.
 pub const FIXTURE: &str = "613e2a43-80ee-4307-8623-28969e05330f";
+
+/// The uuid of the built-in that is the Skill Pack `verkstead`: the skills
+/// every session Verkstead runs is told to read, and the one plugin that pack
+/// name is reserved for. The first row of the Plugins page's Built-in group.
+pub const VERKSTEAD: &str = "15447a8d-f28d-4573-8b8b-a7226d477755";
+
+/// The built-in the Skill Pack `verkstead` is.
+pub fn verkstead() -> BuiltIn {
+    *BUILT_INS
+        .iter()
+        .find(|built_in| built_in.directory == "verkstead")
+        .expect("build.rs embeds every directory under plugins/, and plugins/verkstead is one")
+}
 
 /// A built-in, once the start has tried to load it.
 #[derive(Debug)]
@@ -60,8 +94,8 @@ pub async fn started(platform: Platform, home: Option<&Path>) -> Vec<Started> {
 /// Load one built-in: its manifest read, and its wasm component instantiated
 /// under the capabilities that manifest asks for.
 pub async fn start(built_in: BuiltIn, platform: Platform, home: Option<&Path>) -> Started {
-    let files = Files::Embedded(built_in.files);
-    let manifest = match Manifest::parse(built_in.manifest, files, platform) {
+    let files = built_in.files();
+    let manifest = match built_in.manifest(platform) {
         Ok(manifest) => manifest,
         Err(refusal) => {
             return Started {
@@ -118,6 +152,31 @@ mod tests {
                 .any(|(name, bytes)| { *name == "fixture.wasm" && bytes.starts_with(b"\0asm") }),
             "the fixture carries its wasm component",
         );
+    }
+
+    /// The skills Verkstead ships are a built-in providing the one pack
+    /// `verkstead`, read through the manifest reader — out of the binary as a
+    /// release reads them, and off the checkout as a debug build does.
+    #[tokio::test]
+    async fn the_verkstead_pack_is_a_built_in_with_its_thirteen_skills() {
+        let shipped = verkstead();
+
+        let started = start(shipped, Platform::HERE, None).await;
+        assert_eq!(started.trouble, None);
+
+        for files in [Files::Embedded(shipped.files), shipped.files()] {
+            let manifest = Manifest::parse(shipped.manifest, files, Platform::HERE).unwrap();
+            assert_eq!(manifest.uuid, VERKSTEAD);
+            assert_eq!(manifest.packs.len(), 1);
+            assert_eq!(manifest.packs[0].name, "verkstead");
+            assert_eq!(manifest.packs[0].skills.len(), 13, "{manifest:?}");
+            assert!(
+                manifest.packs[0]
+                    .skills
+                    .iter()
+                    .any(|skill| skill == "grilling")
+            );
+        }
     }
 
     /// Bytes that are not a component are trouble on that built-in, and the
@@ -181,6 +240,7 @@ mod tests {
             directory: "broken",
             manifest: "uuid: not-a-uuid\n",
             files: &[],
+            checkout: None,
         };
 
         let started = start(broken, Platform::HERE, None).await;

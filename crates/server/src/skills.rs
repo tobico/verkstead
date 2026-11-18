@@ -2,8 +2,9 @@
 //!
 //! A session's behaviour should be the product's rather than whatever happens
 //! to be installed on the machine it runs on. So Verkstead carries its own
-//! skills, embedded in the binary as the viewer is (ADR-0004), writes them out
-//! under the Data Directory at startup, and every sandbox reaches that
+//! skills, embedded in the binary as the viewer is (ADR-0004) — the built-in
+//! plugin [`built_in::VERKSTEAD`], whose one Skill Pack they are — writes them
+//! out under the Data Directory at startup, and every sandbox reaches that
 //! directory read-only — at [`INSIDE`] where a bind can make that path, and
 //! where they were really written where none can. Nothing beside the
 //! executable has to be there, and nothing of the host's is reachable for a
@@ -37,26 +38,12 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use rust_embed::Embed;
 
 use crate::handoffs;
 use crate::platform::Platform;
+use crate::plugins::built_in;
+use crate::plugins::manifest::{Files, Pack};
 use crate::store;
-
-/// The skills as they are written in this repository, one directory per skill.
-///
-/// Compiled in for a release build and read off disk for a debug one, exactly
-/// as the viewer is and for the same reason: editing a skill is then visible to
-/// a running `cargo run -p verkstead-cli -- serve` without a recompile.
-///
-/// **Every name is under `verkstead/`**, the Skill Pack the thirteen of them
-/// are (ADR-0030, *Skill packs*): a skill is named `<pack>/<skill>` wherever
-/// one is named, so the pack is in the name the embedding hands out, and what
-/// is installed lands in a directory of the pack's own beside any other.
-#[derive(Embed)]
-#[folder = "$CARGO_MANIFEST_DIR/skills"]
-#[prefix = "verkstead/"]
-struct Bundled;
 
 /// Where the skills are mounted inside a sandbox, on the platform whose
 /// sandbox mounts anything.
@@ -219,23 +206,16 @@ impl Skills {
             }
         }
 
+        // Read through the manifest reader an installed plugin's pack is, so
+        // the skills Verkstead ships are held to the same frontmatter.
+        let shipped = built_in::verkstead();
+        let manifest = shipped
+            .manifest(platform)
+            .map_err(|refusal| anyhow::anyhow!("the skills this binary ships: {refusal}"))?;
+
         let mut installed = 0;
-
-        for name in Bundled::iter() {
-            let file = Bundled::get(&name)
-                .expect("a name the embedding just handed out is one it answers to");
-
-            let written = path.join(name.as_ref());
-
-            if let Some(parent) = written.parent() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("making {}", parent.display()))?;
-            }
-
-            std::fs::write(&written, said_at(&file.data, &inside, handoffs))
-                .with_context(|| format!("installing the skill {}", written.display()))?;
-
-            installed += 1;
+        for pack in &manifest.packs {
+            installed += written(shipped.files(), pack, &path, &inside, handoffs)?;
         }
 
         if installed == 0 {
@@ -245,7 +225,7 @@ impl Skills {
             );
         }
 
-        tracing::debug!(path = %path.display(), files = installed, "the bundled skills are installed");
+        tracing::debug!(path = %path.display(), files = installed, "the skills Verkstead ships are installed");
 
         Ok(Skills { path, inside })
     }
@@ -275,6 +255,90 @@ impl Skills {
             .display()
             .to_string()
     }
+}
+
+/// One installed plugin's Skill Pack, and where its plugin's files are.
+pub(crate) struct Placing<'a> {
+    pub(crate) files: Files<'a>,
+    pub(crate) pack: &'a Pack,
+}
+
+/// The installed plugins' Skill Packs written out beside the ones Verkstead
+/// ships, under `data_dir`: each of `packs` replaced whole, and every pack
+/// directory that is neither one of them nor a built-in's taken away — a
+/// disabled, removed or troubled plugin's pack is not there.
+///
+/// Through the same [`said_at`] the built-in pack is, so a pack's skill naming
+/// another's path names where it really is. Run each time the installed
+/// plugins load; what [`Skills::installed`] wrote at the start is untouched.
+pub(crate) fn placed(platform: Platform, data_dir: &Path, packs: &[Placing<'_>]) -> Result<()> {
+    let path = data_dir.join(DIRECTORY);
+    let inside = crate::sandbox::under(
+        &crate::sandbox::own_directory(platform, data_dir),
+        DIRECTORY,
+    );
+    let handoffs = handoffs::said(platform);
+
+    let shipped: Vec<String> = built_in::BUILT_INS
+        .iter()
+        .filter_map(|shipped| shipped.manifest(platform).ok())
+        .flat_map(|manifest| manifest.packs)
+        .map(|pack| pack.name)
+        .collect();
+
+    if let Ok(entries) = std::fs::read_dir(&path) {
+        for entry in entries.filter_map(Result::ok) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let wanted = packs.iter().any(|placing| placing.pack.name == name);
+            if shipped.contains(&name) || wanted {
+                continue;
+            }
+            std::fs::remove_dir_all(entry.path())
+                .with_context(|| format!("taking away the pack at {}", entry.path().display()))?;
+        }
+    }
+
+    for placing in packs {
+        let pack = path.join(&placing.pack.name);
+        match std::fs::remove_dir_all(&pack) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("clearing the pack at {}", pack.display()));
+            }
+        }
+        written(placing.files, placing.pack, &path, &inside, handoffs)?;
+    }
+
+    Ok(())
+}
+
+/// Every file of `pack` written under `path`, in a directory of the pack's
+/// name, saying where the directories it names are; how many.
+fn written(
+    files: Files<'_>,
+    pack: &Pack,
+    path: &Path,
+    inside: &Path,
+    handoffs: &str,
+) -> Result<usize> {
+    let within = files.within(&pack.directory).unwrap_or_default();
+    for file in &within {
+        let data = files
+            .read(&pack.directory.join(file))
+            .with_context(|| format!("reading the skill file {}", file.display()))?;
+        let written = path.join(&pack.name).join(file);
+
+        if let Some(parent) = written.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("making {}", parent.display()))?;
+        }
+
+        std::fs::write(&written, said_at(&data, inside, handoffs))
+            .with_context(|| format!("installing the skill {}", written.display()))?;
+    }
+    Ok(within.len())
 }
 
 /// A skill's own text, saying where the two directories it names really are.
@@ -1737,6 +1801,42 @@ mod tests {
 
     use super::*;
 
+    /// The skills this binary ships, each by its name `verkstead/<skill>/…`,
+    /// read out of the built-in pack the way [`Skills::installed`] reads them.
+    struct Bundled;
+
+    impl Bundled {
+        fn iter() -> impl Iterator<Item = String> {
+            let shipped = built_in::verkstead();
+            let manifest = shipped.manifest(Platform::HERE).expect("the pack reads");
+            manifest
+                .packs
+                .into_iter()
+                .flat_map(move |pack| {
+                    let files = shipped.files().within(&pack.directory).unwrap_or_default();
+                    files.into_iter().map(move |file| {
+                        Path::new(&pack.name)
+                            .join(file)
+                            .iter()
+                            .map(|component| component.to_string_lossy().into_owned())
+                            .collect::<Vec<_>>()
+                            .join("/")
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+        }
+
+        fn get(name: &str) -> Option<Vec<u8>> {
+            let shipped = built_in::verkstead();
+            let manifest = shipped.manifest(Platform::HERE).expect("the pack reads");
+            manifest.packs.iter().find_map(|pack| {
+                let file = Path::new(name).strip_prefix(&pack.name).ok()?;
+                shipped.files().read(&pack.directory.join(file))
+            })
+        }
+    }
+
     /// The skills as a session finds them where a bind makes the path, which is
     /// what a test about a *prompt* is about: what these hold to is the
     /// sentence a session reads, and the directory named in it is one thing on
@@ -1761,7 +1861,7 @@ mod tests {
     fn skill(name: &str) -> String {
         let file = Bundled::get(name).unwrap_or_else(|| panic!("{name} is one of the skills"));
 
-        String::from_utf8(file.data.to_vec()).expect("a skill is markdown")
+        String::from_utf8(file).expect("a skill is markdown")
     }
 
     /// The same, as one long line: the skills are wrapped at eighty columns, so
@@ -1897,7 +1997,7 @@ mod tests {
     fn every_skill_this_binary_ships_has_a_path_a_session_reaches_it_by() {
         for name in Bundled::iter() {
             assert!(
-                NAMED.contains(&name.as_ref()),
+                NAMED.contains(&name.as_str()),
                 "{name} is shipped and nothing names it, so no session can be \
                  sent into it and nothing holds its path to the mount"
             );
@@ -3385,7 +3485,10 @@ mod tests {
     fn the_finish_skills_carry_every_companion_they_committed_in_to_its_own_pull_request() {
         let block = companion_block("verkstead/next-task/SKILL.md");
 
-        for named in ["verkstead/implementing/SKILL.md", "verkstead/staging/SKILL.md"] {
+        for named in [
+            "verkstead/implementing/SKILL.md",
+            "verkstead/staging/SKILL.md",
+        ] {
             assert_eq!(
                 companion_block(named),
                 block,
@@ -4574,7 +4677,8 @@ mod tests {
             "it gives the signal when it has nothing left to do or ask: {following_up}"
         );
         assert!(
-            flowed("verkstead/following-up/SKILL.md").contains("put the next round to them as a Set"),
+            flowed("verkstead/following-up/SKILL.md")
+                .contains("put the next round to them as a Set"),
             "and a refusal is the human not having finished, so it goes round again: \
              {following_up}"
         );
