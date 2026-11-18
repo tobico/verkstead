@@ -2204,7 +2204,8 @@ fn git_in(dir: &Path, args: &[&str]) -> String {
 
 /// A plugin installed from git on A is listed on B, and B clones it for itself
 /// at the revision A pinned: loaded on both, and greyed on neither. Removed on
-/// A, it goes from B too, and B deletes its clone.
+/// A, it goes from B too, and B deletes its clone; installed on A again, it
+/// comes back on B, which clones it afresh.
 #[tokio::test]
 async fn a_git_plugin_is_cloned_by_another_device_at_the_pinned_revision() {
     let a = Verkstead::answering(A).await;
@@ -2286,6 +2287,19 @@ async fn a_git_plugin_is_cloned_by_another_device_at_the_pinned_revision() {
     })
     .await
     .expect("B deleted its clone");
+
+    // Installed on A again under the same uuid, it is B's again too.
+    a.installs_plugin_from(&url).await;
+
+    b.plugins_saying(|view| view.installed.iter().any(|row| row.uuid == PLUGIN))
+        .await;
+    tokio::time::timeout(WAITING, async {
+        while !checkout.join("plugin.yaml").is_file() {
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await
+    .expect("B cloned it again");
 }
 
 /// A plugin's settings saved in its pane on A are read in its pane on B: a

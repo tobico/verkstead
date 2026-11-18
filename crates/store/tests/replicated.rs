@@ -297,6 +297,85 @@ async fn a_merge_keeps_the_newest_and_a_removal_final() {
     assert_eq!(held[1], arriving("two", 10, Some(10), "a", "removed"));
 }
 
+/// A kind standing in for one whose uuids come from outside, as the Plugins'
+/// do, so a removed one comes back when it is written again.
+struct Revived;
+
+impl Kind for Revived {
+    const NAME: &'static str = "revived";
+    type Fields = Note;
+    const REVIVES: bool = true;
+}
+
+/// In a kind that revives, a write after a removal makes the record again,
+/// stamped past the removal, and an edit of it is still refused.
+#[tokio::test]
+async fn a_removed_record_of_a_kind_that_revives_is_made_again_by_a_write() {
+    let (_dir, pool) = fresh_pool().await;
+
+    write::<Revived>(&pool, "a", "one", &note("first"))
+        .await
+        .unwrap();
+    remove::<Revived>(&pool, "a", "one").await.unwrap();
+    let removal = records::<Revived>(&pool).await.unwrap()[0].updated_at;
+
+    assert_eq!(
+        rewrite::<Revived>(&pool, "a", "one", &note("edited"))
+            .await
+            .unwrap(),
+        Written::Removed,
+        "an edit doesn't bring it back",
+    );
+    assert_eq!(
+        write::<Revived>(&pool, "b", "one", &note("first"))
+            .await
+            .unwrap(),
+        Written::Written,
+        "the same fields as the removed record are still a write",
+    );
+
+    let held = records::<Revived>(&pool).await.unwrap();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].deleted_at, None);
+    assert!(held[0].updated_at > removal);
+    assert_eq!(held[0].written_by, "b");
+    assert_eq!(held[0].fields, note("first"));
+}
+
+/// In a kind that revives, the merge keeps the newest write: a record made
+/// again after its removal wins over that removal, a removal after an edit wins
+/// over that edit, and an older write loses to either.
+#[tokio::test]
+async fn a_merge_in_a_kind_that_revives_keeps_the_newest_write() {
+    let (_dir, pool) = fresh_pool().await;
+
+    merge::<Revived>(&pool, &[arriving("one", 10, Some(10), "a", "removed")])
+        .await
+        .unwrap();
+
+    assert!(
+        !merge::<Revived>(&pool, &[arriving("one", 9, None, "b", "older")])
+            .await
+            .unwrap()
+    );
+    assert!(
+        merge::<Revived>(&pool, &[arriving("one", 11, None, "b", "again")])
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        records::<Revived>(&pool).await.unwrap(),
+        [arriving("one", 11, None, "b", "again")]
+    );
+
+    assert!(
+        merge::<Revived>(&pool, &[arriving("one", 12, Some(12), "a", "gone")])
+            .await
+            .unwrap()
+    );
+    assert!(live_records::<Revived>(&pool).await.unwrap().is_empty());
+}
+
 /// An Author mirror an older Verkstead wrote down is a record of the same uuid
 /// stamped older than anything, and the `author_mirrors` table is gone.
 #[tokio::test]
