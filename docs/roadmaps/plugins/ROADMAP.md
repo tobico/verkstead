@@ -32,7 +32,8 @@ component. **The Forge** runs 12 and 13, standing on 09 because the wrap-up
 Activity is the Forge's main caller and the two should not cross in one stage.
 Languages (02) stand on 01 alone and are the page's first real rows, so 02 is
 reorderable with 03 and 07. Build a plugin (14) stands on one landed stage per
-Category, because its templates describe interfaces that have to exist first.
+Category, because its templates describe interfaces that have to exist first,
+and on 13, whose GitLab repository is its Forge template.
 
 **Stage 05 wants Windows**: the Antigravity login path runs on a pseudoconsole
 the launcher makes as the session account, under `cfg(windows)`, and can be
@@ -55,4 +56,4 @@ harness's login runs under — the brief says to re-verify there by hand.
 - [ ] 11: The Process engine — [brief](11-the-process-engine.md) — after 09, 10
 - [ ] 12: The Forge interface and GitHub across — [brief](12-the-forge-interface.md) — after 09
 - [ ] 13: GitLab — [brief](13-gitlab.md) — after 12
-- [ ] 14: Build a plugin — [brief](14-build-a-plugin.md) — after 02, 06, 11, 12
+- [ ] 14: Build a plugin — [brief](14-build-a-plugin.md) — after 02, 06, 11, 12, 13
