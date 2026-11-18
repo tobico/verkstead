@@ -135,6 +135,26 @@ pub struct HarnessEntry {
 
     /// What to run in a terminal to make an account of it.
     pub first_run: String,
+
+    /// The models a Profile of it is offered, in the order the form offers
+    /// them.
+    pub models: Vec<HarnessModel>,
+
+    /// The short names it answers to beyond those — `opus` — each with what
+    /// it reads as: recognised where a Profile holds one, never offered.
+    pub aliases: Vec<HarnessModel>,
+}
+
+/// One model a harness declares: what it travels as, and what a human reads
+/// instead.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct HarnessModel {
+    /// The id the harness is launched with, and the string a Profile carries.
+    pub id: String,
+
+    /// What it reads as.
+    pub name: String,
 }
 
 /// One path an account of a harness is made of.

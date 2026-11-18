@@ -435,7 +435,7 @@ pub enum Seen {
 ///
 /// **And it is the whole account**, in the shape the profile form sends one:
 /// the wizard saves a ticked row by handing it straight back to the profile
-/// create, with no name and the models this build knows for its harness, rather
+/// create, with no name and the models its harness declares, rather
 /// than by naming paths of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]

@@ -284,4 +284,13 @@ impl Harness for Grok {
     fn model(&self, _role: store::Role) -> &str {
         "grok-4.6"
     }
+
+    fn models(&self) -> Vec<(&str, &str)> {
+        vec![("grok-4.6", "Grok 4.6"), ("grok-4.5", "Grok 4.5")]
+    }
+
+    /// Codex's, the other that stores and nudges.
+    fn running(&self) -> &str {
+        include_str!("running/store-and-nudge.md")
+    }
 }

@@ -440,7 +440,7 @@ pub(crate) const OPENCODE_DB_FILE: &str = "opencode.db";
 /// human is on a phone, so the wait is measured in hours; the shell tool's own
 /// default is two minutes, and its description tells the model that a command
 /// with no timeout is killed after it. So the Guide tells an OpenCode session
-/// to pass a large one — see the CLI's `running-opencode.md` — and this raises
+/// to pass a large one — see `harness/running/opencode.md` — and this raises
 /// what a session that passed nothing gets. Both, because the instruction is
 /// the mechanism and this is what stands under a drifted instruction: an ask
 /// killed two minutes in is an answer the human gave to nobody.

@@ -1,9 +1,9 @@
 //! The Guide: what an agent needs in order to ask well, carried by the binary
 //! that does the asking.
 //!
-//! The text is markdown in this repo, embedded at compile time rather than
-//! fetched or assembled from anything outside — so what an agent reads is
-//! exactly what was reviewed, and the binary alone is the whole documentation.
+//! The core is markdown in this repo, embedded at compile time rather than
+//! fetched — so what an agent reads of it is exactly what was reviewed, and
+//! the binary alone is the whole of it wherever nothing else answers.
 //!
 //! One document, tailored at print time. What differs between backends is how
 //! an ask is run and what comes back from it, which is a fact about the backend
@@ -21,16 +21,21 @@
 //! timeout. A Guide that told either to do the other's would send it after a
 //! harness feature it has not got.
 //!
-//! Which backend the reader is comes out of the environment: Verkstead sets the
-//! agent type in every sandbox it starts a session in. A Guide printed with
-//! nothing set — outside a sandbox, by a human at a terminal — is Claude's,
-//! which is the blocking ask a human at a terminal has.
+//! **Both are the server's to say** (ADR-0030, *Agent*; Set 1764, Q18): a
+//! harness may be a plugin's, whose section is what its manifest wrote, so the
+//! binary carries the core and asks the server for the rest by the harness
+//! `VERKSTEAD_AGENT` names, which Verkstead sets in every sandbox it starts a
+//! session in. A Guide printed with nothing set — outside a sandbox, by a human
+//! at a terminal — or where the server cannot be reached is the core alone:
+//! the blocking kinds, the ask a human at a terminal has, and no section on
+//! running one.
 
 use std::io::Write;
 
 use anyhow::{Context, Result, bail};
 use verkstead_server::sandbox::AGENT_TYPE;
-use verkstead_server::store;
+
+use crate::client::{Client, Guided};
 
 /// The core Guide, and since the gates Topic was retired the whole of it:
 /// nothing in the pipeline gates a commit any more, so there is no task left
@@ -42,15 +47,13 @@ const KINDS_MARKER: &str = "<!-- the two kinds of ask, per channel -->";
 const KINDS_BLOCKING: &str = include_str!("../guide/kinds-blocking.md");
 const KINDS_STORE_AND_NUDGE: &str = include_str!("../guide/kinds-store-and-nudge.md");
 
-/// And where running one is, which is the backend's own — one apiece for the
-/// three that block, and one the store-and-nudge backends share because what
-/// they share is real: the Set is stored, the turn ends, and `verkstead
-/// answers` is what fetches the Answers when the nudge lands.
+/// And where running one is, which is the backend's own and the server's to
+/// say.
 const RUNNING_MARKER: &str = "<!-- running the ask, per backend -->";
-const RUNNING_CLAUDE: &str = include_str!("../guide/running-claude.md");
-const RUNNING_OPENCODE: &str = include_str!("../guide/running-opencode.md");
-const RUNNING_AGY: &str = include_str!("../guide/running-agy.md");
-const RUNNING_STORE_AND_NUDGE: &str = include_str!("../guide/running-store-and-nudge.md");
+
+/// Where the server is when the environment does not say, as every verb that
+/// reaches it has it.
+const SERVER: &str = "VERKSTEAD_SERVER";
 
 /// Print the Guide on stdout.
 ///
@@ -66,7 +69,7 @@ pub fn guide(topic: Option<&str>) -> Result<()> {
         );
     }
 
-    let guide = tailored(reader()?);
+    let guide = tailored(fetched()?);
 
     let mut stdout = std::io::stdout().lock();
     stdout
@@ -75,71 +78,53 @@ pub fn guide(topic: Option<&str>) -> Result<()> {
         .context("writing the Guide to stdout")
 }
 
-/// Which backend this Guide is being printed for, and `None` where nothing
-/// says.
+/// The tailored half for the harness this Guide is printed for, or `None`
+/// where nothing says which or the server cannot be asked.
 ///
-/// Unset is a Guide read outside a sandbox, where nothing has said which
-/// backend is reading it — a human at a terminal, whose ask blocks. A word this
-/// binary does not know is refused by name rather than read past as one of
-/// them: printing one backend's mechanism to another is a session sent after a
-/// feature it has not got, or an ask wedged for hours.
-fn reader() -> Result<Option<store::AgentType>> {
-    let Ok(word) = std::env::var(AGENT_TYPE) else {
+/// An id the server answers it has no harness of is refused by name rather
+/// than printed past as the core: the variable is Verkstead's own to set, and
+/// a Guide that left a backend's mechanism out for a mistake in it is a
+/// session sent after an ask it does not know how to hold.
+fn fetched() -> Result<Option<verkstead_schema::GuideSection>> {
+    let Ok(agent) = std::env::var(AGENT_TYPE) else {
         return Ok(None);
     };
 
-    let agent_type = store::AgentType::read(&word);
+    let server = std::env::var(SERVER).unwrap_or_else(|_| crate::DEFAULT_SERVER.to_owned());
+    let Ok(client) = Client::new(&server) else {
+        return Ok(None);
+    };
 
-    if agent_type.built_in().is_none() {
-        bail!("{AGENT_TYPE} names the agent type {word:?}, which this binary has not got");
+    match client.guide(&agent) {
+        Guided::Section(section) => Ok(Some(section)),
+        Guided::NoSuchHarness(said) => {
+            bail!("{AGENT_TYPE} names the agent type {agent:?}, which the server refused: {said}")
+        }
+        Guided::Unreached => Ok(None),
     }
-
-    Ok(Some(agent_type))
 }
 
-/// The core with each tailored section spliced in where it goes.
+/// The core with each tailored section spliced in where it goes — the
+/// blocking kinds and no running section where there is none.
 ///
 /// A marker that is not there is this crate's own file having drifted from this
 /// module, which is a build to fix rather than a Guide to print — so it is
 /// asserted rather than skipped past, and the suite is what catches it.
-fn tailored(agent_type: Option<store::AgentType>) -> String {
-    let channel = agent_type.map_or(store::Channel::Blocking, |agent_type| {
-        verkstead_server::harness::channel(agent_type)
+fn tailored(section: Option<verkstead_schema::GuideSection>) -> String {
+    let (blocking, running) = section.map_or((true, String::new()), |section| {
+        (section.blocking, section.running)
     });
 
-    let kinds = match channel {
-        store::Channel::Blocking => KINDS_BLOCKING,
-        store::Channel::StoreAndNudge => KINDS_STORE_AND_NUDGE,
+    let kinds = match blocking {
+        true => KINDS_BLOCKING,
+        false => KINDS_STORE_AND_NUDGE,
     };
 
     spliced(
         &spliced(CORE, KINDS_MARKER, kinds),
         RUNNING_MARKER,
-        running(agent_type),
+        &running,
     )
-}
-
-/// How an ask is run, which is the backend's own rather than its channel's.
-///
-/// Matched on the type rather than on the channel so that a backend landing
-/// beside these is a decision taken here rather than one inherited from
-/// whichever channel it was given: the two that share a section share a
-/// mechanism, and the three that block do not. Claude Code backgrounds the call
-/// itself, opencode holds it in the turn under a timeout, and agy's
-/// `run_command` turns it into a background task of its own after a wait and
-/// wakes the session when it ends.
-///
-/// Nothing set reads Claude's, which is what a Guide printed outside a sandbox
-/// has always been.
-fn running(agent_type: Option<store::AgentType>) -> &'static str {
-    match agent_type {
-        None | Some(store::AgentType::CLAUDE) => RUNNING_CLAUDE,
-        Some(store::AgentType::OPENCODE) => RUNNING_OPENCODE,
-        Some(store::AgentType::AGY) => RUNNING_AGY,
-        // Codex and Grok Build, the two that store and nudge: [`reader`] has
-        // refused every id this binary has not got.
-        Some(_) => RUNNING_STORE_AND_NUDGE,
-    }
 }
 
 /// One marker replaced by the section that belongs there.
@@ -149,5 +134,12 @@ fn spliced(guide: &str, marker: &str, section: &str) -> String {
         "the core Guide should carry the {marker} marker"
     );
 
-    guide.replace(marker, section.trim_end())
+    match section.trim_end() {
+        // Nothing to splice, and the blank line it would have stood between
+        // goes with it.
+        "" => guide
+            .replacen(&format!("{marker}\n\n"), "", 1)
+            .replace(marker, ""),
+        section => guide.replace(marker, section),
+    }
 }

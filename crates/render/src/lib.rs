@@ -103,8 +103,8 @@ pub use plugins::{
     PluginsView,
 };
 pub use profiles::{
-    AccountFile, AccountLogin, AgentType, Broken, HarnessEntry, HarnessPath, MemoryFile,
-    MemoryLeft, MemoryWanted, PairingView, PickedView, ProfileAccount, ProfileChoice,
+    AccountFile, AccountLogin, AgentType, Broken, HarnessEntry, HarnessModel, HarnessPath,
+    MemoryFile, MemoryLeft, MemoryWanted, PairingView, PickedView, ProfileAccount, ProfileChoice,
     ProfileChosen, ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry, ProfileSaved,
     ProfileTrouble, RepoPairingsView, RoleChoice,
 };

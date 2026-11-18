@@ -344,4 +344,15 @@ impl Harness for Codex {
     fn model(&self, _role: store::Role) -> &str {
         "gpt-5-codex"
     }
+
+    fn models(&self) -> Vec<(&str, &str)> {
+        vec![("gpt-5-codex", "GPT-5 Codex")]
+    }
+
+    /// The section the two that store and nudge share, because what they
+    /// share is real: the Set is stored, the turn ends, and `verkstead
+    /// answers` is what fetches the Answers when the nudge lands.
+    fn running(&self) -> &str {
+        include_str!("running/store-and-nudge.md")
+    }
 }

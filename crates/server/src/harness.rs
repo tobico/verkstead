@@ -387,6 +387,34 @@ pub(crate) trait Harness: Send + Sync {
     /// The model a default Pairing on this harness runs for `role` — see
     /// [`crate::pairing_defaults`].
     fn model(&self, role: store::Role) -> &str;
+
+    /// The models a Profile of it is offered, each by its id and the name a
+    /// human reads instead, in the order the form offers them.
+    ///
+    /// **The list goes stale** the week another model ships, so nothing is
+    /// built on its being complete: a Profile may list an id it does not hold,
+    /// typed by hand, and is run under it all the same.
+    fn models(&self) -> Vec<(&str, &str)>;
+
+    /// The short names the harness answers to beyond those, each with the name
+    /// it reads as — recognised where a Profile holds one, and never offered,
+    /// since a pick that sent `opus` would be sending whichever model the
+    /// harness calls Opus this month. None, for most.
+    fn aliases(&self) -> Vec<(&str, &str)> {
+        Vec::new()
+    }
+
+    /// The Guide's *Running the ask* section for a session of it, as
+    /// markdown: how its shell tool holds `verkstead ask`, which is the
+    /// harness's own rather than its channel's — see the CLI's `guide`, which
+    /// fetches it through [`running`].
+    fn running(&self) -> &str;
+}
+
+/// The *Running the ask* section of the harness `agent_type`, with how its
+/// sessions ask — or `None` where this server has no harness of that id.
+pub(crate) fn running(agent_type: store::AgentType) -> Option<(store::Channel, &'static str)> {
+    of(agent_type).map(|harness| (harness.channel(), harness.running()))
 }
 
 /// What [`Harness::carried`] answers: the record found, once it has been
@@ -464,10 +492,8 @@ pub(crate) fn every() -> impl Iterator<Item = (store::AgentType, &'static dyn Ha
 }
 
 /// How a session of `agent_type` puts a Question Set to the human — see
-/// [`Harness::channel`] — said for the CLI's Guide, which is outside the crate
-/// the trait is reached in. Blocking for a harness this binary has not got,
-/// which is how the Guide has always been printed outside a sandbox.
-pub fn channel(agent_type: store::AgentType) -> store::Channel {
+/// [`Harness::channel`]. Blocking for a harness this server has not got.
+pub(crate) fn channel(agent_type: store::AgentType) -> store::Channel {
     of(agent_type).map_or(store::Channel::Blocking, |harness| harness.channel())
 }
 

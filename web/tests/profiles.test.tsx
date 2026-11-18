@@ -33,14 +33,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   DirectoryListing,
+  HarnessEntry,
   ProfileAccount,
   ProfileEdit,
   ProfileEntry,
 } from "../src/api/types";
 import { DEFAULT_PROFILE } from "../src/agents";
-import { harnessName } from "../src/harnesses";
+import { harnessName, harnesses, knowHarnesses } from "../src/harnesses";
 import { NOT_USABLE_AWAY } from "../src/broken";
-import { KNOWN_MODELS, prettify } from "../src/models";
+import { offeredFor, prettify } from "../src/models";
 // The four files a backend's brand mark is drawn out of, read as lobehub
 // published them — so that naming a mark here and drawing it in `HarnessMark`
 // are two independent statements about the same art.
@@ -1877,13 +1878,13 @@ describe("the models a profile lists", () => {
   ///
   /// The name is the viewer's word for the model and the id is what the session
   /// is launched with, so both are on the row: one to read, one to check.
-  it("offers every model this build knows for that backend", async () => {
+  it("offers every model that backend's harness declares", async () => {
     theProfiles();
     mountPane(FABLE.id);
 
     await waitFor(() => screen.getByLabelText("Fable 5"));
 
-    const claude = KNOWN_MODELS.filter((model) => model.agent === "Claude");
+    const claude = offeredFor("Claude");
 
     for (const model of claude) {
       expect(screen.getByLabelText(model.name)).toBeTruthy();
@@ -1892,8 +1893,8 @@ describe("the models a profile lists", () => {
       claude.map((model) => `${model.name}${model.id}`),
     );
 
-    // And nothing of anybody else's: `grok-4.6` is a model this build knows the
-    // name of and a Claude Code account cannot be launched on.
+    // And nothing of anybody else's: `grok-4.6` is a model Grok Build declares
+    // and a Claude Code account cannot be launched on.
     expect(screen.queryByLabelText("Grok 4.6")).toBeNull();
   });
 
@@ -1911,10 +1912,37 @@ describe("the models a profile lists", () => {
     await waitFor(() => screen.getByLabelText("Grok 4.6"));
 
     expect(offered()).toEqual(
-      KNOWN_MODELS.filter((model) => model.agent === "Grok").map(
-        (model) => `${model.name}${model.id}`,
-      ),
+      offeredFor("Grok").map((model) => `${model.name}${model.id}`),
     );
+    expect(screen.queryByLabelText("Fable 5")).toBeNull();
+  });
+
+  /// A plugin harness's Profile is offered the models its manifest declares,
+  /// by the names it gives them — the form keeps no list of its own.
+  it("offers a plugin harness the models its manifest declares", async () => {
+    const plugged: HarnessEntry = {
+      ...harnesses()[1]!,
+      id: "3f0c9a12-7b4e-4c1d-8e2f-5a6b7c8d9e0f",
+      name: "Stub Harness",
+      models: [
+        { id: "stub-large", name: "Stub Large" },
+        { id: "stub-small", name: "Stub Small" },
+      ],
+      aliases: [],
+    };
+    knowHarnesses([...harnesses(), plugged]);
+
+    const stub: ProfileEntry = {
+      ...FABLE,
+      account: { agent_type: plugged.id, paths: { home: "/srv/accounts/stub" } },
+      models: ["stub-large"],
+    };
+    serving(whenever("/api/ui/profiles", json([stub])));
+    mountPane(stub.id);
+
+    await waitFor(() => screen.getByLabelText("Stub Large"));
+
+    expect(offered()).toEqual(["Stub Largestub-large", "Stub Smallstub-small"]);
     expect(screen.queryByLabelText("Fable 5")).toBeNull();
   });
 

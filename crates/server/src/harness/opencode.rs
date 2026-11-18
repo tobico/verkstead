@@ -349,6 +349,19 @@ impl Harness for OpenCode {
             store::Role::Implementation | store::Role::Review => "minimax/minimax-m2.1",
         }
     }
+
+    fn models(&self) -> Vec<(&str, &str)> {
+        vec![
+            ("minimax/minimax-m2.1", "Minimax M2.1"),
+            ("opencode/gpt-5.1-codex", "GPT-5.1 Codex"),
+        ]
+    }
+
+    /// Holding the ask in a synchronous shell call given a long enough
+    /// timeout — see [`sandbox`]'s bash timeout, which stands under it.
+    fn running(&self) -> &str {
+        include_str!("running/opencode.md")
+    }
 }
 
 /// The two directories opencode keeps an account in, inside its home: its

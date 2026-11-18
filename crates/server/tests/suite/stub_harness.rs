@@ -58,6 +58,12 @@ pub(crate) enum StubHarness {
     /// login and `auth status` the question of whether it has one. The only
     /// one declaring a login.
     LoggingIn,
+
+    /// As [`StubHarness::Silent`], under a uuid of its own for the suites that
+    /// read back the models it declares: the harness of a uuid is whichever
+    /// manifest was installed last in this process, and every other variant is
+    /// installed with more than one list.
+    Offering,
 }
 
 impl StubHarness {
@@ -68,12 +74,15 @@ impl StubHarness {
             StubHarness::Drawing => "6c1d2b3e-4f5a-4b6c-9d7e-8f9a0b1c2d3e",
             StubHarness::DrawingBlocking => "7d2e3c4f-5a6b-4c7d-8e8f-9a0b1c2d3e4f",
             StubHarness::LoggingIn => "8e3f4d5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a",
+            StubHarness::Offering => "9f4a5e6b-7c8d-4e9f-8a1b-2c3d4e5f6a7b",
         }
     }
 
     fn idle(self) -> String {
         match self {
-            StubHarness::Silent | StubHarness::LoggingIn => "    idle: silence\n".to_owned(),
+            StubHarness::Silent | StubHarness::LoggingIn | StubHarness::Offering => {
+                "    idle: silence\n".to_owned()
+            }
             StubHarness::Drawing | StubHarness::DrawingBlocking => {
                 format!("    idle:\n      signature: \"{AT_WORK}\"\n")
             }
@@ -83,9 +92,10 @@ impl StubHarness {
     fn channel(self) -> &'static str {
         match self {
             StubHarness::Drawing => "store-and-nudge",
-            StubHarness::Silent | StubHarness::DrawingBlocking | StubHarness::LoggingIn => {
-                "blocking"
-            }
+            StubHarness::Silent
+            | StubHarness::DrawingBlocking
+            | StubHarness::LoggingIn
+            | StubHarness::Offering => "blocking",
         }
     }
 
@@ -94,7 +104,10 @@ impl StubHarness {
             StubHarness::LoggingIn => {
                 "    login:\n      line: [auth, login]\n      status: [auth, status]\n"
             }
-            StubHarness::Silent | StubHarness::Drawing | StubHarness::DrawingBlocking => "",
+            StubHarness::Silent
+            | StubHarness::Drawing
+            | StubHarness::DrawingBlocking
+            | StubHarness::Offering => "",
         }
     }
 

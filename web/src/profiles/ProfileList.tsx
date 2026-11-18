@@ -87,10 +87,10 @@
 //! The models are one of those fields, and a profile carries the whole list of
 //! them: a profile reaches one account with one configuration, so what it can
 //! launch is its own rather than a list every profile shares. They are picked
-//! off the models this build knows *of the picked agent type* — a model belongs
+//! off the models *the picked agent type's harness declares* — a model belongs
 //! to one backend, and a tick for another backend's would be an invitation to
 //! save a profile that cannot launch — with a field beside the picks for an id
-//! the build does not know: the list goes stale the week another model ships,
+//! the harness does not declare: the list goes stale the week another model ships,
 //! which is why it is the ordinary way in rather than the only one. The
 //! line-a-piece textarea this replaces was the whole of it, and made every
 //! profile a spelling test.
@@ -163,7 +163,7 @@ import { osIcon } from "../devices";
 import { useReading } from "../freshness";
 import { harness, harnessName, harnesses } from "../harnesses";
 import { rowPress } from "../rows";
-import { KNOWN_MODELS, known, prettify } from "../models";
+import { known, offeredFor, prettify } from "../models";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import app from "../App.module.css";
@@ -900,8 +900,8 @@ export function ProfileForm(props: {
     setRefused(null);
   };
 
-  /// The models this build knows that the picked agent type can launch: the
-  /// ticks the form offers of its own.
+  /// The models the picked agent type's harness declares: the ticks the form
+  /// offers of its own.
   ///
   /// Filtered by the type the form is on rather than the whole list, because a
   /// model is one backend's — a Claude Code account cannot be launched on
@@ -909,9 +909,7 @@ export function ProfileForm(props: {
   /// cannot run. Picking another type therefore changes what is offered, the way
   /// it changes which account paths are asked for.
   const launchable = (): string[] =>
-    KNOWN_MODELS.filter(
-      (model) => model.agent === form().account.agent_type,
-    ).map((model) => model.id);
+    offeredFor(form().account.agent_type).map((model) => model.id);
 
   /// Every model the form draws a tick for: those, and any this profile carries
   /// that they do not cover — an id this build has never heard of, one saved
@@ -928,8 +926,8 @@ export function ProfileForm(props: {
     ...form().models.filter((model) => !launchable().includes(model)),
   ];
 
-  /// Whose model one of them is, where it is a model this build knows and the
-  /// backend that launches it is not the one the form is on.
+  /// Whose model one of them is, where another harness declares it and the
+  /// one the form is on does not.
   ///
   /// Which is the one thing a row of [`offered`] can be that nothing here put
   /// there. A profile carries the models it was saved with, so picking another
@@ -939,14 +937,15 @@ export function ProfileForm(props: {
   /// account's, and what a tick like that saves is a pairing offered as
   /// runnable that the harness will refuse: `grok` started on `claude-fable-5`.
   ///
-  /// `undefined` for every ordinary row and for an id the list has never heard
-  /// of — the free-text way in is what that is, and a model this build cannot
-  /// name is not a model it can say the backend of.
+  /// `undefined` for every ordinary row and for an id no harness declares —
+  /// the free-text way in is what that is, and a model nothing declares is not
+  /// a model anything can say the backend of.
   const elsewhere = (model: string): AgentType | undefined =>
-    KNOWN_MODELS.find(
-      (known) =>
-        known.id === model && known.agent !== form().account.agent_type,
-    )?.agent;
+    launchable().includes(model)
+      ? undefined
+      : harnesses().find((entry) =>
+          entry.models.some((declared) => declared.id === model),
+        )?.id;
 
   /// A model ticked or unticked.
   ///
