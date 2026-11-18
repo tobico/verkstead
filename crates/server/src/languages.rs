@@ -21,18 +21,18 @@
 //! a built-in whole, so that changing one variable still gets every later fix
 //! to the rest; a variable set to `null` is taken out; and an entry naming a
 //! language nothing here has ever heard of is a descriptor in its own right,
-//! on by default, with its variables in the next session and its checkbox on
-//! the settings page.
+//! on by default, with its variables in the next session and a row of its own
+//! on the Plugins page — see [`crate::plugins::installed::installers`].
 //!
 //! **`enabled` and `size` are keys of the same entry**, beside the ones only a
-//! file ever holds, and they are the only two the settings page writes — which
-//! is what lets one request write the whole of `config.yaml` without a save
-//! taking an installer's descriptor away. `rust_build_cache`, which is where
+//! file ever holds; the settings page writes no key of any entry, so a save of
+//! it never takes an installer's descriptor away. `rust_build_cache`, which is where
 //! Rust's switch and size used to be said, is still read as Rust's two, and
 //! the map wins where both are written: see
 //! [`crate::settings::Config::languages`], where the two are put together.
-//! **A built-in language's `enabled` is its plugin's tick now, and its `size`
-//! its plugin's `size` setting**, cluster-wide: the file's were taken up into
+//! **A language's `enabled` is its plugin's tick now, and its `size` its
+//! plugin's `size` setting**, cluster-wide — an installer's own language's
+//! too, it being drawn as a plugin of its own: the file's were taken up into
 //! the plugin's record once and are not read again — see [`configured`] and
 //! [`crate::replicating::plugins::taken_up`].
 //!
@@ -76,9 +76,9 @@
 //! **What was written stays written.** The entry is kept exactly as the file
 //! had it — see [`Raw`] — because a save from the settings page writes the
 //! whole of `config.yaml`, and an entry nothing could read is still text the
-//! installer typed and is about to fix. It goes back the way the descriptor
-//! keys the page never drew do. And the page says why: [`Descriptor::unread`]
-//! is the reason, in the words it is logged in.
+//! installer typed and is about to fix. And its plugin's row says why, as its
+//! trouble: [`Descriptor::unread`] is the reason, in the words it is logged
+//! in.
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -421,8 +421,9 @@ fn known(value: Option<&Raw>, field: &str, allowed: &[&str]) -> Result<(), Refus
 /// stores or grants reach a session, and the Compile Server is not wanted for
 /// it; and `{size}`, the Compile Server's start and the trimming all read the
 /// record's size, or the default where it holds none. A language no plugin
-/// provides — an installer's own — is still switched and sized by its entry
-/// here.
+/// provides — an installer's own — is switched and sized the same way by the
+/// record of the plugin it is drawn as, once it has one, and by its entry
+/// until then.
 pub fn configured(config: &crate::settings::Config) -> Languages {
     let languages = built_in().merged(&config.languages());
 
@@ -436,11 +437,14 @@ pub fn configured(config: &crate::settings::Config) -> Languages {
 /// size, of kind `size`: what `{size}` reads for every language it provides.
 pub const SIZE_SETTING: &str = "size";
 
-/// What the built-in Language plugins' records say of their languages, held
-/// for every session to read — see
-/// [`crate::replicating::plugins::held`].
+/// What the Language plugins' records say of their languages, held for every
+/// session to read — see [`crate::replicating::plugins::held`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Held {
+    /// The installer's own languages that have a record: switched and sized
+    /// by it, as a built-in is, rather than by their entry. One with none yet
+    /// is still its entry's.
+    pub recorded: std::collections::BTreeSet<String>,
     /// The languages whose plugin is unticked.
     pub off: std::collections::BTreeSet<String>,
     /// The size each language's plugin has saved, by language. A language
@@ -502,38 +506,6 @@ impl Languages {
         )]))
     }
 
-    /// And the entries the settings page has just written: the two keys it
-    /// draws, per language it was given.
-    ///
-    /// Written over the file rather than replacing it — see
-    /// [`Languages::under_the_page`], which is what a save goes through — so
-    /// what an installer wrote beside those two keys survives a save. A size
-    /// that is blank is *nothing configured* rather than a size of nothing,
-    /// which is what clearing the field on the page means and what puts the
-    /// default back; a language with no size field at all sends that same
-    /// blank, there being no size to send.
-    ///
-    /// A switch of `None` is one the page does not write: a built-in
-    /// language's, which is its plugin's tick — so a save takes an `enabled`
-    /// the file still holds for it out, the take-up having read it.
-    pub fn of_page(written: impl IntoIterator<Item = (String, Option<bool>, String)>) -> Languages {
-        Languages(Ordered(
-            written
-                .into_iter()
-                .map(|(name, enabled, size)| {
-                    (
-                        name,
-                        Descriptor {
-                            enabled,
-                            size: crate::settings::blank_is_nothing(size),
-                            ..Descriptor::default()
-                        },
-                    )
-                })
-                .collect(),
-        ))
-    }
-
     /// Whether there is nothing here at all, which is what a `config.yaml`
     /// nobody has written a descriptor in says.
     pub fn is_empty(&self) -> bool {
@@ -562,47 +534,27 @@ impl Languages {
         )
     }
 
-    /// And this with what the settings page has just sent written over it.
-    ///
-    /// Not [`Languages::merged`], which is one grammar's entries over
-    /// another's. That one keeps a key the override does not give, because a
-    /// key an installer did not write is a key they said nothing about — and
-    /// the page is the other way round: it draws `enabled` and `size` every
-    /// time it saves, so a key it did not send is one somebody **cleared**.
-    /// Clearing the size field is how the default is asked for back, and a
-    /// merge that kept the old value would be a field that could not be
-    /// emptied.
-    ///
-    /// Everything else in an entry is kept from this one, which is what a save
-    /// from a page with no descriptor editor on it must not be able to touch —
-    /// see [`crate::settings::Config::keeping_what_the_page_never_drew`], the
-    /// one caller. An entry the page never sent stays as it stands, and one
-    /// naming a language this file has never heard of is taken on as written,
-    /// which is what saves an installer's own.
-    ///
-    /// An entry nothing could read keeps its text here like any other key the
-    /// page never drew, and goes back into the file as it was written: it is
-    /// still what the installer typed and is about to fix — see [`Languages`]'s
-    /// own serialisation, which is where that is done.
-    pub fn under_the_page(&self, page: &Languages) -> Languages {
-        Languages(
-            self.0
-                .merged(&page.0, Descriptor::with_the_pages_keys, Descriptor::clone),
-        )
-    }
-
     /// This with every built-in language's switch and size as its plugin's
-    /// record says: off where it is among `held.off`, and on otherwise; sized
-    /// as its plugin saved, and at its default where it saved nothing.
+    /// record says, and every installer's own language's that has a record:
+    /// off where it is among `held.off`, and on otherwise; sized as its plugin
+    /// saved, and at its default where it saved nothing.
+    ///
+    /// Except an installer's own whose entry would not load, which stays off
+    /// whatever its tick says — see [`Descriptor::alone`]: there is nothing
+    /// behind it to turn on.
     fn held(self, held: &Held) -> Languages {
         Languages(Ordered(
             self.0
                 .0
                 .into_iter()
                 .map(|(name, descriptor)| {
-                    let descriptor = match built_in().get(&name).is_some() {
+                    let shipped = built_in().get(&name).is_some();
+                    let descriptor = match shipped || held.recorded.contains(&name) {
                         true => Descriptor {
-                            enabled: Some(!held.off.contains(&name)),
+                            enabled: Some(
+                                !held.off.contains(&name)
+                                    && (shipped || descriptor.unread.is_none()),
+                            ),
                             size: held.sizes.get(&name).cloned(),
                             ..descriptor
                         },
@@ -628,8 +580,8 @@ impl Languages {
     /// the directories that have to be open for them to mean anything.
     ///
     /// The switch and the size are the descriptor's own — `enabled` and `size`,
-    /// which are the two keys of an entry the settings page writes and the only
-    /// two it ever does. They are read at every session spawn rather than held
+    /// which its Language plugin's record lays over it — see [`configured`].
+    /// They are read at every session spawn rather than held
     /// from startup, like everything else a session is built from, so a switch
     /// flipped on a phone applies to the next session.
     pub fn given(&self, machine: &Machine) -> Given {
@@ -734,8 +686,8 @@ impl Languages {
 /// descriptor is two variables, one that is nothing but a capability.
 ///
 /// **`enabled` and `size` are keys of this same entry**, beside the ones only
-/// a file ever holds, and they are the only two the settings page ever writes.
-/// One entry per language rather than a switch in one place and a descriptor in
+/// a file ever holds — read once into a Language plugin's record, which
+/// switches and sizes the language from then on. One entry per language rather than a switch in one place and a descriptor in
 /// another, because a human reading `config.yaml` should find everything it
 /// says about a language in the one block under its name.
 ///
@@ -963,13 +915,19 @@ impl Descriptor {
     /// a name with no variables, and a box on the settings page that turns on a
     /// language that does not exist would be worse than the language being
     /// plainly off until the entry is fixed.
-    fn alone(&self) -> Descriptor {
-        match self.unread.is_some() {
+    ///
+    /// Asked of a built-in's name too, where an entry is merged over something
+    /// that is not the built-ins — `rust_build_cache`'s Rust, in
+    /// [`crate::settings::Config::languages`] — and a built-in's is never off
+    /// for it: the built-in is still underneath, merged in later.
+    fn alone(name: &str, descriptor: &Descriptor) -> Descriptor {
+        let unbacked = built_in().get(name).is_none();
+        match unbacked && descriptor.unread.is_some() {
             true => Descriptor {
                 enabled: Some(false),
-                ..self.clone()
+                ..descriptor.clone()
             },
-            false => self.clone(),
+            false => descriptor.clone(),
         }
     }
 
@@ -1126,14 +1084,14 @@ impl Descriptor {
             // variable no session is given.
             env: self
                 .env
-                .merged(&over.env, |_, over| over.clone(), Clone::clone),
+                .merged(&over.env, |_, over| over.clone(), |_, alone| alone.clone()),
             // And a capability in both is merged in its turn rather than
             // replaced, so that overriding one of the sccache's three variables
             // keeps the other two.
             capabilities: self.capabilities.merged(
                 &over.capabilities,
                 Capability::merged,
-                Capability::clone,
+                |_, alone| alone.clone(),
             ),
             // And a store in both merged in its turn, a `null` taking it out —
             // the variables' rule, one level further down.
@@ -1143,24 +1101,13 @@ impl Descriptor {
                     (Some(held), Some(over)) => Some(held.merged(over)),
                     (_, over) => over.clone(),
                 },
-                Clone::clone,
+                |_, alone| alone.clone(),
             ),
             // And why the override said nothing, where it said nothing because
             // it would not load. Carried rather than merged into: what it is
             // about is the entry in the file, and the built-in underneath it is
             // exactly what it is falling back *to*.
             unread: over.unread.clone().or_else(|| self.unread.clone()),
-        }
-    }
-
-    /// This with the two keys the settings page draws taken from `page`,
-    /// absence included, and every other key left exactly as it is — see
-    /// [`Languages::under_the_page`], which says why that is not a merge.
-    fn with_the_pages_keys(&self, page: &Descriptor) -> Descriptor {
-        Descriptor {
-            enabled: page.enabled,
-            size: page.size.clone(),
-            ..self.clone()
         }
     }
 
@@ -1203,7 +1150,7 @@ impl Capability {
         Capability {
             env: self
                 .env
-                .merged(&over.env, |_, over| over.clone(), Clone::clone),
+                .merged(&over.env, |_, over| over.clone(), |_, alone| alone.clone()),
         }
     }
 }
@@ -1802,14 +1749,14 @@ impl<V: Clone> Ordered<V> {
         &self,
         over: &Ordered<V>,
         merging: impl Fn(&V, &V) -> V,
-        alone: impl Fn(&V) -> V,
+        alone: impl Fn(&str, &V) -> V,
     ) -> Ordered<V> {
         let mut merged = self.0.clone();
 
         for (key, value) in over.iter() {
             match merged.iter_mut().find(|(name, _)| name == key) {
                 Some((_, held)) => *held = merging(held, value),
-                None => merged.push((key.to_owned(), alone(value))),
+                None => merged.push((key.to_owned(), alone(key, value))),
             }
         }
 

@@ -5931,7 +5931,6 @@ describe("the MCP servers a compose page holds", () => {
           verified: null,
           refused: [],
           refused_servers: [],
-          refused_sizes: [],
           tried: [],
         } satisfies SettingsSaved),
         "POST",

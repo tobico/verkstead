@@ -3729,38 +3729,10 @@ profile: string | null, agent_type: AgentType, } };
 export type LanguageCleared = { "Cleared": { settings: SettingsView, } } | { "Running": Running } | "NoSuchLanguage";
 
 /**
- * One language as the human has just left it: the two keys of its entry the
- * settings page writes, and nothing else.
- *
- * The size is a string because it is sccache's own word for one, and an empty
- * one is *no size configured* rather than a size of nothing — which is what
- * clearing the field means and what puts the default back.
- *
- * **Sent for every language, whether the page drew a field for it or not.**
- * It draws one only where something reads a size, and a save built out of the
- * fields alone would write the file with every other language's size gone —
- * see [`LanguageView::size`], which is where this comes back from.
- *
- * Whether compiling is cached is not here. It is the server's own
- * circumstance rather than anything a page can decide, so it travels one way
- * only — see [`LanguageView::compiling`].
- */
-export type LanguageEdit = { 
-/**
- * Which language this is about, by the name `config.yaml` keys it by — a
- * name the server has never heard of is an entry written into that file
- * under it, which is how an installer's own language is saved.
- */
-name: string, enabled: boolean, size: string, };
-
-/**
- * One language as the settings page draws it: what to call it, whether
- * sessions get it, and how big its store may grow.
- *
- * **Every key of an entry that a save writes is here, the size included.**
- * One request writes the whole of `config.yaml`, so a page that only knew the
- * sizes it drew a field for would be a save that emptied the rest — see
- * [`LanguageEdit`], which is those same two keys going the other way.
+ * One language as the settings page is told it: what to call it, whether
+ * sessions get it, and how big its store may grow. Nothing writes it back:
+ * every language is a Language plugin's, switched and sized on the Plugins
+ * page.
  *
  * The switch is never null. Nothing configured is on, so what comes back is
  * where the switch *sits* rather than whether anybody has touched it — a page
@@ -3785,9 +3757,9 @@ label: string,
 enabled: boolean, 
 /**
  * The built-in plugin whose tick on the Plugins page is this switch, by
- * its display name — `Rust & C/C++` — where one provides it: the page
- * draws no checkbox for it, and a save's `enabled` for it is not written.
- * Null for a language only `config.yaml` describes, whose box is here.
+ * its display name — `Rust & C/C++` — where one provides it. Null for a
+ * language only `config.yaml` describes, drawn on the Plugins page as a
+ * plugin of its own.
  */
 plugin: string | null, 
 /**
@@ -5095,7 +5067,7 @@ running: Running, };
 /**
  * Where a Plugin came from.
  */
-export type PluginSource = { "kind": "Local", path: string, } | { "kind": "Git", url: string, revision: string, } | { "kind": "BuiltIn" };
+export type PluginSource = { "kind": "Local", path: string, } | { "kind": "Git", url: string, revision: string, } | { "kind": "BuiltIn" } | { "kind": "Config" };
 
 /**
  * **Update**: nothing the first time, and the capabilities the card showed
@@ -6773,17 +6745,6 @@ export type SettingsEdit = { git_author: Author,
  */
 github_token: TokenEdit, 
 /**
- * The languages as the page has just left them, as values rather than as
- * an action: there is nothing secret about a switch or a size, so a save
- * says where each of them is to stand and the server writes it down.
- *
- * One entry per language the page was given, carrying the two keys it
- * draws and no others — see [`LanguageEdit`]. The rest of a descriptor is
- * an installer's and is never sent, so a save from this page cannot take a
- * language off the machine.
- */
-languages: Array<LanguageEdit>, 
-/**
  * And what the Cleanup is to do after an archiving, as values for that
  * reason again: two switches and two durations, and a save says where each
  * of them is to stand.
@@ -6907,18 +6868,6 @@ refused: Array<RuleRefused>,
  * still has in front of them.
  */
 refused_servers: Array<ServerRefused>, 
-/**
- * And the store sizes that would not be written down, or empty where the
- * save landed. A refusal here is the whole request refused, like the two
- * lists above: neither file is touched.
- *
- * Only a size that was *changed* is refused. One a hand-edit wrote into
- * `config.yaml` that is not a size goes back as it was on a save about
- * something else, so a tick is never turned down over a field the human
- * did not touch — see `LanguageView::size_unread`, which is how the page
- * says that one.
- */
-refused_sizes: Array<SizeRefused>, 
 /**
  * And what came of speaking to each declaration that *was* written down,
  * in the order they were declared — empty on every save that said nothing
@@ -7252,23 +7201,6 @@ export type Shown = { "Painted": Screen } | { "Printed": string };
  * the latest one is the size the Screen and the session's own terminal are.
  */
 export type Size = { columns: number, rows: number, };
-
-/**
- * One store size a save was turned down over.
- *
- * By the language's name rather than by position: there is one size per
- * language and one field per size, so the name is the field.
- */
-export type SizeRefused = { 
-/**
- * The language whose size it is, as `config.yaml` keys it.
- */
-language: string, 
-/**
- * Why, as a clause following the word that was sent — see
- * `crate::languages::bytes` on the server.
- */
-why: string, };
 
 /**
  * And where a prefill came from.

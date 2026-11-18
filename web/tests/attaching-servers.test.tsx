@@ -240,7 +240,6 @@ describe("adding a server from the Attach menu", () => {
       verified: null,
       refused: [],
       refused_servers: [],
-      refused_sizes: [],
       tried: [],
     };
   }

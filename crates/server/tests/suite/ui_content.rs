@@ -3302,16 +3302,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     write("settings-unset.json", &get(&app, "/api/ui/settings").await);
 
     // And a language an installer wrote a descriptor for, hand-edited into the
-    // file the way one really is — there being no editor for it here. What the
-    // page draws of it is its label and its box, which is what the fixture the
-    // viewer's tests read has to carry: Rust alone would prove only that the
-    // page can draw the language it was written around.
-    //
-    // **With a size on it**, which is the key the page draws no field for here:
-    // nothing reads this one's size, its descriptor naming no sccache
-    // capability, and a save still has to put it back. So the fixture carries a
-    // size somebody configured that the pane never shows — see `held.ts`, which
-    // is what sends it.
+    // file the way one really is — there being no editor for it here. It is a
+    // Language plugin of its own on the Plugins page, its size taken up into
+    // that plugin's record; the settings still list it beside the built-ins,
+    // which is what the Sandbox card's sccache line reads.
     std::fs::write(
         told_dir.path().join("config.yaml"),
         "languages:\n  gleam:\n    label: Gleam\n    size: 8G\n    detect:\n      \
@@ -3348,16 +3342,6 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                 "email": "ada@example.com",
             },
             "github_token": { "Set": { "token": "ghp_0123456789abcdef" } },
-            // Every language the page was given, which is how it saves: the
-            // switch and the size of each, and the size of **every** one of them
-            // whether the pane drew a field for it or not — see `held.ts`'s
-            // `asEdit`. Rust's is not written, its size being its plugin's,
-            // saved above; an installer's own language's is, and
-            // `settings-unset.json` above holds the defaults.
-            "languages": [
-                { "name": "rust", "enabled": true, "size": "50G" },
-                { "name": "gleam", "enabled": true, "size": "8G" },
-            ],
             // And a Cleanup somebody has been through: both durations typed and
             // the delete turned on, for the reason the size above is typed —
             // this is the fixture of a Verkstead that has been told everything,

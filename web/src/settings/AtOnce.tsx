@@ -73,7 +73,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldAuthor, heldCleanup, heldLanguages, heldPaths } from "./held";
+import { heldAuthor, heldCleanup, heldPaths } from "./held";
 import styles from "./AtOnce.module.css";
 import { SettingsCard } from "./SettingsCard";
 
@@ -219,8 +219,6 @@ export function AtOncePane(props: {
         // blank token field read as *clear this* is exactly what `Keep` is
         // here to stop.
         github_token: "Keep",
-        // And the languages as they stand — see [`heldLanguages`].
-        ...heldLanguages(told()),
         // And what becomes of an archived Conversation — see [`heldCleanup`].
         cleanup: heldCleanup(told()),
         conflict_resolution: told()?.conflict_resolution ?? "Merge",

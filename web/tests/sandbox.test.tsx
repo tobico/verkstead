@@ -9,17 +9,15 @@
 //! section as a whole does:
 //!
 //! - **The card's one line.** Whatever is waiting on the human in either part
-//!   comes first — an entry `config.yaml` holds that could not be read, compiles
-//!   that nothing caches, a bind the server cannot see — each in the fewest
-//!   words that name it, joined on the one line and in the warning colour. Where
-//!   nothing is, the line counts: how many of an installer's own languages
-//!   have their cache on, where there are any — a built-in's cache is its
-//!   plugin's — and how many binds there are, in the quiet colour, in English
-//!   rather than as `1 binds`.
+//!   comes first — compiles that nothing caches, a bind the server cannot see —
+//!   each in the fewest words that name it, joined on the one line and in the
+//!   warning colour. Where nothing is, the line counts how many binds there
+//!   are, in the quiet colour, in English rather than as `1 binds`. A
+//!   language's cache is its plugin's, so the card counts none.
 //! - **The pane.** One head, titled for the section, with the way back; under it
 //!   the two parts, each under a heading of its own.
-//! - **The round trip.** What either part saves is what the card goes back to
-//!   saying, because the answer is a fresh read of the files both are drawn
+//! - **The round trip.** What the binds part saves is what the card goes back
+//!   to saying, because the answer is a fresh read of the files both are drawn
 //!   from.
 //!
 //! The read is a fixture the server's own tests wrote, so what the page is drawn
@@ -48,16 +46,8 @@ import unset from "./fixtures/settings-unset.json" with { type: "json" };
 const TOLD = told as SettingsView;
 const UNSET = unset as SettingsView;
 
-/// The descriptors the fixture holds, by the names `config.yaml` keys them
-/// under. Gleam is the one an installer wrote; the rest Verkstead ships.
 const RUST = "rust";
-const GO = "go";
-const NODE = "node";
-const PYTHON = "python";
-const DOTNET = "dotnet";
 const CPP = "cpp";
-const JVM = "jvm";
-const GLEAM = "gleam";
 
 /// The same settings with an sccache the server did find, which no fixture
 /// carries — so the caches have nothing to warn about.
@@ -77,37 +67,6 @@ function off(standing: SettingsView, name = RUST): SettingsView {
     ...standing,
     languages: standing.languages.map((language) =>
       language.name === name ? { ...language, enabled: false } : language,
-    ),
-  };
-}
-
-/// And with every language but the one named switched off.
-function only(standing: SettingsView, name: string): SettingsView {
-  return {
-    ...standing,
-    languages: standing.languages.map((language) => ({
-      ...language,
-      enabled: language.name === name,
-    })),
-  };
-}
-
-/// And the same settings with one language's entry in `config.yaml` one the
-/// server could not read, with nothing shipped of that name to fall back to.
-function unread(standing: SettingsView, name: string): SettingsView {
-  return {
-    ...standing,
-    languages: standing.languages.map((language) =>
-      language.name === name
-        ? {
-            ...language,
-            enabled: false,
-            unread: {
-              why: "sets RUSTUP_HOME, which is a variable the sandbox sets itself",
-              running_on: "Nothing" as const,
-            },
-          }
-        : language,
     ),
   };
 }
@@ -184,7 +143,6 @@ function answering(standing: SettingsView): SettingsSaved {
     verified: null,
     refused: [],
     refused_servers: [],
-    refused_sizes: [],
     tried: [],
   };
 }
@@ -217,58 +175,37 @@ async function reads(
 
 describe("the card", () => {
   /// What somebody scanning the page is after where nothing is waiting on
-  /// them: what the section is, and how much is in it — how many languages a
-  /// session builds with a cache, and how many extra paths its sandbox gets —
-  /// in the quiet colour.
-  it("counts the build caches on and the binds", async () => {
+  /// them: what the section is, and how many extra paths its sandbox gets, in
+  /// the quiet colour — and no count of build caches, a language's being its
+  /// plugin's, an installer's own included.
+  it("counts the binds", async () => {
     theSettings(quiet(TOLD));
     const { container } = mountCard();
 
     const face = await theCard(container);
     expect(face.querySelector("h2")?.textContent).toBe("Sandbox");
 
-    const status = await reads(container, "1 build cache · 2 binds");
+    const status = await reads(container, "2 binds");
     expect(status.classList).not.toContain(line.warn);
   });
 
-  /// A language switched off is a cache the count no longer holds, and where
-  /// none of an installer's own is on the count is the binds alone.
-  it("leaves a language that is switched off out of the count", async () => {
-    theSettings(quiet(off(TOLD, GLEAM)));
-    const { container } = mountCard();
-
-    await reads(container, "2 binds");
-  });
-
-  /// And where none are on and nobody has added a bind, the line still counts
-  /// rather than going blank: a card is one line, title and status, and a
-  /// status missing would read as one still loading. A machine nobody has
-  /// touched is the ordinary state rather than one half set up, so it is quiet.
-  it("counts nothing where nothing is on", async () => {
-    theSettings(
-      quiet({
-        ...off(
-          off(
-            off(off(off(off(off(off(TOLD), GO), NODE), PYTHON), DOTNET), CPP),
-            JVM,
-          ),
-          GLEAM,
-        ),
-        paths: { binds: [] },
-      }),
-    );
+  /// And where nobody has added a bind, the line still counts rather than
+  /// going blank: a card is one line, title and status, and a status missing
+  /// would read as one still loading.
+  it("counts nothing where there is nothing", async () => {
+    theSettings(quiet({ ...TOLD, paths: { binds: [] } }));
     const { container } = mountCard();
 
     const status = await reads(container, "0 binds");
     expect(status.classList).not.toContain(line.warn);
   });
 
-  /// One of each in the singular, so the line reads as English.
-  it("says one build cache and one bind in the singular", async () => {
-    theSettings(quiet(firstBind(only(TOLD, GLEAM))));
+  /// One in the singular, so the line reads as English.
+  it("says one bind in the singular", async () => {
+    theSettings(quiet(firstBind(TOLD)));
     const { container } = mountCard();
 
-    await reads(container, "1 build cache · 1 bind");
+    await reads(container, "1 bind");
   });
 
   /// What the human cannot fix from the browser, said where they would
@@ -296,18 +233,6 @@ describe("the card", () => {
     expect(status.classList).not.toContain(line.warn);
   });
 
-  /// And a language whose entry the server could not read, said here too: a
-  /// file that wants editing is exactly the sort of thing somebody scanning the
-  /// page would want telling about. The card says only that there is one;
-  /// which language and what the file says is the pane's to tell.
-  it("says when a language's entry could not be read", async () => {
-    theSettings(unread(quiet(TOLD), GLEAM));
-    const { container } = mountCard();
-
-    const status = await reads(container, "Unreadable config entry");
-    expect(status.classList).toContain(line.warn);
-  });
-
   /// And the thing the browser can see and the human cannot about a bind: an
   /// entry that is saved, is in the file, and does nothing. Counted, in the
   /// warning colour, which is what sends the human to the pane to read why.
@@ -326,21 +251,8 @@ describe("the card", () => {
     await reads(container, "1 bind unseen");
   });
 
-  /// And every warning at once where every one is so, one after the other on
-  /// the one line — the caches' first, as the pane draws them first — because
-  /// none is the less waiting on the human for the others.
-  it("says every warning where they all hold", async () => {
-    theSettings(unread(TOLD, GLEAM));
-    const { container } = mountCard();
-
-    const status = await reads(
-      container,
-      "Unreadable config entry · No sccache · 2 binds unseen",
-    );
-    expect(status.classList).toContain(line.warn);
-  });
-
-  /// And a warning from each part beside the other, with neither's counts.
+  /// And a warning from each part beside the other — the caches' first, as
+  /// the pane draws them first — with no count.
   it("says a cache warning and a bind warning together", async () => {
     theSettings(TOLD);
     const { container } = mountCard();
@@ -388,7 +300,7 @@ describe("the pane", () => {
     theSettings(TOLD);
     const { container } = mountPane();
 
-    await waitFor(() => screen.getByRole("checkbox", { name: "Gleam" }));
+    await waitFor(() => screen.getByText(/build cache is in its plugin's settings/));
     await waitFor(() => screen.getByLabelText("Add a path"));
 
     expect(
@@ -418,35 +330,8 @@ describe("the pane", () => {
 });
 
 describe("the round trip", () => {
-  /// What the caches part saved is what the card goes back to saying, because
-  /// the answer is a fresh read of the files both are drawn from. With every
-  /// warning taken away, so the line is the counts rather than a warning that
-  /// would take it.
-  it("takes a build cache off the card's count when the pane unticks it", async () => {
-    theSettings(quiet(TOLD), json(answering(off(quiet(TOLD), "gleam"))));
-    const { container } = mounting(() => (
-      <>
-        <SandboxCard open press={() => {}} />
-        <SandboxPane back={() => {}} />
-      </>
-    ));
-
-    const gleam = await waitFor(() => {
-      const box = screen.getByRole("checkbox", {
-        name: "Gleam",
-      }) as HTMLInputElement;
-      expect(box.checked).toBe(true);
-      return box;
-    });
-    await reads(container, "1 build cache · 2 binds");
-
-    fireEvent.click(gleam);
-
-    await reads(container, "2 binds");
-  });
-
-  /// And the binds part the same way: a bind removed is one the card no longer
-  /// counts.
+  /// What the binds part saved is what the card goes back to saying, because
+  /// the answer is a fresh read of the files both are drawn from: a bind  /// removed is one the card no longer counts.
   it("takes a bind off the card's count when the pane removes it", async () => {
     theSettings(quiet(TOLD), json(answering(firstBind(quiet(TOLD)))));
     const { container } = mounting(() => (
@@ -456,7 +341,7 @@ describe("the round trip", () => {
       </>
     ));
 
-    await reads(container, "1 build cache · 2 binds");
+    await reads(container, "2 binds");
 
     const remove = await waitFor(() => {
       const found = container.querySelectorAll<HTMLButtonElement>(
@@ -467,6 +352,6 @@ describe("the round trip", () => {
     });
     fireEvent.click(remove);
 
-    await reads(container, "1 build cache · 1 bind");
+    await reads(container, "1 bind");
   });
 });

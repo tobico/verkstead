@@ -139,7 +139,6 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": name, "email": email },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -161,7 +160,6 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": { "Set": { "token": token } },
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -181,7 +179,6 @@ async fn clear_token(app: &Router) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Clear",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -193,63 +190,6 @@ async fn clear_token(app: &Router) -> SettingsSaved {
         }),
     )
     .await
-}
-
-/// The languages as a save that is not about them sends them: every one the
-/// last read listed, with its switch where the read left it and no size typed.
-///
-/// Which is Rust alone here, that being the only descriptor embedded in the
-/// binary — the page sends one entry per language the server gave it, so a
-/// machine with an installer's own descriptor sends that one too.
-fn languages_unset() -> serde_json::Value {
-    serde_json::json!([{ "name": "rust", "enabled": true, "size": "" }])
-}
-
-/// And one language as a save about it sends it, which is the checkbox's own
-/// press and the size's.
-/// An installer's own language, as the page sends it: a language no plugin
-/// provides is the one whose size is still the page's — a built-in's is its
-/// plugin's `size` setting once the plugins' records are held, which a router
-/// here does as soon as its background load lands.
-fn gleam(size: &str) -> serde_json::Value {
-    serde_json::json!([{ "name": "gleam", "enabled": true, "size": size }])
-}
-
-fn gleam_told(settings: &SettingsView) -> &LanguageView {
-    settings
-        .languages
-        .iter()
-        .find(|language| language.name == "gleam")
-        .unwrap_or_else(|| panic!("Gleam was written into config.yaml: {settings:?}"))
-}
-
-fn rust(enabled: bool, size: &str) -> serde_json::Value {
-    serde_json::json!([{ "name": "rust", "enabled": enabled, "size": size }])
-}
-
-/// Every language the last read listed, as the page puts them back.
-///
-/// The page's own rule, which is `held.ts`'s `asEdit`: the switch where the
-/// read left it, and the size where somebody configured one — for **every**
-/// language, including the ones it drew no size field for. A test that sent
-/// only the languages it was interested in would be a test that could not see
-/// a save emptying the others.
-fn as_the_page_saves(told: &SettingsView) -> serde_json::Value {
-    serde_json::Value::Array(
-        told.languages
-            .iter()
-            .map(|language| {
-                serde_json::json!({
-                    "name": language.name,
-                    "enabled": language.enabled,
-                    "size": match language.size_configured {
-                        true => language.size.clone(),
-                        false => String::new(),
-                    },
-                })
-            })
-            .collect(),
-    )
 }
 
 /// The Cleanup as a save that is not about it sends it: both rows where nobody
@@ -283,7 +223,6 @@ async fn save_at_once(app: &Router, roadmap_stages: &str, conversations: &str) -
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": {
                 "roadmap_stages": roadmap_stages,
@@ -308,7 +247,6 @@ async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) ->
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": {
                 "trim": { "enabled": trim.0, "days": trim.1 },
                 "delete": { "enabled": delete.0, "days": delete.1 },
@@ -488,7 +426,6 @@ async fn a_save_about_one_author_leaves_the_others_as_they_were() {
         &serde_json::json!({
             "git_author": { "id": "work", "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_anewone" } },
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -545,7 +482,6 @@ async fn a_save_under_a_new_uuid_adds_an_author_and_the_read_carries_every_one()
                 "email": "toby@example.com",
             },
             "github_token": { "Set": { "token": "ghp_thehomeone" } },
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -620,7 +556,6 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_averysecrettoken" } },
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -864,7 +799,6 @@ async fn a_save_carrying_the_binds_as_they_stand_leaves_them() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -955,15 +889,14 @@ async fn a_language_nobody_has_configured_is_on_at_the_default_size() {
     );
 }
 
-/// Save the languages as given and leave everything else alone, which is what
-/// either of the language pane's presses sends.
-async fn save_languages(app: &Router, languages: serde_json::Value) -> SettingsSaved {
+/// Save every section as it stands, which is what a save about nothing the
+/// languages hold sends.
+async fn save_as_it_stands(app: &Router) -> SettingsSaved {
     save(
         app,
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": languages,
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -1270,41 +1203,11 @@ async fn each_store_says_how_it_is_held_to_its_size() {
     assert!(stores("cpp").is_empty());
 }
 
-/// A size Verkstead cannot read is refused at the save, with the reason the
-/// page draws at the field, and neither file is touched.
+/// And a size written into `config.yaml` by hand that is not one goes back as
+/// it was on a save: the entry is an installer's, and the page draws none of
+/// it.
 #[tokio::test]
-async fn a_size_that_is_not_one_is_refused_at_the_save() {
-    let (dir, app) = app().await;
-
-    save_languages(&app, gleam("40G")).await;
-
-    let saved = save_languages(&app, gleam("1.5G")).await;
-
-    assert_eq!(saved.refused_sizes.len(), 1, "{saved:?}");
-    assert_eq!(saved.refused_sizes[0].language, "gleam");
-    assert!(
-        saved.refused_sizes[0].why.starts_with("isn't a size"),
-        "{:?}",
-        saved.refused_sizes[0],
-    );
-    assert_eq!(
-        gleam_told(&saved.settings).size,
-        "40G",
-        "and what is drawn is how things stood",
-    );
-
-    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-    assert!(
-        written.contains("40G") && !written.contains("1.5G"),
-        "nothing was written: {written}",
-    );
-}
-
-/// And one written into `config.yaml` by hand is the default until it is
-/// fixed, with the reason on the pane — and a save about something else puts
-/// it back as it was rather than being refused over a field nobody touched.
-#[tokio::test]
-async fn a_hand_written_size_that_is_not_one_is_the_default_and_survives_a_save() {
+async fn a_hand_written_size_that_is_not_one_survives_a_save() {
     let (dir, app) = app().await;
 
     hand_edit(
@@ -1313,83 +1216,10 @@ async fn a_hand_written_size_that_is_not_one_is_the_default_and_survives_a_save(
         "languages:\n  gleam:\n    size: lots\n",
     );
 
-    let told = settings(&app).await;
-    let gleam = gleam_told(&told);
-
-    assert_eq!((gleam.size.as_str(), gleam.size_configured), ("lots", true));
-    assert_eq!(gleam.default_size, "10G");
-    assert!(
-        gleam
-            .size_unread
-            .as_deref()
-            .is_some_and(|why| why.starts_with("isn't a size")),
-        "the pane says why: {gleam:?}",
-    );
-
-    let saved = save_languages(&app, as_the_page_saves(&told)).await;
-
-    assert!(saved.refused_sizes.is_empty(), "{saved:?}");
+    save_as_it_stands(&app).await;
 
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
     assert!(written.contains("lots"), "kept as written: {written}");
-}
-
-/// And what a save of it says once the plugins' records are held: Rust's
-/// switch is its plugin's tick and its size its plugin's `size` setting, so
-/// what the page sends for either is not written — Rust stays on, at its
-/// default.
-#[tokio::test]
-async fn a_built_in_languages_switch_and_size_are_not_the_pages() {
-    let (dir, app) = app().await;
-
-    // A tick on Go, which is what has the server hold every built-in's.
-    let ticked = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/ui/plugins/01b5328a-3524-457d-ab88-1af1c65079ea/enabled")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"enabled":true}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(ticked.status(), StatusCode::OK);
-
-    let saved = save(
-        &app,
-        &serde_json::json!({
-            "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
-            "languages": rust(false, "5G"),
-            "cleanup": cleanup_unset(),
-            "at_once": at_once_unset(),
-            "conflict_resolution": "Merge",
-            "share_on_done": false,
-            "sandbox_binds": [],
-            "ignored_comments": "Keep",
-            "mcp_servers": "Keep",
-            "instructions": "Keep",
-        }),
-    )
-    .await;
-
-    assert!(rust_told(&saved.settings).enabled);
-    assert_eq!(
-        rust_told(&saved.settings).plugin.as_deref(),
-        Some("Rust & C/C++")
-    );
-    assert_eq!(rust_told(&saved.settings).size, "30G");
-    assert!(!rust_told(&saved.settings).size_configured);
-
-    // Nor in the file: neither the switch nor the size is the page's.
-    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-    assert!(!written.contains("5G"), "no size in config.yaml: {written}");
-
-    let read_back = settings(&app).await;
-    assert!(rust_told(&read_back).enabled);
-    assert_eq!(rust_told(&read_back).size, "30G");
 }
 
 /// A language an installer wrote a descriptor for is on the page, under the
@@ -1502,28 +1332,9 @@ async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file(
     );
     assert!(!gleam.enabled, "so it is off rather than on at nothing");
 
-    // And a save from the page — which draws two keys and writes two keys —
-    // puts both entries back the way the installer typed them.
-    save(
-        &app,
-        &serde_json::json!({
-            "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
-            "languages": [
-                { "name": "rust", "enabled": true, "size": "" },
-                { "name": "gleam", "enabled": false, "size": "" },
-            ],
-            "cleanup": cleanup_unset(),
-            "at_once": at_once_unset(),
-            "conflict_resolution": "Merge",
-            "share_on_done": false,
-            "sandbox_binds": [],
-            "ignored_comments": "Keep",
-            "mcp_servers": "Keep",
-            "instructions": "Keep",
-        }),
-    )
-    .await;
+    // And a save from the page puts both entries back the way the installer
+    // typed them.
+    save_as_it_stands(&app).await;
 
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
 
@@ -1564,24 +1375,7 @@ async fn a_save_writes_the_old_key_away() {
     assert_eq!(ticked.status(), StatusCode::OK);
 
     // And the page saves what it was just given, the way every pane does.
-    let told = settings(&app).await;
-    save(
-        &app,
-        &serde_json::json!({
-            "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
-            "languages": as_the_page_saves(&told),
-            "cleanup": cleanup_unset(),
-            "at_once": at_once_unset(),
-            "conflict_resolution": "Merge",
-            "share_on_done": false,
-            "sandbox_binds": [],
-            "ignored_comments": "Keep",
-            "mcp_servers": "Keep",
-            "instructions": "Keep",
-        }),
-    )
-    .await;
+    save_as_it_stands(&app).await;
 
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
     assert!(
@@ -1702,7 +1496,6 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": rust(true, "5G"),
             "cleanup": {
                 "trim": { "enabled": false, "days": "5" },
                 "delete": { "enabled": true, "days": "90" },
@@ -1831,7 +1624,6 @@ async fn a_save_carrying_the_limit_as_it_stands_leaves_it() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
             "at_once": { "roadmap_stages": "1", "conversations": "2" },
             "conflict_resolution": "Merge",
@@ -1906,7 +1698,6 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Rebase",
@@ -1944,7 +1735,6 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -1988,7 +1778,6 @@ async fn sharing_on_done_goes_in_and_comes_back() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2031,7 +1820,6 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2051,7 +1839,6 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2153,7 +1940,6 @@ async fn a_save_from_another_section_leaves_the_instructions() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2206,16 +1992,10 @@ async fn a_save_on_a_kept_server_leaves_its_keeper_where_it_is() {
 /// And a language an installer wrote a descriptor for rides along the same way,
 /// every key of it — **its size included**.
 ///
-/// The page draws two keys of an entry — the switch and the size — and an
-/// installer owns the rest: the label, the manifests and the variables. One
-/// request writes the whole of `config.yaml`, so a save built out of what the
-/// page sent would take a language off the machine at the next session.
-///
-/// The size is the one of the two that has to be *sent* to survive, and a
-/// language may have no field for it — C/C++ has none, having no store of its
-/// own. A page that sent only the sizes it drew would be a save that emptied
-/// that one's — which is why the save below is every language the read listed,
-/// exactly as the pane's own `asEdit` puts them back.
+/// The page draws no key of an entry: an installer owns all of it — the
+/// label, the size, the manifests and the variables. One request writes the
+/// whole of `config.yaml`, so a save built out of what the page sent would
+/// take a language off the machine at the next session.
 #[tokio::test]
 async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it() {
     let (dir, app) = app().await;
@@ -2252,7 +2032,6 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "Ada", "email": "ada@example.com" },
             "github_token": "Keep",
-            "languages": as_the_page_saves(&told),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2307,7 +2086,6 @@ async fn save_instructions(app: &Router, instructions: &str) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2337,52 +2115,6 @@ async fn restarted(data_dir: &Path) -> Router {
             "gh".to_owned(),
         ]),
     )
-}
-
-/// Clearing the size field is asking for the default back rather than asking
-/// for a cache of no size at all.
-#[tokio::test]
-async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
-    let (_dir, app) = app().await;
-
-    save(
-        &app,
-        &serde_json::json!({
-            "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
-            "languages": gleam("5G"),
-            "cleanup": cleanup_unset(),
-            "at_once": at_once_unset(),
-            "conflict_resolution": "Merge",
-            "share_on_done": false,
-            "sandbox_binds": [],
-            "ignored_comments": "Keep",
-            "mcp_servers": "Keep",
-            "instructions": "Keep",
-        }),
-    )
-    .await;
-
-    let saved = save(
-        &app,
-        &serde_json::json!({
-            "git_author": { "display_name": "", "name": "", "email": "" },
-            "github_token": "Keep",
-            "languages": gleam("  "),
-            "cleanup": cleanup_unset(),
-            "at_once": at_once_unset(),
-            "conflict_resolution": "Merge",
-            "share_on_done": false,
-            "sandbox_binds": [],
-            "ignored_comments": "Keep",
-            "mcp_servers": "Keep",
-            "instructions": "Keep",
-        }),
-    )
-    .await;
-
-    assert_eq!(gleam_told(&saved.settings).size, "10G");
-    assert!(!gleam_told(&saved.settings).size_configured);
 }
 
 /// The Sandbox binds half of the page: every Sandbox Configuration bind, from
@@ -2421,7 +2153,6 @@ async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2652,7 +2383,6 @@ async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2817,7 +2547,6 @@ async fn a_refused_save_writes_nothing_at_all() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_thetoken" } },
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -2970,7 +2699,6 @@ async fn save_servers_removing(
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -3236,7 +2964,6 @@ async fn a_save_refused_over_a_name_writes_nothing_at_all() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_thetoken" } },
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -3447,7 +3174,6 @@ async fn a_header_value_appears_in_no_answer_this_endpoint_gives() {
         &serde_json::json!({
             "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
-            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
@@ -4202,7 +3928,6 @@ mod trying {
             &serde_json::json!({
                 "git_author": { "display_name": "", "name": "", "email": "" },
                 "github_token": "Keep",
-                "languages": super::languages_unset(),
                 "cleanup": super::cleanup_unset(),
                 "at_once": super::at_once_unset(),
                 "conflict_resolution": "Merge",
