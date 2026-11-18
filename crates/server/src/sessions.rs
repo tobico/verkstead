@@ -3086,10 +3086,19 @@ impl Sessions {
                 // for the row to be wrong about. See [`store::continued_as`].
                 store::continued_as(pool, event_id, &continuing.session).await?;
 
+                // And the Skill Packs listed under the note, as they are under
+                // a fresh prompt: an answer that added one carried this session
+                // on to mount it, and a move may have put it at another path.
+                let note = skills::packed(
+                    &continuing.note,
+                    &agents.skills.among(&conversation.skill_packs),
+                    &agents.skills,
+                );
+
                 (
                     Some(continuing.session),
                     Named::Continuing,
-                    continuing.note,
+                    note,
                     Some(continuing.carried),
                 )
             }

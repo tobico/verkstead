@@ -4535,6 +4535,11 @@ pub enum Added {
     /// one by it — the chip says so where they do not, as the composer's does.
     Server { name: String, declared: bool },
 
+    /// An installed Skill Pack, by name, and whether a plugin loaded on the
+    /// device the work is on still provides it — the chip says so where none
+    /// does, as the composer's does.
+    Pack { name: String, installed: bool },
+
     /// A registered Repo to become a Companion, in this mode, off this base —
     /// `null` being its default branch — on this branch where it is read-write,
     /// `null` there being *mirroring*: the Conversation's own branch name.
@@ -4599,6 +4604,9 @@ pub enum Pick {
     /// A declared MCP server, by name.
     Server { name: String },
 
+    /// An installed Skill Pack, by name.
+    Pack { name: String },
+
     /// A registered Repo to work alongside, from the card the row opens: the
     /// mode, the base — `null` being its default branch — and, read-write, the
     /// branch name, `null` being *mirroring*.
@@ -4624,7 +4632,8 @@ pub enum Pick {
 /// What became of a pick.
 ///
 /// The refusals a file on an Answer meets, for the same reasons — see
-/// [`AnswerAttached`] — and the two only a server can.
+/// [`AnswerAttached`] — and those only a server, a pack, a Repo or a device
+/// can.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum AdditionMade {
@@ -4642,7 +4651,10 @@ pub enum AdditionMade {
     /// Nothing is declared by that name.
     NoSuchServer,
 
-    /// The Conversation has that already: the server, the Repo — its own, or
+    /// No plugin loaded on this device provides a pack by that name.
+    NoSuchPack,
+
+    /// The Conversation has that already: the server, the pack, the Repo — its own, or
     /// a Companion — the Companion opened up, or the device permitted.
     AlreadyOn,
 

@@ -1388,7 +1388,8 @@ mod packs {
     use super::*;
     use sqlx::SqlitePool;
     use verkstead_render::{
-        ConversationView, OfferedPack, PackAttached, PackRemoved, Registered, RepoEntry, Started,
+        Added, AdditionMade, AdditionState, ConversationView, OfferedPack, PackAttached,
+        PackRemoved, Registered, RepoEntry, SetReading, Started, Submitted,
     };
     use verkstead_server::store;
 
@@ -1599,6 +1600,175 @@ mod packs {
         assert_eq!(
             attach(&app, 9_999, "rust-review").await,
             PackAttached::NoSuchConversation
+        );
+    }
+
+    /// Ask a two-Question Set from the Conversation, the ordinary way.
+    async fn asked(pool: &SqlitePool, id: i64) -> i64 {
+        let set = verkstead_schema::QuestionSet::from_yaml(
+            "title: the rate limiter\n\
+             questions:\n\
+             \x20 - label: Q1\n\
+             \x20   text: where does the counter live?\n",
+        )
+        .unwrap();
+
+        store::ask(pool, id, &set, store::Ask::Blocking)
+            .await
+            .unwrap()
+            .unwrap()
+            .id
+    }
+
+    /// Pick pack `name` on the Set at Q1's menu.
+    async fn pick(app: &Router, set: i64, name: &str) -> AdditionMade {
+        answer(
+            app,
+            &format!("/api/ui/sets/{set}/additions"),
+            serde_json::json!({ "label": "Q1", "pick": { "Pack": { "name": name } } }),
+        )
+        .await
+    }
+
+    async fn submit(app: &Router, set: i64) -> Submitted {
+        answer(
+            app,
+            &format!("/api/ui/sets/{set}/response"),
+            serde_json::json!({ "answers": [{ "label": "Q1", "free_text": "in Redis" }] }),
+        )
+        .await
+    }
+
+    /// ADR-0028's second moment for a pack: picked on an Answer after the
+    /// round started, recorded pending, and put on the Conversation by the
+    /// Submit — the Answer the agent reads naming it and where it is mounted,
+    /// and the Timeline line saying it came with the Set.
+    #[tokio::test]
+    async fn a_pack_picked_on_an_answer_is_attached_by_the_submit() {
+        let (app, _dir, pool, id) = drafting().await;
+        store::set_state(&pool, id, store::Lifecycle::Implementing)
+            .await
+            .unwrap();
+        let set = asked(&pool, id).await;
+
+        let AdditionMade::Added { addition } = pick(&app, set, "rust-review").await else {
+            panic!("the pick is recorded");
+        };
+        assert_eq!(
+            addition.added,
+            Added::Pack {
+                name: "rust-review".to_owned(),
+                installed: true,
+            }
+        );
+        assert_eq!(addition.state, AdditionState::Pending);
+        assert!(
+            store::skill_packs(&pool, id).await.unwrap().is_empty(),
+            "nothing is on the Conversation before the Submit"
+        );
+
+        assert_eq!(submit(&app, set).await, Submitted::Accepted);
+
+        assert_eq!(
+            store::skill_packs(&pool, id).await.unwrap(),
+            ["rust-review"]
+        );
+        assert_eq!(held(&app, id).await, [("rust-review".to_owned(), true)]);
+
+        let reading: SetReading = reading(&app, &format!("/api/ui/sets/{set}")).await;
+        let SetReading::Set(view) = reading else {
+            panic!("the Set reads back");
+        };
+        assert_eq!(view.additions[0].state, AdditionState::Applied);
+        assert_eq!(
+            view.packs,
+            ["rust-review"],
+            "and the menus leave it out now"
+        );
+
+        let response: String = {
+            let answered = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!(
+                            "/conversations/{id}/api/v1/sets/{set}/response?hold=0"
+                        ))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(answered.status(), StatusCode::OK);
+            let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+            String::from_utf8(bytes.to_vec()).unwrap()
+        };
+        let response = verkstead_schema::Response::from_yaml(&response).unwrap();
+        let added = &response.answers[0].added;
+        assert_eq!(added.len(), 1, "{response:?}");
+        assert!(
+            added[0].contains("`rust-review`") && added[0].contains("/rust-review/`"),
+            "the Answer names the pack and where it is mounted: {added:?}"
+        );
+    }
+
+    /// A pack nothing provides is not picked, and one on the Conversation
+    /// already is on already.
+    #[tokio::test]
+    async fn a_pack_nothing_provides_or_already_on_is_refused_on_a_set() {
+        let (app, _dir, pool, id) = drafting().await;
+        assert_eq!(
+            attach(&app, id, "rust-review").await,
+            PackAttached::Attached
+        );
+        let set = asked(&pool, id).await;
+
+        assert_eq!(pick(&app, set, "go-review").await, AdditionMade::NoSuchPack);
+        assert_eq!(pick(&app, set, "verkstead").await, AdditionMade::NoSuchPack);
+        assert_eq!(
+            pick(&app, set, "rust-review").await,
+            AdditionMade::AlreadyOn
+        );
+    }
+
+    /// A pack disabled between the pick and the Submit refuses the Submit by
+    /// name, and nothing is stored: the Set still waits, and the chip says it
+    /// is gone. Ticked again, the same Submit goes through.
+    #[tokio::test]
+    async fn a_pack_no_longer_enabled_refuses_the_submit() {
+        let (app, _dir, pool, id) = drafting().await;
+        let set = asked(&pool, id).await;
+
+        assert!(matches!(
+            pick(&app, set, "rust-review").await,
+            AdditionMade::Added { .. }
+        ));
+        enabled(&app, false).await;
+
+        assert_eq!(
+            submit(&app, set).await,
+            Submitted::PackGone("rust-review".to_owned())
+        );
+        assert!(store::settlement(&pool, set).await.unwrap().is_none());
+        assert!(store::skill_packs(&pool, id).await.unwrap().is_empty());
+
+        let reading: SetReading = reading(&app, &format!("/api/ui/sets/{set}")).await;
+        let SetReading::Set(view) = reading else {
+            panic!("the Set reads back");
+        };
+        assert_eq!(
+            view.additions[0].added,
+            Added::Pack {
+                name: "rust-review".to_owned(),
+                installed: false,
+            }
+        );
+
+        enabled(&app, true).await;
+        assert_eq!(submit(&app, set).await, Submitted::Accepted);
+        assert_eq!(
+            store::skill_packs(&pool, id).await.unwrap(),
+            ["rust-review"]
         );
     }
 }

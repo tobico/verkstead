@@ -784,7 +784,10 @@ flowchart LR
   session is bound the shipped pack and the packs its Conversation attached, a
   directory each, rather than the whole of `skills/`: a pack written out for
   one Conversation is not in another's sandbox, and the attached ones are
-  listed under `# Skill packs` in its prompt beside `# MCP servers`.
+  listed under `# Skill packs` in its prompt beside `# MCP servers`. A pack is
+  also one of the things an answer can add (ADR-0028), picked beside the
+  servers and, like them, a change to the sandbox that carries the session
+  waiting on that set on.
 - **Verkstead itself reaches GitHub through host `gh`** (CI status, PR commit
   lists and comments), authenticating as the same configured token the sessions
   get — `GH_TOKEN` in the environment of each call, read from `secrets.yaml` at

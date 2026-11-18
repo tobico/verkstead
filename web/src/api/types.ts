@@ -162,15 +162,16 @@ branch: string, };
 /**
  * What was picked.
  */
-export type Added = { "Server": { name: string, declared: boolean, } } | { "Companion": { repo_id: number, name: string | null, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, name: string | null, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, name: string | null, } } | { "Unmatched": { name: string, } };
+export type Added = { "Server": { name: string, declared: boolean, } } | { "Pack": { name: string, installed: boolean, } } | { "Companion": { repo_id: number, name: string | null, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, name: string | null, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, name: string | null, } } | { "Unmatched": { name: string, } };
 
 /**
  * What became of a pick.
  *
  * The refusals a file on an Answer meets, for the same reasons — see
- * [`AnswerAttached`] — and the two only a server can.
+ * [`AnswerAttached`] — and those only a server, a pack, a Repo or a device
+ * can.
  */
-export type AdditionMade = { "Added": { addition: AdditionView, } } | "NoSuchSet" | "Answered" | "Locked" | "Closed" | "NoSuchLabel" | "NoSuchServer" | "AlreadyOn" | "NoSuchRepo" | "NotACompanion" | "NotAMember" | "WorkIsHere";
+export type AdditionMade = { "Added": { addition: AdditionView, } } | "NoSuchSet" | "Answered" | "Locked" | "Closed" | "NoSuchLabel" | "NoSuchServer" | "NoSuchPack" | "AlreadyOn" | "NoSuchRepo" | "NotACompanion" | "NotAMember" | "WorkIsHere";
 
 /**
  * And of taking a pick off again, refused by the same freezes.
@@ -4816,7 +4817,7 @@ export type Permitting = "Recorded" | "NotAMember" | "DraftedThere" | "WorkIsHer
 /**
  * What a row of the menu picks.
  */
-export type Pick = { "Server": { name: string, } } | { "Companion": { repo_id: number, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, } };
+export type Pick = { "Server": { name: string, } } | { "Pack": { name: string, } } | { "Companion": { repo_id: number, mode: CompanionMode, base_ref: string | null, branch: string | null, } } | { "OpenedUp": { repo_id: number, base_ref: string | null, branch: string | null, } } | { "Device": { device: string, } };
 
 /**
  * What a Conversation has settled about one of its roles, as the page shows
@@ -6649,6 +6650,11 @@ additions: Array<AdditionView>,
  */
 servers: Array<string>, 
 /**
+ * And the Skill Packs it has already, by name, for the same reason. Empty
+ * out of [`set_view`], for [`SetView::by_verkstead`]'s reason.
+ */
+packs: Array<string>, 
+/**
  * And the rest of what those menus offer: Repos to work alongside,
  * read-only Companions to open up, and devices to permit.
  */
@@ -7857,7 +7863,7 @@ export type StoreView = { name: string, eviction: Eviction, };
 /**
  * What became of the human's Response.
  */
-export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Locked" | { "Rejected": Array<string> } | { "ServerGone": string } | { "RepoGone": string } | { "Companion": { repo: string, why: SteerCompanionRefusal, } };
+export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Locked" | { "Rejected": Array<string> } | { "ServerGone": string } | { "PackGone": string } | { "RepoGone": string } | { "Companion": { repo: string, why: SteerCompanionRefusal, } };
 
 /**
  * What became of a device asking to be notified.

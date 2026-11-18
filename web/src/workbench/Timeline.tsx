@@ -2405,7 +2405,8 @@ function QuestionSet(props: {
 }
 
 /// What a question set's answer added to the work, in a sentence per kind: the
-/// MCP servers, the repos and the devices the agent may move it to (ADR-0028).
+/// MCP servers, the skill packs, the repos and the devices the agent may move
+/// it to (ADR-0028).
 /// `null` where it added nothing, which is nearly every set. And where the
 /// session waiting on it was ended to be carried on with them, a last sentence
 /// saying so.
@@ -2416,6 +2417,7 @@ export function addedWith(
   const servers = added.flatMap((one) =>
     "Server" in one ? [one.Server.name] : [],
   );
+  const packs = added.flatMap((one) => ("Pack" in one ? [one.Pack.name] : []));
   const repos = added.flatMap((one) => {
     if ("Companion" in one) {
       const { name, repo_id, mode, branch } = one.Companion;
@@ -2442,6 +2444,9 @@ export function addedWith(
     servers.length === 0
       ? null
       : `You added the ${listed(servers)} MCP server${servers.length === 1 ? "" : "s"}.`,
+    packs.length === 0
+      ? null
+      : `You added the ${listed(packs)} skill pack${packs.length === 1 ? "" : "s"}.`,
     repos.length === 0 ? null : `You added ${listed(repos)}.`,
     devices.length === 0
       ? null

@@ -196,6 +196,13 @@ each skill's path; a Conversation that did not attach it cannot reach it. A
 pack disabled or removed after it was attached keeps its chip, marked *no
 longer installed*, and is neither mounted nor listed until it is back.
 
+A pack is offered on a question set's Attach menus too, at every answer field
+and the comment box, the way a server is ([ADR-0028](adr/0028-adding-from-an-answer.md)):
+picked, it waits on the set, and the Submit puts it on the Conversation. A
+session waiting on that set is carried on in a sandbox with it mounted; a pack
+disabled or removed between the pick and the Submit refuses the Submit,
+naming it.
+
 ### What its wasm component may reach
 
 **`component`** — optional. A path to a `.wasm` file inside the plugin's

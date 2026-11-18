@@ -1047,6 +1047,13 @@ pub(crate) async fn set_reading(
             return Err(unavailable("The question set couldn't be read."));
         }
     };
+    let packs = match store::skill_packs(&state.pool, conversation).await {
+        Ok(packs) => packs,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading a Set's Conversation's skill packs failed");
+            return Err(unavailable("The question set couldn't be read."));
+        }
+    };
     let addable = match crate::answer_additions::addable(state, conversation).await {
         Ok(addable) => addable,
         Err(error) => {
@@ -1098,6 +1105,7 @@ pub(crate) async fn set_reading(
 
     let view: SetView = match view {
         Ok(view) => SetView {
+            packs,
             by_verkstead,
             lock_line,
             ..view
@@ -1158,11 +1166,16 @@ async fn submit_response(
     };
 
     // Every question before anything is stored: a server gone from the settings
-    // since it was picked refuses the Submit by name. See
-    // [`crate::answer_additions::undeclared`].
+    // since it was picked, or a pack no longer installed, refuses the Submit by
+    // name. See [`crate::answer_additions::undeclared`].
     match crate::answer_additions::undeclared(&state, id).await {
         Ok(None) => {}
-        Ok(Some(name)) => return Json(Submitted::ServerGone(name)).into_response(),
+        Ok(Some(crate::answer_additions::Gone::Server(name))) => {
+            return Json(Submitted::ServerGone(name)).into_response();
+        }
+        Ok(Some(crate::answer_additions::Gone::Pack(name))) => {
+            return Json(Submitted::PackGone(name)).into_response();
+        }
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "reading what was picked on a Set failed");
             return unavailable("The response couldn't be taken.");

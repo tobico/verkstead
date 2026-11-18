@@ -52,16 +52,24 @@ pub(crate) async fn submit_response(
         Err(refusal) => return refusal,
     }
 
-    // A server picked on the Set and gone from the settings since refuses the
-    // Response by name, before anything is stored — see
-    // [`crate::answer_additions::undeclared`].
+    // A server picked on the Set and gone from the settings since, or a pack no
+    // longer installed, refuses the Response by name, before anything is
+    // stored — see [`crate::answer_additions::undeclared`].
     match crate::answer_additions::undeclared(&state, id).await {
         Ok(None) => {}
-        Ok(Some(name)) => {
+        Ok(Some(crate::answer_additions::Gone::Server(name))) => {
             return yaml(
                 StatusCode::CONFLICT,
                 &ApiError::new(format!(
                     "the MCP server {name} added on Question Set {id} is no longer declared"
+                )),
+            );
+        }
+        Ok(Some(crate::answer_additions::Gone::Pack(name))) => {
+            return yaml(
+                StatusCode::CONFLICT,
+                &ApiError::new(format!(
+                    "the skill pack {name} added on Question Set {id} is no longer installed"
                 )),
             );
         }

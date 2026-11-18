@@ -4211,6 +4211,42 @@ async fn a_grilling_session_is_told_about_the_attached_mcp_servers_too() {
     );
 }
 
+/// Install a plugin written under `elsewhere` providing the Skill Pack
+/// `rust-review`, holding the one skill `reviewing`, through the presses the
+/// Plugins page makes.
+async fn installing_rust_review(app: &axum::Router, elsewhere: &std::path::Path) {
+    let plugin = elsewhere.join("rust-review");
+    std::fs::create_dir_all(plugin.join("skills/reviewing")).unwrap();
+    std::fs::write(
+        plugin.join("plugin.yaml"),
+        "uuid: 0b6f6b7e-5c3a-4d0e-9a51-2f7d8c1e4a90\n\
+         name: Rust review\n\
+         author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
+         version: 1.0.0\n\
+         interface: 1\n\
+         provides:\n  - category: skills\n    name: rust-review\n    directory: skills\n\
+         capabilities: []\n",
+    )
+    .unwrap();
+    std::fs::write(
+        plugin.join("skills/reviewing/SKILL.md"),
+        "---\nname: reviewing\ndescription: Review Rust.\n---\n\nReview the Rust.\n",
+    )
+    .unwrap();
+    let consent: verkstead_render::PluginConsent = post(
+        app,
+        "/api/ui/plugins/read",
+        &serde_json::json!({ "source": plugin }),
+    )
+    .await;
+    let _: verkstead_render::PluginsView = post(
+        app,
+        "/api/ui/plugins",
+        &serde_json::json!({ "source": plugin, "granted": consent.capabilities }),
+    )
+    .await;
+}
+
 /// And what a Conversation with a Skill Pack attached gives its grilling
 /// session: the pack mounted at `/verkstead/skills/<pack>/`, and listed under
 /// `# Skill packs` with each skill's path — the grilling session for the
@@ -4230,36 +4266,7 @@ async fn a_grilling_session_reads_an_attached_skill_pack() {
     .await;
     let app = bench.app.clone();
 
-    let plugin = bench.elsewhere.path().join("rust-review");
-    std::fs::create_dir_all(plugin.join("skills/reviewing")).unwrap();
-    std::fs::write(
-        plugin.join("plugin.yaml"),
-        "uuid: 0b6f6b7e-5c3a-4d0e-9a51-2f7d8c1e4a90\n\
-         name: Rust review\n\
-         author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
-         version: 1.0.0\n\
-         interface: 1\n\
-         provides:\n  - category: skills\n    name: rust-review\n    directory: skills\n\
-         capabilities: []\n",
-    )
-    .unwrap();
-    std::fs::write(
-        plugin.join("skills/reviewing/SKILL.md"),
-        "---\nname: reviewing\ndescription: Review Rust.\n---\n\nReview the Rust.\n",
-    )
-    .unwrap();
-    let consent: verkstead_render::PluginConsent = post(
-        &app,
-        "/api/ui/plugins/read",
-        &serde_json::json!({ "source": plugin }),
-    )
-    .await;
-    let _: verkstead_render::PluginsView = post(
-        &app,
-        "/api/ui/plugins",
-        &serde_json::json!({ "source": plugin, "granted": consent.capabilities }),
-    )
-    .await;
+    installing_rust_review(&app, bench.elsewhere.path()).await;
 
     let started: Started = post(
         &app,
@@ -16702,6 +16709,160 @@ async fn a_deferred_ask_answered_with_a_companion_restarts_nothing() {
         view.companions[0].mode,
         CompanionMode::ReadWrite,
         "the Answer opened it up all the same",
+    );
+}
+
+/// A grilling that waits, as [`WAITS_AND_CARRIES_ON`] does, and that says when
+/// it is resumed what it was primed with and what it reads at the Skill Pack
+/// `rust-review`'s path.
+const WAITS_AND_READS_A_PACK: &str = r#"
+entry=$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' '-')
+mkdir -p "$HOME/.claude/projects/$entry"
+case "$3" in
+--resume)
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the answers."}]}}' >> "$HOME/.claude/projects/$entry/$4.jsonl"
+    printf 'carried on\r\n'
+    printf 'prompt=%s\r\n' "$2"
+    printf 'skill=%s\r\n' "$(cat /verkstead/skills/rust-review/reviewing/SKILL.md 2>&1)"
+    sleep 300
+    ;;
+*)
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Per key or per address?"}]}}' > "$HOME/.claude/projects/$entry/$4.jsonl"
+    printf 'the grilling is running\r\n'
+    printf 'before=%s\r\n' "$(cat /verkstead/skills/rust-review/reviewing/SKILL.md 2>&1)"
+    sleep 300
+    ;;
+esac
+"#;
+
+/// **A Skill Pack added on an Answer carries the waiting session on** in a
+/// sandbox that has it mounted and a prompt that lists it (ADR-0028, ADR-0030
+/// *Skill packs*): the grilling that could not read the pack's path when it
+/// asked is ended, resumed with the note, and reads the pack's own text.
+#[tokio::test]
+async fn a_pack_added_on_an_answer_carries_the_waiting_session_on_with_it_mounted() {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let fixture = grilling_alongside(WAITS_AND_READS_A_PACK, "askance").await;
+    installing_rust_review(&fixture.app, elsewhere.path()).await;
+
+    let first = fixture
+        .until(|view| output(view).filter(|output| output.lines > 1).map(|o| o.id))
+        .await;
+    let before = fixture.capture(first).await;
+    assert!(
+        !before.contains("Review the Rust."),
+        "the pack is not mounted before it is attached: {before:?}"
+    );
+
+    let set = fixture.ask(ASKED_ALREADY).await;
+
+    let made: verkstead_render::AdditionMade = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/additions"),
+        &serde_json::json!({ "label": "Q1", "pick": { "Pack": { "name": "rust-review" } } }),
+    )
+    .await;
+    assert!(
+        matches!(made, verkstead_render::AdditionMade::Added { .. }),
+        "{made:?}"
+    );
+
+    let answered: Submitted = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({ "answers": [{ "label": "Q1", "selected": 1 }] }),
+    )
+    .await;
+    assert_eq!(answered, Submitted::Accepted);
+
+    let resumed = fixture
+        .until(|view| {
+            outputs(view)
+                .get(1)
+                .filter(|output| output.lines > 2)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let view = fixture.view().await;
+    let waiting = outputs(&view)
+        .into_iter()
+        .find(|output| output.id == first)
+        .unwrap();
+    assert!(!waiting.running, "the session that was waiting was ended");
+
+    let said = fixture.capture(resumed).await.replace("\r\n", "\n");
+    assert!(
+        said.contains("carried on") && said.contains(&format!("verkstead answers {set}")),
+        "the harness was told to resume it, primed with the Set: {said:?}"
+    );
+    assert!(
+        said.contains("the skill pack `rust-review`"),
+        "naming what was added: {said:?}"
+    );
+    assert!(
+        said.contains("# Skill packs")
+            && said.contains(
+                "`rust-review/reviewing`: `/verkstead/skills/rust-review/reviewing/SKILL.md`"
+            ),
+        "the prompt lists it: {said:?}"
+    );
+    assert!(
+        said.contains("Review the Rust."),
+        "and the session reads it at that path: {said:?}"
+    );
+    assert!(
+        sets(&view)
+            .iter()
+            .any(|asked| asked.set_id == set && asked.carried_on),
+        "the line under the Set says it was carried on",
+    );
+}
+
+/// **A Deferred Ask answered with a Skill Pack restarts nothing**: nobody is
+/// idling on it, so the pack lands on the Conversation and reaches its next
+/// session (ADR-0028).
+#[tokio::test]
+async fn a_deferred_ask_answered_with_a_pack_restarts_nothing() {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let fixture = grilling_alongside(WAITS_AND_CARRIES_ON, "askance").await;
+    installing_rust_review(&fixture.app, elsewhere.path()).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask_deferred(ASKED_ALREADY).await;
+
+    let made: verkstead_render::AdditionMade = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/additions"),
+        &serde_json::json!({ "label": "Q1", "pick": { "Pack": { "name": "rust-review" } } }),
+    )
+    .await;
+    assert!(
+        matches!(made, verkstead_render::AdditionMade::Added { .. }),
+        "{made:?}"
+    );
+
+    let answered: Submitted = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({ "answers": [{ "label": "Q1", "selected": 1 }] }),
+    )
+    .await;
+    assert_eq!(answered, Submitted::Accepted);
+
+    let view = fixture.view().await;
+    assert_eq!(outputs(&view).len(), 1, "nothing was launched");
+    assert!(outputs(&view)[0].running, "and nothing was ended");
+    assert_eq!(
+        view.skill_packs
+            .iter()
+            .map(|pack| pack.name.as_str())
+            .collect::<Vec<_>>(),
+        ["rust-review"],
+        "the pack is on the Conversation for its next session",
     );
 }
 
