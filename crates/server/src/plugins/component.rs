@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use wasmtime::component::{Component, Instance, Linker, ResourceTable};
+use wasmtime::component::{Component, Instance, InstancePre, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store, Trap};
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{
@@ -96,6 +96,44 @@ impl std::error::Error for Trouble {}
 pub struct Loaded {
     pub store: Store<Host>,
     pub instance: Instance,
+
+    /// What starts the same component again — see [`Again`].
+    pub again: Again,
+}
+
+/// What starts a loaded component again, in a store of its own, under the
+/// same grant with one directory more.
+///
+/// **For an export handed a path the grant never named**: a harness's
+/// `parse-transcript` finds a session's record under the account it ran on,
+/// and which account that is is the session's, not the plugin's. WASI's
+/// directories are fixed when a store is made, so the one to read is a store
+/// made for it — compiled once, at load, and instantiated per reader.
+#[derive(Clone)]
+pub struct Again {
+    pre: InstancePre<Host>,
+    capabilities: Vec<Capability>,
+    home: Option<PathBuf>,
+}
+
+impl Again {
+    /// The component started again with `dir` granted read-only beside what
+    /// its manifest was granted, named by its own path.
+    pub async fn reading(&self, dir: &Path) -> Result<Loaded, Trouble> {
+        let mut grant = grant(&self.capabilities, self.home.as_deref())?;
+        grant
+            .wasi
+            .preopened_dir(dir, dir.to_string_lossy(), FsPerms::ReadOnly)
+            .map_err(|error| {
+                Trouble::of(format!(
+                    "`{}` couldn't be opened for the component: {}.",
+                    dir.display(),
+                    worded(&error)
+                ))
+            })?;
+
+        started(self.clone(), grant, STARTING).await
+    }
 }
 
 /// What a component's store holds: its WASI context, built from the grant, and
@@ -278,30 +316,46 @@ async fn started_within(
         ))
     })?;
 
-    let mut store = Store::new(&ENGINE, granted(capabilities, home)?);
+    let again = Again {
+        pre,
+        capabilities: capabilities.to_vec(),
+        home: home.map(Path::to_owned),
+    };
+    let grant = grant(capabilities, home)?;
+    started(again, grant, within).await
+}
+
+/// `again`'s component started in a store holding `grant`, stopped where it
+/// is still starting after `within`.
+async fn started(again: Again, grant: Grant, within: Duration) -> Result<Loaded, Trouble> {
+    let mut store = Store::new(&ENGINE, grant.host());
     store.epoch_deadline_trap();
     store.set_epoch_deadline(within.div_duration_f64(TICK).ceil() as u64);
 
-    let instance = pre.instantiate_async(&mut store).await.map_err(|error| {
-        // A trap is worded as the trap alone: what wasmtime wraps around it
-        // is a backtrace, which is the component author's to read with their
-        // own tools rather than a row's to draw.
-        if let Some(Trap::Interrupt) = error.downcast_ref::<Trap>() {
-            Trouble::of(format!(
-                "The component didn't finish starting within {} seconds, so it was stopped.",
-                within.as_secs()
-            ))
-        } else if let Some(trap) = error.downcast_ref::<Trap>() {
-            Trouble::of(format!(
-                "The component stopped while it was starting: {trap}."
-            ))
-        } else {
-            Trouble::of(format!(
-                "The component couldn't be started: {}.",
-                worded(&error)
-            ))
-        }
-    })?;
+    let instance = again
+        .pre
+        .instantiate_async(&mut store)
+        .await
+        .map_err(|error| {
+            // A trap is worded as the trap alone: what wasmtime wraps around it
+            // is a backtrace, which is the component author's to read with their
+            // own tools rather than a row's to draw.
+            if let Some(Trap::Interrupt) = error.downcast_ref::<Trap>() {
+                Trouble::of(format!(
+                    "The component didn't finish starting within {} seconds, so it was stopped.",
+                    within.as_secs()
+                ))
+            } else if let Some(trap) = error.downcast_ref::<Trap>() {
+                Trouble::of(format!(
+                    "The component stopped while it was starting: {trap}."
+                ))
+            } else {
+                Trouble::of(format!(
+                    "The component couldn't be started: {}.",
+                    worded(&error)
+                ))
+            }
+        })?;
 
     worlds::Plugin::new(&mut store, &instance).map_err(|error| {
         Trouble::of(format!(
@@ -314,11 +368,34 @@ async fn started_within(
     // sets its own.
     store.set_epoch_deadline(u64::MAX);
 
-    Ok(Loaded { store, instance })
+    Ok(Loaded {
+        store,
+        instance,
+        again,
+    })
 }
 
-/// The store a component runs in, holding exactly what `capabilities` grant.
-fn granted(capabilities: &[Capability], home: Option<&Path>) -> Result<Host, Trouble> {
+/// What a store is to be made holding: the WASI context a grant builds, and
+/// the outbound hosts its HTTP requests are held to.
+struct Grant {
+    wasi: WasiCtxBuilder,
+    outbound: Outbound,
+}
+
+impl Grant {
+    fn host(mut self) -> Host {
+        Host {
+            wasi: self.wasi.build(),
+            http: WasiHttpCtx::new(),
+            outbound: self.outbound,
+            table: ResourceTable::new(),
+        }
+    }
+}
+
+/// What the store a component runs in holds: exactly what `capabilities`
+/// grant.
+fn grant(capabilities: &[Capability], home: Option<&Path>) -> Result<Grant, Trouble> {
     let mut wasi = WasiCtxBuilder::new();
     wasi.allow_tcp(false)
         .allow_udp(false)
@@ -364,12 +441,7 @@ fn granted(capabilities: &[Capability], home: Option<&Path>) -> Result<Host, Tro
         }
     }
 
-    Ok(Host {
-        wasi: wasi.build(),
-        http: WasiHttpCtx::new(),
-        outbound,
-        table: ResourceTable::new(),
-    })
+    Ok(Grant { wasi, outbound })
 }
 
 /// A granted path with a leading `~` read as `home`.

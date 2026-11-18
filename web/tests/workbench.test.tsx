@@ -7121,7 +7121,7 @@ function rows(...readings: Turn[][]): number {
 /// these have to carry — which is the whole of what keeps a hand-written
 /// payload honest.
 function recordOf(turns: Turn[], cursor = "9.9.9"): TranscriptView {
-  return { turns, bookkeeping: [], whole: true, cursor };
+  return { turns, bookkeeping: [], whole: true, cursor, unreadable: null };
 }
 
 /// A session that kept no record of its own conversation, which is what the
@@ -7132,6 +7132,7 @@ const SAID_NOTHING: TranscriptView = {
   bookkeeping: [],
   whole: true,
   cursor: "0.0.0",
+  unreadable: null,
 };
 
 /// What the same session said after that, as the server hands it to a pane that
@@ -9277,6 +9278,31 @@ describe("a session's output on the timeline", () => {
 
     await waitFor(() => expect(output.classList).toContain(pressable.open));
     expect(output.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /// A plugin harness whose component couldn't read the record leaves none of
+  /// it drawn, and the pane says why where the record would be — rather than
+  /// falling back to the Capture, as a session that kept no record does.
+  it("says why a record its harness couldn't read isn't drawn", async () => {
+    theGrilling(
+      whenever(
+        TRANSCRIPT_OF_IT,
+        json({
+          ...SAID_NOTHING,
+          unreadable: "Its harness couldn't read it: it stopped.",
+        }),
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    await waitFor(() =>
+      screen.getByText(
+        "What this session said couldn't be read. Its harness couldn't read it: it stopped.",
+      ),
+    );
+    expect(container.querySelector(`.${outputPane.capture}`)).toBeNull();
   });
 
   /// A running session is opened for what it is saying now, which is the end of

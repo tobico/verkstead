@@ -31,6 +31,13 @@
 //! opencode's store is, and a file of lines per conversation named for the id
 //! the index answers — see [`Brain`] and [`crate::summaries`].
 //!
+//! **A harness a plugin declares finds and reads its own**: its component's
+//! `parse-transcript` is handed the account's root and the session id and
+//! answers with the record whole, in the kinds the Transcript pane draws, so
+//! what is followed is how many of those have been taken — see
+//! [`crate::harness::plugged::Entries`]. Those go to the store as lines the
+//! render crate wrote the shape of rather than any harness's own.
+//!
 //! **And what the search finds is what gives the two unnamed backends their
 //! names.** Codex and opencode each choose their own, so the Capture is opened
 //! under a name nothing ever uses — and a rollout names *itself*, in the line the
@@ -197,6 +204,11 @@ pub(crate) enum Search {
     /// then a lookup by the id the index answered with — see [`Brain`].
     Brain(Brain),
 
+    /// A plugin harness's: whatever its component's `parse-transcript` answers
+    /// for the session, the finding as well as the reading being the export's
+    /// — see [`crate::harness::plugged::Entries`].
+    Parsed(crate::harness::plugged::Reader),
+
     /// And nowhere at all, for a session there is nothing to look for. Nothing
     /// is looked for and the Capture is the whole record, which is ADR-0006's
     /// rule for a session with no log, unchanged.
@@ -279,6 +291,17 @@ impl Tail {
                         session,
                         taken,
                     } => Following::Records(records::Reader::resuming(database, session, taken)),
+
+                    // Read again by the export, past what it read before the
+                    // session started.
+                    Carried::Entries { taken } => {
+                        match search(profile, session, worktree, launched, home) {
+                            Search::Parsed(reader) => Following::Entries(
+                                crate::harness::plugged::Entries::of(reader, taken),
+                            ),
+                            _ => Following::Looking,
+                        }
+                    }
                 },
                 pending: Vec::new(),
                 latest: None,
@@ -286,27 +309,9 @@ impl Tail {
             };
         }
 
-        // Asked of the harness rather than assumed of every one: where a
-        // backend puts its record, and what it calls it, is that backend's own
-        // business, and a backend arriving with an answer of its own gives it
-        // there — see [`crate::harness::Harness::search`].
-        //
-        // Nowhere for a harness this server has not got, whose sessions it
-        // never launches.
-        let search = crate::harness::of(profile.agent_type()).map_or(Search::Nowhere, |harness| {
-            harness.search(
-                harness.directory(&profile.account),
-                profile.memory,
-                home,
-                session,
-                worktree,
-                launched,
-            )
-        });
-
         Tail {
             conversation,
-            search,
+            search: search(profile, session, worktree, launched, home),
             following: Following::Looking,
             pending: Vec::new(),
             latest: None,
@@ -346,6 +351,7 @@ impl Tail {
         let arrived = match &mut self.following {
             Following::Looking => Vec::new(),
             Following::Log(log) => log.take().await,
+            Following::Entries(entries) => entries.take().await,
 
             Following::Records(records) => {
                 let arrived = records.take().await;
@@ -391,6 +397,11 @@ impl Tail {
             } => following(rollout(sessions, worktree, *launched).await),
             Search::Updates { sessions, session } => following(updates(sessions, session).await),
             Search::Brain(brain) => following(brain.looked(pool, event_id).await),
+            // Nothing to look for, the export doing its own finding on every
+            // poll — as a store's reader does.
+            Search::Parsed(reader) => {
+                Following::Entries(crate::harness::plugged::Entries::of(reader.clone(), 0))
+            }
             Search::Records {
                 database,
                 worktree,
@@ -402,6 +413,35 @@ impl Tail {
             )),
         }
     }
+}
+
+/// How the record of `session`, run under `profile`, is found — see
+/// [`Tail::of`].
+///
+/// Asked of the harness rather than assumed of every one: where a backend puts
+/// its record, and what it calls it, is that backend's own business, and a
+/// backend arriving with an answer of its own gives it there — see
+/// [`crate::harness::Harness::search`].
+///
+/// Nowhere for a harness this server has not got, whose sessions it never
+/// launches.
+fn search(
+    profile: &store::Profile,
+    session: &str,
+    worktree: Option<&Path>,
+    launched: SystemTime,
+    home: &crate::sandbox::Home,
+) -> Search {
+    crate::harness::of(profile.agent_type()).map_or(Search::Nowhere, |harness| {
+        harness.search(
+            harness.directory(&profile.account),
+            profile.memory,
+            home,
+            session,
+            worktree,
+            launched,
+        )
+    })
 }
 
 /// What a session's own record turned out to be, and how far it has been
@@ -421,6 +461,10 @@ enum Following {
 
     /// A session inside a store, and how far its records have been taken.
     Records(records::Reader),
+
+    /// A plugin harness's record as its component reads it, and how many of
+    /// its entries have been taken.
+    Entries(crate::harness::plugged::Entries),
 }
 
 /// A found log, read as far as it has been written.
@@ -589,6 +633,14 @@ pub(crate) enum Carried {
         /// And the highest sequence number already in it, which is where this
         /// session's Transcript opens.
         taken: i64,
+    },
+
+    /// A plugin harness's record, read by its component, and how many entries
+    /// it held before the session started — see
+    /// [`crate::harness::plugged::Entries`].
+    Entries {
+        /// Which is where this session's Transcript opens.
+        taken: usize,
     },
 }
 

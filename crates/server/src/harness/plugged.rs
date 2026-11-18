@@ -6,8 +6,9 @@
 //! `agent` provision — see [`crate::plugins::manifest::agent`] — and answered
 //! here as the built-ins answer it out of their own modules. The three things
 //! that are code are the component's exports, and this calls them with what the
-//! host holds: so far `write-configuration`, which is what a root's
-//! configuration is.
+//! host holds: `write-configuration`, which is what a root's configuration
+//! is, and `parse-transcript`, which is what its sessions' Transcripts are
+//! read out of — see [`Reader`].
 //!
 //! **What the host still does is the host's.** The account's own MCP servers
 //! are taken out of its configuration before the export sees any of it (the
@@ -31,14 +32,14 @@ use super::{
     Carrying, Declared, HOME_REFUSED, Harness, Line, ReadIn, Resume, SETTINGS_FILE, SignedOut,
 };
 use crate::platform::Platform;
-use crate::plugins::component::Loaded;
 use crate::plugins::component::worlds::category::agent as world;
+use crate::plugins::component::{Again, Loaded};
 use crate::plugins::manifest::{self, Agent};
 use crate::sandbox::Home;
 use crate::sandbox::root::{Part, Place};
 use crate::settings::AttachedServer;
 use crate::store;
-use crate::transcript::Search;
+use crate::transcript::{Carried, Search};
 
 /// What a file of an account is refused as on a save — see
 /// [`Declared::refused`].
@@ -58,6 +59,10 @@ pub(crate) struct Plugged {
     agent: Agent,
     mark: String,
     component: Component,
+
+    /// What starts the component again to read a session's record — see
+    /// [`Reader`].
+    again: Again,
 }
 
 impl Plugged {
@@ -68,6 +73,7 @@ impl Plugged {
             id,
             agent,
             mark,
+            again: loaded.again.clone(),
             component: Component::standing(loaded),
         }
     }
@@ -81,6 +87,21 @@ impl Plugged {
     /// The first of the account's paths, which the account is said from.
     fn first(&self) -> &manifest::agent::AccountPath {
         &self.agent.account[0]
+    }
+
+    /// What reads the record of `session` under the account at `account`,
+    /// which is the directory the account is where the Profile shares its
+    /// memory and the session's own root on the host where it does not — the
+    /// built-ins' rule, said from the first path.
+    fn reader(&self, account: &Path, memory: bool, home: &Home, session: &str) -> Reader {
+        Reader {
+            again: self.again.clone(),
+            account: match memory {
+                true => account.to_owned(),
+                false => home.built().join(&self.first().mounted),
+            },
+            session: session.to_owned(),
+        }
     }
 
     /// Of the first path's allowlist, what is neither its login nor its
@@ -376,28 +397,42 @@ impl Harness for Plugged {
             .collect()
     }
 
-    /// Nowhere yet: its record is read by its `parse-transcript` export.
+    /// What its `parse-transcript` export answers for the session, by the id
+    /// the session was named — where the record is kept being the export's to
+    /// find.
     fn search(
         &self,
-        _account: &Path,
-        _memory: bool,
-        _home: &Home,
-        _session: &str,
+        account: &Path,
+        memory: bool,
+        home: &Home,
+        session: &str,
         _worktree: Option<&Path>,
         _launched: SystemTime,
     ) -> Search {
-        Search::Nowhere
+        Search::Parsed(self.reader(account, memory, home, session))
     }
 
+    /// As far as `parse-transcript` reads the record now, before the resumed
+    /// session adds to it; none where it finds none, or can't read it.
     fn carried<'a>(
         &'a self,
-        _account: &'a Path,
-        _memory: bool,
-        _session: &'a str,
+        account: &'a Path,
+        memory: bool,
+        session: &'a str,
         _worktree: &'a Path,
-        _home: &'a Home,
+        home: &'a Home,
     ) -> Carrying<'a> {
-        Box::pin(async { None })
+        let reader = self.reader(account, memory, home, session);
+
+        Box::pin(async move {
+            let mut entries = Entries::of(reader, 0);
+            let Ok(Some(answered)) = entries.answered().await else {
+                return None;
+            };
+            Some(Carried::Entries {
+                taken: answered.len(),
+            })
+        })
     }
 
     /// The model the manifest names for `role`, or its default.
@@ -408,6 +443,183 @@ impl Harness for Plugged {
             .iter()
             .find(|(declared, _)| *declared == role)
             .map_or(&self.agent.models.default, |(_, model)| model)
+    }
+}
+
+/// Where a session of a plugin harness keeps its record, as its
+/// `parse-transcript` is handed it: the account's root on the host, and the
+/// session's id.
+#[derive(Clone)]
+pub(crate) struct Reader {
+    again: Again,
+    account: PathBuf,
+    session: String,
+}
+
+/// A session's record as its plugin harness's `parse-transcript` reads it,
+/// followed as far as it has been taken.
+///
+/// **The export answers the whole record every time it is asked**, the finding
+/// of it included, so following it is remembering how many of its entries are
+/// on the Transcript already and writing the rest — each as the line
+/// [`verkstead_render::Entry::line`] makes, which the render crate draws.
+///
+/// **The component reads in a store of its own**, started with the account's
+/// root granted read-only beside what its manifest was granted — see
+/// [`Again`] — and kept for the life of the following.
+///
+/// **An export that fails is the end of the following**, said once on the
+/// Transcript as [`verkstead_render::Entry::Unreadable`]: a trap leaves a
+/// component instance that can't be entered again, and one that answered
+/// something that isn't an answer would answer it again. The session is
+/// nothing to it.
+pub(crate) struct Entries {
+    reader: Reader,
+    loaded: Option<Loaded>,
+    taken: usize,
+    over: bool,
+}
+
+impl Entries {
+    /// The following of `reader`'s record, with `taken` of its entries on the
+    /// Transcript already.
+    pub(crate) fn of(reader: Reader, taken: usize) -> Entries {
+        Entries {
+            reader,
+            loaded: None,
+            taken,
+            over: false,
+        }
+    }
+
+    /// The lines of what the record holds past what was taken last time.
+    pub(crate) async fn take(&mut self) -> Vec<String> {
+        if self.over {
+            return Vec::new();
+        }
+
+        match self.answered().await {
+            // No record yet, or no root yet to find one in.
+            Ok(None) => Vec::new(),
+            Ok(Some(answered)) => {
+                let arrived: Vec<String> = answered
+                    .into_iter()
+                    .skip(self.taken)
+                    .map(|entry| entered(entry).line())
+                    .collect();
+                self.taken += arrived.len();
+                arrived
+            }
+            Err(why) => {
+                tracing::warn!(
+                    account = %self.reader.account.display(),
+                    session = self.reader.session,
+                    why,
+                    "a plugin harness's parse-transcript failed, so its session's Transcript \
+                     stops here"
+                );
+                self.over = true;
+                self.loaded = None;
+                vec![
+                    verkstead_render::Entry::Unreadable {
+                        why: format!("Its harness couldn't read it: {why}."),
+                    }
+                    .line(),
+                ]
+            }
+        }
+    }
+
+    /// What `parse-transcript` answers for the session now: none where there
+    /// is no record of it, or no account root yet to look in.
+    async fn answered(&mut self) -> Result<Option<Vec<world::Entry>>, String> {
+        let account = &self.reader.account;
+
+        let loaded = match &mut self.loaded {
+            Some(loaded) => loaded,
+            None => {
+                // A root the session hasn't been built into yet: nothing to
+                // look in, and looked in again on the next poll.
+                if !tokio::fs::metadata(account)
+                    .await
+                    .is_ok_and(|found| found.is_dir())
+                {
+                    return Ok(None);
+                }
+                let loaded = self
+                    .reader
+                    .again
+                    .reading(account)
+                    .await
+                    .map_err(|trouble| trouble.why.trim_end_matches('.').to_owned())?;
+                self.loaded.insert(loaded)
+            }
+        };
+
+        let exports = world::Agent::new(&mut loaded.store, &loaded.instance)
+            .map_err(|error| crate::plugins::component::worded(&error))?;
+        loaded.store.set_epoch_deadline(
+            CALLING
+                .div_duration_f64(crate::plugins::component::TICK)
+                .ceil() as u64,
+        );
+        let answered = exports
+            .call_parse_transcript(
+                &mut loaded.store,
+                &account.to_string_lossy(),
+                &self.reader.session,
+            )
+            .await
+            .map_err(|error| failed(&error));
+        loaded.store.set_epoch_deadline(u64::MAX);
+        answered
+    }
+}
+
+/// Why a call into a component failed, as the end of a sentence: a trap as the
+/// trap alone, for the reason [`crate::plugins::component`] words one that way.
+fn failed(error: &wasmtime::Error) -> String {
+    match error.downcast_ref::<wasmtime::Trap>() {
+        Some(wasmtime::Trap::Interrupt) => {
+            format!("it took longer than {} seconds", CALLING.as_secs())
+        }
+        Some(trap) => format!("it stopped: {trap}"),
+        None => crate::plugins::component::worded(error),
+    }
+}
+
+/// One entry the export answered, as the render crate draws it.
+fn entered(entry: world::Entry) -> verkstead_render::Entry {
+    use verkstead_render::{Entry, Voice};
+
+    match entry {
+        world::Entry::Said(said) => Entry::Said {
+            voice: match said.voice {
+                world::Voice::Agent => Voice::Agent,
+                world::Voice::Reasoning => Voice::Reasoning,
+                world::Voice::Put => Voice::Put,
+            },
+            markdown: said.markdown,
+        },
+        world::Entry::ToolCall(call) => Entry::ToolCall {
+            name: call.name,
+            call: call.call,
+            about: call.about,
+            input: call.input,
+        },
+        world::Entry::ToolResult(result) => Entry::ToolResult {
+            call: result.call,
+            failed: result.failed,
+            text: result.text,
+        },
+        world::Entry::Notice(notice) => Entry::Notice {
+            kind: notice.kind,
+            line: notice.line,
+        },
+        world::Entry::Unknown(unknown) => Entry::Unknown {
+            kind: unknown.kind,
+            line: unknown.line,
+        },
     }
 }
 

@@ -49,7 +49,7 @@ mod claude;
 mod codex;
 mod grok;
 mod opencode;
-mod plugged;
+pub(crate) mod plugged;
 
 /// One harness: everything about it the server needs to launch a session on
 /// it and to watch that session run, and what it keeps of an account.
