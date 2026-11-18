@@ -10,7 +10,8 @@
 //!
 //! The card's line says what is waiting on the human in either part first — an
 //! unreadable entry, no sccache, a bind the server cannot see — and otherwise
-//! how many caches are on and how many binds there are.
+//! how many binds there are, and how many of an installer's own languages have
+//! their cache on where there are any.
 
 import { Match, Switch as Choose, type JSX } from "solid-js";
 
@@ -70,10 +71,14 @@ export function SandboxCard(props: {
               status={
                 waiting().length > 0
                   ? waiting().join(" · ")
-                  : `${counted(cachesOn(told()), "build cache")} · ${counted(
-                      told().paths.binds.length,
-                      "bind",
-                    )}`
+                  : [
+                      // An installer's own languages, where there are any:
+                      // a built-in's cache is its plugin's.
+                      ...(cachesOn(told()) > 0
+                        ? [counted(cachesOn(told()), "build cache")]
+                        : []),
+                      counted(told().paths.binds.length, "bind"),
+                    ].join(" · ")
               }
             />
           );

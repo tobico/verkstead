@@ -44,7 +44,12 @@
       }
     }
   ],
+  "languages": [],
   "name": "GitLab",
+  "running": {
+    "sessions": 0,
+    "terminals": 0
+  },
   "trouble": null,
   "uuid": "0b6f6b7e-5c3a-4d0e-9a51-2f7d8c1e4a90"
 }

@@ -31,7 +31,7 @@ use crate::{
     LanguageCleared, LinkedDevice, Locked, LoginClosed, LoginCode, LoginOpened, LoginState,
     MemoPressed, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack,
     OfferedView, OnboardingView, OpenTerminal, PackAttached, PackRemoved, PendingJoin, Permitting,
-    Picking, PluginAt, PluginConsent, PluginEnabled, PluginInstall, PluginSettingsSave,
+    Picking, PluginAt, PluginConsent, PluginEnabled, PluginInstall, PluginLanguageCache, PluginSettingsSave,
     PluginSettingsSaved, PluginSettingsView, PluginUpdate, PluginUpdated, PluginsView, PortsView,
     PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
@@ -515,6 +515,7 @@ fn the_viewers_types_are_written_from_these() {
     PluginEnabled::export_all(&config).unwrap();
     // And a plugin's settings pane, with its save and what that came to.
     PluginSettingsView::export_all(&config).unwrap();
+    PluginLanguageCache::export_all(&config).unwrap();
     PluginSettingsSave::export_all(&config).unwrap();
     PluginSettingsSaved::export_all(&config).unwrap();
     LinkedDevice::export_all(&config).unwrap();

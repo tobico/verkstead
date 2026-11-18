@@ -30,9 +30,10 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
+use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     PluginField, PluginFieldEdit, PluginFieldRefused, PluginFieldValue, PluginFieldWrite,
-    PluginSettingsSave, PluginSettingsSaved, PluginSettingsView,
+    PluginLanguageCache, PluginSettingsSave, PluginSettingsSaved, PluginSettingsView,
 };
 use verkstead_schema::Nudge;
 
@@ -98,7 +99,56 @@ fn view(state: &AppState, held: &Held) -> PluginSettingsView {
             .iter()
             .map(|declared| field(&held.uuid, &held.fields, declared))
             .collect(),
+        languages: caches(state, &held.uuid),
+        running: crate::ui::running(state),
     }
+}
+
+/// What a built-in Language plugin's pane draws under its fields: each
+/// language it provides as this device's stores hold it, ticked or not, in
+/// the order its manifest lists them. Empty for any other plugin.
+fn caches(state: &AppState, uuid: &str) -> Vec<PluginLanguageCache> {
+    let Some(manifest) = built_in::listed()
+        .iter()
+        .find(|manifest| manifest.uuid == uuid)
+    else {
+        return Vec::new();
+    };
+
+    let loaded = crate::languages::configured(&state.settings.config());
+    let caches_compiles = state.sessions.caches_compiles();
+    // The language whose store the one Compile Server keeps its compiles in:
+    // the first naming it, as `Languages::wanting` sizes it.
+    let sizer = loaded
+        .iter()
+        .find(|(_, descriptor)| descriptor.names(crate::languages::SCCACHE));
+
+    built_in::languages(manifest)
+        .filter_map(|provided| {
+            let name = provided.name.as_str();
+            let descriptor = loaded.get(name)?;
+            let label = |name: &str, descriptor: &crate::languages::Descriptor| {
+                descriptor.label().unwrap_or(name).to_owned()
+            };
+            let compiling = descriptor.names(crate::languages::SCCACHE);
+
+            Some(PluginLanguageCache {
+                name: name.to_owned(),
+                label: label(name, descriptor),
+                size: descriptor.size(name).to_owned(),
+                disk_use: crate::ui::disk_use_of(name, descriptor, &state.disk_use),
+                stores: crate::ui::stores_of(descriptor),
+                swept: state
+                    .sweeps
+                    .of(name)
+                    .and_then(|at| at.format(&Rfc3339).ok()),
+                compiling: compiling.then(|| crate::ui::compile_caching(caches_compiles)),
+                through: sizer
+                    .filter(|(sizer, _)| compiling && *sizer != name)
+                    .map(|(sizer, descriptor)| label(sizer, descriptor)),
+            })
+        })
+        .collect()
 }
 
 /// What a field of the plugin `uuid` shows while nothing is set: a Language

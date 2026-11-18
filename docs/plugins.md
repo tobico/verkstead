@@ -455,6 +455,16 @@ was taken up once beside its `enabled` — the larger wins, across a plugin's
 languages and across devices, and a size that will not read is none — and is
 not read again; `size` sizes only a language no plugin provides.
 
+**Under the fields, a Language plugin's pane draws its build cache**: for each
+language it provides, what its stores hold on this device against the size in
+force, which directories they are and how each is held to the size, when they
+were last trimmed, and **Clear**, which empties that language's stores —
+sccache's too, for Rust. Ticked or not, since an off language still holds what
+it fetched. Clear is off, and refused by the server, while a session or a
+terminal runs. The Sandbox page's **Build caches** part keeps only what is no
+language's — whether the server can see an sccache — and the rows of a
+language no plugin provides.
+
 ## Per-platform overrides
 
 A top-level `linux:`, `macos:` or `windows:` holds keys of the common

@@ -12,8 +12,10 @@
 //!   comes first — an entry `config.yaml` holds that could not be read, compiles
 //!   that nothing caches, a bind the server cannot see — each in the fewest
 //!   words that name it, joined on the one line and in the warning colour. Where
-//!   nothing is, the line counts: how many build caches are on and how many
-//!   binds there are, in the quiet colour, in English rather than as `1 binds`.
+//!   nothing is, the line counts: how many of an installer's own languages
+//!   have their cache on, where there are any — a built-in's cache is its
+//!   plugin's — and how many binds there are, in the quiet colour, in English
+//!   rather than as `1 binds`.
 //! - **The pane.** One head, titled for the section, with the way back; under it
 //!   the two parts, each under a heading of its own.
 //! - **The round trip.** What either part saves is what the card goes back to
@@ -225,18 +227,17 @@ describe("the card", () => {
     const face = await theCard(container);
     expect(face.querySelector("h2")?.textContent).toBe("Sandbox");
 
-    const status = await reads(container, "8 build caches · 2 binds");
+    const status = await reads(container, "1 build cache · 2 binds");
     expect(status.classList).not.toContain(line.warn);
   });
 
-  /// A language switched off is a cache the count no longer holds — the one an
-  /// installer wrote the same as one Verkstead ships, because there is nothing
-  /// about either that the card knows.
+  /// A language switched off is a cache the count no longer holds, and where
+  /// none of an installer's own is on the count is the binds alone.
   it("leaves a language that is switched off out of the count", async () => {
     theSettings(quiet(off(TOLD, GLEAM)));
     const { container } = mountCard();
 
-    await reads(container, "7 build caches · 2 binds");
+    await reads(container, "2 binds");
   });
 
   /// And where none are on and nobody has added a bind, the line still counts
@@ -258,13 +259,13 @@ describe("the card", () => {
     );
     const { container } = mountCard();
 
-    const status = await reads(container, "0 build caches · 0 binds");
+    const status = await reads(container, "0 binds");
     expect(status.classList).not.toContain(line.warn);
   });
 
   /// One of each in the singular, so the line reads as English.
   it("says one build cache and one bind in the singular", async () => {
-    theSettings(quiet(firstBind(only(TOLD, GO))));
+    theSettings(quiet(firstBind(only(TOLD, GLEAM))));
     const { container } = mountCard();
 
     await reads(container, "1 build cache · 1 bind");
@@ -291,7 +292,7 @@ describe("the card", () => {
     theSettings(off(off(UNSET), CPP));
     const { container } = mountCard();
 
-    const status = await reads(container, "5 build caches · 0 binds");
+    const status = await reads(container, "0 binds");
     expect(status.classList).not.toContain(line.warn);
   });
 
@@ -437,11 +438,11 @@ describe("the round trip", () => {
       expect(box.checked).toBe(true);
       return box;
     });
-    await reads(container, "8 build caches · 2 binds");
+    await reads(container, "1 build cache · 2 binds");
 
     fireEvent.click(gleam);
 
-    await reads(container, "7 build caches · 2 binds");
+    await reads(container, "2 binds");
   });
 
   /// And the binds part the same way: a bind removed is one the card no longer
@@ -455,7 +456,7 @@ describe("the round trip", () => {
       </>
     ));
 
-    await reads(container, "8 build caches · 2 binds");
+    await reads(container, "1 build cache · 2 binds");
 
     const remove = await waitFor(() => {
       const found = container.querySelectorAll<HTMLButtonElement>(
@@ -466,6 +467,6 @@ describe("the round trip", () => {
     });
     fireEvent.click(remove);
 
-    await reads(container, "8 build caches · 1 bind");
+    await reads(container, "1 build cache · 1 bind");
   });
 });

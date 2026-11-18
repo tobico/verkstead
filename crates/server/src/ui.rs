@@ -6913,7 +6913,7 @@ fn taken(state: &AppState) -> usize {
 /// the Language support pane draws beside each Clear and a Clear is refused
 /// over — those still starting included, because they hold the stores before
 /// they are on either register, and a refusal over one has to name it.
-fn running(state: &AppState) -> Running {
+pub(crate) fn running(state: &AppState) -> Running {
     Running {
         sessions: state.sessions.running_or_launching(),
         terminals: state.terminals.running(),
@@ -7516,7 +7516,7 @@ fn needed(scopes: &crate::github::Scopes) -> Vec<String> {
 /// [`crate::build_cache::compiles_through_an_sccache`], which is what stops one
 /// being looked for at all. Every platform reaches one, so what is left is the
 /// machine: an sccache installed where the server can see it, or none.
-fn compile_caching(cached: bool) -> CompileCaching {
+pub(crate) fn compile_caching(cached: bool) -> CompileCaching {
     match cached {
         true => CompileCaching::Cached,
         false => CompileCaching::NoSccache,
@@ -7579,29 +7579,12 @@ fn languages(
             // And what that store holds, as last measured: never measured
             // here, because a walk of a store is not something a read waits
             // on — see [`crate::disk_use`].
-            disk_use: match (descriptor.names_a_store(), disk_use.of(name)) {
-                (false, _) => DiskUse::NoStore,
-                (true, None) => DiskUse::NotMeasured,
-                (true, Some(held)) => DiskUse::Measured {
-                    bytes: held.bytes,
-                    in_units: held.in_units,
-                },
-            },
+            disk_use: disk_use_of(name, descriptor, disk_use),
             // And how each of its directories is held to that size, which is
             // the descriptor's to say: by its tool, by the sweep, or not at
             // all — said on the page so a store nothing bounds is never a
             // surprise.
-            stores: descriptor
-                .store_names()
-                .map(|store| StoreView {
-                    name: store.to_owned(),
-                    eviction: match descriptor.bounded(store) {
-                        crate::languages::Bounded::ByItsTool => Eviction::ByItsTool,
-                        crate::languages::Bounded::ByUnit(_) => Eviction::ByUnit,
-                        crate::languages::Bounded::NotAtAll => Eviction::NotSwept,
-                    },
-                })
-                .collect(),
+            stores: stores_of(descriptor),
             // And when the sweep last brought those of them it keeps under the
             // size there — see [`crate::eviction`].
             swept: sweeps.of(name).and_then(|at| at.format(&Rfc3339).ok()),
@@ -7625,6 +7608,41 @@ fn languages(
                     false => RunningOn::Nothing,
                 },
             }),
+        })
+        .collect()
+}
+
+/// What a language's store holds, as last measured — never measured here,
+/// because a walk of a store is not something a read waits on: see
+/// [`crate::disk_use`]. The settings page and a Language plugin's pane read it
+/// alike.
+pub(crate) fn disk_use_of(
+    name: &str,
+    descriptor: &crate::languages::Descriptor,
+    disk_use: &crate::disk_use::DiskUse,
+) -> DiskUse {
+    match (descriptor.names_a_store(), disk_use.of(name)) {
+        (false, _) => DiskUse::NoStore,
+        (true, None) => DiskUse::NotMeasured,
+        (true, Some(held)) => DiskUse::Measured {
+            bytes: held.bytes,
+            in_units: held.in_units,
+        },
+    }
+}
+
+/// Each directory of a language's store, and how the descriptor says it is
+/// held to the size: by its tool, by the sweep, or not at all.
+pub(crate) fn stores_of(descriptor: &crate::languages::Descriptor) -> Vec<StoreView> {
+    descriptor
+        .store_names()
+        .map(|store| StoreView {
+            name: store.to_owned(),
+            eviction: match descriptor.bounded(store) {
+                crate::languages::Bounded::ByItsTool => Eviction::ByItsTool,
+                crate::languages::Bounded::ByUnit(_) => Eviction::ByUnit,
+                crate::languages::Bounded::NotAtAll => Eviction::NotSwept,
+            },
         })
         .collect()
 }

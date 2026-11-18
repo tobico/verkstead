@@ -14,13 +14,15 @@
 //! this page writes are the switch and the size, and an installer who wants a
 //! variable, a manifest or a label edits `config.yaml`.
 //!
-//! **And no switch or size for a built-in language.** The seven Verkstead
-//! ships are six built-in Language plugins, and a plugin's tick on the Plugins
-//! page is its languages' switch, cluster-wide (Set 1762, Q11a), and its `size`
-//! setting, on its pane there, their size — so a row of one is its name and its
-//! link, greyed while its plugin is unticked, and its panel says where the size
-//! is set. Only a language `config.yaml` alone describes, an installer's own,
-//! has its box and its size field here.
+//! **And no row for a built-in language.** The seven Verkstead ships are six
+//! built-in Language plugins, and a plugin's tick on the Plugins page is its
+//! languages' switch, cluster-wide (Set 1762, Q11a), its `size` setting their
+//! size, and its pane what their stores hold and their Clear (Set 1784, Q2) —
+//! see `LanguageCache.tsx`. What this part keeps of them is the one thing that
+//! is not a language's (Set 1784, Q3): the line saying there is no sccache
+//! where the server can see one. Only a language `config.yaml` alone
+//! describes, an installer's own, has its box, its size field and its panel
+//! here.
 //!
 //! Which is why a language whose entry in that file would not load is drawn
 //! with its box off and a sentence under it saying why: the two keys they write
@@ -178,14 +180,13 @@ import type {
   LanguageEdit,
   LanguageCleared,
   LanguageView,
-  Running,
   SettingsSaved,
   SettingsView,
   UnreadEntry,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { settledAge, utcStamp } from "../set/when";
-import { Empty, ErrorLine } from "../notices";
+import { Empty, ErrorLine, Note } from "../notices";
 import {
   heldAtOnce,
   heldAuthor,
@@ -193,6 +194,7 @@ import {
   heldLanguages,
   heldPaths,
 } from "./held";
+import { bytesSaid, clearWaits, usageSaid } from "./LanguageCache";
 import styles from "./Languages.module.css";
 
 /// What the section is called, wherever it names itself: the card's heading and
@@ -332,67 +334,12 @@ function sized(
   return language.plugin === null && sizes(told, language);
 }
 
-/// The units a figure is said in, each 1024 of the one before — the size
-/// grammar's `K`, `M`, `G` and `T`, written as the human writes them.
-const UNITS = ["KB", "MB", "GB", "TB"];
-
-/// A number of a unit, with one decimal under ten, where the decimal is most of
-/// what there is to read, and whole above: `0.4`, `9.6`, `30`.
-function figure(value: number): string {
-  return value < 10 ? value.toFixed(1) : Math.round(value).toString();
-}
-
-/// `bytes` in the units a human writes a size in — binary multiples, spelled
-/// `KB`, `MB`, `GB`, `TB` — so a figure reads against the size beside it
-/// without a conversion: `9.6GB` of `10GB`.
-export function bytesSaid(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} bytes`;
-  }
-
-  let value = bytes / 1024;
-  let unit = 0;
-
-  while (value >= 1024 && unit < UNITS.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-
-  return `${figure(value)}${UNITS[unit]}`;
-}
-
 /// The size a language's store is held to now: the one somebody configured,
 /// unless it is not a size, and the default otherwise.
 function inForce(language: LanguageView): string {
   return language.size_configured && language.size_unread === null
     ? language.size
     : language.default_size;
-}
-
-/// What a store holds against the size it is held to, as one fraction in the
-/// size's own unit: `3.2/30GB`.
-///
-/// In the size's unit rather than each in its own, so the two are read against
-/// each other without a conversion — except where what is held would round to
-/// nothing in it, which is said in its own unit instead: `20MB/10GB` rather than
-/// a `0.0` that reads as empty. A size the page cannot read as a number of a
-/// unit is said as it was written.
-export function usageSaid(bytes: number, size: string): string {
-  const parsed = /^\s*(\d+(?:\.\d+)?)\s*([KMGT])B?\s*$/i.exec(size);
-
-  if (parsed === null) {
-    return `${bytesSaid(bytes)}/${size}`;
-  }
-
-  const unit = "KMGT".indexOf(parsed[2]!.toUpperCase());
-  const value = bytes / 1024 ** (unit + 1);
-  const limit = `${parsed[1]}${UNITS[unit]}`;
-
-  if (bytes > 0 && value < 0.05) {
-    return `${bytesSaid(bytes)}/${limit}`;
-  }
-
-  return `${figure(value)}/${limit}`;
 }
 
 /// What a language's store holds on disk, as the first line of its panel — and,
@@ -444,29 +391,6 @@ function sweptSaid(
     said: `Last trimmed ${settledAge(language.swept, now)}.`,
     stamp: utcStamp(language.swept),
   };
-}
-
-/// How many of `count` there are, in words: `1 session`, `2 terminals`.
-function counted(count: number, one: string): string {
-  return `${count} ${one}${count === 1 ? "" : "s"}`;
-}
-
-/// Why a Clear is off, where something is running: what it waits on, counted —
-/// or nothing, where nothing runs and the button is live.
-export function clearWaits(running: Running): string | undefined {
-  const what = [
-    running.sessions > 0 ? counted(running.sessions, "session") : undefined,
-    running.terminals > 0 ? counted(running.terminals, "terminal") : undefined,
-  ].filter((said): said is string => said !== undefined);
-
-  if (what.length === 0) {
-    return undefined;
-  }
-
-  const verb =
-    running.sessions + running.terminals === 1 ? "is running" : "are running";
-
-  return `Clear waits until no session or terminal is running. ${what.join(" and ")} ${verb}.`;
 }
 
 /// Whether a language's store is held to its size twice over: once by a tool
@@ -581,6 +505,12 @@ function unread(told: SettingsView | undefined): string[] {
     .map((language) => language.label);
 }
 
+/// The languages this part draws a row for: the ones no plugin provides,
+/// which only `config.yaml` describes.
+function mine(told: SettingsView | undefined): LanguageView[] {
+  return (told?.languages ?? []).filter((language) => language.plugin === null);
+}
+
 /// What has build support switched on, in the words the card names them by.
 ///
 /// The labels the server gave, which for a language an installer wrote is the
@@ -588,7 +518,7 @@ function unread(told: SettingsView | undefined): string[] {
 /// card says: the languages a session can build, and nothing under the heading
 /// where there are none.
 function standing(told: SettingsView | undefined): string[] {
-  return (told?.languages ?? [])
+  return mine(told)
     .filter((language) => language.enabled)
     .map((language) => language.label);
 }
@@ -878,14 +808,6 @@ export function BuildCaches(): JSX.Element {
           </form>
         </Show>
 
-        {/* A built-in language's size is its plugin's, set on its pane. */}
-        <Show when={language().plugin !== null && sizes(set(), language())}>
-          <p class={styles.note}>
-            Its store size limit is set in {language().plugin}'s settings, on
-            the Plugins page.
-          </p>
-        </Show>
-
         {/* A language compiling through another's Compile Server, which is all
           there is to say about its cache. */}
         <Show
@@ -988,42 +910,33 @@ export function BuildCaches(): JSX.Element {
         <Match when={told()}>
           {(set) => (
             <div class={styles.languages}>
+              {/* Whether compiles are cached, which is no language's: the
+                  server's own environment. */}
+              <Show when={warnedAny(set())}>{uncompiled()}</Show>
+
+              <Note>
+                A built-in language's build cache is in its plugin's settings,
+                on the Plugins page.
+              </Note>
+
               {/* By position rather than by object: every save answers with a
                   fresh read of every language, and a row keyed by the object
                   would be built again — closing the panel somebody was in the
                   middle of. */}
-              <Index each={set().languages}>
+              <Index each={mine(set())}>
                 {(language) => (
                   <div>
                     <div class={styles.row}>
-                      {/* A language a built-in plugin provides is switched by
-                          that plugin's tick on the Plugins page, so its name
-                          stands here without a box. */}
-                      <Show
-                        when={language().plugin === null}
-                        fallback={
-                          <span
-                            class={styles.named}
-                            classList={{ [styles.off!]: !language().enabled }}
-                            title={`Switched on the Plugins page, by ${language().plugin}`}
-                          >
-                            {language().label}
-                          </span>
-                        }
-                      >
-                        <Check
-                          label={language().label}
-                          on={language().enabled}
-                          // And off for a language whose entry would not load:
-                          // the switch is a key of that entry, and there is
-                          // nothing readable there to write it into — see
-                          // [`unreadable`], the sentence underneath saying so.
-                          disabled={
-                            save.isPending || language().unread !== null
-                          }
-                          flip={(enabled) => flip(language(), enabled)}
-                        />
-                      </Show>
+                      <Check
+                        label={language().label}
+                        on={language().enabled}
+                        // And off for a language whose entry would not load:
+                        // the switch is a key of that entry, and there is
+                        // nothing readable there to write it into — see
+                        // [`unreadable`], the sentence underneath saying so.
+                        disabled={save.isPending || language().unread !== null}
+                        flip={(enabled) => flip(language(), enabled)}
+                      />
 
                       {/* Beside the label rather than inside it: a press
                           anywhere in the label ticks the box. */}
