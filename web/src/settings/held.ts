@@ -2,8 +2,8 @@
 //! of the human is not about them.
 //!
 //! One request writes the whole of `config.yaml`, so every section's save sends
-//! every value in it — the author, the languages, the share-on-Done switch and
-//! the sandbox binds. A section that left one out would be a section that
+//! every value in it — the author, the share-on-Done switch and the sandbox
+//! binds. A section that left one out would be a section that
 //! emptied it: what is sent is what the file holds afterwards. The text every
 //! session is given is not among them: it is a record for the whole cluster
 //! rather than a key of the file, and every form but its own sends `Keep`.
@@ -25,7 +25,6 @@ import type {
   CleanupEdit,
   CleanupStepEdit,
   CleanupStepView,
-  LanguageEdit,
   SettingsView,
 } from "../api/types";
 
@@ -50,8 +49,7 @@ export function heldAuthor(told: SettingsView | undefined): Author {
 /// anything, which is what the moment before the read has landed is.
 export function heldConfig(told: SettingsView | undefined) {
   return {
-    ...heldLanguages(told),
-    // And what becomes of an archived Conversation, likewise.
+    // What becomes of an archived Conversation.
     cleanup: heldCleanup(told),
     // And how much Verkstead runs at once — see [`heldAtOnce`].
     at_once: heldAtOnce(told),
@@ -66,45 +64,6 @@ export function heldConfig(told: SettingsView | undefined) {
     // write it back over a newer one saved on another device — see
     // [`InstructionsEdit`]. Only the Instructions' own form sends a text.
     instructions: "Keep" as const,
-  };
-}
-
-/// And the languages as they stand, ready to be spread into a save by a section
-/// that is not about them — or by a checkbox on the section that is.
-///
-/// One entry per language the last read listed, carrying the two keys the page
-/// writes. An empty list where the read has not landed, which is the one thing
-/// a form can honestly say about languages it has never been told: the server
-/// keeps what the file already holds under whatever a save sends, so an entry
-/// nobody sent is an entry nobody changed.
-///
-/// A size nobody typed goes back as the empty string rather than as the default
-/// it is being shown as — see [`heldCleanup`], which says the same about a
-/// duration.
-///
-/// **Every language's size, whether the pane draws a field for it or not.** It
-/// draws one only under a language with a store of its own, and a save built
-/// out of the fields alone would write `config.yaml` with C/C++'s `size` gone
-/// — a key of an entry the page never showed anybody.
-///
-/// **The size here is the server's rather than the field's**, which is what the
-/// language checkboxes want of it. A box saves itself the moment it is ticked,
-/// so it has to say something about the size beside it; saying what is in the
-/// box would commit a number nobody pressed Save on — the `5` of a `50`
-/// somebody was halfway through and thought better of. The size's own Save is
-/// what commits the size, and this is what a tick sends instead.
-export function heldLanguages(told: SettingsView | undefined): {
-  languages: LanguageEdit[];
-} {
-  return { languages: (told?.languages ?? []).map(asEdit) };
-}
-
-/// One of them, as a save puts it back.
-function asEdit(language: SettingsView["languages"][number]): LanguageEdit {
-  return {
-    name: language.name,
-    enabled: language.enabled,
-    size: language.size_configured ? language.size : "",
   };
 }
 

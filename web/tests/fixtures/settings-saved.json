@@ -1,7 +1,6 @@
 {
   "refused": [],
   "refused_servers": [],
-  "refused_sizes": [],
   "settings": {
     "at_once": {
       "conversations": 2,

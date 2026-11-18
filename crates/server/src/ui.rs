@@ -45,7 +45,7 @@ use verkstead_render::{
     Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView,
     FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
     FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, InstallPress, InstructionsEdit, LanguageCleared, LanguageEdit,
+    IgnoredCommentsEdit, InstallPress, InstructionsEdit, LanguageCleared,
     LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging,
     MissedOut, NewAdoption, NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack,
     OpenTerminal, PackAttached, PackRemoved, PairingView, Parked, PendingSteerView, Permitting,
@@ -54,7 +54,7 @@ use verkstead_render::{
     Resumed, RoleChoice, RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress,
     ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit,
     SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    ShowArchived, ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
+    ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened,
     SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
     TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
     TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
@@ -7090,25 +7090,7 @@ async fn save_settings(
             }
         };
 
-        // And the sizes, which are values like everything else the page writes
-        // and refused like the two lists above: a word Verkstead cannot read as
-        // a size is a store nothing could hold to it.
-        //
-        // Not a built-in language's once the plugins' records are held: its
-        // size is its plugin's setting, and what the page sends of it is not
-        // written — see below.
-        let ticks_held = settings.config().plugin_languages().is_some();
-        let pluginless: Vec<LanguageEdit> = edit
-            .languages
-            .iter()
-            .filter(|language| {
-                !(ticks_held && crate::plugins::built_in::providing(&language.name).is_some())
-            })
-            .cloned()
-            .collect();
-        let refused_sizes = size_refusals(&settings.config().languages(), &pluginless);
-
-        if !refused.is_empty() || !refused_servers.is_empty() || !refused_sizes.is_empty() {
+        if !refused.is_empty() || !refused_servers.is_empty() {
             return Ok((
                 SettingsSaved {
                     // How things stand, which is how they stood: nothing was
@@ -7126,7 +7108,6 @@ async fn save_settings(
                     verified: None,
                     refused,
                     refused_servers,
-                    refused_sizes,
                     // And nothing was spoken to. A refusal is the whole request
                     // refused, so there is no declaration written down to try.
                     tried: Vec::new(),
@@ -7177,26 +7158,6 @@ async fn save_settings(
         settings.save_config(
             &Config::of(
                 author.clone(),
-                // The two keys the page writes, per language it drew: the
-                // switch as it stands, and the size as it was typed with an
-                // empty field meaning nothing configured — clearing it is how
-                // the human asks for the default back, and a size of nothing is
-                // not a size. Everything else in a descriptor is an installer's
-                // and is kept from the file below. And no switch for a language
-                // a built-in plugin provides once the plugins' ticks are held,
-                // its tick being its switch, nor a size, its `size` setting
-                // being its size: an `enabled` or a `size` the file still holds
-                // for it was taken up, and goes.
-                crate::languages::Languages::of_page(edit.languages.into_iter().map(|language| {
-                    let ticked =
-                        ticks_held && crate::plugins::built_in::providing(&language.name).is_some();
-                    let enabled = (!ticked).then_some(language.enabled);
-                    let size = match ticked {
-                        true => String::new(),
-                        false => language.size,
-                    };
-                    (language.name, enabled, size)
-                })),
                 // And the Cleanup's two rows, each a switch and a duration as it
                 // was typed — an empty field is the default asked for back, and so
                 // is anything that is not a whole number of days. Nothing here is
@@ -7422,7 +7383,6 @@ async fn save_settings(
                 // nothing wrong with — of either list.
                 refused: Vec::new(),
                 refused_servers: Vec::new(),
-                refused_sizes: Vec::new(),
                 // Filled in below, off the runtime rather than off this thread:
                 // trying a server is a request over the network, which is the one
                 // thing in this handler that is neither a file nor a process.
@@ -7997,46 +7957,6 @@ fn server_refusals(
                 field,
                 why,
             }
-        })
-        .collect()
-}
-
-/// The sizes a save is asking for that are not sizes, one entry per language at
-/// fault, and empty where there is nothing wrong with any of them.
-///
-/// **Only a size that changed.** A word already in `config.yaml` that is not a
-/// size is a hand-edit's, and the page sends it back as it stands on every save
-/// about something else — so refusing it would turn down a tick over a field
-/// nobody touched. The pane says what is wrong with that one instead, and the
-/// store is held to its default meanwhile — see
-/// [`crate::languages::Descriptor::size`].
-///
-/// A blank is nothing configured rather than a size of nothing, so it is never
-/// refused: clearing the field is how the default is asked for back.
-fn size_refusals(written: &crate::languages::Languages, sent: &[LanguageEdit]) -> Vec<SizeRefused> {
-    sent.iter()
-        .filter_map(|language| {
-            let size = language.size.trim();
-
-            if size.is_empty() {
-                return None;
-            }
-
-            let unchanged = written
-                .get(&language.name)
-                .and_then(crate::languages::Descriptor::size_configured)
-                == Some(size);
-
-            if unchanged {
-                return None;
-            }
-
-            let why = crate::languages::bytes(size).err()?;
-
-            Some(SizeRefused {
-                language: language.name.clone(),
-                why,
-            })
         })
         .collect()
 }

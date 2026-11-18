@@ -74,7 +74,6 @@ import {
   heldAtOnce,
   heldAuthor,
   heldCleanup,
-  heldLanguages,
   heldPaths,
 } from "./held";
 import styles from "./Cleanup.module.css";
@@ -216,10 +215,6 @@ export function CleanupPane(props: {
         // blank token field read as *clear this* is exactly what `Keep` is
         // here to stop.
         github_token: "Keep",
-        // And the languages as they stand, which is the section above this one:
-        // a save says what the file holds afterwards, so a list left out would
-        // be a list emptied — see [`heldLanguages`].
-        ...heldLanguages(told()),
         cleanup: edit,
         // And how much Verkstead runs at once — see [`heldAtOnce`].
         at_once: heldAtOnce(told()),

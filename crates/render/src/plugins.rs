@@ -106,6 +106,10 @@ pub enum PluginSource {
     Git { url: String, revision: String },
     /// Inside this binary: a built-in.
     BuiltIn,
+    /// An installer's own language: an entry of this device's `config.yaml`
+    /// naming a language no plugin provides. Drawn only on a device whose file
+    /// has the entry, and with no Remove or Update — the entry is the file's.
+    Config,
 }
 
 /// Where to read a manifest for the consent card: a directory's absolute path,

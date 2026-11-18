@@ -222,6 +222,27 @@
       "trouble": "It needs Base, which isn't installed.",
       "uuid": "3b2a1f0e-9d8c-4b7a-8f6e-5d4c3b2a1f0e",
       "version": "1.4.0"
+    },
+    {
+      "author": "",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "languages": [
+        "Zig"
+      ],
+      "name": "Zig",
+      "needs": [],
+      "provides": [
+        "language"
+      ],
+      "settings": 1,
+      "source": {
+        "kind": "Config"
+      },
+      "trouble": null,
+      "uuid": "6f3e7cf1-6d73-837a-86b6-d13f2f603f3a",
+      "version": ""
     }
   ]
 }

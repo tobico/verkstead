@@ -27,6 +27,11 @@
 //! devices' take-ups. A press made since wins over every take-up, so a device
 //! upgrading late never ticks again what a human unticked.
 //!
+//! **An installer's own language is taken up the same way**, the first time
+//! a device reads its entry: its `enabled` and `size` into the record of the
+//! plugin it is drawn as — see [`Source::Config`] — on winning and the larger
+//! size winning, once per language and device.
+//!
 //! **What loading it came to is not**: a plugin's trouble is this device's
 //! reading of its own copy, held in memory — see [`crate::plugins::installed`].
 //! A merge here is what has it loaded again.
@@ -189,6 +194,17 @@ pub enum Source {
     /// record holds the cluster's switch and settings, and nothing about where
     /// it came from.
     BuiltIn,
+
+    /// An installer's own language: a `languages:` entry in `config.yaml`
+    /// naming a language no plugin provides, drawn as a Language plugin of its
+    /// own on every device whose file has the entry, and on no other. Its
+    /// record is under a uuid derived from the language's name — see
+    /// [`crate::plugins::installed::installer_uuid`] — so every such device
+    /// shares one tick and one size (Set 1784, Q5).
+    Config {
+        /// What `languages:` keys its entry by.
+        language: String,
+    },
 }
 
 /// The size `fields` holds for its languages' stores, where it holds one.
@@ -264,16 +280,87 @@ pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> R
             .context("taking the languages' switches up out of config.yaml")?;
     }
 
+    installers_taken_up(pool, settings, device).await?;
+
     held(pool, settings).await
 }
 
-/// Hand what the built-in Language plugins' records say — which languages
-/// are unticked, and each one's size — on to the settings, which is what
-/// every session's languages are read out of.
+/// Take each installer's own language's switch and size up out of
+/// `config.yaml` into the record of the plugin it is drawn as, where this
+/// device has not already: the first time it reads the entry, which may be
+/// long after its first start, and once per language — the built-ins' rule,
+/// marked by language rather than once for all of them.
+///
+/// The entry's `enabled` is the plugin's tick, and its `size` the plugin's,
+/// one that will not read being none; put together with every other device's
+/// take-up of the same language by on winning and the larger size winning.
+async fn installers_taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> Result<()> {
+    let settings = settings.clone();
+    let config = tokio::task::spawn_blocking(move || settings.config()).await?;
+    let written = config.languages();
+
+    for (name, descriptor) in &crate::plugins::installed::installers(&config) {
+        let what = format!("{LANGUAGES_TAKEN_UP}.{name}");
+        if replicated::taken_up_as(pool, &what).await? {
+            continue;
+        }
+
+        let entry = written.get(name);
+        let mut fields = crate::plugins::installed::installer_fields(
+            name,
+            descriptor,
+            entry.is_none_or(crate::languages::Descriptor::enabled),
+            None,
+        );
+        if let Some(size) = larger(entry.and_then(|entry| entry.size_configured()), None) {
+            fields
+                .values
+                .insert(SIZE_SETTING.to_owned(), SettingValue::Line(size.to_owned()));
+        }
+
+        let kept = [(crate::plugins::installed::installer_uuid(name), fields)];
+        replicated::take_up_as_the_oldest_as::<Plugins>(pool, device, &what, &kept)
+            .await
+            .with_context(|| {
+                format!("taking the {name} language's switch up out of config.yaml")
+            })?;
+    }
+
+    Ok(())
+}
+
+/// Hand what the Language plugins' records say — which languages are
+/// unticked, and each one's size — on to the settings, which is what every
+/// session's languages are read out of: the built-ins', and those an
+/// installer's own languages are drawn as.
+///
+/// One at a time: the records are read and handed on under one lock, so a
+/// load that read them before a save wrote can never hand its older reading
+/// on after the save's.
 pub async fn held(pool: &SqlitePool, settings: &Settings) -> Result<()> {
+    static HOLDING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _one = HOLDING.lock().await;
+
     let records = replicated::live_records::<Plugins>(pool).await?;
 
     let mut held = crate::languages::Held::default();
+
+    // An installer's own language, by the language its record names: held
+    // whatever this device's file says, and laid over the entry only where the
+    // file still has it.
+    for record in &records {
+        let Source::Config { language } = &record.fields.source else {
+            continue;
+        };
+        held.recorded.insert(language.clone());
+        if !record.fields.enabled {
+            held.off.insert(language.clone());
+        }
+        if let Some(size) = size_of(&record.fields) {
+            held.sizes.insert(language.clone(), size.to_owned());
+        }
+    }
+
     for manifest in built_in::listed() {
         let Some(record) = records.iter().find(|record| {
             record.uuid == manifest.uuid && matches!(record.fields.source, Source::BuiltIn)
@@ -671,6 +758,62 @@ mod tests {
         let (_old, old, settings) = fresh("rust_build_cache:\n  size: 50G\n").await;
         taken_up(&old, &settings, "b").await.unwrap();
         assert_eq!(size(&old, RUST_CPP).await.as_deref(), Some("50G"));
+    }
+
+    /// An installer's own language is taken up the first time a device reads
+    /// its entry, under the uuid derived from its name: two devices' take-ups
+    /// come to on where either had it on, at the larger size; both off stays
+    /// off; and from then on the record, not the entry, is what sessions read.
+    #[tokio::test]
+    async fn an_installers_language_is_taken_up_by_name_on_and_larger_winning() {
+        let zig = crate::plugins::installed::installer_uuid("zig");
+        let entry = |more: &str| {
+            format!("languages:\n  zig:\n    env:\n      Z: \"{{cache}}/zig\"\n{more}")
+        };
+
+        let (_one, off_here, settings) = fresh(&entry("    enabled: false\n    size: 5G\n")).await;
+        taken_up(&off_here, &settings, "a").await.unwrap();
+        assert!(!enabled(&off_here, &zig).await);
+        assert!(!on(&settings.config(), "zig"));
+
+        // A device whose file had no entry takes nothing up of it.
+        let (_none, without, settings) = fresh("").await;
+        taken_up(&without, &settings, "c").await.unwrap();
+        assert!(
+            replicated::live_records::<Plugins>(&without)
+                .await
+                .unwrap()
+                .iter()
+                .all(|record| record.uuid != zig)
+        );
+
+        // Nor, once taken up, a second time: the entry written on since is
+        // not read.
+        let (_late, late, settings) = fresh("").await;
+        taken_up(&late, &settings, "d").await.unwrap();
+        std::fs::write(settings.config_path(), entry("    enabled: false\n")).unwrap();
+        taken_up(&late, &settings, "d").await.unwrap();
+        assert!(!enabled(&late, &zig).await, "taken up when first read");
+        std::fs::write(settings.config_path(), entry("")).unwrap();
+        taken_up(&late, &settings, "d").await.unwrap();
+        assert!(!enabled(&late, &zig).await, "and not again");
+        assert!(!on(&settings.config(), "zig"), "the record is what is read");
+
+        let (_two, on_there, settings) = fresh(&entry("    size: 8G\n")).await;
+        taken_up(&on_there, &settings, "b").await.unwrap();
+
+        let theirs = replicated::records::<Plugins>(&on_there).await.unwrap();
+        replicated::merge::<Plugins>(&off_here, &theirs)
+            .await
+            .unwrap();
+        assert!(enabled(&off_here, &zig).await, "on wins");
+        assert_eq!(size(&off_here, &zig).await.as_deref(), Some("8G"));
+
+        let (_three, off_too, settings) = fresh(&entry("    enabled: false\n")).await;
+        taken_up(&off_too, &settings, "e").await.unwrap();
+        let ours = replicated::records::<Plugins>(&late).await.unwrap();
+        replicated::merge::<Plugins>(&off_too, &ours).await.unwrap();
+        assert!(!enabled(&off_too, &zig).await, "both off stays off");
     }
 
     /// Two devices' sizes take up as the larger, whichever arrives where; and

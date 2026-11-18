@@ -298,7 +298,6 @@ impl Verkstead {
                         "email": email,
                     },
                     "github_token": "Keep",
-                    "languages": [{ "name": "rust", "enabled": true, "size": "" }],
                     "cleanup": {
                         "trim": { "enabled": true, "days": "" },
                         "delete": { "enabled": false, "days": "" },
@@ -389,7 +388,6 @@ impl Verkstead {
                 &serde_json::json!({
                     "git_author": { "display_name": "", "name": "", "email": "" },
                     "github_token": "Keep",
-                    "languages": [{ "name": "rust", "enabled": true, "size": "" }],
                     "cleanup": {
                         "trim": { "enabled": true, "days": "" },
                         "delete": { "enabled": false, "days": "" },
@@ -462,7 +460,6 @@ impl Verkstead {
                 &serde_json::json!({
                     "git_author": { "display_name": "", "name": "", "email": "" },
                     "github_token": "Keep",
-                    "languages": [{ "name": "rust", "enabled": true, "size": "" }],
                     "cleanup": {
                         "trim": { "enabled": true, "days": "" },
                         "delete": { "enabled": false, "days": "" },
@@ -2165,6 +2162,102 @@ async fn a_local_plugin_is_listed_on_another_device_as_the_ones_it_is_on() {
 
     a.plugins_saying(|view| view.installed.iter().any(|row| !row.enabled))
         .await;
+}
+
+/// An installer's own language is one tick on every device whose
+/// `config.yaml` has its entry, and no row at all on a device whose file
+/// does not: unticked on A, B draws no row while it lacks the entry — the
+/// record there all the same — and draws it unticked once its file has it,
+/// its sessions reading it off.
+#[tokio::test]
+async fn an_installers_language_is_one_tick_on_every_device_with_its_entry() {
+    use verkstead_server::replicating::plugins::Plugins;
+    use verkstead_store::replicated;
+
+    const ZIG: &str = "languages:\n  zig:\n    label: Zig\n    env:\n      \
+                       ZIG_GLOBAL_CACHE_DIR: \"{cache}/zig\"\n";
+
+    let with_zig = tempfile::tempdir().unwrap();
+    std::fs::write(with_zig.path().join("config.yaml"), ZIG).unwrap();
+    let a = Verkstead::standing(A, with_zig).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    let on_a = a
+        .plugins_saying(|view| {
+            view.installed
+                .iter()
+                .any(|row| row.source == PluginSource::Config)
+        })
+        .await;
+    let zig = on_a.installed[0].clone();
+    assert_eq!((zig.name.as_str(), zig.enabled), ("Zig", true));
+
+    let (status, said) = pressing(
+        &a.workbench,
+        &format!("/api/ui/plugins/{}/enabled", zig.uuid),
+        Some(&serde_json::json!({ "enabled": false }).to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    // The record reaches B, which draws no row for it.
+    tokio::time::timeout(WAITING, async {
+        loop {
+            let records = replicated::live_records::<Plugins>(&b.pool).await.unwrap();
+            if records
+                .iter()
+                .any(|record| record.uuid == zig.uuid && !record.fields.enabled)
+            {
+                break;
+            }
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await
+    .expect("A's untick reached B");
+    let on_b = b.plugins_saying(|_| true).await;
+    assert!(
+        on_b.installed.iter().all(|row| row.uuid != zig.uuid),
+        "B's file has no zig entry: {on_b:#?}",
+    );
+
+    // Its file given the entry, B draws the one tick, unticked.
+    std::fs::write(b.dir.path().join("config.yaml"), ZIG).unwrap();
+    b.plugins_saying(|view| {
+        view.installed
+            .iter()
+            .any(|row| row.uuid == zig.uuid && !row.enabled)
+    })
+    .await;
+    let settings = Settings::in_data_dir(b.dir.path());
+    replicating::plugins::held(&b.pool, &settings)
+        .await
+        .unwrap();
+    assert!(
+        !verkstead_server::languages::configured(&settings.config())
+            .get("zig")
+            .unwrap()
+            .enabled(),
+        "and B's sessions get no zig",
+    );
+
+    // Ticked on B, A reads it on.
+    let (status, said) = pressing(
+        &b.workbench,
+        &format!("/api/ui/plugins/{}/enabled", zig.uuid),
+        Some(&serde_json::json!({ "enabled": true }).to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    a.plugins_saying(|view| {
+        view.installed
+            .iter()
+            .any(|row| row.uuid == zig.uuid && row.enabled)
+    })
+    .await;
 }
 
 /// One git command in `dir`, answering what it printed.

@@ -1405,7 +1405,9 @@ Timeline events:
   plugins stage 02*: a built-in language's row went, its tick, size, cache
   usage and Clear being its Language plugin's, on the Plugins page and in that
   plugin's pane; the part keeps the line saying there is no sccache, at its
-  head, and the rows of a language no plugin provides) (*revised
+  head, and the rows of a language no plugin provides; *and then those*: an
+  installer's own language is a Language plugin of its own under Installed, so
+  the part draws no language at all, and the card counts binds alone) (*revised
   2026-09-15, building settings-ui-tidy*: it was **Rust build cache** at
   `/settings/build-cache`, whose card said how the cache stood in a sentence and
   whose pane held a switch, a paragraph about it and the size; the old slug is no

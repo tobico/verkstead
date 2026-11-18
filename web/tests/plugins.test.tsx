@@ -25,7 +25,8 @@ import plugins from "./fixtures/plugins.json" with { type: "json" };
 import { json, serving, whenever } from "./serving";
 
 /// One plugin that loaded, GitLab, one whose manifest broke, Broken, one from
-/// git, Shared skills, and one whose dependency, Base, isn't installed.
+/// git, Shared skills, one whose dependency, Base, isn't installed, and Zig, an
+/// installer's own language from `config.yaml`.
 const PLUGINS = plugins as PluginsView;
 const CONSENT = consent as PluginConsent;
 
@@ -109,6 +110,27 @@ describe("a row", () => {
     const row = await theRow("Broken");
 
     expect(row.textContent).toContain("`version` isn't a semantic version.");
+  });
+
+  /// An installer's own language: a `languages:` entry naming a language no
+  /// plugin provides, drawn under Installed saying where it comes from, with
+  /// no version, no author, and no Update or Remove — the entry is the file's.
+  it("reads an installer's own language from config.yaml, with no Update or Remove", async () => {
+    serving(whenever("/api/ui/plugins", json(PLUGINS)));
+    pane();
+
+    const row = await theRow("Zig");
+
+    expect(row.textContent).toContain("Provides Zig.");
+    expect(row.textContent).toContain("From this device's config.yaml.");
+    expect(row.textContent).not.toContain("·");
+    expect(
+      [...row.querySelectorAll("button")].map((button) => button.textContent),
+    ).toEqual(["Settings"]);
+    expect(row.querySelector("input[type=checkbox]")).toHaveProperty(
+      "checked",
+      true,
+    );
   });
 
   it("draws a local plugin on another device greyed, naming it, with no Update", async () => {

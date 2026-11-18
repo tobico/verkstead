@@ -26,6 +26,11 @@
 //! what `{size}` reads for each language it provides — see
 //! [`crate::languages::configured`] — and its placeholder is that language's
 //! default.
+//!
+//! **And so is an installer's own language's**, drawn as a plugin of its own:
+//! its fields are the size field where its entry names a store, read off the
+//! entry rather than any record, and its first save makes its record — see
+//! [`super::installed::installer_fields`].
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -38,7 +43,9 @@ use verkstead_render::{
 use verkstead_schema::Nudge;
 
 use super::built_in;
-use super::installed::{built_in_fields, failed, held, on_this_device};
+use super::installed::{
+    built_in_fields, failed, held, installer_fields, installer_uuid, installers, on_this_device,
+};
 use super::manifest::SettingKind;
 use crate::AppState;
 use crate::languages::SIZE_SETTING;
@@ -61,16 +68,21 @@ struct Held {
 /// one and on with none set where it has not; any other plugin's record, or
 /// the refusal naming it as not installed.
 async fn held_or_built_in(state: &AppState, uuid: &str) -> Result<Held, Response> {
-    let Some(manifest) = built_in::listed()
+    let manifest = built_in::listed()
         .iter()
-        .find(|manifest| manifest.uuid == uuid)
-    else {
+        .find(|manifest| manifest.uuid == uuid);
+    let config = state.settings.config();
+    let installer = installers(&config)
+        .into_iter()
+        .find(|(language, _)| installer_uuid(language) == uuid);
+
+    if manifest.is_none() && installer.is_none() {
         return held(state, uuid).await.map(|record| Held {
             uuid: record.uuid,
             fields: record.fields,
             recorded: true,
         });
-    };
+    }
 
     let kept = match replicated::live_records::<Plugins>(&state.pool).await {
         Ok(records) => records.into_iter().find(|record| record.uuid == uuid),
@@ -78,11 +90,49 @@ async fn held_or_built_in(state: &AppState, uuid: &str) -> Result<Held, Response
     };
     let kept = kept.as_ref().map(|record| &record.fields);
 
+    let fields = match (manifest, installer) {
+        (Some(manifest), _) => {
+            built_in_fields(manifest, kept.is_none_or(|kept| kept.enabled), kept)
+        }
+        (None, Some((language, descriptor))) => {
+            let enabled = match kept {
+                Some(kept) => kept.enabled,
+                None => config
+                    .languages()
+                    .get(&language)
+                    .is_none_or(crate::languages::Descriptor::enabled),
+            };
+            installer_fields(&language, &descriptor, enabled, kept)
+        }
+        (None, None) => unreachable!("one or the other, checked above"),
+    };
+
     Ok(Held {
         uuid: uuid.to_owned(),
-        fields: built_in_fields(manifest, kept.is_none_or(|kept| kept.enabled), kept),
+        fields,
         recorded: kept.is_some(),
     })
+}
+
+/// The languages the Language plugin `uuid` provides on this device, by the
+/// name `config.yaml` keys each by, in the order its manifest lists them: a
+/// built-in's, or the one an installer's own is drawn for where this
+/// device's file has it. Nothing for any other plugin.
+fn provided(state: &AppState, uuid: &str) -> Vec<String> {
+    if let Some(manifest) = built_in::listed()
+        .iter()
+        .find(|manifest| manifest.uuid == uuid)
+    {
+        return built_in::languages(manifest)
+            .map(|provided| provided.name.clone())
+            .collect();
+    }
+
+    installers(&state.settings.config())
+        .into_iter()
+        .map(|(language, _)| language)
+        .filter(|language| installer_uuid(language) == uuid)
+        .collect()
 }
 
 /// The pane as this device reads `held`.
@@ -97,23 +147,21 @@ fn view(state: &AppState, held: &Held) -> PluginSettingsView {
             .fields
             .declared
             .iter()
-            .map(|declared| field(&held.uuid, &held.fields, declared))
+            .map(|declared| field(state, &held.uuid, &held.fields, declared))
             .collect(),
         languages: caches(state, &held.uuid),
         running: crate::ui::running(state),
     }
 }
 
-/// What a built-in Language plugin's pane draws under its fields: each
-/// language it provides as this device's stores hold it, ticked or not, in
-/// the order its manifest lists them. Empty for any other plugin.
+/// What a Language plugin's pane draws under its fields: each language it
+/// provides as this device's stores hold it, ticked or not, in the order its
+/// manifest lists them — see [`provided`]. Empty for any other plugin.
 fn caches(state: &AppState, uuid: &str) -> Vec<PluginLanguageCache> {
-    let Some(manifest) = built_in::listed()
-        .iter()
-        .find(|manifest| manifest.uuid == uuid)
-    else {
+    let provided = provided(state, uuid);
+    if provided.is_empty() {
         return Vec::new();
-    };
+    }
 
     let loaded = crate::languages::configured(&state.settings.config());
     let caches_compiles = state.sessions.caches_compiles();
@@ -123,9 +171,10 @@ fn caches(state: &AppState, uuid: &str) -> Vec<PluginLanguageCache> {
         .iter()
         .find(|(_, descriptor)| descriptor.names(crate::languages::SCCACHE));
 
-    built_in::languages(manifest)
-        .filter_map(|provided| {
-            let name = provided.name.as_str();
+    provided
+        .iter()
+        .filter_map(|name| {
+            let name = name.as_str();
             let descriptor = loaded.get(name)?;
             let label = |name: &str, descriptor: &crate::languages::Descriptor| {
                 descriptor.label().unwrap_or(name).to_owned()
@@ -154,19 +203,16 @@ fn caches(state: &AppState, uuid: &str) -> Vec<PluginLanguageCache> {
 /// What a field of the plugin `uuid` shows while nothing is set: a Language
 /// plugin's size is its first language's default — `30G` for Rust & C/C++,
 /// whose sccache has always been started at it, and `10G` for the rest.
-fn placeholder(uuid: &str, declared: &Declared) -> Option<String> {
+fn placeholder(state: &AppState, uuid: &str, declared: &Declared) -> Option<String> {
     if declared.kind != SettingKind::Size || declared.key != SIZE_SETTING {
         return None;
     }
 
-    let manifest = built_in::listed()
-        .iter()
-        .find(|manifest| manifest.uuid == uuid)?;
-    let first = built_in::languages(manifest).next()?;
-    Some(crate::languages::default_size(&first.name).to_owned())
+    let first = provided(state, uuid).into_iter().next()?;
+    Some(crate::languages::default_size(&first).to_owned())
 }
 
-fn field(uuid: &str, fields: &Fields, declared: &Declared) -> PluginField {
+fn field(state: &AppState, uuid: &str, fields: &Fields, declared: &Declared) -> PluginField {
     let line = || match fields.values.get(&declared.key) {
         Some(SettingValue::Line(line)) => line.clone(),
         _ => String::new(),
@@ -176,7 +222,7 @@ fn field(uuid: &str, fields: &Fields, declared: &Declared) -> PluginField {
         key: declared.key.clone(),
         label: declared.label.clone(),
         description: declared.description.clone(),
-        placeholder: placeholder(uuid, declared),
+        placeholder: placeholder(state, uuid, declared),
         value: match declared.kind {
             SettingKind::Text => PluginFieldValue::Text { value: line() },
             SettingKind::Size => PluginFieldValue::Size { value: line() },

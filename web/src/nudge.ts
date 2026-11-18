@@ -505,7 +505,7 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     // came to. The Plugins section draws them, and so does the Attach menu's
     // Skill packs section, off the packs they provide; and the settings beside
     // it, since a Language plugin's tick is its languages' switch, which the
-    // Sandbox section's Build caches draw.
+    // Sandbox section's sccache line reads.
     //
     // **And every Conversation of that device**, for the declarations' reason
     // above: a pack chip says whether anything loaded here still provides it,

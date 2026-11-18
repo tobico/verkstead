@@ -434,17 +434,29 @@ set to `null` is taken **out**; `detect` and a store's `units` are replaced
 whole. An entry naming a language no plugin provides is a language of its own.
 
 Unlike a plugin, an entry there is never refused outright: one that will not
-read falls back to the language of its name as the plugin says it, and the
-settings say why. Beside the grammar's keys it holds two of the installation's
-own — `enabled`, whether sessions get the language, and `size`, how big its
-store may grow — which a plugin's entry cannot hold.
+read falls back to the language of its name as the plugin says it, and that
+plugin's row and pane carry why as its **trouble**; the language still runs.
+Beside the grammar's keys it holds two of the installation's own — `enabled`,
+whether sessions get the language, and `size`, how big its store may grow —
+which a plugin's entry cannot hold.
+
+**An entry naming a language no plugin provides is drawn as a Language plugin
+of its own**, under **Installed**, saying it comes from this device's
+`config.yaml`, so an installer who adds a language gets its row with no code
+change. Its tick and its size are a cluster record keyed by a uuid derived from
+the language's name: drawn only on a device whose file has the entry, and
+shared by every device that does. It has no Update or Remove — the entry is
+the file's to take out — and its pane has the `size` field and the build cache
+below where its entry names a store. An entry of this kind that will not read
+is in trouble and off.
 
 **A built-in language's switch is its plugin's tick** on the Plugins page,
 cluster-wide: unticked, none of its languages' variables, stores or grants
 reach a session. Its `enabled` here was taken up into the plugin's record once,
 at the first start of a release that has the ticks — on where any of its
-languages was on, on any device — and is not read again; `enabled` switches
-only a language no plugin provides.
+languages was on, on any device — and is not read again. An installer's own
+language's `enabled` is taken up the same way into its record, the first time
+each device reads the entry.
 
 **And its size is its plugin's `size` setting**, cluster-wide, drawn in the
 plugin's pane with the default as its placeholder. Every Language plugin
@@ -453,7 +465,8 @@ kind of setting `size` — and it sizes every language the plugin provides, so
 Rust & C/C++ has one size for its one Compile Server. A language's `size` here
 was taken up once beside its `enabled` — the larger wins, across a plugin's
 languages and across devices, and a size that will not read is none — and is
-not read again; `size` sizes only a language no plugin provides.
+not read again. An installer's own language's `size` is taken up the same way,
+beside its `enabled`.
 
 **Under the fields, a Language plugin's pane draws its build cache**: for each
 language it provides, what its stores hold on this device against the size in
@@ -462,8 +475,7 @@ were last trimmed, and **Clear**, which empties that language's stores —
 sccache's too, for Rust. Ticked or not, since an off language still holds what
 it fetched. Clear is off, and refused by the server, while a session or a
 terminal runs. The Sandbox page's **Build caches** part keeps only what is no
-language's — whether the server can see an sccache — and the rows of a
-language no plugin provides.
+language's: whether the server can see an sccache.
 
 ## Per-platform overrides
 

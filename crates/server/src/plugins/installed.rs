@@ -188,8 +188,15 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
     let mut dirs = BTreeMap::new();
     for record in &records {
         // A built-in is read out of the binary, at the start — see
-        // [`super::built_in`] — and its record is only its switch.
-        if !reachable(state, &record.fields) || matches!(record.fields.source, Source::BuiltIn) {
+        // [`super::built_in`] — and its record is only its switch; and an
+        // installer's own language is an entry of `config.yaml`, read with
+        // the rest of the file at every session.
+        if !reachable(state, &record.fields)
+            || matches!(
+                record.fields.source,
+                Source::BuiltIn | Source::Config { .. }
+            )
+        {
             continue;
         }
 
@@ -285,8 +292,10 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         state.nudges.announce_here(Nudge::Plugins);
     }
 
-    // And which languages a built-in's tick has off, for the next session.
-    crate::replicating::plugins::held(&state.pool, &state.settings).await
+    // And which languages a Language plugin's tick has off, for the next
+    // session — an installer's language this device has only now read taken
+    // up first.
+    crate::replicating::plugins::taken_up(&state.pool, &state.settings, &state.device).await
 }
 
 /// This device's clones of the git plugins `removed` deleted, where it still
@@ -338,6 +347,9 @@ pub(super) fn on_this_device(state: &AppState, fields: &Fields) -> bool {
     match &fields.source {
         Source::Local { device, .. } => *device == state.device,
         Source::Git { .. } | Source::BuiltIn => true,
+        Source::Config { language } => installers(&state.settings.config())
+            .iter()
+            .any(|(name, _)| name == language),
     }
 }
 
@@ -535,6 +547,7 @@ async fn loaded(
             .map_err(|error| format!("Its clone couldn't be checked: {error}."))??
         }
         Source::BuiltIn => return Err("It's built in, so it's read out of Verkstead.".to_owned()),
+        Source::Config { .. } => return Err("It's an entry of config.yaml.".to_owned()),
     };
 
     let manifest = Manifest::read(&dir, Platform::HERE).map_err(|refusal| refusal.why)?;
@@ -660,6 +673,100 @@ pub(crate) fn built_in_fields(manifest: &Manifest, enabled: bool, kept: Option<&
     }
 }
 
+/// The installer's own languages: the entries of `config.yaml`'s
+/// `languages:` naming a language no plugin provides, each loaded as every
+/// session reads it, in the order the file has them. Each is drawn as a
+/// Language plugin of its own — see [`installer_uuid`].
+pub(crate) fn installers(
+    config: &crate::settings::Config,
+) -> Vec<(String, crate::languages::Descriptor)> {
+    crate::languages::configured(config)
+        .iter()
+        .filter(|(name, _)| crate::languages::built_in().get(name).is_none())
+        .map(|(name, descriptor)| (name.to_owned(), descriptor.clone()))
+        .collect()
+}
+
+/// The uuid the plugin an installer's own `language` is drawn as is kept
+/// under: derived from its name (Set 1784, Q5), so every device whose
+/// `config.yaml` has the entry names the one record, and shares its tick and
+/// size. A version-8 uuid, its bits a digest's.
+pub(crate) fn installer_uuid(language: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    let digest = Sha256::digest(format!("verkstead language {language}"));
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    )
+}
+
+/// The record's fields of the plugin an installer's own `language` is drawn
+/// as: named by its label, providing a Language, and declaring the size field
+/// a built-in Language plugin does where its entry names a store; its switch,
+/// and the values `kept` holds where it has a record already.
+pub(crate) fn installer_fields(
+    language: &str,
+    descriptor: &crate::languages::Descriptor,
+    enabled: bool,
+    kept: Option<&Fields>,
+) -> Fields {
+    let declared = descriptor
+        .has_store()
+        .then(|| Declared {
+            key: crate::languages::SIZE_SETTING.to_owned(),
+            label: "Store size limit".to_owned(),
+            kind: super::manifest::SettingKind::Size,
+            description: Some("Its stores are held to this size, oldest first.".to_owned()),
+        })
+        .into_iter()
+        .collect();
+
+    Fields {
+        source: Source::Config {
+            language: language.to_owned(),
+        },
+        enabled,
+        granted: Vec::new(),
+        name: descriptor.label().unwrap_or(language).to_owned(),
+        version: String::new(),
+        author: String::new(),
+        provides: vec![super::manifest::Category::Language.word().to_owned()],
+        dependencies: Vec::new(),
+        declared,
+        values: kept.map(|kept| kept.values.clone()).unwrap_or_default(),
+        secrets: BTreeMap::new(),
+    }
+}
+
+/// Why `language`'s entry in `config.yaml` isn't used, as a plugin's trouble,
+/// where it isn't: a built-in's runs on what Verkstead ships meanwhile, and an
+/// installer's own is off.
+fn unread_trouble(language: &str, descriptor: &crate::languages::Descriptor) -> Option<String> {
+    let why = descriptor.unread()?;
+    let label = descriptor.label().unwrap_or(language);
+
+    Some(match crate::languages::built_in().get(language).is_some() {
+        true => format!(
+            "The {language} entry in config.yaml {why}. {label} runs on what Verkstead ships \
+             until the entry is fixed."
+        ),
+        false => {
+            format!("The {language} entry in config.yaml {why}. It's off until the entry is fixed.")
+        }
+    })
+}
+
 /// The languages `manifest` provides, by label.
 fn languages(manifest: &Manifest) -> Vec<String> {
     built_in::languages(manifest)
@@ -687,16 +794,58 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
     };
 
     let records = replicated::live_records::<Plugins>(&state.pool).await?;
+    let config = state.settings.config();
+    let loaded = crate::languages::configured(&config);
     let going: BTreeMap<String, Vec<String>> = records
         .iter()
         .map(|record| (record.uuid.clone(), going_with(&records, &record.uuid)))
         .collect();
 
-    let built_in = built_ins(&records);
+    let built_in = built_ins(&records, &loaded);
+
+    // An installer's own language, drawn only where this device's file has
+    // its entry, its tick its record's — or the entry's, where it has none
+    // yet. No Remove: the entry is the file's to take out.
+    let written = config.languages();
+    let from_the_file: Vec<PluginRow> = installers(&config)
+        .into_iter()
+        .map(|(language, descriptor)| {
+            let uuid = installer_uuid(&language);
+            let record = records.iter().find(|record| record.uuid == uuid);
+            let enabled = match record {
+                Some(record) => record.fields.enabled,
+                None => written
+                    .get(&language)
+                    .is_none_or(crate::languages::Descriptor::enabled),
+            };
+            let fields = installer_fields(&language, &descriptor, enabled, None);
+
+            PluginRow {
+                trouble: unread_trouble(&language, &descriptor),
+                needs: Vec::new(),
+                elsewhere: None,
+                source: PluginSource::Config,
+                dependents: Vec::new(),
+                settings: u32::try_from(fields.declared.len()).unwrap_or(u32::MAX),
+                languages: vec![fields.name.clone()],
+                uuid,
+                name: fields.name,
+                version: fields.version,
+                author: fields.author,
+                provides: fields.provides,
+                enabled,
+            }
+        })
+        .collect();
 
     let installed = records
         .into_iter()
-        .filter(|record| !matches!(record.fields.source, Source::BuiltIn))
+        .filter(|record| {
+            !matches!(
+                record.fields.source,
+                Source::BuiltIn | Source::Config { .. }
+            )
+        })
         .map(|record| {
             let here = on_this_device(state, &record.fields);
             let (source, elsewhere) = match &record.fields.source {
@@ -712,6 +861,7 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                     None,
                 ),
                 Source::BuiltIn => (PluginSource::BuiltIn, None),
+                Source::Config { .. } => (PluginSource::Config, None),
             };
 
             let loads = here && record.fields.enabled;
@@ -735,6 +885,7 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                 enabled: record.fields.enabled,
             }
         })
+        .chain(from_the_file)
         .collect();
 
     Ok(PluginsView {
@@ -746,8 +897,12 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
 /// The Built-in group's rows: every built-in this binary ships but the fixture,
 /// which is not listed, the Skill Pack `verkstead` first. A built-in has no
 /// Remove and no Update, and is always on but for a Language plugin, whose
-/// tick is read off its record — on where it has none.
-fn built_ins(records: &[Record<Fields>]) -> Vec<PluginRow> {
+/// tick is read off its record — on where it has none — and whose trouble is
+/// an override of one of its languages that won't load.
+fn built_ins(
+    records: &[Record<Fields>],
+    loaded: &crate::languages::Languages,
+) -> Vec<PluginRow> {
     let mut rows: Vec<PluginRow> = BUILT_INS
         .iter()
         .filter_map(|built_in| match built_in.manifest(Platform::HERE) {
@@ -765,7 +920,13 @@ fn built_ins(records: &[Record<Fields>]) -> Vec<PluginRow> {
                         .iter()
                         .find(|record| record.uuid == manifest.uuid)
                         .is_none_or(|record| record.fields.enabled),
-                trouble: None,
+                // An override of one of its languages that won't load: the
+                // language still runs, on what Verkstead ships.
+                trouble: built_in::languages(&manifest)
+                    .filter_map(|provided| {
+                        unread_trouble(&provided.name, loaded.get(&provided.name)?)
+                    })
+                    .reduce(|one, other| format!("{one} {other}")),
                 needs: Vec::new(),
                 elsewhere: None,
                 dependents: going_with(records, &manifest.uuid),
@@ -1082,11 +1243,17 @@ async fn update(
     {
         return built_in_refused("updated");
     }
+    if installer_of(&state, &uuid).is_some() {
+        return config_refused("edited");
+    }
 
     let record = match held(&state, &uuid).await {
         Ok(record) => record,
         Err(refusal) => return refusal,
     };
+    if matches!(record.fields.source, Source::Config { .. }) {
+        return config_refused("edited");
+    }
 
     if !on_this_device(&state, &record.fields) {
         return refused(
@@ -1097,6 +1264,7 @@ async fn update(
 
     let answered = match &record.fields.source {
         Source::BuiltIn => Some(built_in_refused("updated")),
+        Source::Config { .. } => Some(config_refused("edited")),
         Source::Local { path, .. } => update_local(&state, &record, path, &press).await,
         Source::Git { url, revision } => {
             // Held so that no load puts the clone back at the pinned revision
@@ -1246,8 +1414,29 @@ fn built_in_refused(done: &str) -> Response {
     )
 }
 
+/// The refusal of a press an installer's own language has no row button for,
+/// `done` saying which: it is an entry of this device's `config.yaml`.
+fn config_refused(done: &str) -> Response {
+    refused(
+        StatusCode::CONFLICT,
+        ApiError::new(format!(
+            "That language comes from config.yaml, so it's {done} there. Untick it to turn it \
+             off."
+        )),
+    )
+}
+
+/// The installer's own language drawn under `uuid` on this device, where one
+/// is, with its entry as every session reads it.
+fn installer_of(state: &AppState, uuid: &str) -> Option<(String, crate::languages::Descriptor)> {
+    installers(&state.settings.config())
+        .into_iter()
+        .find(|(language, _)| installer_uuid(language) == uuid)
+}
+
 /// `POST /api/ui/plugins/{uuid}/enabled` — the checkbox, which is the
-/// cluster's. A built-in's record is made by its first tick.
+/// cluster's. A built-in's record is made by its first tick, and so is an
+/// installer's own language's.
 async fn enable(
     State(state): State<AppState>,
     Path(uuid): Path<String>,
@@ -1270,6 +1459,30 @@ async fn enable(
         };
         let fields = built_in_fields(
             manifest,
+            press.enabled,
+            kept.as_ref().map(|record| &record.fields),
+        );
+
+        if let Err(error) =
+            replicated::write::<Plugins>(&state.pool, &state.device, &uuid, &fields).await
+        {
+            return failed(error);
+        }
+
+        return match moved(&state).await {
+            Ok(plugins) => Json(plugins).into_response(),
+            Err(refusal) => refusal,
+        };
+    }
+
+    if let Some((language, descriptor)) = installer_of(&state, &uuid) {
+        let kept = match replicated::live_records::<Plugins>(&state.pool).await {
+            Ok(records) => records.into_iter().find(|record| record.uuid == uuid),
+            Err(error) => return failed(error),
+        };
+        let fields = installer_fields(
+            &language,
+            &descriptor,
             press.enabled,
             kept.as_ref().map(|record| &record.fields),
         );
@@ -1406,6 +1619,9 @@ async fn remove(State(state): State<AppState>, Path(uuid): Path<String>) -> Resp
     {
         return built_in_refused("removed");
     }
+    if installer_of(&state, &uuid).is_some() {
+        return config_refused("taken out");
+    }
 
     let records = match replicated::live_records::<Plugins>(&state.pool).await {
         Ok(records) => records,
@@ -1417,6 +1633,9 @@ async fn remove(State(state): State<AppState>, Path(uuid): Path<String>) -> Resp
             ApiError::new("That plugin isn't installed."),
         );
     };
+    if matches!(record.fields.source, Source::Config { .. }) {
+        return config_refused("taken out");
+    }
 
     let standing = standing(&records, &uuid);
     if !standing.is_empty() {
