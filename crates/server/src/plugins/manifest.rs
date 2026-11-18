@@ -205,7 +205,8 @@ pub struct Setting {
 }
 
 /// How a settings field is drawn and checked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SettingKind {
     Text,
     /// A size in the grammar `languages.yaml`'s sizes are: `30G`.

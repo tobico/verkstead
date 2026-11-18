@@ -31,17 +31,17 @@ use crate::{
     LanguageCleared, LinkedDevice, Locked, LoginClosed, LoginCode, LoginOpened, LoginState,
     MemoPressed, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, OfferedView,
     OnboardingView, OpenTerminal, PendingJoin, Permitting, Picking, PluginAt, PluginConsent,
-    PluginEnabled, PluginInstall, PluginUpdate, PluginUpdated, PluginsView, PortsView, PrefillView,
-    Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted,
-    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
-    RepoView, Repointed, Repointing, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit,
-    ServePress, ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved,
-    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
-    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
-    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
-    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Transferring, Unsubscribe,
-    UpdateNotice, Watching,
+    PluginEnabled, PluginInstall, PluginSettingsSave, PluginSettingsSaved, PluginSettingsView,
+    PluginUpdate, PluginUpdated, PluginsView, PortsView, PrefillView, Preflight, ProcessChoice,
+    ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
+    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Repointed,
+    Repointing, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
+    ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown,
+    Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted,
+    Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
+    TerminalsView, TranscriptView, Transferring, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -509,6 +509,10 @@ fn the_viewers_types_are_written_from_these() {
     PluginUpdate::export_all(&config).unwrap();
     PluginUpdated::export_all(&config).unwrap();
     PluginEnabled::export_all(&config).unwrap();
+    // And a plugin's settings pane, with its save and what that came to.
+    PluginSettingsView::export_all(&config).unwrap();
+    PluginSettingsSave::export_all(&config).unwrap();
+    PluginSettingsSaved::export_all(&config).unwrap();
     LinkedDevice::export_all(&config).unwrap();
 
     // And the ports of members' terminals this device is holding on its own

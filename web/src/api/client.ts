@@ -45,6 +45,9 @@ import type {
   ComponentsView,
   PluginCapability,
   PluginConsent,
+  PluginFieldEdit,
+  PluginSettingsSaved,
+  PluginSettingsView,
   PluginUpdated,
   PluginsView,
   Confirming,
@@ -2160,6 +2163,23 @@ export function enablePlugin(
 /// while installed plugins depend on it.
 export function removePlugin(uuid: string): Promise<PluginsView> {
   return post<PluginsView>(`/api/ui/plugins/${uuid}/remove`);
+}
+
+/// A plugin's settings pane: the fields its manifest declares, each with the
+/// cluster's value, and only whether a secret is set.
+export function loadPluginSettings(uuid: string): Promise<PluginSettingsView> {
+  return get<PluginSettingsView>(`/api/ui/plugins/${uuid}/settings`);
+}
+
+/// A save of a plugin's pane: the fields it changed. Refused fields come back
+/// in the answer, by key, and nothing is written where any is.
+export function savePluginSettings(
+  uuid: string,
+  fields: PluginFieldEdit[],
+): Promise<PluginSettingsSaved> {
+  return post<PluginSettingsSaved>(`/api/ui/plugins/${uuid}/settings`, {
+    fields,
+  });
 }
 
 /// **Install** on the Components pane's Annex row: the wizard's install run

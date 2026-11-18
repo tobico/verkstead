@@ -29,8 +29,9 @@ use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    AuthorEntry, AuthorRemoved, ConversationView, DevicesView, PluginSource, PluginsView,
-    PointingRepo, Registered, RepoEntry, ServerAttached, Started, UnrepointedRepo, Unrepointing,
+    AuthorEntry, AuthorRemoved, ConversationView, DevicesView, PluginFieldValue,
+    PluginSettingsView, PluginSource, PluginsView, PointingRepo, Registered, RepoEntry,
+    ServerAttached, Started, UnrepointedRepo, Unrepointing,
 };
 use verkstead_schema::Nudge;
 use verkstead_server::device::reading::{RUNNING, Reading};
@@ -2285,4 +2286,85 @@ async fn a_git_plugin_is_cloned_by_another_device_at_the_pinned_revision() {
     })
     .await
     .expect("B deleted its clone");
+}
+
+/// A plugin's settings saved in its pane on A are read in its pane on B: a
+/// text field off the record, and a secret through the digest-and-fetch path
+/// into B's own `secrets.yaml`, which B's pane says is set without saying it.
+#[tokio::test]
+async fn a_plugins_settings_saved_on_one_device_are_read_on_the_other() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    let at = a.dir.path().join("plugin");
+    std::fs::create_dir_all(&at).unwrap();
+    std::fs::write(
+        at.join("plugin.yaml"),
+        format!(
+            "uuid: {PLUGIN}\nname: GitLab\nauthor:\n  name: Ada Lovelace\n  email: \
+             ada@example.com\nversion: 1.4.0\ninterface: 1\nsettings:\n  - key: host\n    \
+             label: Host\n    kind: text\n  - key: token\n    label: Token\n    kind: secret\n"
+        ),
+    )
+    .unwrap();
+    a.installs_plugin_from(at.to_str().unwrap()).await;
+
+    let settings = format!("/api/ui/plugins/{PLUGIN}/settings");
+    let (status, said) = pressing(
+        &a.workbench,
+        &settings,
+        Some(
+            &serde_json::json!({ "fields": [
+                { "key": "host", "value": { "kind": "Text", "value": "gitlab.example.com" } },
+                { "key": "token", "value": { "kind": "Secret", "value": "glpat-seton-a" } },
+            ] })
+            .to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    b.plugins_saying(|view| view.installed.iter().any(|row| row.uuid == PLUGIN))
+        .await;
+    let read = tokio::time::timeout(WAITING, async {
+        loop {
+            let pane: PluginSettingsView = reading(&b.workbench, &settings).await;
+            let host = pane.fields.iter().any(|field| {
+                field.value
+                    == PluginFieldValue::Text {
+                        value: "gitlab.example.com".to_owned(),
+                    }
+            });
+            let token = pane
+                .fields
+                .iter()
+                .any(|field| field.value == PluginFieldValue::Secret { set: true });
+            if host && token {
+                return pane;
+            }
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await
+    .expect("B's pane reads what A saved");
+    assert!(!format!("{read:?}").contains("glpat-seton-a"));
+
+    tokio::time::timeout(WAITING, async {
+        loop {
+            let copy = b
+                .settings()
+                .secrets()
+                .plugin_secrets_of(PLUGIN)
+                .and_then(|secrets| secrets.get("token").cloned());
+            if copy.as_deref() == Some("glpat-seton-a") {
+                return;
+            }
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await
+    .expect("B fetched its own copy of the secret");
 }

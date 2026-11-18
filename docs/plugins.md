@@ -225,6 +225,17 @@ plugin's settings; `label` is what is drawn. `kind` is one of:
 - **`list`** — a list of lines.
 - **`secret`** — kept in `secrets.yaml` and never shown again.
 
+**Settings** on the plugin's row opens its pane, which draws these fields, and
+draws them whether or not the plugin loaded, so a setting it needs can be put
+right there. The values are the cluster's, kept under the plugin's uuid and
+each field's `key`: a `text`, `size` or `list` value on the plugin's installed
+record, which every device reads, and a `secret` in each device's
+`secrets.yaml`, the record carrying only a digest of it, by which every other
+device fetches its own copy from one that holds it. A secret is never shown
+again: the pane says only whether one is set. A value the field's kind cannot
+hold, such as a size that isn't one, is refused at the field with the reason,
+and nothing else in that save is written.
+
 ## Per-platform overrides
 
 A top-level `linux:`, `macos:` or `windows:` holds keys of the common

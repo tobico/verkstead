@@ -64,7 +64,7 @@ use super::manifest::{Access, Capability, Dependency, Files, Manifest};
 use crate::AppState;
 use crate::github::Credential;
 use crate::platform::Platform;
-use crate::replicating::plugins::{Fields, Plugins, Source};
+use crate::replicating::plugins::{Declared, Fields, Plugins, Source};
 use crate::store::replicated::{self, Record, Written};
 use crate::ui::refused;
 
@@ -243,7 +243,7 @@ fn reachable(state: &AppState, fields: &Fields) -> bool {
     fields.enabled && on_this_device(state, fields)
 }
 
-fn on_this_device(state: &AppState, fields: &Fields) -> bool {
+pub(super) fn on_this_device(state: &AppState, fields: &Fields) -> bool {
     match &fields.source {
         Source::Local { device, .. } => *device == state.device,
         Source::Git { .. } => true,
@@ -526,6 +526,18 @@ fn fields(manifest: &Manifest, source: Source, enabled: bool) -> Fields {
             .iter()
             .map(|dependency| dependency.uuid.clone())
             .collect(),
+        declared: manifest
+            .settings
+            .iter()
+            .map(|setting| Declared {
+                key: setting.key.clone(),
+                label: setting.label.clone(),
+                kind: setting.kind,
+                description: setting.description.clone(),
+            })
+            .collect(),
+        values: BTreeMap::new(),
+        secrets: BTreeMap::new(),
     }
 }
 
@@ -577,6 +589,7 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                 elsewhere,
                 source,
                 dependents: going.get(&record.uuid).cloned().unwrap_or_default(),
+                settings: u32::try_from(record.fields.declared.len()).unwrap_or(u32::MAX),
                 uuid: record.uuid,
                 name: record.fields.name,
                 version: record.fields.version,
@@ -604,6 +617,11 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/ui/plugins/{uuid}/update", post(update))
         .route("/api/ui/plugins/{uuid}/enabled", post(enable))
         .route("/api/ui/plugins/{uuid}/remove", post(remove))
+        // Its pane: the settings fields its manifest declares, and a save.
+        .route(
+            "/api/ui/plugins/{uuid}/settings",
+            get(super::settings::pane).post(super::settings::save),
+        )
 }
 
 /// `GET /api/ui/plugins` — the Plugins page.
@@ -618,7 +636,7 @@ async fn answered(state: &AppState) -> Response {
     }
 }
 
-fn failed(error: anyhow::Error) -> Response {
+pub(super) fn failed(error: anyhow::Error) -> Response {
     tracing::error!(error = ?error, "the installed plugins couldn't be read");
     refused(
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -814,7 +832,7 @@ async fn moved(state: &AppState) -> Result<PluginsView, Response> {
 }
 
 /// The record under `uuid`, or the refusal naming it as not installed.
-async fn held(state: &AppState, uuid: &str) -> Result<Record<Fields>, Response> {
+pub(super) async fn held(state: &AppState, uuid: &str) -> Result<Record<Fields>, Response> {
     match replicated::live_records::<Plugins>(&state.pool).await {
         Ok(records) => records
             .into_iter()
@@ -858,7 +876,11 @@ fn updated(
     source: Source,
     granting: Granting,
 ) -> Fields {
-    let mut fields = fields(manifest, source, record.fields.enabled);
+    let mut fields = Fields {
+        values: record.fields.values.clone(),
+        secrets: record.fields.secrets.clone(),
+        ..fields(manifest, source, record.fields.enabled)
+    };
     if let Granting::Stands = granting {
         fields.granted = record.fields.granted.clone();
     }

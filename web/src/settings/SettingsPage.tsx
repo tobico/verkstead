@@ -67,6 +67,7 @@ import { pathOf } from "../workbench/openings";
 import { AtOnceCard, AtOncePane } from "./AtOnce";
 import { CleanupCard, CleanupPane } from "./Cleanup";
 import { ComponentsCard, ComponentsPane, useComponents } from "./Components";
+import { PluginSettingsPane } from "./PluginSettings";
 import { PluginsCard, PluginsPane } from "./Plugins";
 import { DesktopCard, DesktopPane } from "./Desktop";
 import { GitCard, GitPane } from "./Git";
@@ -79,8 +80,10 @@ import {
   SETTINGS,
   WORDS,
   openingAt,
+  opensPlugin,
   opensProfile,
   pathTo,
+  pluginOpened,
   profileOpened,
   type Opening,
 } from "./openings";
@@ -119,6 +122,8 @@ export function panes(): JSX.Element {
       {/* The one pane named by an id, the Repos' having gone: the blank form
           rides in the same segment an id does, as `/settings/profiles/new`. */}
       <Route path="/profiles/:profile" />
+      {/* And a Plugin's settings pane, under the Plugins pane's word. */}
+      <Route path="/plugins/:plugin" />
     </>
   );
 }
@@ -367,7 +372,9 @@ function Settings(props: {
             list of things Verkstead runs on: the Plugins installed, Installed
             above Built-in. See `Plugins.tsx`. */}
         <PluginsCard
-          open={props.opening === "plugins"}
+          open={
+            props.opening === "plugins" || pluginOpened(props.opening) !== null
+          }
           press={() => props.select("plugins")}
         />
       </div>
@@ -402,6 +409,13 @@ function Details(props: {
   const profile = createMemo(() => {
     const one = profileOpened(props.opening);
     return one === null ? null : { which: one };
+  });
+
+  /// And which Plugin, keyed the same way, so opening another builds its form
+  /// again from nothing.
+  const plugin = createMemo(() => {
+    const one = pluginOpened(props.opening);
+    return one === null ? null : { uuid: one };
   });
 
   return (
@@ -440,7 +454,18 @@ function Details(props: {
         <ReposPane back={props.back} />
       </Match>
       <Match when={props.opening === "plugins"}>
-        <PluginsPane back={props.back} />
+        <PluginsPane
+          back={props.back}
+          open={(uuid) => props.select(opensPlugin(uuid))}
+        />
+      </Match>
+      <Match when={plugin()} keyed>
+        {(open) => (
+          <PluginSettingsPane
+            plugin={open.uuid}
+            back={() => props.select("plugins")}
+          />
+        )}
       </Match>
       <Match when={profile()} keyed>
         {(open) => (

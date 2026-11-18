@@ -18,10 +18,11 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 use verkstead_render::{
-    PluginCapability, PluginConsent, PluginFix, PluginNeed, PluginRow, PluginSource, PluginUpdated,
-    PluginsView,
+    PluginCapability, PluginConsent, PluginFieldRefused, PluginFieldValue, PluginFix, PluginNeed,
+    PluginRow, PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdated, PluginsView,
 };
 use verkstead_server::plugins::built_in::FIXTURE;
+use verkstead_server::settings::Settings;
 use verkstead_server::{open_database, router_keeping};
 
 const PLUGINS: &str = "/api/ui/plugins";
@@ -848,18 +849,291 @@ async fn a_row_names_what_goes_with_it_when_unticked() {
 
 const FIXTURES: &str = "../../web/tests/fixtures";
 
+/// The settings a plugin under test declares: one field of each kind.
+const SETTINGS: &str = "settings:\n\
+                        \x20 - key: host\n    label: Host\n    kind: text\n    \
+                        description: The GitLab instance, where it isn't gitlab.com.\n\
+                        \x20 - key: cache\n    label: Cache size\n    kind: size\n\
+                        \x20 - key: groups\n    label: Groups\n    kind: list\n\
+                        \x20 - key: token\n    label: Token\n    kind: secret\n";
+
+/// A plugin declaring [`SETTINGS`], installed.
+async fn settled(app: &Router, dir: &Path) {
+    let path = plugin(
+        dir,
+        "gitlab",
+        &format!("{}{SETTINGS}", manifest(PLUGIN, "GitLab", &[])),
+    );
+    let view = installs(app, &path).await;
+    assert_eq!(row(&view, PLUGIN).settings, 4);
+}
+
+async fn pane(app: &Router) -> (PluginSettingsView, String) {
+    let answered = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("{PLUGINS}/{PLUGIN}/settings"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(answered.status(), StatusCode::OK);
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    let said = String::from_utf8_lossy(&bytes).into_owned();
+    (serde_json::from_str(&said).unwrap(), said)
+}
+
+async fn saves(app: &Router, fields: serde_json::Value) -> (PluginSettingsSaved, String) {
+    let (status, said) = pressing(
+        app,
+        &format!("{PLUGINS}/{PLUGIN}/settings"),
+        serde_json::json!({ "fields": fields }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    (serde_json::from_str(&said).unwrap(), said)
+}
+
+fn value<'a>(view: &'a PluginSettingsView, key: &str) -> &'a PluginFieldValue {
+    &view
+        .fields
+        .iter()
+        .find(|field| field.key == key)
+        .unwrap_or_else(|| panic!("{key} is drawn in {view:?}"))
+        .value
+}
+
+/// A plugin's declared fields are drawn by kind, and a text, a size and a
+/// list saved through the pane read back from it; saved again empty, each is
+/// cleared.
+#[tokio::test]
+async fn a_text_field_round_trips_through_the_pane() {
+    let (app, dir) = kept().await;
+    settled(&app, dir.path()).await;
+
+    let (view, _) = pane(&app).await;
+    assert_eq!(view.name, "GitLab");
+    assert_eq!(
+        view.fields
+            .iter()
+            .map(|field| (field.key.as_str(), field.label.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("host", "Host"),
+            ("cache", "Cache size"),
+            ("groups", "Groups"),
+            ("token", "Token")
+        ],
+    );
+    assert_eq!(
+        view.fields[0].description.as_deref(),
+        Some("The GitLab instance, where it isn't gitlab.com.")
+    );
+    assert_eq!(
+        value(&view, "host"),
+        &PluginFieldValue::Text {
+            value: String::new()
+        }
+    );
+    assert_eq!(
+        value(&view, "token"),
+        &PluginFieldValue::Secret { set: false }
+    );
+
+    let (saved, _) = saves(
+        &app,
+        serde_json::json!([
+            { "key": "host", "value": { "kind": "Text", "value": " gitlab.example.com " } },
+            { "key": "cache", "value": { "kind": "Size", "value": "2G" } },
+            { "key": "groups", "value": { "kind": "List", "values": ["infra", "", "web"] } },
+        ]),
+    )
+    .await;
+    assert!(saved.refused.is_empty(), "{saved:?}");
+
+    let (view, _) = pane(&app).await;
+    assert_eq!(view, saved.settings);
+    assert_eq!(
+        value(&view, "host"),
+        &PluginFieldValue::Text {
+            value: "gitlab.example.com".to_owned()
+        }
+    );
+    assert_eq!(
+        value(&view, "cache"),
+        &PluginFieldValue::Size {
+            value: "2G".to_owned()
+        }
+    );
+    assert_eq!(
+        value(&view, "groups"),
+        &PluginFieldValue::List {
+            values: vec!["infra".to_owned(), "web".to_owned()]
+        }
+    );
+
+    saves(
+        &app,
+        serde_json::json!([{ "key": "host", "value": { "kind": "Text", "value": "" } }]),
+    )
+    .await;
+    let (view, _) = pane(&app).await;
+    assert_eq!(
+        value(&view, "host"),
+        &PluginFieldValue::Text {
+            value: String::new()
+        }
+    );
+    assert_eq!(
+        value(&view, "cache"),
+        &PluginFieldValue::Size {
+            value: "2G".to_owned()
+        },
+        "a field the save left out is left as it is"
+    );
+}
+
+/// A secret saved through the pane is written to `secrets.yaml` under the
+/// plugin's uuid and never comes back: the pane says only that one is set, and
+/// neither it nor the page carries the value. An Update keeps it.
+#[tokio::test]
+async fn a_secret_goes_to_secrets_yaml_and_never_back_to_the_viewer() {
+    let (app, dir) = kept().await;
+    settled(&app, dir.path()).await;
+
+    let (saved, said) = saves(
+        &app,
+        serde_json::json!([
+            { "key": "token", "value": { "kind": "Secret", "value": "glpat-hush" } },
+        ]),
+    )
+    .await;
+    assert!(saved.refused.is_empty(), "{saved:?}");
+    assert!(!said.contains("glpat-hush"), "{said}");
+    assert_eq!(
+        value(&saved.settings, "token"),
+        &PluginFieldValue::Secret { set: true }
+    );
+
+    let written = std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap();
+    assert!(written.contains(PLUGIN), "{written}");
+    assert_eq!(
+        Settings::in_data_dir(dir.path())
+            .secrets()
+            .plugin_secrets_of(PLUGIN)
+            .and_then(|secrets| secrets.get("token"))
+            .map(String::as_str),
+        Some("glpat-hush"),
+    );
+
+    let (_, said) = pane(&app).await;
+    assert!(!said.contains("glpat-hush"), "{said}");
+    let page = serde_json::to_string(&page(&app).await).unwrap();
+    assert!(!page.contains("glpat-hush"), "{page}");
+
+    updates(&app, PLUGIN, None).await;
+    let (view, _) = pane(&app).await;
+    assert_eq!(
+        value(&view, "token"),
+        &PluginFieldValue::Secret { set: true },
+        "an Update keeps it"
+    );
+
+    saves(
+        &app,
+        serde_json::json!([{ "key": "token", "value": { "kind": "SecretCleared" } }]),
+    )
+    .await;
+    let (view, _) = pane(&app).await;
+    assert_eq!(
+        value(&view, "token"),
+        &PluginFieldValue::Secret { set: false }
+    );
+    assert_eq!(
+        Settings::in_data_dir(dir.path())
+            .secrets()
+            .plugin_secrets_of(PLUGIN),
+        None
+    );
+}
+
+/// A size that is not a size is refused at its field, with the reason, and
+/// nothing the save sent beside it is written.
+#[tokio::test]
+async fn a_size_that_is_not_a_size_is_refused_with_the_reason() {
+    let (app, dir) = kept().await;
+    settled(&app, dir.path()).await;
+
+    let (saved, _) = saves(
+        &app,
+        serde_json::json!([
+            { "key": "host", "value": { "kind": "Text", "value": "gitlab.example.com" } },
+            { "key": "cache", "value": { "kind": "Size", "value": "2 gigs" } },
+        ]),
+    )
+    .await;
+    assert_eq!(
+        saved.refused,
+        [PluginFieldRefused {
+            key: "cache".to_owned(),
+            why: "2 gigs isn't a size. Write a whole number with K, M, G or T after it, such \
+                  as 30G."
+                .to_owned(),
+        }],
+    );
+
+    let (view, _) = pane(&app).await;
+    assert_eq!(
+        value(&view, "host"),
+        &PluginFieldValue::Text {
+            value: String::new()
+        },
+        "a refused save writes nothing"
+    );
+}
+
+/// The fields of a plugin in trouble are still drawn, and saved.
+#[tokio::test]
+async fn a_plugin_in_trouble_still_draws_its_fields() {
+    let (app, dir) = kept().await;
+    settled(&app, dir.path()).await;
+    std::fs::write(
+        dir.path().join("gitlab").join("plugin.yaml"),
+        "uuid: broken\n",
+    )
+    .unwrap();
+    updates(&app, PLUGIN, None).await;
+
+    let (view, _) = pane(&app).await;
+    assert!(view.trouble.is_some(), "{view:?}");
+    assert_eq!(view.fields.len(), 4);
+
+    let (saved, _) = saves(
+        &app,
+        serde_json::json!([{ "key": "host", "value": { "kind": "Text", "value": "h" } }]),
+    )
+    .await;
+    assert!(saved.refused.is_empty());
+}
+
 /// Leave the viewer's tests the page and the consent card as the server writes
 /// them: a plugin that loaded, one in trouble, one from git, one whose
-/// dependency isn't installed, and the card for
-/// one asking for a host. The directories are written as `/home/you/src`, so that a fixture
-/// is not rewritten by where a test happened to run.
+/// dependency isn't installed, the card for one asking for a host, and the
+/// first one's settings pane with a text, a list and a secret set. The
+/// directories are written as `/home/you/src`, so that a fixture is not
+/// rewritten by where a test happened to run.
 #[tokio::test]
 async fn the_page_and_the_card_are_written_for_the_viewer() {
     let (app, dir) = kept().await;
     let path = plugin(
         dir.path(),
         "gitlab",
-        &manifest(PLUGIN, "GitLab", &["outbound: gitlab.com"]),
+        &format!(
+            "{}{SETTINGS}",
+            manifest(PLUGIN, "GitLab", &["outbound: gitlab.com"])
+        ),
     );
     let other = plugin(dir.path(), "broken", &manifest(ANOTHER, "Broken", &[]));
     installs(&app, &path).await;
@@ -924,4 +1198,16 @@ async fn the_page_and_the_card_are_written_for_the_viewer() {
         "plugin-consent.json",
         serde_json::to_string(&consent).unwrap(),
     );
+
+    saves(
+        &app,
+        serde_json::json!([
+            { "key": "host", "value": { "kind": "Text", "value": "gitlab.example.com" } },
+            { "key": "groups", "value": { "kind": "List", "values": ["infra", "web"] } },
+            { "key": "token", "value": { "kind": "Secret", "value": "glpat-hush" } },
+        ]),
+    )
+    .await;
+    let (_, settings) = pane(&app).await;
+    written("plugin-settings.json", settings);
 }
