@@ -139,6 +139,7 @@ pub(crate) fn served(state: AppState) -> Router {
         .merge(super::account::route())
         .merge(super::authors::route())
         .merge(super::mcp_servers::route())
+        .merge(super::plugins::route())
         .merge(crate::replicating::route())
         .merge(super::memory::route())
         .merge(super::updating::route())

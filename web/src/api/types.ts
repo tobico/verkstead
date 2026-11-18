@@ -4837,6 +4837,37 @@ export type PluginConsent = { uuid: string, name: string, version: string, autho
 export type PluginEnabled = { enabled: boolean, };
 
 /**
+ * One settings field, as its manifest declares it.
+ */
+export type PluginField = { 
+/**
+ * What the value is kept under, unique among the plugin's fields.
+ */
+key: string, label: string, description: string | null, value: PluginFieldValue, };
+
+/**
+ * One field's new value.
+ */
+export type PluginFieldEdit = { key: string, value: PluginFieldWrite, };
+
+/**
+ * One field a save was refused over, and why, to be drawn at the field.
+ */
+export type PluginFieldRefused = { key: string, why: string, };
+
+/**
+ * A field's kind and what the cluster holds for it. A secret's value never
+ * comes back: only whether one is set.
+ */
+export type PluginFieldValue = { "kind": "Text", value: string, } | { "kind": "Size", value: string, } | { "kind": "List", values: Array<string>, } | { "kind": "Secret", set: boolean, };
+
+/**
+ * What a field is to hold. Empty text, an empty size and an empty list each
+ * clear it.
+ */
+export type PluginFieldWrite = { "kind": "Text", value: string, } | { "kind": "Size", value: string, } | { "kind": "List", values: Array<string>, } | { "kind": "Secret", value: string, } | { "kind": "SecretCleared" };
+
+/**
  * What puts a dependency right. A disabled one is put right by ticking its
  * own row, which the trouble says, and needs no press of its own here.
  */
@@ -4902,7 +4933,35 @@ elsewhere: string | null,
  * The names of the ticked plugins that go with it when it is unticked,
  * depending on it or on one of those: what the checkbox says first.
  */
-dependents: Array<string>, };
+dependents: Array<string>, 
+/**
+ * How many settings fields its manifest declares: where any, the row
+ * opens a pane drawing them.
+ */
+settings: number, };
+
+/**
+ * A save of a Plugin's pane: the fields it changed, each by key. A field
+ * left out is left as it is, which is how a secret nobody typed is kept.
+ */
+export type PluginSettingsSave = { fields: Array<PluginFieldEdit>, };
+
+/**
+ * What a save of a Plugin's pane came to: the pane read again, and the
+ * fields it was refused over, where any — in which case nothing was written.
+ */
+export type PluginSettingsSaved = { settings: PluginSettingsView, refused: Array<PluginFieldRefused>, };
+
+/**
+ * A Plugin's settings pane: the fields its manifest declares, each with the
+ * cluster's value, drawn whether or not the plugin loaded here, so that a
+ * setting it needs can be put right from the pane.
+ */
+export type PluginSettingsView = { uuid: string, name: string, 
+/**
+ * Why it didn't load here, where it didn't: the row's own trouble.
+ */
+trouble: string | null, fields: Array<PluginField>, };
 
 /**
  * Where a Plugin came from.

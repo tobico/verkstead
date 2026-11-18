@@ -12,6 +12,7 @@
         "forge",
         "skills"
       ],
+      "settings": 4,
       "source": {
         "kind": "Local",
         "path": "/home/you/src/gitlab"
@@ -31,6 +32,7 @@
         "forge",
         "skills"
       ],
+      "settings": 0,
       "source": {
         "kind": "Local",
         "path": "/home/you/src/broken"
@@ -50,6 +52,7 @@
         "forge",
         "skills"
       ],
+      "settings": 0,
       "source": {
         "kind": "Git",
         "revision": "133d813ee268b94a39c8df028a5bfa266719fee7",
@@ -79,6 +82,7 @@
         "forge",
         "skills"
       ],
+      "settings": 0,
       "source": {
         "kind": "Local",
         "path": "/home/you/src/dependent"

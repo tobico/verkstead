@@ -20,6 +20,9 @@
 //!   each named by a word. There is one of each of them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
+//! - `plugins/:uuid` — one installed Plugin's settings pane, opened from its
+//!   row on the Plugins pane and under that pane's own word, since it is a
+//!   pane of that section.
 //!
 //! `desktop` is a word here in every browser, while the section behind it is
 //! drawn only inside the Electron app — see `bridge.ts` — and `components` is
@@ -92,7 +95,8 @@ export const WORDS = [
 export type Opening =
   | (typeof WORDS)[number]
   | "profile:new"
-  | `profile:${string}`;
+  | `profile:${string}`
+  | `plugin:${string}`;
 
 /// Whether a segment is one of the words above.
 function worded(what: string | undefined): what is (typeof WORDS)[number] {
@@ -119,6 +123,21 @@ export function profileOpened(opening: Opening | null): string | null {
   return opening.slice(prefix.length);
 }
 
+/// What opens a Plugin's settings pane: its uuid.
+export function opensPlugin(uuid: string): Opening {
+  return `plugin:${uuid}`;
+}
+
+/// And which Plugin an opening names, or `null` where it names none.
+export function pluginOpened(opening: Opening | null): string | null {
+  const prefix = "plugin:";
+  if (opening === null || !opening.startsWith(prefix)) {
+    return null;
+  }
+
+  return opening.slice(prefix.length);
+}
+
 /// Where the settings stand, which every one of their details panes is nested
 /// under.
 export const SETTINGS = "/settings";
@@ -128,6 +147,11 @@ export function pathTo(opening: Opening): string {
   const profile = profileOpened(opening);
   if (profile !== null) {
     return `${SETTINGS}/profiles/${profile}`;
+  }
+
+  const plugin = pluginOpened(opening);
+  if (plugin !== null) {
+    return `${SETTINGS}/plugins/${plugin}`;
   }
 
   return `${SETTINGS}/${opening}`;
@@ -156,6 +180,12 @@ export function openingAt(pathname: string): Opening | null {
   // uuid nothing is saved under names no Profile, which the pane answers.
   if (what === "profiles" && which !== undefined && which !== "") {
     return opensProfile(which);
+  }
+
+  // And under the Plugins' own word, a plugin's uuid: one nothing is
+  // installed under names no Plugin, which the pane answers.
+  if (what === "plugins" && which !== undefined && which !== "") {
+    return opensPlugin(which);
   }
 
   return null;

@@ -27,6 +27,9 @@
 //! dependency's own row. A disabled one is ticked on its own row, which the
 //! trouble says.
 //!
+//! **Settings** on a row whose manifest declares fields opens its pane — see
+//! `PluginSettings.tsx`.
+//!
 //! **Unticking is allowed over what stands on a plugin; Remove is refused by
 //! it** (Set 1769, Q45). Unticking one that ticked plugins depend on asks
 //! first, naming the ones that go with it. **Remove** asks too, saying what
@@ -116,6 +119,8 @@ export function PluginsCard(props: {
 export function PluginsPane(props: {
   /// The way back to the settings, which is the pane this one was entered from.
   back: () => void;
+  /// Opening a plugin's settings pane, from its row.
+  open: (uuid: string) => void;
 }): JSX.Element {
   const plugins = usePlugins();
   const queries = useQueryClient();
@@ -267,6 +272,7 @@ export function PluginsPane(props: {
                           }
                           remove={() => removing.mutate(row.uuid)}
                           fix={(need) => fix(row.uuid, need)}
+                          open={() => props.open(row.uuid)}
                           refused={
                             refused()?.uuid === row.uuid
                               ? refused()!.why
@@ -337,6 +343,7 @@ export function PluginsPane(props: {
                           flip={(enabled) =>
                             enable.mutate({ uuid: row.uuid, enabled })
                           }
+                          open={() => props.open(row.uuid)}
                           refused={
                             refused()?.uuid === row.uuid
                               ? refused()!.why
@@ -372,6 +379,8 @@ function Row(props: {
   /// A press on one of its needs, where the row has trouble a press puts
   /// right.
   fix?: (need: PluginNeed) => void;
+  /// Opening its settings pane, drawn where its manifest declares fields.
+  open: () => void;
   refused: string | null;
   /// What is drawn under the row: the consent card an Update came back with,
   /// or one for a dependency it offered to install.
@@ -410,6 +419,16 @@ function Row(props: {
           disabled={props.pressing || asking() !== null}
           flip={flip}
         />
+
+        <Show when={props.of.settings > 0}>
+          <button
+            type="button"
+            class={styles.press}
+            onClick={() => props.open()}
+          >
+            Settings
+          </button>
+        </Show>
 
         <Show when={props.update !== undefined && props.of.elsewhere === null}>
           <button

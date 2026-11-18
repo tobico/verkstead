@@ -56,6 +56,9 @@ pub struct PluginRow {
     /// The names of the ticked plugins that go with it when it is unticked,
     /// depending on it or on one of those: what the checkbox says first.
     pub dependents: Vec<String>,
+    /// How many settings fields its manifest declares: where any, the row
+    /// opens a pane drawing them.
+    pub settings: u32,
 }
 
 /// A dependency a row's plugin is in trouble over, with the press that would
@@ -164,4 +167,115 @@ pub enum PluginUpdated {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct PluginEnabled {
     pub enabled: bool,
+}
+
+/// A Plugin's settings pane: the fields its manifest declares, each with the
+/// cluster's value, drawn whether or not the plugin loaded here, so that a
+/// setting it needs can be put right from the pane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginSettingsView {
+    pub uuid: String,
+    pub name: String,
+    /// Why it didn't load here, where it didn't: the row's own trouble.
+    pub trouble: Option<String>,
+    pub fields: Vec<PluginField>,
+}
+
+/// One settings field, as its manifest declares it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginField {
+    /// What the value is kept under, unique among the plugin's fields.
+    pub key: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub value: PluginFieldValue,
+}
+
+/// A field's kind and what the cluster holds for it. A secret's value never
+/// comes back: only whether one is set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+#[serde(tag = "kind")]
+pub enum PluginFieldValue {
+    /// A line of text, empty where none is set.
+    Text {
+        value: String,
+    },
+    /// A size such as `30G`, empty where none is set.
+    Size {
+        value: String,
+    },
+    /// A list of lines.
+    List {
+        values: Vec<String>,
+    },
+    Secret {
+        set: bool,
+    },
+}
+
+/// A save of a Plugin's pane: the fields it changed, each by key. A field
+/// left out is left as it is, which is how a secret nobody typed is kept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginSettingsSave {
+    pub fields: Vec<PluginFieldEdit>,
+}
+
+/// One field's new value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginFieldEdit {
+    pub key: String,
+    pub value: PluginFieldWrite,
+}
+
+/// What a field is to hold. Empty text, an empty size and an empty list each
+/// clear it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+#[serde(tag = "kind")]
+pub enum PluginFieldWrite {
+    Text {
+        value: String,
+    },
+    Size {
+        value: String,
+    },
+    List {
+        values: Vec<String>,
+    },
+    /// A secret typed in, which replaces whatever was set.
+    Secret {
+        value: String,
+    },
+    /// A secret taken away.
+    SecretCleared,
+}
+
+/// What a save of a Plugin's pane came to: the pane read again, and the
+/// fields it was refused over, where any — in which case nothing was written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginSettingsSaved {
+    pub settings: PluginSettingsView,
+    pub refused: Vec<PluginFieldRefused>,
+}
+
+/// One field a save was refused over, and why, to be drawn at the field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginFieldRefused {
+    pub key: String,
+    pub why: String,
+}
+
+/// The `secret` settings a device holds for one Plugin, by key: a member's own
+/// call on the Peer Listener, for the copy it keeps in its own `secrets.yaml`,
+/// and never the viewer's. Empty where it holds none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginSecretValues {
+    pub secrets: std::collections::BTreeMap<String, String>,
 }

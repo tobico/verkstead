@@ -45,7 +45,9 @@ function mounting(what: () => JSX.Element) {
   ));
 }
 
-const pane = () => mounting(() => <PluginsPane back={vi.fn()} />);
+const opened = vi.fn();
+const pane = () =>
+  mounting(() => <PluginsPane back={vi.fn()} open={opened} />);
 
 /// The row drawn for `name`.
 async function theRow(name: string): Promise<HTMLElement> {
@@ -116,9 +118,10 @@ describe("a row", () => {
     const row = await theRow("GitLab");
 
     expect(row.textContent).toContain("On wolf.");
+    // Its settings are the cluster's, so their pane opens from any device.
     expect(
       [...row.querySelectorAll("button")].map((button) => button.textContent),
-    ).toEqual(["Remove"]);
+    ).toEqual(["Settings", "Remove"]);
   });
 
   it("is disabled by unticking it", async () => {
@@ -151,6 +154,23 @@ describe("a row", () => {
       String(asked).endsWith("/enabled"),
     );
     expect(JSON.parse(String(press![1]!.body))).toEqual({ enabled: false });
+  });
+});
+
+describe("a row's settings", () => {
+  it("opens its pane from the row where its manifest declares fields", async () => {
+    serving(whenever("/api/ui/plugins", json(PLUGINS)));
+    pane();
+
+    const row = await theRow("GitLab");
+    fireEvent.click(within(row).getByRole("button", { name: "Settings" }));
+
+    expect(opened).toHaveBeenCalledWith(PLUGINS.installed[0]!.uuid);
+    expect(
+      within(await theRow("Broken")).queryByRole("button", {
+        name: "Settings",
+      }),
+    ).toBeNull();
   });
 });
 

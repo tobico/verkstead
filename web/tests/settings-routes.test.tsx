@@ -22,6 +22,7 @@ import { panes } from "../src/settings/SettingsPage";
 import {
   SETTINGS,
   WORDS,
+  opensPlugin,
   opensProfile,
   pathTo,
   type Opening,
@@ -66,11 +67,12 @@ describe("the settings page's own paths", () => {
     });
   }
 
-  /// And the one named by an id, which takes the word `new` in the same
-  /// segment.
+  /// And the ones named by an id: a Profile, which takes the word `new` in
+  /// the same segment, and a Plugin's settings, under the Plugins' word.
   for (const opening of [
     opensProfile("44444444-4444-4444-8444-444444444444"),
     opensProfile("new"),
+    opensPlugin("0b6f6b7e-5c3a-4d0e-9a51-2f7d8c1e4a90"),
   ] satisfies Opening[]) {
     it(`opens ${opening} at the path its card leads to`, () => {
       expect(at(pathTo(opening))).toBe(SETTLED);
