@@ -13,7 +13,8 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     ConversationRow, Decision, Event, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop,
     close_conversation, conversations, forget_stop, open_database, register_repo, signed_out_on,
-    start_conversation, start_grilling, stop, stop_as_asked, stop_signed_out, stopped, timeline,
+    start_conversation, start_grilling, stop, stop_as_asked, stop_signed_out, stop_undriven,
+    stopped, timeline,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -469,6 +470,39 @@ async fn a_stop_asked_for_and_taken_back_is_not_written() {
             .is_some(),
         "Verkstead's own brake needs no request behind it",
     );
+}
+
+/// A stall stands on nothing driving the Conversation as it is written — the
+/// register being asked inside the write, not before it.
+///
+/// The sweep decides a Conversation is undriven and then gathers its evidence,
+/// and a Resume pressed meanwhile registers a driver and clears what stop it
+/// finds — which is none yet. Written anyway, the stall lands on the far side
+/// of the Resume and says nothing is driving a run that has just started.
+#[tokio::test]
+async fn a_stall_taken_up_before_it_is_written_is_not_written() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    assert_eq!(
+        stop_undriven(&pool, id, Decision::Circumstance, SAID, &|| true)
+            .await
+            .unwrap(),
+        Stopping::Driven,
+        "something is driving it now, so there is no stall to land",
+    );
+    assert_eq!(stopped(&pool, id).await.unwrap(), None);
+    assert!(notices(&pool, id).await.is_empty());
+
+    let landed = stop_undriven(&pool, id, Decision::Circumstance, SAID, &|| false)
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(landed, Stopping::Stopped(_)),
+        "and with nothing driving it, it lands: {landed:?}",
+    );
+    assert_eq!(notices(&pool, id).await, vec![SAID.to_owned()]);
 }
 
 /// A Conversation stopped by something outside the human is one the sidebar

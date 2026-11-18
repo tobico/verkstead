@@ -333,12 +333,12 @@ pub(crate) async fn stop(
             what,
             how,
             writing,
-            false,
+            Standing::Whatever,
         )
         .await?
         {
             store::Stopping::Stopped(notice) => Some(notice),
-            store::Stopping::Already | store::Stopping::Withdrawn => None,
+            store::Stopping::Already | store::Stopping::Withdrawn | store::Stopping::Driven => None,
         },
     )
 }
@@ -368,14 +368,52 @@ pub(crate) async fn stop_as_asked(
         what,
         how,
         writing,
-        true,
+        Standing::Asked,
     )
     .await
 }
 
-/// Both of the above: gather the evidence, write the stop, and tell whoever is
-/// watching. `asked` is whether the human's standing request is the condition of
-/// the write — see [`stop_as_asked`].
+/// The same, for the stall sweep's stop: written only while `driven` still
+/// answers that nothing is driving the Conversation.
+///
+/// [`store::stop_undriven`]'s half of the server, and its doc is where the
+/// reason lives: the sweep's verdict is taken before the evidence is gathered,
+/// and a Resume pressed while it is being gathered has taken the Conversation
+/// up by the time the stop is written.
+pub(crate) async fn stall(
+    pool: &SqlitePool,
+    nudges: &Nudges,
+    conversation_id: i64,
+    what: &str,
+    how: &str,
+    writing: Option<i64>,
+    driven: &(dyn Fn() -> bool + Sync),
+) -> Result<store::Stopping> {
+    land(
+        pool,
+        nudges,
+        conversation_id,
+        Decided::Nobody,
+        what,
+        how,
+        writing,
+        Standing::Undriven(driven),
+    )
+    .await
+}
+
+/// Which of the store's stops [`land`] writes — see [`store::stop_as_asked`]
+/// and [`store::stop_undriven`] for the two that stand on something.
+#[derive(Clone, Copy)]
+enum Standing<'a> {
+    Whatever,
+    Asked,
+    Undriven(&'a (dyn Fn() -> bool + Sync)),
+}
+
+/// All three of the above: gather the evidence, write the stop, and tell whoever is
+/// watching. `standing` is what the write is conditional on, where anything —
+/// see [`stop_as_asked`] and [`stall`].
 #[allow(clippy::too_many_arguments)]
 async fn land(
     pool: &SqlitePool,
@@ -385,7 +423,7 @@ async fn land(
     what: &str,
     how: &str,
     writing: Option<i64>,
-    asked: bool,
+    standing: Standing<'_>,
 ) -> Result<store::Stopping> {
     // What the session's records hold, and how it ended where that was written
     // down — see [`ended_instead`]. Which of the two the evidence block is
@@ -402,8 +440,8 @@ async fn land(
         ended.as_ref(),
     );
 
-    let stopped = match asked {
-        true => {
+    let stopped = match standing {
+        Standing::Asked => {
             store::stop_as_asked(
                 pool,
                 conversation_id,
@@ -413,7 +451,10 @@ async fn land(
             )
             .await?
         }
-        false => match match decided.signed_out() {
+        Standing::Undriven(driven) => {
+            store::stop_undriven(pool, conversation_id, decided.decision(), &said, driven).await?
+        }
+        Standing::Whatever => match match decided.signed_out() {
             Some(profile) => store::stop_signed_out(pool, conversation_id, &said, profile).await?,
             None => {
                 store::stop(
@@ -467,6 +508,12 @@ async fn land(
             conversation_id,
             how,
             "the stop the human asked for was taken back before it landed, so nothing stopped"
+        ),
+
+        store::Stopping::Driven => tracing::info!(
+            conversation_id,
+            how,
+            "something took the Conversation up before the stall was written, so nothing stopped"
         ),
     }
 
