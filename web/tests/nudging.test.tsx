@@ -567,6 +567,9 @@ const ABOUT: Record<string, readonly string[]> = {
   // the open Conversation, whose chips say whether each name is still
   // declared and whether two declarations clash over it.
   mcp_servers: [OPENED],
+  // The installed Plugins, which the settings page alone draws — a pane this
+  // sweep never opens.
+  plugins: [],
   // The joins in flight, which move the list the modal is drawn from and the
   // Devices section of the Remote access pane. Neither is among the five: the
   // modal is read by the shell rather than by a page, and the Devices section

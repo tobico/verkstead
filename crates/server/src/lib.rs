@@ -608,6 +608,11 @@ pub(crate) struct AppState {
     /// spawn see the same thing — see [`settings`].
     settings: settings::Settings,
 
+    /// What loading the installed Plugins on this device came to — see
+    /// [`plugins::installed`]. The list is the cluster's record; each device's
+    /// reading of its own copies is held here.
+    plugins: plugins::installed::Installed,
+
     /// What each language's store held when it was last measured — see
     /// [`disk_use`].
     disk_use: disk_use::DiskUse,
@@ -1647,6 +1652,7 @@ fn standing(
         // at the moment they are wanted, so what the settings page saves reaches
         // the next session without a restart — see [`settings`].
         settings: settings::Settings::in_data_dir(&data_dir),
+        plugins: plugins::installed::Installed::default(),
         disk_use: disk_use::DiskUse::default(),
         sweeps: eviction::Sweeps::default(),
         nudges,
@@ -1814,9 +1820,15 @@ fn standing(
     // And every member's Replicated records pulled and merged into this
     // device's, beside it and on the same channel: read once now, and again
     // whenever a member says its records moved or the membership itself does,
-    // so every device holds the cluster's Authors, Agent Profiles, Instructions
-    // and MCP servers (ADR-0028) — see [`replicating`].
+    // so every device holds the cluster's Authors, Agent Profiles, Instructions,
+    // MCP servers and Plugins (ADR-0028) — see [`replicating`].
     replicating::pulling(&state);
+
+    // And the Plugins installed here loaded, each through the manifest reader
+    // and the wasm component loader, once now and again whenever their records
+    // move — see [`plugins::installed`]. One that fails to load is trouble on
+    // its row, and nothing else (Set 1762, Q15).
+    plugins::installed::loading(&state);
 
     // And the stages this device holds away from their home, each telling that
     // device where it stands, on the same channel again and on a slow clock for

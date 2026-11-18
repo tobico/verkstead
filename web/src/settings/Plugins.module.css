@@ -1,0 +1,192 @@
+/* The Plugins section — see `Plugins.tsx`. The card is `SettingsCard`'s; the
+   pane is two groups of rows set the way the Components pane sets its one, and
+   the consent card under a row or under the add field. */
+
+.pluginsCard {
+  /* The look is `SettingsCard.module.css`'s; this names the card. */
+  min-width: 0;
+}
+
+.group {
+  margin-top: 1rem;
+}
+
+.group h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plugin {
+  min-width: 0;
+}
+
+/* A local plugin on another device: drawn, and greyed, since nothing of it is
+   loaded here. */
+.elsewhere {
+  opacity: 0.6;
+}
+
+/* The checkbox with the name and its facts, and Update across from it. */
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.name {
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+/* The version and the author, set quietly beside the name. */
+.facts {
+  margin: 0;
+  margin-inline-start: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.provides {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* Where it came from: an exact string, read the way an address is. */
+.source {
+  margin: 0.25rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+/* Update, drawn as the Components pane draws its presses. */
+.press {
+  flex: none;
+  margin-inline-start: auto;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.press:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .press:not(:disabled):hover {
+    border-color: var(--accent);
+  }
+}
+
+/* Why it didn't load, drawn as the Components row draws the same line. */
+.trouble {
+  display: block;
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--stopped);
+  border-radius: 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.add {
+  margin-top: 1.25rem;
+}
+
+.adding {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 1.25rem;
+}
+
+.adding label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* The consent card: who the plugin is and what it asks for, over the press
+   that grants it. */
+.consent {
+  margin-top: 0.75rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.consent h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.consent p {
+  margin: 0.4rem 0 0;
+  font-size: 0.9rem;
+}
+
+.consent .facts {
+  margin-inline-start: 0;
+}
+
+.capabilities {
+  margin: 0.3rem 0 0;
+  padding-inline-start: 1.2rem;
+  font-size: 0.9rem;
+}
+
+.buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+/* The press that does the thing, filled, as the Repos' form fills its own. */
+.buttons button:not(:where(.cancel)) {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .buttons button:not(:where(.cancel)):not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
+
+.cancel {
+  /* The look is `.secondary`'s, in `styles/base.css`; this names it. */
+  min-width: 0;
+}

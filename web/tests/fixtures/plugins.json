@@ -1,0 +1,39 @@
+{
+  "built_in": [],
+  "installed": [
+    {
+      "author": "Ada Lovelace",
+      "elsewhere": null,
+      "enabled": true,
+      "name": "GitLab",
+      "provides": [
+        "forge",
+        "skills"
+      ],
+      "source": {
+        "kind": "Local",
+        "path": "/home/you/src/gitlab"
+      },
+      "trouble": null,
+      "uuid": "0b6f6b7e-5c3a-4d0e-9a51-2f7d8c1e4a90",
+      "version": "1.4.0"
+    },
+    {
+      "author": "Ada Lovelace",
+      "elsewhere": null,
+      "enabled": true,
+      "name": "Broken",
+      "provides": [
+        "forge",
+        "skills"
+      ],
+      "source": {
+        "kind": "Local",
+        "path": "/home/you/src/broken"
+      },
+      "trouble": "`version` isn't a semantic version. Write one like `1.4.0`.",
+      "uuid": "4c1d2e3f-8a9b-4c0d-9e1f-2a3b4c5d6e7f",
+      "version": "1.4.0"
+    }
+  ]
+}

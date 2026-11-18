@@ -10,13 +10,14 @@
 //! pane draws:
 //!
 //! - `desktop`, `git`, `sandbox`, `instructions`, `mcp-servers`, `scheduling`,
-//!   `cleanup`, `remote`, `components` and `repos` — what the desktop app does
+//!   `cleanup`, `remote`, `components`, `repos` and `plugins` — what the desktop app does
 //!   about its own window, everything git is told, what a session's sandbox
 //!   holds (the build caches and the extra paths), the text every session is
 //!   given, the MCP servers a Conversation may attach, how much Verkstead runs
 //!   at once, what becomes of an archived Conversation, whether this
 //!   machine can be reached from a phone, what it has installed beyond what the
-//!   wizard checks, and the Repos that are registered, each named by a word. There is one of each of them, and a word says so.
+//!   wizard checks, the Repos that are registered, and the Plugins installed,
+//!   each named by a word. There is one of each of them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
 //!
@@ -53,7 +54,8 @@
 /// the text every session is given, the MCP servers a Conversation may attach,
 /// how much Verkstead runs at once, what becomes of an archived Conversation, how this
 /// machine is reached from a phone, what it has installed beyond the wizard's
-/// checks and which Repos are registered — the things
+/// checks, which Repos are registered and which Plugins are installed — the
+/// things
 /// there is exactly one of on this page.
 ///
 /// A list rather than a word written wherever one is needed, because three
@@ -78,6 +80,7 @@ export const WORDS = [
   "remote",
   "components",
   "repos",
+  "plugins",
 ] as const;
 
 /// What the details pane on the settings page is showing.

@@ -29,6 +29,27 @@ not a WebAssembly component, one that imports something Verkstead does not
 provide, and one that traps while it starts are each refused the same way,
 with the sentence the Plugins page would draw on the plugin's row.
 
+## Installing one from a directory
+
+**Add a plugin…**, at the foot of the **Plugins** section of the settings,
+takes the path of the plugin's directory and reads its manifest into a consent
+card: who the plugin is, what it provides, and every capability it asks for.
+**Install** grants those capabilities, and is the only time they are asked
+about. A uuid already installed, or one a built-in plugin holds, is refused at
+the card.
+
+A plugin installed from a directory is **read where it is**, never copied, and
+belongs to the device it was installed on: every other device of the cluster
+lists it greyed, naming that device, and loads nothing of it. Its checkbox is
+the cluster's.
+
+**Update** on its row reads the manifest again, which is the loop for writing
+one: edit `plugin.yaml` or rebuild the component, then press it. A manifest
+that no longer reads is the plugin's trouble, drawn on its row, until an Update
+finds it fixed; and one that now asks for more capabilities than were granted
+shows the consent card again before anything changes. Until then it is loaded
+by nobody.
+
 ## The smallest plugin
 
 ```yaml

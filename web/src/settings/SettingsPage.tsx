@@ -67,6 +67,7 @@ import { pathOf } from "../workbench/openings";
 import { AtOnceCard, AtOncePane } from "./AtOnce";
 import { CleanupCard, CleanupPane } from "./Cleanup";
 import { ComponentsCard, ComponentsPane, useComponents } from "./Components";
+import { PluginsCard, PluginsPane } from "./Plugins";
 import { DesktopCard, DesktopPane } from "./Desktop";
 import { GitCard, GitPane } from "./Git";
 import { InstructionsCard, InstructionsPane } from "./Instructions";
@@ -362,6 +363,13 @@ function Settings(props: {
           open={props.opening === "repos"}
           press={() => props.select("repos")}
         />
+        {/* And at the foot, beside the Agent Profiles and the Repos, the other
+            list of things Verkstead runs on: the Plugins installed, Installed
+            above Built-in. See `Plugins.tsx`. */}
+        <PluginsCard
+          open={props.opening === "plugins"}
+          press={() => props.select("plugins")}
+        />
       </div>
     </>
   );
@@ -430,6 +438,9 @@ function Details(props: {
       </Match>
       <Match when={props.opening === "repos"}>
         <ReposPane back={props.back} />
+      </Match>
+      <Match when={props.opening === "plugins"}>
+        <PluginsPane back={props.back} />
       </Match>
       <Match when={profile()} keyed>
         {(open) => (
