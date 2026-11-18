@@ -439,6 +439,13 @@ settings say why. Beside the grammar's keys it holds two of the installation's
 own — `enabled`, whether sessions get the language, and `size`, how big its
 store may grow — which a plugin's entry cannot hold.
 
+**A built-in language's switch is its plugin's tick** on the Plugins page,
+cluster-wide: unticked, none of its languages' variables, stores or grants
+reach a session. Its `enabled` here was taken up into the plugin's record once,
+at the first start of a release that has the ticks — on where any of its
+languages was on, on any device — and is not read again; `enabled` switches
+only a language no plugin provides.
+
 ## Per-platform overrides
 
 A top-level `linux:`, `macos:` or `windows:` holds keys of the common

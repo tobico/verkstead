@@ -52,6 +52,16 @@
   min-width: 0;
 }
 
+/* A built-in language's name, standing where its box would: the switch is
+   its plugin's, on the Plugins page. Greyed while that plugin is unticked. */
+.named {
+  padding: 0.2rem 0;
+}
+
+.off {
+  color: var(--ink-soft);
+}
+
 /* The link, which is the panel's trigger: drawn as a link rather than as a
    button, because it is a reading first — what the cache holds — and the panel
    behind it second. In the accent while its language is on. */

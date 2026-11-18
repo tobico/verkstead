@@ -2249,7 +2249,7 @@ describe("the path a details pane stands at", () => {
   it("draws the caches and the binds in the details pane, and reads the sandbox card as open", async () => {
     const { container } = thePage("/settings/sandbox");
 
-    await waitFor(() => screen.getByRole("checkbox", { name: "Rust" }));
+    await waitFor(() => screen.getByRole("checkbox", { name: "Gleam" }));
     await waitFor(() => screen.getByLabelText("Add a path"));
 
     const face = await drawn<HTMLElement>(container, `.${sandbox.sandboxCard}`);

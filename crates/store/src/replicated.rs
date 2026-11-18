@@ -96,6 +96,18 @@ pub trait Kind {
     /// keeps the newest write whether or not it is a removal — see
     /// [`newest_wins`].
     const REVIVES: bool = false;
+
+    /// What two devices' taken-up records of one uuid come to together, where
+    /// both are stamped at the epoch — see [`take_up_as_the_oldest`] — and the
+    /// kind would rather keep something of each than let the Device Id pick
+    /// one: `winner` is the one the Device Id picks, and `loser` the other.
+    ///
+    /// Nothing, which is every kind but one, leaves the pick standing. What is
+    /// made instead has to come out the same whichever device makes it and
+    /// however often, so that every device ends up holding one record.
+    fn taken_up_together(_winner: &Self::Fields, _loser: &Self::Fields) -> Option<Self::Fields> {
+        None
+    }
 }
 
 /// One record of a kind, as this device holds it — and as it crosses to a
@@ -462,34 +474,60 @@ async fn merged<K: Kind>(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     record: &Record<K::Fields>,
 ) -> Result<bool> {
-    let held: Option<(i64, Option<i64>, String)> = sqlx::query_as(
-        "SELECT updated_at, deleted_at, written_by FROM replicated
-         WHERE kind = ? AND uuid = ?",
-    )
-    .bind(K::NAME)
-    .bind(&record.uuid)
-    .fetch_optional(&mut **tx)
-    .await
-    .with_context(|| format!("reading the {} record {}", K::NAME, record.uuid))?;
+    let held: Option<Record<K::Fields>> = record_on::<K>(tx, &record.uuid).await?;
 
-    let wins = held
-        .as_ref()
-        .is_none_or(|(updated_at, deleted_at, written_by)| {
-            let held = Stamp {
-                updated_at: *updated_at,
-                deleted_at: *deleted_at,
-                written_by,
-            };
-            match K::REVIVES {
-                true => newest_wins(held, record.stamp()),
-                false => arriving_wins(held, record.stamp()),
-            }
-        });
+    // Two take-ups of one record, which the kind may put together rather than
+    // pick between — see [`Kind::taken_up_together`].
+    if let Some(held) = &held
+        && let Some(together) = together::<K>(held, record)
+    {
+        if together == *held {
+            return Ok(false);
+        }
+        return written_down::<K>(tx, &together).await;
+    }
+
+    let wins = held.as_ref().is_none_or(|held| match K::REVIVES {
+        true => newest_wins(held.stamp(), record.stamp()),
+        false => arriving_wins(held.stamp(), record.stamp()),
+    });
 
     if !wins {
         return Ok(false);
     }
 
+    written_down::<K>(tx, record).await
+}
+
+/// What `held` and `arriving` come to together where both are live records
+/// stamped at the epoch and the kind puts two such together — the one the
+/// Device Id picks carrying its stamp.
+fn together<K: Kind>(
+    held: &Record<K::Fields>,
+    arriving: &Record<K::Fields>,
+) -> Option<Record<K::Fields>> {
+    let taken_up = |record: &Record<K::Fields>| record.updated_at == 0 && !record.removed();
+    if !taken_up(held) || !taken_up(arriving) {
+        return None;
+    }
+
+    let (winner, loser) = match arriving.stamp().newer_than(&held.stamp()) {
+        true => (arriving, held),
+        false => (held, arriving),
+    };
+
+    K::taken_up_together(&winner.fields, &loser.fields).map(|fields| Record {
+        fields,
+        ..winner.clone()
+    })
+}
+
+/// `record` written down as it stands, stamps and all, over whatever is held
+/// under its uuid.
+async fn written_down<K: Kind>(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    record: &Record<K::Fields>,
+) -> Result<bool> {
     let body = serde_json::to_string(&record.fields)
         .with_context(|| format!("writing down the {} record {}", K::NAME, record.uuid))?;
 
@@ -517,12 +555,19 @@ async fn merged<K: Kind>(
 
 /// Whether kind `K` has been taken up already — see [`take_up`].
 pub async fn taken_up<K: Kind>(pool: &SqlitePool) -> Result<bool> {
+    taken_up_as(pool, K::NAME).await
+}
+
+/// Whether what is said as `what` has been taken up already: a kind by its
+/// name, or one part of a kind taken up apart from the rest of it — see
+/// [`take_up_as_the_oldest_as`].
+pub async fn taken_up_as(pool: &SqlitePool, what: &str) -> Result<bool> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT kind FROM replicated_taken_up WHERE kind = ?")
-            .bind(K::NAME)
+            .bind(what)
             .fetch_optional(pool)
             .await
-            .with_context(|| format!("reading whether the {} have been taken up", K::NAME))?;
+            .with_context(|| format!("reading whether the {what} have been taken up"))?;
 
     Ok(row.is_some())
 }
@@ -592,6 +637,19 @@ pub async fn take_up_as_the_oldest<K: Kind>(
     device: &str,
     kept: &[(String, K::Fields)],
 ) -> Result<()> {
+    take_up_as_the_oldest_as::<K>(pool, device, K::NAME, kept).await
+}
+
+/// And the same for one part of a kind, said as `what` rather than by the
+/// kind's name: records of a kind that was records from the start, which take
+/// up something that was kept elsewhere — a built-in Plugin's switch, out of
+/// each device's `config.yaml`.
+pub async fn take_up_as_the_oldest_as<K: Kind>(
+    pool: &SqlitePool,
+    device: &str,
+    what: &str,
+    kept: &[(String, K::Fields)],
+) -> Result<()> {
     let mut tx = super::writing(pool, "taking records up").await?;
 
     for (uuid, fields) in kept {
@@ -609,14 +667,14 @@ pub async fn take_up_as_the_oldest<K: Kind>(
     }
 
     sqlx::query("INSERT INTO replicated_taken_up (kind) VALUES (?) ON CONFLICT (kind) DO NOTHING")
-        .bind(K::NAME)
+        .bind(what)
         .execute(&mut *tx)
         .await
-        .with_context(|| format!("saying the {} have been taken up", K::NAME))?;
+        .with_context(|| format!("saying the {what} have been taken up"))?;
 
     tx.commit()
         .await
-        .with_context(|| format!("taking up the {}", K::NAME))
+        .with_context(|| format!("taking up the {what}"))
 }
 
 #[cfg(test)]

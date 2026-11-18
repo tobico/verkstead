@@ -250,6 +250,11 @@ struct Held {
     /// And whether the log has been told about an `mcp_servers:` key nothing
     /// reads any more.
     ignoring_servers_said: AtomicBool,
+
+    /// And the languages whose built-in plugin is unticked, out of the
+    /// plugins' records — see [`Settings::holding_unticked_languages`]. `None`
+    /// until they first are.
+    unticked_languages: RwLock<Option<BTreeSet<String>>>,
 }
 
 /// Every Data Directory's held lists, so that every handle on one directory
@@ -375,6 +380,21 @@ impl Settings {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(servers);
     }
 
+    /// Hold `off` as the languages whose built-in plugin is unticked, for
+    /// [`Settings::config`] to lay beside whatever `config.yaml` says.
+    ///
+    /// **And from then on a built-in language's `enabled` in `config.yaml` is
+    /// not read**: the plugin's tick is its switch, cluster-wide — see
+    /// [`crate::replicating::plugins::taken_up`] and
+    /// [`crate::languages::configured`].
+    pub fn holding_unticked_languages(&self, off: BTreeSet<String>) {
+        *self
+            .held
+            .unticked_languages
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(off);
+    }
+
     /// Forget the declarations held, as a new start of the server would.
     #[cfg(test)]
     pub(crate) fn forgetting_the_mcp_servers(&self) {
@@ -498,6 +518,14 @@ impl Settings {
 
             config.mcp_servers = servers;
         }
+
+        // And which built-in languages are off, out of their plugins' records.
+        config.unticked = self
+            .held
+            .unticked_languages
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
 
         // The table's Authors over the file's, once there are any held: the
         // file was emptied of them as they were taken up, so an `authors:` key
@@ -1445,6 +1473,14 @@ pub struct Config {
     #[serde(skip)]
     awaited: BTreeSet<String>,
 
+    /// The built-in languages whose plugin is unticked, once the plugins'
+    /// records are held — never read from this file nor written to it, but
+    /// laid beside it by [`Settings::config`]. `None` before then, when each
+    /// language's `enabled` here is still its switch. See
+    /// [`crate::languages::configured`].
+    #[serde(skip)]
+    unticked: Option<BTreeSet<String>>,
+
     /// And how the shared Rust build cache is set: whether sessions get one at
     /// all, and how big its compiled half may grow — see [`crate::build_cache`].
     ///
@@ -1690,6 +1726,7 @@ impl Config {
             // dropped — see [`authors_kept`].
             authors: authors_kept(config.authors),
             awaited: BTreeSet::new(),
+            unticked: None,
             rust_build_cache: RustBuildCache {
                 enabled: config.rust_build_cache.enabled,
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
@@ -1747,6 +1784,7 @@ impl Config {
             // installer's descriptor keys are.
             authors: author.into_iter().collect(),
             awaited: BTreeSet::new(),
+            unticked: None,
             // And nothing for the key the map replaced: the two keys the page
             // draws of Rust are in `languages` below now, so writing this one
             // as well would leave a second opinion about them in the file. A
@@ -1916,6 +1954,12 @@ impl Config {
             self.rust_build_cache.size(),
         )
         .merged(&self.languages)
+    }
+
+    /// The built-in languages whose plugin is unticked, where the plugins'
+    /// records are held — see [`Config::unticked`].
+    pub fn unticked_languages(&self) -> Option<&BTreeSet<String>> {
+        self.unticked.as_ref()
     }
 
     /// And what the Cleanup is to do after an archiving, which is a trim at
@@ -5457,8 +5501,12 @@ mod tests {
         let page = Config::of(
             None,
             crate::languages::Languages::of_page([
-                (crate::languages::RUST.to_owned(), false, String::new()),
-                ("gleam".to_owned(), true, String::new()),
+                (
+                    crate::languages::RUST.to_owned(),
+                    Some(false),
+                    String::new(),
+                ),
+                ("gleam".to_owned(), Some(true), String::new()),
             ]),
             Cleanup::default(),
             AtOnce::default(),

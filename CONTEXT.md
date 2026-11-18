@@ -1351,8 +1351,9 @@ seven shipping as six built-in Plugins with Rust and C/C++ sharing one for
 their Compile Server, and an installer's `languages:` entry merging over the
 language of its name. A plugin's entry is refused by field where an
 installer's falls back, and cannot hold `enabled` or `size`, which are the
-installation's. The Plugins page's tick is to replace the Build caches box, and
-`size` to become the Plugin's declared setting. See ADR-0030.
+installation's. A built-in Language plugin's tick on the Plugins page is its
+languages' switch, cluster-wide, in place of a Build caches box, and `size` is
+to become the Plugin's declared setting. See ADR-0030.
 _Avoid_: language definition, toolchain, language config
 
 **Build Cache**:

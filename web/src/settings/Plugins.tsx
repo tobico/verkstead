@@ -3,8 +3,10 @@
 //!
 //! **Two groups, Installed above Built-in**, one row per Plugin whatever it
 //! provides. The Built-in group is drawn only once it has a row (Set 1772, Q4):
-//! the Skill Pack `verkstead` is its first. A built-in is always on, so its row
-//! has no checkbox, and it has no Remove.
+//! the Skill Pack `verkstead` first, then the six Language plugins, each saying
+//! the languages it provides. A built-in has no Remove, and is always on, so
+//! its row has no checkbox — but for a Language plugin, whose tick is whether
+//! sessions get its languages.
 //!
 //! **A row** reads the plugin's name, version and author, the Category of what
 //! it provides, where it came from, its checkbox, and its trouble where it
@@ -341,6 +343,12 @@ export function PluginsPane(props: {
                         <Row
                           of={row}
                           pressing={enable.isPending}
+                          flip={
+                            row.languages.length > 0
+                              ? (enabled) =>
+                                  enable.mutate({ uuid: row.uuid, enabled })
+                              : undefined
+                          }
                           open={() => props.open(row.uuid)}
                           refused={
                             refused()?.uuid === row.uuid
@@ -367,8 +375,8 @@ export function PluginsPane(props: {
 function Row(props: {
   of: PluginRow;
   pressing: boolean;
-  /// Its checkbox, where it has one: every installed plugin, and no built-in,
-  /// which is always on.
+  /// Its checkbox, where it has one: every installed plugin, and a built-in
+  /// only where it is a Language plugin — the rest are always on.
   flip?: (enabled: boolean) => void;
   /// **Update**, where the row has one: a git plugin, or a local plugin on
   /// this device.
@@ -497,8 +505,19 @@ function Row(props: {
         />
       </Show>
 
-      <Show when={props.of.provides.length > 0}>
-        <p class={styles.provides}>Provides {props.of.provides.join(", ")}.</p>
+      <Show
+        when={props.of.languages.length > 0}
+        fallback={
+          <Show when={props.of.provides.length > 0}>
+            <p class={styles.provides}>
+              Provides {props.of.provides.join(", ")}.
+            </p>
+          </Show>
+        }
+      >
+        <p class={styles.provides}>
+          Provides {listed(props.of.languages)}.
+        </p>
       </Show>
 
       <Show when={source(props.of)}>

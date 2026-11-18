@@ -1245,11 +1245,27 @@ async fn a_hand_written_size_that_is_not_one_is_the_default_and_survives_a_save(
     assert!(written.contains("lots"), "kept as written: {written}");
 }
 
-/// And what a save of it says: both halves come back off the file, and the
-/// switch is what the next session is built against.
+/// And what a save of it says: the size comes back off the file — and once
+/// the plugins' ticks are held, Rust's switch is its plugin's, so what the
+/// page sends for it is not written and Rust stays on.
 #[tokio::test]
 async fn a_languages_switch_and_size_go_in_and_come_back() {
     let (dir, app) = app().await;
+
+    // A tick on Go, which is what has the server hold every built-in's.
+    let ticked = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/ui/plugins/01b5328a-3524-457d-ab88-1af1c65079ea/enabled")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"enabled":true}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ticked.status(), StatusCode::OK);
 
     let saved = save(
         &app,
@@ -1269,23 +1285,28 @@ async fn a_languages_switch_and_size_go_in_and_come_back() {
     )
     .await;
 
-    assert!(!rust_told(&saved.settings).enabled);
+    assert!(rust_told(&saved.settings).enabled);
+    assert_eq!(
+        rust_told(&saved.settings).plugin.as_deref(),
+        Some("Rust & C/C++")
+    );
     assert_eq!(rust_told(&saved.settings).size, "5G");
     assert!(rust_told(&saved.settings).size_configured);
 
     // In the file the next session reads, rather than only in the answer — and
-    // under the map the page writes now rather than under the key it replaced.
+    // the size alone: the switch is the plugin's.
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
     assert!(
-        written.contains("languages")
-            && written.contains("rust")
-            && written.contains("enabled: false")
-            && written.contains("5G"),
-        "the switch and the size are Rust's entry in config.yaml: {written}"
+        written.contains("languages") && written.contains("rust") && written.contains("5G"),
+        "the size is Rust's entry in config.yaml: {written}"
+    );
+    assert!(
+        written.contains("languages:\n  rust:\n    size: 5G\n"),
+        "and no switch in it: {written}"
     );
 
     let read_back = settings(&app).await;
-    assert!(!rust_told(&read_back).enabled);
+    assert!(rust_told(&read_back).enabled);
     assert_eq!(rust_told(&read_back).size, "5G");
 }
 

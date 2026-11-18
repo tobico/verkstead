@@ -24,8 +24,9 @@ pub struct PluginsView {
 
     /// The ones this binary ships and lists, the Skill Pack `verkstead` first;
     /// the fixture that proves the path is not listed, and the group is drawn
-    /// only once it has a row. A built-in has no **Remove** and no checkbox:
-    /// it is always on.
+    /// only once it has a row. A built-in has no **Remove** and no **Update**,
+    /// and is always on but for a Language plugin, which is on until it is
+    /// unticked.
     pub built_in: Vec<PluginRow>,
 }
 
@@ -42,6 +43,9 @@ pub struct PluginRow {
     /// The Category of each thing it provides, as the manifest writes it, once
     /// each.
     pub provides: Vec<String>,
+    /// The languages it provides, by label — `Rust`, `C/C++` — in the order
+    /// its manifest lists them. Empty for one providing none.
+    pub languages: Vec<String>,
     pub source: PluginSource,
     /// Its checkbox: whether the cluster has it on.
     pub enabled: bool,

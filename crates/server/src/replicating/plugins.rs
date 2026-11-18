@@ -15,6 +15,18 @@
 //! and every device fetching its own copy from a member that holds one — an
 //! MCP server's header values' way (ADR-0021, ADR-0028).
 //!
+//! **A built-in has a record too, once anything is written to it** — a tick,
+//! a settings save, the take-up below — and none until then, **absent meaning
+//! enabled**, so a cluster that never touched one has it on. Its source is
+//! [`Source::BuiltIn`]: nothing to clone, and no Remove.
+//!
+//! **A Language plugin's switch is taken up out of `config.yaml` once** — see
+//! [`taken_up`] — where each language's `enabled` was each device's own.
+//! **On wins**: a plugin is on where any of its languages was on, on any
+//! device, which [`Plugins`]' [`Kind::taken_up_together`] keeps across two
+//! devices' take-ups. A press made since wins over every take-up, so a device
+//! upgrading late never ticks again what a human unticked.
+//!
 //! **What loading it came to is not**: a plugin's trouble is this device's
 //! reading of its own copy, held in memory — see [`crate::plugins::installed`].
 //! A merge here is what has it loaded again.
@@ -23,6 +35,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use verkstead_render::{PluginCapability, PluginSecretValues};
 use verkstead_schema::Nudge;
 
@@ -30,8 +43,10 @@ use super::Replicating;
 use super::authors::{digest, writing_held};
 use crate::AppState;
 use crate::peer::plugins::SECRETS;
+use crate::plugins::built_in;
 use crate::plugins::manifest::SettingKind;
 use crate::relaying::{Read, asking, word_from};
+use crate::settings::Settings;
 use crate::store::replicated::{self, Kind, Record};
 
 /// The installed Plugins, as a kind of record.
@@ -45,6 +60,15 @@ impl Kind for Plugins {
     /// when it is installed again. That Install makes the record again, on
     /// every device, rather than being refused for good.
     const REVIVES: bool = true;
+
+    /// Two devices' take-ups of a built-in's switch: on where either was on
+    /// (Set 1784, Q4), so a take-up only ever moves a record toward on.
+    fn taken_up_together(winner: &Fields, loser: &Fields) -> Option<Fields> {
+        Some(Fields {
+            enabled: winner.enabled || loser.enabled,
+            ..winner.clone()
+        })
+    }
 }
 
 impl Replicating for Plugins {
@@ -151,6 +175,80 @@ pub enum Source {
         /// The commit pinned at **Install**, or at the last Update.
         revision: String,
     },
+
+    /// One this binary ships, read out of the binary on every device: its
+    /// record holds the cluster's switch and settings, and nothing about where
+    /// it came from.
+    BuiltIn,
+}
+
+/// What a built-in's switch is taken up as, apart from the installed
+/// Plugins, which were records from the start.
+const LANGUAGES_TAKEN_UP: &str = "plugins.languages";
+
+/// Take each built-in Language plugin's switch up out of `config.yaml` — its
+/// languages' `enabled`, and `rust_build_cache`'s for Rust — where it has not
+/// been already, and hold which languages are off for the settings either way.
+///
+/// **Once**, and stamped older than any press: a plugin is on where any of its
+/// languages was on here, written as this device's take-up, and put together
+/// with every other device's by on winning — see [`Plugins`]. The file's
+/// `enabled` is not read again from here on, and a save of the settings page
+/// takes it out — see [`crate::settings::Config::languages`].
+pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> Result<()> {
+    if !replicated::taken_up_as(pool, LANGUAGES_TAKEN_UP).await? {
+        let settings_ = settings.clone();
+        let config = tokio::task::spawn_blocking(move || settings_.config()).await?;
+        let languages = crate::languages::configured(&config);
+
+        let kept: Vec<(String, Fields)> = built_in::listed()
+            .iter()
+            .filter(|manifest| built_in::languages(manifest).next().is_some())
+            .map(|manifest| {
+                let on = built_in::languages(manifest).any(|provided| {
+                    languages
+                        .get(&provided.name)
+                        .is_none_or(crate::languages::Descriptor::enabled)
+                });
+                (
+                    manifest.uuid.clone(),
+                    crate::plugins::installed::built_in_fields(manifest, on, None),
+                )
+            })
+            .collect();
+
+        replicated::take_up_as_the_oldest_as::<Plugins>(pool, device, LANGUAGES_TAKEN_UP, &kept)
+            .await
+            .context("taking the languages' switches up out of config.yaml")?;
+    }
+
+    held(pool, settings).await
+}
+
+/// Hand the languages whose built-in plugin is unticked on to the settings,
+/// which is what every session's languages are read out of.
+pub async fn held(pool: &SqlitePool, settings: &Settings) -> Result<()> {
+    let records = replicated::live_records::<Plugins>(pool).await?;
+
+    let off = built_in::listed()
+        .iter()
+        .filter(|manifest| {
+            records.iter().any(|record| {
+                record.uuid == manifest.uuid
+                    && matches!(record.fields.source, Source::BuiltIn)
+                    && !record.fields.enabled
+            })
+        })
+        .flat_map(|manifest| {
+            built_in::languages(manifest)
+                .map(|provided| provided.name.clone())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    settings.holding_unticked_languages(off);
+
+    Ok(())
 }
 
 /// The most a member's answer about one plugin's secrets may be: the token's
@@ -335,4 +433,149 @@ async fn secrets_at(
     .await?;
 
     Ok(said.secrets)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::languages::{CPP, GO, RUST};
+
+    const RUST_CPP: &str = "795515ae-96cd-4d7c-8071-e6753b3f4624";
+    const GO_PLUGIN: &str = "01b5328a-3524-457d-ab88-1af1c65079ea";
+
+    /// A database and settings files in one fresh Data Directory, its
+    /// `config.yaml` saying `config`.
+    async fn fresh(config: &str) -> (tempfile::TempDir, SqlitePool, Settings) {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::store::open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+        std::fs::write(settings.config_path(), config).unwrap();
+
+        (dir, pool, settings)
+    }
+
+    async fn enabled(pool: &SqlitePool, uuid: &str) -> bool {
+        replicated::live_records::<Plugins>(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|record| record.uuid == uuid)
+            .unwrap_or_else(|| panic!("{uuid} was taken up"))
+            .fields
+            .enabled
+    }
+
+    fn on(config: &crate::settings::Config, language: &str) -> bool {
+        crate::languages::configured(config)
+            .get(language)
+            .unwrap()
+            .enabled()
+    }
+
+    /// A plugin is taken up on where any of its languages was on — Rust off
+    /// and C/C++ on comes up on — and off only where every one was off; a
+    /// language with no entry is on. Once: a second start takes nothing up.
+    #[tokio::test]
+    async fn each_plugin_is_taken_up_on_where_any_of_its_languages_was() {
+        let (_dir, pool, settings) = fresh(
+            "rust_build_cache:\n  enabled: false\nlanguages:\n  cpp:\n    enabled: true\n  \
+             go:\n    enabled: false\n",
+        )
+        .await;
+
+        taken_up(&pool, &settings, "a").await.unwrap();
+
+        assert!(enabled(&pool, RUST_CPP).await);
+        assert!(!enabled(&pool, GO_PLUGIN).await);
+        for listed in built_in::listed() {
+            let off = listed.uuid == GO_PLUGIN;
+            assert_eq!(enabled(&pool, &listed.uuid).await, !off, "{}", listed.name);
+        }
+
+        let config = settings.config();
+        assert!(on(&config, RUST) && on(&config, CPP));
+        assert!(
+            !on(&config, GO),
+            "and the settings hold Go off from here on"
+        );
+
+        // The file's `enabled` is not read again: Go on in it now changes
+        // nothing, and neither does a second start.
+        std::fs::write(
+            settings.config_path(),
+            "languages:\n  go:\n    enabled: true\n",
+        )
+        .unwrap();
+        taken_up(&pool, &settings, "a").await.unwrap();
+        assert!(!enabled(&pool, GO_PLUGIN).await);
+        assert!(!on(&settings.config(), GO));
+    }
+
+    /// Two devices' take-ups come to on where either had it on, whichever
+    /// arrives where; and a press made since stands over a device upgrading
+    /// later.
+    #[tokio::test]
+    async fn on_wins_across_devices_and_a_press_since_stands() {
+        let (_one, off_here, settings) = fresh("languages:\n  go:\n    enabled: false\n").await;
+        taken_up(&off_here, &settings, "a").await.unwrap();
+
+        let (_two, on_there, settings) = fresh("").await;
+        taken_up(&on_there, &settings, "b").await.unwrap();
+
+        let theirs = replicated::records::<Plugins>(&on_there).await.unwrap();
+        let ours = replicated::records::<Plugins>(&off_here).await.unwrap();
+        replicated::merge::<Plugins>(&off_here, &theirs)
+            .await
+            .unwrap();
+        replicated::merge::<Plugins>(&on_there, &ours)
+            .await
+            .unwrap();
+        assert!(
+            enabled(&off_here, GO_PLUGIN).await,
+            "on wins where it arrives"
+        );
+        assert!(enabled(&on_there, GO_PLUGIN).await, "and where it was");
+
+        // Both off stays off.
+        let (_three, off_too, settings) = fresh("languages:\n  go:\n    enabled: false\n").await;
+        taken_up(&off_too, &settings, "c").await.unwrap();
+        let (_four, off_also, settings) = fresh("languages:\n  go:\n    enabled: false\n").await;
+        taken_up(&off_also, &settings, "d").await.unwrap();
+        let theirs = replicated::records::<Plugins>(&off_also).await.unwrap();
+        replicated::merge::<Plugins>(&off_too, &theirs)
+            .await
+            .unwrap();
+        assert!(!enabled(&off_too, GO_PLUGIN).await);
+
+        // A human unticks Go on `a`; `e`, upgrading later with Go on, is
+        // merged with that and stays unticked.
+        let unticked = Fields {
+            enabled: false,
+            ..replicated::live_records::<Plugins>(&off_here)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|record| record.uuid == GO_PLUGIN)
+                .unwrap()
+                .fields
+        };
+        replicated::write::<Plugins>(&off_here, "a", GO_PLUGIN, &unticked)
+            .await
+            .unwrap();
+        let (_five, late, settings) = fresh("").await;
+        let pressed = replicated::records::<Plugins>(&off_here).await.unwrap();
+        replicated::merge::<Plugins>(&late, &pressed).await.unwrap();
+        taken_up(&late, &settings, "e").await.unwrap();
+        assert!(!enabled(&late, GO_PLUGIN).await);
+
+        // And the other way about: taken up first, the press merged after.
+        let (_six, later, settings) = fresh("").await;
+        taken_up(&later, &settings, "f").await.unwrap();
+        replicated::merge::<Plugins>(&later, &pressed)
+            .await
+            .unwrap();
+        assert!(!enabled(&later, GO_PLUGIN).await);
+    }
 }
