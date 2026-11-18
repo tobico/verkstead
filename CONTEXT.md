@@ -354,6 +354,10 @@ those three are said — and nowhere else: the state word already says where the
 work is. Offered on the picker
 only once its stage has landed, as an agent type is offered only once it can
 launch the real thing. See ADR-0020.
+**From the plugins roadmap on a Process is a Plugin**: its states, each running
+an **Activity**, its transitions from each **Outcome**, its roles, the directions
+it offers and its words all declared in the manifest, the five above bundled as
+Plugins of that shape and a sixth installed. See ADR-0030.
 _Avoid_: mode, kind, type, workflow, flow, template, Direction (that is how
 Develop's building is run, and is picked inside it)
 **Rank**:
@@ -2931,8 +2935,79 @@ rather than whatever the machine or the account happens to keep. That path is
 they were installed in where it cannot, which is the whole of the difference: a
 session is put inside a Skill by the prompt it is started on, which names it
 above the Brief, and what a prompt names is where the file really is. What the
-account keeps under its own skills is not reachable at all.
+account keeps under its own skills is not reachable at all. **Grouped in Skill
+Packs** from the plugins roadmap on, and named `<pack>/<skill>` — see **Skill
+Pack**, and ADR-0030.
 _Avoid_: prompt, instructions, plugin, workflow file
+
+**Plugin**:
+One directory with a `plugin.yaml` at its root, which is how Verkstead is
+extended and, from the plugins roadmap on, how it is made: a harness, a
+Process, a Forge, a Language, an Activity and a pack of Skills are each one,
+the ones Verkstead ships are Plugins of the same shape bundled inside the
+binary, and a human installs their own from a git URL or a local directory.
+Declarative first — the manifest says what it **provides**, a list each of one
+**Category**, the **capabilities** it asks for and the settings fields it
+wants drawn — and a WebAssembly component where a piece is code, run by
+wasmtime over a WIT interface whose version the manifest names. Installed into
+`plugins/` under the Data Directory, tracked as a Replicated record so the
+cluster has it, enabled or disabled by its checkbox on the **Plugins** page,
+and listed there with its trouble where it failed to load, which stops nothing
+else. Its code runs on the host beside the server, with what the human
+granted at **Install** and nothing more, and never inside a Sandbox. See
+ADR-0030.
+_Avoid_: extension, module, add-on, integration, package, mod
+
+**Category**:
+Which of the six kinds of thing a Plugin provides an entry is: **Agent**, a
+harness; **Process**; **Forge**; **Language**, a Descriptor; **Activity**;
+**Skills**, a Skill Pack. One Plugin may provide several, across several
+Categories, and is listed once. The viewer draws every Category from the data
+its manifest declares and a Plugin ships no viewer code.
+_Avoid_: kind, type, plugin type, slot
+
+**Activity**:
+What a Process's state runs: a component the server drives, started with the
+Conversation's facts and its Timeline, handed events, lent sessions — one
+launched under a named Skill and role, waited on for its Done signal — the
+Forge, Question Sets of Verkstead's own, Timeline notices, the Worktree's git
+facts and the capabilities its manifest asked for, and ending in one of the
+**Outcomes** its manifest declares. Stateless across a restart: started again
+with the same facts, it works out where it was from them and from the files in
+the Repo, which stay the truth. Six are Verkstead's — the interview, one
+session, follow-up rounds, the wrap-up with its declared watchers, the backlog
+runner and the stage runner — and a Plugin may bring one of its own.
+_Avoid_: step, stage, phase, task, runner, driver, handler
+
+**Outcome**:
+How an Activity ends, by one of the names its manifest declares; what a
+Process's transitions map to a state, every one of them, or the Process is
+refused by `verkstead plugin check` and by the loader alike.
+_Avoid_: result, exit code, event, transition, status
+
+**Forge**:
+Where a Repo's pull requests live, as a Plugin says it: the hosts it covers
+and the ones the human adds for a self-hosted instance, the **noun** it uses —
+pull request, merge request — which the viewer says wherever a Repo on it is
+drawn, the credential helper's username for git inside the Sandbox, the CLI
+tool and token variable to lend a session, and the **capabilities** it has —
+checks, review, publish, stacks, create — a wrap-up watcher over an absent one
+being settled at once. A Repo is on the Forge whose hosts its remote names,
+and on none where none match, which is a Repo with no wrap-up. An Author holds
+one token per Forge. GitHub is the one Verkstead ships, a component over HTTP
+since `gh` left the server; GitLab is the demonstration written against it.
+_Avoid_: git host, provider, remote, backend, SCM, platform
+
+**Skill Pack**:
+A directory of Skills a Plugin provides, named `<pack>/<skill>` and mounted
+read-only at `/verkstead/skills/<pack>/<skill>/` in every session that has it;
+Verkstead's thirteen are one pack named `verkstead`. A Process or an Activity
+names the Skill it runs by that path, and a pack is **attachable** to a
+Conversation from the Attach menu the way an MCP server is, its Skills
+mounted and listed in the prompt beside the servers — said, as ADR-0021 has a
+server said, rather than found; what an account keeps under its own skills is
+still not reachable at all.
+_Avoid_: skill set, skill library, skills folder, plugin skills
 
 **Brief**:
 The editable markdown document a round of a Conversation starts from, and the
