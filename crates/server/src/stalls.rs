@@ -207,14 +207,24 @@ async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
         "nothing is driving a Conversation that says it is being worked on",
     );
 
-    let stopped = crate::stopping::stop(
+    // Asked again as the stop is written rather than trusted from the sweep's
+    // look: gathering the evidence is a `git status` and a Timeline read, and
+    // a Resume pressed meanwhile has registered by the time it is done. See
+    // [`store::stop_undriven`].
+    let driven = || {
+        state
+            .drivers
+            .driven(&state.sessions.working(), conversation_id, lifecycle)
+    };
+
+    let stopped = crate::stopping::stall(
         &state.pool,
         &state.nudges,
         conversation_id,
-        crate::stopping::Decided::Nobody,
         driving(lifecycle),
         "Nothing is driving it. No session is running, and nothing is left to start one.",
         said_last(state, conversation_id).await,
+        &driven,
     )
     .await;
 
