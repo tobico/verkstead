@@ -3750,6 +3750,8 @@ dependencies = [
  "verkstead-server",
  "wat",
  "windows-sys 0.61.2",
+ "wit-component 0.263.0",
+ "wit-parser 0.263.0",
 ]
 
 [[package]]
@@ -4618,6 +4620,7 @@ dependencies = [
  "wasm-encoder 0.263.0",
  "wasm-metadata 0.263.0",
  "wasmparser 0.263.0",
+ "wat",
  "wit-parser 0.263.0",
 ]
 

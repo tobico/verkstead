@@ -13,8 +13,8 @@
 //! is a plugin quietly doing less than its author wrote, which is the gap the
 //! interface version exists to stop. A `provides:` entry's body beyond its
 //! `category` is read here once a stage has given that Category its grammar —
-//! `skills` in [`Walk::packs`], and `language` in the descriptor grammar, see
-//! [`crate::languages::provided`] — and kept as written until then.
+//! [`agent`], `skills` in [`Walk::packs`], and `language` in the descriptor
+//! grammar, see [`crate::languages::provided`] — and kept as written until then.
 //!
 //! **Per-platform overrides replace, key by key.** A top-level `linux:`,
 //! `macos:` or `windows:` holds keys of the common declaration, and reading for
@@ -38,6 +38,10 @@ use serde_json::{Map, Value};
 
 use crate::languages::Provided;
 use crate::platform::Platform;
+
+pub mod agent;
+
+pub use agent::Agent;
 
 /// The newest interface version this build knows. A manifest naming a higher
 /// one was written for a newer Verkstead and is refused at load, rather than
@@ -132,14 +136,31 @@ pub struct Dependency {
     pub version: semver::VersionReq,
 }
 
-/// One thing a plugin provides, of one Category. Its body beyond the Category
-/// is the stage's that gives the Category its grammar, and is kept as written.
+/// One thing a plugin provides, of one Category.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Provision {
     pub category: Category,
-    pub body: Map<String, Value>,
+    pub body: Body,
     /// The body read, where the Category is `language`.
     pub language: Option<Provided>,
+}
+
+/// A provision beyond its Category: read by its Category's grammar where the
+/// stage that gives it one has landed, and kept as written where not.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Body {
+    Agent(Box<Agent>),
+    Unread(Map<String, Value>),
+}
+
+impl Provision {
+    /// The harness this provides, where it is an agent.
+    pub fn agent(&self) -> Option<&Agent> {
+        match &self.body {
+            Body::Agent(agent) => Some(agent),
+            Body::Unread(_) => None,
+        }
+    }
 }
 
 /// A **Skill Pack**: a `provides:` entry of the `skills` Category, read.
@@ -339,16 +360,16 @@ impl Manifest {
         };
 
         let fields = merged(tree, platform)?;
-        let walk = Walk { files };
+        let walk = Walk { files, platform };
 
         let interface = walk.interface(&fields)?;
         let uuid = uuid(required(&fields, "uuid")?, "uuid")?;
-        let provides = languages(list(&fields, "provides", provision)?, text, platform)?;
+        let provides = languages(walk.provides(&fields)?, text, platform)?;
         let packs = walk.packs(&provides, &uuid)?;
         let settings = settings(&fields)?;
         sized(&provides, &settings)?;
 
-        Ok(Manifest {
+        let manifest = Manifest {
             uuid,
             name: text_of(required(&fields, "name")?, "name")?,
             author: author(required(&fields, "author")?, "author")?,
@@ -356,14 +377,45 @@ impl Manifest {
             repository: optional_text(&fields, "repository", "repository")?,
             interface,
             description: optional_text(&fields, "description", "description")?,
-            mark: walk.mark(&fields)?,
+            mark: walk.mark(&fields, "mark", "mark")?,
             dependencies: list(&fields, "dependencies", dependency)?,
             provides,
             packs,
             capabilities: list(&fields, "capabilities", capability)?,
             settings,
             component: walk.component(&fields)?,
-        })
+        };
+        manifest.whole()?;
+        Ok(manifest)
+    }
+
+    /// Refused where what it provides needs what the rest of it does not say:
+    /// an agent is drawn with a mark, its own or the plugin's, and is three
+    /// exports of a component.
+    fn whole(&self) -> Result<(), Refusal> {
+        for (index, provision) in self.provides.iter().enumerate() {
+            let Some(agent) = provision.agent() else {
+                continue;
+            };
+            if agent.mark.is_none() && self.mark.is_none() {
+                let field = format!("provides[{index}].mark");
+                return Err(Refusal::of(
+                    &field,
+                    format!(
+                        "`{field}` is missing. An agent is drawn with a mark: give it one, or \
+                         give the plugin one."
+                    ),
+                ));
+            }
+            if self.component.is_none() {
+                return Err(Refusal::of(
+                    "component",
+                    "`component` is missing. A plugin providing an agent needs one, exporting \
+                     what the `agent` world asks for.",
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Read `dir` as each platform would, for `verkstead plugin check`: the
@@ -514,9 +566,11 @@ fn walked(dir: &Path, at: &Path, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// What reading a path needs: where the files it may name are.
+/// What reading a path needs: where the files it may name are, and which
+/// platform a provision's own blocks are read for.
 struct Walk<'a> {
     files: Files<'a>,
+    platform: Platform,
 }
 
 impl Walk<'_> {
@@ -541,9 +595,14 @@ impl Walk<'_> {
         Ok(interface)
     }
 
-    fn mark(&self, fields: &Map<String, Value>) -> Result<Option<Mark>, Refusal> {
-        let field = "mark";
-        let Some(mark) = optional_text(fields, field, field)? else {
+    /// The mark at `key` of `fields`, named `field` in a refusal.
+    fn mark(
+        &self,
+        fields: &Map<String, Value>,
+        key: &str,
+        field: &str,
+    ) -> Result<Option<Mark>, Refusal> {
+        let Some(mark) = optional_text(fields, key, field)? else {
             return Ok(None);
         };
 
@@ -564,6 +623,26 @@ impl Walk<'_> {
                 format!("`{mark}` isn't a file in the plugin's directory."),
             )),
         }
+    }
+
+    fn provides(&self, fields: &Map<String, Value>) -> Result<Vec<Provision>, Refusal> {
+        list(fields, "provides", provision)?
+            .into_iter()
+            .enumerate()
+            .map(|(index, (category, body))| {
+                let body = match category {
+                    Category::Agent => {
+                        Body::Agent(Box::new(self.agent(&body, &format!("provides[{index}]"))?))
+                    }
+                    _ => Body::Unread(body),
+                };
+                Ok(Provision {
+                    category,
+                    body,
+                    language: None,
+                })
+            })
+            .collect()
     }
 
     fn component(&self, fields: &Map<String, Value>) -> Result<Option<PathBuf>, Refusal> {
@@ -597,8 +676,11 @@ impl Walk<'_> {
             if provision.category != Category::Skills {
                 continue;
             }
+            let Body::Unread(body) = &provision.body else {
+                continue;
+            };
             let field = format!("provides[{index}]");
-            let pack = self.pack(&provision.body, &field, uuid)?;
+            let pack = self.pack(body, &field, uuid)?;
             if packs.iter().any(|seen| seen.name == pack.name) {
                 let field = format!("{field}.name");
                 return Err(Refusal::of(
@@ -781,6 +863,24 @@ fn frontmatter(text: &str, skill: &str) -> Result<(), String> {
     }
 }
 
+/// `written` as a relative path that stays where it is said from: a path a
+/// harness keeps inside an account or a home, rather than one in the plugin's
+/// directory.
+fn relative(written: &str, field: &str) -> Result<PathBuf, Refusal> {
+    let path = PathBuf::from(written);
+    let within = path
+        .components()
+        .all(|component| matches!(component, Component::Normal(_) | Component::CurDir));
+    if within {
+        Ok(path)
+    } else {
+        Err(Refusal::of(
+            field,
+            format!("`{field}` should be a relative path that stays inside where it's said from."),
+        ))
+    }
+}
+
 /// Whether `text` is SVG, which is all the reading asks of a mark.
 fn is_svg(text: &str) -> bool {
     text.contains("<svg")
@@ -949,7 +1049,9 @@ fn dependency(value: &Value, field: &str) -> Result<Dependency, Refusal> {
     })
 }
 
-fn provision(value: &Value, field: &str) -> Result<Provision, Refusal> {
+/// A provision's Category and the rest of it, which its Category's grammar
+/// reads.
+fn provision(value: &Value, field: &str) -> Result<(Category, Map<String, Value>), Refusal> {
     let Value::Object(map) = value else {
         return Err(Refusal::of(
             field,
@@ -980,11 +1082,7 @@ fn provision(value: &Value, field: &str) -> Result<Provision, Refusal> {
 
     let mut body = map.clone();
     body.remove("category");
-    Ok(Provision {
-        category,
-        body,
-        language: None,
-    })
+    Ok((category, body))
 }
 
 /// `provides` with each `language` entry's body read in the descriptor
@@ -1279,7 +1377,10 @@ provides: []
 
         let provision = &read(&yaml).unwrap().provides[0];
         assert_eq!(provision.category, Category::Forge);
-        assert_eq!(provision.body["noun"], "merge request");
+        let Body::Unread(body) = &provision.body else {
+            panic!("a forge's body has no grammar yet");
+        };
+        assert_eq!(body["noun"], "merge request");
     }
 
     /// A manifest providing one language, `rust`, whose entry goes on with

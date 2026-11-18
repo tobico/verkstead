@@ -406,5 +406,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # `wit-component` wraps it as a component against WIT the test writes, with
 # `wit-parser` reading that WIT. The versions wasmtime's own wasmparser is.
 wat = "1"
-wit-component = "0.263"
+wit-component = { version = "0.263", features = ["dummy-module"] }
 wit-parser = "0.263"

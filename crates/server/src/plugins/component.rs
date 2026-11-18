@@ -33,17 +33,26 @@ use wasmtime_wasi_http::{
     WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks, WasiHttpView, default_hooks,
 };
 
-use super::manifest::{Access, Capability, Files, Manifest};
+use super::manifest::{Access, Capability, Category, Files, Manifest};
 
 /// The bindings to `wit/plugin.wit`: the base world every component is checked
-/// against, and one world per Category with nothing in it yet.
+/// against, and one world per Category, each filled in by the stage that gives
+/// its Category a grammar.
 pub mod worlds {
     wasmtime::component::bindgen!({ path: "wit", world: "plugin" });
 
     /// The Category worlds, which the stages that give each Category its
     /// grammar fill in.
     pub mod category {
-        wasmtime::component::bindgen!({ path: "wit", world: "agent" });
+        /// An agent's three exports, called on the store the component was
+        /// started in, which is an async one.
+        pub mod agent {
+            wasmtime::component::bindgen!({
+                path: "wit",
+                world: "agent",
+                exports: { default: async },
+            });
+        }
         pub mod process {
             wasmtime::component::bindgen!({ path: "wit", world: "process" });
         }
@@ -205,9 +214,31 @@ pub async fn load(
         ))
     })?;
 
-    instantiate(&bytes, &manifest.capabilities, home)
-        .await
-        .map(Some)
+    let mut loaded = instantiate(&bytes, &manifest.capabilities, home).await?;
+    exports_what_it_provides(&mut loaded, manifest)?;
+    Ok(Some(loaded))
+}
+
+/// Refused where `manifest` provides a Category whose world has exports and
+/// the component does not export them: an agent is its three exports, and
+/// one missing would be a harness that fails the first time a session needs
+/// it rather than at load.
+fn exports_what_it_provides(loaded: &mut Loaded, manifest: &Manifest) -> Result<(), Trouble> {
+    let agent = manifest
+        .provides
+        .iter()
+        .any(|provision| provision.category == Category::Agent);
+    if agent {
+        worlds::category::agent::Agent::new(&mut loaded.store, &loaded.instance).map_err(
+            |error| {
+                Trouble::of(format!(
+                    "The component provides an agent and doesn't export what one needs: {}.",
+                    worded(&error)
+                ))
+            },
+        )?;
+    }
+    Ok(())
 }
 
 /// Instantiate a component's bytes under `capabilities`, stopped where it is
@@ -531,6 +562,76 @@ world reader {
             .validate(true)
             .encode()
             .expect("the reader should encode as a component")
+    }
+
+    /// A component exporting the `agent` world, made from `wit/` itself by
+    /// wit-component: each export traps if it is called, which nothing here
+    /// does — what a component providing an agent is checked for at load is
+    /// that it has them.
+    fn exporting_an_agent() -> Vec<u8> {
+        let mut resolve = wit_parser::Resolve::default();
+        let (package, _) = resolve
+            .push_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("wit"))
+            .expect("the plugin WIT should parse");
+        let world = resolve
+            .select_world(&[package], Some("agent"))
+            .expect("the agent world should be there");
+
+        let mut module =
+            wit_component::dummy_module(&resolve, world, wit_parser::ManglingAndAbi::Standard32);
+        wit_component::embed_component_metadata(
+            &mut module,
+            &resolve,
+            world,
+            wit_component::StringEncoding::UTF8,
+            false,
+        )
+        .expect("the agent world should embed");
+
+        wit_component::ComponentEncoder::default()
+            .module(&module)
+            .expect("the dummy should be a module wit-component reads")
+            .validate(true)
+            .encode()
+            .expect("the dummy should encode as a component")
+    }
+
+    /// The agent manifest of the grammar's tests, its component `bytes`.
+    async fn load_agent(bytes: &[u8]) -> Result<Option<Loaded>, Trouble> {
+        let files: &[(&str, &[u8])] = &[
+            ("mark.svg", b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>"),
+            ("agent.wasm", bytes),
+        ];
+        let manifest = Manifest::parse(
+            crate::plugins::manifest::agent::tests::AGENT,
+            Files::Embedded(files),
+            crate::platform::Platform::HERE,
+        )
+        .expect("the agent manifest should be read");
+
+        load(Files::Embedded(files), &manifest, None).await
+    }
+
+    #[tokio::test]
+    async fn a_component_exporting_an_agent_loads_for_an_agent() {
+        let loaded = load_agent(&exporting_an_agent()).await;
+
+        assert!(matches!(loaded, Ok(Some(_))), "{:?}", loaded.err());
+    }
+
+    #[tokio::test]
+    async fn a_component_exporting_nothing_is_refused_for_an_agent() {
+        let trouble = load_agent(&assembled(EMPTY))
+            .await
+            .err()
+            .expect("an agent with none of its exports should not load");
+
+        assert!(
+            trouble
+                .why
+                .starts_with("The component provides an agent and doesn't export what one needs"),
+            "{trouble}"
+        );
     }
 
     async fn read(loaded: &mut Loaded, path: &str) -> i64 {
