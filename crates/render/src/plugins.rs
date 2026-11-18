@@ -24,6 +24,7 @@ pub struct PluginsView {
 
     /// The ones this binary ships and lists. None yet: the fixture that proves
     /// the path is not listed, and the group is drawn only once it has a row.
+    /// A built-in has no **Remove**.
     pub built_in: Vec<PluginRow>,
 }
 
@@ -52,6 +53,9 @@ pub struct PluginRow {
     /// The device it is on, by name, where it is a local plugin on another
     /// device: drawn greyed, and not loaded here.
     pub elsewhere: Option<String>,
+    /// The names of the ticked plugins that go with it when it is unticked,
+    /// depending on it or on one of those: what the checkbox says first.
+    pub dependents: Vec<String>,
 }
 
 /// A dependency a row's plugin is in trouble over, with the press that would

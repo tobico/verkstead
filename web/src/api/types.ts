@@ -4898,7 +4898,12 @@ needs: Array<PluginNeed>,
  * The device it is on, by name, where it is a local plugin on another
  * device: drawn greyed, and not loaded here.
  */
-elsewhere: string | null, };
+elsewhere: string | null, 
+/**
+ * The names of the ticked plugins that go with it when it is unticked,
+ * depending on it or on one of those: what the checkbox says first.
+ */
+dependents: Array<string>, };
 
 /**
  * Where a Plugin came from.
@@ -4924,6 +4929,7 @@ export type PluginsView = { installed: Array<PluginRow>,
 /**
  * The ones this binary ships and lists. None yet: the fixture that proves
  * the path is not listed, and the group is drawn only once it has a row.
+ * A built-in has no **Remove**.
  */
 built_in: Array<PluginRow>, };
 

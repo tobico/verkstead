@@ -7,7 +7,13 @@
 //! The reads are fixtures the server's own suite wrote off the real endpoints —
 //! see `crates/server/tests/suite/plugins.rs`.
 
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
@@ -110,7 +116,9 @@ describe("a row", () => {
     const row = await theRow("GitLab");
 
     expect(row.textContent).toContain("On wolf.");
-    expect(row.querySelector("button")).toBeNull();
+    expect(
+      [...row.querySelectorAll("button")].map((button) => button.textContent),
+    ).toEqual(["Remove"]);
   });
 
   it("is disabled by unticking it", async () => {
@@ -235,6 +243,146 @@ describe("a dependency that isn't there", () => {
           String(asked).endsWith("/update"),
         ),
       ).toBe(true),
+    );
+  });
+});
+
+describe("Remove and the checkbox over dependents", () => {
+  const GITLAB = PLUGINS.installed[0]!;
+
+  /// The page with GitLab depended on by two ticked plugins.
+  const DEPENDED: PluginsView = {
+    ...PLUGINS,
+    installed: PLUGINS.installed.map((row) =>
+      row.uuid === GITLAB.uuid ? { ...row, dependents: ["One", "Top"] } : row,
+    ),
+  };
+
+  /// The page with a built-in listed, which Verkstead ships rather than the
+  /// human installing.
+  const BUILT_IN: PluginsView = {
+    ...PLUGINS,
+    built_in: [
+      {
+        ...GITLAB,
+        uuid: "613e2a43-80ee-4307-8623-28969e05330f",
+        name: "Fixture",
+      },
+    ],
+  };
+
+  it("draws no Remove on a built-in row", async () => {
+    serving(whenever("/api/ui/plugins", json(BUILT_IN)));
+    pane();
+
+    const row = await theRow("Fixture");
+
+    expect(row.textContent).not.toContain("Remove");
+    expect((await theRow("GitLab")).textContent).toContain("Remove");
+  });
+
+  it("removes a row once its confirmation is pressed", async () => {
+    const fetching = serving(
+      whenever("/api/ui/plugins", json(PLUGINS)),
+      whenever(
+        `/api/ui/plugins/${GITLAB.uuid}/remove`,
+        json({ ...PLUGINS, installed: PLUGINS.installed.slice(1) }),
+        "POST",
+      ),
+    );
+    pane();
+
+    const row = await theRow("GitLab");
+    fireEvent.click(within(row).getByRole("button", { name: "Remove" }));
+
+    const asking = await waitFor(() =>
+      screen.getByRole("group", { name: "Remove GitLab?" }),
+    );
+    expect(asking.textContent).toContain(
+      "It's taken off every device. Its directory stays.",
+    );
+    expect(fetching.mock.calls.some(([asked]) => String(asked).endsWith("/remove"))).toBe(false);
+
+    fireEvent.click(within(asking).getByRole("button", { name: "Remove" }));
+
+    await waitFor(() => expect(screen.queryByText("GitLab")).toBeNull());
+  });
+
+  it("draws the refusal on the row where plugins depend on it", async () => {
+    const why =
+      "GitLab can't be removed while 2 plugins depend on it: One and Top. Remove them first.";
+    serving(
+      whenever("/api/ui/plugins", json(DEPENDED)),
+      whenever(
+        `/api/ui/plugins/${GITLAB.uuid}/remove`,
+        json({ error: why }, 409),
+        "POST",
+      ),
+    );
+    pane();
+
+    const row = await theRow("GitLab");
+    fireEvent.click(within(row).getByRole("button", { name: "Remove" }));
+    fireEvent.click(
+      within(
+        await waitFor(() => screen.getByRole("group", { name: "Remove GitLab?" })),
+      ).getByRole("button", { name: "Remove" }),
+    );
+
+    await waitFor(() => expect(row.textContent).toContain(why));
+  });
+
+  it("names the dependents before unticking, and unticks on Disable", async () => {
+    const fetching = serving(
+      whenever("/api/ui/plugins", json(DEPENDED)),
+      whenever(
+        `/api/ui/plugins/${GITLAB.uuid}/enabled`,
+        json(PLUGINS),
+        "POST",
+      ),
+    );
+    pane();
+
+    const row = await theRow("GitLab");
+    fireEvent.click(row.querySelector("input[type=checkbox]")!);
+
+    const asking = await waitFor(() =>
+      screen.getByRole("group", { name: "Disable GitLab?" }),
+    );
+    expect(asking.textContent).toContain(
+      "One and Top depend on it, and are disabled with it.",
+    );
+    const pressed = () =>
+      fetching.mock.calls.some(([asked]) => String(asked).endsWith("/enabled"));
+    expect(pressed()).toBe(false);
+
+    fireEvent.click(within(asking).getByRole("button", { name: "Disable" }));
+
+    await waitFor(() => expect(pressed()).toBe(true));
+    const press = fetching.mock.calls.find(([asked]) =>
+      String(asked).endsWith("/enabled"),
+    );
+    expect(JSON.parse(String(press![1]!.body))).toEqual({ enabled: false });
+  });
+
+  it("leaves it ticked when the untick is cancelled", async () => {
+    serving(whenever("/api/ui/plugins", json(DEPENDED)));
+    pane();
+
+    const row = await theRow("GitLab");
+    fireEvent.click(row.querySelector("input[type=checkbox]")!);
+    fireEvent.click(
+      within(
+        await waitFor(() => screen.getByRole("group", { name: "Disable GitLab?" })),
+      ).getByRole("button", { name: "Cancel" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("group", { name: "Disable GitLab?" })).toBeNull(),
+    );
+    expect(row.querySelector("input[type=checkbox]")).toHaveProperty(
+      "checked",
+      true,
     );
   });
 });

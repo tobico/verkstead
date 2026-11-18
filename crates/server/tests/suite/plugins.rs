@@ -722,6 +722,130 @@ async fn unticking_a_dependency_puts_its_dependent_in_trouble_until_ticked() {
     assert_eq!(row(&view, TOP).trouble, None);
 }
 
+/// Remove on a git plugin nothing depends on takes its row off the page and
+/// deletes its clone; a local plugin's own directory stays where it is.
+#[tokio::test]
+async fn remove_takes_the_row_off_and_deletes_a_git_checkout() {
+    let (app, dir) = kept().await;
+    let sources = tempfile::tempdir().unwrap();
+    let (url, _) = repository(sources.path(), "gitlab", &manifest(PLUGIN, "GitLab", &[]));
+    let local = plugin(dir.path(), "base", &manifest(ANOTHER, BASE, &[]));
+    installs(&app, &url).await;
+    installs(&app, &local).await;
+    assert_eq!(plugins_dir(dir.path()), [PLUGIN]);
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{PLUGIN}/remove"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let view: PluginsView = serde_json::from_str(&said).unwrap();
+    assert!(view.installed.iter().all(|row| row.uuid != PLUGIN));
+    assert_eq!(plugins_dir(dir.path()), Vec::<String>::new());
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{ANOTHER}/remove"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(page(&app).await.installed.is_empty());
+    assert!(
+        Path::new(&local).join("plugin.yaml").is_file(),
+        "a local plugin's directory is the human's own",
+    );
+}
+
+/// Remove on a plugin installed plugins depend on is refused, counting and
+/// naming them, ticked or not, and nothing is removed. A built-in has no
+/// record to remove.
+#[tokio::test]
+async fn remove_is_refused_while_installed_plugins_depend_on_it() {
+    let (app, dir) = kept().await;
+    let base = plugin(dir.path(), "base", &manifest(ANOTHER, BASE, &[]));
+    let one = plugin(
+        dir.path(),
+        "one",
+        &depending(&manifest(PLUGIN, "One", &[]), ANOTHER, BASE, "^1", None),
+    );
+    const TWO: &str = "6a5b4c3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d";
+    let two = plugin(
+        dir.path(),
+        "two",
+        &depending(&manifest(TWO, "Two", &[]), ANOTHER, BASE, "^1", None),
+    );
+    installs(&app, &base).await;
+    installs(&app, &one).await;
+    installs(&app, &two).await;
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{TWO}/enabled"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{ANOTHER}/remove"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(
+        said.contains("Base can't be removed while 2 plugins depend on it: One and Two."),
+        "{said}"
+    );
+    assert_eq!(page(&app).await.installed.len(), 3);
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{FIXTURE}/remove"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{said}");
+}
+
+/// A row names the ticked plugins that go with it when it is unticked: those
+/// depending on it and on those in turn, and not one already unticked.
+#[tokio::test]
+async fn a_row_names_what_goes_with_it_when_unticked() {
+    let (app, dir) = kept().await;
+    let base = plugin(dir.path(), "base", &manifest(ANOTHER, BASE, &[]));
+    let one = plugin(
+        dir.path(),
+        "one",
+        &depending(&manifest(PLUGIN, "One", &[]), ANOTHER, BASE, "^1", None),
+    );
+    const TOP: &str = "6a5b4c3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d";
+    let top = plugin(
+        dir.path(),
+        "top",
+        &depending(&manifest(TOP, "Top", &[]), PLUGIN, "One", "^1", None),
+    );
+    installs(&app, &base).await;
+    installs(&app, &one).await;
+    let view = installs(&app, &top).await;
+
+    assert_eq!(row(&view, ANOTHER).dependents, ["One", "Top"]);
+    assert_eq!(row(&view, PLUGIN).dependents, ["Top"]);
+    assert!(row(&view, TOP).dependents.is_empty());
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{TOP}/enabled"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let view: PluginsView = serde_json::from_str(&said).unwrap();
+    assert_eq!(row(&view, ANOTHER).dependents, ["One"]);
+}
+
 const FIXTURES: &str = "../../web/tests/fixtures";
 
 /// Leave the viewer's tests the page and the consent card as the server writes

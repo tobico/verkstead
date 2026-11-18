@@ -26,6 +26,12 @@
 //! dependency names, through the same consent card, or **Update** on the
 //! dependency's own row. A disabled one is ticked on its own row, which the
 //! trouble says.
+//!
+//! **Unticking is allowed over what stands on a plugin; Remove is refused by
+//! it** (Set 1769, Q45). Unticking one that ticked plugins depend on asks
+//! first, naming the ones that go with it. **Remove** asks too, saying what
+//! goes, and the server refuses it while installed plugins depend on it,
+//! counting and naming them on the row. A built-in has no Remove.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -45,6 +51,7 @@ import {
   installPlugin,
   loadPlugins,
   readPlugin,
+  removePlugin,
   updatePlugin,
 } from "../api/client";
 import type {
@@ -204,11 +211,18 @@ export function PluginsPane(props: {
     }
   };
 
+  const removing = useMutation(() => ({
+    mutationFn: (uuid: string) => removePlugin(uuid),
+    onSuccess: read,
+    onError: (error: Error, uuid) => setRefused({ uuid, why: error.message }),
+  }));
+
   const pressing = (): boolean =>
     enable.isPending ||
     update.isPending ||
     fetching.isPending ||
-    installing.isPending;
+    installing.isPending ||
+    removing.isPending;
 
   return (
     <>
@@ -251,6 +265,7 @@ export function PluginsPane(props: {
                           update={() =>
                             update.mutate({ uuid: row.uuid, granted: null })
                           }
+                          remove={() => removing.mutate(row.uuid)}
                           fix={(need) => fix(row.uuid, need)}
                           refused={
                             refused()?.uuid === row.uuid
@@ -351,6 +366,9 @@ function Row(props: {
   /// **Update**, where the row has one: a git plugin, or a local plugin on
   /// this device.
   update?: () => void;
+  /// **Remove**, where the row has one: every installed plugin, and no
+  /// built-in.
+  remove?: () => void;
   /// A press on one of its needs, where the row has trouble a press puts
   /// right.
   fix?: (need: PluginNeed) => void;
@@ -361,6 +379,18 @@ function Row(props: {
 }): JSX.Element {
   /// The version and the author, as one quiet line beside the name.
   const facts = (): string => `${props.of.version} · ${props.of.author}`;
+
+  /// The press waiting on its confirmation: an untick that takes ticked
+  /// dependents with it, or **Remove**.
+  const [asking, setAsking] = createSignal<"disable" | "remove" | null>(null);
+
+  const flip = (enabled: boolean): void => {
+    if (!enabled && props.of.dependents.length > 0) {
+      setAsking("disable");
+      return;
+    }
+    props.flip(enabled);
+  };
 
   return (
     <li
@@ -377,8 +407,8 @@ function Row(props: {
             </>
           }
           on={props.of.enabled}
-          disabled={props.pressing}
-          flip={props.flip}
+          disabled={props.pressing || asking() !== null}
+          flip={flip}
         />
 
         <Show when={props.update !== undefined && props.of.elsewhere === null}>
@@ -391,7 +421,52 @@ function Row(props: {
             Update
           </button>
         </Show>
+
+        <Show when={props.remove !== undefined}>
+          <button
+            type="button"
+            class={styles.press}
+            disabled={props.pressing || asking() !== null}
+            onClick={() => setAsking("remove")}
+          >
+            Remove
+          </button>
+        </Show>
       </div>
+
+      <Show when={asking() === "disable"}>
+        <Confirming
+          question={`Disable ${props.of.name}?`}
+          consequence={`${listed(props.of.dependents)} ${
+            props.of.dependents.length === 1 ? "depends" : "depend"
+          } on it, and ${
+            props.of.dependents.length === 1 ? "is" : "are"
+          } disabled with it.`}
+          verb="Disable"
+          act={() => {
+            setAsking(null);
+            props.flip(false);
+          }}
+          cancel={() => setAsking(null)}
+        />
+      </Show>
+
+      <Show when={asking() === "remove"}>
+        <Confirming
+          question={`Remove ${props.of.name}?`}
+          consequence={
+            props.of.source.kind === "Git"
+              ? "It's taken off every device, and each device's clone of it is deleted."
+              : "It's taken off every device. Its directory stays."
+          }
+          verb="Remove"
+          act={() => {
+            setAsking(null);
+            props.remove?.();
+          }}
+          cancel={() => setAsking(null)}
+        />
+      </Show>
 
       <Show when={props.of.provides.length > 0}>
         <p class={styles.provides}>Provides {props.of.provides.join(", ")}.</p>
@@ -430,6 +505,43 @@ function Row(props: {
       {props.children}
     </li>
   );
+}
+
+/// A press's confirmation under its row: the question naming the act, what
+/// follows from it, and the act's verb against **Cancel**.
+function Confirming(props: {
+  question: string;
+  consequence: string;
+  verb: string;
+  act: () => void;
+  cancel: () => void;
+}): JSX.Element {
+  return (
+    <div class={styles.consent} role="group" aria-label={props.question}>
+      <h3>{props.question}</h3>
+      <p>{props.consequence}</p>
+      <div class={styles.buttons}>
+        <button type="button" onClick={() => props.act()}>
+          {props.verb}
+        </button>
+        <button
+          type="button"
+          class={`${styles.cancel} secondary`}
+          onClick={() => props.cancel()}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/// `names` as a sentence lists them, with the serial comma.
+function listed(names: string[]): string {
+  if (names.length <= 2) {
+    return names.join(" and ");
+  }
+  return `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`;
 }
 
 /// Where a row's plugin came from: its directory, or its repository and the

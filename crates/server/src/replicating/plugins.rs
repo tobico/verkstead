@@ -62,6 +62,12 @@ pub struct Fields {
     pub version: String,
     pub author: String,
     pub provides: Vec<String>,
+
+    /// The uuids of the plugins its manifest depended on when it was last read
+    /// at a press: what keeps those from being removed, and what goes with
+    /// one when it is unticked, read the same on every device.
+    #[serde(default)]
+    pub dependencies: Vec<String>,
 }
 
 /// Where a Plugin came from.
