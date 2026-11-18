@@ -3,8 +3,10 @@
 //! (ADR-0030).
 //!
 //! What is here so far is the reading of one — the manifest's grammar, in
-//! [`manifest`] — which is what `verkstead plugin check` runs and what every
-//! later piece of the loader starts from. The grammar as a plugin's author
-//! reads it is `docs/plugins.md`.
+//! [`manifest`] — and the running of its code, in [`component`]: the two
+//! `verkstead plugin check` runs and every later piece of the loader starts
+//! from. The grammar as a plugin's author reads it is `docs/plugins.md`, and
+//! the interface its component is written against is `wit/plugin.wit`.
 
+pub mod component;
 pub mod manifest;

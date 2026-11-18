@@ -9,12 +9,21 @@
 //! declaration, and one wrong there is found on a machine the author may not
 //! have; a refusal met on some platforms and not others says which.
 //!
-//! Nothing here needs a server: a manifest is a file, and the check is a read.
+//! **And it starts the plugin's component**, where there is one, under the
+//! capabilities the manifest asks for and through the server's own loader: a
+//! component that is not one, needs what Verkstead does not provide, or traps
+//! while it starts is the trouble the page would draw on its row, printed the
+//! same way.
+//!
+//! Nothing here needs a server: a manifest is a file, and the check is a read
+//! and an instantiation in this process.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use clap::Subcommand;
+use verkstead_server::platform::{Environment, Platform, home_dir};
+use verkstead_server::plugins::component;
 use verkstead_server::plugins::manifest::{Manifest, platform_key};
 
 /// Which of the plugin verbs this is.
@@ -22,9 +31,9 @@ use verkstead_server::plugins::manifest::{Manifest, platform_key};
 pub enum What {
     /// Say whether a directory is a plugin Verkstead would load, and why not.
     ///
-    /// Reads its `plugin.yaml` as each of Linux, macOS and Windows would, and
-    /// prints either what the plugin is or the refusal naming the field at
-    /// fault, exiting non-zero on a refusal.
+    /// Reads its `plugin.yaml` as each of Linux, macOS and Windows would and
+    /// starts its component, and prints either what the plugin is or the
+    /// refusal naming the field at fault, exiting non-zero on a refusal.
     Check {
         /// The plugin's directory: the one with `plugin.yaml` at its root.
         dir: PathBuf,
@@ -40,6 +49,20 @@ pub fn plugin(what: What) -> Result<()> {
 fn check(dir: &Path) -> Result<()> {
     match Manifest::check(dir) {
         Ok(manifest) => {
+            if manifest.component.is_some() {
+                let home = home_dir(Platform::HERE, &Environment::of_the_process());
+                let loaded = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?
+                    .block_on(component::load(dir, &manifest, home.as_deref()));
+                if let Err(trouble) = loaded {
+                    bail!(
+                        "{} isn't a plugin Verkstead would load.\n{trouble}",
+                        dir.display()
+                    );
+                }
+            }
+
             let provides: Vec<&str> = manifest
                 .provides
                 .iter()

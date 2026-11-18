@@ -23,6 +23,12 @@ Plugins page draws beside the plugin, says which platforms it was met on where
 it is not all three, and exits non-zero, so the check can stand in a plugin's
 own CI. No server is needed.
 
+Where the manifest names a `component`, the check then starts it, the way the
+server would and under the capabilities the manifest asks for: a file that is
+not a WebAssembly component, one that imports something Verkstead does not
+provide, and one that traps while it starts are each refused the same way,
+with the sentence the Plugins page would draw on the plugin's row.
+
 ## The smallest plugin
 
 ```yaml
@@ -109,7 +115,14 @@ An empty list, or none, is a plugin that provides nothing.
 
 **`component`** — optional. A path to a `.wasm` file inside the plugin's
 directory: the wasm component that holds the plugin's code, where any of it is
-code.
+code. It is a WebAssembly **component** built for WASI 0.2 — Rust's
+`wasm32-wasip2` target makes one — and is written against a world of
+Verkstead's WIT package, `verkstead:plugin` (`crates/server/wit/plugin.wit`):
+the base world `plugin`, or the world of a Category it provides. None of those
+worlds holds anything yet; each Category's stage fills its own.
+
+The component may import WASI 0.2 and WASI HTTP, and nothing else. What any of
+it reaches is what `capabilities` grants, below.
 
 **`capabilities`** — optional, a list. A wasm component reaches nothing until
 its manifest asks, and what it asks for is shown to the human at **Install**
@@ -124,10 +137,18 @@ capabilities:
   - environment: GITLAB_HOST          # a variable it may read
 ```
 
-- **`filesystem`** — a path on the host, with `access` either `read-only` (the
-  default) or `read-write`.
-- **`outbound`** — a host it may open connections to.
-- **`environment`** — an environment variable it may read.
+- **`filesystem`** — a directory on the host, with `access` either
+  `read-only` (the default) or `read-write`. The component is handed it as a
+  WASI preopen named by the path, with a leading `~` spelt out as the home
+  directory, and it is the only filesystem the component has: a path outside
+  every granted directory cannot be opened at all. A granted directory that
+  does not exist yet is not handed over; a granted path that is a file is
+  refused when the component starts.
+- **`outbound`** — a host it may send HTTP requests to, through WASI HTTP. A
+  request to any other host is refused before a connection is made. Raw
+  sockets and name lookups are not granted, whatever is asked.
+- **`environment`** — an environment variable it may read, with the value
+  Verkstead's own process has. No other variable is set.
 
 Any other kind is refused, and so is an entry naming two.
 
