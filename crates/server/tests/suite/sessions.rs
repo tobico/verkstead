@@ -4300,7 +4300,7 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
         "the grilling Profile's model is what the session runs on, not the implementation one's: {said:?}"
     );
     assert!(
-        said.contains("/verkstead/skills/grilling/SKILL.md"),
+        said.contains("/verkstead/skills/verkstead/grilling/SKILL.md"),
         "the session is sent into the bundled grilling skill by the prompt, nothing inside \
          saying what the session is for — a global instructions file there holds the \
          human's own text and never Verkstead's: {said:?}"
@@ -6652,7 +6652,7 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
         "the work runs under the implementation Profile, not the one that grilled: {said:?}"
     );
     assert!(
-        said.contains("/verkstead/skills/implementing/SKILL.md"),
+        said.contains("/verkstead/skills/verkstead/implementing/SKILL.md"),
         "and inside the bundled implementation skill: {said:?}"
     );
     assert!(
@@ -6922,7 +6922,7 @@ async fn a_later_pick_moves_the_watcher_onto_the_artifact_it_asked_for() {
 
     assert!(
         said.contains("model=claude-implementation-5")
-            && said.contains("/verkstead/skills/next-task/SKILL.md"),
+            && said.contains("/verkstead/skills/verkstead/next-task/SKILL.md"),
         "the backlog is being worked, which is where a task-list pick leads: {said:?}"
     );
     assert_eq!(
@@ -6996,7 +6996,7 @@ async fn a_restarted_server_grills_the_work_again_rather_than_raising_anything()
     let printed = fixture.capture(said).await.replace("\r\n", "\n");
 
     assert!(
-        printed.contains("/verkstead/skills/grilling/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/grilling/SKILL.md"),
         "a grilling started again is a grilling: {printed:?}",
     );
     assert!(
@@ -7301,7 +7301,7 @@ async fn choosing_a_task_list_breaks_the_work_down_in_the_grilling_session() {
         case "$1" in
         claude-grilling-5)
             printf 'model=%s\n' "$1"
-            grep '^name:' "/verkstead/skills/breaking-down/SKILL.md"
+            grep '^name:' "/verkstead/skills/verkstead/breaking-down/SKILL.md"
             printf '# A document nobody asked for\n' > /tmp/verkstead/handoff.md
             : > /tmp/verkstead/done
             mkdir -p .tasks
@@ -7396,8 +7396,8 @@ async fn choosing_a_task_list_breaks_the_work_down_in_the_grilling_session() {
         "the task run is the implementation Profile's, as the work it does is: {next:?}"
     );
     assert!(
-        next.contains("/verkstead/skills/next-task/SKILL.md")
-            && !next.contains("/verkstead/skills/breaking-down/SKILL.md"),
+        next.contains("/verkstead/skills/verkstead/next-task/SKILL.md")
+            && !next.contains("/verkstead/skills/verkstead/breaking-down/SKILL.md"),
         "and it is the first task rather than a second breakdown: {next:?}"
     );
 
@@ -7441,7 +7441,7 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
         case "$1" in
         claude-grilling-5)
             printf 'model=%s\n' "$1"
-            grep '^name:' "/verkstead/skills/staging/SKILL.md"
+            grep '^name:' "/verkstead/skills/verkstead/staging/SKILL.md"
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             : > /tmp/verkstead/done
             mkdir -p docs/roadmaps/rate-limiting
@@ -7666,7 +7666,7 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
             next=$(ls .tasks | grep -E "^$number-" | head -n 1)
             if [ -n "$next" ]; then
                 printf 'working %s\n' "$next"
-                printf 'skill=%s\n' "$(grep '^name:' "/verkstead/skills/next-task/SKILL.md")"
+                printf 'skill=%s\n' "$(grep '^name:' "/verkstead/skills/verkstead/next-task/SKILL.md")"
                 printf 'a limiter\n' >> limiter.md
                 sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
                 git add -A
@@ -19802,7 +19802,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         "the stage plans under the implementation Profile: {prompt:?}",
     );
     assert!(
-        prompt.contains("/verkstead/skills/next-stage/SKILL.md"),
+        prompt.contains("/verkstead/skills/verkstead/next-stage/SKILL.md"),
         "inside the bundled fork of next-stage: {prompt:?}",
     );
     assert!(
@@ -19819,7 +19819,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     let working = until_written(&worked).await;
 
     assert!(
-        working.contains("/verkstead/skills/next-task/SKILL.md"),
+        working.contains("/verkstead/skills/verkstead/next-task/SKILL.md"),
         "the stage's backlog is worked by the same runner a feature's is: {working:?}",
     );
 
@@ -22199,7 +22199,7 @@ async fn a_stage_clears_the_task_list_the_branch_it_stands_on_carried() {
     let prompt = until_written(&planning).await;
 
     assert!(
-        prompt.contains("/verkstead/skills/next-stage/SKILL.md"),
+        prompt.contains("/verkstead/skills/verkstead/next-stage/SKILL.md"),
         "the stage still plans: {prompt:?}",
     );
 }
@@ -24819,7 +24819,7 @@ async fn adopting_a_roadmap_starts_its_next_stage_with_a_planning_session() {
         "an adopted stage plans under the implementation Profile: {prompt:?}",
     );
     assert!(
-        prompt.contains("/verkstead/skills/next-stage/SKILL.md"),
+        prompt.contains("/verkstead/skills/verkstead/next-stage/SKILL.md"),
         "inside the bundled fork of next-stage: {prompt:?}",
     );
     assert!(
@@ -24957,7 +24957,7 @@ async fn resuming_a_stage_that_never_planned_runs_the_planning_again() {
         "the planning ran twice and no more: {planned:?}",
     );
     assert!(
-        prompts(&planned)[1].contains("/verkstead/skills/next-stage/SKILL.md"),
+        prompts(&planned)[1].contains("/verkstead/skills/verkstead/next-stage/SKILL.md"),
         "the second one is the fork of next-stage as well: {planned:?}",
     );
     assert!(
@@ -24968,7 +24968,7 @@ async fn resuming_a_stage_that_never_planned_runs_the_planning_again() {
     // And the run carried on from what the planning committed, which is what a
     // stage's first step landing means: the backlog is worked from here.
     assert!(
-        started.contains("/verkstead/skills/next-task/SKILL.md"),
+        started.contains("/verkstead/skills/verkstead/next-task/SKILL.md"),
         "the backlog it wrote is being worked: {started:?}",
     );
 
@@ -29017,7 +29017,7 @@ async fn resuming_a_stalled_backlog_run_takes_the_next_task_off_the_repository()
     let printed = fixture.capture(said).await.replace("\r\n", "\n");
 
     assert!(
-        printed.contains("/verkstead/skills/next-task/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/next-task/SKILL.md"),
         "the run picks the backlog up again, which is the fork that reads it: {printed:?}",
     );
     assert!(
@@ -29279,7 +29279,7 @@ async fn resuming_an_inline_run_with_no_pull_request_builds_the_work_again() {
     let printed = fixture.capture(said).await.replace("\r\n", "\n");
 
     assert!(
-        printed.contains("/verkstead/skills/implementing/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/implementing/SKILL.md"),
         "an inline run picked up again is an inline run: {printed:?}",
     );
     assert!(
@@ -29651,7 +29651,7 @@ async fn resuming_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_se
     let printed = fixture.capture(said).await.replace("\r\n", "\n");
 
     assert!(
-        printed.contains("/verkstead/skills/grilling/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/grilling/SKILL.md"),
         "a grilling started again is a grilling: {printed:?}",
     );
     assert!(
@@ -29880,7 +29880,7 @@ async fn steering_a_stalled_backlog_run_into_implementing_works_the_next_task() 
     let printed = fixture.printed_after(before).await;
 
     assert!(
-        printed.contains("/verkstead/skills/next-task/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/next-task/SKILL.md"),
         "the run picks the backlog up again, which is the fork that reads it: \
          {printed:?}",
     );
@@ -30023,7 +30023,7 @@ async fn steering_into_implementing_carries_on_a_backlog_whose_worktree_has_gone
     let printed = fixture.printed_after(before).await;
 
     assert!(
-        printed.contains("/verkstead/skills/next-task/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/next-task/SKILL.md"),
         "the run picks the backlog up again, which is the fork that reads it: \
          {printed:?}",
     );
@@ -30302,7 +30302,7 @@ async fn an_instruction_session_that_commits_wraps_the_pull_request_up_again() {
     let printed = fixture.printed_after(before).await;
 
     assert!(
-        printed.contains("/verkstead/skills/instruction/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/instruction/SKILL.md"),
         "the session is put inside the instruction skill, which is the one that \
          says the pipeline carries on after it: {printed:?}",
     );
@@ -30755,7 +30755,7 @@ async fn a_tinker_starts_the_follow_ups_own_session_on_the_brief() {
          {prompt:?}",
     );
     assert!(
-        prompt.contains("/verkstead/skills/following-up/SKILL.md"),
+        prompt.contains("/verkstead/skills/verkstead/following-up/SKILL.md"),
         "inside the follow-up skill, which is the one that keeps asking until \
          the human is finished: {prompt:?}",
     );
@@ -30909,7 +30909,7 @@ async fn resume_tinkers_again_on_the_brief_and_the_rounds_answered() {
         .await;
 
     assert!(
-        relaunched.contains("/verkstead/skills/following-up/SKILL.md"),
+        relaunched.contains("/verkstead/skills/verkstead/following-up/SKILL.md"),
         "the press starts the follow-up again rather than anything else: \
          {relaunched:?}",
     );
@@ -30992,12 +30992,12 @@ async fn an_investigate_starts_the_investigating_session_on_the_brief() {
          {prompt:?}",
     );
     assert!(
-        prompt.contains("/verkstead/skills/investigating/SKILL.md"),
+        prompt.contains("/verkstead/skills/verkstead/investigating/SKILL.md"),
         "inside the investigating skill, which is the one that keeps asking and \
          commits nothing: {prompt:?}",
     );
     assert!(
-        !prompt.contains("/verkstead/skills/following-up/SKILL.md"),
+        !prompt.contains("/verkstead/skills/verkstead/following-up/SKILL.md"),
         "and in no other: an investigation is not a follow-up: {prompt:?}",
     );
     assert!(
@@ -31067,7 +31067,7 @@ async fn resume_investigates_again_on_the_brief_and_the_rounds_answered() {
         .await;
 
     assert!(
-        relaunched.contains("/verkstead/skills/investigating/SKILL.md"),
+        relaunched.contains("/verkstead/skills/verkstead/investigating/SKILL.md"),
         "the press starts the investigation again rather than anything else: \
          {relaunched:?}",
     );
@@ -31975,7 +31975,7 @@ async fn steering_into_follow_up_runs_the_skill_on_the_brief_and_is_never_swept(
     let printed = fixture.printed_after(before).await;
 
     assert!(
-        printed.contains("/verkstead/skills/following-up/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/following-up/SKILL.md"),
         "the session is put inside the follow-up skill, which is the one that \
          says to keep asking until the human is finished: {printed:?}",
     );
@@ -32105,12 +32105,12 @@ async fn steering_into_investigating_runs_the_skill_on_the_question_it_was_given
     let prompt = started[0];
 
     assert!(
-        prompt.contains("/verkstead/skills/investigating/SKILL.md"),
+        prompt.contains("/verkstead/skills/verkstead/investigating/SKILL.md"),
         "inside the investigating skill, which is the one that keeps asking and \
          commits nothing: {prompt:?}",
     );
     assert!(
-        !prompt.contains("/verkstead/skills/following-up/SKILL.md"),
+        !prompt.contains("/verkstead/skills/verkstead/following-up/SKILL.md"),
         "and in no other: an investigation is not a follow-up: {prompt:?}",
     );
     assert!(
@@ -36102,7 +36102,7 @@ esac
     let printed = fixture.printed_after(before + 1).await;
 
     assert!(
-        printed.contains("/verkstead/skills/next-task/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/next-task/SKILL.md"),
         "and once it committed and signalled again the pipeline carried on: \
          {printed:?}",
     );
@@ -36486,7 +36486,7 @@ async fn resume_follows_the_work_up_again_on_the_brief_and_the_rounds_answered()
     let printed = fixture.printed_after(before).await;
 
     assert!(
-        printed.contains("/verkstead/skills/following-up/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/following-up/SKILL.md"),
         "the press starts a follow-up rather than anything else: {printed:?}",
     );
     assert!(
@@ -36555,7 +36555,7 @@ async fn a_restart_follows_the_work_up_again_rather_than_raising_anything() {
     let printed = fixture.printed_after(before).await;
 
     assert!(
-        printed.contains("/verkstead/skills/following-up/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/following-up/SKILL.md"),
         "the restart follows the work up again, with nobody having pressed \
          anything: {printed:?}",
     );
@@ -36672,14 +36672,14 @@ async fn an_instruction_session_over_a_backlog_hands_on_to_the_next_task() {
     let printed = fixture.printed_after(before).await;
 
     assert!(
-        printed.contains("/verkstead/skills/instruction/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/instruction/SKILL.md"),
         "what the human wrote goes first, whatever the branch holds: {printed:?}",
     );
 
     let printed = fixture.printed_after(before + 1).await;
 
     assert!(
-        printed.contains("/verkstead/skills/next-task/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/next-task/SKILL.md"),
         "and then the run carries on where it stood, which is the fork that \
          reads the backlog: {printed:?}",
     );
@@ -36809,7 +36809,7 @@ async fn steering_into_grilling_primes_the_digest_only_where_it_was_asked_for() 
     let printed = fixture.printed_after(before).await;
 
     assert!(
-        printed.contains("/verkstead/skills/grilling/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/grilling/SKILL.md"),
         "a grilling steered into is a grilling: {printed:?}",
     );
     assert!(
@@ -37614,7 +37614,7 @@ async fn a_restarted_server_works_the_backlog_it_was_left_implementing() {
     let printed = fixture.capture(said).await.replace("\r\n", "\n");
 
     assert!(
-        printed.contains("/verkstead/skills/next-task/SKILL.md"),
+        printed.contains("/verkstead/skills/verkstead/next-task/SKILL.md"),
         "the backlog is picked up again, which is the fork that reads it: {printed:?}",
     );
 
@@ -37775,7 +37775,7 @@ async fn a_halt_nobody_chose_is_driven_again_by_the_next_server() {
     let printed = fixture.capture(said).await.replace("\r\n", "\n");
 
     assert!(
-        printed.contains("/verkstead/skills/grilling/SKILL.md")
+        printed.contains("/verkstead/skills/verkstead/grilling/SKILL.md")
             && printed.contains("The API has none."),
         "a fresh grilling on the Brief, which is what the button would have \
          started: {printed:?}",
@@ -39807,7 +39807,7 @@ async fn a_stage_wanting_this_devices_platform_is_planned_here_unmoved() {
 
     let prompt = until_written(&planning).await;
     assert!(
-        prompt.contains("/verkstead/skills/next-stage/SKILL.md"),
+        prompt.contains("/verkstead/skills/verkstead/next-stage/SKILL.md"),
         "the stage is planned here: {prompt:?}",
     );
     assert!(
@@ -41559,7 +41559,7 @@ async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
     let relaunched = fixture.printed_after(before).await;
 
     assert!(
-        relaunched.contains("/verkstead/skills/grilling/SKILL.md")
+        relaunched.contains("/verkstead/skills/verkstead/grilling/SKILL.md")
             && relaunched.contains("**The limiter's test**")
             && relaunched.contains("The limiter's test flakes."),
         "a relaunched grilling is told the memo standing: {relaunched:?}",
@@ -41586,7 +41586,7 @@ async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
     let instructed = fixture.printed_after(before).await;
 
     assert!(
-        instructed.contains("/verkstead/skills/instruction/SKILL.md")
+        instructed.contains("/verkstead/skills/verkstead/instruction/SKILL.md")
             && instructed.contains("**The limiter's test**"),
         "and so is a steered instruction: {instructed:?}",
     );
@@ -41717,7 +41717,7 @@ async fn a_steered_instruction_is_told_the_previews_and_a_grilling_is_not() {
     let relaunched = fixture.printed_after(before).await;
 
     assert!(
-        relaunched.contains("/verkstead/skills/grilling/SKILL.md")
+        relaunched.contains("/verkstead/skills/verkstead/grilling/SKILL.md")
             && !relaunched.contains("previews standing"),
         "nor does a relaunched one, with a Preview standing: {relaunched:?}",
     );
@@ -41735,7 +41735,7 @@ async fn a_steered_instruction_is_told_the_previews_and_a_grilling_is_not() {
     let instructed = fixture.printed_after(before).await;
 
     assert!(
-        instructed.contains("/verkstead/skills/instruction/SKILL.md")
+        instructed.contains("/verkstead/skills/verkstead/instruction/SKILL.md")
             && instructed.contains(&format!(
                 "# The previews standing\n\n\
                  **Build and test**\n\n    cargo run -- serve\n\n\
