@@ -26,8 +26,9 @@ own CI. No server is needed.
 Where the manifest names a `component`, the check then starts it, the way the
 server would and under the capabilities the manifest asks for: a file that is
 not a WebAssembly component, one that imports something Verkstead does not
-provide, and one that traps while it starts are each refused the same way,
-with the sentence the Plugins page would draw on the plugin's row.
+provide, one that traps while it starts, and one still starting after ten
+seconds, which is stopped there, are each refused the same way, with the
+sentence the Plugins page would draw on the plugin's row.
 
 ## Installing one from a directory
 
