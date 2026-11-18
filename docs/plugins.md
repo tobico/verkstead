@@ -645,6 +645,21 @@ install instructions; **`commands`** are lines that install its binary, run
 only when the human presses for it. Write a platform's own under that
 platform's block.
 
+While the plugin is enabled, its harness is a row of the setup wizard's first
+step, after the built-ins: present once `binary` is on a session's PATH, the
+same walk the built-ins' rows are. Ticking the row and pressing Next runs the
+`commands`, joined with `&&`, as the user that runs Verkstead — PowerShell
+behind the elevation dialog on Windows, where every install is — in the same
+install run as everything else on the step. The plugin's row on the Plugins
+page offers the same press, **Install**, where the binary is missing. Nothing
+else runs them. The by-hand screen shows the `commands` and the
+`instructions` link; a harness with neither says so.
+
+**Disabling** the plugin keeps its Profiles: they are offered on no picker, a
+remembered Pairing on one is not applied, and a session already running under
+it finishes. Its row says how many Profiles use it, and **Remove** is refused
+while any do.
+
 **`login`** — optional: how Verkstead logs a Profile of it in. **`line`** is the
 words after the binary that log in, **`status`** the words that ask whether
 the account is logged in, and **`terminal`**, `false` unless it says

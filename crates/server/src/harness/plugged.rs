@@ -29,7 +29,8 @@ use std::time::{Duration, SystemTime};
 use verkstead_render::{Broken, ProfileSaved};
 
 use super::{
-    Carrying, Declared, HOME_REFUSED, Harness, Line, ReadIn, Resume, SETTINGS_FILE, SignedOut,
+    Carrying, Declared, HOME_REFUSED, Harness, Install, Line, ReadIn, Resume, SETTINGS_FILE,
+    SignedOut,
 };
 use crate::logins::Speaking;
 use crate::platform::Platform;
@@ -473,6 +474,13 @@ impl Harness for Plugged {
     /// The section the manifest wrote under `ask.guide`.
     fn running(&self) -> &str {
         &self.agent.ask.guide
+    }
+
+    fn install(&self) -> Option<Install<'_>> {
+        Some(Install {
+            instructions: self.agent.install.instructions.as_deref(),
+            commands: &self.agent.install.commands,
+        })
     }
 }
 

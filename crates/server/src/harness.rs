@@ -409,6 +409,24 @@ pub(crate) trait Harness: Send + Sync {
     /// harness's own rather than its channel's — see the CLI's `guide`, which
     /// fetches it through [`running`].
     fn running(&self) -> &str;
+
+    /// How its binary is put on a machine, as a plugin's manifest declares it
+    /// for this one — or `None` for a built-in, whose installs are the wizard's
+    /// own, a unit per platform: see [`crate::onboarding`]'s install run, which
+    /// runs these commands on a press and at no other time.
+    fn install(&self) -> Option<Install<'_>> {
+        None
+    }
+}
+
+/// How a plugin's harness is installed — see [`Harness::install`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Install<'a> {
+    /// Where its own install instructions are.
+    pub(crate) instructions: Option<&'a str>,
+
+    /// The lines that install it, each one shell line of this platform's.
+    pub(crate) commands: &'a [String],
 }
 
 /// The *Running the ask* section of the harness `agent_type`, with how its
@@ -495,6 +513,23 @@ pub(crate) fn every() -> impl Iterator<Item = (store::AgentType, &'static dyn Ha
 /// [`Harness::channel`]. Blocking for a harness this server has not got.
 pub(crate) fn channel(agent_type: store::AgentType) -> store::Channel {
     of(agent_type).map_or(store::Channel::Blocking, |harness| harness.channel())
+}
+
+/// The program every harness a plugin has declared in this process is run as,
+/// for the sandbox to follow into its install as it follows the built-ins' —
+/// see [`crate::sandbox::installs`].
+///
+/// Every one this process has stood up rather than the ones this server
+/// offers: what is granted is the directories a link of that name leads
+/// through under the home, read-only, so one more name followed is one more
+/// install a session can open and nothing else.
+pub(crate) fn plugged_binaries() -> Vec<&'static str> {
+    PLUGGED
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .values()
+        .map(|plugged| plugged.binary())
+        .collect()
 }
 
 /// Every harness built into this binary.

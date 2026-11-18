@@ -248,11 +248,25 @@ pub enum InstallState {
 
 /// What a row is about.
 ///
-/// Flat rather than a harness variant carrying an [`crate::AgentType`]: the
-/// step draws nine rows with an instruction apiece, and which of them are
-/// harnesses is a fact about the objective rather than about the drawing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+/// **A harness's row is the harness**, by its id: the five built-ins and every
+/// harness an enabled Agent plugin declares (ADR-0030, *Agent*), so which of
+/// them a machine is asked about is the harness list's to say rather than a
+/// closed word list's here.
+///
+/// **One string on the wire**, the way it always was: `Sandbox`, `Git`, `Gh`,
+/// `Wsl`, or the harness's id — and a built-in's id is the word its row was
+/// called before a harness could be a plugin's, `Claude` to `Agy`, so a
+/// built-in's row reads exactly as it did. A plugin's id is its uuid, which
+/// none of the four words is.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "typescript",
+    derive(TS),
+    ts(
+        export_to = "types.ts",
+        type = "\"Sandbox\" | \"Git\" | \"Gh\" | \"Wsl\" | AgentType"
+    )
+)]
 pub enum Dependency {
     /// What a session is run inside: `bwrap` on Linux, the seatbelt on macOS,
     /// and on Windows the local account of Verkstead's own that a session runs
@@ -263,11 +277,8 @@ pub enum Dependency {
     /// Which is not optional: every Conversation is a branch and a worktree.
     Git,
 
-    Claude,
-    Codex,
-    Grok,
-    OpenCode,
-    Agy,
+    /// A harness, which a session needs one of.
+    Harness(crate::AgentType),
 
     /// The one row that never gates, GitHub being a choice rather than a
     /// dependency — see the objective in ADR-0016.
@@ -278,6 +289,53 @@ pub enum Dependency {
     /// until WSL answers, and it never gates — a session on this machine
     /// needs none of it.
     Wsl,
+}
+
+impl Dependency {
+    /// The word a row that is not a harness is said as.
+    const WORDS: [(&'static str, Dependency); 4] = [
+        ("Sandbox", Dependency::Sandbox),
+        ("Git", Dependency::Git),
+        ("Gh", Dependency::Gh),
+        ("Wsl", Dependency::Wsl),
+    ];
+
+    /// The row as the wire says it.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Dependency::Harness(id) => id.as_str(),
+            row => Dependency::WORDS
+                .iter()
+                .find(|(_, word)| word == row)
+                .map(|(said, _)| *said)
+                .expect("every row that is not a harness has a word"),
+        }
+    }
+
+    /// And back again: one of the four words, or a harness's id.
+    pub fn read(said: &str) -> Dependency {
+        Dependency::WORDS
+            .iter()
+            .find(|(word, _)| *word == said)
+            .map_or_else(
+                || Dependency::Harness(crate::AgentType(said.to_owned().into())),
+                |(_, row)| row.clone(),
+            )
+    }
+}
+
+impl Serialize for Dependency {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for Dependency {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let said = String::deserialize(deserializer)?;
+
+        Ok(Dependency::read(&said))
+    }
 }
 
 /// And whether the machine has it.

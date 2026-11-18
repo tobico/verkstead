@@ -335,7 +335,7 @@ async fn filled(
 
     usable(
         state,
-        crate::pairing_defaults::platform_default(profiles, role),
+        crate::pairing_defaults::platform_default(profiles, role, &state.plugins.harnesses()),
     )
     .await
 }

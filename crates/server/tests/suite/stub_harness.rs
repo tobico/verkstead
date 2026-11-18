@@ -64,7 +64,18 @@ pub(crate) enum StubHarness {
     /// manifest was installed last in this process, and every other variant is
     /// installed with more than one list.
     Offering,
+
+    /// As [`StubHarness::Silent`], declaring the command that installs its
+    /// binary: `/bin/sh` running [`INSTALLER`] from the home of whoever runs the
+    /// server, named in full because what the line searches is the machine's
+    /// `PATH`.
+    /// The only one declaring an install.
+    Installing,
 }
+
+/// The script an installing stub harness's install command runs, said from
+/// the home it runs under.
+pub(crate) const INSTALLER: &str = "install-stub-harness.sh";
 
 impl StubHarness {
     /// Its plugin's uuid, which is the harness's id.
@@ -75,14 +86,16 @@ impl StubHarness {
             StubHarness::DrawingBlocking => "7d2e3c4f-5a6b-4c7d-8e8f-9a0b1c2d3e4f",
             StubHarness::LoggingIn => "8e3f4d5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a",
             StubHarness::Offering => "9f4a5e6b-7c8d-4e9f-8a1b-2c3d4e5f6a7b",
+            StubHarness::Installing => "a05b6f7c-8d9e-4fa0-9b1c-3d4e5f6a7b8c",
         }
     }
 
     fn idle(self) -> String {
         match self {
-            StubHarness::Silent | StubHarness::LoggingIn | StubHarness::Offering => {
-                "    idle: silence\n".to_owned()
-            }
+            StubHarness::Silent
+            | StubHarness::LoggingIn
+            | StubHarness::Offering
+            | StubHarness::Installing => "    idle: silence\n".to_owned(),
             StubHarness::Drawing | StubHarness::DrawingBlocking => {
                 format!("    idle:\n      signature: \"{AT_WORK}\"\n")
             }
@@ -95,7 +108,8 @@ impl StubHarness {
             StubHarness::Silent
             | StubHarness::DrawingBlocking
             | StubHarness::LoggingIn
-            | StubHarness::Offering => "blocking",
+            | StubHarness::Offering
+            | StubHarness::Installing => "blocking",
         }
     }
 
@@ -107,7 +121,22 @@ impl StubHarness {
             StubHarness::Silent
             | StubHarness::Drawing
             | StubHarness::DrawingBlocking
-            | StubHarness::Offering => "",
+            | StubHarness::Offering
+            | StubHarness::Installing => "",
+        }
+    }
+
+    fn install(self) -> String {
+        match self {
+            StubHarness::Installing => format!(
+                "    install:\n      instructions: https://example.com/stub-harness\n      \
+                 commands: ['/bin/sh \"$HOME/{INSTALLER}\"']\n"
+            ),
+            StubHarness::Silent
+            | StubHarness::Drawing
+            | StubHarness::DrawingBlocking
+            | StubHarness::LoggingIn
+            | StubHarness::Offering => String::new(),
         }
     }
 
@@ -169,11 +198,12 @@ provides:
       {says}: {said}
     instructions: STUB.md
     excluded: [.stub-work/]
-{login}"#,
+{install}{login}"#,
             uuid = self.uuid(),
             variant = self,
             idle = self.idle(),
             channel = self.channel(),
+            install = self.install(),
             login = self.login(),
             says = SAYS.0,
             said = SAYS.1,

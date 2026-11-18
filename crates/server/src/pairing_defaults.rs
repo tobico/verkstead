@@ -14,8 +14,9 @@
 //! longest. Review takes the implementation model on every harness.
 //!
 //! **One candidate and no hunting.** A default is picked by rule — the first
-//! harness in [`HARNESSES`] with a Profile saved — or, past them, the plugin
-//! harness whose Profile was saved first — that harness's unnamed Profile
+//! built-in harness with a Profile saved, in the order
+//! [`crate::harness::every`] lists them — or, past them, the plugin harness
+//! this server offers whose Profile was saved first — that harness's unnamed Profile
 //! or else its earliest, the table's model or else the first that Profile lists
 //! — and handed back whole, to be judged by the same reading a remembered
 //! Pairing gets. A candidate that fails the judging leaves its picker empty; it
@@ -24,18 +25,6 @@
 //! broken today.
 
 use crate::store::{self, AgentType, Picked, Profile, Role};
-
-/// The harnesses in the order a default prefers them, most preferred first.
-///
-/// Fixed rather than read off anything, so that saving a second harness's
-/// Profile does not quietly move every fresh Repo's default on to it.
-const HARNESSES: [AgentType; 5] = [
-    AgentType::CLAUDE,
-    AgentType::CODEX,
-    AgentType::GROK,
-    AgentType::OPENCODE,
-    AgentType::AGY,
-];
 
 /// The model a harness's default Pairing runs for a role.
 ///
@@ -53,14 +42,19 @@ fn model(harness: AgentType, role: Role) -> Option<&'static str> {
 
 /// The platform default for `role`, out of the Profiles in the order they were
 /// saved — or [`Picked::Nothing`] where there is no Profile to run one under.
+/// `offered` is the plugin harnesses this server offers: a disabled plugin's
+/// Profile is never a default (Set 1764, Q20).
+///
+/// **The built-ins in a fixed order** rather than one read off anything, so
+/// that saving a second harness's Profile does not quietly move every fresh
+/// Repo's default on to it.
 ///
 /// Unjudged: whether the Profile's account is still where it was left is the
 /// filesystem's question, and it is asked by whoever prefills with this.
-pub(crate) fn platform_default(profiles: &[Profile], role: Role) -> Picked {
-    let Some(profile) = HARNESSES
-        .iter()
-        .find_map(|&harness| account(profiles, harness))
-        .or_else(|| account(profiles, plugged(profiles)?))
+pub(crate) fn platform_default(profiles: &[Profile], role: Role, offered: &[AgentType]) -> Picked {
+    let Some(profile) = crate::harness::every()
+        .find_map(|(harness, _)| account(profiles, harness))
+        .or_else(|| account(profiles, plugged(profiles, offered)?))
     else {
         return Picked::Nothing;
     };
@@ -86,15 +80,15 @@ pub(crate) fn platform_default(profiles: &[Profile], role: Role) -> Picked {
     }
 }
 
-/// The plugin harness a default prefers once none of [`HARNESSES`] has a
-/// Profile: the one whose Profile was saved first, among those this server
-/// has — after the built-ins, so that installing a plugin does not move a
-/// default that already stood.
-fn plugged(profiles: &[Profile]) -> Option<AgentType> {
+/// The plugin harness a default prefers once no built-in has a Profile: the
+/// one whose Profile was saved first, among those this server offers — after
+/// the built-ins, so that installing a plugin does not move a default that
+/// already stood.
+fn plugged(profiles: &[Profile], offered: &[AgentType]) -> Option<AgentType> {
     profiles
         .iter()
         .map(Profile::agent_type)
-        .find(|&harness| harness.built_in().is_none() && crate::harness::of(harness).is_some())
+        .find(|harness| harness.built_in().is_none() && offered.contains(harness))
 }
 
 /// The one Profile of `harness` a default would run under: the unnamed one,

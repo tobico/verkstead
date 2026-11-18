@@ -1919,7 +1919,10 @@ pub(crate) fn installs(platform: Platform, path: &OsStr, home: &Path) -> Vec<Pat
         return directories;
     }
 
-    for program in PROGRAMS {
+    // And every harness a plugin declares, followed as the built-ins are.
+    let plugged = crate::harness::plugged_binaries();
+
+    for program in PROGRAMS.iter().chain(plugged.iter()) {
         for landed in opened(platform, program, Some(path), None, Some(home)) {
             let Some(directory) = holding(&landed, home) else {
                 continue;

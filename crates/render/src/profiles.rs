@@ -143,6 +143,28 @@ pub struct HarnessEntry {
     /// The short names it answers to beyond those — `opus` — each with what
     /// it reads as: recognised where a Profile holds one, never offered.
     pub aliases: Vec<HarnessModel>,
+
+    /// The program a session of it is run as, looked for on a session's
+    /// `PATH` by this name: what its onboarding row names under the harness.
+    pub binary: String,
+
+    /// How a plugin's harness is put on a machine, as its manifest declares
+    /// it for this one — or `null` for a built-in, whose instructions are
+    /// the wizard's own, one per tab.
+    pub install: Option<HarnessInstall>,
+}
+
+/// How a plugin's harness is installed, as its manifest declares it for the
+/// platform this server is on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct HarnessInstall {
+    /// Where its own install instructions are.
+    pub instructions: Option<String>,
+
+    /// The lines that install it, which the wizard's install run runs on a
+    /// press and at no other time.
+    pub commands: Vec<String>,
 }
 
 /// One model a harness declares: what it travels as, and what a human reads
@@ -223,6 +245,12 @@ pub enum Broken {
     /// Not offered on a picker — there is nothing here to launch it with, and
     /// nothing to name it by but its id.
     HarnessUnknown,
+
+    /// The harness this Profile runs is a plugin's, and that plugin is
+    /// disabled. Not offered on a picker, and a remembered Pairing on it is
+    /// not applied; it runs again once the plugin is ticked. Sessions already
+    /// running under it finish.
+    HarnessDisabled,
 
     /// The harness this Profile runs is not on *this* machine, whatever is true
     /// of it on the devices it is bound on.

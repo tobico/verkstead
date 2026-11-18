@@ -5405,6 +5405,58 @@ async fn plugin_harness_sessions_are_ended_on_the_signature_their_manifest_decla
     );
 }
 
+/// **A session already running on a plugin's harness finishes when the plugin
+/// is disabled** (Set 1764, Q20): unticking takes the harness off every picker,
+/// and the session it is running goes on to its own end with nothing cut
+/// short — the harness stays standing for whatever is still holding it.
+#[tokio::test]
+async fn a_session_on_a_plugin_harness_finishes_after_the_plugin_is_disabled() {
+    let spill = tempfile::tempdir().unwrap();
+    let go = spill.path().join("go");
+    let harness = StubHarness::Silent;
+
+    let fixture = grilling_spilling_on_a_plugin(
+        spill,
+        harness,
+        &format!(
+            "while [ ! -e '{go}' ]; do printf '.'; sleep 0.1; done\n\
+             printf '\\nfinished with its plugin disabled\\n'\n",
+            go = go.display(),
+        ),
+        PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.running).map(|o| o.id))
+        .await;
+
+    let view: verkstead_render::PluginsView = post(
+        &fixture.app,
+        &format!("/api/ui/plugins/{}/enabled", harness.uuid()),
+        &serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert!(
+        view.installed
+            .iter()
+            .any(|row| row.uuid == harness.uuid() && !row.enabled),
+        "the plugin is disabled under the running session",
+    );
+
+    std::fs::write(&go, "").unwrap();
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await;
+    assert!(
+        said.contains("finished with its plugin disabled"),
+        "the session ran to its own end: {said:?}",
+    );
+}
+
 /// And one whose second manifest says it idles by silence is worked to the
 /// end on its silence, drawing nothing at all.
 #[tokio::test]

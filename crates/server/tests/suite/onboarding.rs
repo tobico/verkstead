@@ -502,12 +502,20 @@ async fn a_machine_with_the_objective_met_comes_up_with_the_mode_off() {
          the row says which one was run"
     );
     assert_eq!(
-        row(&reading, Dependency::Claude).state,
+        row(
+            &reading,
+            Dependency::Harness(verkstead_render::AgentType::CLAUDE)
+        )
+        .state,
         found(dir.path(), "claude"),
         "and one harness is what the objective asks for — this one, at this path"
     );
     assert_eq!(
-        row(&reading, Dependency::Codex).state,
+        row(
+            &reading,
+            Dependency::Harness(verkstead_render::AgentType::CODEX)
+        )
+        .state,
         MISSING,
         "the three beside it are absent, and hold nothing up"
     );
@@ -542,7 +550,11 @@ async fn a_harness_a_session_cannot_reach_says_where_it_was_seen() {
     let reading = reading(&app).await;
 
     assert_eq!(
-        row(&reading, Dependency::Codex).state,
+        row(
+            &reading,
+            Dependency::Harness(verkstead_render::AgentType::CODEX)
+        )
+        .state,
         DependencyState::Absent {
             trouble: None,
             seen: Some(Seen::Beyond {
@@ -553,7 +565,11 @@ async fn a_harness_a_session_cannot_reach_says_where_it_was_seen() {
          to do something about"
     );
     assert_eq!(
-        row(&reading, Dependency::Grok).state,
+        row(
+            &reading,
+            Dependency::Harness(verkstead_render::AgentType::GROK)
+        )
+        .state,
         MISSING,
         "while a harness on neither list was seen nowhere, and has nothing \
          said under it but what to install"

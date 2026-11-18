@@ -153,9 +153,11 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [],
       "name": "GitLab",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "forge",
         "activity"
@@ -174,9 +176,11 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [],
       "name": "Broken",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "forge",
         "activity"
@@ -195,9 +199,11 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [],
       "name": "Shared skills",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "forge",
         "activity"
@@ -217,6 +223,7 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
       "languages": [],
       "name": "Dependent",
       "needs": [
@@ -229,6 +236,7 @@
           "uuid": "8e7d6c5b-4a39-4281-9f0e-1d2c3b4a5968"
         }
       ],
+      "profiles": 0,
       "provides": [
         "forge",
         "activity"
