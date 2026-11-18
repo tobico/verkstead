@@ -1,0 +1,12 @@
+[package]
+name = "verkstead-plugin-fixture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# The wasm file is named after this, and the directory the plugin is in: what
+# `crates/server/build.rs` looks for is `<directory>.wasm`.
+[lib]
+name = "fixture"
+crate-type = ["cdylib"]

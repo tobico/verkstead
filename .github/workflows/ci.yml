@@ -26,6 +26,42 @@ permissions:
   contents: read
 
 jobs:
+  # The wasm components of the Plugins Verkstead ships, built once for
+  # `wasm32-wasip2` and handed to every job below that compiles the server,
+  # which embeds them — see `crates/server/build.rs`. Once, because a
+  # component is platform-neutral bytes: `release.yml` builds them the same
+  # way, so the suites run against the bytes a release would carry rather than
+  # five builds of them.
+  #
+  # **Named `built-in-plugins-ci` as an artifact**, not `built-in-plugins`:
+  # `release.yml` calls this workflow and builds its own, and two artifacts of
+  # one name in one run is a run that fails at the second upload.
+  built-in-plugins:
+    name: Built-in plugins
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # The same pin as every other job, with the one target this job is for.
+      - name: Install Rust 1.97.1
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: wasm32-wasip2
+
+      - name: Build
+        run: |
+          cargo build --release --locked --target wasm32-wasip2 \
+            --manifest-path plugins/Cargo.toml
+          mkdir -p plugins/dist
+          cp plugins/target/wasm32-wasip2/release/*.wasm plugins/dist/
+
+      - name: Upload the components
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: built-in-plugins-ci
+          path: plugins/dist
+          if-no-files-found: error
+
   # The workspace's suites, on Linux.
   #
   # **The budget: every leg under fifteen minutes, the typical one near
@@ -121,6 +157,7 @@ jobs:
   rust:
     name: Rust (${{ matrix.partition }}/5)
     runs-on: ubuntu-24.04
+    needs: built-in-plugins
     # Fifteen, as the `Windows` job's: a hang is caught, and a leg that drew a
     # slow runner is not failed for it.
     timeout-minutes: 15
@@ -135,6 +172,14 @@ jobs:
         partition: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v7.0.1
+
+      # Where `crates/server/build.rs` looks before building them itself — see
+      # the `built-in-plugins` job.
+      - name: Fetch the built-in plugins
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: built-in-plugins-ci
+          path: plugins/dist
 
       # The version branch _is_ the pin: `@1.97.1` installs exactly that
       # toolchain, where `@stable` would move whenever Rust released. 1.97.1 is
@@ -283,8 +328,17 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-24.04
+    needs: built-in-plugins
     steps:
       - uses: actions/checkout@v7.0.1
+
+      # Where `crates/server/build.rs` looks before building them itself — see
+      # the `built-in-plugins` job.
+      - name: Fetch the built-in plugins
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: built-in-plugins-ci
+          path: plugins/dist
 
       # The same pin as every other job, for the same reason.
       - name: Install Rust 1.97.1
@@ -377,8 +431,17 @@ jobs:
   package-stores:
     name: Package stores
     runs-on: ubuntu-24.04
+    needs: built-in-plugins
     steps:
       - uses: actions/checkout@v7.0.1
+
+      # Where `crates/server/build.rs` looks before building them itself — see
+      # the `built-in-plugins` job.
+      - name: Fetch the built-in plugins
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: built-in-plugins-ci
+          path: plugins/dist
 
       # The same pin as every other job, for the same reason.
       - name: Install Rust 1.97.1
@@ -694,8 +757,17 @@ jobs:
   macos-sandbox:
     name: macOS sandbox
     runs-on: macos-15
+    needs: built-in-plugins
     steps:
       - uses: actions/checkout@v7.0.1
+
+      # Where `crates/server/build.rs` looks before building them itself — see
+      # the `built-in-plugins` job.
+      - name: Fetch the built-in plugins
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: built-in-plugins-ci
+          path: plugins/dist
 
       # The same pin as every other job, for the same reason.
       - name: Install Rust 1.97.1
@@ -1046,6 +1118,7 @@ jobs:
   windows:
     name: Windows (${{ matrix.partition }}/10)
     runs-on: windows-2025
+    needs: built-in-plugins
     # Fifteen rather than ten: the last run's slowest leg missed ten by eight
     # seconds, on a slow runner's tests. The ledger above has the figures.
     timeout-minutes: 15
@@ -1124,6 +1197,14 @@ jobs:
         run: git config --global core.autocrlf false
 
       - uses: actions/checkout@v7.0.1
+
+      # Where `crates/server/build.rs` looks before building them itself — see
+      # the `built-in-plugins` job.
+      - name: Fetch the built-in plugins
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: built-in-plugins-ci
+          path: plugins/dist
 
       # The same pin as every other job, for the same reason. MSVC and the
       # Windows SDK are the runner image's own — SQLite and ring are C, and this

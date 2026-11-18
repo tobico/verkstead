@@ -291,12 +291,11 @@ impl Manifest {
             }
         };
 
-        Manifest::parse(&text, dir, platform)
+        Manifest::parse(&text, Files::Dir(dir), platform)
     }
 
-    /// Read a manifest's text, with `dir` as the directory its paths are
-    /// inside.
-    pub fn parse(text: &str, dir: &Path, platform: Platform) -> Result<Manifest, Refusal> {
+    /// Read a manifest's text, with `files` as where the paths it names are.
+    pub fn parse(text: &str, files: Files<'_>, platform: Platform) -> Result<Manifest, Refusal> {
         let tree = serde_saphyr::from_str::<Value>(text).map_err(|error| Refusal {
             field: None,
             why: format!("`{FILE}` isn't YAML Verkstead can read: {error}."),
@@ -309,7 +308,7 @@ impl Manifest {
         };
 
         let fields = merged(tree, platform)?;
-        let walk = Walk { dir };
+        let walk = Walk { files };
 
         let interface = walk.interface(&fields)?;
 
@@ -397,9 +396,44 @@ fn merged(mut tree: Map<String, Value>, platform: Platform) -> Result<Map<String
     Ok(tree)
 }
 
-/// What reading a path needs: the directory it has to be inside.
+/// Where the files a manifest names are: a plugin's directory, or a built-in's
+/// files embedded in this binary beside its manifest — see
+/// [`super::built_in`].
+#[derive(Debug, Clone, Copy)]
+pub enum Files<'a> {
+    Dir(&'a Path),
+    /// Each file by its path relative to the plugin's directory, written with
+    /// `/`.
+    Embedded(&'a [(&'a str, &'a [u8])]),
+}
+
+impl Files<'_> {
+    /// `path`'s contents, or `None` where there is no such file.
+    pub fn read(&self, path: &Path) -> Option<Vec<u8>> {
+        match self {
+            Files::Dir(dir) => {
+                let path = dir.join(path);
+                path.is_file().then(|| std::fs::read(path).ok()).flatten()
+            }
+            Files::Embedded(files) => files
+                .iter()
+                .find(|(name, _)| Path::new(name) == path)
+                .map(|(_, bytes)| bytes.to_vec()),
+        }
+    }
+
+    /// Whether there is a file at `path`, without reading it.
+    pub fn has(&self, path: &Path) -> bool {
+        match self {
+            Files::Dir(dir) => dir.join(path).is_file(),
+            Files::Embedded(files) => files.iter().any(|(name, _)| Path::new(name) == path),
+        }
+    }
+}
+
+/// What reading a path needs: where the files it may name are.
 struct Walk<'a> {
-    dir: &'a Path,
+    files: Files<'a>,
 }
 
 impl Walk<'_> {
@@ -439,10 +473,10 @@ impl Walk<'_> {
         }
 
         let path = self.inside(&mark, field)?;
-        match std::fs::read_to_string(self.dir.join(&path)) {
-            Ok(text) if is_svg(&text) => Ok(Some(Mark::File(path))),
-            Ok(_) => Err(Refusal::of(field, format!("`{mark}` isn't SVG."))),
-            Err(_) => Err(Refusal::of(
+        match self.files.read(&path).map(String::from_utf8) {
+            Some(Ok(text)) if is_svg(&text) => Ok(Some(Mark::File(path))),
+            Some(_) => Err(Refusal::of(field, format!("`{mark}` isn't SVG."))),
+            None => Err(Refusal::of(
                 field,
                 format!("`{mark}` isn't a file in the plugin's directory."),
             )),
@@ -462,7 +496,7 @@ impl Walk<'_> {
                 format!("`{field}` should name a `.wasm` file."),
             ));
         }
-        if !self.dir.join(&path).is_file() {
+        if !self.files.has(&path) {
             return Err(Refusal::of(
                 field,
                 format!("`{component}` isn't a file in the plugin's directory."),
@@ -810,7 +844,7 @@ provides: []
     }
 
     fn read_for(yaml: &str, platform: Platform) -> Result<Manifest, Refusal> {
-        Manifest::parse(yaml, Path::new("/nonexistent"), platform)
+        Manifest::parse(yaml, Files::Dir(Path::new("/nonexistent")), platform)
     }
 
     /// The field a manifest was refused at, insisting it was refused.

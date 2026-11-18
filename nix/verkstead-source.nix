@@ -26,6 +26,10 @@ rustPlatform.buildRustPackage {
       ../Cargo.toml
       ../Cargo.lock
       ../crates
+      # The built-in plugins, whose wasm components `crates/server/build.rs`
+      # builds for `wasm32-wasip2` and embeds — `rustToolchain` carries that
+      # target, and the components have no dependencies to vendor.
+      ../plugins
       # Read by the server for the stable channel the Annex it makes is on —
       # see `crates/server/src/annex/flake.rs`.
       ../flake.nix
