@@ -46,9 +46,38 @@ pub struct PluginRow {
     /// Why it didn't load here, where it didn't. A plugin with trouble counts
     /// as disabled.
     pub trouble: Option<String>,
+    /// The press that would put right a dependency its trouble names, where
+    /// there is one: one per dependency, in the order the manifest lists them.
+    pub needs: Vec<PluginNeed>,
     /// The device it is on, by name, where it is a local plugin on another
     /// device: drawn greyed, and not loaded here.
     pub elsewhere: Option<String>,
+}
+
+/// A dependency a row's plugin is in trouble over, with the press that would
+/// put it right from that row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PluginNeed {
+    /// The dependency's uuid, which an **Update** names.
+    pub uuid: String,
+    /// Its display name, as the dependent's manifest writes it.
+    pub name: String,
+    pub fix: PluginFix,
+}
+
+/// What puts a dependency right. A disabled one is put right by ticking its
+/// own row, which the trouble says, and needs no press of its own here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+#[serde(tag = "kind")]
+pub enum PluginFix {
+    /// It isn't installed: **Install** from the repository the dependency
+    /// names, through the consent card **Add a plugin…** shows.
+    Install { repository: String },
+    /// It is installed outside the version the dependent asks for: **Update**
+    /// on its row, which shows its card first where it asks for more.
+    Update,
 }
 
 /// Where a Plugin came from.

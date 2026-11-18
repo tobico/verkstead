@@ -111,6 +111,18 @@
   overflow-wrap: anywhere;
 }
 
+/* The presses that put a dependency right, under its trouble. */
+.needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.needs .press {
+  margin-inline-start: 0;
+}
+
 .add {
   margin-top: 1.25rem;
 }

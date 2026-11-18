@@ -136,6 +136,18 @@ over the dependency's semantic version, in Cargo's syntax. It is required: a
 dependency on any version at all is one that breaks the day its author ships a
 2.0.
 
+A dependency is resolved whenever the installed plugins load — at the start, at
+every press on the Plugins section, and when another device's change arrives —
+against the installed plugins that loaded on this device and the built-ins.
+Where one is **missing**, **disabled**, installed outside its specifier, a
+directory on another device, or in trouble itself, the plugin depending on it
+is in trouble, counts as disabled, and its row says which by the `name` written
+here. The row offers the press that puts it right: **Install** from
+`repository` through the consent card where the dependency isn't installed and
+names one, **Update** on the dependency's own row where it is outdated. A
+disabled one is ticked on its own row. Either way, once it is put right, the
+plugin depending on it loads.
+
 ### What it provides
 
 **`provides`** — a list, each entry of one **Category**: `agent`, `process`,

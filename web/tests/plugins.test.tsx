@@ -18,8 +18,8 @@ import consent from "./fixtures/plugin-consent.json" with { type: "json" };
 import plugins from "./fixtures/plugins.json" with { type: "json" };
 import { json, serving, whenever } from "./serving";
 
-/// One plugin that loaded, GitLab, one whose manifest broke, Broken, and one
-/// from git, Shared skills.
+/// One plugin that loaded, GitLab, one whose manifest broke, Broken, one from
+/// git, Shared skills, and one whose dependency, Base, isn't installed.
 const PLUGINS = plugins as PluginsView;
 const CONSENT = consent as PluginConsent;
 
@@ -52,7 +52,7 @@ describe("the card", () => {
 
     mounting(() => <PluginsCard open={false} press={vi.fn()} />);
 
-    await waitFor(() => screen.getByText("1 in trouble"));
+    await waitFor(() => screen.getByText("2 in trouble"));
   });
 
   it("says none are installed on an empty page", async () => {
@@ -143,6 +143,99 @@ describe("a row", () => {
       String(asked).endsWith("/enabled"),
     );
     expect(JSON.parse(String(press![1]!.body))).toEqual({ enabled: false });
+  });
+});
+
+describe("a dependency that isn't there", () => {
+  const DEPENDENT = PLUGINS.installed.find((row) => row.name === "Dependent")!;
+
+  it("is the dependent's trouble, naming it", async () => {
+    serving(whenever("/api/ui/plugins", json(PLUGINS)));
+    pane();
+
+    const row = await theRow("Dependent");
+
+    expect(row.textContent).toContain("It needs Base, which isn't installed.");
+  });
+
+  it("installs from its repository through the consent card", async () => {
+    const fetching = serving(
+      whenever("/api/ui/plugins", json(PLUGINS)),
+      whenever("/api/ui/plugins/read", json(CONSENT), "POST"),
+      whenever("/api/ui/plugins", json(PLUGINS), "POST"),
+    );
+    pane();
+
+    const row = await theRow("Dependent");
+    fireEvent.click(
+      await waitFor(() => screen.getByRole("button", { name: "Install Base" })),
+    );
+
+    await waitFor(() => screen.getByText("Dependent needs it."));
+    expect(row.textContent).toContain("Card 1.4.0");
+    const read = fetching.mock.calls.find(([asked]) =>
+      String(asked).endsWith("/read"),
+    );
+    expect(JSON.parse(String(read![1]!.body))).toEqual({
+      source: "https://example.com/base.git",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+
+    await waitFor(() => expect(screen.queryByText("Card 1.4.0")).toBeNull());
+    const press = fetching.mock.calls.find(
+      ([asked, init]) =>
+        String(asked) === "/api/ui/plugins" && init?.method === "POST",
+    );
+    expect(JSON.parse(String(press![1]!.body))).toEqual({
+      source: "https://example.com/base.git",
+      granted: CONSENT.capabilities,
+    });
+  });
+
+  it("offers the update where it is outdated, pressing it on the dependency", async () => {
+    const outdated: PluginsView = {
+      ...PLUGINS,
+      installed: PLUGINS.installed.map((row) =>
+        row.uuid === DEPENDENT.uuid
+          ? {
+              ...row,
+              trouble: "It needs GitLab ^2, and 1.4.0 is installed.",
+              needs: [
+                {
+                  uuid: PLUGINS.installed[0]!.uuid,
+                  name: "GitLab",
+                  fix: { kind: "Update" },
+                },
+              ],
+            }
+          : row,
+      ),
+    };
+    const fetching = serving(
+      whenever("/api/ui/plugins", json(outdated)),
+      whenever(
+        `/api/ui/plugins/${PLUGINS.installed[0]!.uuid}/update`,
+        json({ kind: "Updated", plugins: PLUGINS }),
+        "POST",
+      ),
+    );
+    pane();
+
+    await theRow("Dependent");
+    fireEvent.click(
+      await waitFor(() =>
+        screen.getByRole("button", { name: "Update GitLab" }),
+      ),
+    );
+
+    await waitFor(() =>
+      expect(
+        fetching.mock.calls.some(([asked]) =>
+          String(asked).endsWith("/update"),
+        ),
+      ).toBe(true),
+    );
   });
 });
 

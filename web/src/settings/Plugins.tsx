@@ -20,6 +20,12 @@
 //! for more by then is refused rather than installed. **Update** on a local
 //! row reads the manifest again, and on a git row pulls; either shows the card
 //! first where it now asks for more. Nothing fetches on its own.
+//!
+//! **A dependency that isn't there** is the dependent's trouble, and its row
+//! offers the press that puts it right: **Install** from the repository the
+//! dependency names, through the same consent card, or **Update** on the
+//! dependency's own row. A disabled one is ticked on its own row, which the
+//! trouble says.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -44,6 +50,7 @@ import {
 import type {
   PluginCapability,
   PluginConsent,
+  PluginNeed,
   PluginRow,
   PluginsView,
   PluginUpdated,
@@ -120,6 +127,14 @@ export function PluginsPane(props: {
     consent: PluginConsent;
   } | null>(null);
 
+  // The consent card for a dependency a row offered to install, drawn under
+  // that row.
+  const [fixing, setFixing] = createSignal<{
+    uuid: string;
+    repository: string;
+    consent: PluginConsent;
+  } | null>(null);
+
   const read = (view: PluginsView): void => {
     setRefused(null);
     queries.setQueryData(["plugins"], view);
@@ -150,6 +165,50 @@ export function PluginsPane(props: {
     onError: (error: Error, press) =>
       setRefused({ uuid: press.uuid, why: error.message }),
   }));
+
+  const fetching = useMutation(() => ({
+    mutationFn: (press: { uuid: string; repository: string }) =>
+      readPlugin(press.repository),
+    onSuccess: (consent: PluginConsent, press) => {
+      setRefused(null);
+      setFixing({ ...press, consent });
+    },
+    onError: (error: Error, press) =>
+      setRefused({ uuid: press.uuid, why: error.message }),
+  }));
+
+  const installing = useMutation(() => ({
+    mutationFn: (press: {
+      uuid: string;
+      repository: string;
+      granted: PluginCapability[];
+    }) => installPlugin(press.repository, press.granted),
+    onSuccess: (view: PluginsView) => {
+      setFixing(null);
+      read(view);
+    },
+    onError: (error: Error, press) =>
+      setRefused({ uuid: press.uuid, why: error.message }),
+  }));
+
+  /// A press on a row's need: the dependency's card read off its repository,
+  /// or its own row's **Update**.
+  const fix = (uuid: string, need: PluginNeed): void => {
+    switch (need.fix.kind) {
+      case "Install":
+        fetching.mutate({ uuid, repository: need.fix.repository });
+        return;
+      case "Update":
+        update.mutate({ uuid: need.uuid, granted: null });
+        return;
+    }
+  };
+
+  const pressing = (): boolean =>
+    enable.isPending ||
+    update.isPending ||
+    fetching.isPending ||
+    installing.isPending;
 
   return (
     <>
@@ -185,13 +244,14 @@ export function PluginsPane(props: {
                       {(row) => (
                         <Row
                           of={row}
-                          pressing={enable.isPending || update.isPending}
+                          pressing={pressing()}
                           flip={(enabled) =>
                             enable.mutate({ uuid: row.uuid, enabled })
                           }
                           update={() =>
                             update.mutate({ uuid: row.uuid, granted: null })
                           }
+                          fix={(need) => fix(row.uuid, need)}
                           refused={
                             refused()?.uuid === row.uuid
                               ? refused()!.why
@@ -218,6 +278,28 @@ export function PluginsPane(props: {
                                   })
                                 }
                                 cancel={() => setReviewing(null)}
+                              />
+                            )}
+                          </Show>
+                          <Show
+                            when={
+                              fixing()?.uuid === row.uuid ? fixing() : null
+                            }
+                          >
+                            {(fixed) => (
+                              <Consent
+                                of={fixed().consent}
+                                lede={`${row.name} needs it.`}
+                                verb="Install"
+                                pressing={installing.isPending}
+                                grant={() =>
+                                  installing.mutate({
+                                    uuid: row.uuid,
+                                    repository: fixed().repository,
+                                    granted: fixed().consent.capabilities,
+                                  })
+                                }
+                                cancel={() => setFixing(null)}
                               />
                             )}
                           </Show>
@@ -269,8 +351,12 @@ function Row(props: {
   /// **Update**, where the row has one: a git plugin, or a local plugin on
   /// this device.
   update?: () => void;
+  /// A press on one of its needs, where the row has trouble a press puts
+  /// right.
+  fix?: (need: PluginNeed) => void;
   refused: string | null;
-  /// What is drawn under the row: the consent card an Update came back with.
+  /// What is drawn under the row: the consent card an Update came back with,
+  /// or one for a dependency it offered to install.
   children?: JSX.Element;
 }): JSX.Element {
   /// The version and the author, as one quiet line beside the name.
@@ -319,6 +405,24 @@ function Row(props: {
 
       <Show when={props.of.trouble}>
         {(trouble) => <p class={styles.trouble}>{trouble()}</p>}
+      </Show>
+
+      <Show when={props.fix !== undefined && props.of.needs.length > 0}>
+        <div class={styles.needs}>
+          <For each={props.of.needs}>
+            {(need) => (
+              <button
+                type="button"
+                class={styles.press}
+                disabled={props.pressing}
+                onClick={() => props.fix?.(need)}
+              >
+                {need.fix.kind === "Install" ? "Install" : "Update"}{" "}
+                {need.name}
+              </button>
+            )}
+          </For>
+        </div>
       </Show>
 
       <Show when={props.refused}>{(why) => <ErrorLine>{why()}</ErrorLine>}</Show>

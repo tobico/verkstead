@@ -18,7 +18,8 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 use verkstead_render::{
-    PluginCapability, PluginConsent, PluginRow, PluginSource, PluginUpdated, PluginsView,
+    PluginCapability, PluginConsent, PluginFix, PluginNeed, PluginRow, PluginSource, PluginUpdated,
+    PluginsView,
 };
 use verkstead_server::plugins::built_in::FIXTURE;
 use verkstead_server::{open_database, router_keeping};
@@ -557,10 +558,175 @@ async fn update_on_a_git_row_pulls_and_re_pins() {
 
 /// Where the golden fixtures are written, relative to this crate — the
 /// directory `ui_content.rs` writes the other endpoints' payloads to.
+/// `text`, a manifest, depending on the plugin `uuid` called `name` at
+/// `version`, fetched from `repository` where there is one.
+fn depending(
+    text: &str,
+    uuid: &str,
+    name: &str,
+    version: &str,
+    repository: Option<&str>,
+) -> String {
+    let repository = repository
+        .map(|url| format!("    repository: {url}\n"))
+        .unwrap_or_default();
+    format!(
+        "{text}dependencies:\n  - uuid: {uuid}\n    name: {name}\n    author:\n      \
+         name: Grace Hopper\n      email: grace@example.com\n{repository}    version: \"{version}\"\n"
+    )
+}
+
+/// The dependency the tests below install, ANOTHER, called Base.
+const BASE: &str = "Base";
+
+/// A plugin depending on one that isn't installed is in trouble naming it, and
+/// offers its Install from the repository it names; installed through the
+/// card, the dependent loads.
+#[tokio::test]
+async fn a_missing_dependency_is_trouble_and_installs_from_its_repository() {
+    let (app, dir) = kept().await;
+    let (url, _) = repository(
+        &dir.path().join("sources"),
+        "base",
+        &manifest(ANOTHER, BASE, &[]),
+    );
+    let path = plugin(
+        dir.path(),
+        "one",
+        &depending(
+            &manifest(PLUGIN, "One", &[]),
+            ANOTHER,
+            BASE,
+            "^1.2",
+            Some(&url),
+        ),
+    );
+
+    let view = installs(&app, &path).await;
+    let dependent = row(&view, PLUGIN);
+    let trouble = dependent.trouble.clone().expect("trouble");
+    assert!(
+        trouble.contains("needs Base, which isn't installed"),
+        "{trouble}"
+    );
+    assert_eq!(
+        dependent.needs,
+        [PluginNeed {
+            uuid: ANOTHER.to_owned(),
+            name: BASE.to_owned(),
+            fix: PluginFix::Install {
+                repository: url.clone()
+            },
+        }],
+    );
+
+    let view = installs(&app, &url).await;
+    assert_eq!(row(&view, ANOTHER).trouble, None);
+    assert_eq!(row(&view, PLUGIN).trouble, None, "the dependent loads");
+    assert!(row(&view, PLUGIN).needs.is_empty());
+}
+
+/// A dependency installed outside the specifier reads as that, and offers its
+/// Update; updated into it, the dependent loads.
+#[tokio::test]
+async fn a_dependency_outside_its_specifier_is_outdated_and_offers_the_update() {
+    let (app, dir) = kept().await;
+    let base = plugin(dir.path(), "base", &manifest(ANOTHER, BASE, &[]));
+    let path = plugin(
+        dir.path(),
+        "one",
+        &depending(&manifest(PLUGIN, "One", &[]), ANOTHER, BASE, "^2", None),
+    );
+    installs(&app, &base).await;
+
+    let view = installs(&app, &path).await;
+    let dependent = row(&view, PLUGIN);
+    let trouble = dependent.trouble.clone().expect("trouble");
+    assert!(
+        trouble.contains("needs Base ^2, and 1.4.0 is installed"),
+        "{trouble}"
+    );
+    assert_eq!(
+        dependent.needs,
+        [PluginNeed {
+            uuid: ANOTHER.to_owned(),
+            name: BASE.to_owned(),
+            fix: PluginFix::Update,
+        }],
+    );
+
+    std::fs::write(
+        Path::new(&base).join("plugin.yaml"),
+        manifest(ANOTHER, BASE, &[]).replace("version: 1.4.0", "version: 2.0.1"),
+    )
+    .unwrap();
+    let PluginUpdated::Updated { plugins } = updates(&app, ANOTHER, None).await else {
+        panic!("nothing new was asked for");
+    };
+    assert_eq!(row(&plugins, PLUGIN).trouble, None);
+}
+
+/// Unticking a dependency puts its dependent in trouble as disabled, and
+/// ticking it again clears that. A plugin depending on that one in turn is
+/// in trouble too.
+#[tokio::test]
+async fn unticking_a_dependency_puts_its_dependent_in_trouble_until_ticked() {
+    let (app, dir) = kept().await;
+    let base = plugin(dir.path(), "base", &manifest(ANOTHER, BASE, &[]));
+    let path = plugin(
+        dir.path(),
+        "one",
+        &depending(&manifest(PLUGIN, "One", &[]), ANOTHER, BASE, "^1", None),
+    );
+    const TOP: &str = "6a5b4c3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d";
+    let top = plugin(
+        dir.path(),
+        "top",
+        &depending(&manifest(TOP, "Top", &[]), PLUGIN, "One", ">=1.0", None),
+    );
+    installs(&app, &base).await;
+    installs(&app, &path).await;
+    let view = installs(&app, &top).await;
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+    assert_eq!(row(&view, TOP).trouble, None);
+
+    let ticked = |enabled: bool| {
+        let app = app.clone();
+        async move {
+            let (status, said) = pressing(
+                &app,
+                &format!("/api/ui/plugins/{ANOTHER}/enabled"),
+                serde_json::json!({ "enabled": enabled }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{said}");
+            serde_json::from_str::<PluginsView>(&said).unwrap()
+        }
+    };
+
+    let view = ticked(false).await;
+    let trouble = row(&view, PLUGIN).trouble.clone().expect("trouble");
+    assert!(
+        trouble.contains("needs Base, which is disabled"),
+        "{trouble}"
+    );
+    assert!(row(&view, PLUGIN).needs.is_empty(), "ticking it is the fix");
+    let trouble = row(&view, TOP).trouble.clone().expect("trouble");
+    assert!(
+        trouble.contains("needs One, which didn't load"),
+        "{trouble}"
+    );
+
+    let view = ticked(true).await;
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+    assert_eq!(row(&view, TOP).trouble, None);
+}
+
 const FIXTURES: &str = "../../web/tests/fixtures";
 
 /// Leave the viewer's tests the page and the consent card as the server writes
-/// them: a plugin that loaded, one in trouble, one from git, and the card for
+/// them: a plugin that loaded, one in trouble, one from git, one whose
+/// dependency isn't installed, and the card for
 /// one asking for a host. The directories are written as `/home/you/src`, so that a fixture
 /// is not rewritten by where a test happened to run.
 #[tokio::test]
@@ -586,6 +752,18 @@ async fn the_page_and_the_card_are_written_for_the_viewer() {
         &manifest("2e4f6a8b-1c3d-4e5f-8a7b-9c0d1e2f3a4b", "Shared skills", &[]),
     );
     installs(&app, &url).await;
+    let dependent = plugin(
+        dir.path(),
+        "dependent",
+        &depending(
+            &manifest("3b2a1f0e-9d8c-4b7a-8f6e-5d4c3b2a1f0e", "Dependent", &[]),
+            "8e7d6c5b-4a39-4281-9f0e-1d2c3b4a5968",
+            BASE,
+            "^1",
+            Some("https://example.com/base.git"),
+        ),
+    );
+    installs(&app, &dependent).await;
 
     let card = plugin(
         dir.path(),
