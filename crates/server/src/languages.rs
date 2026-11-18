@@ -31,6 +31,9 @@
 //! Rust's switch and size used to be said, is still read as Rust's two, and
 //! the map wins where both are written: see
 //! [`crate::settings::Config::languages`], where the two are put together.
+//! **A built-in language's `enabled` is its plugin's tick now**, cluster-wide:
+//! the file's was taken up into the plugin's record once and is not read
+//! again — see [`configured`] and [`crate::replicating::plugins::taken_up`].
 //!
 //! **A descriptor cannot say a command to run.** It says a label, the manifests
 //! that detect the language in a Repo, the variables a session is given, and
@@ -410,8 +413,19 @@ fn known(value: Option<&Raw>, field: &str, allowed: &[&str]) -> Result<(), Refus
 /// [`crate::settings::Config::languages`]. A language switched off from a phone
 /// applies to the next session, and so does a descriptor a hand-edit added an
 /// hour ago.
+///
+/// **A built-in language's switch is its plugin's tick** once the plugins'
+/// records are held, whatever `enabled` the file still says: unticked, none
+/// of its variables, stores or grants reach a session, and the Compile Server
+/// is not wanted for it. A language no plugin provides — an installer's own —
+/// is still switched by its entry here.
 pub fn configured(config: &crate::settings::Config) -> Languages {
-    built_in().merged(&config.languages())
+    let languages = built_in().merged(&config.languages());
+
+    match config.unticked_languages() {
+        Some(off) => languages.ticked(off),
+        None => languages,
+    }
 }
 
 /// A map of descriptors keyed by language, in the order they were written.
@@ -478,7 +492,11 @@ impl Languages {
     /// which is what clearing the field on the page means and what puts the
     /// default back; a language with no size field at all sends that same
     /// blank, there being no size to send.
-    pub fn of_page(written: impl IntoIterator<Item = (String, bool, String)>) -> Languages {
+    ///
+    /// A switch of `None` is one the page does not write: a built-in
+    /// language's, which is its plugin's tick — so a save takes an `enabled`
+    /// the file still holds for it out, the take-up having read it.
+    pub fn of_page(written: impl IntoIterator<Item = (String, Option<bool>, String)>) -> Languages {
         Languages(Ordered(
             written
                 .into_iter()
@@ -486,7 +504,7 @@ impl Languages {
                     (
                         name,
                         Descriptor {
-                            enabled: Some(enabled),
+                            enabled,
                             size: crate::settings::blank_is_nothing(size),
                             ..Descriptor::default()
                         },
@@ -551,6 +569,27 @@ impl Languages {
             self.0
                 .merged(&page.0, Descriptor::with_the_pages_keys, Descriptor::clone),
         )
+    }
+
+    /// This with every built-in language's switch as its plugin's tick says:
+    /// off where it is among `off`, and on otherwise.
+    fn ticked(self, off: &std::collections::BTreeSet<String>) -> Languages {
+        Languages(Ordered(
+            self.0
+                .0
+                .into_iter()
+                .map(|(name, descriptor)| {
+                    let descriptor = match built_in().get(&name).is_some() {
+                        true => Descriptor {
+                            enabled: Some(!off.contains(&name)),
+                            ..descriptor
+                        },
+                        false => descriptor,
+                    };
+                    (name, descriptor)
+                })
+                .collect(),
+        ))
     }
 
     /// The descriptor of `name`, where there is one.

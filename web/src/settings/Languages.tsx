@@ -14,6 +14,13 @@
 //! this page writes are the switch and the size, and an installer who wants a
 //! variable, a manifest or a label edits `config.yaml`.
 //!
+//! **And no switch for a built-in language.** The seven Verkstead ships are
+//! six built-in Language plugins, and a plugin's tick on the Plugins page is
+//! its languages' switch, cluster-wide (Set 1762, Q11a) — so a row of one is
+//! its name and its link, greyed while its plugin is unticked. Only a
+//! language `config.yaml` alone describes, an installer's own, has its box
+//! here.
+//!
 //! Which is why a language whose entry in that file would not load is drawn
 //! with its box off and a sentence under it saying why: the two keys they write
 //! go into that entry, and the server writes it back exactly as it was typed.
@@ -970,16 +977,34 @@ export function BuildCaches(): JSX.Element {
                 {(language) => (
                   <div>
                     <div class={styles.row}>
-                      <Check
-                        label={language().label}
-                        on={language().enabled}
-                        // And off for a language whose entry would not load:
-                        // the switch is a key of that entry, and there is
-                        // nothing readable there to write it into — see
-                        // [`unreadable`], the sentence underneath saying so.
-                        disabled={save.isPending || language().unread !== null}
-                        flip={(enabled) => flip(language(), enabled)}
-                      />
+                      {/* A language a built-in plugin provides is switched by
+                          that plugin's tick on the Plugins page, so its name
+                          stands here without a box. */}
+                      <Show
+                        when={language().plugin === null}
+                        fallback={
+                          <span
+                            class={styles.named}
+                            classList={{ [styles.off!]: !language().enabled }}
+                            title={`Switched on the Plugins page, by ${language().plugin}`}
+                          >
+                            {language().label}
+                          </span>
+                        }
+                      >
+                        <Check
+                          label={language().label}
+                          on={language().enabled}
+                          // And off for a language whose entry would not load:
+                          // the switch is a key of that entry, and there is
+                          // nothing readable there to write it into — see
+                          // [`unreadable`], the sentence underneath saying so.
+                          disabled={
+                            save.isPending || language().unread !== null
+                          }
+                          flip={(enabled) => flip(language(), enabled)}
+                        />
+                      </Show>
 
                       {/* Beside the label rather than inside it: a press
                           anywhere in the label ticks the box. */}

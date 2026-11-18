@@ -64,7 +64,7 @@ use verkstead_render::{
 };
 use verkstead_schema::{ApiError, Nudge};
 
-use super::built_in::{BUILT_INS, FIXTURE};
+use super::built_in::{self, BUILT_INS, FIXTURE};
 use super::component;
 use super::git::{self, Staged};
 use super::manifest::{Access, Capability, Dependency, Files, Manifest};
@@ -187,7 +187,9 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
     let mut manifests = BTreeMap::new();
     let mut dirs = BTreeMap::new();
     for record in &records {
-        if !reachable(state, &record.fields) {
+        // A built-in is read out of the binary, at the start — see
+        // [`super::built_in`] — and its record is only its switch.
+        if !reachable(state, &record.fields) || matches!(record.fields.source, Source::BuiltIn) {
             continue;
         }
 
@@ -283,7 +285,8 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         state.nudges.announce_here(Nudge::Plugins);
     }
 
-    Ok(())
+    // And which languages a built-in's tick has off, for the next session.
+    crate::replicating::plugins::held(&state.pool, &state.settings).await
 }
 
 /// This device's clones of the git plugins `removed` deleted, where it still
@@ -334,7 +337,7 @@ fn reachable(state: &AppState, fields: &Fields) -> bool {
 pub(super) fn on_this_device(state: &AppState, fields: &Fields) -> bool {
     match &fields.source {
         Source::Local { device, .. } => *device == state.device,
-        Source::Git { .. } => true,
+        Source::Git { .. } | Source::BuiltIn => true,
     }
 }
 
@@ -411,6 +414,12 @@ fn unmet(
     built_ins: &BTreeMap<String, semver::Version>,
 ) -> Option<Unmet> {
     if let Some(version) = built_ins.get(&dependency.uuid) {
+        let unticked = records
+            .iter()
+            .any(|record| record.uuid == dependency.uuid && !record.fields.enabled);
+        if unticked {
+            return Some(Unmet::Disabled);
+        }
         return (!dependency.version.matches(version)).then(|| Unmet::Outdated {
             version: version.to_string(),
             updatable: false,
@@ -525,6 +534,7 @@ async fn loaded(
             .await
             .map_err(|error| format!("Its clone couldn't be checked: {error}."))??
         }
+        Source::BuiltIn => return Err("It's built in, so it's read out of Verkstead.".to_owned()),
     };
 
     let manifest = Manifest::read(&dir, Platform::HERE).map_err(|refusal| refusal.why)?;
@@ -636,6 +646,33 @@ fn fields(manifest: &Manifest, source: Source, enabled: bool) -> Fields {
     }
 }
 
+/// A built-in's record: who `manifest` says it is, its switch, and the
+/// settings' values `kept` holds where it has a record already.
+pub(crate) fn built_in_fields(manifest: &Manifest, enabled: bool, kept: Option<&Fields>) -> Fields {
+    let fields = fields(manifest, Source::BuiltIn, enabled);
+    match kept {
+        Some(kept) => Fields {
+            values: kept.values.clone(),
+            secrets: kept.secrets.clone(),
+            ..fields
+        },
+        None => fields,
+    }
+}
+
+/// The languages `manifest` provides, by label.
+fn languages(manifest: &Manifest) -> Vec<String> {
+    built_in::languages(manifest)
+        .map(|provided| {
+            provided
+                .descriptor
+                .label()
+                .unwrap_or(&provided.name)
+                .to_owned()
+        })
+        .collect()
+}
+
 /// The Plugins page as this device reads it.
 pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
     let names: BTreeMap<String, String> = match state.devices.as_ref() {
@@ -655,8 +692,11 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
         .map(|record| (record.uuid.clone(), going_with(&records, &record.uuid)))
         .collect();
 
+    let built_in = built_ins(&records);
+
     let installed = records
         .into_iter()
+        .filter(|record| !matches!(record.fields.source, Source::BuiltIn))
         .map(|record| {
             let here = on_this_device(state, &record.fields);
             let (source, elsewhere) = match &record.fields.source {
@@ -671,6 +711,7 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                     },
                     None,
                 ),
+                Source::BuiltIn => (PluginSource::BuiltIn, None),
             };
 
             let loads = here && record.fields.enabled;
@@ -690,6 +731,7 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                 version: record.fields.version,
                 author: record.fields.author,
                 provides: record.fields.provides,
+                languages: Vec::new(),
                 enabled: record.fields.enabled,
             }
         })
@@ -697,15 +739,16 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
 
     Ok(PluginsView {
         installed,
-        built_in: built_ins(),
+        built_in,
     })
 }
 
 /// The Built-in group's rows: every built-in this binary ships but the fixture,
-/// which is not listed. Always on — a built-in has no checkbox and no Remove —
-/// and in trouble only where its manifest no longer reads.
-fn built_ins() -> Vec<PluginRow> {
-    BUILT_INS
+/// which is not listed, the Skill Pack `verkstead` first. A built-in has no
+/// Remove and no Update, and is always on but for a Language plugin, whose
+/// tick is read off its record — on where it has none.
+fn built_ins(records: &[Record<Fields>]) -> Vec<PluginRow> {
+    let mut rows: Vec<PluginRow> = BUILT_INS
         .iter()
         .filter_map(|built_in| match built_in.manifest(Platform::HERE) {
             Ok(manifest) if manifest.uuid == FIXTURE => None,
@@ -715,12 +758,17 @@ fn built_ins() -> Vec<PluginRow> {
                 version: manifest.version.to_string(),
                 author: manifest.author.name.clone(),
                 provides: provides(&manifest),
+                languages: languages(&manifest),
                 source: PluginSource::BuiltIn,
-                enabled: true,
+                enabled: !built_in::switched(&manifest)
+                    || records
+                        .iter()
+                        .find(|record| record.uuid == manifest.uuid)
+                        .is_none_or(|record| record.fields.enabled),
                 trouble: None,
                 needs: Vec::new(),
                 elsewhere: None,
-                dependents: Vec::new(),
+                dependents: going_with(records, &manifest.uuid),
                 settings: u32::try_from(manifest.settings.len()).unwrap_or(u32::MAX),
             }),
             Err(refusal) => Some(PluginRow {
@@ -729,6 +777,7 @@ fn built_ins() -> Vec<PluginRow> {
                 version: String::new(),
                 author: String::new(),
                 provides: Vec::new(),
+                languages: Vec::new(),
                 source: PluginSource::BuiltIn,
                 enabled: true,
                 trouble: Some(refusal.why),
@@ -738,7 +787,9 @@ fn built_ins() -> Vec<PluginRow> {
                 settings: 0,
             }),
         })
-        .collect()
+        .collect();
+    rows.sort_by_key(|row| row.uuid != built_in::VERKSTEAD);
+    rows
 }
 
 /// The routes the section reads and presses — mounted beside the rest of the
@@ -1025,6 +1076,13 @@ async fn update(
     Path(uuid): Path<String>,
     Json(press): Json<PluginUpdate>,
 ) -> Response {
+    if built_in::listed()
+        .iter()
+        .any(|manifest| manifest.uuid == uuid)
+    {
+        return built_in_refused("updated");
+    }
+
     let record = match held(&state, &uuid).await {
         Ok(record) => record,
         Err(refusal) => return refusal,
@@ -1038,6 +1096,7 @@ async fn update(
     }
 
     let answered = match &record.fields.source {
+        Source::BuiltIn => Some(built_in_refused("updated")),
         Source::Local { path, .. } => update_local(&state, &record, path, &press).await,
         Source::Git { url, revision } => {
             // Held so that no load puts the clone back at the pinned revision
@@ -1176,13 +1235,57 @@ async fn update_git(
     None
 }
 
+/// The refusal of a press a built-in has no row button for, `done` saying
+/// which: it comes and goes with Verkstead.
+fn built_in_refused(done: &str) -> Response {
+    refused(
+        StatusCode::CONFLICT,
+        ApiError::new(format!(
+            "That plugin is built in, so it's {done} with Verkstead. Untick it to turn it off."
+        )),
+    )
+}
+
 /// `POST /api/ui/plugins/{uuid}/enabled` — the checkbox, which is the
-/// cluster's.
+/// cluster's. A built-in's record is made by its first tick.
 async fn enable(
     State(state): State<AppState>,
     Path(uuid): Path<String>,
     Json(press): Json<PluginEnabled>,
 ) -> Response {
+    if let Some(manifest) = built_in::listed()
+        .iter()
+        .find(|manifest| manifest.uuid == uuid)
+    {
+        if !built_in::switched(manifest) {
+            return refused(
+                StatusCode::CONFLICT,
+                ApiError::new("That plugin is built in and always on, so it has no tick."),
+            );
+        }
+
+        let kept = match replicated::live_records::<Plugins>(&state.pool).await {
+            Ok(records) => records.into_iter().find(|record| record.uuid == uuid),
+            Err(error) => return failed(error),
+        };
+        let fields = built_in_fields(
+            manifest,
+            press.enabled,
+            kept.as_ref().map(|record| &record.fields),
+        );
+
+        if let Err(error) =
+            replicated::write::<Plugins>(&state.pool, &state.device, &uuid, &fields).await
+        {
+            return failed(error);
+        }
+
+        return match moved(&state).await {
+            Ok(plugins) => Json(plugins).into_response(),
+            Err(refusal) => refusal,
+        };
+    }
+
     let record = match held(&state, &uuid).await {
         Ok(record) => record,
         Err(refusal) => return refusal,
@@ -1295,8 +1398,15 @@ fn listed(names: &[&str]) -> String {
 /// `POST /api/ui/plugins/{uuid}/remove` — **Remove**: the record taken off the
 /// cluster, and this device's clone of a git plugin deleted; every other
 /// device deletes its own as the removal merges. Refused while anything open
-/// stands on it, counted and named. A built-in has no record, and no Remove.
+/// stands on it, counted and named. A built-in has no Remove.
 async fn remove(State(state): State<AppState>, Path(uuid): Path<String>) -> Response {
+    if built_in::listed()
+        .iter()
+        .any(|manifest| manifest.uuid == uuid)
+    {
+        return built_in_refused("removed");
+    }
+
     let records = match replicated::live_records::<Plugins>(&state.pool).await {
         Ok(records) => records,
         Err(error) => return failed(error),

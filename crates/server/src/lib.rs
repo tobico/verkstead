@@ -2591,6 +2591,15 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         .await
         .context("taking the MCP servers up out of config.yaml into the database")?;
 
+    // And each built-in Language plugin's switch the same way, once: on where
+    // any of its languages was on here, put together with every other
+    // device's take-up by on winning — and the languages it leaves off held
+    // for the settings before anything below builds a session's languages.
+    // See [`replicating::plugins::taken_up`].
+    replicating::plugins::taken_up(&pool, &settings, device.id())
+        .await
+        .context("taking the languages' switches up out of config.yaml into the database")?;
+
     // And the shared build cache, which is resolved for the reason the binds
     // above are and *made* here, which they never are — see
     // [`build_cache::BuildCache::resolve`] for why this one directory is

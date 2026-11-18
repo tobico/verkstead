@@ -164,16 +164,17 @@ fn packing(dir: &Path, uuid: &str, name: &str, pack: &str) -> String {
     at
 }
 
-/// The skills Verkstead ships are the Built-in group's row: providing skills,
-/// always on, and with no Remove — and the fixture is not listed.
+/// The skills Verkstead ships are the Built-in group's first row: providing
+/// skills, always on with no tick, and with no Remove — and the fixture is not
+/// listed.
 #[tokio::test]
 async fn the_verkstead_pack_is_a_built_in_row() {
     let (app, _dir) = kept().await;
 
     let view = page(&app).await;
 
-    let [row] = view.built_in.as_slice() else {
-        panic!("one built-in is listed: {view:?}");
+    let Some(row) = view.built_in.first() else {
+        panic!("a built-in is listed: {view:?}");
     };
     assert_eq!(row.uuid, VERKSTEAD);
     assert_eq!(row.name, "Verkstead");
@@ -190,6 +191,16 @@ async fn the_verkstead_pack_is_a_built_in_row() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "a built-in has no Remove");
+
+    let (status, said) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{VERKSTEAD}/enabled"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(said.contains("always on"), "{said}");
+    assert!(page(&app).await.built_in[0].enabled);
 }
 
 /// An enabled plugin's pack is written out under its name, and taken away
@@ -484,6 +495,100 @@ async fn a_uuid_installed_or_built_in_is_refused() {
     assert!(said.contains("built-in"), "{said}");
 
     assert_eq!(page(&app).await.installed.len(), 1);
+}
+
+const GO_PLUGIN: &str = "01b5328a-3524-457d-ab88-1af1c65079ea";
+
+fn built_in<'a>(view: &'a PluginsView, name: &str) -> &'a PluginRow {
+    view.built_in
+        .iter()
+        .find(|row| row.name == name)
+        .unwrap_or_else(|| panic!("{name} is listed under Built-in in {view:?}"))
+}
+
+/// The six Language plugins are listed under Built-in, each saying the
+/// languages it provides, on with nothing written; the fixture isn't listed,
+/// and a built-in has no Remove or Update.
+#[tokio::test]
+async fn the_language_plugins_are_listed_under_built_in() {
+    let (app, _dir) = kept().await;
+    let view = page(&app).await;
+
+    assert!(view.installed.is_empty());
+    let names: Vec<&str> = view.built_in.iter().map(|row| row.name.as_str()).collect();
+    assert_eq!(names.len(), 7, "the pack and six languages: {names:?}");
+    assert!(!view.built_in.iter().any(|row| row.uuid == FIXTURE));
+
+    let rust = built_in(&view, "Rust & C/C++");
+    assert_eq!(rust.languages, ["Rust", "C/C++"]);
+    assert_eq!(rust.provides, ["language"]);
+    assert_eq!(rust.source, PluginSource::BuiltIn);
+    assert!(rust.enabled);
+    for (name, language) in [
+        ("Go", "Go"),
+        ("Node", "Node"),
+        ("Python", "Python"),
+        (".NET", ".NET"),
+        ("JVM", "JVM"),
+    ] {
+        let row = built_in(&view, name);
+        assert_eq!(row.languages, [language], "{name}");
+        assert!(row.enabled, "{name}");
+    }
+
+    let go = &built_in(&view, "Go").uuid;
+    for press in ["remove", "update"] {
+        let (status, said) = pressing(
+            &app,
+            &format!("/api/ui/plugins/{go}/{press}"),
+            serde_json::json!({ "granted": null }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{press}: {said}");
+        assert!(said.contains("built in"), "{said}");
+    }
+}
+
+/// Unticking Go is what the next session reads: its languages have Go off,
+/// and none of Go's variables are given — and ticking it again gives them
+/// back. Everything else stays on.
+#[tokio::test]
+async fn the_tick_on_a_built_in_is_whether_sessions_get_its_language() {
+    use verkstead_server::languages::{self, GO, Machine, RUST};
+
+    let (app, dir) = kept().await;
+    let settings = Settings::in_data_dir(dir.path());
+    let machine = Machine::of(&dir.path().join("cache"), dir.path(), None);
+    let given = |settings: &Settings| {
+        languages::configured(&settings.config())
+            .given(&machine)
+            .env()
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(given(&settings).contains(&"GOMODCACHE".to_owned()));
+
+    let enabled = format!("/api/ui/plugins/{GO_PLUGIN}/enabled");
+    let press =
+        |enabled_: bool| pressing(&app, &enabled, serde_json::json!({ "enabled": enabled_ }));
+
+    let (status, said) = press(false).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let view: PluginsView = serde_json::from_str(&said).unwrap();
+    assert!(!built_in(&view, "Go").enabled);
+    assert!(built_in(&view, "Rust & C/C++").enabled);
+
+    let languages = languages::configured(&settings.config());
+    assert!(!languages.get(GO).unwrap().enabled());
+    assert!(languages.get(RUST).unwrap().enabled());
+    assert!(!given(&settings).contains(&"GOMODCACHE".to_owned()));
+    assert!(given(&settings).contains(&"CARGO_HOME".to_owned()));
+
+    let (status, said) = press(true).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(built_in(&page(&app).await, "Go").enabled);
+    assert!(given(&settings).contains(&"GOMODCACHE".to_owned()));
 }
 
 /// A directory with no manifest is refused with the reader's own sentence.

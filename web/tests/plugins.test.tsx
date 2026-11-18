@@ -157,6 +157,38 @@ describe("a row", () => {
   });
 });
 
+describe("the Built-in group", () => {
+  /// The six Language plugins, each saying the languages it provides by
+  /// label, ticked, with no source line, Update or Remove.
+  it("lists the Language plugins, each saying the languages it provides", async () => {
+    serving(whenever("/api/ui/plugins", json(PLUGINS)));
+    pane();
+
+    const rust = await theRow("Rust & C/C++");
+
+    expect(rust.textContent).toContain("Provides Rust and C/C++.");
+    expect(rust.querySelector("input[type=checkbox]")).toHaveProperty(
+      "checked",
+      true,
+    );
+    expect(rust.querySelectorAll("button")).toHaveLength(0);
+    expect((await theRow("Go")).textContent).toContain("Provides Go.");
+    expect(
+      [...screen.getAllByRole("heading", { level: 3 })].map(
+        (heading) => heading.textContent,
+      ),
+    ).toEqual(["Installed", "Built-in"]);
+    expect(PLUGINS.built_in.map((row) => row.name)).toEqual([
+      ".NET",
+      "Go",
+      "JVM",
+      "Node",
+      "Python",
+      "Rust & C/C++",
+    ]);
+  });
+});
+
 describe("a row's settings", () => {
   it("opens its pane from the row where its manifest declares fields", async () => {
     serving(whenever("/api/ui/plugins", json(PLUGINS)));

@@ -182,9 +182,33 @@ function languagesSent(fetching: ReturnType<typeof serving>) {
     .languages;
 }
 
-/// One of the boxes on the pane, by the label the server gave its language.
-function theCheck(label = "Rust"): HTMLInputElement {
+/// One of the boxes on the pane, by the label the server gave its language —
+/// only a language no plugin provides has one.
+function theCheck(label = "Gleam"): HTMLInputElement {
   return screen.getByRole("checkbox", { name: label }) as HTMLInputElement;
+}
+
+/// A built-in language's name, standing where a box would: its switch is its
+/// plugin's tick on the Plugins page.
+function theName(label = "Rust"): HTMLElement {
+  return screen.getByText(label, { selector: `.${styles.named}` });
+}
+
+/// Whether a built-in language's name reads as on.
+function named(label = "Rust"): boolean {
+  return !theName(label).classList.contains(styles.off!);
+}
+
+/// The same settings with one built-in language drawn as a language no plugin
+/// provides, box and all — which is what an installer's own language with a
+/// store is, and no fixture carries one.
+function unplugged(standing: SettingsView, name = RUST): SettingsView {
+  return {
+    ...standing,
+    languages: standing.languages.map((language) =>
+      language.name === name ? { ...language, plugin: null } : language,
+    ),
+  };
 }
 
 /// The link beside a language's box, by the label the server gave it — or
@@ -267,27 +291,36 @@ describe("the languages as the pane draws them", () => {
     theSettings(TOLD);
     const { container } = mountPane();
 
-    await waitFor(() => expect(theCheck().checked).toBe(true));
+    await waitFor(() => expect(named()).toBe(true));
     expect(container.querySelector("h3")?.textContent).toBe("Build Caches");
     expect(container.querySelector("h1")).toBeNull();
   });
 
-  /// A box per descriptor the server loaded, under the label it gave — the one
-  /// an installer wrote included, which is the whole of what *the file only*
-  /// comes to: they write `config.yaml` and the box is here next time.
-  it("draws a checkbox per language the server lists", async () => {
+  /// A row per descriptor the server loaded, under the label it gave. A
+  /// built-in language is its name and no box, its switch being its plugin's
+  /// tick on the Plugins page; the one an installer wrote has its box, which
+  /// is the whole of what *the file only* comes to: they write `config.yaml`
+  /// and the box is here next time.
+  it("draws a box only for a language no plugin provides", async () => {
     theSettings(TOLD);
     mountPane();
 
-    await waitFor(() => expect(theCheck("Rust").checked).toBe(true));
-    expect(theCheck("Go").checked).toBe(true);
-    expect(theCheck("Node").checked).toBe(true);
-    expect(theCheck("Python").checked).toBe(true);
-    expect(theCheck(".NET").checked).toBe(true);
-    expect(theCheck("C/C++").checked).toBe(true);
-    expect(theCheck("JVM").checked).toBe(true);
+    await waitFor(() => expect(named("Rust")).toBe(true));
+    for (const label of ["Go", "Node", "Python", ".NET", "C/C++", "JVM"]) {
+      expect(named(label), label).toBe(true);
+      expect(theName(label).title).toMatch(/^Switched on the Plugins page, by /);
+    }
     expect(theCheck("Gleam").checked).toBe(true);
-    expect(screen.getAllByRole("checkbox")).toHaveLength(8);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+  });
+
+  /// And a built-in language whose plugin is unticked is greyed.
+  it("greys a built-in language whose plugin is unticked", async () => {
+    theSettings(off(TOLD, GO));
+    mountPane();
+
+    await waitFor(() => expect(named("Go")).toBe(false));
+    expect(named("Rust")).toBe(true);
   });
 
   /// The box says where its language stands rather than whether anybody has
@@ -296,13 +329,13 @@ describe("the languages as the pane draws them", () => {
     theSettings(UNSET);
     mountPane();
 
-    await waitFor(() => expect(theCheck().checked).toBe(true));
+    await waitFor(() => expect(named()).toBe(true));
   });
 
   /// The link stands beside the box rather than inside its label: a press
   /// anywhere in the label ticks the box, and pressing the link must not.
   it("opens a panel from the link without ticking the box", async () => {
-    const fetching = theSettings(TOLD);
+    const fetching = theSettings(unplugged(TOLD, GO));
     mountPane();
 
     const panel = await opened("Go");
@@ -331,7 +364,6 @@ describe("the languages as the pane draws them", () => {
       ),
     );
 
-    expect(theCheck().matches(":disabled")).toBe(true);
     await opened();
     expect(theSize().matches(":disabled")).toBe(true);
   });
@@ -353,10 +385,9 @@ describe("the languages as the pane draws them", () => {
 
     expect(theCheck("Gleam").checked).toBe(false);
     expect(theCheck("Gleam").matches(":disabled")).toBe(true);
-    expect(
-      theCheck("Rust").matches(":disabled"),
-      "while the language beside it is left alone",
-    ).toBe(false);
+    expect(named("Rust"), "while the language beside it is left alone").toBe(
+      true,
+    );
   });
 
   /// Nothing about sccache at the foot of the pane: it is in the panels of the
@@ -365,7 +396,7 @@ describe("the languages as the pane draws them", () => {
     theSettings(UNSET);
     mountPane();
 
-    await waitFor(() => expect(theCheck().checked).toBe(true));
+    await waitFor(() => expect(named()).toBe(true));
 
     expect(screen.queryByText(/The server can't see an sccache/)).toBeNull();
   });
@@ -433,7 +464,7 @@ describe("the link beside each language", () => {
     theSettings(off(off(measured(TOLD, GO, 0), GO), NODE));
     mountPane();
 
-    await waitFor(() => expect(theCheck("Go").checked).toBe(false));
+    await waitFor(() => expect(named("Go")).toBe(false));
     expect(linkOf("Go")).toBeUndefined();
     expect(linkSaid("Node")).toBe("Store not measured yet");
   });
@@ -479,7 +510,7 @@ describe("the link beside each language", () => {
     theSettings(compiling(TOLD));
     const { container } = mountPane();
 
-    await waitFor(() => expect(theCheck().checked).toBe(true));
+    await waitFor(() => expect(named()).toBe(true));
     expect(container.querySelectorAll("p")).toHaveLength(0);
     expect(container.querySelectorAll("input[type=text]")).toHaveLength(0);
   });
@@ -877,7 +908,7 @@ describe("changing the languages", () => {
   /// and `Keep` for the token: one request writes both files, so a tick here
   /// must not be able to take the credentials with it.
   it("saves the moment the box is ticked, and leaves the credentials alone", async () => {
-    const fetching = theSettings(TOLD, json(answering(off(TOLD))));
+    const fetching = theSettings(TOLD, json(answering(off(TOLD, GLEAM))));
     mountPane();
 
     await waitFor(() => expect(theCheck().checked).toBe(true));
@@ -895,14 +926,14 @@ describe("changing the languages", () => {
         // that was pressed as it is now to stand, and the rest as they were,
         // sizes included, whether this pane drew a field for one or not.
         languages: [
-          { name: RUST, enabled: false, size: "50G" },
+          { name: RUST, enabled: true, size: "50G" },
           { name: GO, enabled: true, size: "" },
           { name: NODE, enabled: true, size: "" },
           { name: PYTHON, enabled: true, size: "" },
           { name: DOTNET, enabled: true, size: "" },
           { name: CPP, enabled: true, size: "" },
           { name: JVM, enabled: true, size: "" },
-          { name: GLEAM, enabled: true, size: "8G" },
+          { name: GLEAM, enabled: false, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
@@ -950,19 +981,22 @@ describe("changing the languages", () => {
   /// a `50` as the store size, which is a number nobody finished. The Cleanup
   /// pane's two durations hold the same rule.
   it("sends the server's size when the box is ticked, not what is typed", async () => {
-    const fetching = theSettings(compiling(TOLD), json(answering(off(TOLD))));
+    const fetching = theSettings(
+      unplugged(compiling(TOLD)),
+      json(answering(unplugged(off(TOLD)))),
+    );
     mountPane();
 
     await opened();
     fireEvent.input(theSize(), { target: { value: "5" } });
 
-    fireEvent.click(theCheck());
+    fireEvent.click(theCheck("Rust"));
 
     await waitFor(() => expect(languagesSent(fetching)[0]?.size).toBe("50G"));
 
     // And what was typed is still there to finish typing: the tick did not
     // commit it, so the field did not let go of it either.
-    await waitFor(() => expect(theCheck().checked).toBe(false));
+    await waitFor(() => expect(theCheck("Rust").checked).toBe(false));
     expect(theSize().value).toBe("5");
   });
 
@@ -1108,7 +1142,10 @@ describe("changing the languages", () => {
   /// gone, which is a key nobody was ever shown being emptied by a press about
   /// something else.
   it("sends the size of a language it drew no field for", async () => {
-    const fetching = theSettings(compiling(TOLD), json(answering(off(TOLD))));
+    const fetching = theSettings(
+      compiling(TOLD),
+      json(answering(off(TOLD, GLEAM))),
+    );
     mountPane();
 
     await waitFor(() => expect(theCheck().checked).toBe(true));
@@ -1116,14 +1153,14 @@ describe("changing the languages", () => {
 
     await waitFor(() =>
       expect(languagesSent(fetching)).toEqual([
-        { name: RUST, enabled: false, size: "50G" },
+        { name: RUST, enabled: true, size: "50G" },
         { name: GO, enabled: true, size: "" },
         { name: NODE, enabled: true, size: "" },
         { name: PYTHON, enabled: true, size: "" },
         { name: DOTNET, enabled: true, size: "" },
         { name: CPP, enabled: true, size: "" },
         { name: JVM, enabled: true, size: "" },
-        { name: GLEAM, enabled: true, size: "8G" },
+        { name: GLEAM, enabled: false, size: "8G" },
       ]),
     );
   });

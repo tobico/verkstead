@@ -359,6 +359,12 @@ pub struct LanguageView {
     /// Whether sessions get it at all.
     pub enabled: bool,
 
+    /// The built-in plugin whose tick on the Plugins page is this switch, by
+    /// its display name — `Rust & C/C++` — where one provides it: the page
+    /// draws no checkbox for it, and a save's `enabled` for it is not written.
+    /// Null for a language only `config.yaml` describes, whose box is here.
+    pub plugin: Option<String>,
+
     /// How big its store may grow, in sccache's own words — `30G`, `500M`:
     /// what is written down where somebody wrote one, and the default where
     /// nobody did. Always a value, so the page always has a word to draw.

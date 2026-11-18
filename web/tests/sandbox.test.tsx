@@ -387,7 +387,7 @@ describe("the pane", () => {
     theSettings(TOLD);
     const { container } = mountPane();
 
-    await waitFor(() => screen.getByRole("checkbox", { name: "Rust" }));
+    await waitFor(() => screen.getByRole("checkbox", { name: "Gleam" }));
     await waitFor(() => screen.getByLabelText("Add a path"));
 
     expect(
@@ -422,7 +422,7 @@ describe("the round trip", () => {
   /// warning taken away, so the line is the counts rather than a warning that
   /// would take it.
   it("takes a build cache off the card's count when the pane unticks it", async () => {
-    theSettings(quiet(TOLD), json(answering(off(quiet(TOLD)))));
+    theSettings(quiet(TOLD), json(answering(off(quiet(TOLD), "gleam"))));
     const { container } = mounting(() => (
       <>
         <SandboxCard open press={() => {}} />
@@ -430,16 +430,16 @@ describe("the round trip", () => {
       </>
     ));
 
-    const rust = await waitFor(() => {
+    const gleam = await waitFor(() => {
       const box = screen.getByRole("checkbox", {
-        name: "Rust",
+        name: "Gleam",
       }) as HTMLInputElement;
       expect(box.checked).toBe(true);
       return box;
     });
     await reads(container, "8 build caches · 2 binds");
 
-    fireEvent.click(rust);
+    fireEvent.click(gleam);
 
     await reads(container, "7 build caches · 2 binds");
   });

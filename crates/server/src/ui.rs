@@ -7188,6 +7188,7 @@ async fn save_settings(
             )
         });
 
+        let ticks_held = settings.config().unticked_languages().is_some();
         settings.save_config(
             &Config::of(
                 author.clone(),
@@ -7196,12 +7197,16 @@ async fn save_settings(
                 // empty field meaning nothing configured — clearing it is how
                 // the human asks for the default back, and a size of nothing is
                 // not a size. Everything else in a descriptor is an installer's
-                // and is kept from the file below.
-                crate::languages::Languages::of_page(
-                    edit.languages
-                        .into_iter()
-                        .map(|language| (language.name, language.enabled, language.size)),
-                ),
+                // and is kept from the file below. And no switch for a language
+                // a built-in plugin provides once the plugins' ticks are held,
+                // its tick being its switch: an `enabled` the file still holds
+                // for it was taken up, and goes.
+                crate::languages::Languages::of_page(edit.languages.into_iter().map(|language| {
+                    let ticked =
+                        ticks_held && crate::plugins::built_in::providing(&language.name).is_some();
+                    let enabled = (!ticked).then_some(language.enabled);
+                    (language.name, enabled, language.size)
+                })),
                 // And the Cleanup's two rows, each a switch and a duration as it
                 // was typed — an empty field is the default asked for back, and so
                 // is anything that is not a whole number of days. Nothing here is
@@ -7564,6 +7569,8 @@ fn languages(
             name: name.to_owned(),
             label: descriptor.label().unwrap_or(name).to_owned(),
             enabled: descriptor.enabled(),
+            // And the plugin whose tick that is, where a built-in provides it.
+            plugin: crate::plugins::built_in::providing(name).map(|manifest| manifest.name.clone()),
             // What is written down, as written, where somebody wrote one — it is
             // what a save puts back — and the default where nobody did, with the
             // flag beside it saying which of the two this is. The default rides

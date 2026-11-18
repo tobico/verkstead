@@ -3784,6 +3784,13 @@ label: string,
  */
 enabled: boolean, 
 /**
+ * The built-in plugin whose tick on the Plugins page is this switch, by
+ * its display name — `Rust & C/C++` — where one provides it: the page
+ * draws no checkbox for it, and a save's `enabled` for it is not written.
+ * Null for a language only `config.yaml` describes, whose box is here.
+ */
+plugin: string | null, 
+/**
  * How big its store may grow, in sccache's own words — `30G`, `500M`:
  * what is written down where somebody wrote one, and the default where
  * nobody did. Always a value, so the page always has a word to draw.
@@ -4973,7 +4980,12 @@ author: string,
  * The Category of each thing it provides, as the manifest writes it, once
  * each.
  */
-provides: Array<string>, source: PluginSource, 
+provides: Array<string>, 
+/**
+ * The languages it provides, by label — `Rust`, `C/C++` — in the order
+ * its manifest lists them. Empty for one providing none.
+ */
+languages: Array<string>, source: PluginSource, 
 /**
  * Its checkbox: whether the cluster has it on.
  */
@@ -5051,8 +5063,9 @@ export type PluginsView = { installed: Array<PluginRow>,
 /**
  * The ones this binary ships and lists, the Skill Pack `verkstead` first;
  * the fixture that proves the path is not listed, and the group is drawn
- * only once it has a row. A built-in has no **Remove** and no checkbox:
- * it is always on.
+ * only once it has a row. A built-in has no **Remove** and no **Update**,
+ * and is always on but for a Language plugin, which is on until it is
+ * unticked.
  */
 built_in: Array<PluginRow>, };
 
