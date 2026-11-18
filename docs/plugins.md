@@ -210,8 +210,9 @@ directory: the wasm component that holds the plugin's code, where any of it is
 code. It is a WebAssembly **component** built for WASI 0.2 — Rust's
 `wasm32-wasip2` target makes one — and is written against a world of
 Verkstead's WIT package, `verkstead:plugin` (`crates/server/wit/plugin.wit`):
-the base world `plugin`, or the world of a Category it provides. None of those
-worlds holds anything yet; each Category's stage fills its own.
+the base world `plugin`, or the world of a Category it provides. A Category's
+world is filled by the stage that gives it its grammar: the `agent` world's
+exports are above, and the rest hold nothing yet.
 
 The component may import WASI 0.2 and WASI HTTP, and nothing else. What any of
 it reaches is what `capabilities` grants, below.
@@ -484,6 +485,196 @@ sccache's too, for Rust. Ticked or not, since an off language still holds what
 it fetched. Clear is off, and refused by the server, while a session or a
 terminal runs. The Sandbox page's **Build caches** part keeps only what is no
 language's: whether the server can see an sccache.
+
+### Agent
+
+An entry of category **`agent`** is a harness: a program a session runs, such
+as Claude Code or Codex. What about it is data is written here; the three
+things about it that are code — finding and reading a session's transcript,
+writing its configuration, and driving its login — are the exports of the
+plugin's `component`, against the `agent` world (below). A plugin providing an
+agent is refused without a `component`.
+
+```yaml
+provides:
+  - category: agent
+    binary: stub
+    name: Stub
+    mark: stub.svg                      # optional where the plugin has one
+    launch:
+      model: [--model, "{model}"]
+      prompt: ["{prompt}"]              # or [--prompt, "{prompt}"]
+      session: [--session-id, "{session}"]
+      resume:
+        flag: [--resume, "{session}"]
+      tail: [--yes, --settings, "{settings}", --add-dir, "{worktree}"]
+      settings:
+        autoUpdates: false
+    account:
+      - key: dir
+        label: Directory
+        purpose: Mounted at `~/.stub`.
+        example: /home/you/accounts/work/.stub
+        kind: directory
+        mounted: .stub
+        allowlist: [settings.json, sessions]
+        credentials: [auth.json]
+        memory: [memory]
+    idle:
+      signature: esc to interrupt
+    phrases:
+      exhausted: you've hit your usage limit
+      signed-out:
+        ends: Please run /login.
+    ask:
+      channel: blocking
+      guide: |
+        Run `verkstead ask` and wait for it: it returns with the answers.
+    models:
+      - id: stub-large
+        name: Stub Large
+        default: true
+      - id: stub-small
+        name: Stub Small
+        for: [review]
+    tools: mcp__<server>__<tool>
+    install:
+      instructions: https://example.com/stub/install
+      commands: [npm install -g stub]
+    login:
+      line: [auth, login]
+      status: [auth, status]
+    environment:
+      STUB_DISABLE_UPDATES: "1"
+    instructions: STUB.md
+    excluded: [.stub/]
+```
+
+**Who it is.** `binary` is the program a session runs, found on PATH by that
+name. `name` is what a sentence calls it. `mark` is its mark, read as the
+top-level `mark` is; where it has none, the plugin's is drawn, and an agent
+with neither is refused.
+
+**`launch`** — required: its launch line, in parts, each a list of the words
+on the line. The words may hold **placeholders** the host fills: `{model}`,
+`{prompt}`, `{session}`, `{worktree}` and `{settings}`, and nothing else.
+
+- **`model`** — required, holding `{model}`: how the model is said.
+- **`prompt`** — required, holding `{prompt}`: how the Brief is given, a flag
+  and it or it alone.
+- **`session`** — optional, holding `{session}`: how the session id Verkstead
+  picked is named. A harness that takes none leaves it out, and its transcript
+  is then found rather than named.
+- **`resume`** — optional: how a conversation is carried on, under the id of
+  the session that was having it. Either a **`flag`** holding `{session}`,
+  written where `session` would have been, or a **`subcommand`** holding
+  `{session}`, written straight after the binary, with **`also`** the words a
+  resume needs on the end that a launch does not. Without one, a resumed
+  Conversation opens a session of its own.
+- **`tail`** — optional: what goes last. `{worktree}` is the Worktree the
+  session works in.
+- **`settings`** — optional: settings for this session alone, as a map, which
+  the host writes as JSON to a file and names on the line as `{settings}`. One
+  without the other is refused.
+
+The approval bypass belongs in `tail`: Verkstead runs every session
+unattended, inside its Sandbox.
+
+**`account`** — required, at least one: the paths an account is made of, in
+the order the Profile form draws a field apiece for them.
+
+- **`key`** — what the Profile holds the path under, unique in the list.
+- **`label`** — what the form labels the field. **`purpose`**, optional, is
+  said under it, and **`example`**, optional, is what it shows before anything
+  is typed.
+- **`kind`** — `directory` or `file`.
+- **`mounted`** — where it is joined into a session's HOME, said from there.
+- **`allowlist`**, **`credentials`** and **`memory`** — optional, a
+  directory's only, each a list of paths said from it: what of it is mounted
+  (all of it where there is no list), the files that hold the login, and the
+  directories that are the memory store.
+
+Every path written relatively here, and `instructions` below, is refused where
+it would climb out of where it is said from.
+
+**`idle`** — required: how a session is told to be idle. `silence` is a
+session that has written nothing for a while. A map holding a **`signature`**
+is one whose Screen holds that text while it works and not while it waits.
+
+**`phrases`** — optional. **`exhausted`** is the stable start of what a
+session prints when its account is out of window. **`signed-out`** is what it
+says when its account has signed out: the sentence a line **`ends`** with, and
+**`then`**, optional, the line drawn next, where the sentence alone is also
+said by a session signed in. A `signed-out` needs a `login`, which is what puts
+it right.
+
+**`ask`** — required: how a session puts a Question Set to the human.
+**`channel`** is `blocking`, for a harness that can hold a shell command open
+for hours, or `store-and-nudge`, for one whose shell tool gives up after
+seconds: the ask returns at once, the session ends its turn, and Verkstead
+types into its terminal when the answer lands. **`guide`** is the *Running the
+ask* section of the Guide a session reads, in markdown.
+
+**`models`** — required: the models a Profile of it offers, each an **`id`**,
+what the harness is told, and a **`name`**, what is drawn. Exactly one is
+**`default: true`**, which a Pairing runs where nothing else says; **`for`**
+lists the roles — `grilling`, `implementation`, `review` — whose default is
+that model instead, each role on one model at most.
+
+**`tools`** — required: how the harness names an MCP server's tools to the
+model, with `<server>` and `<tool>` where the two names go.
+
+**`install`** — optional. **`instructions`** is a link to the harness's own
+install instructions; **`commands`** are lines that install its binary, run
+only when the human presses for it. Write a platform's own under that
+platform's block.
+
+**`login`** — optional: how Verkstead logs a Profile of it in. **`line`** is the
+words after the binary that log in, **`status`** the words that ask whether
+the account is logged in, and **`terminal`**, `false` unless it says
+otherwise, whether the harness reads the code it is given off a terminal
+rather than a pipe. An agent with no `login` is one Verkstead does not log in.
+
+**`environment`** — optional: a map of each variable a session is told beyond
+what every session is told, to its value, which is text.
+
+**`instructions`** — required: the file the harness reads as its global
+instructions, said from where the account is mounted.
+
+**`excluded`** — optional: what the harness writes inside the Worktree it
+runs in, each a line of git's `info/exclude`.
+
+**Any of it may differ by platform.** An agent's own `linux:`, `macos:` or
+`windows:` holds keys of the entry, and reading for that platform takes each
+key present there in place of the common one, whole, as the top-level blocks
+do:
+
+```yaml
+    binary: stub
+    windows:
+      binary: stub.exe
+```
+
+#### The `agent` world
+
+The component of a plugin providing an agent is written against the `agent`
+world of `crates/server/wit/plugin.wit`, and is refused at load where it does
+not export all three of:
+
+- **`parse-transcript(account, session)`** — the record of a session, found
+  under the account's directory by the session's id and read into what the
+  Transcript pane draws: something said, a tool call, its result, a notice of
+  the harness's own bookkeeping, and a line it does not know, which folds away
+  under its own name. None where there is no record of it yet.
+- **`write-configuration(found, servers)`** — what a session's root holds of
+  the account's configuration, given each configuration file as the account
+  holds it, with the account's own MCP servers already taken out, and the
+  servers the Conversation attached. It answers with the files and with the
+  session-only settings `{settings}` names.
+- **`login(written)`** — the next step of a login, given what the harness has
+  written since the last call: the address to show the human, that the harness
+  is waiting for the code they bring back, words to say to them, or done. The
+  host runs the harness and owns its console; the export only reads it.
 
 ## Per-platform overrides
 
