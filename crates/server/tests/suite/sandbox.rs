@@ -6499,7 +6499,7 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
 /// Three of Node's seven are there — pnpm's, deno's and bun's — and uv's with
 /// them, and the reason is what those four do with their store rather than what
 /// is in it: each links a package out into the project instead of copying, and a
-/// link does not cross a filesystem. See `crates/server/languages.yaml`, and
+/// link does not cross a filesystem. See `plugins/node/plugin.yaml`, and
 /// `tests/suite/package_stores.rs`, where what really comes of that on this platform
 /// is proved.
 ///

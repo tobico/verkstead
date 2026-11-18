@@ -1270,9 +1270,9 @@ What a language *is* to Verkstead: **data**, in one grammar, saying a label for
 the settings page, the manifests that detect it in a Repo, the variables a
 session is given, and the **capabilities** it names. Seven ship — Rust and
 C/C++, which compile, the four **package stores**, Go, Node, Python and
-.NET, and the JVM, whose one entry is Maven and Gradle — and there is nothing special about any of them: the built-ins are a YAML file embedded in the
-binary, written the way an installer writes one, so they are the grammar's own
-worked examples rather than a second shape nobody ever sees. **One entry per
+.NET, and the JVM, whose one entry is Maven and Gradle — and there is nothing special about any of them: the built-ins are the `language` entries of six
+built-in **Plugins**, written the way an installer writes one, so they are the
+grammar's own worked examples rather than a second shape nobody ever sees. **One entry per
 ecosystem rather than per tool**, which is what makes Node six tools, Python
 four and the JVM two: what one box on the settings page turns off is every tool that installs
 from one registry.
@@ -1345,12 +1345,14 @@ nothing could read is still text somebody is about to fix — and while it is
 there the **Build caches** part of the Sandbox pane draws that language's box off with the
 reason under it, naming the variable where a variable is what was
 refused, and saying which of the two became of it.
-**From the plugins roadmap on a descriptor is a Language Plugin's**: the
-`language` block of its `provides:` list, in the grammar above, the seven
-shipping as six built-in Plugins with Rust and C/C++ sharing one for their
-Compile Server, and an installer's `languages:` entry still merging over the
-Plugin of its name. The Plugins page's tick replaces the Build caches box, and
-`size` becomes the Plugin's declared setting. See ADR-0030.
+**A descriptor is a Language Plugin's**: the `language` entry of its
+`provides:` list, in the grammar above (`docs/plugins.md`'s *Language*), the
+seven shipping as six built-in Plugins with Rust and C/C++ sharing one for
+their Compile Server, and an installer's `languages:` entry merging over the
+language of its name. A plugin's entry is refused by field where an
+installer's falls back, and cannot hold `enabled` or `size`, which are the
+installation's. The Plugins page's tick is to replace the Build caches box, and
+`size` to become the Plugin's declared setting. See ADR-0030.
 _Avoid_: language definition, toolchain, language config
 
 **Build Cache**:
