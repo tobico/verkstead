@@ -579,7 +579,7 @@ fn known(members: &[store::Member]) -> String {
 /// One finding of the preflight, in the words the Transfer dialog draws it in —
 /// see `lacking` in `web/src/workbench/Transfer.tsx`.
 pub(crate) fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String {
-    use verkstead_render::{AgentType, Lacking, PairingRole};
+    use verkstead_render::{Lacking, PairingRole};
 
     match lacking {
         Lacking::Unreachable => format!(
@@ -628,13 +628,7 @@ pub(crate) fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String
                 PairingRole::Implementation => "Implementation",
                 PairingRole::Review => "Review",
             };
-            let agent = match agent_type {
-                AgentType::Claude => "Claude Code",
-                AgentType::Codex => "Codex",
-                AgentType::Grok => "Grok Build",
-                AgentType::OpenCode => "OpenCode",
-                AgentType::Agy => "Antigravity CLI",
-            };
+            let agent = crate::harness::of(crate::profiles::stored(*agent_type)).named();
 
             format!(
                 "{role} is paired with {profile}, which runs {agent}. {agent} is not on {device}.",

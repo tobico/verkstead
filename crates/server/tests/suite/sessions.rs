@@ -17923,7 +17923,7 @@ mkdir -p "$(dirname "$log")"
 /// Shell that writes `line` into `$log` the way claude 2.1.329 writes a turn
 /// that failed on its login: the turn's answer, an assistant message marked as
 /// an API error. Which is the record a sign-out is read in — see
-/// `crate::signouts::ReadIn` — the terminal drawing the same line again with
+/// `crate::harness::ReadIn` — the terminal drawing the same line again with
 /// every conversation it resumes.
 fn said_in_the_log(line: &str) -> String {
     let record = serde_json::json!({

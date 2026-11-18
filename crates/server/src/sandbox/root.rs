@@ -11,7 +11,7 @@
 //! absent from it too without anybody having to notice.
 //!
 //! **One shape for every harness**, in four parts. Which files and directories
-//! each part is, is the harness's own — see [`Harness`]:
+//! each part is, is the harness's own — see [`Allowlist`]:
 //!
 //! - **The login, linked**, where the account has one.
 //! - **The memory store, joined only where the Profile's memory switch is on.**
@@ -473,7 +473,7 @@ pub(crate) struct Root {
     account: PathBuf,
 
     /// Which harness's allowlist this is.
-    harness: Harness,
+    harness: Allowlist,
 
     /// Whether the memory store is joined at all: the Profile's memory switch —
     /// see [`Root::remembering`].
@@ -482,7 +482,7 @@ pub(crate) struct Root {
 
 /// Which harness a root is for, and what that harness's allowlist is made of.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Harness {
+enum Allowlist {
     /// Claude Code: `.credentials.json` linked, two entries under `projects/`
     /// as its memory, and a `settings.json` written.
     Claude {
@@ -579,7 +579,7 @@ impl Root {
 
         Root {
             account: account.to_owned(),
-            harness: Harness::Claude {
+            harness: Allowlist::Claude {
                 repo,
                 worktree,
                 trusted,
@@ -595,7 +595,7 @@ impl Root {
     pub(crate) fn codex(account: &Path) -> Root {
         Root {
             account: account.to_owned(),
-            harness: Harness::Codex,
+            harness: Allowlist::Codex,
             memory: true,
         }
     }
@@ -607,7 +607,7 @@ impl Root {
     pub(crate) fn grok(account: &Path) -> Root {
         Root {
             account: account.to_owned(),
-            harness: Harness::Grok,
+            harness: Allowlist::Grok,
             memory: true,
         }
     }
@@ -620,7 +620,7 @@ impl Root {
     pub(crate) fn opencode(account: &Path) -> Root {
         Root {
             account: account.to_owned(),
-            harness: Harness::OpenCode,
+            harness: Allowlist::OpenCode,
             memory: true,
         }
     }
@@ -634,7 +634,7 @@ impl Root {
     pub(crate) fn agy(account: &Path) -> Root {
         Root {
             account: account.to_owned(),
-            harness: Harness::Agy,
+            harness: Allowlist::Agy,
             memory: true,
         }
     }
@@ -658,11 +658,11 @@ impl Root {
     /// launch into it is registered under — see [`super::sharing`].
     pub(crate) fn named(&self) -> &'static str {
         match self.harness {
-            Harness::Claude { .. } => super::CLAUDE_DIR_INSIDE_HOME,
-            Harness::Codex => super::CODEX_INSIDE_HOME,
-            Harness::Grok => super::GROK_INSIDE_HOME,
-            Harness::OpenCode => "opencode",
-            Harness::Agy => super::AGY_INSIDE_HOME,
+            Allowlist::Claude { .. } => super::CLAUDE_DIR_INSIDE_HOME,
+            Allowlist::Codex => super::CODEX_INSIDE_HOME,
+            Allowlist::Grok => super::GROK_INSIDE_HOME,
+            Allowlist::OpenCode => "opencode",
+            Allowlist::Agy => super::AGY_INSIDE_HOME,
         }
     }
 
@@ -671,8 +671,10 @@ impl Root {
     /// and HOME itself for OpenCode, whose account is a home.
     fn landing(&self) -> &'static Path {
         Path::new(match self.harness {
-            Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::Agy => self.named(),
-            Harness::OpenCode => "",
+            Allowlist::Claude { .. } | Allowlist::Codex | Allowlist::Grok | Allowlist::Agy => {
+                self.named()
+            }
+            Allowlist::OpenCode => "",
         })
     }
 
@@ -688,11 +690,11 @@ impl Root {
     /// data directory then being the account's, joined whole.
     pub(crate) fn built(&self) -> Vec<&'static str> {
         match (&self.harness, self.memory) {
-            (Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::Agy, _) => {
+            (Allowlist::Claude { .. } | Allowlist::Codex | Allowlist::Grok | Allowlist::Agy, _) => {
                 vec![self.named()]
             }
-            (Harness::OpenCode, true) => vec![OPENCODE_CONFIG],
-            (Harness::OpenCode, false) => vec![OPENCODE_CONFIG, OPENCODE_DATA],
+            (Allowlist::OpenCode, true) => vec![OPENCODE_CONFIG],
+            (Allowlist::OpenCode, false) => vec![OPENCODE_CONFIG, OPENCODE_DATA],
         }
     }
 
@@ -706,12 +708,12 @@ impl Root {
         let root = built.join(self.landing());
 
         match self.harness {
-            Harness::Agy => vec![
+            Allowlist::Agy => vec![
                 root.join(AGY_CLI),
                 root.join(AGY_CUSTOMISATION),
                 root.join(AGY_ONBOARDED).parent().unwrap().to_owned(),
             ],
-            Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::OpenCode => {
+            Allowlist::Claude { .. } | Allowlist::Codex | Allowlist::Grok | Allowlist::OpenCode => {
                 Vec::new()
             }
         }
@@ -762,16 +764,16 @@ impl Root {
     /// data directory joined whole, so it is the account's with nothing more
     /// said about it and nothing to hand back.
     pub(crate) fn login_alone(&self) -> bool {
-        !matches!((&self.harness, self.memory), (Harness::OpenCode, true))
+        !matches!((&self.harness, self.memory), (Allowlist::OpenCode, true))
     }
 
     /// Where the login file is, inside the account's directory.
     fn login(&self) -> &'static str {
         match self.harness {
-            Harness::Claude { .. } => CREDENTIALS,
-            Harness::Codex | Harness::Grok => AUTH,
-            Harness::OpenCode => OPENCODE_AUTH,
-            Harness::Agy => AGY_LOGIN,
+            Allowlist::Claude { .. } => CREDENTIALS,
+            Allowlist::Codex | Allowlist::Grok => AUTH,
+            Allowlist::OpenCode => OPENCODE_AUTH,
+            Allowlist::Agy => AGY_LOGIN,
         }
     }
 
@@ -806,11 +808,11 @@ impl Root {
         let root = built.join(self.landing());
 
         let written = match self.harness {
-            Harness::Claude { .. } => (
+            Allowlist::Claude { .. } => (
                 root.join(SETTINGS),
                 settings(std::fs::read(self.account.join(SETTINGS)).ok().as_deref()),
             ),
-            Harness::Codex => (
+            Allowlist::Codex => (
                 root.join(CODEX_CONFIG),
                 toml_carrying(
                     std::fs::read_to_string(self.account.join(CODEX_CONFIG))
@@ -821,7 +823,7 @@ impl Root {
                     CODEX_HEADERS,
                 ),
             ),
-            Harness::Grok => (
+            Allowlist::Grok => (
                 root.join(GROK_CONFIG),
                 toml_carrying(
                     std::fs::read_to_string(self.account.join(GROK_CONFIG))
@@ -832,7 +834,7 @@ impl Root {
                     HEADERS,
                 ),
             ),
-            Harness::OpenCode => {
+            Allowlist::OpenCode => {
                 let config = Path::new(OPENCODE_CONFIG);
 
                 (
@@ -845,7 +847,7 @@ impl Root {
                     ),
                 )
             }
-            Harness::Agy => {
+            Allowlist::Agy => {
                 let settings = (
                     root.join(AGY_SETTINGS),
                     agy_settings(
@@ -909,10 +911,10 @@ impl Root {
         let root = built.join(self.landing());
 
         let path = match self.harness {
-            Harness::Claude { .. } => root.join(CLAUDE_INSTRUCTIONS),
-            Harness::Codex | Harness::Grok => root.join(AGENTS),
-            Harness::OpenCode => root.join(OPENCODE_CONFIG).join(AGENTS),
-            Harness::Agy => root.join(AGY_INSTRUCTIONS),
+            Allowlist::Claude { .. } => root.join(CLAUDE_INSTRUCTIONS),
+            Allowlist::Codex | Allowlist::Grok => root.join(AGENTS),
+            Allowlist::OpenCode => root.join(OPENCODE_CONFIG).join(AGENTS),
+            Allowlist::Agy => root.join(AGY_INSTRUCTIONS),
         };
 
         Some((path, text.as_bytes().to_vec()))
@@ -938,7 +940,10 @@ impl Root {
     /// rename replaces the link instead, which is handed back as it ends — see
     /// [`super::closing`].
     pub(crate) fn login_copied(&self, platform: Platform) -> bool {
-        matches!((&self.harness, platform), (Harness::Grok, Platform::Linux))
+        matches!(
+            (&self.harness, platform),
+            (Allowlist::Grok, Platform::Linux)
+        )
     }
 
     /// The `.claude.json` a Claude session is given: a copy of the account's own
@@ -957,8 +962,8 @@ impl Root {
     /// Blocking: one read.
     pub(crate) fn config(&self, config_file: &Path, servers: &[AttachedServer]) -> Vec<u8> {
         let trusted = match &self.harness {
-            Harness::Claude { trusted, .. } => trusted.as_slice(),
-            Harness::Codex | Harness::Grok | Harness::OpenCode | Harness::Agy => &[],
+            Allowlist::Claude { trusted, .. } => trusted.as_slice(),
+            Allowlist::Codex | Allowlist::Grok | Allowlist::OpenCode | Allowlist::Agy => &[],
         };
 
         config(std::fs::read(config_file).ok().as_deref(), trusted, servers)
@@ -1051,13 +1056,13 @@ impl Root {
         let root = built.join(self.landing());
 
         match self.harness {
-            Harness::Claude { .. } => vec![Root::projects_in(&root)],
-            Harness::Codex => CODEX_MEMORY.iter().map(|store| root.join(store)).collect(),
-            Harness::Grok => GROK_MEMORY.iter().map(|store| root.join(store)).collect(),
-            Harness::OpenCode => Vec::new(),
+            Allowlist::Claude { .. } => vec![Root::projects_in(&root)],
+            Allowlist::Codex => CODEX_MEMORY.iter().map(|store| root.join(store)).collect(),
+            Allowlist::Grok => GROK_MEMORY.iter().map(|store| root.join(store)).collect(),
+            Allowlist::OpenCode => Vec::new(),
             // The two directories, and not the database: agy makes its own
             // where there is none, and a database of nothing is no file.
-            Harness::Agy => AGY_MEMORY.iter().map(|store| root.join(store)).collect(),
+            Allowlist::Agy => AGY_MEMORY.iter().map(|store| root.join(store)).collect(),
         }
     }
 
@@ -1070,15 +1075,15 @@ impl Root {
         }
 
         match &self.harness {
-            Harness::Claude { .. } => self
+            Allowlist::Claude { .. } => self
                 .entries()
                 .into_iter()
                 .map(|entry| Path::new(PROJECTS).join(entry))
                 .collect(),
-            Harness::Codex => CODEX_MEMORY.iter().map(PathBuf::from).collect(),
-            Harness::Grok => GROK_MEMORY.iter().map(PathBuf::from).collect(),
-            Harness::OpenCode => vec![PathBuf::from(OPENCODE_DATA)],
-            Harness::Agy => AGY_MEMORY
+            Allowlist::Codex => CODEX_MEMORY.iter().map(PathBuf::from).collect(),
+            Allowlist::Grok => GROK_MEMORY.iter().map(PathBuf::from).collect(),
+            Allowlist::OpenCode => vec![PathBuf::from(OPENCODE_DATA)],
+            Allowlist::Agy => AGY_MEMORY
                 .iter()
                 .chain(AGY_SUMMARIES_JOINED)
                 .map(PathBuf::from)
@@ -1091,8 +1096,8 @@ impl Root {
     /// of any other harness's.
     fn joined_files(&self) -> Vec<PathBuf> {
         match self.harness {
-            Harness::Agy => AGY_SUMMARIES_JOINED.iter().map(PathBuf::from).collect(),
-            Harness::Claude { .. } | Harness::Codex | Harness::Grok | Harness::OpenCode => {
+            Allowlist::Agy => AGY_SUMMARIES_JOINED.iter().map(PathBuf::from).collect(),
+            Allowlist::Claude { .. } | Allowlist::Codex | Allowlist::Grok | Allowlist::OpenCode => {
                 Vec::new()
             }
         }
@@ -1108,9 +1113,9 @@ impl Root {
     /// directory a session runs in.
     fn entries(&self) -> Vec<&str> {
         match &self.harness {
-            Harness::Claude { repo, worktree, .. } if repo == worktree => vec![repo],
-            Harness::Claude { repo, worktree, .. } => vec![repo, worktree],
-            Harness::Codex | Harness::Grok | Harness::OpenCode | Harness::Agy => Vec::new(),
+            Allowlist::Claude { repo, worktree, .. } if repo == worktree => vec![repo],
+            Allowlist::Claude { repo, worktree, .. } => vec![repo, worktree],
+            Allowlist::Codex | Allowlist::Grok | Allowlist::OpenCode | Allowlist::Agy => Vec::new(),
         }
     }
 
@@ -1188,7 +1193,7 @@ impl Root {
         };
 
         match &self.harness {
-            Harness::Claude {
+            Allowlist::Claude {
                 repo,
                 worktree: written,
                 ..
@@ -1201,7 +1206,7 @@ impl Root {
                 ),
             ],
 
-            Harness::Codex => vec![
+            Allowlist::Codex => vec![
                 part(MEMORY, PathBuf::from(CODEX_MEMORY[1]), Whose::Everything),
                 part(
                     SESSIONS_PART,
@@ -1210,7 +1215,7 @@ impl Root {
                 ),
             ],
 
-            Harness::Grok => vec![
+            Allowlist::Grok => vec![
                 part(MEMORY, PathBuf::from(GROK_MEMORY[1]), Whose::Everything),
                 part(
                     SESSIONS_PART,
@@ -1219,7 +1224,7 @@ impl Root {
                 ),
             ],
 
-            Harness::OpenCode => vec![part(
+            Allowlist::OpenCode => vec![part(
                 DATA,
                 PathBuf::from(OPENCODE_DATA),
                 Whose::Database(super::OPENCODE_DB_FILE),
@@ -1231,7 +1236,7 @@ impl Root {
             // which is the human's index of every conversation they have had:
             // agy 1.4.12 resumes a conversation that has no row in it and
             // writes the row itself.
-            Harness::Agy => vec![
+            Allowlist::Agy => vec![
                 part(
                     CONVERSATIONS,
                     PathBuf::from(AGY_MEMORY[0]),
@@ -2264,8 +2269,8 @@ mod tests {
     /// A Claude root's `projects/` entries.
     fn entries(root: &Root) -> Vec<String> {
         match &root.harness {
-            Harness::Claude { .. } => root.entries().into_iter().map(str::to_owned).collect(),
-            Harness::Codex | Harness::Grok | Harness::OpenCode | Harness::Agy => {
+            Allowlist::Claude { .. } => root.entries().into_iter().map(str::to_owned).collect(),
+            Allowlist::Codex | Allowlist::Grok | Allowlist::OpenCode | Allowlist::Agy => {
                 panic!("only a Claude root has `projects/` entries")
             }
         }
@@ -2274,8 +2279,8 @@ mod tests {
     /// And the paths its `.claude.json` copy trusts.
     fn trusted(root: &Root) -> Vec<String> {
         match &root.harness {
-            Harness::Claude { trusted, .. } => trusted.clone(),
-            Harness::Codex | Harness::Grok | Harness::OpenCode | Harness::Agy => {
+            Allowlist::Claude { trusted, .. } => trusted.clone(),
+            Allowlist::Codex | Allowlist::Grok | Allowlist::OpenCode | Allowlist::Agy => {
                 panic!("only a Claude root has a `.claude.json` to trust in")
             }
         }

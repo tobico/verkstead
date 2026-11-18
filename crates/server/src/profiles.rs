@@ -1120,6 +1120,18 @@ pub(crate) fn agent_type(agent_type: store::AgentType) -> AgentType {
     }
 }
 
+/// And back again, for a reading that came off the wire and wants the harness
+/// it names — see [`crate::harness::of`].
+pub(crate) fn stored(agent_type: AgentType) -> store::AgentType {
+    match agent_type {
+        AgentType::Claude => store::AgentType::Claude,
+        AgentType::Codex => store::AgentType::Codex,
+        AgentType::Grok => store::AgentType::Grok,
+        AgentType::OpenCode => store::AgentType::OpenCode,
+        AgentType::Agy => store::AgentType::Agy,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, UNIX_EPOCH};

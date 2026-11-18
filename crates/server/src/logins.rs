@@ -17,7 +17,7 @@
 //!
 //! **On Windows as the session account**, the way a session runs there — so
 //! started by Verkstead's own logon rather than the standard library's spawn,
-//! with its input held open for the code (see [`Harness`]), and behind a
+//! with its input held open for the code (see [`Spawned`]), and behind a
 //! boundary of its own that is taken back when the login ends (see
 //! [`crate::sandbox::login_taken_back`]).
 //!
@@ -55,7 +55,7 @@
 //! without asking a model anything. It offers the address only to a standard
 //! input that is a terminal, so that is the one stream it is given a terminal
 //! for — and on Windows, where it reads the code off its console whatever its
-//! standard input is, the whole of it runs on one (see `Harness::on_a_console`).
+//! standard input is, the whole of it runs on one (see `Spawned::on_a_console`).
 //! And it waits a minute for the code, then gives up; while a device is still
 //! looking, a fresh address takes the place of the one that ran out.
 //!
@@ -661,7 +661,7 @@ impl Logins {
             );
         };
 
-        let mut child = match Harness::start(rendering, speaking.typed_on_a_terminal).await {
+        let mut child = match Spawned::start(rendering, speaking.typed_on_a_terminal).await {
             Ok(child) => child,
             Err(error) => {
                 tracing::error!(
@@ -851,7 +851,7 @@ enum Ending {
 /// runtime's blocking threads, and the process waited for on one of its own.
 ///
 /// Killed as it is dropped, on both platforms.
-struct Harness {
+struct Spawned {
     /// Its standard input, where a code is written.
     typing: Option<Box<dyn AsyncWrite + Send + Unpin>>,
 
@@ -864,7 +864,7 @@ struct Harness {
     process: Process,
 }
 
-impl Harness {
+impl Spawned {
     /// `rendering` started, from a thread that outlives it.
     ///
     /// **Not from a blocking thread on Linux.** `bwrap --die-with-parent` kills
@@ -879,25 +879,25 @@ impl Harness {
     /// the harness reads its code off one, and pipes for the other two all the same: the harness
     /// asks only whether its input is a terminal, and the address is still
     /// read off what it prints. On Windows the whole of it is on a console
-    /// instead — see [`Harness::on_a_console`].
-    async fn start(rendering: Rendering, on_a_terminal: bool) -> io::Result<Harness> {
+    /// instead — see [`Spawned::on_a_console`].
+    async fn start(rendering: Rendering, on_a_terminal: bool) -> io::Result<Spawned> {
         match Platform::HERE {
             Platform::Windows => {
-                tokio::task::spawn_blocking(move || Harness::started(&rendering, on_a_terminal))
+                tokio::task::spawn_blocking(move || Spawned::started(&rendering, on_a_terminal))
                     .await
                     .map_err(io::Error::other)?
             }
-            Platform::Linux | Platform::MacOs => Harness::started(&rendering, on_a_terminal),
+            Platform::Linux | Platform::MacOs => Spawned::started(&rendering, on_a_terminal),
         }
     }
 
     /// `rendering` started. Blocks on Windows, where the logon is made.
     #[cfg_attr(windows, allow(unused_variables))]
-    fn started(rendering: &Rendering, on_a_terminal: bool) -> io::Result<Harness> {
+    fn started(rendering: &Rendering, on_a_terminal: bool) -> io::Result<Spawned> {
         #[cfg(windows)]
         if let Some(logon) = rendering.account() {
             if on_a_terminal {
-                return Harness::on_a_console(rendering);
+                return Spawned::on_a_console(rendering);
             }
 
             let held = crate::sandbox::starting::held_open(rendering, logon)?;
@@ -910,7 +910,7 @@ impl Harness {
                 let _ = exit.send(waiting.wait());
             });
 
-            return Ok(Harness {
+            return Ok(Spawned {
                 typing: Some(Box::new(tokio::fs::File::from_std(held.typing))),
                 printed: Some(Box::new(tokio::fs::File::from_std(held.printed))),
                 complained: Some(Box::new(tokio::fs::File::from_std(held.complained))),
@@ -942,7 +942,7 @@ impl Harness {
 
         let mut child = command.spawn()?;
 
-        Ok(Harness {
+        Ok(Spawned {
             typing: match keys {
                 Some(keys) => Some(Box::new(keys) as Box<dyn AsyncWrite + Send + Unpin>),
                 None => child
@@ -976,7 +976,7 @@ impl Harness {
     /// it draws is read back as lines — see [`Drawn`]. Everything the harness
     /// says is on the console, so all of it comes back as what it complained.
     #[cfg(windows)]
-    fn on_a_console(rendering: &Rendering) -> io::Result<Harness> {
+    fn on_a_console(rendering: &Rendering) -> io::Result<Spawned> {
         use tokio::io::AsyncReadExt;
 
         let mut terminal = crate::terminal::Terminal::open()?;
@@ -1018,7 +1018,7 @@ impl Harness {
             }
         });
 
-        Ok(Harness {
+        Ok(Spawned {
             typing: Some(Box::new(typing)),
             printed: None,
             complained: Some(Box::new(drawn)),
@@ -1027,7 +1027,7 @@ impl Harness {
     }
 }
 
-/// The process of a [`Harness`].
+/// The process of a [`Spawned`].
 enum Process {
     /// Started by the standard library, which is both of the platforms whose
     /// boundary is a wrapper in front of the process.
@@ -1041,7 +1041,7 @@ enum Process {
         exited: oneshot::Receiver<io::Result<ExitStatus>>,
     },
 
-    /// Or as the account on a console — see [`Harness::on_a_console`]. Its Job
+    /// Or as the account on a console — see [`Spawned::on_a_console`]. Its Job
     /// ends it as it is dropped.
     #[cfg(windows)]
     OnAConsole(crate::terminal::Child),
@@ -1131,7 +1131,7 @@ fn keyboard() -> io::Result<(tokio::fs::File, std::os::fd::OwnedFd)> {
 }
 
 /// What a pseudoconsole draws, made back into the plain lines a pipe would have
-/// carried — see [`Harness::on_a_console`].
+/// carried — see [`Spawned::on_a_console`].
 ///
 /// **A console draws a screen rather than printing lines**: colours, a cursor
 /// that is hidden and shown, a title, and a cursor moved to where the next line
@@ -1332,7 +1332,7 @@ async fn status(agents: Arc<Agents>, profile: store::Profile, limit: Duration) -
     let (rendering, closing) = built?;
 
     // Asked over pipes whatever the login reads its code off: nothing is typed.
-    let status = match Harness::start(rendering, false).await {
+    let status = match Spawned::start(rendering, false).await {
         Ok(mut asking) => {
             // Nothing to type, and what it says is read rather than left
             // unread: a harness writing into a pipe nobody reads is one that
@@ -1353,7 +1353,7 @@ async fn status(agents: Arc<Agents>, profile: store::Profile, limit: Duration) -
                 .collect();
 
             // A harness that did not answer in time is killed as it is
-            // dropped — see [`Harness`].
+            // dropped — see [`Spawned`].
             match tokio::time::timeout(limit, asking.process.wait()).await {
                 Ok(Ok(status)) if status.success() => Some(true),
                 Ok(Ok(_)) => match speaking.signed_out {

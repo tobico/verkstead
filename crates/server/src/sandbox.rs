@@ -427,7 +427,7 @@ pub(crate) const OPENCODE_DATA_INSIDE_HOME: &str = ".local/share/opencode";
 /// opencode 1.18.25, which is the release this backend is pinned at: a stable
 /// install of that names the file `opencode.db` on its own, so what this is
 /// worth is the day the host installs a beta.
-const OPENCODE_DB: &str = "OPENCODE_DB";
+pub(crate) const OPENCODE_DB: &str = "OPENCODE_DB";
 pub(crate) const OPENCODE_DB_FILE: &str = "opencode.db";
 
 /// And how long a command opencode's shell tool will run before it kills it,
@@ -460,8 +460,9 @@ pub(crate) const OPENCODE_DB_FILE: &str = "opencode.db";
 /// says `EXPERIMENTAL` on it, and moving it costs one edit here. A value it
 /// cannot read as a positive integer is ignored rather than refused, so the
 /// number is written out in milliseconds rather than computed into one.
-const OPENCODE_BASH_DEFAULT_TIMEOUT: &str = "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS";
-const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
+pub(crate) const OPENCODE_BASH_DEFAULT_TIMEOUT: &str =
+    "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS";
+pub(crate) const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
 
 /// What tells a Claude session not to update itself.
 ///
@@ -477,7 +478,7 @@ const OPENCODE_BASH_DEFAULT_TIMEOUT_MS: &str = "86400000";
 /// Claude's own spelling, which is why it is named here rather than composed:
 /// moving it costs one edit. Nothing but that backend reads it, so nothing else
 /// is told it.
-const DISABLE_AUTOUPDATER: &str = "DISABLE_AUTOUPDATER";
+pub(crate) const DISABLE_AUTOUPDATER: &str = "DISABLE_AUTOUPDATER";
 
 /// What sends an Antigravity CLI process on Windows to its file store rather
 /// than the Credential Manager, and the value it is given.
@@ -498,7 +499,7 @@ const DISABLE_AUTOUPDATER: &str = "DISABLE_AUTOUPDATER";
 /// and on the two Unixes agy finds no keyring inside a sandbox by itself. The
 /// value is the shape `sshd` gives it, a loopback to a loopback, since a
 /// reader that went further than *is it set* would find nothing to follow.
-const AGY_FILE_STORE: (&str, &str) = ("SSH_CONNECTION", "127.0.0.1 0 127.0.0.1 22");
+pub(crate) const AGY_FILE_STORE: (&str, &str) = ("SSH_CONNECTION", "127.0.0.1 0 127.0.0.1 22");
 
 /// Which backend a session is running, in its own environment.
 ///
@@ -1460,15 +1461,15 @@ fn system(platform: Platform) -> &'static [&'static str] {
 /// rule: it is resolved on a session's `PATH`, followed into whatever install
 /// it links into, and granted where that install is the human's own.
 ///
-/// The harness names are [`crate::sessions::binary`]'s rather than written
+/// The harness names are [`crate::harness::BINARIES`] rather than written
 /// again, because what a row is about is the program a session of that type is
 /// launched as.
 pub(crate) const PROGRAMS: &[&str] = &[
-    crate::sessions::binary(store::AgentType::Claude),
-    crate::sessions::binary(store::AgentType::Codex),
-    crate::sessions::binary(store::AgentType::Grok),
-    crate::sessions::binary(store::AgentType::OpenCode),
-    crate::sessions::binary(store::AgentType::Agy),
+    crate::harness::BINARIES[0],
+    crate::harness::BINARIES[1],
+    crate::harness::BINARIES[2],
+    crate::harness::BINARIES[3],
+    crate::harness::BINARIES[4],
     GIT,
     GH,
 ];
@@ -1663,64 +1664,17 @@ pub(crate) enum Standing {
     Nowhere,
 }
 
-/// Whether the file `at`, resolved for `program`, is Claude Code's **desktop
-/// app** rather than the command-line tool a session is launched as.
+/// Whether the file `at`, resolved for `program`, is a **desktop app** rather
+/// than the command-line tool a session is launched as.
 ///
-/// **Decided by shape, and nothing is run to find out.** An Electron binary
-/// asked for `--version` may open a window on somebody's screen, and
-/// [ADR 0016](../../../docs/adr/0016-onboarding.md) kept the wizard to reads —
-/// so this is `stat`s and path reading, and every arm of it is a unit test on a
-/// machine that is not Windows.
-///
-/// Two shapes, and the platform is a value rather than a `cfg`:
-///
-/// - an ancestor directory named [`ANTHROPIC_CLAUDE`], which is where the app a
-///   person downloads installs itself under `%LOCALAPPDATA%` — the versioned
-///   `app-x.y.z` it really runs out of is under the same directory;
-/// - a sibling [`SQUIRREL_UPDATE`], which is Squirrel's updater standing beside
-///   the app it updates.
-///
-/// **Two, and both of them seen.** A third was written and taken out again: a
-/// parent directory called `WindowsApps`, where an app-execution alias stands
-/// and where a Microsoft Store package would put one. No machine here has ever had that
-/// alias, and the cost of guessing wrong is not a row's wrong sentence — this
-/// answer refuses a session outright, with nothing on the Profile to overrule
-/// it, so a `claude.exe` alias standing in the directory every Windows user
-/// already has on their `PATH` would stop the product on that machine and tell
-/// the human to install what they have. A shape goes in here when somebody has
-/// seen it.
+/// The harness the name belongs to is what answers — see
+/// [`crate::harness::Harness::desktop_app`] — and Claude Code's is the one
+/// that has one. A name that is no harness's, `git` and `gh`, is never one.
 fn desktop_app(platform: Platform, program: &str, at: &Path) -> bool {
-    if platform != Platform::Windows || program != crate::sessions::binary(store::AgentType::Claude)
-    {
-        return false;
-    }
-
-    let Some(directory) = at.parent() else {
-        return false;
-    };
-
-    // The ancestors rather than the parent: what the downloaded app resolves to
-    // sits a versioned directory below the one it installed into.
-    at.ancestors()
-        .skip(1)
-        .filter_map(Path::file_name)
-        .any(|name| called(name, ANTHROPIC_CLAUDE))
-        || directory.join(SQUIRREL_UPDATE).is_file()
+    crate::harness::BUILT_IN
+        .iter()
+        .any(|harness| harness.binary() == program && harness.desktop_app(platform, at))
 }
-
-/// Whether a path component is `against`, the way Windows reads one: without
-/// regard to case.
-fn called(component: &OsStr, against: &str) -> bool {
-    component
-        .as_encoded_bytes()
-        .eq_ignore_ascii_case(against.as_bytes())
-}
-
-/// Where the Claude Code desktop app installs itself under `%LOCALAPPDATA%`.
-const ANTHROPIC_CLAUDE: &str = "AnthropicClaude";
-
-/// Squirrel's updater, which stands beside the app it updates.
-const SQUIRREL_UPDATE: &str = "Update.exe";
 
 /// Where `program` was seen on the `PATH` the server itself was started with,
 /// in a directory a session's own does not hold.
@@ -5089,38 +5043,12 @@ impl Sandbox {
         // host, which is the half ADR-0013 did not reach.
         surface.set(NIXOS_ENVIRONMENT_DONE, "1");
 
-        // What a Claude session is told about itself: that it is not to update
-        // the install it is running. The native binary writes a new version
-        // into `~/.local/share/claude/versions/`, which is read-only inside —
-        // see [`installs`], which is what puts it inside — so an updater in
-        // there is a session spending its first minutes failing at something
-        // nobody asked it to do, and the install is the human's own besides.
-        // Every Claude session wherever `claude` was found, rather than only
-        // the ones that found the human's: a session is never what moves an
-        // install on, whosever it is.
-        if matches!(self.account, store::Account::Claude { .. }) {
-            surface.set(DISABLE_AUTOUPDATER, "1");
-        }
-
-        // The two an OpenCode session is told about itself: where its store
-        // goes, because opencode names the file after the release channel the
-        // install came from and the reader that follows a Transcript opens the
-        // path this chose; and how long its shell tool holds a command the
-        // model gave no timeout of its own, which is what a blocking ask under
-        // this backend stands on — see [`OPENCODE_BASH_DEFAULT_TIMEOUT`].
-        if matches!(self.account, store::Account::OpenCode { .. }) {
-            surface.set(OPENCODE_DB, OPENCODE_DB_FILE).set(
-                OPENCODE_BASH_DEFAULT_TIMEOUT,
-                OPENCODE_BASH_DEFAULT_TIMEOUT_MS,
-            );
-        }
-
-        // And an Antigravity CLI process on Windows, that its login is the
-        // account's file rather than the session account's vault — see
-        // [`AGY_FILE_STORE`].
-        if self.platform == Platform::Windows && matches!(self.account, store::Account::Agy { .. })
+        // And what this session's harness is told about itself, which no
+        // other harness reads — see [`crate::harness::Harness::environment`].
+        for (name, value) in
+            crate::harness::of(self.account.agent_type()).environment(self.platform)
         {
-            surface.set(AGY_FILE_STORE.0, AGY_FILE_STORE.1);
+            surface.set(name, value);
         }
 
         // And where the toolchain that build runs is, on a machine whose Rust
