@@ -8280,7 +8280,13 @@ whole: boolean,
  * after it. Opaque to whoever holds it: it is the server's own bookmark,
  * and the shape of it is [`Cursor`]'s business alone.
  */
-cursor: string, };
+cursor: string, 
+/**
+ * Why the record couldn't be read, where a plugin harness's component
+ * failed to read it — see [`Entry::Unreadable`]. Screen copy. `None` for
+ * every other Transcript, and for this part of one where it is a piece.
+ */
+unreadable: string | null, };
 
 /**
  * Which copy of a transferred Conversation is the live one: the device holding

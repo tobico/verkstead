@@ -5590,6 +5590,155 @@ async fn a_blocking_plugin_harness_session_holding_an_ask_is_neither_ended_nor_p
         .await;
 }
 
+/// What a plugin harness's stub writes before a record's first line: the
+/// session id it was named, read off its line, and the record it keeps under
+/// it — in the account's `memory/`, where its `parse-transcript` looks.
+const A_STUB_RECORD: &str = r#"
+name=
+while [ $# -gt 0 ]; do
+    if [ "$1" = --session-id ]; then name=$2; fi
+    shift
+done
+log=$HOME/.stub/memory/$name.jsonl
+"#;
+
+/// A plugin harness's Transcript is what its component's `parse-transcript`
+/// answered: drawn while the session runs, and the rest of it once it ends.
+///
+/// **And what its component marks unknown folds away under its own name**, as
+/// a backend's line of an unknown kind always has (ADR-0006).
+#[tokio::test]
+async fn a_plugin_harness_s_transcript_is_drawn_out_of_what_its_component_read() {
+    let fixture = grilling_on_a_plugin(
+        StubHarness::Silent,
+        &format!(
+            r#"{A_STUB_RECORD}
+printf '%s\n' '{{"said":"put","markdown":"Rate limiting"}}' > "$log"
+printf '%s\n' '{{"said":"agent","markdown":"Reading the **brief**."}}' >> "$log"
+printf '%s\n' '{{"call":"shell","id":"c1","about":"List the tasks","input":"ls .tasks"}}' >> "$log"
+printf '%s\n' '{{"unknown":"rewind","line":"to 3"}}' >> "$log"
+while [ ! -f /tmp/verkstead/go ]; do sleep 0.1; done
+printf '%s\n' '{{"result":"c1","failed":false,"text":"01-count.md"}}' >> "$log"
+"#
+        ),
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let live = fixture.spoken(event, 3).await;
+
+    assert!(
+        output(&fixture.view().await).is_some_and(|output| output.running),
+        "drawn while the session was still running"
+    );
+    assert_eq!(
+        live.turns,
+        vec![
+            Turn::Put(verkstead_render::Put {
+                id: 1,
+                html: "<p>Rate limiting</p>\n".to_owned(),
+            }),
+            Turn::Prose(verkstead_render::Prose {
+                id: 2,
+                html: "<p>Reading the <strong>brief</strong>.</p>\n".to_owned(),
+            }),
+            Turn::ToolUse(verkstead_render::ToolUse {
+                id: 3,
+                name: "shell".to_owned(),
+                call: "c1".to_owned(),
+                about: "List the tasks".to_owned(),
+                input: "ls .tasks".to_owned(),
+            }),
+        ],
+    );
+    assert_eq!(
+        live.bookkeeping
+            .iter()
+            .map(|kept| (kept.kind.as_str(), kept.line.as_str()))
+            .collect::<Vec<_>>(),
+        [("rewind", "to 3")],
+        "the entry its component marked unknown folds away under the kind it gave",
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+    fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|_| ()))
+        .await;
+
+    let ended = fixture.spoken(event, 4).await;
+    assert_eq!(
+        ended.turns.last(),
+        Some(&Turn::ToolResult(verkstead_render::ToolResult {
+            id: 4,
+            call: "c1".to_owned(),
+            failed: false,
+            text: "01-count.md".to_owned(),
+        })),
+        "and what it wrote last is drawn once it ended: {:?}",
+        ended.turns,
+    );
+    assert_eq!(ended.unreadable, None);
+}
+
+/// A plugin harness whose component stops while it reads the record leaves
+/// the Transcript empty, saying why — and the session runs on.
+#[tokio::test]
+async fn a_plugin_harness_whose_component_stops_reading_leaves_its_transcript_empty() {
+    let fixture = grilling_on_a_plugin(
+        StubHarness::Silent,
+        &format!(
+            r#"{A_STUB_RECORD}
+printf '%s\n' '{{"said":"agent","markdown":"Reading the brief."}}' > "$log"
+printf '%s\n' '{{"trap":true}}' >> "$log"
+printf 'Reading the brief.\n'
+sleep 300
+"#
+        ),
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    let view = loop {
+        let view: TranscriptView = get(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/transcript/{event}", fixture.id),
+        )
+        .await;
+        if view.unreadable.is_some() {
+            break view;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the Transcript never said it couldn't be read: {view:?}"
+        );
+        pause(Duration::from_millis(25)).await;
+    };
+
+    assert!(
+        view.turns.is_empty() && view.bookkeeping.is_empty(),
+        "nothing of what it stopped reading is drawn: {view:?}"
+    );
+    assert!(
+        view.unreadable
+            .as_deref()
+            .is_some_and(|why| why.contains("couldn't read it")),
+        "and it says so: {view:?}"
+    );
+
+    tokio::time::sleep(BRISKLY.proposing * 2).await;
+    let view = fixture.view().await;
+    let printed = output(&view).expect("the session is on the Timeline");
+    assert!(printed.running, "the session itself runs on");
+    assert!(
+        fixture.capture(event).await.contains("Reading the brief."),
+        "and its Capture is written as ever"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
 /// A Codex session's log is found rather than named: codex takes no session id,
 /// so what says a rollout is this session's is the Worktree its own first line
 /// names and its having appeared after this session was launched.
