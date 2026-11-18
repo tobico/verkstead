@@ -25,7 +25,7 @@ Roadmap stage: [01: The framework and the Plugins page](docs/roadmaps/plugins/01
 ## Tasks
 
 - [x] 01: The manifest and `verkstead plugin check` — [details](01-the-manifest.md)
-- [ ] 02: The toolchain moves to Rust 1.97, with wasm32-wasip2 — [details](02-the-toolchain.md)
+- [x] 02: The toolchain moves to Rust 1.97, with wasm32-wasip2 — [details](02-the-toolchain.md)
 - [ ] 03: Running a wasm component — [details](03-running-a-wasm-component.md)
 - [ ] 04: Built-in components embedded in every binary — [details](04-built-ins-embedded.md)
 - [ ] 05: Add a plugin from a local directory, and the Plugins section — [details](05-local-install-and-the-section.md)

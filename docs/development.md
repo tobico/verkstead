@@ -26,6 +26,16 @@ desktop app runs on — and every tool the language descriptors' proofs in
 `crates/server/tests/suite/package_stores.rs` install or build with, a JDK,
 Maven and Gradle among them.
 
+**The Rust is not nixpkgs'.** It is a prebuilt release taken through
+[rust-overlay](https://github.com/oxalica/rust-overlay) — `rustToolchain` in
+`flake.nix` — pinned to the exact patch version every
+`dtolnay/rust-toolchain` in `.github/workflows` installs, so the shell, CI and
+a release all compile with one rustc. It carries the standard library for
+`wasm32-wasip2` as well as the host's, which is what a plugin's component is
+built for and what nixpkgs' rustc is built without. Moving the pin is three
+edits that go together: the flake, the workflows, and the workspace's
+`rust-version` in `Cargo.toml`.
+
 ### 2. Build the viewer and start the server (terminal 1)
 
 ```console

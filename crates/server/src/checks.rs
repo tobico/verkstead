@@ -573,22 +573,22 @@ async fn checking(
             .unwrap_or_default()
         };
 
-        if let (false, Some(pushed)) = (suite.head.is_empty(), pushed.as_deref()) {
-            if pushed != suite.head {
-                tracing::debug!(
-                    conversation_id,
-                    repo = watched.repo.name,
-                    number = watched.number,
-                    reported = suite.head,
-                    pushed,
-                    "the checks GitHub reported are about a commit that is not \
+        if let (false, Some(pushed)) = (suite.head.is_empty(), pushed.as_deref())
+            && pushed != suite.head
+        {
+            tracing::debug!(
+                conversation_id,
+                repo = watched.repo.name,
+                number = watched.number,
+                reported = suite.head,
+                pushed,
+                "the checks GitHub reported are about a commit that is not \
                      what origin is holding, so the run for what was pushed has \
                      not been reported yet",
-                );
+            );
 
-                unsettle(state, conversation_id, watched).await;
-                return Checking::NothingToDo;
-            }
+            unsettle(state, conversation_id, watched).await;
+            return Checking::NothingToDo;
         }
 
         settle(state, conversation_id, watched, suite.checks.len()).await;

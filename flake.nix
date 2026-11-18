@@ -2,9 +2,20 @@
   description = "Verkstead — a service and CLI through which coding agents put questions to a human";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+  # Rust comes from here rather than from nixpkgs: the prebuilt release CI pins,
+  # whatever nixpkgs has got to, and with the standard library for
+  # `wasm32-wasip2`, which nixpkgs' rustc is built without.
+  inputs.rust-overlay = {
+    url = "github:oxalica/rust-overlay";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      rust-overlay,
+    }:
     let
       systems = [
         "x86_64-linux"
@@ -13,6 +24,23 @@
         "aarch64-darwin"
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+
+      # The one Rust everything here compiles with, and the same release every
+      # `dtolnay/rust-toolchain` in `.github/workflows` installs: move the three
+      # together, and the workspace's `rust-version` with them. The components
+      # are what the dev shell had from nixpkgs, `rust-src` being what
+      # `RUST_SRC_PATH` points into.
+      rustToolchain =
+        pkgs:
+        (rust-overlay.lib.mkRustBin { } pkgs).stable."1.97.1".default.override {
+          extensions = [
+            "clippy"
+            "rustfmt"
+            "rust-analyzer"
+            "rust-src"
+          ];
+          targets = [ "wasm32-wasip2" ];
+        };
 
       # What the viewer under `web/` is built and tested with. Named here because
       # the dev shell and the build both take it, and a pnpm in one that is not
@@ -46,7 +74,13 @@
             pkgs.callPackage ./nix/verkstead.nix { }
           else
             verkstead-source;
-        verkstead-source = pkgs.callPackage ./nix/verkstead-source.nix { inherit viewer; };
+        verkstead-source = pkgs.callPackage ./nix/verkstead-source.nix {
+          inherit viewer;
+          rustPlatform = pkgs.makeRustPlatform {
+            cargo = rustToolchain pkgs;
+            rustc = rustToolchain pkgs;
+          };
+        };
         # The viewer's static files on their own. Nothing serves them from here —
         # `verkstead` embeds them — but they are worth building alone when what is
         # being looked at is the vite output.
@@ -132,11 +166,9 @@
           packages =
             (webTools pkgs)
             ++ (with pkgs; [
-              cargo
-              rustc
-              clippy
-              rustfmt
-              rust-analyzer
+              # cargo, rustc, clippy, rustfmt and rust-analyzer, in one
+              # toolchain — see `rustToolchain` above.
+              (rustToolchain pkgs)
               # What `pnpm start` in `desktop/` runs (ADR-0020). The npm
               # package the project pins is there for its TypeScript
               # definitions and for what electron-builder packs in CI; its own
@@ -258,7 +290,7 @@
               imagemagick
             ]);
 
-          env.RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
+          env.RUST_SRC_PATH = "${rustToolchain pkgs}/lib/rustlib/src/rust/library";
         };
       });
 
