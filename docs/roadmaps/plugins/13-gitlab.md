@@ -79,9 +79,10 @@ at the local repository. The plugin's repository is the Forge template stage
    request, the wrap-up to mergeable, written up in the plugin's README with
    the API version it was measured against. AC: the README names the date and
    the version, and what `checks` was decided to be.
-4. **Docs** — CONTEXT.md's **Forge** entry names GitLab as the second, the
-   plugin's URL under docs/, and stage 14's template list points at it.
-   AC: the Build a plugin Brief for a Forge names this repository.
+4. **Docs** — CONTEXT.md's **Forge** entry names GitLab as the second, and
+   the plugin's URL under docs/, where stage 14 reads it to point the Forge
+   Brief at. AC: the URL is written down and the plugin's README says it is
+   the Forge template.
 
 ## Re-verify at start
 
