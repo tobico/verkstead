@@ -23,6 +23,15 @@
 //! devices follow. A fetch that fails, or a manifest there that doesn't read,
 //! leaves the old checkout loaded and the row saying why.
 //!
+//! **Dependencies are resolved after loading** (Set 1771, Q1): a plugin that
+//! loaded is in trouble still where a dependency it declares is missing,
+//! disabled, outside the version it asks for, or in trouble itself, against
+//! the installed plugins that loaded here and the built-ins. Its trouble names
+//! the dependency by the name its own manifest gives it, and the row offers
+//! the press that puts it right where there is one — **Install** from the
+//! repository the dependency names, or **Update** on the dependency's row.
+//! Every load resolves again, so a press on the dependency clears it.
+//!
 //! **Install is the grant, and the whole of it** (ADR-0030, *Capabilities and
 //! trust*). The consent card is read off the manifest with nothing written,
 //! and the press carries back the capabilities the card showed: a manifest
@@ -43,15 +52,15 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use verkstead_render::{
-    PluginAt, PluginCapability, PluginConsent, PluginEnabled, PluginInstall, PluginRow,
-    PluginSource, PluginUpdate, PluginUpdated, PluginsView,
+    PluginAt, PluginCapability, PluginConsent, PluginEnabled, PluginFix, PluginInstall, PluginNeed,
+    PluginRow, PluginSource, PluginUpdate, PluginUpdated, PluginsView,
 };
 use verkstead_schema::{ApiError, Nudge};
 
 use super::built_in::BUILT_INS;
 use super::component;
 use super::git::{self, Staged};
-use super::manifest::{Access, Capability, Files, Manifest};
+use super::manifest::{Access, Capability, Dependency, Files, Manifest};
 use crate::AppState;
 use crate::github::Credential;
 use crate::platform::Platform;
@@ -64,7 +73,7 @@ use crate::ui::refused;
 /// state.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Installed {
-    troubles: Arc<Mutex<BTreeMap<String, String>>>,
+    troubles: Arc<Mutex<BTreeMap<String, Trouble>>>,
 
     /// Why the last **Update** of a git plugin didn't land, by uuid: the old
     /// checkout stays loaded, and the row says so until an Update does.
@@ -84,7 +93,7 @@ impl Installed {
             .lock()
             .expect("nothing panics holding the troubles")
             .get(uuid)
-            .cloned();
+            .map(|trouble| trouble.why.clone());
 
         loading.or_else(|| {
             self.pulls
@@ -93,6 +102,17 @@ impl Installed {
                 .get(uuid)
                 .cloned()
         })
+    }
+
+    /// The presses that would put right the dependencies `uuid` is in
+    /// trouble over.
+    fn needs(&self, uuid: &str) -> Vec<PluginNeed> {
+        self.troubles
+            .lock()
+            .expect("nothing panics holding the troubles")
+            .get(uuid)
+            .map(|trouble| trouble.needs.clone())
+            .unwrap_or_default()
     }
 
     /// What `uuid`'s Update came to: why it didn't land, or nothing.
@@ -105,8 +125,16 @@ impl Installed {
     }
 }
 
-/// Load every enabled plugin this device can reach, and hold what each came
-/// to — the pages told where that moved.
+/// Why a plugin counts as disabled here, and what would put its
+/// dependencies right.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Trouble {
+    why: String,
+    needs: Vec<PluginNeed>,
+}
+
+/// Load every enabled plugin this device can reach, resolve what each depends
+/// on, and hold what each came to — the pages told where that moved.
 pub(crate) async fn load(state: &AppState) -> Result<()> {
     let _one = state.plugins.loading.lock().await;
 
@@ -114,21 +142,43 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         .map(|homes| homes.servers().to_owned());
     let credential = credential(state);
 
+    let records = replicated::live_records::<Plugins>(&state.pool).await?;
     let mut troubles = BTreeMap::new();
-    for record in replicated::live_records::<Plugins>(&state.pool).await? {
+    let mut manifests = BTreeMap::new();
+    for record in &records {
         if !reachable(state, &record.fields) {
             continue;
         }
 
-        if let Err(trouble) = loaded(state, &record, home.as_deref(), &credential).await {
-            tracing::warn!(
-                plugin = record.fields.name,
-                uuid = record.uuid,
-                %trouble,
-                "an installed plugin didn't load, and counts as disabled",
-            );
-            troubles.insert(record.uuid.clone(), trouble);
+        match loaded(state, record, home.as_deref(), &credential).await {
+            Ok(manifest) => {
+                manifests.insert(record.uuid.clone(), manifest);
+            }
+            Err(why) => {
+                tracing::warn!(
+                    plugin = record.fields.name,
+                    uuid = record.uuid,
+                    trouble = why,
+                    "an installed plugin didn't load, and counts as disabled",
+                );
+                troubles.insert(
+                    record.uuid.clone(),
+                    Trouble {
+                        why,
+                        needs: Vec::new(),
+                    },
+                );
+            }
         }
+    }
+
+    for (uuid, trouble) in resolved(state, &records, &mut manifests) {
+        tracing::warn!(
+            uuid,
+            trouble = trouble.why,
+            "an installed plugin's dependency isn't there, and it counts as disabled",
+        );
+        troubles.insert(uuid, trouble);
     }
 
     let moved = {
@@ -178,14 +228,164 @@ fn credential(state: &AppState) -> Credential {
     state.github.as_author(None).credential()
 }
 
-/// One plugin read and its wasm component started, or why not. A git plugin's
-/// clone is put at its pinned revision first, made where this device has none.
+/// Every plugin in `loaded` whose dependencies aren't all there taken out of
+/// it, answering each one's trouble. Taken out, it counts as disabled for the
+/// plugins depending on it in turn, so this goes round until nothing moves.
+fn resolved(
+    state: &AppState,
+    records: &[Record<Fields>],
+    loaded: &mut BTreeMap<String, Manifest>,
+) -> BTreeMap<String, Trouble> {
+    let built_ins: BTreeMap<String, semver::Version> = BUILT_INS
+        .iter()
+        .filter_map(|built_in| {
+            Manifest::parse(
+                built_in.manifest,
+                Files::Embedded(built_in.files),
+                Platform::HERE,
+            )
+            .ok()
+        })
+        .map(|manifest| (manifest.uuid, manifest.version))
+        .collect();
+
+    let mut troubles = BTreeMap::new();
+    loop {
+        let short: Vec<(String, Trouble)> = loaded
+            .iter()
+            .filter_map(|(uuid, manifest)| {
+                let unmet: Vec<(&Dependency, Unmet)> = manifest
+                    .dependencies
+                    .iter()
+                    .filter_map(|dependency| {
+                        unmet(state, dependency, records, loaded, &built_ins)
+                            .map(|unmet| (dependency, unmet))
+                    })
+                    .collect();
+                (!unmet.is_empty()).then(|| (uuid.clone(), trouble(&unmet)))
+            })
+            .collect();
+
+        if short.is_empty() {
+            return troubles;
+        }
+        for (uuid, trouble) in short {
+            loaded.remove(&uuid);
+            troubles.insert(uuid, trouble);
+        }
+    }
+}
+
+/// How a dependency isn't there.
+enum Unmet {
+    Missing,
+    Disabled,
+    /// Installed at a version outside the specifier, and whether its row has
+    /// an **Update** — a built-in or a directory on another device has none.
+    Outdated {
+        version: String,
+        updatable: bool,
+    },
+    /// A directory on another device, so nothing of it is loaded here.
+    Elsewhere,
+    /// Installed and ticked, but in trouble itself.
+    Troubled,
+}
+
+/// How `dependency` isn't there, against the installed plugins and those of
+/// them `loaded` here, and the built-ins; nothing where it is.
+fn unmet(
+    state: &AppState,
+    dependency: &Dependency,
+    records: &[Record<Fields>],
+    loaded: &BTreeMap<String, Manifest>,
+    built_ins: &BTreeMap<String, semver::Version>,
+) -> Option<Unmet> {
+    if let Some(version) = built_ins.get(&dependency.uuid) {
+        return (!dependency.version.matches(version)).then(|| Unmet::Outdated {
+            version: version.to_string(),
+            updatable: false,
+        });
+    }
+
+    let Some(record) = records.iter().find(|record| record.uuid == dependency.uuid) else {
+        return Some(Unmet::Missing);
+    };
+    if !record.fields.enabled {
+        return Some(Unmet::Disabled);
+    }
+    if !on_this_device(state, &record.fields) {
+        return Some(Unmet::Elsewhere);
+    }
+
+    match loaded.get(&dependency.uuid) {
+        Some(manifest) if dependency.version.matches(&manifest.version) => None,
+        Some(manifest) => Some(Unmet::Outdated {
+            version: manifest.version.to_string(),
+            updatable: true,
+        }),
+        None => Some(Unmet::Troubled),
+    }
+}
+
+/// The trouble a plugin is in over its `unmet` dependencies: a sentence for
+/// each, and the press that puts each right where there is one.
+fn trouble(unmet: &[(&Dependency, Unmet)]) -> Trouble {
+    let mut why = Vec::new();
+    let mut needs = Vec::new();
+    for (dependency, unmet) in unmet {
+        let name = &dependency.name;
+        let mut need = |fix: PluginFix| {
+            needs.push(PluginNeed {
+                uuid: dependency.uuid.clone(),
+                name: name.clone(),
+                fix,
+            })
+        };
+
+        why.push(match unmet {
+            Unmet::Missing => {
+                if let Some(repository) = &dependency.repository {
+                    need(PluginFix::Install {
+                        repository: repository.clone(),
+                    });
+                }
+                format!("It needs {name}, which isn't installed.")
+            }
+            Unmet::Disabled => {
+                format!("It needs {name}, which is disabled. Tick it to load this one.")
+            }
+            Unmet::Outdated { version, updatable } => {
+                if *updatable {
+                    need(PluginFix::Update);
+                }
+                format!(
+                    "It needs {name} {}, and {version} is installed.",
+                    dependency.version
+                )
+            }
+            Unmet::Elsewhere => {
+                format!("It needs {name}, which is a directory on another device.")
+            }
+            Unmet::Troubled => format!("It needs {name}, which didn't load."),
+        });
+    }
+
+    Trouble {
+        why: why.join(" "),
+        needs,
+    }
+}
+
+/// One plugin read and its wasm component started, answering its manifest, or
+/// why not. A git plugin's clone is put at its pinned revision first, made
+/// where this device has none.
 async fn loaded(
     state: &AppState,
     record: &Record<Fields>,
     home: Option<&FsPath>,
     credential: &Credential,
-) -> Result<(), String> {
+) -> Result<Manifest, String> {
     let dir = match &record.fields.source {
         Source::Local { path, .. } => PathBuf::from(path),
         Source::Git { url, revision } => {
@@ -215,7 +415,7 @@ async fn loaded(
 
     component::load(Files::Dir(&dir), &manifest, home)
         .await
-        .map(drop)
+        .map(|_| manifest)
         .map_err(|trouble| trouble.why)
 }
 
@@ -328,11 +528,13 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                 ),
             };
 
+            let loads = here && record.fields.enabled;
             PluginRow {
-                trouble: if here && record.fields.enabled {
-                    state.plugins.trouble(&record.uuid)
+                trouble: loads.then(|| state.plugins.trouble(&record.uuid)).flatten(),
+                needs: if loads {
+                    state.plugins.needs(&record.uuid)
                 } else {
-                    None
+                    Vec::new()
                 },
                 elsewhere,
                 source,

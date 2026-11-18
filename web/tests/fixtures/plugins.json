@@ -6,6 +6,7 @@
       "elsewhere": null,
       "enabled": true,
       "name": "GitLab",
+      "needs": [],
       "provides": [
         "forge",
         "skills"
@@ -23,6 +24,7 @@
       "elsewhere": null,
       "enabled": true,
       "name": "Broken",
+      "needs": [],
       "provides": [
         "forge",
         "skills"
@@ -40,6 +42,7 @@
       "elsewhere": null,
       "enabled": true,
       "name": "Shared skills",
+      "needs": [],
       "provides": [
         "forge",
         "skills"
@@ -51,6 +54,33 @@
       },
       "trouble": null,
       "uuid": "2e4f6a8b-1c3d-4e5f-8a7b-9c0d1e2f3a4b",
+      "version": "1.4.0"
+    },
+    {
+      "author": "Ada Lovelace",
+      "elsewhere": null,
+      "enabled": true,
+      "name": "Dependent",
+      "needs": [
+        {
+          "fix": {
+            "kind": "Install",
+            "repository": "https://example.com/base.git"
+          },
+          "name": "Base",
+          "uuid": "8e7d6c5b-4a39-4281-9f0e-1d2c3b4a5968"
+        }
+      ],
+      "provides": [
+        "forge",
+        "skills"
+      ],
+      "source": {
+        "kind": "Local",
+        "path": "/home/you/src/dependent"
+      },
+      "trouble": "It needs Base, which isn't installed.",
+      "uuid": "3b2a1f0e-9d8c-4b7a-8f6e-5d4c3b2a1f0e",
       "version": "1.4.0"
     }
   ]

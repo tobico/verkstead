@@ -4838,10 +4838,30 @@ export type PluginConsent = { uuid: string, name: string, version: string, autho
 export type PluginEnabled = { enabled: boolean, };
 
 /**
+ * What puts a dependency right. A disabled one is put right by ticking its
+ * own row, which the trouble says, and needs no press of its own here.
+ */
+export type PluginFix = { "kind": "Install", repository: string, } | { "kind": "Update" };
+
+/**
  * **Install**: the directory or git URL, and the capabilities the card
  * showed, which is the grant.
  */
 export type PluginInstall = { source: string, granted: Array<PluginCapability>, };
+
+/**
+ * A dependency a row's plugin is in trouble over, with the press that would
+ * put it right from that row.
+ */
+export type PluginNeed = { 
+/**
+ * The dependency's uuid, which an **Update** names.
+ */
+uuid: string, 
+/**
+ * Its display name, as the dependent's manifest writes it.
+ */
+name: string, fix: PluginFix, };
 
 /**
  * One Plugin's row.
@@ -4869,6 +4889,11 @@ enabled: boolean,
  * as disabled.
  */
 trouble: string | null, 
+/**
+ * The press that would put right a dependency its trouble names, where
+ * there is one: one per dependency, in the order the manifest lists them.
+ */
+needs: Array<PluginNeed>, 
 /**
  * The device it is on, by name, where it is a local plugin on another
  * device: drawn greyed, and not loaded here.

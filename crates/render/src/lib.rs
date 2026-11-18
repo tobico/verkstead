@@ -95,8 +95,8 @@ pub use onboarding::{
     Source, StepsView,
 };
 pub use plugins::{
-    PluginAt, PluginCapability, PluginConsent, PluginEnabled, PluginInstall, PluginRow,
-    PluginSource, PluginUpdate, PluginUpdated, PluginsView,
+    PluginAt, PluginCapability, PluginConsent, PluginEnabled, PluginFix, PluginInstall, PluginNeed,
+    PluginRow, PluginSource, PluginUpdate, PluginUpdated, PluginsView,
 };
 pub use profiles::{
     AccountFile, AccountLogin, AccountLoginTaken, AccountSignedOut, AgentType, Broken, LoginOver,
