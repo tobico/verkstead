@@ -101,7 +101,9 @@ fn reader() -> Result<Option<store::AgentType>> {
 /// module, which is a build to fix rather than a Guide to print — so it is
 /// asserted rather than skipped past, and the suite is what catches it.
 fn tailored(agent_type: Option<store::AgentType>) -> String {
-    let channel = agent_type.map_or(store::Channel::Blocking, store::AgentType::channel);
+    let channel = agent_type.map_or(store::Channel::Blocking, |agent_type| {
+        verkstead_server::harness::of(agent_type).channel()
+    });
 
     let kinds = match channel {
         store::Channel::Blocking => KINDS_BLOCKING,

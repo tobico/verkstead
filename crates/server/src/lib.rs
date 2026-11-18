@@ -140,6 +140,9 @@ mod grillings;
 /// session runs on — every sandbox binds one — so standing a router up that runs
 /// sessions means saying where they live.
 pub mod handoffs;
+/// Every harness a session can be run on, reached through one trait
+/// (ADR-0030, *Agent*).
+pub mod harness;
 /// What this Verkstead was installed as, which says whether its row on
 /// **Devices** can be offered an Update (ADR-0027).
 mod install;

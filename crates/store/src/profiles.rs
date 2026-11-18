@@ -91,27 +91,10 @@ impl AgentType {
             other => bail!("a Profile names the unknown agent type {other:?}"),
         })
     }
-
-    /// How a session of this type puts a Question Set to the human.
-    ///
-    /// A fact about the backend rather than about the Set (ADR-0011): the CLI
-    /// asks the same way everywhere, and what differs is whether the backend can
-    /// afford to hold a shell command open for hours. Kept beside the type
-    /// itself so that the Guide a session reads and the server that takes its
-    /// Set answer the question the same way.
-    pub fn channel(self) -> Channel {
-        match self {
-            // The Antigravity CLI blocks for free: agy 1.4.12's shell tool
-            // turns a long command into a background task, ends the turn, and
-            // wakes the session when it returns — an hour's hold measured with
-            // no model turn spent on it.
-            Self::Claude | Self::OpenCode | Self::Agy => Channel::Blocking,
-            Self::Codex | Self::Grok => Channel::StoreAndNudge,
-        }
-    }
 }
 
-/// How a backend's sessions ask, which is one of two things.
+/// How a backend's sessions ask, which is one of two things — which one being
+/// the harness's answer, in the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Channel {
     /// `verkstead ask` idles until the Response comes back, so the Answers are
