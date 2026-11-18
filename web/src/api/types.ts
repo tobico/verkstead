@@ -4956,6 +4956,43 @@ export type PluginFix = { "kind": "Install", repository: string, } | { "kind": "
 export type PluginInstall = { source: string, granted: Array<PluginCapability>, };
 
 /**
+ * One language of a Language plugin, as its pane draws its cache.
+ */
+export type PluginLanguageCache = { 
+/**
+ * The name `config.yaml` keys it by, which a Clear names.
+ */
+name: string, label: string, 
+/**
+ * The size its store is held to now: the plugin's `size` where it is
+ * one, and the default otherwise.
+ */
+size: string, 
+/**
+ * What its store holds, as last measured.
+ */
+disk_use: DiskUse, 
+/**
+ * Each directory of its store, and how it is kept under the size.
+ */
+stores: Array<StoreView>, 
+/**
+ * When its swept stores were last swept, RFC 3339, or null where they
+ * have not been since the server started.
+ */
+swept: string | null, 
+/**
+ * Whether it compiles through the Compile Server, and whether that is
+ * cached — null where it names no such capability.
+ */
+compiling: CompileCaching | null, 
+/**
+ * The label of the language whose store its compiles are kept in, where
+ * that is another's: C/C++, compiling through Rust's.
+ */
+through: string | null, };
+
+/**
  * A dependency a row's plugin is in trouble over, with the press that would
  * put it right from that row.
  */
@@ -5042,7 +5079,18 @@ export type PluginSettingsView = { uuid: string, name: string,
 /**
  * Why it didn't load here, where it didn't: the row's own trouble.
  */
-trouble: string | null, fields: Array<PluginField>, };
+trouble: string | null, fields: Array<PluginField>, 
+/**
+ * What a Language plugin's pane draws under its fields: each language it
+ * provides, with what its store holds and its Clear. Empty for a plugin
+ * providing none. Drawn whether or not the plugin is ticked, because an
+ * off language still holds what it fetched.
+ */
+languages: Array<PluginLanguageCache>, 
+/**
+ * What is running as this was drawn, which a Clear is refused over.
+ */
+running: Running, };
 
 /**
  * Where a Plugin came from.

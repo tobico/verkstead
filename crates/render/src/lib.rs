@@ -97,9 +97,10 @@ pub use onboarding::{
 };
 pub use plugins::{
     PluginAt, PluginCapability, PluginConsent, PluginEnabled, PluginField, PluginFieldEdit,
-    PluginFieldRefused, PluginFieldValue, PluginFieldWrite, PluginFix, PluginInstall, PluginNeed,
-    PluginRow, PluginSecretValues, PluginSettingsSave, PluginSettingsSaved, PluginSettingsView,
-    PluginSource, PluginUpdate, PluginUpdated, PluginsView,
+    PluginFieldRefused, PluginFieldValue, PluginFieldWrite, PluginFix, PluginInstall,
+    PluginLanguageCache, PluginNeed, PluginRow, PluginSecretValues, PluginSettingsSave,
+    PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdate, PluginUpdated,
+    PluginsView,
 };
 pub use profiles::{
     AccountFile, AccountLogin, AccountLoginTaken, AccountSignedOut, AgentType, Broken, LoginOver,

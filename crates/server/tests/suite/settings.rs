@@ -47,8 +47,8 @@ use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
     CompileCaching, ConflictResolution, DiskUse, Eviction, IgnoreRule, LanguageCleared,
-    LanguageView, McpHeader, McpServer, PathResolution, PathSource, RuleField, RunningOn,
-    ServerField, SettingsSaved, SettingsView, Verified,
+    LanguageView, McpHeader, McpServer, PathResolution, PathSource, PluginSettingsView, RuleField,
+    RunningOn, ServerField, SettingsSaved, SettingsView, Verified,
 };
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
@@ -1165,6 +1165,78 @@ async fn a_language_with_no_store_has_nothing_to_clear() {
     assert_eq!(
         clear_language(&app, "cobol").await,
         LanguageCleared::NoSuchLanguage
+    );
+}
+
+/// A built-in Language plugin's pane, read with nothing written to its record.
+async fn plugin_pane(app: &Router, uuid: &str) -> PluginSettingsView {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .uri(format!("/api/ui/plugins/{uuid}/settings"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "the pane couldn't be read: {body}");
+    read(&body)
+}
+
+/// A Language plugin's pane draws each language it provides under its fields:
+/// Rust's store against the size in force, its directories and how each is
+/// held, and C/C++ as compiling through Rust's — and a Clear of Go's store is
+/// what Go's pane draws next.
+#[tokio::test]
+async fn a_language_plugins_pane_draws_its_cache_and_a_clear_redraws_it() {
+    const RUST_CPP: &str = "795515ae-96cd-4d7c-8071-e6753b3f4624";
+    const GO: &str = "01b5328a-3524-457d-ab88-1af1c65079ea";
+
+    let (dir, app, _cache) = app_with_a_cache().await;
+
+    let pane = plugin_pane(&app, RUST_CPP).await;
+    let named: Vec<&str> = pane.languages.iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(named, ["rust", "cpp"]);
+
+    let rust = &pane.languages[0];
+    assert_eq!(rust.label, "Rust");
+    assert_eq!(rust.size, "30G");
+    assert_ne!(rust.disk_use, DiskUse::NoStore);
+    assert_eq!(
+        rust.stores
+            .iter()
+            .map(|store| (store.name.as_str(), store.eviction))
+            .collect::<Vec<_>>(),
+        [
+            ("cargo", Eviction::ByUnit),
+            ("sccache", Eviction::ByItsTool)
+        ],
+    );
+    assert_eq!(rust.through, None);
+
+    let cpp = &pane.languages[1];
+    assert_eq!(cpp.disk_use, DiskUse::NoStore);
+    assert_eq!(cpp.through.as_deref(), Some("Rust"));
+    assert_eq!((pane.running.sessions, pane.running.terminals), (0, 0));
+
+    let module = dir.path().join("cache/go/mod/example.test/greet@v1.0.0");
+    std::fs::create_dir_all(&module).unwrap();
+    std::fs::write(module.join("greet.go"), "package greet\n").unwrap();
+
+    assert!(matches!(
+        clear_language(&app, "go").await,
+        LanguageCleared::Cleared { .. }
+    ));
+
+    let go = plugin_pane(&app, GO).await;
+    assert_eq!(go.languages.len(), 1);
+    assert_eq!(go.languages[0].size, "10G");
+    assert_eq!(
+        go.languages[0].disk_use,
+        DiskUse::Measured {
+            bytes: 0,
+            in_units: Some(0)
+        }
     );
 }
 

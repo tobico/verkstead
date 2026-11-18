@@ -15,6 +15,12 @@
 //! section is for, and a suite that only ever saw Rust would prove only that the
 //! page can draw the language it was written around.
 //!
+//! **A built-in language has no row here**: its switch, its size and its cache
+//! are its plugin's, on the Plugins page — see `plugin-settings.test.tsx`. So
+//! most of this suite draws the shipped descriptors as an installer's own,
+//! with no plugin providing them, which is the row this part still draws; the
+//! fixtures as the server wrote them are what says a built-in has none.
+//!
 //! Two saves and one endpoint. A checkbox is its own press, because a box that
 //! needed a second one is not a box; the size is typed, so it saves on Enter or
 //! on leaving the field — and not on leaving one nobody changed, which is every
@@ -40,14 +46,31 @@ import type {
   SettingsSaved,
   SettingsView,
 } from "../src/api/types";
-import { BuildCaches, bytesSaid, usageSaid } from "../src/settings/Languages";
+import { bytesSaid, usageSaid } from "../src/settings/LanguageCache";
+import { BuildCaches } from "../src/settings/Languages";
 import styles from "../src/settings/Languages.module.css";
 import { type Answer, json, serving, whenever } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
 
-const TOLD = told as SettingsView;
-const UNSET = unset as SettingsView;
+/// The settings as the server wrote them: every shipped language a built-in
+/// plugin's, and so drawing no row here.
+const SHIPPED = told as SettingsView;
+
+/// Every language in `standing` as one no plugin provides, which is what this
+/// part draws a row for.
+function unpluggedAll(standing: SettingsView): SettingsView {
+  return {
+    ...standing,
+    languages: standing.languages.map((language) => ({
+      ...language,
+      plugin: null,
+    })),
+  };
+}
+
+const TOLD = unpluggedAll(SHIPPED);
+const UNSET = unpluggedAll(unset as SettingsView);
 
 /// The built-in descriptor, and the one an installer wrote — by the names
 /// `config.yaml` keys them under, which is what a save names back.
@@ -188,15 +211,9 @@ function theCheck(label = "Gleam"): HTMLInputElement {
   return screen.getByRole("checkbox", { name: label }) as HTMLInputElement;
 }
 
-/// A built-in language's name, standing where a box would: its switch is its
-/// plugin's tick on the Plugins page.
-function theName(label = "Rust"): HTMLElement {
-  return screen.getByText(label, { selector: `.${styles.named}` });
-}
-
-/// Whether a built-in language's name reads as on.
+/// Whether a language's box reads as on.
 function named(label = "Rust"): boolean {
-  return !theName(label).classList.contains(styles.off!);
+  return theCheck(label).checked;
 }
 
 /// The same settings with one built-in language drawn as a language no plugin
@@ -296,31 +313,30 @@ describe("the languages as the pane draws them", () => {
     expect(container.querySelector("h1")).toBeNull();
   });
 
-  /// A row per descriptor the server loaded, under the label it gave. A
-  /// built-in language is its name and no box, its switch being its plugin's
-  /// tick on the Plugins page; the one an installer wrote has its box, which
-  /// is the whole of what *the file only* comes to: they write `config.yaml`
-  /// and the box is here next time.
-  it("draws a box only for a language no plugin provides", async () => {
-    theSettings(TOLD);
+  /// A row per language no plugin provides, under the label the server gave
+  /// it — which is the whole of what *the file only* comes to: an installer
+  /// writes `config.yaml` and the box is here next time. A built-in language
+  /// has none: its switch, size and cache are its plugin's.
+  it("draws a row only for a language no plugin provides", async () => {
+    theSettings(SHIPPED);
     mountPane();
 
-    await waitFor(() => expect(named("Rust")).toBe(true));
-    for (const label of ["Go", "Node", "Python", ".NET", "C/C++", "JVM"]) {
-      expect(named(label), label).toBe(true);
-      expect(theName(label).title).toMatch(/^Switched on the Plugins page, by /);
-    }
-    expect(theCheck("Gleam").checked).toBe(true);
+    await waitFor(() => expect(theCheck("Gleam").checked).toBe(true));
     expect(screen.getAllByRole("checkbox")).toHaveLength(1);
-  });
-
-  /// And a built-in language whose plugin is unticked is greyed.
-  it("greys a built-in language whose plugin is unticked", async () => {
-    theSettings(off(TOLD, GO));
-    mountPane();
-
-    await waitFor(() => expect(named("Go")).toBe(false));
-    expect(named("Rust")).toBe(true);
+    for (const label of [
+      "Rust",
+      "Go",
+      "Node",
+      "Python",
+      ".NET",
+      "C/C++",
+      "JVM",
+    ]) {
+      expect(screen.queryByText(label), label).toBeNull();
+    }
+    screen.getByText(
+      "A built-in language's build cache is in its plugin's settings, on the Plugins page.",
+    );
   });
 
   /// The box says where its language stands rather than whether anybody has
@@ -390,14 +406,22 @@ describe("the languages as the pane draws them", () => {
     );
   });
 
-  /// Nothing about sccache at the foot of the pane: it is in the panels of the
-  /// languages it is about, and on the Sandbox card.
-  it("says nothing about sccache at the foot of the pane", async () => {
-    theSettings(UNSET);
+  /// No sccache where the server can see one is said at the head of the
+  /// part, whatever rows it draws: it is the server's, and no language's.
+  it("says when there is no sccache, with no built-in row drawn", async () => {
+    theSettings(unset as SettingsView);
     mountPane();
 
-    await waitFor(() => expect(named()).toBe(true));
+    await waitFor(() => screen.getByText(/The server can't see an sccache/));
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  });
 
+  /// And nothing where it found one.
+  it("says nothing about sccache where the server found one", async () => {
+    theSettings(compiling(SHIPPED));
+    mountPane();
+
+    await waitFor(() => theCheck("Gleam"));
     expect(screen.queryByText(/The server can't see an sccache/)).toBeNull();
   });
 });
@@ -511,7 +535,8 @@ describe("the link beside each language", () => {
     const { container } = mountPane();
 
     await waitFor(() => expect(named()).toBe(true));
-    expect(container.querySelectorAll("p")).toHaveLength(0);
+    // The one line saying where a built-in's cache is.
+    expect(container.querySelectorAll("p")).toHaveLength(1);
     expect(container.querySelectorAll("input[type=text]")).toHaveLength(0);
   });
 });
@@ -557,31 +582,6 @@ describe("the size in a language's panel", () => {
 
     await opened();
     expect(theSize().matches(":disabled")).toBe(false);
-  });
-
-  /// A built-in language's size is its plugin's `size` setting, so its panel
-  /// draws no field and says where the size is set instead.
-  it("draws no size in a built-in language's panel, and says where it is set", async () => {
-    theSettings(compiling(TOLD));
-    mountPane();
-
-    for (const [label, plugin] of [
-      ["Rust", "Rust & C/C++"],
-      ["Go", "Go"],
-      ["Node", "Node"],
-      ["Python", "Python"],
-      [".NET", ".NET"],
-      ["JVM", "JVM"],
-    ] as const) {
-      const panel = await opened(label);
-      expect(panel.querySelector("input"), `${label} draws no field`).toBe(
-        null,
-      );
-      expect(panel.textContent).toContain(
-        `Its store size limit is set in ${plugin}'s settings, on the Plugins page.`,
-      );
-      fireEvent.keyDown(document, { key: "Escape" });
-    }
   });
 
   /// Every language no plugin provides with a store directory has a size —

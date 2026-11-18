@@ -16,6 +16,10 @@
 //!
 //! The fields are drawn whether or not the plugin loaded here, under its
 //! trouble, so a setting it needs can be put right from this pane.
+//!
+//! **Then what its Category adds**, under the fields: a Language plugin's
+//! build cache, each of its languages' store against the size and its Clear —
+//! see `LanguageCache.tsx`.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -40,6 +44,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
+import { LanguageCaches } from "./LanguageCache";
 import styles from "./PluginSettings.module.css";
 
 /// What a field's box holds, as typed: a list's lines joined by newlines, and
@@ -242,49 +247,53 @@ export function PluginSettingsPane(props: {
         </Match>
         <Match when={settings.data}>
           {(view) => (
-            <form class={styles.form} onSubmit={(ev) => commit(view(), ev)}>
-              <Show when={view().trouble}>
-                {(trouble) => <p class={styles.trouble}>{trouble()}</p>}
-              </Show>
-
-              <Show
-                when={view().fields.length > 0}
-                fallback={<Empty>This plugin declares no settings.</Empty>}
-              >
-                <For each={view().fields}>
-                  {(field) => (
-                    <div class={styles.field} data-setting={field.key}>
-                      <label for={`plugin-setting-${field.key}`}>
-                        {field.label}
-                      </label>
-                      <Show when={field.description}>
-                        {(description) => <Note>{description()}</Note>}
-                      </Show>
-                      <Show when={field.value.kind === "List"}>
-                        <Note>One per line.</Note>
-                      </Show>
-                      {box(field)}
-                      <Show when={why(field.key)}>
-                        {(reason) => <ErrorLine>{reason()}</ErrorLine>}
-                      </Show>
-                    </div>
-                  )}
-                </For>
-
-                <div class={styles.presses}>
-                  <button type="submit" disabled={save.isPending}>
-                    Save
-                  </button>
-                  <Show when={saved()}>
-                    <Note>Saved.</Note>
-                  </Show>
-                </div>
-
-                <Show when={save.error}>
-                  {(error) => <ErrorLine>{error().message}</ErrorLine>}
+            <>
+              <form class={styles.form} onSubmit={(ev) => commit(view(), ev)}>
+                <Show when={view().trouble}>
+                  {(trouble) => <p class={styles.trouble}>{trouble()}</p>}
                 </Show>
-              </Show>
-            </form>
+
+                <Show
+                  when={view().fields.length > 0}
+                  fallback={<Empty>This plugin declares no settings.</Empty>}
+                >
+                  <For each={view().fields}>
+                    {(field) => (
+                      <div class={styles.field} data-setting={field.key}>
+                        <label for={`plugin-setting-${field.key}`}>
+                          {field.label}
+                        </label>
+                        <Show when={field.description}>
+                          {(description) => <Note>{description()}</Note>}
+                        </Show>
+                        <Show when={field.value.kind === "List"}>
+                          <Note>One per line.</Note>
+                        </Show>
+                        {box(field)}
+                        <Show when={why(field.key)}>
+                          {(reason) => <ErrorLine>{reason()}</ErrorLine>}
+                        </Show>
+                      </div>
+                    )}
+                  </For>
+
+                  <div class={styles.presses}>
+                    <button type="submit" disabled={save.isPending}>
+                      Save
+                    </button>
+                    <Show when={saved()}>
+                      <Note>Saved.</Note>
+                    </Show>
+                  </div>
+
+                  <Show when={save.error}>
+                    {(error) => <ErrorLine>{error().message}</ErrorLine>}
+                  </Show>
+                </Show>
+              </form>
+
+              <LanguageCaches view={view()} />
+            </>
           )}
         </Match>
       </Switch>
