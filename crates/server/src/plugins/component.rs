@@ -13,7 +13,9 @@
 //!
 //! **What fails is [`Trouble`], never a panic and never an error that stops
 //! the server** (Set 1762, Q15): bytes that are not a component, a component
-//! importing what this host does not provide, one that traps while it starts.
+//! importing what this host does not provide, one that traps while it starts,
+//! and one that is still starting after [`STARTING`] — stopped there, so a
+//! component that never finishes cannot hold up every load after it.
 //! The same sentence is what `verkstead plugin check` prints and what the
 //! Plugins page draws on the row.
 //!
@@ -22,9 +24,10 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use wasmtime::component::{Component, Instance, Linker, ResourceTable};
-use wasmtime::{Engine, Store, Trap};
+use wasmtime::{Config, Engine, Store, Trap};
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{
     WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks, WasiHttpView, default_hooks,
@@ -154,8 +157,33 @@ impl WasiHttpHooks for Outbound {
     }
 }
 
-/// The one engine every component is compiled by.
-static ENGINE: LazyLock<Engine> = LazyLock::new(Engine::default);
+/// How long a component may take to start before it is stopped and is
+/// trouble.
+pub const STARTING: Duration = Duration::from_secs(10);
+
+/// How often the engine's epoch moves on, which is how finely a deadline is
+/// kept.
+const TICK: Duration = Duration::from_millis(100);
+
+/// The one engine every component is compiled by, compiled to stop at an epoch
+/// deadline, and the thread that moves its epoch on.
+static ENGINE: LazyLock<Engine> = LazyLock::new(|| {
+    let engine = Engine::new(Config::new().epoch_interruption(true))
+        .expect("the engine's configuration is this build's own");
+
+    let ticking = engine.clone();
+    std::thread::Builder::new()
+        .name("plugin-epoch".to_owned())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(TICK);
+                ticking.increment_epoch();
+            }
+        })
+        .expect("the epoch thread should start");
+
+    engine
+});
 
 /// Instantiate `manifest`'s component, read out of `files` — an installed
 /// plugin's directory or a built-in's embedded files, the one loader for both —
@@ -182,11 +210,21 @@ pub async fn load(
         .map(Some)
 }
 
-/// Instantiate a component's bytes under `capabilities`.
+/// Instantiate a component's bytes under `capabilities`, stopped where it is
+/// still starting after [`STARTING`].
 pub async fn instantiate(
     bytes: &[u8],
     capabilities: &[Capability],
     home: Option<&Path>,
+) -> Result<Loaded, Trouble> {
+    started_within(bytes, capabilities, home, STARTING).await
+}
+
+async fn started_within(
+    bytes: &[u8],
+    capabilities: &[Capability],
+    home: Option<&Path>,
+    within: Duration,
 ) -> Result<Loaded, Trouble> {
     let component = Component::new(&ENGINE, bytes).map_err(|error| {
         Trouble::of(format!(
@@ -210,11 +248,19 @@ pub async fn instantiate(
     })?;
 
     let mut store = Store::new(&ENGINE, granted(capabilities, home)?);
+    store.epoch_deadline_trap();
+    store.set_epoch_deadline(within.div_duration_f64(TICK).ceil() as u64);
+
     let instance = pre.instantiate_async(&mut store).await.map_err(|error| {
         // A trap is worded as the trap alone: what wasmtime wraps around it
         // is a backtrace, which is the component author's to read with their
         // own tools rather than a row's to draw.
-        if let Some(trap) = error.downcast_ref::<Trap>() {
+        if let Some(Trap::Interrupt) = error.downcast_ref::<Trap>() {
+            Trouble::of(format!(
+                "The component didn't finish starting within {} seconds, so it was stopped.",
+                within.as_secs()
+            ))
+        } else if let Some(trap) = error.downcast_ref::<Trap>() {
             Trouble::of(format!(
                 "The component stopped while it was starting: {trap}."
             ))
@@ -232,6 +278,10 @@ pub async fn instantiate(
             worded(&error)
         ))
     })?;
+
+    // Started, it has no deadline: what a Category later calls into it for
+    // sets its own.
+    store.set_epoch_deadline(u64::MAX);
 
     Ok(Loaded { store, instance })
 }
@@ -329,6 +379,15 @@ mod tests {
 (component
   (core module $m
     (func $start unreachable)
+    (start $start))
+  (core instance (instantiate $m)))
+"#;
+
+    /// A component whose core module never finishes its start function.
+    const SPINS: &str = r#"
+(component
+  (core module $m
+    (func $start (loop $forever (br $forever)))
     (start $start))
   (core instance (instantiate $m)))
 "#;
@@ -572,6 +631,32 @@ world reader {
             "The component stopped while it was starting: \
              wasm trap: wasm `unreachable` instruction executed."
         );
+    }
+
+    #[tokio::test]
+    async fn a_component_that_never_finishes_starting_is_stopped_and_is_trouble() {
+        let trouble = started_within(&assembled(SPINS), &[], None, Duration::from_secs(2))
+            .await
+            .err()
+            .expect("a start that never finishes should not load");
+
+        assert_eq!(
+            trouble.why,
+            "The component didn't finish starting within 2 seconds, so it was stopped."
+        );
+    }
+
+    #[tokio::test]
+    async fn a_component_that_started_has_no_deadline_left() {
+        let root = two_directories();
+        let capabilities = granting(&root.path().join("granted"));
+        let mut loaded = started_within(&reader(), &capabilities, None, Duration::from_millis(200))
+            .await
+            .expect("the reader should load");
+
+        std::thread::sleep(Duration::from_millis(500));
+
+        assert_eq!(read(&mut loaded, "secret").await, "granted".len() as i64);
     }
 
     #[tokio::test]
