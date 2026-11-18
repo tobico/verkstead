@@ -6,7 +6,10 @@ use std::time::SystemTime;
 
 use verkstead_render::Broken;
 
-use super::{Carrying, Declared, HOME_REFUSED, Harness, Line, Resume, SignedOut};
+use super::{
+    Carrying, Declared, HOME_REFUSED, Harness, Line, MODEL, PROMPT, Resume, SESSION, SignedOut,
+    said,
+};
 use crate::platform::Platform;
 use crate::sandbox::root::{self, Part, Place, Whose};
 use crate::sandbox::{self, Home};
@@ -145,11 +148,11 @@ impl Harness for OpenCode {
     /// [`crate::records::carried`].
     fn line(&self, _worktree: Option<&Path>, _companions: &[PathBuf]) -> Line {
         Line {
-            model: "-m".to_owned(),
-            prompt: Some("--prompt".to_owned()),
-            names_the_session: false,
-            resume: Some(Resume::Flag("--session".to_owned())),
-            tail: vec!["--auto".to_owned()],
+            model: said(&["-m", MODEL]),
+            prompt: said(&["--prompt", PROMPT]),
+            session: None,
+            resume: Some(Resume::Flag(said(&["--session", SESSION]))),
+            tail: said(&["--auto"]),
         }
     }
 
@@ -196,10 +199,6 @@ impl Harness for OpenCode {
                 crate::sandbox::OPENCODE_BASH_DEFAULT_TIMEOUT_MS,
             ),
         ]
-    }
-
-    fn written_in_worktree(&self) -> Option<&str> {
-        None
     }
 
     /// A home, which is the one the XDG defaults resolve inside.

@@ -881,6 +881,15 @@ fn relative(written: &str, field: &str) -> Result<PathBuf, Refusal> {
     }
 }
 
+/// `written` as a path that stays inside where it is said from, or `None`:
+/// what a file a plugin's component answers is held to — see
+/// [`crate::harness`].
+pub(crate) fn relative_path(written: &str) -> Option<PathBuf> {
+    relative(written, "")
+        .ok()
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
 /// Whether `text` is SVG, which is all the reading asks of a mark.
 fn is_svg(text: &str) -> bool {
     text.contains("<svg")

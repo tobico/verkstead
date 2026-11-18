@@ -6,7 +6,10 @@ use std::time::SystemTime;
 
 use verkstead_render::Broken;
 
-use super::{Carrying, Declared, HOME_REFUSED, Harness, Line, Resume, SignedOut};
+use super::{
+    Carrying, Declared, HOME_REFUSED, Harness, Line, MODEL, PROMPT, Resume, SESSION, SignedOut,
+    said,
+};
 use crate::platform::Platform;
 use crate::sandbox::root::{self, Part, Place, Whose};
 use crate::sandbox::{self, Home};
@@ -116,16 +119,11 @@ impl Harness for Grok {
     /// reads its whole configuration out of the home the Profile named.
     fn line(&self, _worktree: Option<&Path>, _companions: &[PathBuf]) -> Line {
         Line {
-            model: "-m".to_owned(),
-            prompt: None,
-            names_the_session: true,
-            resume: Some(Resume::Flag("--resume".to_owned())),
-            tail: vec![
-                "--always-approve".to_owned(),
-                "--sandbox".to_owned(),
-                "off".to_owned(),
-                "--no-alt-screen".to_owned(),
-            ],
+            model: said(&["-m", MODEL]),
+            prompt: said(&[PROMPT]),
+            session: Some(said(&["--session-id", SESSION])),
+            resume: Some(Resume::Flag(said(&["--resume", SESSION]))),
+            tail: said(&["--always-approve", "--sandbox", "off", "--no-alt-screen"]),
         }
     }
 
@@ -154,10 +152,6 @@ impl Harness for Grok {
 
     fn environment(&self, _platform: Platform) -> Vec<(&str, &str)> {
         Vec::new()
-    }
-
-    fn written_in_worktree(&self) -> Option<&str> {
-        None
     }
 
     fn kept_in(&self, home: &Path) -> store::Account {

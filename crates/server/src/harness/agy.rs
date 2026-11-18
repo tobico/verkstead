@@ -6,7 +6,10 @@ use std::time::SystemTime;
 
 use verkstead_render::Broken;
 
-use super::{Carrying, Declared, HOME_REFUSED, Harness, Line, Resume, SignedOut};
+use super::{
+    Carrying, Declared, HOME_REFUSED, Harness, Line, MODEL, PROMPT, Resume, SESSION, SignedOut,
+    said,
+};
 use crate::logins::Speaking;
 use crate::platform::Platform;
 use crate::sandbox::root::{self, Part, Place, Whose};
@@ -129,10 +132,10 @@ impl Harness for Agy {
         ));
 
         Line {
-            model: "--model".to_owned(),
-            prompt: Some("--prompt-interactive".to_owned()),
-            names_the_session: false,
-            resume: Some(Resume::Flag("--conversation".to_owned())),
+            model: said(&["--model", MODEL]),
+            prompt: said(&["--prompt-interactive", PROMPT]),
+            session: None,
+            resume: Some(Resume::Flag(said(&["--conversation", SESSION]))),
             tail,
         }
     }
@@ -180,8 +183,8 @@ impl Harness for Agy {
 
     /// `.gemini/`, where agy 1.4.12 keeps its transcript of the session and
     /// whatever else it files under the workspace.
-    fn written_in_worktree(&self) -> Option<&str> {
-        Some(".gemini/")
+    fn written_in_worktree(&self) -> Vec<&str> {
+        vec![".gemini/"]
     }
 
     fn kept_in(&self, home: &Path) -> store::Account {

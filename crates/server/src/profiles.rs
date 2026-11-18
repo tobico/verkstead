@@ -897,9 +897,13 @@ pub(crate) fn stored(agent_type: &AgentType) -> store::AgentType {
 }
 
 /// Every harness this server can run a session on, as the viewer draws it —
-/// see [`verkstead_render::HarnessEntry`].
-pub(crate) fn harnesses() -> Vec<HarnessEntry> {
+/// see [`verkstead_render::HarnessEntry`]: the built-ins, and after them the
+/// ones the Agent plugins that loaded here declare, `plugged`.
+pub(crate) fn harnesses(plugged: &[store::AgentType]) -> Vec<HarnessEntry> {
     crate::harness::every()
+        .chain(plugged.iter().filter_map(|agent_type| {
+            crate::harness::of(*agent_type).map(|harness| (*agent_type, harness))
+        }))
         .map(|(agent_type, harness)| HarnessEntry {
             id: self::agent_type(agent_type),
             name: harness.named().to_owned(),

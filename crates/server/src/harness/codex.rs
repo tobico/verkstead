@@ -6,7 +6,9 @@ use std::time::SystemTime;
 
 use verkstead_render::Broken;
 
-use super::{Carrying, Declared, HOME_REFUSED, Harness, Line, Resume, SignedOut};
+use super::{
+    Carrying, Declared, HOME_REFUSED, Harness, Line, MODEL, PROMPT, Resume, SignedOut, said,
+};
 use crate::platform::Platform;
 use crate::sandbox::root::{self, Part, Place, Whose};
 use crate::sandbox::{self, Home};
@@ -176,11 +178,11 @@ impl Harness for Codex {
         }
 
         Line {
-            model: "-m".to_owned(),
-            prompt: None,
-            names_the_session: false,
+            model: said(&["-m", MODEL]),
+            prompt: said(&[PROMPT]),
+            session: None,
             resume: Some(Resume::Subcommand {
-                word: "resume".to_owned(),
+                words: said(&["resume"]),
                 also: vec!["-c".to_owned(), format!("{RESUME_CWD}=\"current\"")],
             }),
             tail,
@@ -213,10 +215,6 @@ impl Harness for Codex {
 
     fn environment(&self, _platform: Platform) -> Vec<(&str, &str)> {
         Vec::new()
-    }
-
-    fn written_in_worktree(&self) -> Option<&str> {
-        None
     }
 
     fn kept_in(&self, home: &Path) -> store::Account {

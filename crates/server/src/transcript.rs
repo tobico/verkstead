@@ -295,7 +295,7 @@ impl Tail {
         // never launches.
         let search = crate::harness::of(profile.agent_type()).map_or(Search::Nowhere, |harness| {
             harness.search(
-                profile.account.directory(),
+                harness.directory(&profile.account),
                 profile.memory,
                 home,
                 session,
@@ -641,9 +641,11 @@ pub(crate) async fn carried(
     worktree: &Path,
     home: &crate::sandbox::Home,
 ) -> Option<Carried> {
-    crate::harness::of(profile.agent_type())?
+    let harness = crate::harness::of(profile.agent_type())?;
+
+    harness
         .carried(
-            profile.account.directory(),
+            harness.directory(&profile.account),
             profile.memory,
             session,
             worktree,

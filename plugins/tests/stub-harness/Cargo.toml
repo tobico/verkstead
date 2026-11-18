@@ -1,0 +1,16 @@
+[package]
+name = "verkstead-plugin-stub-harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# A harness plugin's component for the server's suites, and never a built-in:
+# its directory is under `tests/`, where `crates/server/build.rs` embeds
+# nothing, and the build script hands the suites the file's path instead.
+[lib]
+name = "stub_harness"
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.51"

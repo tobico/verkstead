@@ -505,19 +505,23 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     // came to. The Plugins section draws them, and so does the Attach menu's
     // Skill packs section, off the packs they provide; and the settings beside
     // it, since a Language plugin's tick is its languages' switch, which the
-    // Sandbox section's sccache line reads.
+    // Sandbox section's sccache line reads. And the harness list is what the
+    // Agent ones that loaded here add to — this device's own, read once for the
+    // whole page.
     //
     // **And every Conversation of that device**, for the declarations' reason
     // above: a pack chip says whether anything loaded here still provides it,
     // read with the Conversation, and a plugin disabled or removed moves that
     // with nothing else here moving.
-    case "plugins":
-      return [
+    case "plugins": {
+      const keys = [
         keyOf(device, "plugins"),
         keyOf(device, "skill-packs"),
         keyOf(device, "conversation"),
         keyOf(device, "settings"),
       ];
+      return device === null ? [...keys, ["harnesses"]] : keys;
+    }
 
     // Where a Profile's login has got to moved — which is what shows a second
     // device's modal the address the first one's login printed. This device's
