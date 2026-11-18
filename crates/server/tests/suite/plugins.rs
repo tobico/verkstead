@@ -760,6 +760,42 @@ async fn remove_takes_the_row_off_and_deletes_a_git_checkout() {
     );
 }
 
+/// A plugin removed is installed again under its own uuid, which is its
+/// author's: the record is made again, and a git one is cloned afresh.
+#[tokio::test]
+async fn a_removed_plugin_can_be_installed_again() {
+    let (app, dir) = kept().await;
+    let sources = tempfile::tempdir().unwrap();
+    let (url, _) = repository(sources.path(), "gitlab", &manifest(PLUGIN, "GitLab", &[]));
+    let local = plugin(dir.path(), "base", &manifest(ANOTHER, BASE, &[]));
+
+    for source in [&url, &local] {
+        let uuid = installs(&app, source)
+            .await
+            .installed
+            .last()
+            .unwrap()
+            .uuid
+            .clone();
+        let (status, said) = pressing(
+            &app,
+            &format!("/api/ui/plugins/{uuid}/remove"),
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+    }
+    assert!(page(&app).await.installed.is_empty());
+
+    installs(&app, &url).await;
+    let view = installs(&app, &local).await;
+
+    assert_eq!(row(&view, PLUGIN).name, "GitLab");
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+    assert_eq!(row(&view, ANOTHER).name, BASE);
+    assert_eq!(plugins_dir(dir.path()), [PLUGIN]);
+}
+
 /// Remove on a plugin installed plugins depend on is refused, counting and
 /// naming them, ticked or not, and nothing is removed. A built-in has no
 /// record to remove.

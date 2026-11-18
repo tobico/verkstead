@@ -10,7 +10,8 @@
 //! kind        the kind it is, "authors" and so on
 //! uuid        the record's, the same on every device
 //! updated_at  the stamp of the last write, in milliseconds since the epoch
-//! deleted_at  the deletion stamp, or nothing — a removal is final
+//! deleted_at  the deletion stamp, or nothing — a removal is final, unless
+//!             the kind says otherwise
 //! written_by  the Device Id that wrote it last, which breaks a tie
 //! body        the kind's own fields, as JSON
 //! ```
@@ -21,9 +22,10 @@
 //!
 //! **Two rules, each one function.** [`arriving_wins`] is the merge: per
 //! record, the newest stamp wins with the writer's Device Id breaking a tie,
-//! and a record carrying a deletion stamp is never overwritten by an edit.
-//! [`stamped`] is how a write here is stamped: past what it was made on top
-//! of, whatever this device's clock says.
+//! and a record carrying a deletion stamp is never overwritten by an edit —
+//! except in a kind that [`Kind::REVIVES`], where the newest write wins either
+//! way. [`stamped`] is how a write here is stamped: past what it was made on
+//! top of, whatever this device's clock says.
 //!
 //! **Removed records are kept**, never pruned: a deletion stamp is what tells a
 //! device that was off when the removal happened that its edit is to stay
@@ -85,6 +87,15 @@ pub trait Kind {
     /// Compared to tell a write that changes nothing from one that does: a
     /// save of every section of a page rewrites nothing it did not change.
     type Fields: Serialize + DeserializeOwned + PartialEq + Clone;
+
+    /// Whether a removed record of this kind comes back when it is written
+    /// again, rather than staying removed for good. For a kind whose uuid is
+    /// not made here but brought in from outside, so the same uuid is meant
+    /// to be made again after a removal. The Plugins are one: their uuid is
+    /// the author's. A later write here makes the record again, and the merge
+    /// keeps the newest write whether or not it is a removal — see
+    /// [`newest_wins`].
+    const REVIVES: bool = false;
 }
 
 /// One record of a kind, as this device holds it — and as it crosses to a
@@ -151,6 +162,14 @@ pub fn arriving_wins(held: Stamp<'_>, arriving: Stamp<'_>) -> bool {
         (None, Some(_)) => true,
         _ => arriving.newer_than(&held),
     }
+}
+
+/// **The merge rule of a kind that [`Kind::REVIVES`]**: the newest write wins,
+/// a removal being a write like any other, and the writing device's id breaks
+/// a tie. So a record made again after its removal wins over that removal, and
+/// a removal made after an edit wins over that edit.
+pub fn newest_wins(held: Stamp<'_>, arriving: Stamp<'_>) -> bool {
+    arriving.newer_than(&held)
 }
 
 /// **The stamping rule**: what a write made here at `now` is stamped with, on
@@ -261,7 +280,8 @@ pub enum Written {
     /// a write that changes nothing is no news to anybody.
     Unchanged,
 
-    /// The record has been removed, which is final: nothing was written.
+    /// The record has been removed, which is final in a kind that doesn't
+    /// [`Kind::REVIVES`]: nothing was written.
     Removed,
 
     /// There is no such record, and the write was one that edits rather than
@@ -271,7 +291,8 @@ pub enum Written {
 
 /// Write `fields` as the record of kind `K` under `uuid`, made here by
 /// `device`: a new record where there is none, and an edit of the one held
-/// where there is.
+/// where there is. A removed one comes back only in a kind that
+/// [`Kind::REVIVES`], and stays removed otherwise.
 pub async fn write<K: Kind>(
     pool: &SqlitePool,
     device: &str,
@@ -323,8 +344,12 @@ pub(crate) async fn written_on<K: Kind>(
 
     match &held {
         None if !making => return Ok(Written::Absent),
-        Some(held) if held.removed() => return Ok(Written::Removed),
-        Some(held) if held.fields == *fields => return Ok(Written::Unchanged),
+        Some(held) if held.removed() && !(making && K::REVIVES) => {
+            return Ok(Written::Removed);
+        }
+        Some(held) if !held.removed() && held.fields == *fields => {
+            return Ok(Written::Unchanged);
+        }
         _ => {}
     }
 
@@ -336,6 +361,7 @@ pub(crate) async fn written_on<K: Kind>(
          VALUES (?, ?, ?, NULL, ?, ?)
          ON CONFLICT (kind, uuid) DO UPDATE SET
              updated_at = excluded.updated_at,
+             deleted_at = NULL,
              written_by = excluded.written_by,
              body = excluded.body",
     )
@@ -406,7 +432,8 @@ pub(crate) async fn removed_on<K: Kind>(
 }
 
 /// Merge what a member served of kind `K` into what this device holds, by
-/// [`arriving_wins`] record by record, in one transaction — and say whether
+/// [`arriving_wins`] record by record — [`newest_wins`] in a kind that
+/// [`Kind::REVIVES`] — in one transaction — and say whether
 /// anything here moved.
 ///
 /// **Idempotent**: the same records merged twice move nothing the second time,
@@ -429,7 +456,7 @@ pub async fn merge<K: Kind>(pool: &SqlitePool, arriving: &[Record<K::Fields>]) -
     Ok(moved)
 }
 
-/// One record arriving, merged by [`arriving_wins`] inside `tx` — and whether
+/// One record arriving, merged by its kind's rule inside `tx` — and whether
 /// it moved anything here.
 async fn merged<K: Kind>(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -448,14 +475,15 @@ async fn merged<K: Kind>(
     let wins = held
         .as_ref()
         .is_none_or(|(updated_at, deleted_at, written_by)| {
-            arriving_wins(
-                Stamp {
-                    updated_at: *updated_at,
-                    deleted_at: *deleted_at,
-                    written_by,
-                },
-                record.stamp(),
-            )
+            let held = Stamp {
+                updated_at: *updated_at,
+                deleted_at: *deleted_at,
+                written_by,
+            };
+            match K::REVIVES {
+                true => newest_wins(held, record.stamp()),
+                false => arriving_wins(held, record.stamp()),
+            }
         });
 
     if !wins {

@@ -204,8 +204,8 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
 }
 
 /// This device's clones of the git plugins `removed` deleted, where it still
-/// has them. A removal is final, so nothing will clone one again. A local
-/// plugin's directory is the human's own and is never touched.
+/// has them. One installed again is a live record, and is cloned afresh. A
+/// local plugin's directory is the human's own and is never touched.
 async fn forget(state: &AppState, removed: &[Record<Fields>]) {
     let checkouts: Vec<PathBuf> = removed
         .iter()
@@ -793,19 +793,8 @@ async fn install(State(state): State<AppState>, Json(press): Json<PluginInstall>
         taken_back(checkout).await;
     }
 
-    match written {
-        Ok(Written::Removed) => {
-            return refused(
-                StatusCode::CONFLICT,
-                ApiError::new(format!(
-                    "A plugin with the uuid `{}` was removed, and its uuid can't be installed \
-                     again.",
-                    manifest.uuid
-                )),
-            );
-        }
-        Ok(_) => {}
-        Err(error) => return failed(error),
+    if let Err(error) = written {
+        return failed(error);
     }
 
     match moved(&state).await {

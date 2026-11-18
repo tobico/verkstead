@@ -130,6 +130,18 @@ greyed with that said. Per-device in `config.yaml` was the alternative, and
 would have had a Process exist on one device of a cluster and not on the next,
 which is the one thing the record kinds were made to stop.
 
+**A removed plugin can be installed again**, which makes this kind the one
+exception to ADR-0028's *a removal is final*. A record's uuid is usually made
+by Verkstead, so declaring a removed thing again is a new record. A plugin's
+uuid is its author's, so the same plugin installed again is the same uuid, and
+under the general rule it would be refused for good. For this kind, Install
+makes the removed record again and the merge keeps the newest write, a removal
+included. The cost accepted is the one ADR-0028 turned the rule down for: a
+tick or an Update made on a device that was apart when the plugin was removed,
+stamped after the removal, brings the plugin back. Keeping removal final and
+saying so on the Remove confirmation was turned down, and so was a removed flag
+in the record's fields, which every reader of the list would have had to skip.
+
 **A plugin that fails to load** — a manifest that does not parse, a component
 that traps on instantiation, a pull that fails, an interface version too new —
 is listed on the Plugins page with its trouble, counts as disabled, and

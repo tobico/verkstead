@@ -40,6 +40,11 @@ pub struct Plugins;
 impl Kind for Plugins {
     const NAME: &'static str = "plugins";
     type Fields = Fields;
+
+    /// A plugin's uuid is its author's, so a plugin removed is the same uuid
+    /// when it is installed again. That Install makes the record again, on
+    /// every device, rather than being refused for good.
+    const REVIVES: bool = true;
 }
 
 impl Replicating for Plugins {
