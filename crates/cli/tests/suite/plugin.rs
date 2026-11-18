@@ -134,3 +134,92 @@ fn a_component_that_traps_while_starting_is_refused_saying_so() {
         "{stderr}"
     );
 }
+
+/// A plugin whose one `provides:` entry is the Skill Pack `pack`, its skills
+/// each a directory of `skills/` holding the `SKILL.md` given.
+fn with_pack(pack: &str, skills: &[(&str, &str)]) -> tempfile::TempDir {
+    let dir = plugin(&MINIMAL.replace(
+        "provides: []",
+        &format!("provides:\n  - category: skills\n    name: {pack}\n    directory: skills\n"),
+    ));
+    for (skill, text) in skills {
+        let at = dir.path().join("skills").join(skill);
+        std::fs::create_dir_all(&at).unwrap();
+        std::fs::write(at.join("SKILL.md"), text).unwrap();
+    }
+    dir
+}
+
+#[test]
+fn a_skill_pack_passes() {
+    let dir = with_pack(
+        "rust-review",
+        &[(
+            "reviewing",
+            "---\nname: reviewing\ndescription: Review Rust.\n---\n\nRead the diff.\n",
+        )],
+    );
+
+    let output = check(dir.path());
+
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("providing skills"), "{stdout}");
+}
+
+#[test]
+fn a_skill_without_frontmatter_is_refused_naming_it() {
+    let dir = with_pack(
+        "rust-review",
+        &[("reviewing", "# Reviewing\n\nRead the diff.\n")],
+    );
+
+    let output = check(dir.path());
+
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("The skill `reviewing` has no frontmatter"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn a_skill_named_other_than_its_directory_is_refused_naming_it() {
+    let dir = with_pack(
+        "rust-review",
+        &[(
+            "reviewing",
+            "---\nname: review\ndescription: Review Rust.\n---\n",
+        )],
+    );
+
+    let output = check(dir.path());
+
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("The skill `reviewing` is named `review`"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn a_pack_named_verkstead_is_refused() {
+    let dir = with_pack(
+        "verkstead",
+        &[(
+            "grilling",
+            "---\nname: grilling\ndescription: Grill.\n---\n",
+        )],
+    );
+
+    let output = check(dir.path());
+
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`provides[0].name` is `verkstead`"),
+        "{stderr}"
+    );
+}

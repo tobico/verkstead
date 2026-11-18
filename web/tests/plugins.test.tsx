@@ -82,7 +82,7 @@ describe("a row", () => {
     const row = await theRow("GitLab");
 
     expect(row.textContent).toContain("1.4.0 · Ada Lovelace");
-    expect(row.textContent).toContain("Provides forge, skills.");
+    expect(row.textContent).toContain("Provides forge, activity.");
     expect(row.textContent).toContain("/home/you/src/gitlab");
     expect(row.querySelector("input[type=checkbox]")).toHaveProperty(
       "checked",
@@ -97,7 +97,7 @@ describe("a row", () => {
     const row = await theRow("Shared skills");
 
     expect(row.textContent).toContain(
-      "file:///home/you/src/sources/skills at 133d813",
+      "file:///home/you/src/sources/skills at eb22087",
     );
     expect(row.textContent).toContain("Update");
   });
@@ -278,25 +278,17 @@ describe("Remove and the checkbox over dependents", () => {
     ),
   };
 
-  /// The page with a built-in listed, which Verkstead ships rather than the
-  /// human installing.
-  const BUILT_IN: PluginsView = {
-    ...PLUGINS,
-    built_in: [
-      {
-        ...GITLAB,
-        uuid: "613e2a43-80ee-4307-8623-28969e05330f",
-        name: "Fixture",
-      },
-    ],
-  };
-
-  it("draws no Remove on a built-in row", async () => {
-    serving(whenever("/api/ui/plugins", json(BUILT_IN)));
+  it("lists the skills Verkstead ships as a built-in, with no checkbox and no Remove", async () => {
+    serving(whenever("/api/ui/plugins", json(PLUGINS)));
     pane();
 
-    const row = await theRow("Fixture");
+    const row = await theRow("Verkstead");
 
+    expect(row.closest("section")?.querySelector("h3")?.textContent).toBe(
+      "Built-in",
+    );
+    expect(row.textContent).toContain("Provides skills.");
+    expect(row.querySelector("input[type=checkbox]")).toBeNull();
     expect(row.textContent).not.toContain("Remove");
     expect((await theRow("GitLab")).textContent).toContain("Remove");
   });

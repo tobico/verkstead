@@ -777,7 +777,10 @@ flowchart LR
   thirteen are one Skill Pack named `verkstead`, installed under
   `skills/verkstead/` and named `<pack>/<skill>` — a session is sent to
   `/verkstead/skills/verkstead/grilling/SKILL.md` — so the mount holds a
-  directory per pack ([ADR-0030](../adr/0030-plugins.md), *Skill packs*).
+  directory per pack ([ADR-0030](../adr/0030-plugins.md), *Skill packs*). The
+  pack is the built-in plugin `plugins/verkstead/`, read through the manifest
+  reader an installed plugin's pack is; an installed plugin's pack is written
+  out beside it, under `skills/<pack>/`, while that plugin is loaded.
 - **Verkstead itself reaches GitHub through host `gh`** (CI status, PR commit
   lists and comments), authenticating as the same configured token the sessions
   get — `GH_TOKEN` in the environment of each call, read from `secrets.yaml` at

@@ -2,8 +2,9 @@
 //! list, after Repos, and the pane behind it.
 //!
 //! **Two groups, Installed above Built-in**, one row per Plugin whatever it
-//! provides. The Built-in group is drawn only once it has a row (Set 1772, Q4),
-//! so it is absent until a stage ships one that is listed.
+//! provides. The Built-in group is drawn only once it has a row (Set 1772, Q4):
+//! the Skill Pack `verkstead` is its first. A built-in is always on, so its row
+//! has no checkbox, and it has no Remove.
 //!
 //! **A row** reads the plugin's name, version and author, the Category of what
 //! it provides, where it came from, its checkbox, and its trouble where it
@@ -340,9 +341,6 @@ export function PluginsPane(props: {
                         <Row
                           of={row}
                           pressing={enable.isPending}
-                          flip={(enabled) =>
-                            enable.mutate({ uuid: row.uuid, enabled })
-                          }
                           open={() => props.open(row.uuid)}
                           refused={
                             refused()?.uuid === row.uuid
@@ -369,7 +367,9 @@ export function PluginsPane(props: {
 function Row(props: {
   of: PluginRow;
   pressing: boolean;
-  flip: (enabled: boolean) => void;
+  /// Its checkbox, where it has one: every installed plugin, and no built-in,
+  /// which is always on.
+  flip?: (enabled: boolean) => void;
   /// **Update**, where the row has one: a git plugin, or a local plugin on
   /// this device.
   update?: () => void;
@@ -398,7 +398,7 @@ function Row(props: {
       setAsking("disable");
       return;
     }
-    props.flip(enabled);
+    props.flip?.(enabled);
   };
 
   return (
@@ -408,17 +408,27 @@ function Row(props: {
       data-plugin={props.of.uuid}
     >
       <div class={styles.head}>
-        <Check
-          label={
-            <>
+        <Show
+          when={props.flip !== undefined}
+          fallback={
+            <span>
               <span class={styles.name}>{props.of.name}</span>
               <span class={styles.facts}>{facts()}</span>
-            </>
+            </span>
           }
-          on={props.of.enabled}
-          disabled={props.pressing || asking() !== null}
-          flip={flip}
-        />
+        >
+          <Check
+            label={
+              <>
+                <span class={styles.name}>{props.of.name}</span>
+                <span class={styles.facts}>{facts()}</span>
+              </>
+            }
+            on={props.of.enabled}
+            disabled={props.pressing || asking() !== null}
+            flip={flip}
+          />
+        </Show>
 
         <Show when={props.of.settings > 0}>
           <button
@@ -464,7 +474,7 @@ function Row(props: {
           verb="Disable"
           act={() => {
             setAsking(null);
-            props.flip(false);
+            props.flip?.(false);
           }}
           cancel={() => setAsking(null)}
         />
@@ -491,7 +501,9 @@ function Row(props: {
         <p class={styles.provides}>Provides {props.of.provides.join(", ")}.</p>
       </Show>
 
-      <p class={styles.source}>{source(props.of)}</p>
+      <Show when={source(props.of)}>
+        {(from) => <p class={styles.source}>{from()}</p>}
+      </Show>
 
       <Show when={props.of.elsewhere}>
         {(device) => <Note>On {device()}. It's loaded there.</Note>}
@@ -564,13 +576,16 @@ function listed(names: string[]): string {
 }
 
 /// Where a row's plugin came from: its directory, or its repository and the
-/// revision this cluster is pinned to.
-function source(row: PluginRow): string {
+/// revision this cluster is pinned to. Nothing for a built-in, whose group
+/// already says so.
+function source(row: PluginRow): string | null {
   switch (row.source.kind) {
     case "Local":
       return row.source.path;
     case "Git":
       return `${row.source.url} at ${row.source.revision.slice(0, 7)}`;
+    case "BuiltIn":
+      return null;
   }
 }
 

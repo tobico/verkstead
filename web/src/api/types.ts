@@ -4967,7 +4967,7 @@ trouble: string | null, fields: Array<PluginField>, };
 /**
  * Where a Plugin came from.
  */
-export type PluginSource = { "kind": "Local", path: string, } | { "kind": "Git", url: string, revision: string, };
+export type PluginSource = { "kind": "Local", path: string, } | { "kind": "Git", url: string, revision: string, } | { "kind": "BuiltIn" };
 
 /**
  * **Update**: nothing the first time, and the capabilities the card showed
@@ -4986,9 +4986,10 @@ export type PluginUpdated = { "kind": "Updated", plugins: PluginsView, } | { "ki
  */
 export type PluginsView = { installed: Array<PluginRow>, 
 /**
- * The ones this binary ships and lists. None yet: the fixture that proves
- * the path is not listed, and the group is drawn only once it has a row.
- * A built-in has no **Remove**.
+ * The ones this binary ships and lists, the Skill Pack `verkstead` first;
+ * the fixture that proves the path is not listed, and the group is drawn
+ * only once it has a row. A built-in has no **Remove** and no checkbox:
+ * it is always on.
  */
 built_in: Array<PluginRow>, };
 
