@@ -53,6 +53,7 @@ import setup from "../src/workbench/Setup.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import {
   ATTACH_REFUSAL,
+  PACK_REFUSAL,
   SERVER_REFUSAL,
 } from "../src/workbench/Composer";
 import {
@@ -3478,6 +3479,46 @@ describe("moving a saved draft to another device", () => {
     }
   });
 
+  /// And its Skill Packs the same way, by name — a chip already saying its
+  /// plugin is gone included — and one the target has no plugin for is one
+  /// more refusal to carry, the old draft left open.
+  it("carries every attached skill pack by name, a refused one as a refusal", async () => {
+    const fetching = moving(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}`,
+        json({
+          ...OPEN,
+          skill_packs: [
+            { name: "review-kit", installed: true },
+            { name: "gone-kit", installed: false },
+          ],
+        }),
+      ),
+      whenever(
+        at(`/conversations/${MOVED}/skill-packs/review-kit`),
+        json("Attached"),
+        "POST",
+      ),
+      whenever(
+        at(`/conversations/${MOVED}/skill-packs/gone-kit`),
+        json("NoSuchPack"),
+        "POST",
+      ),
+    );
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await screen.findByText(
+      `gone-kit couldn't be attached. ${PACK_REFUSAL.NoSuchPack}`,
+    );
+    expect(
+      writes(fetching, at(`/conversations/${MOVED}/skill-packs/review-kit`)),
+    ).toBe(1);
+    expect(writes(fetching, moved)).toBe(0);
+  });
+
   /// And a server the target declares nothing by is one more refusal to carry,
   /// as a refused file is — the old draft left open, the move being one the
   /// human finishes by hand.
@@ -6185,6 +6226,147 @@ describe("the MCP servers a compose page holds", () => {
   });
 });
 
+/// The Skill Packs handed over with what is being composed, which are the
+/// servers' half again: rows in the same menu, held by name on the device until
+/// a press, and put on the Conversation it makes straight after the servers.
+describe("the skill packs a compose page holds", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(null, 0, [], null);
+  });
+
+  const attach = (name: string) =>
+    `/api/ui/conversations/${OPEN.id}/skill-packs/${name}`;
+
+  /// What this device offers: the one pack, from a plugin of its own.
+  const OFFERING = whenever(
+    "/api/ui/skill-packs",
+    json([{ name: "review-kit", plugin: "reviewing", skills: ["reviewing"] }]),
+  );
+
+  async function pickPack(name: string): Promise<void> {
+    const card = await attachMenu();
+    fireEvent.click(
+      await waitFor(() => within(card).getByRole("menuitem", { name })),
+    );
+  }
+
+  /// Under the servers, a pick a chip, and the name kept with the brief.
+  it("offers the device's packs after the servers, and holds a pick", async () => {
+    const fetching = creating(OFFERING);
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const card = await attachMenu();
+    await waitFor(() =>
+      expect(offeredIn(card)).toEqual([
+        "Attach file…",
+        ...SETTINGS.mcp_servers.map((one) => one.name),
+        "Add a server…",
+        "review-kit",
+      ]),
+    );
+    shutMenu();
+
+    await pickPack("review-kit");
+
+    await waitFor(() => expect(chips(container)).toEqual(["review-kit"]));
+    await waitFor(() => expect(stored().packs).toEqual(["review-kit"]));
+    expect(writes(fetching, attach("review-kit"))).toBe(0);
+  });
+
+  /// The press is what attaches them, after the servers and before the work
+  /// starts, for the servers' reason.
+  it("attaches what it holds after the create, before the work starts", async () => {
+    const fetching = creating(
+      OFFERING,
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/mcp-servers/docs`,
+        json("Attached"),
+        "POST",
+      ),
+      whenever(attach("review-kit"), json("Attached"), "POST"),
+    );
+    const { container } = mount("/compose");
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
+    fireEvent.click(
+      within(await attachMenu()).getByRole("menuitem", { name: "docs" }),
+    );
+    await pickPack("review-kit");
+    await waitFor(() =>
+      expect(chips(container)).toEqual(["docs", "review-kit"]),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(1),
+    );
+    expect(writes(fetching, attach("review-kit"))).toBe(1);
+    expect(order(fetching, attach("review-kit"))).toBeGreaterThan(
+      order(fetching, `/api/ui/conversations/${OPEN.id}/mcp-servers/docs`),
+    );
+    expect(order(fetching, attach("review-kit"))).toBeLessThan(
+      order(fetching, `/api/ui/conversations/${OPEN.id}/grill`),
+    );
+  });
+
+  /// A held pack the server will not take is a refusal for the draft the page
+  /// lands on, and it stops the kickoff.
+  it("says on the new draft what could not be attached", async () => {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({ ...blank(), brief: "Make the widget", packs: ["review-kit"] }),
+    );
+    const fetching = creating(
+      OFFERING,
+      whenever(attach("review-kit"), json("NoSuchPack"), "POST"),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
+    await waitFor(() => expect(chips(container)).toEqual(["review-kit"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await screen.findByText(
+      `review-kit couldn't be attached. ${PACK_REFUSAL.NoSuchPack}`,
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
+  });
+
+  /// A kept name whose plugin has gone since is drawn saying so, and still
+  /// comes off by its ×.
+  it("says so where a kept pack is no longer installed", async () => {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({ ...blank(), brief: "Make the widget", packs: ["gone-kit"] }),
+    );
+    creating(OFFERING);
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    const gone = await waitFor(() => {
+      const found = [...container.querySelectorAll<HTMLElement>(`.${pill.missing}`)];
+      expect(found).toHaveLength(1);
+      return found[0]!;
+    });
+    expect(gone.textContent).toContain("gone-kit");
+    expect(gone.textContent).toContain("no longer installed");
+
+    fireEvent.click(within(gone).getByRole("button", { name: "Remove gone-kit" }));
+    await waitFor(() => expect(chips(container)).toEqual([]));
+  });
+});
+
 /// And the state away from the page it is composed on: what survives a round
 /// trip through this device, and what is discarded rather than half-applied.
 describe("what a device holds between visits", () => {
@@ -6211,6 +6393,7 @@ describe("what a device holds between visits", () => {
       adopting: null,
       permitted: ["0011223344556677889900aabbccddee"],
       servers: ["docs"],
+      packs: ["review-kit"],
     };
 
     keep(held);
@@ -6223,6 +6406,15 @@ describe("what a device holds between visits", () => {
   /// absence a field-by-field check has to read rather than discard.
   it("reads a body from before the process as one nobody picked", () => {
     const { process: _, ...before } = { ...blank(), repo: 2 };
+    localStorage.setItem(COMPOSING, JSON.stringify(before));
+
+    expect(stored()).toEqual({ ...blank(), repo: 2 });
+  });
+
+  /// And one from before the packs were kept has none, which is nothing
+  /// picked rather than a draft to throw away.
+  it("reads a body from before the packs as none picked", () => {
+    const { packs: _, ...before } = { ...blank(), repo: 2 };
     localStorage.setItem(COMPOSING, JSON.stringify(before));
 
     expect(stored()).toEqual({ ...blank(), repo: 2 });

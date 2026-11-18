@@ -780,7 +780,11 @@ flowchart LR
   directory per pack ([ADR-0030](../adr/0030-plugins.md), *Skill packs*). The
   pack is the built-in plugin `plugins/verkstead/`, read through the manifest
   reader an installed plugin's pack is; an installed plugin's pack is written
-  out beside it, under `skills/<pack>/`, while that plugin is loaded.
+  out beside it, under `skills/<pack>/`, while that plugin is loaded. A
+  session is bound the shipped pack and the packs its Conversation attached, a
+  directory each, rather than the whole of `skills/`: a pack written out for
+  one Conversation is not in another's sandbox, and the attached ones are
+  listed under `# Skill packs` in its prompt beside `# MCP servers`.
 - **Verkstead itself reaches GitHub through host `gh`** (CI status, PR commit
   lists and comments), authenticating as the same configured token the sessions
   get — `GH_TOKEN` in the environment of each call, read from `secrets.yaml` at

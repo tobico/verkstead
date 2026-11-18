@@ -683,6 +683,18 @@ const CARRIED: &[Carried] = &[
             ("conversation_id", Holds::Conversation),
         ],
     },
+    // And the Skill Packs, as names for the servers' reason: a pack is a
+    // plugin's, read on the far end against what loaded there, and one that
+    // did not — a local plugin's, on a device without its directory — is a
+    // chip saying it is gone rather than a refusal.
+    Carried {
+        table: "conversation_skill_packs",
+        found: Found::ByConversation,
+        ids: &[
+            ("id", Holds::Mine(Remembered::Nothing)),
+            ("conversation_id", Holds::Conversation),
+        ],
+    },
     // And the devices its agent may move it to, which travel as the Device Ids
     // they are: an id names the same machine in every database of a cluster,
     // so the far end reads the same list — and the drafting device, which is

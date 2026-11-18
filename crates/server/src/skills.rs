@@ -36,6 +36,7 @@
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
 
@@ -150,6 +151,29 @@ pub struct Skills {
     /// And where a session reads them, which is `path` itself wherever nothing
     /// can be mounted anywhere else — see [`Skills::inside`].
     inside: PathBuf,
+
+    /// The packs the built-in plugins ship, which every session is given —
+    /// `verkstead`, today.
+    shipped: Vec<String>,
+
+    /// And the installed plugins' packs that loaded on this device, as the
+    /// last load wrote them out — see [`Skills::holding`]. Shared by every
+    /// clone, so what a launch reads is what the plugins came to last.
+    loaded: Arc<RwLock<Vec<LoadedPack>>>,
+}
+
+/// One installed plugin's Skill Pack, written out under the skills directory
+/// and attachable to a Conversation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedPack {
+    /// Its name, which is its directory: `<skills>/<name>/`.
+    pub name: String,
+
+    /// The plugin providing it, by its manifest's name.
+    pub plugin: String,
+
+    /// Its skills, by name, in the order the pack lists them.
+    pub skills: Vec<String>,
 }
 
 impl Skills {
@@ -217,6 +241,11 @@ impl Skills {
         for pack in &manifest.packs {
             installed += written(shipped.files(), pack, &path, &inside, handoffs)?;
         }
+        let shipped = manifest
+            .packs
+            .iter()
+            .map(|pack| pack.name.clone())
+            .collect();
 
         if installed == 0 {
             anyhow::bail!(
@@ -227,7 +256,12 @@ impl Skills {
 
         tracing::debug!(path = %path.display(), files = installed, "the skills Verkstead ships are installed");
 
-        Ok(Skills { path, inside })
+        Ok(Skills {
+            path,
+            inside,
+            shipped,
+            loaded: Arc::default(),
+        })
     }
 
     /// Where they landed, which is what a sandbox reaches for.
@@ -254,6 +288,55 @@ impl Skills {
         crate::sandbox::under(&self.inside, skill)
             .display()
             .to_string()
+    }
+
+    /// Hold `packs` as what the installed plugins came to on this device,
+    /// once they are written out — see [`placed`]. What every launch after it
+    /// mounts and lists, and what the Attach menu offers.
+    pub fn holding(&self, packs: Vec<LoadedPack>) {
+        *self
+            .loaded
+            .write()
+            .expect("nothing panics holding the loaded packs") = packs;
+    }
+
+    /// The installed plugins' packs loaded here.
+    pub(crate) fn loaded(&self) -> Vec<LoadedPack> {
+        self.loaded
+            .read()
+            .expect("nothing panics holding the loaded packs")
+            .clone()
+    }
+
+    /// Those of `attached` that are loaded here, in the order they were
+    /// attached in: a name disabled, removed or never loaded on this device is
+    /// left out, being neither mounted nor listed (Q7).
+    pub(crate) fn among(&self, attached: &[String]) -> Vec<LoadedPack> {
+        let loaded = self.loaded();
+        attached
+            .iter()
+            .filter_map(|name| loaded.iter().find(|pack| pack.name == *name).cloned())
+            .collect()
+    }
+
+    /// Every pack a session given `attached` reaches: the shipped ones and
+    /// those, each as the directory it was written to and the one a session
+    /// reads it at.
+    ///
+    /// A directory per pack rather than the whole of the skills directory, so a
+    /// session has the packs its Conversation attached and none of the others
+    /// written out beside them.
+    pub(crate) fn bound(&self, attached: &[String]) -> Vec<(PathBuf, PathBuf)> {
+        self.shipped
+            .iter()
+            .chain(attached)
+            .map(|pack| {
+                (
+                    self.path.join(pack),
+                    crate::sandbox::under(&self.inside, pack),
+                )
+            })
+            .collect()
     }
 }
 
@@ -1368,6 +1451,49 @@ pub(crate) fn served(prompt: &str, servers: &[String], agent: store::AgentType) 
     )
 }
 
+/// The same prompt again, with the Skill Packs the Conversation attached
+/// listed under it — each pack, and each of its skills at the path of its
+/// `SKILL.md` — so a session finds them by reading rather than by exploring the
+/// mount.
+///
+/// [`served`]'s listing for its reasons: on every session prompt, appended
+/// where every session is launched, and neutral. `packs` is what the chips came
+/// to at this launch — the ones loaded on this device, in the order they were
+/// attached — so one gone since is not listed any more than it is mounted. The
+/// built-in `verkstead` is never among them: every session has it, and the
+/// prompt it was started on names the skill it runs. None, no heading.
+pub(crate) fn packed(prompt: &str, packs: &[LoadedPack], skills: &Skills) -> String {
+    if packs.is_empty() {
+        return prompt.to_owned();
+    }
+
+    let listed: Vec<String> = packs
+        .iter()
+        .map(|pack| {
+            let each: String = pack
+                .skills
+                .iter()
+                .map(|skill| {
+                    format!(
+                        "\n  - `{}/{skill}`: `{}`",
+                        pack.name,
+                        skills.named(&format!("{}/{skill}/SKILL.md", pack.name)),
+                    )
+                })
+                .collect();
+            format!("- `{}`{each}", pack.name)
+        })
+        .collect();
+
+    format!(
+        "{}\n\n# Skill packs\n\nThe human attached these Skill Packs to this Conversation. \
+         Each skill is a `SKILL.md`, at the path beside its name, in a directory this session \
+         can read and not write.\n\n{}\n",
+        prompt.trim_end(),
+        listed.join("\n"),
+    )
+}
+
 /// What a harness puts in front of an MCP server's tool names.
 ///
 /// Each read off a real run against a server that recorded what it was asked,
@@ -1849,6 +1975,8 @@ mod tests {
         Skills {
             path: PathBuf::from(INSIDE),
             inside: PathBuf::from(INSIDE),
+            shipped: vec![crate::plugins::manifest::RESERVED.to_owned()],
+            loaded: Arc::default(),
         }
     }
 
@@ -6069,6 +6197,43 @@ mod tests {
             assert!(
                 !prompt.to_lowercase().contains(instructed),
                 "the listing is neutral, and {instructed:?} is not: {prompt:?}"
+            );
+        }
+    }
+
+    /// The Skill Packs a Conversation attached are listed under a heading of
+    /// their own, each skill at the path of its `SKILL.md` — and none attached
+    /// is the prompt as it stands, as the servers' is.
+    #[test]
+    fn the_packs_are_listed_with_each_skills_path_and_none_is_no_heading() {
+        let prompt = next_task(&mounted(), "# Rate limiting\n", None);
+
+        assert_eq!(packed(&prompt, &[], &mounted()), prompt);
+
+        let said = packed(
+            &prompt,
+            &[LoadedPack {
+                name: "rust-review".to_owned(),
+                plugin: "Rust review".to_owned(),
+                skills: vec!["reviewing".to_owned(), "linting".to_owned()],
+            }],
+            &mounted(),
+        );
+
+        assert!(said.starts_with(prompt.trim_end()), "{said:?}");
+        assert!(said.contains("\n\n# Skill packs\n\n"), "{said:?}");
+        assert!(
+            said.contains(
+                "- `rust-review`\n  \
+                 - `rust-review/reviewing`: `/verkstead/skills/rust-review/reviewing/SKILL.md`\n  \
+                 - `rust-review/linting`: `/verkstead/skills/rust-review/linting/SKILL.md`"
+            ),
+            "{said:?}"
+        );
+        for instructed in ["you should", "use it", "make sure", "read the"] {
+            assert!(
+                !said.to_lowercase().contains(instructed),
+                "the listing is neutral, and {instructed:?} is not: {said:?}"
             );
         }
     }

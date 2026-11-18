@@ -46,7 +46,8 @@
 //! by name once there is a Conversation to attach them to — before the kickoff
 //! for the files' own reason, the servers freezing when the Brief does. Unlike
 //! the files they are held on the device with the rest of it, a name being text
-//! a device can write down: see [`Composed.servers`].
+//! a device can write down: see [`Composed.servers`]. **The Skill Packs picked
+//! there go up the same way**, after the servers — see [`Composed.packs`].
 //!
 //! **A roadmap loaded into the page is held the same way and creates the other
 //! kind of Conversation.** Picking one out of the Adopt dropdown writes it into
@@ -73,7 +74,9 @@ import { createSignal } from "solid-js";
 import {
   addCompanion,
   adoptRoadmap,
-    attachServer, attachFile,
+  attachFile,
+  attachPack,
+  attachServer,
   chooseGrillingPairing,
   chooseImplementationPairing,
   chooseReviewPairing,
@@ -109,7 +112,7 @@ import * as pairing from "../pairing";
 import { rowKey, type Device } from "../reaching";
 import { draftingOn, forget, read, write } from "../remembered";
 import { adoptRefusal } from "./Adoption";
-import { ATTACH_REFUSAL, SERVER_REFUSAL } from "./Composer";
+import { ATTACH_REFUSAL, PACK_REFUSAL, SERVER_REFUSAL } from "./Composer";
 import { PROCESS, targeted } from "./processes";
 import {
   BASE_REFUSAL,
@@ -287,6 +290,11 @@ export type Composed = {
   /// outlive its declaration, which the page draws as gone — the composer's
   /// chip for the same thing — and the replay is refused over by name.
   servers: string[];
+
+  /// And the Skill Packs picked there, by name, in the order they were picked
+  /// — kept on the device for the servers' reason, and drawn as gone the same
+  /// way where nothing installed on the work's device provides one any more.
+  packs: string[];
 };
 
 /// The box written into, with the Target filled out of it.
@@ -407,6 +415,7 @@ export function blank(): Composed {
     adopting: null,
     permitted: [],
     servers: [],
+    packs: [],
   };
 }
 
@@ -476,7 +485,8 @@ export function empty(state: Composed): boolean {
     state.review === null &&
     state.adopting === null &&
     state.permitted.length === 0 &&
-    state.servers.length === 0
+    state.servers.length === 0 &&
+    state.packs.length === 0
   );
 }
 
@@ -550,8 +560,8 @@ export type Created =
 /// still worth carrying, so the list is what decides rather than the first one.
 ///
 /// **What this page is holding at its Attach control goes up in the same
-/// replay** — the MCP servers attached by name, and the files one request
-/// apiece through the route a draft's own paperclip uses. There is a
+/// replay** — the MCP servers and the Skill Packs attached by name, and the
+/// files one request apiece through the route a draft's own paperclip uses. There is a
 /// Conversation by then, so there is nothing else either of them could need.
 /// They go after every field and before the kickoff: what is attached freezes
 /// with the Brief, and either arriving after the grilling started would be
@@ -742,6 +752,15 @@ export async function create(
         refused.push(
           `${name} couldn't be attached. ${SERVER_REFUSAL[outcome]}`,
         );
+      }
+    }
+
+    // And the packs the same way: a pack the work's device no longer provides
+    // is refused by name rather than dropped, for the servers' reason.
+    for (const name of state.packs) {
+      const outcome = await attachPack(to, id, name);
+      if (outcome !== "Attached") {
+        refused.push(`${name} couldn't be attached. ${PACK_REFUSAL[outcome]}`);
       }
     }
 
@@ -980,7 +999,9 @@ export type Target = {
 /// draft over there is launched with the same ones wherever that device declares
 /// them. One it declares nothing by is a refusal to carry, as a file is — and a
 /// chip already saying its server is gone goes too, the reference being the
-/// human's to take off rather than the move's to drop.
+/// human's to take off rather than the move's to drop. **And so do the Skill
+/// Packs**, for the same reasons: a name is a pack on whichever device provides
+/// it, and one the target has no plugin for is a refusal to carry.
 ///
 /// **Nothing is undone by a refusal**, which is [`create`]'s rule again. The new
 /// Conversation is real from its first request, so a field the target would not
@@ -1082,6 +1103,15 @@ export async function moveTo(
     if (outcome !== "Attached") {
       refused.push(
         `${server.name} couldn't be attached. ${SERVER_REFUSAL[outcome]}`,
+      );
+    }
+  }
+
+  for (const pack of draft.skill_packs) {
+    const outcome = await attachPack(to.reaching, id, pack.name);
+    if (outcome !== "Attached") {
+      refused.push(
+        `${pack.name} couldn't be attached. ${PACK_REFUSAL[outcome]}`,
       );
     }
   }
@@ -1279,6 +1309,12 @@ function parsed(body: string): Composed | null {
       held.servers === undefined ||
       (Array.isArray(held.servers) &&
         held.servers.every((one) => typeof one === "string"))
+    ) ||
+    // And the same of one from before the packs were.
+    !(
+      held.packs === undefined ||
+      (Array.isArray(held.packs) &&
+        held.packs.every((one) => typeof one === "string"))
     )
   ) {
     return null;
@@ -1326,6 +1362,7 @@ function parsed(body: string): Composed | null {
     adopting: held.adopting ?? null,
     permitted: held.permitted ?? [],
     servers: held.servers ?? [],
+    packs: held.packs ?? [],
   };
 }
 

@@ -77,6 +77,7 @@ mod session_names;
 mod session_pairings;
 mod set_additions;
 mod shares;
+mod skill_packs;
 mod slices;
 mod steers;
 mod stops;
@@ -211,6 +212,7 @@ pub use set_additions::{
     carried_sets, conversation_additions, set_additions, take_off_set,
 };
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
+pub use skill_packs::{attach_skill_pack_to_draft, detach_skill_pack_from_draft, skill_packs};
 pub use slices::{
     Cell, MOST_A_SLICE_IS, Marks, Renaming, Rows, STAYS_BEHIND, Slice, carried_tables, land, slice,
 };
@@ -1070,6 +1072,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // declared in `config.yaml`, which this crate has never heard of — see
     // [`mcp_servers`].
     mcp_servers::apply_schema(pool).await?;
+
+    // And the Skill Packs each of them asks its sessions to be given, beside
+    // those servers and for their reasons — see [`skill_packs`].
+    skill_packs::apply_schema(pool).await?;
 
     // And what the human picked to add to the work from a Question Set's sheet,
     // which hangs off the Set it was picked on as an Answer's file does — see

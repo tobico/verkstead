@@ -977,6 +977,12 @@ pub struct ConversationView {
     /// about reaching it stays in this installation's settings.
     pub mcp_servers: Vec<AttachedServerView>,
 
+    /// And the Skill Packs it has attached, in the order they were attached in
+    /// — chips beside the servers', settled at the same control and frozen at
+    /// the same moment. Names, read beside whether this device has each pack
+    /// loaded — see [`AttachedPackView`].
+    pub skill_packs: Vec<AttachedPackView>,
+
     /// The steer somebody has started on this Conversation and not yet decided,
     /// where there is one.
     ///
@@ -1320,6 +1326,42 @@ pub enum AttachmentOrigin {
     /// Put at the answer sheet's comment box: on the Set as a whole, under no
     /// Question and with no label, and an Answer to nothing (ADR-0028).
     Set,
+}
+
+/// One Skill Pack a Conversation has attached, as the composer draws it: the
+/// name it was attached under, and whether a plugin loaded on this device
+/// still provides it.
+///
+/// [`AttachedServerView`]'s shape for its reasons: a pack whose plugin was
+/// disabled or removed since — or a local plugin's, on a device without its
+/// directory after a Transfer — keeps its chip, drawn saying it is gone, and is
+/// neither mounted nor listed to a session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AttachedPackView {
+    /// What it is called, which is the directory its skills are under:
+    /// `/verkstead/skills/<name>/`.
+    pub name: String,
+
+    /// Whether a plugin loaded on this device provides it, read at the moment
+    /// the Conversation is.
+    pub installed: bool,
+}
+
+/// One Skill Pack the Attach menu offers: an enabled installed plugin's, loaded
+/// on this device. The built-in `verkstead` is never one — every session has
+/// it already.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct OfferedPack {
+    /// The pack's name, which is what a pick attaches.
+    pub name: String,
+
+    /// The plugin providing it, by its manifest's name.
+    pub plugin: String,
+
+    /// Its skills, by name, in the order the pack lists them.
+    pub skills: Vec<String>,
 }
 
 /// One MCP server a Conversation has attached, as the composer draws it: the
@@ -4370,6 +4412,38 @@ pub enum ServerRemoved {
 
     /// The Conversation is past drafting, for [`ServerAttached::NotDrafting`]'s
     /// reason: what freezes with the Brief cannot be taken off it either.
+    NotDrafting,
+}
+
+/// What became of attaching an installed Skill Pack to a Conversation.
+///
+/// [`ServerAttached`]'s shape, with *no such pack* in place of its two about
+/// declarations: a pack is installed or it is not, and two plugins never hold
+/// one name — the second is refused as it loads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum PackAttached {
+    /// On it, and drawn as a chip beside the servers.
+    Attached,
+
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, so its packs are frozen with its
+    /// Brief — see [`Attached::NotDrafting`], which is the same freeze.
+    NotDrafting,
+
+    /// No plugin loaded on this device provides a pack of that name — never
+    /// installed, disabled or removed since the menu was drawn, or in trouble
+    /// — or it is the built-in `verkstead`, which every session has already.
+    NoSuchPack,
+}
+
+/// And of taking one off again — [`ServerRemoved`]'s reasons, said of a pack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum PackRemoved {
+    Removed,
+    NoSuchConversation,
     NotDrafting,
 }
 

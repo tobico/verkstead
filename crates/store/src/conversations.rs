@@ -429,6 +429,12 @@ pub struct Conversation {
     /// prompt they are started on.
     pub mcp_servers: Vec<String>,
 
+    /// And the Skill Packs its sessions are given, by name — see
+    /// [`super::skill_packs`]. Read against the plugins loaded on the device
+    /// launching it, for the servers' reason: a pack disabled or removed since
+    /// is skipped rather than refused.
+    pub skill_packs: Vec<String>,
+
     /// The devices the agent may move this work to, by Device Id, in the order
     /// they were ticked — see [`super::permitted`].
     ///
@@ -2590,6 +2596,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         target: target(pool, id).await?,
         companions: super::companions(pool, id).await?,
         mcp_servers: super::mcp_servers(pool, id).await?,
+        skill_packs: super::skill_packs(pool, id).await?,
         permitted: super::permitted_devices(pool, id).await?,
         // A read of its own beside the row for the worktree's reason: nearly
         // every Conversation has no mark at all, and a `LEFT JOIN`'s worth of

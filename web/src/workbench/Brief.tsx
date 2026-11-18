@@ -142,14 +142,24 @@ export function Brief(props: {
           which is what a share carries too: a chip says what the sessions were
           given a server *called*, and where it is reached stays in this
           installation's settings. One whose declaration has since gone says so
-          here as well, there being no × on this row to do anything about it. */}
+          here as well, there being no × on this row to do anything about it.
+
+          And the Skill Packs after them, the same way: names, frozen with the
+          rest, and one whose plugin is no longer installed here saying so. */}
       <Attachments
         files={props.conversation.attachments}
-        chips={props.conversation.mcp_servers.map((server) => ({
-          name: server.name,
-          gone: !server.declared,
-          clashes: server.clashes,
-        }))}
+        chips={[
+          ...props.conversation.mcp_servers.map((server) => ({
+            name: server.name,
+            gone: !server.declared,
+            clashes: server.clashes,
+          })),
+          ...props.conversation.skill_packs.map((pack) => ({
+            name: pack.name,
+            kind: "pack" as const,
+            gone: !pack.installed,
+          })),
+        ]}
         class={styles.attachments}
       />
 

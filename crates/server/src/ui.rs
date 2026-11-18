@@ -47,14 +47,14 @@ use verkstead_render::{
     FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
     IgnoredCommentsEdit, InstallPress, InstructionsEdit, LanguageCleared, LanguageEdit,
     LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging,
-    MissedOut, NewAdoption, NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank,
-    OpenTerminal, PairingView, Parked, PendingSteerView, Permitting, Picking, Process,
-    ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
-    RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField,
-    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
+    MissedOut, NewAdoption, NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank, OfferedPack,
+    OpenTerminal, PackAttached, PackRemoved, PairingView, Parked, PendingSteerView, Permitting,
+    Picking, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry,
+    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
+    Resumed, RoleChoice, RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress,
+    ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowArchived, ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
     SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
     TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
     TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
@@ -471,6 +471,20 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/mcp-servers/{name}/remove",
             post(detach_server),
         )
+        // And the Skill Packs, the third thing the one Attach control puts
+        // on the work — by name in the path, for the servers' reason, and
+        // frozen with the Brief the same way.
+        .route(
+            "/api/ui/conversations/{id}/skill-packs/{name}",
+            post(attach_pack),
+        )
+        .route(
+            "/api/ui/conversations/{id}/skill-packs/{name}/remove",
+            post(detach_pack),
+        )
+        // And which packs the menu offers: those the installed plugins
+        // loaded on this device, read as the menu is drawn.
+        .route("/api/ui/skill-packs", get(skill_packs))
         // And which Repo the work is in at all, which is the first thing the
         // Repo panel asks and the one the branch and the base below it are
         // facts about. Refused from the moment there is a checkout, like both
@@ -2673,6 +2687,16 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And the Skill Packs, chips in that same row for the same reason, read
+    // against the plugins loaded here — and none where the read fails.
+    let packs = match crate::conversations::attached_packs(state, id).await {
+        Ok(packs) => packs,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading the skill packs attached to a Conversation failed");
+            Vec::new()
+        }
+    };
+
     // And the steer somebody has started on it and not yet decided, which the
     // Timeline draws as its last item and the details pane draws the form of.
     // Read the way the archive mark is: a row beside the Conversation rather
@@ -2834,6 +2858,7 @@ pub(crate) async fn conversation_view(
         shared,
         attachments: attached,
         mcp_servers: servers,
+        skill_packs: packs,
         pending_steer,
         previews,
         // And where the live record is, where this copy is not it: what takes
@@ -5180,6 +5205,49 @@ async fn detach_server(
             unavailable("The MCP server couldn't be removed.")
         }
     }
+}
+
+/// `POST /api/ui/conversations/{id}/skill-packs/{name}` — give a Conversation
+/// an installed Skill Pack for its sessions to be given.
+async fn attach_pack(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(PackAttached::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::attach_pack(&state, id, &name).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, name = %name, "attaching a skill pack failed");
+            unavailable("The skill pack couldn't be attached.")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/skill-packs/{name}/remove` — and take one
+/// off again.
+async fn detach_pack(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(PackRemoved::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::detach_pack(&state, id, &name).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, name = %name, "removing a skill pack failed");
+            unavailable("The skill pack couldn't be removed.")
+        }
+    }
+}
+
+/// `GET /api/ui/skill-packs` — the Skill Packs the Attach menu offers.
+async fn skill_packs(State(state): State<AppState>) -> Json<Vec<OfferedPack>> {
+    Json(crate::conversations::offered_packs(&state))
 }
 
 /// `POST /api/ui/sets/{id}/answers/{label}/attachments/{name}` — put a file on

@@ -97,7 +97,8 @@ export function serving(...answers: Array<Answer>) {
   const fetching = vi.fn((path: RequestInfo | URL, init?: RequestInit) => {
     const answer =
       held.get(`${init?.method ?? "GET"} ${String(path)}`) ??
-      nothingClonable(path, init);
+      nothingClonable(path, init) ??
+      nothingInstalled(path, init);
     // Handed what the page put on the wire, for the answer that has to behave
     // like the network rather than like a value — see [`hangs`], which needs
     // the signal to know when the caller gave up.
@@ -121,6 +122,22 @@ function nothingClonable(
 ): ((init?: RequestInit) => Promise<Response>) | undefined {
   return (init?.method ?? "GET") === "GET" &&
     String(path).endsWith("/repos/clonable")
+    ? json([])
+    : undefined;
+}
+
+/// What Skill Packs a device offers, wherever a test has not said: none — no
+/// plugin installed, which is what every test that has not said otherwise is
+/// about.
+///
+/// Read wherever an Attach menu opens, on whichever device the page is about,
+/// so it is matched by the path's end for [`nothingClonable`]'s reason.
+function nothingInstalled(
+  path: RequestInfo | URL,
+  init?: RequestInit,
+): ((init?: RequestInit) => Promise<Response>) | undefined {
+  return (init?.method ?? "GET") === "GET" &&
+    String(path).endsWith("/api/ui/skill-packs")
     ? json([])
     : undefined;
 }
