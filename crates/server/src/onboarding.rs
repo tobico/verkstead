@@ -888,13 +888,11 @@ impl Machine {
             sandbox::Standing::Found { landed, .. } if self.is_apples_git(landed),
         );
 
-        if stub {
-            if let Err(trouble) = self.command_line_tools() {
-                return DependencyState::Absent {
-                    trouble,
-                    seen: None,
-                };
-            }
+        if stub && let Err(trouble) = self.command_line_tools() {
+            return DependencyState::Absent {
+                trouble,
+                seen: None,
+            };
         }
 
         stood(standing)

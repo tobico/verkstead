@@ -825,11 +825,11 @@ pub(crate) fn goes_over(login: &Path, sent: &AccountLogin) -> bool {
 ///
 /// Blocking.
 pub(crate) fn into_the_account(login: &Path, text: &str) -> std::io::Result<()> {
-    if let Some(over) = login.parent() {
-        if !over.is_dir() {
-            std::fs::create_dir_all(over)?;
-            owner_only(over)?;
-        }
+    if let Some(over) = login.parent()
+        && !over.is_dir()
+    {
+        std::fs::create_dir_all(over)?;
+        owner_only(over)?;
     }
 
     std::fs::write(login, text)?;

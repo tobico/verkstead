@@ -75,10 +75,9 @@ fn resolved(mdns: u16, wanted: &str) -> ResolvedService {
     while Instant::now() < deadline {
         if let Ok(ServiceEvent::ServiceResolved(service)) =
             events.recv_timeout(Duration::from_millis(100))
+            && service.get_property_val_str("id") == Some(wanted)
         {
-            if service.get_property_val_str("id") == Some(wanted) {
-                return *service;
-            }
+            return *service;
         }
     }
 
@@ -96,10 +95,9 @@ fn heard(mdns: u16) -> Vec<String> {
     while Instant::now() < deadline {
         if let Ok(ServiceEvent::ServiceResolved(service)) =
             events.recv_timeout(Duration::from_millis(100))
+            && let Some(device) = service.get_property_val_str("id")
         {
-            if let Some(device) = service.get_property_val_str("id") {
-                heard.push(device.to_owned());
-            }
+            heard.push(device.to_owned());
         }
     }
 

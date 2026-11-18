@@ -403,10 +403,10 @@ async fn over(state: &AppState, conversation_id: i64, ended_badly: Option<(Strin
     // leaves a Set with nobody to read what the human writes into it, so the
     // questions go off and the run stops rather than waiting on an answer
     // nothing would ever act on.
-    if let Some(set_id) = asked(state, conversation_id).await {
-        if unanswered(state, set_id).await {
-            return abandoned(state, conversation_id, set_id, ended_badly).await;
-        }
+    if let Some(set_id) = asked(state, conversation_id).await
+        && unanswered(state, set_id).await
+    {
+        return abandoned(state, conversation_id, set_id, ended_badly).await;
     }
 
     if let Some((how, writing)) = ended_badly {

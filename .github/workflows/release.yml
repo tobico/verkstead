@@ -28,7 +28,7 @@
 #
 # Pinned throughout, as `ci.yml` is: actions to released versions, runners to
 # images rather than `-latest`, and Rust to the patch version the flake's
-# nixpkgs carries.
+# `rustToolchain` pins.
 name: Release
 
 # By hand and by hand only. Nothing here is triggered by a push: a tag used to
@@ -395,11 +395,11 @@ jobs:
           sudo apt-get install -y musl-tools
           echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
 
-      # The version branch _is_ the pin, as in `ci.yml`: 1.95.0 is what the
-      # flake's nixpkgs carries, so a release binary is compiled by the rustc
-      # the dev shell and CI both use.
-      - name: Install Rust 1.95.0
-        uses: dtolnay/rust-toolchain@1.95.0
+      # The version branch _is_ the pin, as in `ci.yml`: 1.97.1 is what the
+      # flake's `rustToolchain` pins, so a release binary is compiled by the
+      # rustc the dev shell and CI both use.
+      - name: Install Rust 1.97.1
+        uses: dtolnay/rust-toolchain@1.97.1
         with:
           targets: ${{ matrix.target }}
 

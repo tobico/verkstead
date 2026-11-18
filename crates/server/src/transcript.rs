@@ -809,19 +809,19 @@ async fn relocated(sessions: &Path, session: &str, worktree: &Path) -> Option<Pa
 
     let belongs = group.join(session);
 
-    if held != belongs {
-        if let Err(error) = tokio::fs::rename(&held, &belongs).await {
-            tracing::info!(
-                error = ?error,
-                from = %held.display(),
-                to = %belongs.display(),
-                "the carried session directory of a Grok session could not be filed under this \
-                 device's own name for the Worktree, so the session is re-primed rather than \
-                 resumed",
-            );
+    if held != belongs
+        && let Err(error) = tokio::fs::rename(&held, &belongs).await
+    {
+        tracing::info!(
+            error = ?error,
+            from = %held.display(),
+            to = %belongs.display(),
+            "the carried session directory of a Grok session could not be filed under this \
+             device's own name for the Worktree, so the session is re-primed rather than \
+             resumed",
+        );
 
-            return None;
-        }
+        return None;
     }
 
     let log = belongs.join(UPDATES);

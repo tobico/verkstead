@@ -10508,10 +10508,10 @@ async fn until_written(path: &Path) -> String {
     let deadline = Instant::now() + *PATIENCE;
 
     loop {
-        if let Ok(written) = std::fs::read_to_string(path) {
-            if !written.trim().is_empty() {
-                return written;
-            }
+        if let Ok(written) = std::fs::read_to_string(path)
+            && !written.trim().is_empty()
+        {
+            return written;
         }
 
         assert!(
@@ -10564,10 +10564,10 @@ async fn until_written_saying(path: &Path, said: &str) -> String {
     let deadline = Instant::now() + *PATIENCE;
 
     loop {
-        if let Ok(written) = std::fs::read_to_string(path) {
-            if written.contains(said) {
-                return written;
-            }
+        if let Ok(written) = std::fs::read_to_string(path)
+            && written.contains(said)
+        {
+            return written;
         }
 
         assert!(

@@ -325,34 +325,34 @@ async fn held_away(state: &AppState, conversation_id: i64) -> Option<Vec<skills:
 
         let answered = ask_home(state, &away).await;
 
-        if let Ok(join) = &answered {
-            if join.ahead.is_empty() {
-                let chain: Vec<store::Joined> = join
-                    .chain
-                    .iter()
-                    .map(|link| store::Joined {
-                        conversation_id: link.conversation,
-                        stage: link.stage.clone(),
-                        branch: link.branch.clone(),
-                    })
-                    .collect();
+        if let Ok(join) = &answered
+            && join.ahead.is_empty()
+        {
+            let chain: Vec<store::Joined> = join
+                .chain
+                .iter()
+                .map(|link| store::Joined {
+                    conversation_id: link.conversation,
+                    stage: link.stage.clone(),
+                    branch: link.branch.clone(),
+                })
+                .collect();
 
-                let named = chain
-                    .iter()
-                    .map(|link| link.branch.clone())
-                    .chain(join.foot.clone())
-                    .collect();
+            let named = chain
+                .iter()
+                .map(|link| link.branch.clone())
+                .chain(join.foot.clone())
+                .collect();
 
-                // Home answers the chain without the stage's own link in it — see
-                // [`asked`] — so nothing here is this stage's: home's ids are not
-                // this device's, and an heir's are not the birth key's.
-                return Some(below(
-                    away.born.id,
-                    &chain,
-                    join.foot.as_deref(),
-                    &landed(state, &of, named).await,
-                ));
-            }
+            // Home answers the chain without the stage's own link in it — see
+            // [`asked`] — so nothing here is this stage's: home's ids are not
+            // this device's, and an heir's are not the birth key's.
+            return Some(below(
+                away.born.id,
+                &chain,
+                join.foot.as_deref(),
+                &landed(state, &of, named).await,
+            ));
         }
 
         if crate::stopping::stopped(state, conversation_id).await {
@@ -710,16 +710,17 @@ fn below(
         });
     }
 
-    if let Some(stands_on) = stands_on {
-        if !landed.contains(stands_on) && !links.iter().any(|link| link.branch == stands_on) {
-            links.insert(
-                0,
-                skills::Link {
-                    stage: None,
-                    branch: stands_on.to_owned(),
-                },
-            );
-        }
+    if let Some(stands_on) = stands_on
+        && !landed.contains(stands_on)
+        && !links.iter().any(|link| link.branch == stands_on)
+    {
+        links.insert(
+            0,
+            skills::Link {
+                stage: None,
+                branch: stands_on.to_owned(),
+            },
+        );
     }
 
     links

@@ -2058,16 +2058,13 @@ fn merge(baseline: &Object, now: &Object, account: &mut Object) -> bool {
         // The names the copy was given without, kept as the account has them
         // where the session did not fetch them back: a copy that never had
         // them did not take them away.
-        if key == OAUTH_ACCOUNT {
-            if let (
-                Some(serde_json::Value::Object(profile)),
-                Some(serde_json::Value::Object(own)),
-            ) = (&mut value, account.get(key))
-            {
-                for name in NAMING {
-                    if let (false, Some(kept)) = (profile.contains_key(name), own.get(name)) {
-                        profile.insert(name.to_owned(), kept.clone());
-                    }
+        if key == OAUTH_ACCOUNT
+            && let (Some(serde_json::Value::Object(profile)), Some(serde_json::Value::Object(own))) =
+                (&mut value, account.get(key))
+        {
+            for name in NAMING {
+                if let (false, Some(kept)) = (profile.contains_key(name), own.get(name)) {
+                    profile.insert(name.to_owned(), kept.clone());
                 }
             }
         }
