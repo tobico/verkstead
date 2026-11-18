@@ -1423,7 +1423,7 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
     );
     assert!(
         prompt.contains(&format!(
-            "{}/grilling/SKILL.md",
+            "{}/verkstead/grilling/SKILL.md",
             fixture.skills_inside.display()
         )),
         "and the session is sent into the bundled grilling skill, which on this \
