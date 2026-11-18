@@ -615,9 +615,11 @@ impl Root {
         git_dir: &Path,
         worktree: &Path,
     ) -> Option<Root> {
+        let harness = crate::harness::of(account.agent_type())?;
+
         Some(Root::with(
-            crate::harness::of(account.agent_type())?,
-            account.directory(),
+            harness,
+            harness.directory(account),
             platform,
             git_dir,
             worktree,
@@ -1190,7 +1192,7 @@ pub(crate) enum Whose {
 pub(crate) fn login_at(account: &crate::store::Account) -> Option<PathBuf> {
     let harness = crate::harness::of(account.agent_type())?;
 
-    Some(account.directory().join(harness.login()))
+    Some(harness.directory(account).join(harness.login()))
 }
 
 /// And where a **mirror** of an account of `agent_type` keeps its login, said from

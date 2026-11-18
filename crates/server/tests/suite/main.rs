@@ -15,9 +15,11 @@
 //! file here runs on threads of the one process under `cargo test`, beside
 //! every other.
 //!
-//! Two modules are not suites: `fixture_repositories` is the git repository a
-//! test copies rather than makes, for the suites that can reach it, and `pace`
-//! is the one ruler the suites judged on wall clock stretch their waits by.
+//! Three modules are not suites: `fixture_repositories` is the git repository a
+//! test copies rather than makes, for the suites that can reach it, `pace` is
+//! the one ruler the suites judged on wall clock stretch their waits by, and
+//! `stub_harness` is the harness plugin the suites install to launch a session
+//! on one.
 
 mod account_windows;
 mod accounts;
@@ -80,6 +82,7 @@ mod sets;
 mod settings;
 mod sharing;
 mod skeleton;
+mod stub_harness;
 mod terminal;
 mod terminal_windows;
 mod transcripts;

@@ -3609,7 +3609,7 @@ async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpRe
         sets,
         commits,
         taken,
-        crate::profiles::harnesses(),
+        crate::profiles::harnesses(&state.plugins.harnesses()),
     ))
 }
 
@@ -6280,8 +6280,8 @@ async fn choose_review_pairing(
 
 /// `GET /api/ui/harnesses` — every harness this server can run a session on,
 /// with what the Profile form, the cards and the pickers draw of each.
-async fn harnesses() -> Json<Vec<verkstead_render::HarnessEntry>> {
-    Json(crate::profiles::harnesses())
+async fn harnesses(State(state): State<AppState>) -> Json<Vec<verkstead_render::HarnessEntry>> {
+    Json(crate::profiles::harnesses(&state.plugins.harnesses()))
 }
 
 /// `GET /api/ui/profiles` — the Agent Profiles, by name, each saying whether its

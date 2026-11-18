@@ -8,10 +8,10 @@
 //! could not draw a harness a plugin brought. Every site that names a harness,
 //! draws its mark or asks for its paths reads it through this module.
 //!
-//! **Held in one place for the whole page**, read once by [`useHarnesses`] at
-//! the shell — the list cannot change under a running server — so that the
-//! plain functions that compose a reading (see `agents.ts`) can ask it without
-//! a query of their own. A share, which has no server to ask, is handed the
+//! **Held in one place for the whole page**, read by [`useHarnesses`] at the
+//! shell and again when the installed Plugins move — an Agent plugin that
+//! loads adds its harness — so that the plain functions that compose a reading
+//! (see `agents.ts`) can ask it without a query of their own. A share, which has no server to ask, is handed the
 //! list in its bundle and says it here with [`knowHarnesses`].
 //!
 //! **An id the list does not hold reads as the id**, which is legible where a
@@ -49,13 +49,12 @@ export function knowHarnesses(entries: HarnessEntry[]): void {
 }
 
 /// Read the list off the server and say it here, for as long as the caller is
-/// mounted. Once: the harnesses a server can run are fixed for as long as it
-/// runs.
+/// mounted, and again whenever the installed Plugins move.
 export function useHarnesses(): void {
   const reading = useReading(() => ({
     queryKey: ["harnesses"],
     queryFn: listHarnesses,
-    freshness: "static",
+    freshness: { reconcile: "id" },
   }));
 
   // Said as it lands rather than read through the query wherever a name is

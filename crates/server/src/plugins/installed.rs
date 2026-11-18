@@ -67,7 +67,7 @@ use verkstead_schema::{ApiError, Nudge};
 use super::built_in::{self, BUILT_INS, FIXTURE};
 use super::component;
 use super::git::{self, Staged};
-use super::manifest::{Access, Capability, Dependency, Files, Manifest};
+use super::manifest::{Access, Capability, Dependency, Files, Manifest, Mark};
 use crate::AppState;
 use crate::github::Credential;
 use crate::platform::Platform;
@@ -95,6 +95,11 @@ pub(crate) struct Installed {
     /// handed, held here too because a server with no agents still draws the
     /// composer.
     packs: Arc<Mutex<Vec<crate::skills::LoadedPack>>>,
+
+    /// The harnesses the Agent plugins that loaded here declare, in the order
+    /// they were installed: what this server offers beside its built-ins —
+    /// see [`crate::harness::plugged`].
+    harnesses: Arc<Mutex<Vec<crate::store::AgentType>>>,
 }
 
 impl Installed {
@@ -123,6 +128,14 @@ impl Installed {
         self.packs
             .lock()
             .expect("nothing panics holding the packs")
+            .clone()
+    }
+
+    /// The harnesses the Agent plugins that loaded here declare.
+    pub(crate) fn harnesses(&self) -> Vec<crate::store::AgentType> {
+        self.harnesses
+            .lock()
+            .expect("nothing panics holding the harnesses")
             .clone()
     }
 
@@ -196,6 +209,7 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
     let mut troubles = BTreeMap::new();
     let mut manifests = BTreeMap::new();
     let mut dirs = BTreeMap::new();
+    let mut components = BTreeMap::new();
     for record in &records {
         // A built-in is read out of the binary, at the start — see
         // [`super::built_in`] — and its record is only its switch; and an
@@ -212,19 +226,22 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
 
         let read = loaded(state, record, home.as_deref(), &credential)
             .await
-            .and_then(|(manifest, dir)| {
-                unclaimed(&claimed, &languages, &manifest).map(|()| (manifest, dir))
+            .and_then(|(manifest, dir, component)| {
+                unclaimed(&claimed, &languages, &manifest).map(|()| (manifest, dir, component))
             });
         match read {
-            Ok((manifest, dir)) => {
+            Ok((manifest, dir, component)) => {
                 for pack in &manifest.packs {
                     claimed.insert(pack.name.clone(), manifest.name.clone());
                 }
                 for provided in built_in::languages(&manifest) {
                     languages.insert(provided.name.clone(), manifest.name.clone());
                 }
-                dirs.insert(record.uuid.clone(), dir);
+                dirs.insert(record.uuid.clone(), dir.clone());
                 manifests.insert(record.uuid.clone(), manifest);
+                if let Some(component) = component {
+                    components.insert(record.uuid.clone(), (dir, component));
+                }
             }
             Err(why) => {
                 tracing::warn!(
@@ -292,6 +309,27 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         .lock()
         .expect("nothing panics holding the packs") = packs;
 
+    // Every Agent plugin that loaded and is in no trouble stands its harness
+    // up, in the order the plugins were installed.
+    let harnesses: Vec<crate::store::AgentType> = records
+        .iter()
+        .filter_map(|record| {
+            let manifest = manifests.get(&record.uuid)?;
+            let (dir, component) = components.remove(&record.uuid)?;
+            harness(manifest, &dir, component)
+        })
+        .collect();
+    let offered = {
+        let mut held = state
+            .plugins
+            .harnesses
+            .lock()
+            .expect("nothing panics holding the harnesses");
+        let offered = *held != harnesses;
+        *held = harnesses;
+        offered
+    };
+
     let moved = {
         let mut held = state
             .plugins
@@ -303,8 +341,13 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         moved
     };
 
-    if moved {
+    // A harness offered or taken away moves the harness list the viewer
+    // reads with the Plugins, and which Profiles are runnable.
+    if moved || offered {
         state.nudges.announce_here(Nudge::Plugins);
+    }
+    if offered {
+        state.nudges.announce_here(Nudge::Profiles);
     }
 
     // And the languages the installed Language plugins that loaded provide,
@@ -323,6 +366,26 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
     // session — an installer's language this device has only now read taken
     // up first.
     crate::replicating::plugins::taken_up(&state.pool, &state.settings, &state.device).await
+}
+
+/// The harness `manifest` declares, stood up with its mark read out of `dir`
+/// and its component `loaded` — or none, for a plugin providing no agent.
+fn harness(
+    manifest: &Manifest,
+    dir: &FsPath,
+    loaded: component::Loaded,
+) -> Option<crate::store::AgentType> {
+    let agent = manifest
+        .provides
+        .iter()
+        .find_map(|provision| provision.agent())?;
+
+    let mark = match agent.mark.as_ref().or(manifest.mark.as_ref())? {
+        Mark::Inline(svg) => svg.clone(),
+        Mark::File(path) => String::from_utf8(Files::Dir(dir).read(path)?).ok()?,
+    };
+
+    Some(crate::harness::plugged(&manifest.uuid, agent, mark, loaded))
 }
 
 /// This device's clones of the git plugins `removed` deleted, where it still
@@ -569,7 +632,7 @@ async fn loaded(
     record: &Record<Fields>,
     home: Option<&FsPath>,
     credential: &Credential,
-) -> Result<(Manifest, PathBuf), String> {
+) -> Result<(Manifest, PathBuf, Option<component::Loaded>), String> {
     let dir = match &record.fields.source {
         Source::Local { path, .. } => PathBuf::from(path),
         Source::Git { url, revision } => {
@@ -601,7 +664,7 @@ async fn loaded(
 
     component::load(Files::Dir(&dir), &manifest, home)
         .await
-        .map(|_| (manifest, dir))
+        .map(|component| (manifest, dir, component))
         .map_err(|trouble| trouble.why)
 }
 

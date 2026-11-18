@@ -444,6 +444,16 @@ fn account(value: &Value, field: &str) -> Result<Vec<AccountPath>, Refusal> {
                 ),
             ));
         }
+        if index == 0 && path.file {
+            let kind_field = format!("{entry_field}.kind");
+            return Err(Refusal::of(
+                &kind_field,
+                format!(
+                    "`{kind_field}` should be `directory`. An account is said from its first \
+                     path, so that one is a directory."
+                ),
+            ));
+        }
         paths.push(path);
     }
     Ok(paths)
@@ -1010,6 +1020,17 @@ provides:
         );
 
         assert_eq!(refused_at(&yaml), "provides[0].phrases.signed-out");
+    }
+
+    #[test]
+    fn an_account_whose_first_path_is_a_file_is_refused() {
+        let yaml = AGENT.replacen("        kind: directory\n", "        kind: file\n", 1);
+        let yaml = yaml.replace(
+            "        allowlist: [settings.json, sessions]\n        credentials: [auth.json]\n        memory: [memory]\n",
+            "",
+        );
+
+        assert_eq!(refused_at(&yaml), "provides[0].account[0].kind");
     }
 
     #[test]

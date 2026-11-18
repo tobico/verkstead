@@ -7,7 +7,9 @@ use std::time::SystemTime;
 
 use verkstead_render::{Broken, ProfileSaved};
 
-use super::{Carrying, Declared, Harness, Line, ReadIn, Resume, SignedOut};
+use super::{
+    Carrying, Declared, Harness, Line, MODEL, PROMPT, ReadIn, Resume, SESSION, SignedOut, said,
+};
 use crate::logins::Speaking;
 use crate::platform::Platform;
 use crate::sandbox::root::{self, Part, Place, Whose};
@@ -96,11 +98,11 @@ impl Harness for Claude {
     /// built at all — see [`crate::transcript::carried`].
     fn line(&self, _worktree: Option<&Path>, _companions: &[PathBuf]) -> Line {
         Line {
-            model: "--model".to_owned(),
-            prompt: None,
-            names_the_session: true,
-            resume: Some(Resume::Flag("--resume".to_owned())),
-            tail: vec!["--dangerously-skip-permissions".to_owned()],
+            model: said(&["--model", MODEL]),
+            prompt: said(&[PROMPT]),
+            session: Some(said(&["--session-id", SESSION])),
+            resume: Some(Resume::Flag(said(&["--resume", SESSION]))),
+            tail: said(&["--dangerously-skip-permissions"]),
         }
     }
 
@@ -151,10 +153,6 @@ impl Harness for Claude {
     /// what moves an install on, whosever it is.
     fn environment(&self, _platform: Platform) -> Vec<(&str, &str)> {
         vec![(crate::sandbox::DISABLE_AUTOUPDATER, "1")]
-    }
-
-    fn written_in_worktree(&self) -> Option<&str> {
-        None
     }
 
     /// Whether the file `at`, resolved for `claude`, is Claude Code's **desktop

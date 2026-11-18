@@ -172,7 +172,7 @@ pub const STARTING: Duration = Duration::from_secs(10);
 
 /// How often the engine's epoch moves on, which is how finely a deadline is
 /// kept.
-const TICK: Duration = Duration::from_millis(100);
+pub(crate) const TICK: Duration = Duration::from_millis(100);
 
 /// The one engine every component is compiled by, compiled to stop at an epoch
 /// deadline, and the thread that moves its epoch on.
@@ -385,7 +385,7 @@ fn expanded(path: &str, home: Option<&Path>) -> PathBuf {
 }
 
 /// wasmtime's account of an error, its causes included, as one line.
-fn worded(error: &wasmtime::Error) -> String {
+pub(crate) fn worded(error: &wasmtime::Error) -> String {
     format!("{error:#}").trim_end_matches('.').to_owned()
 }
 

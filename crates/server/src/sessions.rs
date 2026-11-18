@@ -554,7 +554,7 @@ impl Agents {
     /// and the flag is then left off entirely rather than passed empty: an agent
     /// told to run under no name at all would refuse to start, where one not
     /// told anything picks its own. A backend that takes no session id at all is
-    /// told none whatever Verkstead named it — see [`harness::Line::names_the_session`].
+    /// told none whatever Verkstead named it — see [`harness::Line::session`].
     ///
     /// **And in that same place, where `named` says the session is being
     /// continued rather than opened, goes the backend's resume instead** — see
@@ -604,7 +604,8 @@ impl Agents {
         companions: &[PathBuf],
     ) -> Option<Vec<String>> {
         let agent_type = pairing.profile.agent_type();
-        let line = harness::of(agent_type)?.line(worktree, companions);
+        let harness = harness::of(agent_type)?;
+        let line = harness.line(worktree, companions);
 
         let mut argv = match &self.agent {
             Some(standing) => standing.clone(),
@@ -620,38 +621,58 @@ impl Agents {
             Named::Opening => None,
         };
 
-        // A resume that is a subcommand is the first word after the binary, ahead
-        // of the options it takes: what follows is that subcommand's line rather
-        // than the ordinary one.
-        if let Some((Resume::Subcommand { word, .. }, _)) = resuming {
-            argv.push(word.clone());
-        }
-
-        if let Some(model) = pairing.runs_on() {
-            argv.push(line.model.clone());
-            argv.push(model.to_owned());
-        }
-
-        // And the session it is resuming, where that subcommand takes it as the
-        // positional in front of the prompt. Here rather than in the one slot
-        // below, because a positional's place on the line is the whole of what
-        // says which argument it is.
-        if let Some((Resume::Subcommand { .. }, session)) = resuming {
-            argv.push(session.to_owned());
-        }
-
-        if let Some(flag) = &line.prompt {
-            argv.push(flag.clone());
-        }
-
-        argv.push(match self.homes.platform() {
+        let prompt = match self.homes.platform() {
             Platform::Windows => self.handoffs.wrote_prompt(
                 conversation_id,
                 self.homes.for_conversation(conversation_id).handoffs(),
                 prompt,
             )?,
             Platform::Linux | Platform::MacOs => prompt.to_owned(),
-        });
+        };
+
+        // Where the session-only settings are written, inside the root a
+        // session finds in its HOME — see [`harness::SETTINGS_FILE`].
+        let settings = self
+            .homes
+            .for_conversation(conversation_id)
+            .path()
+            .join(harness.landing())
+            .join(harness::SETTINGS_FILE)
+            .display()
+            .to_string();
+        let worktree = worktree.map(|worktree| worktree.display().to_string());
+
+        let filling = harness::Filling {
+            model: pairing.runs_on(),
+            prompt: Some(&prompt),
+            session,
+            worktree: worktree.as_deref(),
+            settings: Some(&settings),
+        };
+        let fill = |words: &[String]| harness::filled(words, filling);
+
+        // A resume that is a subcommand is the first words after the binary,
+        // ahead of the options it takes: what follows is that subcommand's line
+        // rather than the ordinary one.
+        if let Some((Resume::Subcommand { words, .. }, _)) = resuming {
+            argv.extend(fill(words));
+        }
+
+        if pairing.runs_on().is_some() {
+            argv.extend(fill(&line.model));
+        }
+
+        // And the session it is resuming, where that subcommand takes it as the
+        // positional in front of the prompt rather than among its words. Here
+        // rather than in the one slot below, because a positional's place on
+        // the line is the whole of what says which argument it is.
+        if let Some((Resume::Subcommand { words, .. }, session)) = resuming
+            && !harness::holds(words, harness::SESSION)
+        {
+            argv.push(session.to_owned());
+        }
+
+        argv.extend(fill(&line.prompt));
 
         // The session's name, or the resume that stands in its place: one slot,
         // because a session cannot be both named and resumed. A launch that is
@@ -659,10 +680,7 @@ impl Agents {
         // launch opening one is told to run under it. The subcommand shape has
         // said both of its halves already, and says neither again.
         match resuming {
-            Some((Resume::Flag(flag), session)) => {
-                argv.push(flag.clone());
-                argv.push(session.to_owned());
-            }
+            Some((Resume::Flag(words), _)) => argv.extend(fill(words)),
 
             Some((Resume::Subcommand { .. }, _)) => {}
 
@@ -670,22 +688,19 @@ impl Agents {
             // a continuation with no resume to say — and that one is told nothing
             // at all: the name belongs to a session it is not opening.
             None => {
-                if let (Named::Opening, Some(session)) =
-                    (named, session.filter(|_| line.names_the_session))
-                {
-                    argv.push("--session-id".to_owned());
-                    argv.push(session.to_owned());
+                if let (Named::Opening, Some(_), Some(words)) = (named, session, &line.session) {
+                    argv.extend(fill(words));
                 }
             }
         }
 
-        argv.extend(line.tail);
+        argv.extend(fill(&line.tail));
 
         // And what the continuation itself needs said, which the ordinary line has
         // no business carrying: a setting about how a resume is resolved means
         // nothing to a launch that is opening a conversation.
         if let Some((Resume::Subcommand { also, .. }, _)) = resuming {
-            argv.extend(also.iter().cloned());
+            argv.extend(fill(also));
         }
 
         Some(argv)
@@ -734,8 +749,8 @@ pub(crate) fn binary(agent_type: store::AgentType) -> &'static str {
 
 /// What a harness writes inside the Worktree it runs in — see
 /// [`crate::harness::Harness::written_in_worktree`].
-fn written_in_worktree(agent_type: store::AgentType) -> Option<&'static str> {
-    harness::of(agent_type)?.written_in_worktree()
+fn written_in_worktree(agent_type: store::AgentType) -> Vec<&'static str> {
+    harness::of(agent_type).map_or_else(Vec::new, |harness| harness.written_in_worktree())
 }
 
 /// Whether the session Verkstead named is one this launch is **opening** or one
@@ -2587,17 +2602,17 @@ impl Sessions {
 
                 // And what the harness writes inside the Worktree, kept out of
                 // the Diff and every commit before it has written any of it.
-                if let (Some(pattern), Some(worktree)) = (
-                    written_in_worktree(pairing.profile.agent_type()),
-                    conversation.worktree.as_deref(),
-                ) && !crate::worktrees::excluded(worktree, pattern)
-                {
-                    tracing::warn!(
-                        conversation_id,
-                        pattern,
-                        "what this session's harness writes inside the Worktree could not be \
-                         excluded from git, so it will show in the Diff"
-                    );
+                for pattern in written_in_worktree(pairing.profile.agent_type()) {
+                    if let Some(worktree) = conversation.worktree.as_deref()
+                        && !crate::worktrees::excluded(worktree, pattern)
+                    {
+                        tracing::warn!(
+                            conversation_id,
+                            pattern,
+                            "what this session's harness writes inside the Worktree could not \
+                             be excluded from git, so it will show in the Diff"
+                        );
+                    }
                 }
 
                 agents.sandboxed(&conversation, &pairing.profile, &argv)
@@ -4993,7 +5008,7 @@ mod tests {
     /// out of git.
     #[test]
     fn only_agy_writes_inside_the_worktree() {
-        assert_eq!(written_in_worktree(store::AgentType::AGY), Some(".gemini/"));
+        assert_eq!(written_in_worktree(store::AgentType::AGY), [".gemini/"]);
 
         for agent_type in [
             store::AgentType::CLAUDE,
@@ -5001,7 +5016,7 @@ mod tests {
             store::AgentType::GROK,
             store::AgentType::OPENCODE,
         ] {
-            assert_eq!(written_in_worktree(agent_type), None);
+            assert!(written_in_worktree(agent_type).is_empty());
         }
     }
 

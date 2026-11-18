@@ -24,12 +24,16 @@
 //! [`codex`], [`grok`], [`opencode`] and [`agy`]. Each holds everything
 //! about its harness that used to be an arm of somebody else's `match`, and the
 //! wording in each is the harness's own and will move — so it is kept in one
-//! place, and moving it costs one edit there. [`of`] is the one place a type is
-//! turned into its harness.
+//! place, and moving it costs one edit there. **And a sixth**, [`plugged`]:
+//! a harness a plugin declares, answering out of its manifest and its
+//! component, which is the only one a third-party harness is. [`of`] is the
+//! one place a type is turned into its harness.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::RwLock;
 use std::time::SystemTime;
 
 use crate::logins::Speaking;
@@ -45,6 +49,7 @@ mod claude;
 mod codex;
 mod grok;
 mod opencode;
+mod plugged;
 
 /// One harness: everything about it the server needs to launch a session on
 /// it and to watch that session run, and what it keeps of an account.
@@ -159,10 +164,12 @@ pub(crate) trait Harness: Send + Sync {
     /// [`crate::sandbox`], where the names are and where they are set.
     fn environment(&self, platform: Platform) -> Vec<(&str, &str)>;
 
-    /// What the harness writes inside the Worktree it runs in, as the line of
-    /// `info/exclude` that keeps it out of git — see
-    /// [`crate::worktrees::excluded`].
-    fn written_in_worktree(&self) -> Option<&str>;
+    /// What the harness writes inside the Worktree it runs in, each as the
+    /// line of `info/exclude` that keeps it out of git — see
+    /// [`crate::worktrees::excluded`]. Nothing, for most.
+    fn written_in_worktree(&self) -> Vec<&str> {
+        Vec::new()
+    }
 
     /// Whether the file `at`, where this harness's binary resolved on
     /// `platform`, is a desktop app standing where the harness should be
@@ -179,6 +186,14 @@ pub(crate) trait Harness: Send + Sync {
     /// The account this harness keeps directly in `home`, rooted where the
     /// harness itself would have written it — see [`crate::sandbox::kept_in`].
     fn kept_in(&self, home: &Path) -> store::Account;
+
+    /// The directory `account` is, which its login and its memory are said
+    /// from: the first path it declares, which [`store::Account::directory`]
+    /// is for every built-in. A plugin's account is held by its keys, so its
+    /// harness names which.
+    fn directory<'a>(&self, account: &'a store::Account) -> &'a Path {
+        account.directory()
+    }
 
     /// Each of `account`'s own paths, and where it is joined into a session's
     /// HOME at `home` — see [`crate::sandbox`]'s `account_inside`, which says
@@ -390,6 +405,53 @@ pub(crate) fn of(agent_type: store::AgentType) -> Option<&'static dyn Harness> {
         .zip(store::BUILT_IN)
         .find(|(_, built_in)| built_in.agent_type == agent_type)
         .map(|(harness, _)| *harness)
+        .or_else(|| {
+            PLUGGED
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get(&agent_type)
+                .map(|plugged| *plugged as &'static dyn Harness)
+        })
+}
+
+/// The harnesses plugins have declared in this process, by their plugin's
+/// uuid — see [`plugged`].
+static PLUGGED: RwLock<BTreeMap<store::AgentType, &'static plugged::Plugged>> =
+    RwLock::new(BTreeMap::new());
+
+/// Stand up the harness the plugin `uuid` declares as `agent`, drawn with
+/// `mark` and run by its component `loaded`, so that [`of`] finds it — and
+/// answer its id.
+///
+/// **Held for the life of the process**, as a built-in is: every answer of
+/// [`Harness`] is borrowed from it, by sessions that may outlive a reload of
+/// the plugin. So a plugin read again and declaring the same harness keeps
+/// the one already standing and the component it was handed is let go, and
+/// one declaring a different harness — after an **Update** — replaces it, the
+/// old one left behind for whatever is still holding it. A plugin disabled or
+/// removed keeps its harness here too, which is what lets a session already
+/// running under it finish: what is offered is each server's own list — see
+/// [`crate::plugins::installed`].
+pub(crate) fn plugged(
+    uuid: &str,
+    agent: &crate::plugins::manifest::Agent,
+    mark: String,
+    loaded: crate::plugins::component::Loaded,
+) -> store::AgentType {
+    let id = store::AgentType::read(uuid);
+    let mut plugged = PLUGGED
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    let standing = plugged
+        .get(&id)
+        .is_some_and(|held| held.declared() == agent && held.mark() == mark);
+    if !standing {
+        let harness = plugged::Plugged::new(id, agent.clone(), mark, loaded);
+        plugged.insert(id, Box::leak(Box::new(harness)));
+    }
+
+    id
 }
 
 /// Every harness this server can run, each with its id, in the order the
@@ -501,6 +563,21 @@ pub enum ReadIn {
     Log,
 }
 
+/// The words a launch line may hold for the host to fill — see [`Line`] and
+/// [`filled`]: the model, the Brief, the session id Verkstead named, the
+/// Worktree the session works in, and the file its session-only settings are
+/// written to.
+pub(crate) const MODEL: &str = "{model}";
+pub(crate) const PROMPT: &str = "{prompt}";
+pub(crate) const SESSION: &str = "{session}";
+pub(crate) const WORKTREE: &str = "{worktree}";
+pub(crate) const SETTINGS: &str = "{settings}";
+
+/// What a session's `{settings}` is filled with: the file inside the root,
+/// said from [`Harness::landing`], that its session-only settings are written
+/// to — see [`Harness::configured`].
+pub(crate) const SETTINGS_FILE: &str = "verkstead-settings.json";
+
 /// The rest of a backend's launch line: how it is told its model, how it is
 /// given the Brief, whether it takes the session id Verkstead named, and what
 /// goes on the end.
@@ -508,47 +585,54 @@ pub enum ReadIn {
 /// One value rather than a mapping apiece, because they are one fact — what
 /// this harness's command line looks like — and a harness answers it once, in
 /// [`Harness::line`].
+///
+/// **Each part is words with placeholders in them**, [`MODEL`], [`PROMPT`],
+/// [`SESSION`], [`WORKTREE`] and [`SETTINGS`], which the host fills as the line
+/// is built — see [`filled`]. That is the shape a plugin's manifest writes a
+/// line in (ADR-0030, *Agent*), so a harness declared there answers this as
+/// readily as one written here.
 pub struct Line {
-    /// What the model is said with. `--model` reads as claude's own; codex
-    /// takes `-m`.
-    pub(crate) model: String,
+    /// How the model is said, holding [`MODEL`]. `--model` reads as claude's
+    /// own; codex takes `-m`.
+    pub(crate) model: Vec<String>,
 
-    /// The flag the Brief goes under, or `None` where it is the one positional
-    /// argument.
+    /// How the Brief is given, holding [`PROMPT`]: a flag and it, or it alone
+    /// as the one positional argument.
     ///
     /// The positional is what every backend up to this one takes, and opencode
     /// is the first that does not: its positional is the project to start in,
     /// and the prompt is `--prompt`. Said here rather than assumed, so that a
     /// harness taking either shape is one answer of [`Harness::line`] rather
     /// than a branch in the builder.
-    pub(crate) prompt: Option<String>,
+    pub(crate) prompt: Vec<String>,
 
-    /// Whether the session Verkstead named is named on the line.
+    /// How the session Verkstead named is named on the line, holding
+    /// [`SESSION`].
     ///
-    /// False for a backend that takes no session id at all, whose log is
+    /// `None` for a backend that takes no session id at all, whose log is
     /// therefore found rather than named — see [`crate::transcript`].
-    pub(crate) names_the_session: bool,
+    pub(crate) session: Option<Vec<String>>,
 
     /// And the other line this same backend has: the one that **continues** a
     /// conversation instead of opening one, under the id of the session that was
     /// having it.
     ///
-    /// Mutually exclusive with [`Line::names_the_session`] wherever both could
-    /// be said, and that is a fact about what a session is rather than a
-    /// convention: a conversation carried on keeps the id it already had, so
-    /// there is nothing left to name it.
+    /// Mutually exclusive with [`Line::session`] wherever both could be said,
+    /// and that is a fact about what a session is rather than a convention: a
+    /// conversation carried on keeps the id it already had, so there is
+    /// nothing left to name it.
     ///
     /// And it is not always a flag — see [`Resume`]: codex's is a subcommand, and
     /// what a subcommand changes is the shape of the whole line rather than what
     /// is on the end of it.
     ///
     /// `None` where Verkstead does not carry a conversation on from a session of
-    /// this backend, which is now no backend at all: all five have a resume, and
-    /// what separated them was never that but whether Verkstead knew the id to
-    /// resume by and whether their store had to be put right first. It stays an
-    /// `Option` because a sixth backend lands here before either of those is
-    /// answered for it, and until they are a launch under it opens a session of
-    /// its own, which is Verkstead's own Resume and nothing lost.
+    /// this backend, which is now no built-in at all: all five have a resume,
+    /// and what separated them was never that but whether Verkstead knew the id
+    /// to resume by and whether their store had to be put right first. It stays
+    /// an `Option` because a plugin's harness may declare none, and a launch
+    /// under it then opens a session of its own, which is Verkstead's own
+    /// Resume and nothing lost.
     pub(crate) resume: Option<Resume>,
 
     /// The flags and configuration overrides that go last, after the prompt.
@@ -574,16 +658,20 @@ pub struct Line {
 /// carries come across onto the subcommand — a resume that dropped them would come
 /// up logged out and sitting on a trust prompt.
 pub enum Resume {
-    /// A flag and the id, written where the session id it is mutually exclusive
-    /// with would have gone. Claude's and Grok Build's, both spelled `--resume`,
-    /// and OpenCode's, spelled `--session`.
-    Flag(String),
+    /// Words holding [`SESSION`], written where the session would have been
+    /// named. Claude's and Grok Build's, both `--resume`, and OpenCode's,
+    /// `--session`.
+    Flag(Vec<String>),
 
-    /// A subcommand and the id, written in front of the line rather than on the
-    /// end of it. Codex's.
+    /// Words written straight after the binary, ahead of the line.
+    ///
+    /// Where they hold [`SESSION`], the id is said there, which is the shape a
+    /// plugin's manifest writes. Where they do not, the id is a positional in
+    /// front of the prompt, after the model — codex's, whose words are
+    /// `resume` alone.
     Subcommand {
-        /// The word itself, straight after the binary.
-        word: String,
+        /// The words themselves.
+        words: Vec<String>,
 
         /// And what the continuation needs said that the ordinary line does not,
         /// which goes on the end with the tail.
@@ -593,6 +681,69 @@ pub enum Resume {
         /// question it is not asking.
         also: Vec<String>,
     },
+}
+
+/// What the placeholders of a launch line are filled with — see [`filled`].
+/// One left `None` is filled with nothing.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Filling<'a> {
+    pub(crate) model: Option<&'a str>,
+    pub(crate) prompt: Option<&'a str>,
+    pub(crate) session: Option<&'a str>,
+    pub(crate) worktree: Option<&'a str>,
+    pub(crate) settings: Option<&'a str>,
+}
+
+/// `words` with each placeholder in them filled from `filling`.
+///
+/// **In one pass**, so that what a placeholder is filled with is never read for
+/// placeholders in turn: a Brief that happens to say `{session}` reaches the
+/// harness saying it.
+pub(crate) fn filled(words: &[String], filling: Filling<'_>) -> Vec<String> {
+    let placeholders = [
+        (MODEL, filling.model),
+        (PROMPT, filling.prompt),
+        (SESSION, filling.session),
+        (WORKTREE, filling.worktree),
+        (SETTINGS, filling.settings),
+    ];
+
+    words
+        .iter()
+        .map(|word| {
+            let mut out = String::with_capacity(word.len());
+            let mut rest = word.as_str();
+
+            'scanning: while let Some(open) = rest.find('{') {
+                out.push_str(&rest[..open]);
+                rest = &rest[open..];
+
+                for (placeholder, value) in placeholders {
+                    if let Some(after) = rest.strip_prefix(placeholder) {
+                        out.push_str(value.unwrap_or_default());
+                        rest = after;
+                        continue 'scanning;
+                    }
+                }
+
+                out.push('{');
+                rest = &rest[1..];
+            }
+
+            out.push_str(rest);
+            out
+        })
+        .collect()
+}
+
+/// Whether `words` hold `placeholder` anywhere in them.
+pub(crate) fn holds(words: &[String], placeholder: &str) -> bool {
+    words.iter().any(|word| word.contains(placeholder))
+}
+
+/// Each of `words`, owned: how a built-in writes a part of its line.
+pub(crate) fn said(words: &[&str]) -> Vec<String> {
+    words.iter().map(|word| (*word).to_owned()).collect()
 }
 
 #[cfg(test)]

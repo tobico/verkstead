@@ -575,13 +575,25 @@ on the line. The words may hold **placeholders** the host fills: `{model}`,
   session works in.
 - **`settings`** — optional: settings for this session alone, as a map, which
   the host writes as JSON to a file and names on the line as `{settings}`. One
-  without the other is refused.
+  without the other is refused. The file is `verkstead-settings.json` in the
+  session's root, beside the configuration, and where `write-configuration`
+  answers settings of its own those are written instead.
+
+Each placeholder is filled where it stands in a word, and once: a Brief that
+happens to say `{session}` reaches the harness saying it.
 
 The approval bypass belongs in `tail`: Verkstead runs every session
 unattended, inside its Sandbox.
 
 **`account`** — required, at least one: the paths an account is made of, in
-the order the Profile form draws a field apiece for them.
+the order the Profile form draws a field apiece for them. **The first is a
+directory**, and is the one the account is said from: a session is given a
+root built in its place at `mounted` — its `credentials` (the first of them)
+joined in as the login, its `memory` joined where the Profile shares memory,
+and what `write-configuration` answers written beside them. The rest of its
+`allowlist` is the account's configuration, handed to that export as found.
+The paths after the first are judged when a Profile is saved, and are not yet
+given to a session.
 
 - **`key`** — what the Profile holds the path under, unique in the list.
 - **`label`** — what the form labels the field. **`purpose`**, optional, is
@@ -670,7 +682,12 @@ not export all three of:
   the account's configuration, given each configuration file as the account
   holds it, with the account's own MCP servers already taken out, and the
   servers the Conversation attached. It answers with the files and with the
-  session-only settings `{settings}` names.
+  session-only settings `{settings}` names. The host takes the servers out by
+  the keys the harnesses met so far keep them under — a JSON object's
+  `mcpServers`, `mcp_servers` and `mcp`, a TOML table's `mcp_servers` — and
+  hands any other file over as it is. A file it answers is written into the
+  root where its path stays inside it, and an export that fails is a session
+  whose root holds none of the configuration, said in the server's log.
 - **`login(written)`** — the next step of a login, given what the harness has
   written since the last call: the address to show the human, that the harness
   is waiting for the code they bring back, words to say to them, or done. The
