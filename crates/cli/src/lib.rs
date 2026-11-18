@@ -35,6 +35,7 @@ mod memo;
 /// one. Read on every platform, so that a pipe named where there are none is
 /// refused as the pipe it is rather than as an unparseable URL.
 mod pipe;
+mod plugin;
 mod preview;
 pub mod repo;
 mod serve;
@@ -275,6 +276,15 @@ enum Command {
     /// (ADR-0020) and is nobody else's to pass.
     Serve(serve::Serve),
 
+    /// Work on a plugin: `verkstead plugin check <dir>` says whether a
+    /// directory is a plugin Verkstead would load, and why not.
+    ///
+    /// The manifest's grammar is `docs/plugins.md`.
+    Plugin {
+        #[command(subcommand)]
+        what: plugin::What,
+    },
+
     /// The local account this machine's Windows sessions run as: make it, or
     /// take it away.
     ///
@@ -353,6 +363,7 @@ impl Cli {
             }
             Some(Command::Transfer { device, server }) => transfer::transfer(&device, &server),
             Some(Command::Serve(asked)) => serve::serve(asked),
+            Some(Command::Plugin { what }) => plugin::plugin(what),
             #[cfg(windows)]
             Some(Command::SessionAccount { what }) => session_account::session_account(what),
             #[cfg(windows)]

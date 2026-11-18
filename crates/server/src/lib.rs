@@ -260,6 +260,10 @@ mod placing;
 /// the product's business rather than an endpoint's, and the default is one rule
 /// for every binary that parses a [`Config`] rather than the server's alone.
 pub mod platform;
+/// Plugins: a directory with a `plugin.yaml` at its root, and the reading of
+/// one (ADR-0030). Public for `verkstead plugin check`, which reads a manifest
+/// with no server running.
+pub mod plugins;
 pub mod preflight;
 /// Suggesting a Preview for trying the work by hand, from a building session
 /// alone (ADR-0024).
