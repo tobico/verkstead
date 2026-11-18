@@ -13,7 +13,8 @@
 //!   root, a line per entry in a shape of the stub's own — see [`entry`] — and
 //!   traps on a line `{"trap":true}`, so a suite can see what a component that
 //!   stops does to a Transcript.
-//! - **`login`** is over as soon as it is asked.
+//! - **`login`** reads what a stub logging in writes — see [`LOGIN`] — and
+//!   answers each thing it recognises as the step it is, in its own words.
 
 wit_bindgen::generate!({
     path: "../../../crates/server/wit",
@@ -57,10 +58,63 @@ impl Guest for Stub {
         }
     }
 
-    fn login(_written: String) -> LoginStep {
-        LoginStep::Done
+    fn login(written: String) -> LoginStep {
+        let mut kept = WRITTEN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        kept.push_str(&written);
+
+        // The first thing it recognises in what is not answered yet, and
+        // everything up to the end of it taken as answered.
+        let Some((at, said, step)) = LOGIN
+            .iter()
+            .filter_map(|(said, step)| Some((kept.find(said)?, *said, step)))
+            .min_by_key(|(at, _, _)| *at)
+        else {
+            return LoginStep::Waiting;
+        };
+        let after = at + said.len();
+
+        let step = match step {
+            Step::Address => {
+                // The address is the rest of its line, once the line is ended.
+                let Some(ended) = kept[after..].find('\n') else {
+                    return LoginStep::Waiting;
+                };
+                let url = kept[after..after + ended].trim().to_owned();
+                kept.drain(..after + ended);
+                return LoginStep::Address(url);
+            }
+            Step::Code => LoginStep::Code,
+            Step::Words(words) => LoginStep::Words((*words).to_owned()),
+            Step::Done => LoginStep::Done,
+        };
+        kept.drain(..after);
+        step
     }
 }
+
+/// What a stub logging in has written and `login` has not answered yet. The
+/// instance is the one login's, so this is too.
+static WRITTEN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// What `login` recognises in what a stub logging in writes.
+enum Step {
+    /// The address follows, to the end of the line.
+    Address,
+    Code,
+    Words(&'static str),
+    Done,
+}
+
+/// What a stub logging in writes, and what each is answered as: the words its
+/// own, so that a suite can tell them from anything the host would say.
+const LOGIN: &[(&str, Step)] = &[
+    ("Go to: ", Step::Address),
+    ("Code? ", Step::Code),
+    ("Too short.", Step::Words("The stub wants all of the code.")),
+    ("Wrong code.", Step::Words("The stub turned that code down.")),
+    ("Gave up.", Step::Words("The stub stopped waiting for a code.")),
+    ("Signed in.", Step::Done),
+];
 
 /// One line of the stub's record, as the kind it says it is.
 ///

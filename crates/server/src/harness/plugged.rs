@@ -31,6 +31,7 @@ use verkstead_render::{Broken, ProfileSaved};
 use super::{
     Carrying, Declared, HOME_REFUSED, Harness, Line, ReadIn, Resume, SETTINGS_FILE, SignedOut,
 };
+use crate::logins::Speaking;
 use crate::platform::Platform;
 use crate::plugins::component::worlds::category::agent as world;
 use crate::plugins::component::{Again, Loaded};
@@ -60,6 +61,9 @@ pub(crate) struct Plugged {
     mark: String,
     component: Component,
 
+    /// How its login goes, where the manifest declares one.
+    speaking: Option<Speaking>,
+
     /// What starts the component again to read a session's record — see
     /// [`Reader`].
     again: Again,
@@ -71,6 +75,10 @@ impl Plugged {
     pub(crate) fn new(id: store::AgentType, agent: Agent, mark: String, loaded: Loaded) -> Self {
         Plugged {
             id,
+            speaking: agent
+                .login
+                .as_ref()
+                .map(|login| Speaking::exported(&agent.name, login, loaded.again.clone())),
             agent,
             mark,
             again: loaded.again.clone(),
@@ -435,6 +443,13 @@ impl Harness for Plugged {
         })
     }
 
+    /// Where the manifest declares a login: its line run by the host, and
+    /// what the harness writes read by the `login` export — see
+    /// [`crate::logins::Dialogue::Exported`].
+    fn speaking(&self) -> Option<&Speaking> {
+        self.speaking.as_ref()
+    }
+
     /// The model the manifest names for `role`, or its default.
     fn model(&self, role: store::Role) -> &str {
         self.agent
@@ -585,6 +600,44 @@ fn failed(error: &wasmtime::Error) -> String {
         }
         Some(trap) => format!("it stopped: {trap}"),
         None => crate::plugins::component::worded(error),
+    }
+}
+
+/// A plugin harness's `login` export, standing for one harness of a login: an
+/// instance of the component of its own, started afresh, since what the export
+/// answers builds on what it was handed before — see
+/// [`crate::logins::Dialogue::Exported`].
+pub(crate) struct Exchange {
+    loaded: Loaded,
+}
+
+impl Exchange {
+    /// `again`'s component, started afresh for a login.
+    pub(crate) async fn started(again: &Again) -> Result<Exchange, String> {
+        let loaded = again
+            .afresh()
+            .await
+            .map_err(|trouble| trouble.why.trim_end_matches('.').to_owned())?;
+        Ok(Exchange { loaded })
+    }
+
+    /// What `login` answers, handed what the harness has written since it was
+    /// last asked.
+    pub(crate) async fn step(&mut self, written: &str) -> Result<world::LoginStep, String> {
+        let loaded = &mut self.loaded;
+        let exports = world::Agent::new(&mut loaded.store, &loaded.instance)
+            .map_err(|error| crate::plugins::component::worded(&error))?;
+        loaded.store.set_epoch_deadline(
+            CALLING
+                .div_duration_f64(crate::plugins::component::TICK)
+                .ceil() as u64,
+        );
+        let step = exports
+            .call_login(&mut loaded.store, written)
+            .await
+            .map_err(|error| failed(&error));
+        loaded.store.set_epoch_deadline(u64::MAX);
+        step
     }
 }
 

@@ -146,7 +146,19 @@ world agent {
   export write-configuration: func(found: list<found>, servers: list<server>) -> configuration;
 
   /// The next step of a login, given what the harness has written since the
-  /// last call. Called only for a harness whose manifest declares a login.
+  /// last call — on either of its outputs, in whatever pieces it arrived in.
+  /// Called only for a harness whose manifest declares a login, in an instance
+  /// of the component started for that one harness, so what it was handed
+  /// before is its own to keep.
+  ///
+  /// After any answer but `waiting` it is asked again with nothing new, so
+  /// that one piece carrying an address and a prompt is answered as both.
+  ///
+  /// `words` said while the code handed over is being checked put the human
+  /// back at the same address with them — a code cut short. Said otherwise,
+  /// and followed by the harness exiting without a login, they are what the
+  /// human reads beside the fresh address the host starts — a harness giving
+  /// up — as they are beside one after a code it refused.
   export login: func(written: string) -> login-step;
 }
 
