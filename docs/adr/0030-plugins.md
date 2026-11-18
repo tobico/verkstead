@@ -343,7 +343,10 @@ share the sccache Compile Server, whose behaviour stays the server's and is
 switched on by name as the descriptor grammar always said. **One switch**: the
 Sandbox page's per-language checkbox goes, and the Plugins page tick is
 whether sessions get the language. The store size becomes a declared settings
-field. A Language plugin is data and nothing else.
+field. Both are the cluster's, as every plugin's tick and settings are, where
+each was a device's `config.yaml` key before; the take-up resolves devices that
+disagree by on winning and the larger size winning (Set 1771, Q2). A Language
+plugin is data and nothing else.
 
 ## The Plugins page
 
