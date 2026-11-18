@@ -1451,7 +1451,9 @@ windows:
     fn a_skill_directory_without_a_skill_md_is_refused() {
         let dir = packed(PACK, &[REVIEWING]);
         std::fs::create_dir_all(dir.path().join("skills/linting")).unwrap();
-        std::fs::write(dir.path().join("skills/linting/skill.md"), "x").unwrap();
+        // Not `skill.md`, which a case-insensitive filesystem — Windows', a
+        // Mac's by default — opens as `SKILL.md`.
+        std::fs::write(dir.path().join("skills/linting/README.md"), "x").unwrap();
 
         let refusal = Manifest::read(dir.path(), Platform::Linux).unwrap_err();
 
