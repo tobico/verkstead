@@ -100,7 +100,7 @@ base: string, };
  *
  * **And it is the whole account**, in the shape the profile form sends one:
  * the wizard saves a ticked row by handing it straight back to the profile
- * create, with no name and the models this build knows for its harness, rather
+ * create, with no name and the models its harness declares, rather
  * than by naming paths of its own.
  */
 export type AccountView = { 
@@ -3627,7 +3627,31 @@ found_at: Array<string>,
 /**
  * What to run in a terminal to make an account of it.
  */
-first_run: string, };
+first_run: string, 
+/**
+ * The models a Profile of it is offered, in the order the form offers
+ * them.
+ */
+models: Array<HarnessModel>, 
+/**
+ * The short names it answers to beyond those — `opus` — each with what
+ * it reads as: recognised where a Profile holds one, never offered.
+ */
+aliases: Array<HarnessModel>, };
+
+/**
+ * One model a harness declares: what it travels as, and what a human reads
+ * instead.
+ */
+export type HarnessModel = { 
+/**
+ * The id the harness is launched with, and the string a Profile carries.
+ */
+id: string, 
+/**
+ * What it reads as.
+ */
+name: string, };
 
 /**
  * One path an account of a harness is made of.

@@ -459,6 +459,21 @@ impl Harness for Plugged {
             .find(|(declared, _)| *declared == role)
             .map_or(&self.agent.models.default, |(_, model)| model)
     }
+
+    /// The manifest's list, in the order it declares them.
+    fn models(&self) -> Vec<(&str, &str)> {
+        self.agent
+            .models
+            .list
+            .iter()
+            .map(|model| (model.id.as_str(), model.name.as_str()))
+            .collect()
+    }
+
+    /// The section the manifest wrote under `ask.guide`.
+    fn running(&self) -> &str {
+        &self.agent.ask.guide
+    }
 }
 
 /// Where a session of a plugin harness keeps its record, as its

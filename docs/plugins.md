@@ -625,13 +625,17 @@ it right.
 for hours, or `store-and-nudge`, for one whose shell tool gives up after
 seconds: the ask returns at once, the session ends its turn, and Verkstead
 types into its terminal when the answer lands. **`guide`** is the *Running the
-ask* section of the Guide a session reads, in markdown.
+ask* section of the Guide a session reads, in markdown: `verkstead guide` inside
+the harness's sandbox asks the server for it and prints it where every
+harness's goes, and the channel decides which kinds of ask the Guide describes.
 
 **`models`** — required: the models a Profile of it offers, each an **`id`**,
 what the harness is told, and a **`name`**, what is drawn. Exactly one is
 **`default: true`**, which a Pairing runs where nothing else says; **`for`**
 lists the roles — `grilling`, `implementation`, `review` — whose default is
-that model instead, each role on one model at most.
+that model instead, each role on one model at most. The Profile form offers the
+list in the order written; a fresh Repo's default Pairing reaches a plugin
+harness only where no built-in harness has a Profile.
 
 **`tools`** — required: how the harness names an MCP server's tools to the
 model, with `<server>` and `<tool>` where the two names go.

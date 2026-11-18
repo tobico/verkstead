@@ -256,7 +256,7 @@ fn a_language_entry_setting_a_sandbox_variable_is_refused_naming_it() {
 
 /// A harness declared in full, as `docs/plugins.md` writes one, its component
 /// `agent.wasm` and its mark `mark.svg`.
-const AGENT: &str = r#"
+pub(crate) const AGENT: &str = r#"
 uuid: 3f0c9a12-7b4e-4c1d-8e2f-5a6b7c8d9e0f
 name: Stub harness
 author:
@@ -300,7 +300,7 @@ provides:
 
 /// A component exporting the server's `agent` world, made from its WIT by
 /// wit-component, each export a trap nothing here calls.
-fn exporting_an_agent() -> Vec<u8> {
+pub(crate) fn exporting_an_agent() -> Vec<u8> {
     let mut resolve = wit_parser::Resolve::default();
     let (package, _) = resolve
         .push_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../server/wit"))
@@ -330,7 +330,7 @@ fn exporting_an_agent() -> Vec<u8> {
 
 /// A plugin of `manifest` providing an agent, with `component` as its
 /// component.
-fn agent(manifest: &str, component: &[u8]) -> tempfile::TempDir {
+pub(crate) fn agent(manifest: &str, component: &[u8]) -> tempfile::TempDir {
     let dir = plugin(manifest);
     std::fs::write(
         dir.path().join("mark.svg"),

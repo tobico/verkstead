@@ -133,6 +133,7 @@ mod forwarding;
 pub mod github;
 /// Grilling a Conversation again, where the session that was grilling it died.
 mod grillings;
+mod guides;
 /// Where a Conversation's handoff document is written, and how it reaches the
 /// Timeline.
 ///
@@ -1912,6 +1913,12 @@ fn serving(state: AppState, gate: &key::Gate) -> Router {
         .route(
             &format!("{ASKING_FROM}/{{conversation}}/api/v1/previews/retire"),
             post(previews::retire),
+        )
+        // And the Guide's half that is the harness's own, which `verkstead
+        // guide` splices into the core it carries.
+        .route(
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/guide"),
+            get(guides::section),
         )
         // And saying it is waiting on work of its own, which keeps it at work.
         .route(

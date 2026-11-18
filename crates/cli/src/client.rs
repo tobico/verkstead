@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use verkstead_schema::{
-    ApiError, MemoLeaving, MemoLeft, PreviewLeft, PreviewSuggestion, QuestionSet, Response,
-    SetCreated,
+    ApiError, GuideSection, MemoLeaving, MemoLeft, PreviewLeft, PreviewSuggestion, QuestionSet,
+    Response, SetCreated,
 };
 
 /// How long the server is asked to hold each wait open. Its own ceiling is a
@@ -30,6 +30,23 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// up to. Short: the human may be answering right now.
 const FIRST_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(10);
+
+/// How long `verkstead guide` waits on the server before printing the core
+/// alone: it is on the loopback or the pipe, so anything slower is a server
+/// that is not answering.
+const GUIDE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// What asking for the Guide's tailored half came to — see [`Client::guide`].
+pub enum Guided {
+    /// The section, and how the harness asks.
+    Section(GuideSection),
+
+    /// The server answered that it has no harness of that id, saying so.
+    NoSuchHarness(String),
+
+    /// Nothing usable came back: no server, or one older than the route.
+    Unreached,
+}
 
 pub struct Client {
     agent: ureq::Agent,
@@ -377,6 +394,42 @@ impl Client {
                 self.said
             ),
             _ => bail!("the server refused: {}", refusal(&text)),
+        }
+    }
+
+    /// Ask for the Guide's half that is the harness `agent`'s own — see
+    /// [`crate::guide`].
+    ///
+    /// No retry, and briefly: a Guide is printed whether or not this answers,
+    /// so a server that is not there is said as [`Guided::Unreached`] rather
+    /// than waited out. A server older than the route is the same thing.
+    pub fn guide(&self, agent: &str) -> Guided {
+        let asked = self
+            .agent
+            .get(format!("{}/api/v1/guide", self.base))
+            .query("agent", agent)
+            .config()
+            .timeout_global(Some(GUIDE_TIMEOUT))
+            .build()
+            .call();
+
+        let Ok(mut reply) = asked else {
+            return Guided::Unreached;
+        };
+
+        let status = reply.status().as_u16();
+        let Ok(text) = reply.body_mut().read_to_string() else {
+            return Guided::Unreached;
+        };
+
+        match status {
+            200 => serde_saphyr::from_str(&text).map_or(Guided::Unreached, Guided::Section),
+            // A route this server has, refusing the id, carries why; a route it
+            // has not got carries nothing that reads as a refusal.
+            404 => serde_saphyr::from_str::<ApiError>(&text).map_or(Guided::Unreached, |refused| {
+                Guided::NoSuchHarness(refused.error)
+            }),
+            _ => Guided::Unreached,
         }
     }
 

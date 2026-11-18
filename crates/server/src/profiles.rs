@@ -42,9 +42,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    AgentType, Broken, HarnessEntry, HarnessPath, PairingView, PickedView, ProfileAccount,
-    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry,
-    ProfileSaved, RoleChoice, RowDevice,
+    AgentType, Broken, HarnessEntry, HarnessModel, HarnessPath, PairingView, PickedView,
+    ProfileAccount, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileDevice, ProfileEdit,
+    ProfileEntry, ProfileSaved, RoleChoice, RowDevice,
 };
 
 use crate::resolved::{Resolved, resolve};
@@ -1090,6 +1090,19 @@ pub(crate) fn harnesses(plugged: &[store::AgentType]) -> Vec<HarnessEntry> {
             login: harness.speaking().map(|speaking| speaking.name.to_owned()),
             found_at: harness.found_at().into_iter().map(str::to_owned).collect(),
             first_run: harness.first_run().to_owned(),
+            models: modelled(harness.models()),
+            aliases: modelled(harness.aliases()),
+        })
+        .collect()
+}
+
+/// Models as a harness answers them, as the wire carries them.
+fn modelled(models: Vec<(&str, &str)>) -> Vec<HarnessModel> {
+    models
+        .into_iter()
+        .map(|(id, name)| HarnessModel {
+            id: id.to_owned(),
+            name: name.to_owned(),
         })
         .collect()
 }

@@ -376,6 +376,39 @@ impl Harness for Claude {
             store::Role::Implementation | store::Role::Review => "claude-opus-5",
         }
     }
+
+    /// Ordinary first, because a picker is read from the top and these are the
+    /// ones a Profile is likely to list — and then the two the long context is
+    /// worth a row of its own for, rather than every model in a second
+    /// spelling. Spelled out in full like the rest: `opus[1m]` reads the same
+    /// and is one of the aliases below, which is why it is not what a pick
+    /// sends.
+    fn models(&self) -> Vec<(&str, &str)> {
+        vec![
+            ("claude-opus-5", "Opus 5"),
+            ("claude-fable-5", "Fable 5"),
+            ("claude-sonnet-5", "Sonnet 5"),
+            ("claude-haiku-4-5-20251001", "Haiku 4.5"),
+            ("claude-opus-5[1m]", "Opus 5 (1M context)"),
+            ("claude-sonnet-5[1m]", "Sonnet 5 (1M context)"),
+        ]
+    }
+
+    /// The short names Claude Code answers to.
+    fn aliases(&self) -> Vec<(&str, &str)> {
+        vec![
+            ("opus", "Opus 5"),
+            ("fable", "Fable 5"),
+            ("sonnet", "Sonnet 5"),
+            ("haiku", "Haiku 4.5"),
+        ]
+    }
+
+    /// Holding the ask open in a background shell call its harness wakes it
+    /// from.
+    fn running(&self) -> &str {
+        include_str!("running/claude.md")
+    }
 }
 
 /// A Claude account's two paths: the directory, and the file beside it.

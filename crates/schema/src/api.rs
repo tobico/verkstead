@@ -275,6 +275,18 @@ pub struct PreviewLeft {
     pub title: String,
 }
 
+/// What `GET …/api/v1/guide?agent=<id>` returns: the two things about asking
+/// that are the harness's own, for `verkstead guide` to splice into the core.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuideSection {
+    /// Whether the harness's asks hold `verkstead ask` open until the Response
+    /// comes back, or store the Set and are nudged when it lands.
+    pub blocking: bool,
+
+    /// Its *Running the ask* section, as markdown.
+    pub running: String,
+}
+
 /// What the API returns when it refuses a request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]

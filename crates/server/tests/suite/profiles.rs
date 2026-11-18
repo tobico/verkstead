@@ -2269,6 +2269,31 @@ async fn the_harness_list_names_every_built_in_with_its_paths_and_mark() {
         ["claude_dir", "config_file"]
     );
     assert_eq!(claude.login.as_deref(), Some("Claude"));
+    assert_eq!(
+        claude
+            .models
+            .iter()
+            .map(|model| (model.id.as_str(), model.name.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("claude-opus-5", "Opus 5"),
+            ("claude-fable-5", "Fable 5"),
+            ("claude-sonnet-5", "Sonnet 5"),
+            ("claude-haiku-4-5-20251001", "Haiku 4.5"),
+            ("claude-opus-5[1m]", "Opus 5 (1M context)"),
+            ("claude-sonnet-5[1m]", "Sonnet 5 (1M context)"),
+        ],
+        "the models the form has always offered a Claude Profile, in its order"
+    );
+    assert_eq!(
+        claude
+            .aliases
+            .iter()
+            .map(|alias| alias.id.as_str())
+            .collect::<Vec<_>>(),
+        ["opus", "fable", "sonnet", "haiku"],
+        "and the short names it reads and never offers"
+    );
 
     let codex = &harnesses[1];
     assert_eq!(
@@ -2280,4 +2305,103 @@ async fn the_harness_list_names_every_built_in_with_its_paths_and_mark() {
         ["home"]
     );
     assert_eq!(codex.login, None);
+
+    let offered = |at: usize| -> Vec<&str> {
+        harnesses[at]
+            .models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect()
+    };
+    assert_eq!(offered(1), ["gpt-5-codex"]);
+    assert_eq!(offered(2), ["grok-4.6", "grok-4.5"]);
+    assert_eq!(
+        offered(3),
+        ["minimax/minimax-m2.1", "opencode/gpt-5.1-codex"]
+    );
+    assert_eq!(
+        offered(4),
+        [
+            "gemini-3.8-flash-high",
+            "gemini-3.8-flash-medium",
+            "gemini-3.8-flash-low",
+            "claude-opus-4-6-thinking",
+            "claude-sonnet-4-6",
+            "gpt-oss-120b-medium",
+        ]
+    );
+    assert!(
+        harnesses[1..].iter().all(|entry| entry.aliases.is_empty()),
+        "Claude Code's short names are its own"
+    );
+}
+
+/// A plugin harness declares its own models: its Profile form offers them,
+/// and a fresh Repo's default Pairing on it runs the one its manifest names
+/// for each role — after every built-in, which keep their places.
+#[tokio::test]
+async fn a_plugin_harness_offers_its_declared_models_and_defaults_to_its_declared_one() {
+    use crate::stub_harness::{self, StubHarness};
+
+    let (accounts, dir, app) = workbench().await;
+    let harness = StubHarness::Offering;
+    harness
+        .installed(&app, dir.path(), ["stub-large", "stub-grilling"])
+        .await;
+    let repo = fresh_repo(&app, accounts.path(), "verkstead").await;
+
+    let harnesses: Vec<verkstead_render::HarnessEntry> = get(&app, "/api/ui/harnesses").await;
+    let entry = harnesses
+        .iter()
+        .find(|entry| entry.id.as_str() == harness.uuid())
+        .expect("the plugin harness is listed");
+    assert_eq!(
+        entry
+            .models
+            .iter()
+            .map(|model| (model.id.as_str(), model.name.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("stub-large", "Stub default"),
+            ("stub-grilling", "Stub grilling")
+        ],
+        "the manifest's list, by the names it gives"
+    );
+
+    assert_eq!(
+        save(
+            &app,
+            &serde_json::json!({
+                "name": null,
+                "account": {
+                    "agent_type": harness.uuid(),
+                    "paths": stub_harness::account(accounts.path()),
+                },
+                "models": ["stub-large", "stub-grilling"],
+            }),
+        )
+        .await,
+        ProfileSaved::Saved
+    );
+    let stubbed = listed(&app).await.remove(0);
+
+    let offered = prefill(&app, repo).await;
+    assert_eq!(
+        on(offered.grilling.as_ref()),
+        Some((stubbed.id.as_str(), "stub-grilling")),
+        "the model the manifest names for the grilling"
+    );
+    assert_eq!(
+        on(offered.implementation.as_ref()),
+        Some((stubbed.id.as_str(), "stub-large")),
+        "and its default for a role it names nothing for"
+    );
+
+    let claude = saved(&app, accounts.path(), "work").await;
+    let offered = prefill(&app, repo).await;
+    assert_eq!(
+        on(offered.grilling.as_ref()).map(|(profile, _)| profile),
+        Some(claude.id.as_str()),
+        "a built-in's Profile is preferred, whenever it was saved"
+    );
 }

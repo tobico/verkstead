@@ -360,6 +360,26 @@ impl Harness for Agy {
             store::Role::Implementation | store::Role::Review => "gemini-3.8-flash-medium",
         }
     }
+
+    /// What `agy models` lists to a signed-in account on agy 1.4.12, each named
+    /// as agy names it: the Flash tiers first, the two [`Harness::model`]
+    /// names among them, and the other vendors' models agy serves after.
+    fn models(&self) -> Vec<(&str, &str)> {
+        vec![
+            ("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)"),
+            ("gemini-3.8-flash-medium", "Gemini 3.8 Flash (Medium)"),
+            ("gemini-3.8-flash-low", "Gemini 3.8 Flash (Low)"),
+            ("claude-opus-4-6-thinking", "Claude Opus 4.6 (Thinking)"),
+            ("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)"),
+            ("gpt-oss-120b-medium", "GPT-OSS 120B (Medium)"),
+        ]
+    }
+
+    /// `run_command` turning the ask into a background task of its own after
+    /// a wait, and waking the session when it ends.
+    fn running(&self) -> &str {
+        include_str!("running/agy.md")
+    }
 }
 
 /// The session-only settings an Antigravity CLI session is launched with, as

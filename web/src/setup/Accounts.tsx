@@ -15,8 +15,8 @@
 //! is met, which is the rail's own rule and the only time there is a way back.
 //! The page ticks the card when the harness lands.
 //!
-//! **A ticked one is saved with no name and every model this build knows for
-//! its harness.** Both are the settings page's to change afterwards; nothing
+//! **A ticked one is saved with no name and every model its harness
+//! declares.** Both are the settings page's to change afterwards; nothing
 //! here asks anybody to type either, because an account found in a home is one
 //! account and needs no name to tell it from another.
 //!
@@ -61,7 +61,7 @@ import type {
   ProfileEdit,
   ProfileSaved,
 } from "../api/types";
-import { KNOWN_MODELS } from "../models";
+import { offeredFor } from "../models";
 import { ErrorLine } from "../notices";
 import { rowPress } from "../rows";
 import {
@@ -500,7 +500,7 @@ function runnable(reading: OnboardingView): HarnessEntry[] {
 }
 
 /// One found account as the Profile it would be saved as: no name, memory shared,
-/// and every model this build knows for its harness.
+/// and every model its harness declares.
 ///
 /// Unnamed because a home holds one account per harness, so there is nothing to
 /// tell it from — and the models because a Profile with none is refused, while
@@ -510,9 +510,7 @@ function asProfile(found: AccountView): ProfileEdit {
   return {
     name: null,
     account: found.account,
-    models: KNOWN_MODELS.filter(
-      (model) => model.agent === found.account.agent_type,
-    ).map((model) => model.id),
+    models: offeredFor(found.account.agent_type).map((model) => model.id),
     memory: true,
   };
 }
