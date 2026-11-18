@@ -65,8 +65,8 @@ says so where a pull request would have been drawn.
 - **One token per Forge per Author.** `secrets.yaml` holds
   `author_tokens: {<author uuid>: <token>}` today, one GitHub token per Author
   (ADR-0025). It becomes a map keyed by the Author and then the Forge plugin's
-  name, an installation from before reading its one token as `github`'s; the
-  Author record's `holds_token` becomes a set of Forge names, which is what a
+  uuid, an installation from before reading its one token as the built-in
+  GitHub's; the Author record's `holds_token` becomes a set of Forge uuids, which is what a
   Repo on a Forge reads to know whether its Author can write there. The Git
   settings section asks for a token per **enabled** Forge under each Author and
   verifies it through the plugin's `verify` export, which answers with the

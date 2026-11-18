@@ -3,28 +3,32 @@
 ## Goal
 
 A directory with a `plugin.yaml` at its root is a **Plugin**, and Verkstead
-loads one. The manifest's grammar is written down and read: a name, a version,
-the interface version it was written against, a description, a mark as SVG, a
-`provides:` list whose entries are each of one **Category**, the `capabilities:`
-the plugin asks for, the `settings:` fields it wants drawn, and per-platform
-overrides keyed `linux`, `macos` and `windows` over the common declaration. The
-loader stands on wasmtime and the component model, with a WIT world per
-Category — none of which has a Category behind it yet, so what this stage proves
-is the loading, the versioning and the trouble reporting, on a manifest-only
-plugin that provides nothing and a component that exports nothing. Plugins live
-under `plugins/` in the Data Directory. The installed list is a **Replicated
-record**, and every device clones the source for itself.
+loads one. The manifest's grammar is written down and read: the metadata — a
+uuid, a display name, the author's name and email, a semantic version and an
+optional repository URL — the interface version it was written against, a
+description, a mark as SVG, the `dependencies:` it needs, a `provides:` list
+whose entries are each of one **Category**, the `capabilities:` the plugin asks
+for, the `settings:` fields it wants drawn, and per-platform overrides keyed
+`linux`, `macos` and `windows` over the common declaration. The loader stands on
+wasmtime and the component model, with a WIT world per Category — none of which
+has a Category behind it yet, so what this stage proves is the loading, the
+versioning and the trouble reporting, on a manifest-only plugin that provides
+nothing and a component that exports nothing. Plugins live under `plugins/` in
+the Data Directory. The installed list is a **Replicated record**, and every
+device clones the source for itself.
 
 The settings page gains a **Plugins** section at the foot of the list, beside
-Agent Profiles and Repos: two groups, Installed above Built-in, each row
-reading the plugin's name, what it provides, where it came from, a checkbox
-and — where it failed to load — its trouble. **Add a plugin…** takes a git URL
-or a browsed path, clones it, reads the manifest, shows what it provides and
-the capabilities it asks for, and **Install** confirms. A git row has
-**Update**, a press that pulls; nothing fetches on its own. **Remove** is
-refused while anything open stands on the plugin. Opening a row draws a pane
-with the plugin's declared settings fields. And `verkstead plugin check <dir>`
-says whether a directory is a plugin Verkstead would load, and why not.
+Agent Profiles and Repos: two groups, Installed above Built-in, each row reading
+the plugin's display name, version and author, what it provides, where it came
+from, a checkbox and — where it failed to load or a dependency is missing,
+disabled or outdated — its trouble, with the install or update that would put a
+dependency right. **Add a plugin…** takes a git URL or a browsed path, clones
+it, reads the manifest, shows what it provides and the capabilities it asks for,
+and **Install** confirms. A git row has **Update**, a press that pulls; nothing
+fetches on its own. **Remove** is refused while anything open stands on the
+plugin, another plugin's dependency included. Opening a row draws a pane with
+the plugin's declared settings fields. And `verkstead plugin check <dir>` says
+whether a directory is a plugin Verkstead would load, and why not.
 
 ## Decisions in force
 
@@ -57,7 +61,7 @@ says whether a directory is a plugin Verkstead would load, and why not.
   local directory, under the Data Directory's `plugins/`, a git one tracking its
   default branch and pulled by a press. An archive URL and a catalogue were
   turned down (Set 1760, Q4). The installed list is a **Replicated record** —
-  name, source, enabled, the revision pinned at install, and for a local
+  uuid, source, enabled, the revision pinned at install, and for a local
   directory the device it is on — cluster-wide like Authors and MCP servers,
   each device cloning the source itself (Set 1762, Q10). A local one is marked
   as that device's and drawn greyed elsewhere with that said.
@@ -73,8 +77,23 @@ says whether a directory is a plugin Verkstead would load, and why not.
   on it; Remove is refused while anything open stands on it, the refusal
   counting them and leading there (Set 1769, Q45; Set 1764, Q20). The two
   groups are Installed above Built-in; a built-in has no Remove.
-- **The name is the manifest's**, unique among those installed, and a name a
-  built-in holds is refused. Nothing about the plugin is keyed by its source.
+- **The uuid is the plugin's identity** (Set 1771, Q1): the record, a
+  dependency and everything stored about a plugin key by it, unique among those
+  installed, and a uuid a built-in holds is refused. The display name is only
+  drawn. Nothing about the plugin is keyed by its source. The built-ins carry
+  fixed uuids, and words stored before there were plugins — `claude`, `github`
+  — are read as theirs.
+- **Dependencies are declared** (Set 1771, Q1, and the human's words beside
+  it). Each entry carries the uuid, display name, author's name and email,
+  optional repository URL and a **version specifier** over the semantic
+  version, so a dependency can be named and fetched without being installed. A
+  plugin whose dependency is missing, disabled or outside the specifier is in
+  trouble, listed saying which and counting as disabled, and its row offers the
+  install or update through the same consent card as **Add a plugin…** where
+  the dependency names a repository. Disabling a plugin others depend on says
+  first which ones go with it; Remove is refused while an installed plugin
+  depends on it, naming them. The checks that a Process or an Activity
+  declares what it names are stages 08 and 11's, over this grammar.
 - **The word is *Plugin*** (Set 1760, Q6). CONTEXT.md's three Avoid entries
   that name the word — MCP server, Components, Skill — stand, since each says
   not to call *that* a plugin.
@@ -92,7 +111,8 @@ says whether a directory is a plugin Verkstead would load, and why not.
 
 1. **The manifest** — a `plugin.yaml` grammar in the server with a reader that
    refuses by field, and `verkstead plugin check <dir>` over it. AC: a minimal
-   manifest passes; a missing name, a Category nobody knows, a capability of an
+   manifest passes; a missing uuid, a version that is not semantic, a
+   dependency without a version specifier, a Category nobody knows, a capability of an
    unknown kind, and an interface version ahead of this build each refuse
    naming the field; the check prints the refusal and exits non-zero.
 2. **The loader** — wasmtime in the server, a component instantiated under the
@@ -103,7 +123,7 @@ says whether a directory is a plugin Verkstead would load, and why not.
    for every release target, and the release workflow builds a fixture
    component for `wasm32-wasip2` and embeds it in each platform's binary.
 3. **The record and the directory** — the installed-plugins Replicated record,
-   `plugins/<name>/` under the Data Directory, a clone at install, a pull on
+   `plugins/<uuid>/` under the Data Directory, a clone at install, a pull on
    Update, the local-directory case marked by device. AC: a plugin installed
    on one device is listed on another and cloned there; a local one reads as
    this device's elsewhere; a pull that fails leaves the old checkout and a
@@ -112,10 +132,18 @@ says whether a directory is a plugin Verkstead would load, and why not.
    trouble line, Remove and its refusal. AC: a plugin with trouble shows it on
    its row; unticking a row disables it; Remove on a built-in is not drawn;
    Remove on a plugin something stands on is refused with the count.
+7. **Dependencies** — the declared list resolved at load against what is
+   installed and enabled, trouble for missing, disabled and outdated, the
+   install or update offered from the row, the warning before a disable and the
+   refusal of a Remove. AC: a fixture plugin depending on an absent one is in
+   trouble naming it and installs it from its declared URL through the consent
+   card; one depending on `^2` over an installed `1.4.0` reads outdated;
+   unticking the dependency names the dependent first; removing it is refused
+   naming the dependent.
 5. **Add a plugin…** — URL or browsed path, clone, manifest read, the consent
    card listing what it provides and the capabilities, Install. AC: a URL that
    is not a repository refuses before anything is listed; a manifest asking for
-   `gitlab.com` outbound shows it before Install; a name colliding with a
+   `gitlab.com` outbound shows it before Install; a uuid colliding with a
    built-in is refused.
 6. **The settings pane** — declared fields drawn by kind, a secret written to
    `secrets.yaml` with a digest on the record. AC: a text field round-trips; a
