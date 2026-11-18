@@ -89,3 +89,48 @@ fn a_directory_with_no_manifest_is_not_a_plugin() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("There's no `plugin.yaml` here"), "{stderr}");
 }
+
+/// A plugin whose component is `wat`, assembled.
+fn with_component(wat: &str) -> tempfile::TempDir {
+    let dir = plugin(&format!("{MINIMAL}component: plugin.wasm\n"));
+    let bytes = wat::parse_str(wat).expect("the fixture should assemble");
+    std::fs::write(dir.path().join("plugin.wasm"), bytes).unwrap();
+    dir
+}
+
+#[test]
+fn a_component_exporting_nothing_passes() {
+    let dir = with_component("(component)");
+
+    let output = check(dir.path());
+
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn a_component_that_traps_while_starting_is_refused_saying_so() {
+    let dir = with_component(
+        r#"
+(component
+  (core module $m
+    (func $start unreachable)
+    (start $start))
+  (core instance (instantiate $m)))
+"#,
+    );
+
+    let output = check(dir.path());
+
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("isn't a plugin Verkstead would load"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains(
+            "The component stopped while it was starting: wasm trap: wasm `unreachable` instruction executed."
+        ),
+        "{stderr}"
+    );
+}

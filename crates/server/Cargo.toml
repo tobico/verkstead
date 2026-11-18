@@ -235,6 +235,39 @@ tokio-util = { version = "0.7", features = ["io"] }
 # subscriber is the CLI's dependency rather than this crate's — see
 # `crates/cli/src/serve.rs`.
 tracing = "0.1"
+# What a Plugin's code runs in: a WebAssembly component, instantiated under the
+# capabilities its manifest asked for and nothing else (ADR-0030) — see
+# `src/plugins/component.rs`. wasmtime and the component model rather than
+# wasmer and a hand-rolled ABI, the interface written as WIT in `wit/` and the
+# bindings generated (Set 1762, Q13), at the 10 to 20 MB on the binary the ADR
+# accepted.
+#
+# Default features off and named back. `cranelift` compiles a component at
+# load, `parallel-compilation` spreads that over threads, `component-model` is
+# the whole of what a plugin is, and `async` is the instantiation the server's
+# runtime can wait on. Off stay the on-disk cache (a C zstd for a compile done
+# once per load), the profilers, the debugger support and the GC proposals.
+wasmtime = { version = "50", default-features = false, features = [
+    "async",
+    "component-model",
+    "cranelift",
+    "parallel-compilation",
+    "runtime",
+    "std",
+] }
+# WASI 0.2 for those components: a granted path is a preopen, a granted
+# variable is the one variable it is handed, and nothing else is inherited.
+# `p2` alone — the snapshot-1 adapter and the 0.3 previews are for components
+# no plugin is built as.
+wasmtime-wasi = { version = "50", default-features = false, features = ["p2"] }
+# And WASI HTTP, which is how a granted `outbound:` host is reached — through a
+# hook that refuses every other host before a connection is made. Its
+# `default-send-request` is the request actually sent, over the rustls and ring
+# already in the tree.
+wasmtime-wasi-http = { version = "50", default-features = false, features = [
+    "default-send-request",
+    "p2",
+] }
 # The aes128gcm encryption a push body has to be in. Default features off
 # leaves out its VAPID half, which pulls a whole JWT stack in for what is one
 # ES256 signature over two claims — p256 is already here to make it. 0.4 rather
@@ -368,3 +401,10 @@ tower = { version = "0.5", features = ["util"] }
 # every such failure reads *it printed nothing*. `env-filter` so that what is
 # printed is this crate's own account rather than sqlx's every statement.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# The plugin loader's fixtures, written as WAT and made into components at test
+# time, so the suite needs no wasm toolchain: `wat` assembles a core module and
+# `wit-component` wraps it as a component against WIT the test writes, with
+# `wit-parser` reading that WIT. The versions wasmtime's own wasmparser is.
+wat = "1"
+wit-component = "0.263"
+wit-parser = "0.263"
