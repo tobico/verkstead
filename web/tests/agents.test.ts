@@ -12,6 +12,7 @@
 import { describe, expect, it } from "vitest";
 
 import { briefly, reading } from "../src/agents";
+import { pairings } from "../src/pairing";
 import type { ProfileEntry } from "../src/api/types";
 
 /// One saved profile of a backend, which is all this cares about them: a name
@@ -24,8 +25,11 @@ const profile = (
   name,
   account:
     agent_type === "Claude"
-      ? { agent_type, claude_dir: "/srv/dir", config_file: "/srv/file" }
-      : { agent_type, home: "/srv/home" },
+      ? {
+          agent_type,
+          paths: { claude_dir: "/srv/dir", config_file: "/srv/file" },
+        }
+      : { agent_type, paths: { home: "/srv/home" } },
   models: [],
   memory: true,
   broken: null,
@@ -226,5 +230,35 @@ describe("the reading with the backend left off", () => {
     expect(
       briefly({ agent: "Claude", model: "claude-opus-9", profile: "Work" }, TWO),
     ).toBe("claude-opus-9 · Work");
+  });
+});
+
+/// A Profile of a harness this server has not got — a plugin installed on the
+/// device that saved it — reads as its id, and is the one broken row no picker
+/// offers: there is nothing here to launch it with.
+describe("a harness this server has not got", () => {
+  const plugin = "3f0c7a52-9d14-4b8e-a6f1-2c5d8e9b7a40";
+
+  it("reads as its id", () => {
+    expect(
+      reading({ agent: plugin, model: "gemini-code", profile: null }, []),
+    ).toContain(plugin);
+  });
+
+  it("is offered on no picker", () => {
+    const known = profile("work", "Claude");
+    const unknown: ProfileEntry = {
+      ...profile("plugged", plugin),
+      id: "22222222-2222-4222-8222-222222222222",
+      account: { agent_type: plugin, paths: { state: "/srv/plugged" } },
+      models: ["gemini-code"],
+      broken: "HarnessUnknown",
+    };
+
+    expect(
+      pairings([{ ...known, models: ["claude-opus-5"] }, unknown]).map(
+        (row) => row.profile.id,
+      ),
+    ).toEqual([known.id]);
   });
 });

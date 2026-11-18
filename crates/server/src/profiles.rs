@@ -6,9 +6,10 @@
 //! server's: a form that checked it would be a courtesy, since this endpoint is
 //! reachable without one. Anywhere the server can read is somewhere an account
 //! can be kept — the human's own login under `~` included, which is the account a
-//! Profile most naturally names. What an account *is* — Claude's pair, and the
-//! single home each backend after it keeps one under — is the agent type's, and
-//! every judgement here is made per type for that reason.
+//! Profile most naturally names. What an account *is* — Claude's pair, the
+//! single home each built-in after it keeps one under, whatever a plugin
+//! declares — is the harness's to say, and every judgement here is made by the
+//! paths it declares for that reason (see [`crate::harness::Harness::paths`]).
 //!
 //! **And a Profile may be bound on other devices alone**, which is the one
 //! row here nothing is judged about against this filesystem: every device
@@ -41,8 +42,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice, RowDevice,
+    AgentType, Broken, HarnessEntry, HarnessPath, PairingView, PickedView, ProfileAccount,
+    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry,
+    ProfileSaved, RoleChoice, RowDevice,
 };
 
 use crate::resolved::{Resolved, resolve};
@@ -471,13 +473,18 @@ fn lends(profile: &store::Profile) -> bool {
 /// in, and the binding tells the members there is nothing to fetch. A login
 /// that says no such day is taken at its word, as every login was before.
 fn holds_login(account: &store::Account) -> bool {
-    let Resolved::At(login) = resolve(&crate::sandbox::root::login_at(account)) else {
+    let Some(login) = crate::sandbox::root::login_at(account) else {
         return false;
     };
 
-    match account {
-        store::Account::Claude { .. } => !refresh_ran_out(&login, std::time::SystemTime::now()),
-        _ => true,
+    let Resolved::At(login) = resolve(&login) else {
+        return false;
+    };
+
+    if account.agent_type() == store::AgentType::CLAUDE {
+        !refresh_ran_out(&login, std::time::SystemTime::now())
+    } else {
+        true
     }
 }
 
@@ -636,6 +643,10 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// 2. **The harness is not on this machine** — [`Broken::HarnessMissing`]. The
 ///    onboarding probe's own finding, in that step's own word.
 ///
+/// **Before any of it, a harness this server has not got** —
+/// [`Broken::HarnessUnknown`] — bound here or not: there is nothing to judge
+/// its paths by, and nothing to launch it with.
+///
 /// **And that is the whole of it** for such a Profile: a row that passes both
 /// is a row to run under, and there is nothing about this filesystem to go and
 /// put right.
@@ -650,6 +661,10 @@ fn broken(
     harnesses: &HashMap<store::AgentType, bool>,
     signed_out: &HashSet<String>,
 ) -> Option<Broken> {
+    let Some(harness) = crate::harness::of(profile.agent_type()) else {
+        return Some(Broken::HarnessUnknown);
+    };
+
     if profile.unbound.is_some() {
         if !reachable {
             return Some(Broken::NoBoundDevice);
@@ -670,7 +685,7 @@ fn broken(
         return None;
     }
 
-    let paths = crate::harness::of(profile.agent_type()).judged(&profile.account);
+    let paths = harness.judged(&profile.account);
 
     for (path, missing) in paths {
         if !matches!(resolve(&path), Resolved::At(_)) {
@@ -756,109 +771,94 @@ fn named(edit: &ProfileEdit) -> Result<(Option<String>, Vec<String>), ProfileSav
 
 /// The account, resolved — or the reason it is refused.
 ///
-/// One arm per agent type, because what a Profile names is that type's own
-/// shape: Claude's pair here, and the single home each backend after it keeps
-/// its whole account under when its stage lands.
-///
-/// Every path is judged the same way and refused by its own name: pointing the
-/// config field at the directory is an easy mistake, and "that path is wrong"
-/// would not say which one.
+/// One field per path the harness declares, each judged as it declares it — a
+/// directory or a file, and the directories inside it a session mounts — and
+/// each refused by its own name: pointing the config field at a directory is
+/// an easy mistake, and "that path is wrong" would not say which one.
 fn inspect(account: &ProfileAccount) -> Result<store::Account, ProfileSaved> {
-    match account {
-        ProfileAccount::Claude {
-            claude_dir,
-            config_file,
-        } => {
-            // A Claude account nobody has run yet is two paths with nothing at
-            // them, and the login that would make them needs a Profile bound
-            // here first — so the save makes them, rather than refusing the one
-            // way there is to start a new account. See [`made`].
-            let dir = match made(Path::new(claude_dir.trim()), Making::Directory) {
-                Resolved::At(path) => path,
-                Resolved::NotAbsolute => return Err(ProfileSaved::DirNotAbsolute),
-                Resolved::Missing => return Err(ProfileSaved::DirMissing),
-            };
+    let agent_type = stored(&account.agent_type);
 
-            if !dir.is_dir() {
-                return Err(ProfileSaved::NotADirectory);
-            }
+    let Some(harness) = crate::harness::of(agent_type) else {
+        return Err(ProfileSaved::NoSuchHarness);
+    };
 
-            let config = match made(Path::new(config_file.trim()), Making::Config) {
-                Resolved::At(path) => path,
-                Resolved::NotAbsolute => return Err(ProfileSaved::ConfigNotAbsolute),
-                Resolved::Missing => return Err(ProfileSaved::ConfigMissing),
-            };
+    let mut paths = Vec::new();
 
-            if !config.is_file() {
-                return Err(ProfileSaved::NotAFile);
-            }
+    for declared in harness.paths() {
+        let typed = account.paths.get(declared.key).map_or("", String::as_str);
+        let path = judged(
+            Path::new(typed.trim()),
+            declared.file,
+            declared.made,
+            declared.refused,
+        )?;
 
-            Ok(store::Account::Claude {
-                claude_dir: dir,
-                config_file: config,
-            })
+        // What is mounted of an account kept somewhere inside the path, each
+        // judged by the same rule and refused in the same words, because for
+        // this harness they *are* the path the account is kept under.
+        for inside in declared.within {
+            judged(&path.join(inside), false, false, declared.refused)?;
         }
 
-        ProfileAccount::Codex { home } => Ok(store::Account::Codex { home: kept(home)? }),
+        paths.push((declared.key, path));
+    }
 
-        ProfileAccount::Grok { home } => Ok(store::Account::Grok { home: kept(home)? }),
+    Ok(store::Account::new(agent_type, paths))
+}
 
-        ProfileAccount::Agy { home } => Ok(store::Account::Agy { home: kept(home)? }),
+/// One path, resolved and of the kind it is declared to be — or what it is
+/// refused as: named relatively, nothing there, or the wrong kind of thing.
+///
+/// **A path the harness says is made is made where nothing is there** — see
+/// [`crate::harness::Declared::made`] — and resolved again, so that an account
+/// nobody has run yet is a save rather than a refusal.
+fn judged(
+    path: &Path,
+    file: bool,
+    make: bool,
+    refused: [ProfileSaved; 3],
+) -> Result<PathBuf, ProfileSaved> {
+    let [not_absolute, missing, not_of_its_kind] = refused;
 
-        // An OpenCode home is the directory the two opencode keeps an account
-        // in sit under, so both of those are judged as well as the home itself
-        // — they are what a session mounts, and a directory that has never had
-        // opencode run in it holds neither. Each is judged by the same rule and
-        // refused in the same words, because for this type they *are* the home
-        // the account is kept under.
-        ProfileAccount::OpenCode { home } => {
-            let home = kept(home)?;
+    let path = match resolve(path) {
+        Resolved::Missing if make => match made(path, file) {
+            Resolved::At(path) => path,
+            Resolved::NotAbsolute => return Err(not_absolute),
+            Resolved::Missing => return Err(missing),
+        },
 
-            for path in xdg(&home) {
-                directory(&path)?;
-            }
+        Resolved::At(path) => path,
+        Resolved::NotAbsolute => return Err(not_absolute),
+        Resolved::Missing => return Err(missing),
+    };
 
-            Ok(store::Account::OpenCode { home })
-        }
+    match file {
+        true if path.is_file() => Ok(path),
+        false if path.is_dir() => Ok(path),
+        _ => Err(not_of_its_kind),
     }
 }
 
-/// What [`made`] puts at a path with nothing at it.
-#[derive(Debug, Clone, Copy)]
-enum Making {
-    /// A Claude account's directory, empty.
-    Directory,
-
-    /// Its config file, as an empty JSON object — what Claude Code fills in
-    /// the first time it runs on the account.
-    Config,
-}
-
-/// `path` resolved, and where there is nothing at it, **made** — a directory
-/// or a config file as `making` says — and resolved again.
+/// `path` **made** — an empty directory, or a file holding an empty JSON
+/// object, which is what a harness fills in the first time it runs on the
+/// account — and resolved again.
 ///
 /// **Only one level of it.** The directory it would be made in has to be there
 /// already, so a path with a typo high up in it is refused as having nothing at
 /// it, the way it always was, rather than answered with a tree nobody meant.
-/// And nothing already there is touched: a path that resolves is handed back as
-/// it is, and a file is made only where none has appeared in the meantime.
+/// And nothing already there is touched: a file is made only where none has
+/// appeared in the meantime.
 ///
-/// A path that is not absolute is refused as before. One that still cannot be
-/// made — a parent this server cannot write — is *missing*, which is what it
-/// is.
-fn made(path: &Path, making: Making) -> Resolved {
-    match resolve(path) {
-        Resolved::Missing => {}
-        resolved => return resolved,
-    }
-
+/// A path that still cannot be made — a parent this server cannot write — is
+/// *missing*, which is what it is.
+fn made(path: &Path, file: bool) -> Resolved {
     let Some(parent) = path.parent().filter(|parent| parent.is_dir()) else {
         return Resolved::Missing;
     };
 
-    let wrote = match making {
-        Making::Directory => std::fs::create_dir(path),
-        Making::Config => std::fs::OpenOptions::new()
+    let wrote = match file {
+        false => std::fs::create_dir(path),
+        true => std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(path)
@@ -869,7 +869,7 @@ fn made(path: &Path, making: Making) -> Resolved {
         Ok(()) => tracing::info!(
             path = %path.display(),
             parent = %parent.display(),
-            "a Claude account's path had nothing at it, so the save made it",
+            "an account's path had nothing at it, so the save made it",
         ),
 
         // Made by somebody else in between, which is as good.
@@ -879,7 +879,7 @@ fn made(path: &Path, making: Making) -> Resolved {
             tracing::info!(
                 error = ?why,
                 path = %path.display(),
-                "a Claude account's path had nothing at it and could not be made",
+                "an account's path had nothing at it and could not be made",
             );
 
             return Resolved::Missing;
@@ -887,49 +887,6 @@ fn made(path: &Path, making: Making) -> Resolved {
     }
 
     resolve(path)
-}
-
-/// The two directories an OpenCode account is kept in, under the home a Profile
-/// names.
-///
-/// opencode reads the XDG base directories rather than keeping a dot-directory
-/// of its own, and a Profile's home is a home to resolve them inside — see
-/// [`crate::sandbox::OPENCODE_CONFIG_INSIDE_HOME`], which is where the same two
-/// relative paths are bound from and to.
-fn xdg(home: &Path) -> impl Iterator<Item = PathBuf> {
-    [
-        crate::sandbox::OPENCODE_CONFIG_INSIDE_HOME,
-        crate::sandbox::OPENCODE_DATA_INSIDE_HOME,
-    ]
-    .map(|inside| home.join(inside))
-    .into_iter()
-}
-
-/// The one directory a type whose whole account is one home named, judged the
-/// way each of Claude's pair is.
-///
-/// One check for every such type rather than one apiece: what differs between
-/// them is which account the directory is, and that is the arm above, not this.
-fn kept(home: &str) -> Result<PathBuf, ProfileSaved> {
-    directory(Path::new(home.trim()))
-}
-
-/// The same, of a path rather than of something typed into the form.
-///
-/// What an OpenCode home holds is judged this way: the two directories under it
-/// are derived rather than typed, so there is nothing to trim off either.
-fn directory(home: &Path) -> Result<PathBuf, ProfileSaved> {
-    let home = match resolve(home) {
-        Resolved::At(path) => path,
-        Resolved::NotAbsolute => return Err(ProfileSaved::HomeNotAbsolute),
-        Resolved::Missing => return Err(ProfileSaved::HomeMissing),
-    };
-
-    if !home.is_dir() {
-        return Err(ProfileSaved::HomeNotADirectory);
-    }
-
-    Ok(home)
 }
 
 /// Choose the Pairing a Conversation's grilling session will run under.
@@ -1045,32 +1002,19 @@ fn chosen(chosen: store::Chosen) -> ProfileChosen {
     }
 }
 
-/// The store's account as the viewer receives it, held to the wire's the same
-/// way: one arm per agent type, and the paths that type has.
+/// The store's account as the viewer receives it: the harness, and each path
+/// under its key.
 ///
 /// The paths are stored as UTF-8 in the first place — one that is not cannot be
 /// saved — so nothing is lost putting them back on the wire.
 pub(crate) fn account(account: &store::Account) -> ProfileAccount {
-    match account {
-        store::Account::Claude {
-            claude_dir,
-            config_file,
-        } => ProfileAccount::Claude {
-            claude_dir: claude_dir.to_string_lossy().into_owned(),
-            config_file: config_file.to_string_lossy().into_owned(),
-        },
-        store::Account::Codex { home } => ProfileAccount::Codex {
-            home: home.to_string_lossy().into_owned(),
-        },
-        store::Account::Grok { home } => ProfileAccount::Grok {
-            home: home.to_string_lossy().into_owned(),
-        },
-        store::Account::OpenCode { home } => ProfileAccount::OpenCode {
-            home: home.to_string_lossy().into_owned(),
-        },
-        store::Account::Agy { home } => ProfileAccount::Agy {
-            home: home.to_string_lossy().into_owned(),
-        },
+    ProfileAccount {
+        agent_type: agent_type(account.agent_type()),
+        paths: account
+            .keyed()
+            .iter()
+            .map(|(key, path)| (key.clone(), path.to_string_lossy().into_owned()))
+            .collect(),
     }
 }
 
@@ -1086,29 +1030,64 @@ pub(crate) fn shown(name: Option<&str>) -> &str {
     name.unwrap_or("Default")
 }
 
+/// How the built-ins are spelled on the wire, which is how they were spelled
+/// when the wire's word for a harness was an enum's: a device still on an
+/// older release reads them, and the viewer's fixtures say them.
+const WIRE: [(store::AgentType, &str); 5] = [
+    (store::AgentType::CLAUDE, "Claude"),
+    (store::AgentType::CODEX, "Codex"),
+    (store::AgentType::GROK, "Grok"),
+    (store::AgentType::OPENCODE, "OpenCode"),
+    (store::AgentType::AGY, "Agy"),
+];
+
 /// And the agent type on its own, for the Timeline: what a session ran under is
 /// recorded without an account, the Profile it came from being a thing that can
-/// since have gone.
+/// since have gone. A plugin harness is its id.
 pub(crate) fn agent_type(agent_type: store::AgentType) -> AgentType {
-    match agent_type {
-        store::AgentType::Claude => AgentType::Claude,
-        store::AgentType::Codex => AgentType::Codex,
-        store::AgentType::Grok => AgentType::Grok,
-        store::AgentType::OpenCode => AgentType::OpenCode,
-        store::AgentType::Agy => AgentType::Agy,
-    }
+    let wire = WIRE
+        .iter()
+        .find(|(stored, _)| *stored == agent_type)
+        .map_or(agent_type.word(), |(_, wire)| wire);
+
+    AgentType(wire.into())
 }
 
 /// And back again, for a reading that came off the wire and wants the harness
 /// it names — see [`crate::harness::of`].
-pub(crate) fn stored(agent_type: AgentType) -> store::AgentType {
-    match agent_type {
-        AgentType::Claude => store::AgentType::Claude,
-        AgentType::Codex => store::AgentType::Codex,
-        AgentType::Grok => store::AgentType::Grok,
-        AgentType::OpenCode => store::AgentType::OpenCode,
-        AgentType::Agy => store::AgentType::Agy,
-    }
+pub(crate) fn stored(agent_type: &AgentType) -> store::AgentType {
+    WIRE.iter()
+        .find(|(_, wire)| *wire == agent_type.as_str())
+        .map_or_else(
+            || store::AgentType::read(agent_type.as_str()),
+            |(stored, _)| *stored,
+        )
+}
+
+/// Every harness this server can run a session on, as the viewer draws it —
+/// see [`verkstead_render::HarnessEntry`].
+pub(crate) fn harnesses() -> Vec<HarnessEntry> {
+    crate::harness::every()
+        .map(|(agent_type, harness)| HarnessEntry {
+            id: self::agent_type(agent_type),
+            name: harness.named().to_owned(),
+            mark: harness.mark().to_owned(),
+            paths: harness
+                .paths()
+                .into_iter()
+                .map(|declared| HarnessPath {
+                    key: declared.key.to_owned(),
+                    label: declared.label.to_owned(),
+                    purpose: declared.purpose.to_owned(),
+                    placeholder: declared.placeholder.to_owned(),
+                    file: declared.file,
+                })
+                .collect(),
+            login: harness.speaking().map(|speaking| speaking.name.to_owned()),
+            found_at: harness.found_at().into_iter().map(str::to_owned).collect(),
+            first_run: harness.first_run().to_owned(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1142,15 +1121,15 @@ mod tests {
         let claude_dir = dir.path().join(".claude-work");
         let config_file = dir.path().join(".claude-work.json");
 
-        let saved = inspect(&ProfileAccount::Claude {
-            claude_dir: claude_dir.to_string_lossy().into_owned(),
-            config_file: config_file.to_string_lossy().into_owned(),
-        })
+        let saved = inspect(&ProfileAccount::claude(
+            claude_dir.to_string_lossy(),
+            config_file.to_string_lossy(),
+        ))
         .expect("made rather than refused");
 
         assert!(claude_dir.is_dir());
         assert_eq!(std::fs::read_to_string(&config_file).unwrap(), "{}\n");
-        assert!(matches!(saved, store::Account::Claude { .. }));
+        assert_eq!(saved.agent_type(), store::AgentType::CLAUDE);
     }
 
     /// But one level only: a path whose parent is not there is refused as it
@@ -1160,14 +1139,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let claude_dir = dir.path().join("typo/.claude");
 
-        let refused = inspect(&ProfileAccount::Claude {
-            claude_dir: claude_dir.to_string_lossy().into_owned(),
-            config_file: dir
-                .path()
-                .join(".claude.json")
-                .to_string_lossy()
-                .into_owned(),
-        });
+        let refused = inspect(&ProfileAccount::claude(
+            claude_dir.to_string_lossy(),
+            dir.path().join(".claude.json").to_string_lossy(),
+        ));
 
         assert!(matches!(refused, Err(ProfileSaved::DirMissing)));
         assert!(!dir.path().join("typo").exists(), "and nothing was made");
@@ -1183,10 +1158,10 @@ mod tests {
         std::fs::create_dir(&claude_dir).unwrap();
         std::fs::write(&config_file, r#"{"numStartups":3}"#).unwrap();
 
-        inspect(&ProfileAccount::Claude {
-            claude_dir: claude_dir.to_string_lossy().into_owned(),
-            config_file: config_file.to_string_lossy().into_owned(),
-        })
+        inspect(&ProfileAccount::claude(
+            claude_dir.to_string_lossy(),
+            config_file.to_string_lossy(),
+        ))
         .unwrap();
 
         assert_eq!(
@@ -1233,10 +1208,7 @@ mod tests {
         let claude_dir = dir.path().join(".claude");
         std::fs::create_dir(&claude_dir).unwrap();
 
-        let account = store::Account::Claude {
-            claude_dir: claude_dir.clone(),
-            config_file: dir.path().join(".claude.json"),
-        };
+        let account = store::Account::claude(claude_dir.clone(), dir.path().join(".claude.json"));
 
         login_until(&claude_dir, 1_759_659_206_247);
         assert!(!holds_login(&account), "ran out in 2025");

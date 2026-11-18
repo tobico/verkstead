@@ -268,21 +268,22 @@ fn an_account(dir: &Path, agent_type: AgentType) {
     let home = home(dir);
 
     let dirs: Vec<PathBuf> = match agent_type {
-        AgentType::Claude => vec![home.join(".claude")],
-        AgentType::Codex => vec![home.join(".codex")],
-        AgentType::Grok => vec![home.join(".grok")],
-        AgentType::OpenCode => vec![
+        AgentType::CLAUDE => vec![home.join(".claude")],
+        AgentType::CODEX => vec![home.join(".codex")],
+        AgentType::GROK => vec![home.join(".grok")],
+        AgentType::OPENCODE => vec![
             home.join(".config/opencode"),
             home.join(".local/share/opencode"),
         ],
-        AgentType::Agy => vec![home.join(".gemini/antigravity-cli")],
+        AgentType::AGY => vec![home.join(".gemini/antigravity-cli")],
+        other => panic!("no account of {other} to make"),
     };
 
     for path in dirs {
         std::fs::create_dir_all(path).unwrap();
     }
 
-    if agent_type == AgentType::Claude {
+    if agent_type == AgentType::CLAUDE {
         std::fs::write(home.join(".claude.json"), "{}\n").unwrap();
     }
 }
@@ -297,10 +298,7 @@ async fn a_profile(pool: &SqlitePool, dir: &Path) -> String {
         pool,
         &ProfileFacts {
             name: Some("Mine".to_owned()),
-            account: Account::Claude {
-                claude_dir: account.clone(),
-                config_file: account.join("claude.json"),
-            },
+            account: Account::claude(account.clone(), account.join("claude.json")),
             models: vec!["sonnet".to_owned()],
             memory: true,
         },
@@ -327,10 +325,10 @@ async fn a_mirror(pool: &SqlitePool) {
         "aa00bb11cc22dd33ee44ff5566778899",
         &ProfileFacts {
             name: Some("Theirs".to_owned()),
-            account: Account::Claude {
-                claude_dir: PathBuf::from("/home/someone-else/.claude"),
-                config_file: PathBuf::from("/home/someone-else/.claude.json"),
-            },
+            account: Account::claude(
+                PathBuf::from("/home/someone-else/.claude"),
+                PathBuf::from("/home/someone-else/.claude.json"),
+            ),
             models: vec!["sonnet".to_owned()],
             memory: true,
         },
@@ -708,8 +706,8 @@ async fn deleting_the_last_profile_mid_run_leaves_the_mode_where_it_was() {
 async fn the_accounts_in_the_home_are_offered_with_their_harnesses() {
     let (dir, pool) = ready().await;
 
-    an_account(dir.path(), AgentType::Claude);
-    an_account(dir.path(), AgentType::Codex);
+    an_account(dir.path(), AgentType::CLAUDE);
+    an_account(dir.path(), AgentType::CODEX);
 
     // Claude Code is on this machine and Codex is not, which is the whole
     // difference between the two rows.
@@ -726,16 +724,17 @@ async fn the_accounts_in_the_home_are_offered_with_their_harnesses() {
             .collect::<Vec<_>>(),
         vec![
             (
-                ProfileAccount::Claude {
-                    claude_dir: home.join(".claude").to_string_lossy().into_owned(),
-                    config_file: home.join(".claude.json").to_string_lossy().into_owned(),
-                },
+                ProfileAccount::claude(
+                    home.join(".claude").to_string_lossy().into_owned(),
+                    home.join(".claude.json").to_string_lossy().into_owned()
+                ),
                 true,
             ),
             (
-                ProfileAccount::Codex {
-                    home: home.join(".codex").to_string_lossy().into_owned(),
-                },
+                ProfileAccount::home(
+                    verkstead_render::AgentType::CODEX,
+                    home.join(".codex").to_string_lossy().into_owned()
+                ),
                 false,
             ),
         ],
@@ -937,8 +936,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // whose harnesses is on the machine, which is the row to tick and the row
     // to grey.
     let (dir, pool) = ready().await;
-    an_account(dir.path(), AgentType::Claude);
-    an_account(dir.path(), AgentType::Codex);
+    an_account(dir.path(), AgentType::CLAUDE);
+    an_account(dir.path(), AgentType::CODEX);
     let app = served(dir.path(), &pool, EVERYTHING);
     natively_installed(dir.path());
     write("onboarding-part-way.json", &reading(&app).await, dir.path());

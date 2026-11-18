@@ -290,7 +290,7 @@ async fn named(
             // leaves out — so the entry it names is never read.
             &repo.unwrap_or_default().join(".git"),
             worktree.as_deref().unwrap_or(Path::new("")),
-        );
+        )?;
 
         let parts = carried(
             root.synced(wanted.worktree.as_deref(), &wanted.sessions),
@@ -298,12 +298,12 @@ async fn named(
             named_worktree,
         );
 
-        (root.account().to_owned(), parts)
+        Some((root.account().to_owned(), parts))
     })
     .await;
 
     match named {
-        Ok(named) => Some(named),
+        Ok(named) => named,
 
         Err(why) => {
             tracing::error!(

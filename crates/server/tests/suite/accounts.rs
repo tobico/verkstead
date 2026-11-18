@@ -394,8 +394,10 @@ impl Verkstead {
                     "name": name,
                     "account": {
                         "agent_type": "Claude",
-                        "claude_dir": claude_dir,
-                        "config_file": config_file,
+                        "paths": {
+                            "claude_dir": claude_dir,
+                            "config_file": config_file,
+                        },
                     },
                     "models": [MODEL],
                     "memory": true,
@@ -427,8 +429,10 @@ impl Verkstead {
                     "name": name,
                     "account": {
                         "agent_type": "Claude",
-                        "claude_dir": self.elsewhere.path().join(name).join(".claude"),
-                        "config_file": self.elsewhere.path().join(name).join(".claude.json"),
+                        "paths": {
+                            "claude_dir": self.elsewhere.path().join(name).join(".claude"),
+                            "config_file": self.elsewhere.path().join(name).join(".claude.json"),
+                        },
                     },
                     "models": [MODEL],
                     "memory": false,
@@ -1238,10 +1242,7 @@ async fn a_login_refreshed_at_home_is_the_one_the_next_launch_gets() {
 
     assert_eq!(
         fetched.profile.account,
-        verkstead_store::Account::Claude {
-            claude_dir: under.join(".claude"),
-            config_file: under.join(".claude.json"),
-        },
+        verkstead_store::Account::claude(under.join(".claude"), under.join(".claude.json")),
         "the launch reads the mirror as the account, in the shape the harness \
          keeps one",
     );
@@ -1448,10 +1449,10 @@ async fn a_home_that_is_not_answering_refuses_the_launch_by_name() {
         A,
         &store::ProfileFacts {
             name: Some("work".to_owned()),
-            account: store::Account::Claude {
-                claude_dir: PathBuf::from("/home/you/accounts/work/.claude"),
-                config_file: PathBuf::from("/home/you/accounts/work/.claude.json"),
-            },
+            account: store::Account::claude(
+                PathBuf::from("/home/you/accounts/work/.claude"),
+                PathBuf::from("/home/you/accounts/work/.claude.json"),
+            ),
             models: vec![MODEL.to_owned()],
             memory: true,
         },
@@ -1502,10 +1503,10 @@ async fn a_home_that_has_left_the_cluster_is_not_asked_for_the_account() {
         A,
         &store::ProfileFacts {
             name: Some("work".to_owned()),
-            account: store::Account::Claude {
-                claude_dir: PathBuf::from("/home/you/accounts/work/.claude"),
-                config_file: PathBuf::from("/home/you/accounts/work/.claude.json"),
-            },
+            account: store::Account::claude(
+                PathBuf::from("/home/you/accounts/work/.claude"),
+                PathBuf::from("/home/you/accounts/work/.claude.json"),
+            ),
             models: vec![MODEL.to_owned()],
             memory: true,
         },

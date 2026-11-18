@@ -23,7 +23,7 @@ Roadmap stage: [03: The Agent interface](docs/roadmaps/plugins/03-the-agent-inte
 
 - [x] 01: The trait, launch half — [details](01-the-trait-launch-half.md)
 - [x] 02: The trait, account half — [details](02-the-trait-account-half.md)
-- [ ] 03: The id as a string, the account as paths — [details](03-the-id-as-a-string.md)
+- [x] 03: The id as a string, the account as paths — [details](03-the-id-as-a-string.md)
 - [ ] 04: The `agent` provides-block and the WIT — [details](04-the-agent-provides-block.md)
 - [ ] 05: A plugin harness launches — [details](05-a-plugin-harness-launches.md)
 - [ ] 06: Its Transcript drawn — [details](06-its-transcript-drawn.md)

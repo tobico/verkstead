@@ -333,8 +333,10 @@ describe("a shared conversation", () => {
                       name: "work",
                       account: {
                         agent_type: "Claude",
-                        claude_dir: "/srv/accounts/work/.claude",
-                        config_file: "/srv/accounts/work/.claude.json",
+                        paths: {
+                          claude_dir: "/srv/accounts/work/.claude",
+                          config_file: "/srv/accounts/work/.claude.json",
+                        },
                       },
                       models: ["claude-fable-5"],
                       memory: true,

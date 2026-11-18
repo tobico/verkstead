@@ -43,10 +43,15 @@ export type Pairing = {
 
 /// Every pairing the saved profiles come to, in the order they are listed —
 /// profiles by name, and each profile's models as the human typed them.
+///
+/// **Less the profiles of a harness this server has not got**, the one broken
+/// row a picker leaves out: there is nothing here to launch it with, nothing to
+/// put right from here, and nothing to name it by but an id. The settings page
+/// still draws it, broken, where it can be removed.
 export function pairings(profiles: ProfileEntry[]): Pairing[] {
-  return profiles.flatMap((profile) =>
-    profile.models.map((model) => ({ profile, model })),
-  );
+  return profiles
+    .filter((profile) => profile.broken !== "HarnessUnknown")
+    .flatMap((profile) => profile.models.map((model) => ({ profile, model })));
 }
 
 /// What one row sends when it is the choice.
@@ -117,7 +122,8 @@ export function shown(
 ///
 /// Said once here rather than at each of the four places a pairing is read,
 /// because it is one rule. A profile nothing can be launched under stays in
-/// every picker — a row saying why is something to go and put right, and a row
+/// every picker — but for one of a harness this server has not got, see
+/// [`pairings`] — a row saying why is something to go and put right, and a row
 /// quietly missing is a human looking for a profile they know they saved — so
 /// the row has to carry the why. The words are
 /// [`brokenBriefly`](./broken.ts), which is the short form of the sentence the

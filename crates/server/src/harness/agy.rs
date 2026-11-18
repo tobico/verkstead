@@ -5,7 +5,7 @@ use std::time::SystemTime;
 
 use verkstead_render::Broken;
 
-use super::{Carrying, Harness, Line, ReadIn, Resume, SignedOut};
+use super::{Carrying, Declared, HOME_REFUSED, Harness, Line, ReadIn, Resume, SignedOut};
 use crate::logins::Speaking;
 use crate::platform::Platform;
 use crate::sandbox::root::{self, Part, Place, Whose};
@@ -73,6 +73,27 @@ impl Harness for Agy {
 
     fn named(&self) -> &str {
         "Antigravity CLI"
+    }
+
+    fn mark(&self) -> &str {
+        include_str!("marks/antigravity.svg")
+    }
+
+    fn paths(&self) -> Vec<Declared<'_>> {
+        vec![Declared {
+            key: store::HOME,
+            label: "Home directory",
+            purpose: "Mounted at `~/.gemini`. It holds `antigravity-cli` once agy has run in it.",
+            placeholder: "/home/you/accounts/work/.gemini",
+            file: false,
+            made: false,
+            refused: HOME_REFUSED,
+            within: &[],
+        }]
+    }
+
+    fn found_at(&self) -> Vec<&str> {
+        vec!["~/.gemini"]
     }
 
     /// **The Antigravity CLI's says what a session needs of agy's settings on the
@@ -165,9 +186,7 @@ impl Harness for Agy {
     }
 
     fn kept_in(&self, home: &Path) -> store::Account {
-        store::Account::Agy {
-            home: home.join(sandbox::AGY_INSIDE_HOME),
-        }
+        store::Account::home(store::AgentType::AGY, home.join(sandbox::AGY_INSIDE_HOME))
     }
 
     /// agy's own directory inside `~/.gemini` rather than the whole of it:

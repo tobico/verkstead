@@ -2354,7 +2354,7 @@ describe("the path a details pane stands at", () => {
     }
     expect(
       (screen.getByLabelText(/Claude directory/) as HTMLInputElement).value,
-    ).toBe(account.claude_dir);
+    ).toBe(account.paths.claude_dir);
     expect(details.textContent).toContain(account.agent_type);
 
     // In the third pane rather than over the page: the modal is gone.

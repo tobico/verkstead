@@ -290,14 +290,19 @@ impl Tail {
         // backend puts its record, and what it calls it, is that backend's own
         // business, and a backend arriving with an answer of its own gives it
         // there — see [`crate::harness::Harness::search`].
-        let search = crate::harness::of(profile.agent_type()).search(
-            profile.account.directory(),
-            profile.memory,
-            home,
-            session,
-            worktree,
-            launched,
-        );
+        //
+        // Nowhere for a harness this server has not got, whose sessions it
+        // never launches.
+        let search = crate::harness::of(profile.agent_type()).map_or(Search::Nowhere, |harness| {
+            harness.search(
+                profile.account.directory(),
+                profile.memory,
+                home,
+                session,
+                worktree,
+                launched,
+            )
+        });
 
         Tail {
             conversation,
@@ -636,7 +641,7 @@ pub(crate) async fn carried(
     worktree: &Path,
     home: &crate::sandbox::Home,
 ) -> Option<Carried> {
-    crate::harness::of(profile.agent_type())
+    crate::harness::of(profile.agent_type())?
         .carried(
             profile.account.directory(),
             profile.memory,

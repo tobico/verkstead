@@ -604,7 +604,7 @@ impl Agents {
         companions: &[PathBuf],
     ) -> Option<Vec<String>> {
         let agent_type = pairing.profile.agent_type();
-        let line = harness::of(agent_type).line(worktree, companions);
+        let line = harness::of(agent_type)?.line(worktree, companions);
 
         let mut argv = match &self.agent {
             Some(standing) => standing.clone(),
@@ -704,11 +704,13 @@ impl Agents {
     /// rather than against an account. A harness whose idle is the silence
     /// gets no signature even then.
     fn signature(&self, agent_type: store::AgentType) -> Option<Signature> {
-        harness::of(agent_type).at_work().map(|at_work| {
+        let at_work = harness::of(agent_type)?.at_work()?;
+
+        Some(
             self.signature
                 .clone()
-                .unwrap_or_else(|| Signature::AtWork(at_work.to_owned()))
-        })
+                .unwrap_or_else(|| Signature::AtWork(at_work.to_owned())),
+        )
     }
 
     fn judged(&self, agent_type: store::AgentType) -> Judged {
@@ -723,14 +725,17 @@ impl Agents {
 }
 
 /// The program a Profile of `agent_type` is run as — see [`crate::harness::Harness::binary`].
+///
+/// The id itself for a harness this server has not got, which is no program
+/// on any `PATH`: what is looked for is then not found, which is what is true.
 pub(crate) fn binary(agent_type: store::AgentType) -> &'static str {
-    harness::of(agent_type).binary()
+    harness::of(agent_type).map_or(agent_type.word(), |harness| harness.binary())
 }
 
 /// What a harness writes inside the Worktree it runs in — see
 /// [`crate::harness::Harness::written_in_worktree`].
 fn written_in_worktree(agent_type: store::AgentType) -> Option<&'static str> {
-    harness::of(agent_type).written_in_worktree()
+    harness::of(agent_type)?.written_in_worktree()
 }
 
 /// Whether the session Verkstead named is one this launch is **opening** or one
@@ -1764,7 +1769,7 @@ impl Sessions {
                     .get(&conversation_id)
                     .map(|launch| launch.agent_type)
             })
-            .map(|agent_type| harness::of(agent_type).channel())
+            .map(harness::channel)
             .unwrap_or(store::Channel::Blocking)
     }
 
@@ -3436,8 +3441,7 @@ async fn carried_on(
     }
 
     if harness::of(continued.agent_type)
-        .line(conversation.worktree.as_deref(), &[])
-        .resume
+        .and_then(|harness| harness.line(conversation.worktree.as_deref(), &[]).resume)
         .is_none()
     {
         return Carrying::Instead(
@@ -4303,10 +4307,10 @@ mod tests {
         store::Profile {
             id: "1".to_owned(),
             name: Some("fable".to_owned()),
-            account: store::Account::Claude {
-                claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
-                config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
-            },
+            account: store::Account::claude(
+                PathBuf::from("/srv/accounts/fable/.claude"),
+                PathBuf::from("/srv/accounts/fable/.claude.json"),
+            ),
             models: vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()],
             memory: true,
             unbound: None,
@@ -4330,9 +4334,10 @@ mod tests {
             profile: store::Profile {
                 id: "2".to_owned(),
                 name: Some("work".to_owned()),
-                account: store::Account::Codex {
-                    home: PathBuf::from("/srv/accounts/work/.codex"),
-                },
+                account: store::Account::home(
+                    store::AgentType::CODEX,
+                    PathBuf::from("/srv/accounts/work/.codex"),
+                ),
                 models: vec!["gpt-5-codex".to_owned()],
                 memory: true,
                 unbound: None,
@@ -4348,9 +4353,10 @@ mod tests {
             profile: store::Profile {
                 id: "3".to_owned(),
                 name: Some("xai".to_owned()),
-                account: store::Account::Grok {
-                    home: PathBuf::from("/srv/accounts/work/.grok"),
-                },
+                account: store::Account::home(
+                    store::AgentType::GROK,
+                    PathBuf::from("/srv/accounts/work/.grok"),
+                ),
                 models: vec!["grok-4.6".to_owned()],
                 memory: true,
                 unbound: None,
@@ -4368,9 +4374,10 @@ mod tests {
             profile: store::Profile {
                 id: "4".to_owned(),
                 name: Some("zen".to_owned()),
-                account: store::Account::OpenCode {
-                    home: PathBuf::from("/srv/accounts/zen/opencode"),
-                },
+                account: store::Account::home(
+                    store::AgentType::OPENCODE,
+                    PathBuf::from("/srv/accounts/zen/opencode"),
+                ),
                 models: vec!["opencode/big-pickle".to_owned()],
                 memory: true,
                 unbound: None,
@@ -4386,9 +4393,10 @@ mod tests {
             profile: store::Profile {
                 id: "5".to_owned(),
                 name: None,
-                account: store::Account::Agy {
-                    home: PathBuf::from("/srv/accounts/gemini/.gemini"),
-                },
+                account: store::Account::home(
+                    store::AgentType::AGY,
+                    PathBuf::from("/srv/accounts/gemini/.gemini"),
+                ),
                 models: vec!["gemini-pro".to_owned()],
                 memory: true,
                 unbound: None,
@@ -4985,13 +4993,13 @@ mod tests {
     /// out of git.
     #[test]
     fn only_agy_writes_inside_the_worktree() {
-        assert_eq!(written_in_worktree(store::AgentType::Agy), Some(".gemini/"));
+        assert_eq!(written_in_worktree(store::AgentType::AGY), Some(".gemini/"));
 
         for agent_type in [
-            store::AgentType::Claude,
-            store::AgentType::Codex,
-            store::AgentType::Grok,
-            store::AgentType::OpenCode,
+            store::AgentType::CLAUDE,
+            store::AgentType::CODEX,
+            store::AgentType::GROK,
+            store::AgentType::OPENCODE,
         ] {
             assert_eq!(written_in_worktree(agent_type), None);
         }
@@ -5453,7 +5461,7 @@ exit 1
         );
 
         {
-            let launching = sessions.launching(CONVERSATION, store::AgentType::Claude);
+            let launching = sessions.launching(CONVERSATION, store::AgentType::CLAUDE);
 
             assert!(
                 sessions.starting(CONVERSATION),
@@ -5483,7 +5491,7 @@ exit 1
         assert_eq!(sessions.running_or_launching(), 0);
 
         {
-            let _launching = sessions.launching(CONVERSATION, store::AgentType::Claude);
+            let _launching = sessions.launching(CONVERSATION, store::AgentType::CLAUDE);
 
             assert_eq!(
                 sessions.running_or_launching(),
@@ -5519,7 +5527,7 @@ exit 1
         );
 
         {
-            let launching = sessions.launching(CONVERSATION, store::AgentType::Claude);
+            let launching = sessions.launching(CONVERSATION, store::AgentType::CLAUDE);
 
             assert_eq!(
                 sessions.writing(CONVERSATION),

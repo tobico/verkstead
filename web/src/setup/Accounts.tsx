@@ -49,11 +49,13 @@ import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 import { Copy } from "../Copy";
 import { HarnessMark } from "../HarnessMark";
 import { Icon } from "../Icon";
-import { AGENT_NAME, type AgentType } from "../agents";
+import type { AgentType } from "../agents";
+import { harness, harnessName, harnesses } from "../harnesses";
 import { createProfile, listProfiles } from "../api/client";
 import { harnessAbsent } from "../broken";
 import { useReading } from "../freshness";
 import type {
+  HarnessEntry,
   AccountView,
   OnboardingView,
   ProfileEdit,
@@ -63,40 +65,13 @@ import { KNOWN_MODELS } from "../models";
 import { ErrorLine } from "../notices";
 import { rowPress } from "../rows";
 import {
-  BLANK_PROFILE,
+  blankProfile,
   PROFILE_REFUSAL,
   ProfileForm,
 } from "../profiles/ProfileList";
 import { Foot } from "./Foot";
 import { PROBE } from "./steps";
 import styles from "./Accounts.module.css";
-
-/// What to run to make an account of each harness: the program itself, once, in
-/// a terminal — logging in is what each of them does when it is first started.
-///
-/// The viewer's own words, like the install commands beside them: what the
-/// server says is which accounts are *there*, and how one is made is the same
-/// answer on every Verkstead.
-const LOGIN: Record<AgentType, string> = {
-  Claude: "claude",
-  Codex: "codex",
-  Grok: "grok",
-  OpenCode: "opencode auth login",
-  Agy: "agy",
-};
-
-/// Where each shape of account is kept, said as the paths a human would
-/// recognise — the ones under the home the server itself runs as.
-///
-/// Drawn under a row so that what is about to be saved can be checked. The
-/// server sends the resolved paths; these are the names they have.
-const KEPT: Record<AgentType, string[]> = {
-  Claude: ["~/.claude", "~/.claude.json"],
-  Codex: ["~/.codex"],
-  Grok: ["~/.grok"],
-  OpenCode: ["~/.config/opencode", "~/.local/share/opencode"],
-  Agy: ["~/.gemini"],
-};
 
 /// Why the press is held, beside it.
 const HELD = "Tick an account, or save one.";
@@ -324,7 +299,7 @@ export function Accounts(props: {
           </p>
 
           <ProfileForm
-            initial={() => BLANK_PROFILE}
+            initial={blankProfile}
             submit="Save profile"
             save={createProfile}
             saved={read}
@@ -380,13 +355,19 @@ function Card(props: {
       <HarnessMark of={agent()} class={styles.harness} />
       <span class={styles.text}>
         <span class={styles.name}>
-          {AGENT_NAME[agent()]}
+          {harnessName(agent())}
           <Show when={!props.found.harness}>
             <span class={styles.pill}>Not installed</span>
           </Show>
         </span>
         <span class={styles.kept}>
-          <For each={KEPT[agent()]}>{(path) => <code>{path}</code>}</For>
+          {/* Said as the paths a human would recognise — the ones under the
+              home the server itself runs as — so that what is about to be
+              saved can be checked. The server sends the resolved paths; these
+              are the names they have, as the harness list says them. */}
+          <For each={harness(agent())?.found_at ?? []}>
+            {(path) => <code>{path}</code>}
+          </For>
         </span>
         {/* An account whose harness is missing is one there is nothing to
             run: the card is drawn so that it is not a surprise later, and
@@ -478,17 +459,20 @@ function Nothing(props: { reading: OnboardingView }): JSX.Element {
       </p>
 
       <ul class={styles.logins}>
+        {/* What to run to make an account of each harness: the program
+            itself, once, in a terminal — logging in is what each of them does
+            when it is first started — as the harness list says it. */}
         <For each={runnable(props.reading)}>
-          {(agent) => (
-            <li class={styles.login} data-login={agent}>
+          {(entry) => (
+            <li class={styles.login} data-login={entry.id}>
               <span class={styles.name}>
-                <HarnessMark of={agent} class={styles.harness} />
-                {AGENT_NAME[agent]}
+                <HarnessMark of={entry.id} class={styles.harness} />
+                {entry.name}
               </span>
               <span class={styles.command}>
                 <span class={styles.prompt}>$</span>
-                <pre>{LOGIN[agent]}</pre>
-                <Copy of={LOGIN[agent]} class={styles.copy} />
+                <pre>{entry.first_run}</pre>
+                <Copy of={entry.first_run} class={styles.copy} />
               </span>
             </li>
           )}
@@ -498,23 +482,21 @@ function Nothing(props: { reading: OnboardingView }): JSX.Element {
   );
 }
 
-/// The harnesses a login could be run under here: those on the machine, or all
-/// five where none is.
+/// The harnesses a login could be run under here: those on the machine, or
+/// every one the server lists where none is.
 ///
 /// Read off the dependency rows rather than said again, which is what keeps
 /// this list and the step above from disagreeing about what is installed. A
-/// harness row and an agent type are written in the same five words on purpose
-/// — see `crates/render/src/profiles.rs` — so one is read as the other rather
-/// than through a table nobody would maintain.
-function runnable(reading: OnboardingView): AgentType[] {
-  const harnesses: AgentType[] = ["Claude", "Codex", "Grok", "OpenCode", "Agy"];
-  const there = harnesses.filter((agent) =>
+/// harness row and an agent type are written in the same words on purpose —
+/// see `crates/render/src/profiles.rs` — so one is read as the other.
+function runnable(reading: OnboardingView): HarnessEntry[] {
+  const there = harnesses().filter((entry) =>
     reading.dependencies.some(
-      (row) => row.dependency === agent && row.state.state === "Present",
+      (row) => row.dependency === entry.id && row.state.state === "Present",
     ),
   );
 
-  return there.length > 0 ? there : harnesses;
+  return there.length > 0 ? there : harnesses();
 }
 
 /// One found account as the Profile it would be saved as: no name, memory shared,

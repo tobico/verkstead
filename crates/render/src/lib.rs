@@ -103,10 +103,10 @@ pub use plugins::{
     PluginsView,
 };
 pub use profiles::{
-    AccountFile, AccountLogin, AccountLoginTaken, AccountSignedOut, AgentType, Broken, LoginOver,
-    MemoryFile, MemoryLeft, MemoryWanted, PairingView, PickedView, ProfileAccount, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry, ProfileSaved,
-    ProfileTrouble, RepoPairingsView, RoleChoice,
+    AccountFile, AccountLogin, AccountLoginTaken, AccountSignedOut, AgentType, Broken,
+    HarnessEntry, HarnessPath, LoginOver, MemoryFile, MemoryLeft, MemoryWanted, PairingView,
+    PickedView, ProfileAccount, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileDevice,
+    ProfileEdit, ProfileEntry, ProfileSaved, ProfileTrouble, RepoPairingsView, RoleChoice,
 };
 pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};

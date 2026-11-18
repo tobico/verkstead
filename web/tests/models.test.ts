@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { AGENT_NAME } from "../src/agents";
+import { harness, harnesses } from "../src/harnesses";
 import { KNOWN_MODELS, known, prettify } from "../src/models";
 
 describe("the known models", () => {
@@ -22,7 +22,7 @@ describe("the known models", () => {
       expect(model.id).not.toBe("");
       expect(model.name).not.toBe("");
       expect(model.name).not.toBe(model.id);
-      expect(AGENT_NAME[model.agent]).toBeTruthy();
+      expect(harness(model.agent)).toBeDefined();
     }
   });
 
@@ -31,7 +31,7 @@ describe("the known models", () => {
   /// picks are the ordinary way in, and a backend with none would be a form that
   /// looked broken until somebody guessed at a spelling.
   it("knows a model for every backend", () => {
-    for (const agent of Object.keys(AGENT_NAME)) {
+    for (const agent of harnesses().map((entry) => entry.id)) {
       expect(
         KNOWN_MODELS.some((model) => model.agent === agent),
         `nothing is written down for ${agent}`,

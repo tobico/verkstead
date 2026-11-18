@@ -164,9 +164,10 @@ pub async fn printed(pool: &SqlitePool, id: i64, session: &str, said: &str) -> i
         pool,
         &ProfileFacts {
             name: Some(session.to_owned()),
-            account: Account::Codex {
-                home: PathBuf::from("/watched/accounts/work/.codex"),
-            },
+            account: Account::home(
+                AgentType::CODEX,
+                PathBuf::from("/watched/accounts/work/.codex"),
+            ),
             models: vec!["gpt-5".to_owned()],
             memory: true,
         },
@@ -279,9 +280,10 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
         pool,
         &ProfileFacts {
             name: Some(format!("{branch}-grilling")),
-            account: Account::Codex {
-                home: PathBuf::from("/watched/accounts/work/.codex"),
-            },
+            account: Account::home(
+                AgentType::CODEX,
+                PathBuf::from("/watched/accounts/work/.codex"),
+            ),
             models: vec!["gpt-5".to_owned()],
             memory: true,
         },
@@ -753,7 +755,7 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
         id,
         &Continued {
             session_id: "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
-            agent_type: AgentType::Claude,
+            agent_type: AgentType::CLAUDE,
             widened_by: None,
             kept_here_by: None,
         },

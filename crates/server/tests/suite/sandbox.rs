@@ -671,7 +671,7 @@ fi
             &self.pool,
             &store::ProfileFacts {
                 name: Some("codex".to_owned()),
-                account: store::Account::Codex { home },
+                account: store::Account::home(store::AgentType::CODEX, home),
                 models: vec!["gpt-5-codex".to_owned()],
                 memory: true,
             },
@@ -729,7 +729,7 @@ fi
             &self.pool,
             &store::ProfileFacts {
                 name: Some("grok".to_owned()),
-                account: store::Account::Grok { home },
+                account: store::Account::home(store::AgentType::GROK, home),
                 models: vec!["grok-4.6".to_owned()],
                 memory: true,
             },
@@ -777,7 +777,7 @@ fi
             &self.pool,
             &store::ProfileFacts {
                 name: Some("opencode".to_owned()),
-                account: store::Account::OpenCode { home },
+                account: store::Account::home(store::AgentType::OPENCODE, home),
                 models: vec!["opencode/big-pickle".to_owned()],
                 memory: true,
             },
@@ -850,7 +850,7 @@ fi
             &self.pool,
             &store::ProfileFacts {
                 name: Some("agy".to_owned()),
-                account: store::Account::Agy { home },
+                account: store::Account::home(store::AgentType::AGY, home),
                 models: vec!["gemini-pro".to_owned()],
                 memory: true,
             },
@@ -1050,10 +1050,7 @@ async fn grilling_with(
         &pool,
         &store::ProfileFacts {
             name: Some("work".to_owned()),
-            account: store::Account::Claude {
-                claude_dir,
-                config_file,
-            },
+            account: store::Account::claude(claude_dir, config_file),
             models: vec!["claude-opus-5".to_owned()],
             memory: true,
         },
@@ -2902,10 +2899,10 @@ async fn an_account_on_another_volume_is_a_session_that_is_not_started() {
             // The directory half where the fixture's own is, so that what is
             // being refused is the one path a hard link is asked for rather
             // than the whole account being somewhere odd.
-            account: store::Account::Claude {
-                claude_dir: fixture.claude_dir(),
-                config_file: PathBuf::from(r"Z:\accounts\work\.claude.json"),
-            },
+            account: store::Account::claude(
+                fixture.claude_dir(),
+                PathBuf::from(r"Z:\accounts\work\.claude.json"),
+            ),
             models: vec!["claude-opus-5".to_owned()],
             memory: true,
         },

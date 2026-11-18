@@ -5,9 +5,9 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use verkstead_render::Broken;
+use verkstead_render::{Broken, ProfileSaved};
 
-use super::{Carrying, Harness, Line, ReadIn, Resume, SignedOut};
+use super::{Carrying, Declared, Harness, Line, ReadIn, Resume, SignedOut};
 use crate::logins::Speaking;
 use crate::platform::Platform;
 use crate::sandbox::root::{self, Part, Place, Whose};
@@ -42,6 +42,48 @@ impl Harness for Claude {
 
     fn named(&self) -> &str {
         "Claude Code"
+    }
+
+    fn mark(&self) -> &str {
+        include_str!("marks/claude-color.svg")
+    }
+
+    fn paths(&self) -> Vec<Declared<'_>> {
+        vec![
+            Declared {
+                key: store::CLAUDE_DIR,
+                label: "Claude directory",
+                purpose: "A session's `~/.claude` is built from it. Verkstead makes it and \
+                         the config file if they aren't there yet.",
+                placeholder: "/home/you/accounts/work/.claude",
+                file: false,
+                made: true,
+                refused: [
+                    ProfileSaved::DirNotAbsolute,
+                    ProfileSaved::DirMissing,
+                    ProfileSaved::NotADirectory,
+                ],
+                within: &[],
+            },
+            Declared {
+                key: store::CONFIG_FILE,
+                label: "Config file",
+                purpose: "Copied to a session's `~/.claude.json`.",
+                placeholder: "/home/you/accounts/work/.claude.json",
+                file: true,
+                made: true,
+                refused: [
+                    ProfileSaved::ConfigNotAbsolute,
+                    ProfileSaved::ConfigMissing,
+                    ProfileSaved::NotAFile,
+                ],
+                within: &[],
+            },
+        ]
+    }
+
+    fn found_at(&self) -> Vec<&str> {
+        vec!["~/.claude", "~/.claude.json"]
     }
 
     /// **Its resume is `--resume <session-id>`**, written where the session id it
@@ -160,10 +202,10 @@ impl Harness for Claude {
     }
 
     fn kept_in(&self, home: &Path) -> store::Account {
-        store::Account::Claude {
-            claude_dir: home.join(sandbox::CLAUDE_DIR_INSIDE_HOME),
-            config_file: home.join(sandbox::CLAUDE_CONFIG_INSIDE_HOME),
-        }
+        store::Account::claude(
+            home.join(sandbox::CLAUDE_DIR_INSIDE_HOME),
+            home.join(sandbox::CLAUDE_CONFIG_INSIDE_HOME),
+        )
     }
 
     /// A directory and a file — which is exactly the distinction the Windows

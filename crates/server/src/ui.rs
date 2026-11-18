@@ -670,6 +670,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/review-pairing",
             post(choose_review_pairing),
         )
+        .route("/api/ui/harnesses", get(harnesses))
         .route("/api/ui/profiles", get(profiles).post(create_profile))
         .route("/api/ui/profiles/{id}", post(edit_profile))
         // Setting a Profile up on this device, a press of its own rather than
@@ -3603,7 +3604,13 @@ async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpRe
         .format(&Rfc3339)
         .unwrap_or_default();
 
-    Ok(verkstead_render::shared(view, sets, commits, taken))
+    Ok(verkstead_render::shared(
+        view,
+        sets,
+        commits,
+        taken,
+        crate::profiles::harnesses(),
+    ))
 }
 
 /// What a share's Set sheets read their pictures out of: the repositories the
@@ -6269,6 +6276,12 @@ async fn choose_review_pairing(
             unavailable("The review pairing couldn't be chosen.")
         }
     }
+}
+
+/// `GET /api/ui/harnesses` — every harness this server can run a session on,
+/// with what the Profile form, the cards and the pickers draw of each.
+async fn harnesses() -> Json<Vec<verkstead_render::HarnessEntry>> {
+    Json(crate::profiles::harnesses())
 }
 
 /// `GET /api/ui/profiles` — the Agent Profiles, by name, each saying whether its

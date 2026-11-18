@@ -138,10 +138,10 @@ import iconButtonCss from "../src/IconButton.module.css?raw";
 // Reading one back off the page is `marked` in `./marking.ts`, the mark being
 // drawn on more pages than this one.
 import harnessMark from "../src/HarnessMark.module.css";
-import claudeMarkFile from "../src/marks/claude-color.svg?raw";
-import codexMarkFile from "../src/marks/codex.svg?raw";
-import grokMarkFile from "../src/marks/grok.svg?raw";
-import opencodeMarkFile from "../src/marks/opencode.svg?raw";
+import claudeMarkFile from "../../crates/server/src/harness/marks/claude-color.svg?raw";
+import codexMarkFile from "../../crates/server/src/harness/marks/codex.svg?raw";
+import grokMarkFile from "../../crates/server/src/harness/marks/grok.svg?raw";
+import opencodeMarkFile from "../../crates/server/src/harness/marks/opencode.svg?raw";
 import dropdown from "../src/Menu.module.css";
 import menuCss from "../src/Menu.module.css?raw";
 import notices from "../src/notices.module.css";
@@ -358,7 +358,7 @@ import {
   openAgent,
   theWorkbench,
 } from "./bench";
-import { art, marked } from "./marking";
+import { art, drawing as markDrawing, marked } from "./marking";
 import {
   actionRows,
   offered,
@@ -6163,7 +6163,7 @@ describe("a conversation's pairings", () => {
   const MIXED: ProfileEntry[] = [
     PROFILES[0]!,
     {
-      account: { agent_type: "Grok", home: "/srv/accounts/grok" },
+      account: { agent_type: "Grok", paths: { home: "/srv/accounts/grok" } },
       broken: null,
       login: true,
       id: "99999999-9999-4999-8999-999999999999",
@@ -9464,11 +9464,11 @@ describe("the mark of the harness a session ran under", () => {
       `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.ranAs}`,
     );
 
-    const path = await drawn(head, `.${harnessMark.mark} path`);
+    const mark = await drawn(head, `.${harnessMark.mark}`);
 
-    expect(path.getAttribute("fill")).toBe("#D97757");
-    expect(head.querySelector(`.${harnessMark.mark} svg`)!.getAttribute("fill"))
-      .toBeNull();
+    expect(mark.classList).toContain(harnessMark.coloured);
+    expect(markDrawing(mark)).toContain('fill="#D97757"');
+    expect(markDrawing(mark)).not.toContain("currentColor");
   });
 
   /// And the other three follow the ink of whatever line they were put beside,
@@ -9485,10 +9485,10 @@ describe("the mark of the harness a session ran under", () => {
         `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.ranAs}`,
       );
 
-      const svg = await drawn(head, `.${harnessMark.mark} svg`);
+      const mark = await drawn(head, `.${harnessMark.mark}`);
 
-      expect(svg.getAttribute("fill")).toBe("currentColor");
-      expect(svg.querySelector("path")!.getAttribute("fill")).toBeNull();
+      expect(mark.classList).toContain(harnessMark.inked);
+      expect(markDrawing(mark)).toContain('fill="currentColor"');
     },
   );
 

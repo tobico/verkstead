@@ -29,10 +29,12 @@
 //! where a save goes and what a save that was taken means, and both of those
 //! are the caller's.
 //!
-//! Which fields those are comes off the profile's agent type rather than being
-//! written into the form: an account is that type's own shape — Claude's pair of
-//! paths here — so [`ACCOUNT_FIELDS`] holds a row per type, and the stage that
-//! adds a backend adds a row rather than restructuring anything.
+//! Which fields those are comes off the profile's harness rather than being
+//! written into the form: the server's harness list declares the paths an
+//! account of each is made of — Claude's pair, every other built-in's one home,
+//! whatever a plugin's manifest says — with the label, the note and the example
+//! of each, and the form draws one field per declared path. See
+//! [`../harnesses.ts`](../harnesses.ts).
 //!
 //! Two halves in two panes, which is what the settings page is now. Each saved
 //! Profile is a [`CardButton`](../CardButton.tsx) in the middle pane and the
@@ -100,23 +102,18 @@
 //! for the picked type's own, blank, a path typed for one type's account meaning
 //! nothing in another's.
 //!
-//! It is a segmented control of the four, each under its own brand mark —
+//! It is a segmented control of the harnesses, each under its own brand mark —
 //! radios under one legend, drawn as one bar with the chosen segment raised —
 //! and it stands first, over the name, as the setup wizard's boards draw the
 //! form. The models under the paths are chips: a tick each, drawn in the ember
 //! when picked. The form is drawn this one way for the wizard and the settings
 //! page alike, it being one form. Everything else here is a text field.
 //!
-//! A type is offered only once it can launch the real binary, which is what
-//! keeps the picker from being a lie — and offering is said apart from drawing,
-//! in [`AGENT_TYPES`], because the two are not the same list. What a saved
-//! profile can be *drawn* with is every type there is, since a profile of one
-//! whose stage has not landed is one saved over the API and it still has to
-//! read back; what the picker *offers* is the types that can launch, which is
-//! written down rather than derived. Derived is what would make the picker a
-//! lie again: [`ACCOUNT_FIELDS`] has to name every type to compile, so a
-//! discriminator arriving in the wire types would put its own row in the picker
-//! the same day, with no backend behind it.
+//! The picker offers the harnesses the server says it can run, which is what
+//! keeps it from being a lie: a harness is on the list once there is something
+//! here to launch it with. A saved profile of a harness that is not on it — a
+//! plugin installed on the device that saved it and not here — reads as none of
+//! them chosen, and is drawn broken.
 //!
 //! A section of the settings page rather than a page of its own: which accounts
 //! a session may be run under is settled once and then left alone, which is the
@@ -152,9 +149,10 @@ import {
   editProfile,
   listProfiles,
 } from "../api/client";
-import { AGENT_NAME, type AgentType } from "../agents";
+import type { AgentType } from "../agents";
 import { NOT_USABLE_AWAY, brokenReading } from "../broken";
 import type {
+  HarnessPath,
   ProfileAccount,
   ProfileDeleted,
   ProfileDevice,
@@ -164,6 +162,7 @@ import type {
 } from "../api/types";
 import { osIcon } from "../devices";
 import { useReading } from "../freshness";
+import { harness, harnessName, harnesses } from "../harnesses";
 import { rowPress } from "../rows";
 import { KNOWN_MODELS, known, prettify } from "../models";
 import { Empty, ErrorLine, Note } from "../notices";
@@ -200,6 +199,7 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
   HomeMissing: "There's nothing at the home's path.",
   HomeNotADirectory:
     "That isn't a directory. An account's home is mounted from one.",
+  NoSuchHarness: "That agent isn't installed on this Verkstead.",
 };
 
 /// And what each way of being refused a removal says.
@@ -212,173 +212,57 @@ export const PROFILE_REMOVAL_REFUSAL: Record<ProfileDeleted, string> = {
   NoSuchProfile: "That profile is gone already.",
 };
 
-/// One path an account of some agent type is: the key it is held under, what the
-/// label over it says, what becomes of the path in a session, an example to type
-/// into it, and whether the path it names is a file.
-///
-/// That last one is the field's browse rather than anything the form does with
-/// what is typed: a field naming a file offers the files beside the directories
-/// and stops at one, and every other field here offers directories only. The
-/// server is what holds a saved path to being the one or the other — `NotAFile`
-/// and `NotADirectory` are two of its refusals above.
-type AccountField = {
-  key: string;
-  label: string;
-  note: JSX.Element;
-  placeholder: string;
-  file?: boolean;
-};
-
-/// What a profile of each agent type is asked for.
-///
-/// The whole of the per-type half of the form: a row apiece, and the stage that
-/// lands a backend adds one, which is the point of the account being a shape
-/// rather than a pair every profile is assumed to have.
-///
-/// Every type there is, and it has to be: a saved profile of a type whose stage
-/// has not landed — one written over the API — is still a profile this pane has
-/// to draw. What the picker offers is the shorter list beside it, in
-/// [`AGENT_TYPES`], and it is this table that makes offering one safe: the type
-/// checker will not let a row go missing, so a type the picker offers is always
-/// one the form can then ask the paths of.
-const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
-  Claude: [
-    {
-      key: "claude_dir",
-      label: "Claude directory",
-      note: (
-        <>
-          A session's <code>~/.claude</code> is built from it. Verkstead makes
-          it and the config file if they aren't there yet.
-        </>
-      ),
-      placeholder: "/home/you/accounts/work/.claude",
-    },
-    {
-      key: "config_file",
-      label: "Config file",
-      note: (
-        <>
-          Copied to a session's <code>~/.claude.json</code>.
-        </>
-      ),
-      placeholder: "/home/you/accounts/work/.claude.json",
-      file: true,
-    },
-  ],
-  Codex: [
-    {
-      key: "home",
-      label: "Home directory",
-      note: (
-        <>
-          Mounted at <code>~/.codex</code>.
-        </>
-      ),
-      placeholder: "/home/you/accounts/work/.codex",
-    },
-  ],
-  Grok: [
-    {
-      key: "home",
-      label: "Home directory",
-      note: (
-        <>
-          Mounted at <code>~/.grok</code>.
-        </>
-      ),
-      placeholder: "/home/you/accounts/work/.grok",
-    },
-  ],
-  OpenCode: [
-    {
-      key: "home",
-      label: "Home directory",
-      note: (
-        <>
-          Its <code>.config/opencode</code> and{" "}
-          <code>.local/share/opencode</code> are mounted where opencode looks
-          for them.
-        </>
-      ),
-      placeholder: "/home/you/accounts/work/opencode",
-    },
-  ],
-  Agy: [
-    {
-      key: "home",
-      label: "Home directory",
-      note: (
-        <>
-          Mounted at <code>~/.gemini</code>. It holds{" "}
-          <code>antigravity-cli</code> once agy has run in it.
-        </>
-      ),
-      placeholder: "/home/you/accounts/work/.gemini",
-    },
-  ],
-};
-
-/// An account of each type with nothing typed into it: what picking that type
-/// leaves in the form.
+/// An account of `agent_type` with nothing typed into it: what picking that
+/// harness leaves in the form.
 ///
 /// Blank rather than carried across, because the paths are not the same paths:
 /// what a Claude profile keeps in two is what a Codex one keeps in one, and a
 /// directory typed for either means nothing under the other.
-const BLANK_ACCOUNT: Record<AgentType, ProfileAccount> = {
-  Claude: { agent_type: "Claude", claude_dir: "", config_file: "" },
-  Codex: { agent_type: "Codex", home: "" },
-  Grok: { agent_type: "Grok", home: "" },
-  OpenCode: { agent_type: "OpenCode", home: "" },
-  Agy: { agent_type: "Agy", home: "" },
-};
+function blank(agent_type: AgentType): ProfileAccount {
+  return {
+    agent_type,
+    paths: Object.fromEntries(
+      (harness(agent_type)?.paths ?? []).map((declared) => [declared.key, ""]),
+    ),
+  };
+}
 
 /// An empty form: what "add a profile" starts from.
 ///
-/// A Claude account because it is the first of [`AGENT_TYPES`], rather than
-/// because it is the only one. What this is not is a hard-coded pair: the
-/// fields drawn under it come off the type this names.
-export const BLANK_PROFILE: ProfileEdit = {
-  name: null,
-  account: BLANK_ACCOUNT.Claude,
-  models: [],
-  // On, which is what every account has always been given: the switch is a
-  // way to stop sharing memory rather than a way to start.
-  memory: true,
-};
+/// An account of the first harness the server lists, rather than of one this
+/// file names: the fields drawn under it come off the harness it is of.
+export function blankProfile(): ProfileEdit {
+  return {
+    name: null,
+    account: blank(harnesses()[0]?.id ?? ""),
+    models: [],
+    // On, which is what every account has always been given: the switch is a
+    // way to stop sharing memory rather than a way to start.
+    memory: true,
+  };
+}
 
-/// The types the picker offers, in the order it offers them.
-///
-/// **Written down rather than derived, and that is the whole of what keeps the
-/// picker honest.** A type is offered only once it can launch the real binary
-/// (ADR-0011) — one that cannot would be a lie in a picker — and every list
-/// this could have been read off names types by a rule that has nothing to do
-/// with launching. [`ACCOUNT_FIELDS`] names every type there is, because it has
-/// to compile; so does the [`AgentType`] the wire types generate. Either would
-/// put a backend in front of the human the day its discriminator landed, which
-/// is the day before the stage that makes it run.
-///
-/// So the stage that lands a backend adds it here, last, as the last thing it
-/// does — and a discriminator that arrives ahead of its stage is drawable
-/// without being offered, which is what it was always meant to be.
-const AGENT_TYPES: AgentType[] = ["Claude", "Codex", "Grok", "OpenCode", "Agy"];
-
-/// One of an account's paths, by the key the table above named it with.
-///
-/// Every account is an agent type and the paths that type keeps, so reading one
-/// by key is reading a string. What the shapes really are is `ProfileAccount`,
-/// and the server is what holds them to it — [`path`] and [`written`] are the
-/// two places the form looks past the type, and both look past it only to reach
-/// keys the table for that type gave them.
+/// One of an account's paths, by the key its harness declares it under.
 const path = (account: ProfileAccount, key: string): string =>
-  (account as Record<string, string>)[key] ?? "";
+  account.paths[key] ?? "";
 
 /// And the same account with one of those paths changed.
 const written = (
   account: ProfileAccount,
   key: string,
   value: string,
-): ProfileAccount => ({ ...account, [key]: value }) as ProfileAccount;
+): ProfileAccount => ({
+  ...account,
+  paths: { ...account.paths, [key]: value },
+});
+
+/// What a declared path is for, as the harness list says it: words, with what
+/// is to be read as code between backticks.
+function purpose(said: string): JSX.Element {
+  return said
+    .split("`")
+    .map((part, at) => (at % 2 === 1 ? <code>{part}</code> : part));
+}
 
 /// The Profiles as they stand, read once for the two panes that draw them.
 ///
@@ -481,9 +365,9 @@ export function ProfileList(props: {
 /// the pane is where they are picked; a card that listed them put a line of ids
 /// under every row, which is what a list is scrolled past rather than scanned.
 function summary(profile: ProfileEntry): string {
-  const harness = AGENT_NAME[profile.account.agent_type];
+  const named = harnessName(profile.account.agent_type);
 
-  return profile.name ? `${harness} · ${profile.name}` : harness;
+  return profile.name ? `${named} · ${profile.name}` : named;
 }
 
 /// One saved profile: what it runs, and what it is called.
@@ -643,11 +527,16 @@ function DeviceLine(props: { line: ProfileDevice }): JSX.Element {
   );
 }
 
-/// The paths a binding holds, in its harness's shape: Claude's pair, or the one
-/// home every harness after it keeps.
+/// The paths a binding holds, in the order its harness declares them: Claude's
+/// pair, or the one home every built-in after it keeps — or as the binding
+/// holds them, for a harness this server has not got.
 function paths(account: ProfileAccount): string {
-  return ACCOUNT_FIELDS[account.agent_type]
-    .map((field) => path(account, field.key))
+  const declared = harness(account.agent_type)?.paths.map(
+    (declared) => declared.key,
+  );
+
+  return (declared ?? Object.keys(account.paths))
+    .map((key) => path(account, key))
     .join(" and ");
 }
 
@@ -659,12 +548,10 @@ function notLendable(profile: ProfileEntry): boolean {
   return !profile.login && profile.bound;
 }
 
-/// Whether a card offers a login: a Claude or an Antigravity CLI Profile bound
-/// on this device — see ADR-0022 for why no other.
+/// Whether a card offers a login: a Profile bound on this device whose
+/// harness's login Verkstead runs, which the harness list says — see ADR-0022.
 function loggable(profile: ProfileEntry): boolean {
-  const runs = profile.account.agent_type;
-
-  return (runs === "Claude" || runs === "Agy") && profile.bound;
+  return harness(profile.account.agent_type)?.login != null && profile.bound;
 }
 
 /// Whether the account is logged in here: it holds a login file, and the server
@@ -718,7 +605,7 @@ export function ProfilePane(props: {
     const profile = saved();
 
     return profile === undefined
-      ? BLANK_PROFILE
+      ? blankProfile()
       : {
           name: profile.name,
           account: { ...profile.account },
@@ -949,7 +836,7 @@ function SetUpHere(props: {
 }): JSX.Element {
   const [open, setOpen] = createSignal(false);
   const [account, setAccount] = createSignal<ProfileAccount>(
-    BLANK_ACCOUNT[props.profile.account.agent_type],
+    blank(props.profile.account.agent_type),
   );
   const [refused, setRefused] = createSignal<ProfileSaved | null>(null);
 
@@ -965,8 +852,10 @@ function SetUpHere(props: {
     },
   }));
 
-  const fields = (): AccountField[] =>
-    ACCOUNT_FIELDS[props.profile.account.agent_type];
+  /// The paths this profile's harness declares, which is what the form draws
+  /// a field apiece for between the models and the buttons.
+  const fields = (): HarnessPath[] =>
+    harness(props.profile.account.agent_type)?.paths ?? [];
 
   return (
     <section class={styles.standing}>
@@ -1001,7 +890,7 @@ function SetUpHere(props: {
             {(field) => (
               <>
                 <label for={`bind-${field.key}`}>{field.label}</label>
-                <Note class={styles.fieldNote}>{field.note}</Note>
+                <Note class={styles.fieldNote}>{purpose(field.purpose)}</Note>
                 <PathField
                   id={`bind-${field.key}`}
                   dotfiles
@@ -1097,10 +986,10 @@ export function ProfileForm(props: {
   /// with.
   const form = (): ProfileEdit => edited() ?? props.initial();
 
-  /// The fields this profile's type is asked for, which is what the form draws
-  /// between the models and the buttons.
-  const fields = (): AccountField[] =>
-    ACCOUNT_FIELDS[form().account.agent_type];
+  /// The paths this profile's harness declares, which is what the form draws
+  /// a field apiece for between the models and the buttons.
+  const fields = (): HarnessPath[] =>
+    harness(form().account.agent_type)?.paths ?? [];
 
   const save = useMutation(() => ({
     mutationFn: (profile: ProfileEdit) => props.save(profile),
@@ -1140,7 +1029,7 @@ export function ProfileForm(props: {
       return;
     }
 
-    setEdited({ ...form(), account: BLANK_ACCOUNT[agent_type] });
+    setEdited({ ...form(), account: blank(agent_type) });
     setRefused(null);
   };
 
@@ -1234,19 +1123,19 @@ export function ProfileForm(props: {
           is under this changes with it and nothing typed for the old one
           is carried across.
 
-          A segmented control of the four rather than a dropdown, because
-          they are four and each is known by its brand mark at a glance:
-          radios under one legend, the mark and the name in each, the
-          chosen one raised. A profile of a type this build draws but does
-          not offer reads as none of them chosen, which is the honest
-          reading of a row that is not on offer. Its account is untouched by
-          that: what the form sends is what was read back, until another
-          type is picked. */}
+          A segmented control of the harnesses rather than a dropdown,
+          because they are few and each is known by its brand mark at a
+          glance: radios under one legend, the mark and the name in each,
+          the chosen one raised. A profile of a harness this server has not
+          got reads as none of them chosen, which is the honest reading of
+          a row that is not on offer. Its account is untouched by that:
+          what the form sends is what was read back, until another harness
+          is picked. */}
       <fieldset class={styles.agents} disabled={props.unbound}>
         <legend>Agent</legend>
 
         <div class={styles.segments}>
-          <For each={AGENT_TYPES}>
+          <For each={harnesses().map((entry) => entry.id)}>
             {(agent_type) => (
               <label
                 class={styles.segment}
@@ -1267,7 +1156,7 @@ export function ProfileForm(props: {
                   onChange={() => pickedType(agent_type)}
                 />
                 <HarnessMark of={agent_type} class={styles.segmentMark} />
-                {AGENT_NAME[agent_type]}
+                {harnessName(agent_type)}
               </label>
             )}
           </For>
@@ -1293,15 +1182,14 @@ export function ProfileForm(props: {
         onInput={(ev) => typedName(ev.currentTarget.value)}
       />
 
-      {/* The account, in whatever shape its agent type keeps one: the
-          fields come off the type rather than being written here, so a
-          backend arriving is a row in `ACCOUNT_FIELDS` and nothing
-          else. */}
+      {/* The account, as the paths its harness declares: the fields come
+          off the harness list rather than being written here, so a harness
+          arriving brings its own. */}
       <For each={fields()}>
         {(field) => (
           <>
             <label for={`profile-${field.key}`}>{field.label}</label>
-            <Note class={styles.fieldNote}>{field.note}</Note>
+            <Note class={styles.fieldNote}>{purpose(field.purpose)}</Note>
             {/* Browsed or typed, which the form cannot tell apart and has
                 no reason to: what Save sends is whatever the box holds,
                 and the server's answer about it is unchanged. Anywhere
@@ -1371,7 +1259,7 @@ export function ProfileForm(props: {
                   <Show when={elsewhere(model)}>
                     {(agent) => (
                       <span class={styles.elsewhere}>
-                        {AGENT_NAME[agent()]}'s model, which this account can't
+                        {harnessName(agent())}'s model, which this account can't
                         launch
                       </span>
                     )}

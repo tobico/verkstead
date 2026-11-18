@@ -296,8 +296,10 @@ impl Verkstead {
                     "name": name,
                     "account": {
                         "agent_type": "Claude",
-                        "claude_dir": claude_dir,
-                        "config_file": config_file,
+                        "paths": {
+                            "claude_dir": claude_dir,
+                            "config_file": config_file,
+                        },
                     },
                     "models": [MODEL],
                     "memory": true,
@@ -753,7 +755,7 @@ async fn a_harness_the_far_end_has_not_got_is_named_with_its_pairings() {
     let harness = |role| Lacking::Harness {
         role,
         profile: Some("work".to_owned()),
-        agent_type: verkstead_render::AgentType::Claude,
+        agent_type: verkstead_render::AgentType::CLAUDE,
     };
 
     assert_eq!(
@@ -805,7 +807,7 @@ async fn a_harness_only_a_newer_member_knows_is_passed_over() {
     let harness = |role| Lacking::Harness {
         role,
         profile: Some("work".to_owned()),
-        agent_type: verkstead_render::AgentType::Claude,
+        agent_type: verkstead_render::AgentType::CLAUDE,
     };
 
     assert_eq!(

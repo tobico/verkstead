@@ -5,67 +5,41 @@
 //! Code Fable 5 — Work" — and a mark in front of it is what makes a list of them
 //! scannable: a reader picks the Claude row out of five by its shape long before
 //! reading any of the words. So the mark is not decoration beside the reading, it
-//! is the reading's first character, and it goes wherever the reading is drawn
-//! and JSX can put an `svg`.
+//! is the reading's first character, and it goes wherever the reading is drawn.
 //!
 //! ## Where the art comes from
 //!
-//! [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons), MIT licensed,
-//! copied into this repository rather than depended on. Its React package cannot
-//! run in a SolidJS app and carries the drawing inside each component; the
-//! `@lobehub/icons-static-svg` sibling publishes the same art as plain files, and
-//! those five files are what sit in [`./marks/`](./marks) under lobehub's own
-//! names — so updating one is copying it again. Its licence sits beside them, in
-//! [`./marks/LICENSE`](./marks/LICENSE), MIT asking for the notice to travel with
-//! the copy.
+//! The harness's own, as the server's harness list carries it — see
+//! [`./harnesses.ts`](./harnesses.ts). A plugin ships its mark as an SVG file,
+//! and the built-ins' are lobehub's, kept beside the server's harnesses with
+//! their licence (`crates/server/src/harness.rs` says where they came from).
 //!
-//! Verbatim but for one edit: each file's `<title>` is taken out. It is what a
-//! browser draws as a tooltip on hover, and a mark whose tooltip said "Claude"
-//! beside words already reading *Claude Code Fable 5 — Work* would be the line
-//! saying itself twice. Nothing here is said to a screen reader either, for the
-//! same reason — the reading beside it is the whole of what the mark means.
+//! ## Drawn as an image, never put into the page
 //!
-//! ## Colour, and the one mark that keeps its own
+//! A mark is a file somebody else wrote, so nothing in it is let run: it is
+//! drawn as a CSS image of the document, which a browser renders without its
+//! scripts, its links or its reach into the page around it. Nothing is said to a
+//! screen reader either — the reading beside it is the whole of what the mark
+//! means.
 //!
-//! Four of the five are the mono cut, drawn the way [`./Icon.tsx`](./Icon.tsx)
-//! draws a Font Awesome icon: `currentColor` and `1em`, so a mark sits in
-//! whatever ink surrounds it — the ordinary ink on a card's second line, the
-//! heading's own in the pane that card opens. Claude Code's is lobehub's colour
-//! variant, which names its fill and so stands in its own orange wherever it is
-//! drawn. That was
-//! the pick: colour where lobehub has it, and lobehub has it for Claude alone of
-//! these four. The Antigravity CLI's is the mono cut of Antigravity's mark even
-//! so: lobehub's colour one is a stack of masked, blurred gradients, which at
-//! `1em` is a smudge of four colours rather than a shape.
+//! **And in the ink around it, where it is painted in `currentColor`.** An image
+//! has no ink of its own to inherit, so a mark that asks for `currentColor` — the
+//! mono cut, four of the five built-ins' — is drawn as a mask over the line's own
+//! colour instead: the ordinary ink on a card's second line, the heading's own in
+//! the pane that card opens. A mark that names its own colours — Claude Code's
+//! orange — is drawn as the picture it is.
 
 import { Show, type JSX } from "solid-js";
 
-import type { AgentType } from "./agents";
+import type { AgentType } from "./api/types";
+import { harness } from "./harnesses";
 import styles from "./HarnessMark.module.css";
-
-import claude from "./marks/claude-color.svg?raw";
-import codex from "./marks/codex.svg?raw";
-import grok from "./marks/grok.svg?raw";
-import antigravity from "./marks/antigravity.svg?raw";
-import opencode from "./marks/opencode.svg?raw";
-
-/// Which drawing belongs to which harness.
-///
-/// Keyed by the [`AgentType`] the reading is composed from, so a fifth backend
-/// arrives here by not compiling until it has been given a mark — the same way
-/// `AGENT_NAME` will not compile until it has been given a name.
-const MARK: Record<AgentType, string> = {
-  Claude: claude,
-  Codex: codex,
-  Grok: grok,
-  OpenCode: opencode,
-  Agy: antigravity,
-};
 
 export function HarnessMark(props: {
   /// The harness whose mark to draw. `null` — a run recorded before Verkstead
   /// wrote the harness down — draws nothing at all, exactly as it composes no
-  /// harness word: no element, so no gap where a mark would have been.
+  /// harness word: no element, so no gap where a mark would have been. Nor does
+  /// a harness this server has not got, there being no mark to draw.
   of: AgentType | null;
 
   /// Where it stands in the line it was drawn into. Styled by whoever passes
@@ -73,18 +47,30 @@ export function HarnessMark(props: {
   /// line, which is a flex row in one place and a run of text in three others.
   class?: string;
 }): JSX.Element {
+  const mark = (): string | undefined =>
+    props.of === null ? undefined : harness(props.of)?.mark;
+
   return (
-    <Show when={props.of}>
-      {(agent) => (
+    <Show when={mark()}>
+      {(svg) => (
         <span
-          class={[styles.mark, props.class].filter(Boolean).join(" ")}
+          class={[
+            styles.mark,
+            svg().includes("currentColor") ? styles.inked : styles.coloured,
+            props.class,
+          ]
+            .filter(Boolean)
+            .join(" ")}
           aria-hidden="true"
-          // The file as it was copied, which is already an `svg` sized in `em`
-          // and painted in `currentColor`. Nothing is parsed out of it and
-          // nothing is put back: what the bundle carries is what lobehub drew.
-          innerHTML={MARK[agent()]}
+          style={{ "--mark": image(svg()) }}
         />
       )}
     </Show>
   );
+}
+
+/// The mark as a CSS image of the document, which a browser draws without
+/// running anything in it.
+function image(svg: string): string {
+  return `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}")`;
 }

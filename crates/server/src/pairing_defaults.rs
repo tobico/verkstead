@@ -30,11 +30,11 @@ use crate::store::{self, AgentType, Picked, Profile, Role};
 /// Fixed rather than read off anything, so that saving a second harness's
 /// Profile does not quietly move every fresh Repo's default on to it.
 const HARNESSES: [AgentType; 5] = [
-    AgentType::Claude,
-    AgentType::Codex,
-    AgentType::Grok,
-    AgentType::OpenCode,
-    AgentType::Agy,
+    AgentType::CLAUDE,
+    AgentType::CODEX,
+    AgentType::GROK,
+    AgentType::OPENCODE,
+    AgentType::AGY,
 ];
 
 /// The model a harness's default Pairing runs for a role.
@@ -47,8 +47,8 @@ const HARNESSES: [AgentType; 5] = [
 /// read off `agy models` on agy 1.4.12 signed in to a Google account on its
 /// starter quota, which lists those three, two Claude models and GPT-OSS, and
 /// no Pro to grill on.
-fn model(harness: AgentType, role: Role) -> &'static str {
-    crate::harness::of(harness).model(role)
+fn model(harness: AgentType, role: Role) -> Option<&'static str> {
+    crate::harness::of(harness).map(|harness| harness.model(role))
 }
 
 /// The platform default for `role`, out of the Profiles in the order they were
@@ -73,7 +73,7 @@ pub(crate) fn platform_default(profiles: &[Profile], role: Role) -> Picked {
     let model = profile
         .models
         .iter()
-        .find(|listed| *listed == wanted)
+        .find(|listed| Some(listed.as_str()) == wanted)
         .or_else(|| profile.models.first());
 
     match model {

@@ -157,10 +157,10 @@ async fn profile(pool: &SqlitePool, name: &str, models: &[&str]) -> String {
         pool,
         &ProfileFacts {
             name: Some(name.to_owned()),
-            account: Account::Claude {
-                claude_dir: PathBuf::from(format!("/state/profiles/{name}")),
-                config_file: PathBuf::from(format!("/state/profiles/{name}.json")),
-            },
+            account: Account::claude(
+                PathBuf::from(format!("/state/profiles/{name}")),
+                PathBuf::from(format!("/state/profiles/{name}.json")),
+            ),
             models: models.iter().map(|model| (*model).to_owned()).collect(),
             memory: true,
         },

@@ -805,12 +805,15 @@ fn said(
              here, so it was not added."
         ),
         store::Addition::Server { name } => {
-            let tools = agent.map_or_else(String::new, |agent| {
-                format!(
-                    ", whose tools are named `{}`",
-                    crate::skills::tools_named(agent).replace("<server>", name)
-                )
-            });
+            let tools =
+                agent
+                    .and_then(crate::skills::tools_named)
+                    .map_or_else(String::new, |naming| {
+                        format!(
+                            ", whose tools are named `{}`",
+                            naming.replace("<server>", name)
+                        )
+                    });
 
             let reach = match reach {
                 Reach::Carried => CARRIED,

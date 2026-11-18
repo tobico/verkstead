@@ -230,7 +230,13 @@ pub(crate) async fn written(
             .into_response();
     };
 
-    let login = crate::sandbox::root::login_at(&held.account);
+    let Some(login) = crate::sandbox::root::login_at(&held.account) else {
+        return (
+            StatusCode::NOT_FOUND,
+            "this device has no harness for the Agent Profile under that id\n",
+        )
+            .into_response();
+    };
 
     match tokio::task::spawn_blocking({
         let login = login.clone();
@@ -351,10 +357,16 @@ pub(crate) async fn signed_out(
             .into_response();
     };
 
-    let login = crate::sandbox::root::login_at(&held.account);
-    let here = tokio::task::spawn_blocking(move || crate::mirroring::account::login_named(&login))
-        .await
-        .unwrap_or(None);
+    // Nothing for a harness this device has not got — see [`login_at`] — and an
+    // account whose login cannot even be named is one this device holds none of.
+    let here = match crate::sandbox::root::login_at(&held.account) {
+        Some(login) => {
+            tokio::task::spawn_blocking(move || crate::mirroring::account::login_named(&login))
+                .await
+                .unwrap_or(None)
+        }
+        None => None,
+    };
 
     if here == sent.login {
         tracing::info!(

@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use verkstead_render::Broken;
 
-use super::{Carrying, Harness, Line, Resume, SignedOut};
+use super::{Carrying, Declared, HOME_REFUSED, Harness, Line, Resume, SignedOut};
 use crate::platform::Platform;
 use crate::sandbox::root::{self, Part, Place, Whose};
 use crate::sandbox::{self, Home};
@@ -63,6 +63,35 @@ impl Harness for OpenCode {
 
     fn named(&self) -> &str {
         "OpenCode"
+    }
+
+    fn mark(&self) -> &str {
+        include_str!("marks/opencode.svg")
+    }
+
+    /// One home, and the two directories opencode keeps an account in judged
+    /// inside it as well: they are what a session mounts, and a directory that
+    /// has never had opencode run in it holds neither.
+    fn paths(&self) -> Vec<Declared<'_>> {
+        vec![Declared {
+            key: store::HOME,
+            label: "Home directory",
+            purpose: "Its `.config/opencode` and `.local/share/opencode` are mounted where opencode looks for them.",
+            placeholder: "/home/you/accounts/work/opencode",
+            file: false,
+            made: false,
+            refused: HOME_REFUSED,
+            within: &XDG,
+        }]
+    }
+
+    fn found_at(&self) -> Vec<&str> {
+        vec!["~/.config/opencode", "~/.local/share/opencode"]
+    }
+
+    /// Its login is a subcommand of its own.
+    fn first_run(&self) -> &str {
+        "opencode auth login"
     }
 
     /// **opencode has no such flag and takes the alternate screen**, which is a
@@ -176,9 +205,7 @@ impl Harness for OpenCode {
 
     /// A home, which is the one the XDG defaults resolve inside.
     fn kept_in(&self, home: &Path) -> store::Account {
-        store::Account::OpenCode {
-            home: home.to_owned(),
-        }
+        store::Account::home(store::AgentType::OPENCODE, home)
     }
 
     /// Two rather than one, and the same relative path on both sides of

@@ -14,90 +14,149 @@
 //! the config field at a directory is an easy mistake, and "that path is wrong"
 //! would not say which one.
 
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-/// Which agent a session runs, on its own rather than as an account's shape.
+/// Which agent a session runs: the id of its harness, as the server's harness
+/// list gives it — see [`HarnessEntry`].
 ///
-/// The same four words [`ProfileAccount`]'s discriminator is written in, so a
-/// viewer narrowing on one narrows on the other: what a Profile runs and what a
-/// finished session ran are the same fact about the same set of backends, and
-/// two spellings of it would be two things for the viewer to keep in step.
+/// **A string rather than a closed list** (ADR-0030, *Agent*): a harness is a
+/// Plugin of the Agent Category, so the ids are whatever this server can run
+/// and whatever a Profile written elsewhere names. The five built-ins are
+/// spelled as they always were on the wire — `Claude`, `Codex`, `Grok`,
+/// `OpenCode`, `Agy` — so that a device still on an older release reads what
+/// this one sends it; a plugin harness is its plugin's uuid.
 ///
-/// Its own type because the account is not always there to carry it — a Timeline
-/// Event says which agent ran a session and holds no account at all, the
-/// Profile it was launched from being a thing that can since have gone.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Its own type because the account is not always there to carry it — a
+/// Timeline Event says which agent ran a session and holds no account at all,
+/// the Profile it was launched from being a thing that can since have gone.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum AgentType {
-    Claude,
-    Codex,
-    Grok,
-    OpenCode,
-    Agy,
+pub struct AgentType(pub Cow<'static, str>);
+
+impl AgentType {
+    pub const CLAUDE: Self = Self(Cow::Borrowed("Claude"));
+    pub const CODEX: Self = Self(Cow::Borrowed("Codex"));
+    pub const GROK: Self = Self(Cow::Borrowed("Grok"));
+    pub const OPENCODE: Self = Self(Cow::Borrowed("OpenCode"));
+    pub const AGY: Self = Self(Cow::Borrowed("Agy"));
+
+    /// The id, as the wire spells it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
-/// The account a Profile names, in the shape the agent type running it keeps
-/// one.
+/// The account a Profile names: which harness runs it, and each of the paths
+/// that harness declares an account to be made of, under its key.
 ///
-/// Flat on the wire — `{"agent_type": "Claude", "claude_dir": "…",
-/// "config_file": "…"}` — so the type is a field the viewer can read and narrow
-/// on rather than a name it has to unwrap the account out of. Which is what the
-/// form draws its fields off: a shape per type, and adding a backend adds a
-/// variant here and the fields beside it.
+/// **One shape for every harness**, the form drawing a field per path the
+/// harness list declares — see [`HarnessPath`] — rather than a shape per type:
+/// Claude Code's pair is two declared paths, `claude_dir` and `config_file`,
+/// and every built-in after it one, `home`.
 ///
 /// One shape for both directions. A Profile as the viewer receives it carries
 /// the resolved paths the server recorded and a Profile as the human has just
 /// written it carries what they typed, but they are the same fields either way,
 /// and two types for one shape would be two opinions about what an account is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "agent_type")]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum ProfileAccount {
-    /// Claude Code's pair: the directory a session's `~/.claude` is built from,
-    /// and the file its `~/.claude.json` is copied from.
-    Claude {
-        claude_dir: String,
-        config_file: String,
-    },
+pub struct ProfileAccount {
+    /// Which harness runs it.
+    pub agent_type: AgentType,
 
-    /// Codex's one home: what is bind-mounted over `~/.codex`, and the whole of
-    /// what a Codex Profile names.
-    Codex { home: String },
-
-    /// And Grok Build's, bind-mounted over `~/.grok`: the same one-home shape
-    /// Codex's is, under the directory grok keeps an account in.
-    Grok { home: String },
-
-    /// And OpenCode's, which is one home again but not one mount: opencode
-    /// keeps no dot-directory of its own, so what this names is a home holding
-    /// `.config/opencode` and `.local/share/opencode`, each bound where
-    /// opencode's XDG defaults look for it inside the sandbox.
-    OpenCode { home: String },
-
-    /// And the Antigravity CLI's, bind-mounted over `~/.gemini`: the one-home
-    /// shape again, a `~/.gemini` holding `antigravity-cli/`.
-    Agy { home: String },
+    /// Each path under the key its harness declares it by. Optional per key
+    /// to the viewer, which reads them by the keys a harness declares and may
+    /// hold an account of a harness that declares others.
+    #[cfg_attr(feature = "typescript", ts(type = "{ [key in string]?: string }"))]
+    pub paths: BTreeMap<String, String>,
 }
 
 impl ProfileAccount {
-    /// Which agent runs this account, which is what its shape says.
-    ///
-    /// The discriminator read as the type it is spelled in: a reader with an
-    /// account in hand and no Profile around it — a refusal naming the harness
-    /// a row could not be run on, say — should not have to match four arms to
-    /// learn what the tag already holds.
-    pub fn agent_type(&self) -> AgentType {
-        match self {
-            ProfileAccount::Claude { .. } => AgentType::Claude,
-            ProfileAccount::Codex { .. } => AgentType::Codex,
-            ProfileAccount::Grok { .. } => AgentType::Grok,
-            ProfileAccount::OpenCode { .. } => AgentType::OpenCode,
-            ProfileAccount::Agy { .. } => AgentType::Agy,
+    /// Claude Code's pair.
+    pub fn claude(claude_dir: impl Into<String>, config_file: impl Into<String>) -> Self {
+        Self {
+            agent_type: AgentType::CLAUDE,
+            paths: BTreeMap::from([
+                ("claude_dir".to_owned(), claude_dir.into()),
+                ("config_file".to_owned(), config_file.into()),
+            ]),
         }
     }
+
+    /// The one home of a built-in harness that keeps its account under one.
+    pub fn home(agent_type: AgentType, home: impl Into<String>) -> Self {
+        Self {
+            agent_type,
+            paths: BTreeMap::from([("home".to_owned(), home.into())]),
+        }
+    }
+
+    /// Which agent runs this account.
+    pub fn agent_type(&self) -> AgentType {
+        self.agent_type.clone()
+    }
+}
+
+/// One harness this server can run a session on, as the Profile form, the
+/// cards and the pickers draw it: everything about it the viewer used to keep
+/// a table of.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct HarnessEntry {
+    /// The id a Profile of it names.
+    pub id: AgentType,
+
+    /// What it is called where a sentence names it: *Claude Code*.
+    pub name: String,
+
+    /// Its mark, as the SVG document it ships. Drawn as an image rather than
+    /// put into the page, so that nothing in it runs.
+    pub mark: String,
+
+    /// The paths an account of it is made of, in the order the form draws
+    /// them.
+    pub paths: Vec<HarnessPath>,
+
+    /// What its login calls it — *Claude*, *Antigravity* — where Verkstead
+    /// runs its login, so that a Profile card offers one; `null` where it does
+    /// not.
+    pub login: Option<String>,
+
+    /// Where an account of it is kept in a home, said from `~` as the human
+    /// would recognise it: what onboarding draws under an account it found.
+    pub found_at: Vec<String>,
+
+    /// What to run in a terminal to make an account of it.
+    pub first_run: String,
+}
+
+/// One path an account of a harness is made of.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct HarnessPath {
+    /// The key it is kept under in a [`ProfileAccount`].
+    pub key: String,
+
+    /// What the form labels its field.
+    pub label: String,
+
+    /// What it is for, said under the field, with what is to be read as code
+    /// between backticks.
+    pub purpose: String,
+
+    /// What the field shows before anything is typed into it.
+    pub placeholder: String,
+
+    /// Whether it is a file rather than a directory, which is what the field's
+    /// picker offers.
+    pub file: bool,
 }
 
 /// Why a saved Profile cannot be run under as things stand.
@@ -138,6 +197,12 @@ pub enum Broken {
     /// binding any of them would do. A device bound on it whose account holds
     /// no login file is no source either — there is nothing in it to copy.
     NoBoundDevice,
+
+    /// The harness this Profile runs is not one this server has: a plugin
+    /// installed on the device that saved it and not here, or since removed.
+    /// Not offered on a picker — there is nothing here to launch it with, and
+    /// nothing to name it by but its id.
+    HarnessUnknown,
 
     /// The harness this Profile runs is not on *this* machine, whatever is true
     /// of it on the devices it is bound on.
@@ -384,10 +449,10 @@ pub struct AccountSignedOut {
 
 /// A Profile as the human has just written it, for saving or for rewriting.
 ///
-/// The account says which type it is, because the fields beside it are that
-/// type's. The form picks one from the types whose stage has landed — a type
-/// that cannot launch the real binary yet would be a lie in a picker — so a
-/// type this knows about may still be one nothing arrives as.
+/// The account says which harness it is, because the paths beside it are the
+/// ones that harness declares. The form picks one from the harnesses the server
+/// lists, and a harness it has not got is refused as
+/// [`ProfileSaved::NoSuchHarness`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileEdit {
@@ -395,7 +460,8 @@ pub struct ProfileEdit {
     /// sends for an empty box. A harness takes one unnamed Profile.
     pub name: Option<String>,
 
-    /// The absolute paths this Profile's account is, in its type's shape.
+    /// The absolute paths this Profile's account is, under the keys its
+    /// harness declares.
     pub account: ProfileAccount,
 
     /// The models this account can run a session on, in the order they were
@@ -473,6 +539,9 @@ pub enum ProfileSaved {
     /// Something is there and it is not a directory — a home is a directory
     /// bind-mounted over, so a file cannot stand in for it.
     HomeNotADirectory,
+
+    /// The harness it names is not one this server has.
+    NoSuchHarness,
 }
 
 /// What became of removing a Profile.

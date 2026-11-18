@@ -94,7 +94,8 @@ import {
 import { Copy } from "../Copy";
 import { HarnessMark } from "../HarnessMark";
 import { Icon } from "../Icon";
-import { AGENT_NAME, type AgentType } from "../agents";
+import type { AgentType } from "../agents";
+import { harnessName } from "../harnesses";
 import { cancelInstall, startInstall } from "../api/client";
 import type {
   Barred,
@@ -128,22 +129,24 @@ import {
 } from "./steps";
 import styles from "./Dependencies.module.css";
 
-/// What each row is called where somebody reads it.
-///
-/// The harnesses are [`AGENT_NAME`]'s, which is what they are called everywhere
-/// else in the app: a row saying *Claude* beside a Profile list saying *Claude
-/// Code* would be two names for one backend.
-export const NAMES: Record<Dependency, string> = {
+/// What each row that is not a harness is called where somebody reads it.
+const NAMES: Partial<Record<Dependency, string>> = {
   Sandbox: "A sandbox",
   Git: "git",
-  Claude: AGENT_NAME.Claude,
-  Codex: AGENT_NAME.Codex,
-  Grok: AGENT_NAME.Grok,
-  OpenCode: AGENT_NAME.OpenCode,
-  Agy: AGENT_NAME.Agy,
   Gh: "gh",
   Wsl: "Linux development (WSL)",
 };
+
+/// What a row is called where somebody reads it.
+///
+/// A harness's row is called what the harness list calls it, which is what it
+/// is called everywhere else in the app: a row saying *Claude* beside a Profile
+/// list saying *Claude Code* would be two names for one backend. A harness row
+/// and an agent type are written in the same words on purpose — see
+/// `crates/render/src/profiles.rs`.
+export function named(dependency: Dependency): string {
+  return NAMES[dependency] ?? harnessName(dependency);
+}
 
 /// And what each is for, which is also which of them hold the step up.
 const WHY: Record<Dependency, string> = {
@@ -816,7 +819,7 @@ function Choice(props: {
       </Show>
       <span class={styles.text}>
         <span class={styles.name}>
-          {NAMES[props.row.dependency]}
+          {named(props.row.dependency)}
           <Show when={command()}>
             {(command) => <code class={styles.called}>{command()}</code>}
           </Show>
@@ -854,7 +857,7 @@ function Choice(props: {
           {box()}
         </Show>
       </span>
-      <span class={styles.name}>{NAMES[props.row.dependency]}</span>
+      <span class={styles.name}>{named(props.row.dependency)}</span>
       <Show when={command()}>
         {(command) => <code class={styles.called}>{command()}</code>}
       </Show>
@@ -1013,7 +1016,7 @@ function Named(props: {
         of={HARNESSES[props.row.dependency] ?? null}
         class={styles.harness}
       />
-      {NAMES[props.row.dependency]}
+      {named(props.row.dependency)}
       <Show when={called(props.row.dependency, props.platform)}>
         {(command) => <code class={styles.called}>{command()}</code>}
       </Show>
@@ -1232,7 +1235,7 @@ function Row(props: {
             of={HARNESSES[props.row.dependency] ?? null}
             class={styles.harness}
           />
-          {NAMES[props.row.dependency]}
+          {named(props.row.dependency)}
         </span>
         <span class={styles.why}>{WHY[props.row.dependency]}</span>
 
