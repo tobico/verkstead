@@ -33,6 +33,17 @@ Activities and a Skill pack of its own.
   unmapped. `steered` is an outcome every Activity has, and a Process maps it
   by marking which states take a steer and with what brief rather than by a
   transition row — see Steer below.
+- **What a Process names, it declares** (Set 1771, Q1). Each state's
+  Activity, and any skill named in its options, is the Process's own plugin's
+  or one of its declared **dependencies** (stage 01), and the check and the
+  loader refuse one that is neither. So a Process whose Activity's plugin is
+  missing, disabled or outdated is in trouble rather than on the picker, the
+  five built-ins included: they depend on the plugins providing the six
+  Activities and the `verkstead` pack, and unticking any of those says first
+  that the Processes go with it. Conversations already on a Process in trouble
+  stop where they stand, the card saying which dependency is wanted, and carry
+  on from their state once it is back — the restart rule, since an Activity
+  works out where it was.
 - **Roles are the plugin's** (Q26): declared by name and label, one marked as
   the **building role** that the Done signal, memos and previews assume. The
   three names Verkstead knows — `grilling`, `implementation`, `review` — keep
@@ -88,8 +99,11 @@ Activities and a Skill pack of its own.
 1. **The `process` provides-block** — states with word, Activity, options,
    steer mark and detour mark; transitions; offered Directions; roles with the
    building role; Target and name and description; the check refusing an
-   unmapped outcome. AC: `verkstead plugin check` accepts a complete Process and
-   names the outcome a broken one leaves unmapped; the loader does the same.
+   unmapped outcome and an Activity it does not declare a dependency on. AC:
+   `verkstead plugin check` accepts a complete Process and names the outcome a
+   broken one leaves unmapped; one naming an undeclared Activity is refused
+   naming it; the loader does the same; unticking the plugin holding the
+   wrap-up Activity takes Develop off the picker with its trouble said.
 2. **The engine** — Start enters the first state, runs its Activity with the
    Conversation's facts, maps the outcome, enters the next; Done and Closed
    are reached by transition or by the human's Close; restart re-enters the

@@ -70,7 +70,8 @@ built-ins stay in-process Rust, which is stages 04 to 06.
   to. Keeping Claude's special shape beside the generic one was offered and
   declined.
 - **The id is a string, the mark is a file.** `AgentType` stops being an enum:
-  a Profile records the plugin's name, the render crate carries it as a string,
+  a Profile records the plugin's uuid, the five stored words read as the
+  built-ins' (stage 01), the render crate carries it as a string,
   and the viewer draws the mark the manifest ships (an SVG, like the lobehub
   ones in `web/src/marks/` today) rather than looking one up. The viewer's
   `KNOWN_MODELS` goes; the Profile form offers the plugin's declared list, and

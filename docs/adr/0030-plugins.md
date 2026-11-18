@@ -28,11 +28,17 @@ GitLab Forge, as a demonstration rather than a daily tool.
 
 **A plugin is a directory with a `plugin.yaml` at its root**, declarative
 first, and a **WebAssembly component** where a piece of it is code. The
-manifest carries a name, a version, the **interface version** it was written
-against, a description, a mark as SVG, what it **provides** — a list, each
-entry of one **category** — the **capabilities** it asks for, **settings**
-fields it wants drawn, and per-platform overrides keyed `linux`, `macos` and
-`windows` over the common declaration. The runtime is **wasmtime with the
+manifest carries its **metadata** — a **uuid**, a display name, the author's
+name and email, a **semantic version** and, optionally, the URL of its
+repository — the **interface version** it was written against, a
+description, a mark as SVG, the **dependencies** it needs, what it
+**provides** — a list, each entry of one **category** — the
+**capabilities** it asks for, **settings** fields it wants drawn, and
+per-platform overrides keyed `linux`, `macos` and `windows` over the common
+declaration. The uuid is the plugin's identity: the installed record, a
+dependency and everything stored about a plugin key by it, and the display
+name is only what is drawn. The built-ins carry fixed uuids, and the words
+stored before there were plugins — `claude`, `github` — are read as theirs. The runtime is **wasmtime with the
 component model**, the interface written as WIT and bindings generated on both
 sides, so a plugin is written in whatever compiles to a component. A plugin
 written against a newer interface than the server knows is refused at load
@@ -112,7 +118,7 @@ whose every other decision avoids one. The **Build a plugin** button means a
 plugin is developed in a Repo of its own, so the install takes the repository
 it was written in, and a local directory is the development loop.
 
-**The installed list is a Replicated record** (ADR-0028) — name, source,
+**The installed list is a Replicated record** (ADR-0028) — uuid, source,
 enabled, pinned revision — so a plugin installed on one device is installed on
 the cluster and each device clones the source itself. One installed from a
 local directory is marked as that device's, and the other devices list it
@@ -126,6 +132,27 @@ is listed on the Plugins page with its trouble, counts as disabled, and
 nothing else is affected. The rule `config.yaml` is built on, applied to the
 next thing read from disk. Refusing to start until it is fixed was rejected as
 one plugin holding every Conversation hostage.
+
+**A plugin declares what it depends on.** A Process names Activities, and a
+Process or an Activity names Skills as `<pack>/<skill>`, any of which may be
+another plugin's. So the manifest lists its **dependencies**, each carrying
+what Verkstead needs to say and fix one without the plugin it names being
+there: the uuid, the display name, the author's name and email, the URL of its
+repository where it has one, and a **version specifier** over the semantic
+version. A plugin whose dependency is missing, disabled or outside the
+specifier is in trouble — listed with which one and why, and counting as
+disabled — and where the dependency carries a repository URL its row offers
+the install or the update that would put it right, through the same consent
+card as **Add a plugin…**. Disabling a plugin that others depend on says
+before it is done which ones it takes down with it, and **Remove** is refused
+while any installed plugin depends on it, the refusal naming them. A Process
+naming an Activity or a skill it declares no dependency for is refused by
+`verkstead plugin check` and the loader alike — the built-ins included, the
+five Processes depending on the plugins that provide the six Activities and
+the `verkstead` pack, so unticking one of those says that Develop goes with
+it. Leaving the reference to be found missing at run time was the
+alternative, and is a Conversation standing in a state whose Activity is not
+there.
 
 **Authoring.** A template repository per category, each a minimal plugin that
 passes the check, and `verkstead plugin check <dir>` in the CLI, so the session
@@ -160,7 +187,8 @@ columns. The form draws one field per path the plugin declares, Claude's pair
 becomes two declared paths, and the Claude-only columns move into the per-path
 table that every other harness's home already lives in. `AgentType` stops
 being a closed enum anywhere — store, render, viewer — and becomes the
-plugin's name; the ten hand-written viewer tables keyed by it go, and the mark
+plugin's uuid, `claude` and the other four stored words read as the
+built-ins'; the ten hand-written viewer tables keyed by it go, and the mark
 comes from the manifest.
 
 **The CLI fetches the tailored Guide from the server.** `verkstead guide`
@@ -286,7 +314,7 @@ instance; a Repo matching none has no Forge and no wrap-up. Picking it on the
 Repo's row was the alternative, one more thing to set that the remote already
 says.
 
-**One token per Forge per Author**, keyed by the plugin's name in
+**One token per Forge per Author**, keyed by the plugin's uuid in
 `secrets.yaml`, the Git settings section asking for one per enabled Forge and
 verifying it through the plugin's declared scopes. The plugin declares the
 credential helper's username and the hosts it covers for git inside the
@@ -320,14 +348,17 @@ field. A Language plugin is data and nothing else.
 ## The Plugins page
 
 A section at the foot of the settings list beside Agent Profiles and Repos.
-**Installed above Built-in**, each row the plugin's name, what it provides,
+**Installed above Built-in**, each row the plugin's display name, version and
+author, what it provides,
 its source, a checkbox and its trouble where it failed to load. **Add a
 plugin…** takes a git URL or a browsed path, clones it, reads the manifest,
 shows what it provides and the capabilities it asks for, and **Install**
 confirms. **Update** on git rows. **Remove** is refused while anything open
 stands on the plugin — Profiles on an Agent, Conversations on a Process, Repos
-on a Forge — the refusal counting them and leading there, disable being the
-way to stop new use meanwhile. A plugin's declared settings fields are drawn
+on a Forge, and any installed plugin that depends on it — the refusal counting
+them and leading there, disable being the way to stop new use meanwhile. A
+row in trouble over a dependency says which, and offers its install or update
+where the dependency names a repository. A plugin's declared settings fields are drawn
 in a pane when its row is opened.
 
 **Build a plugin** asks the category from a small menu, then opens the compose

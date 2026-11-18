@@ -72,6 +72,13 @@ reached the server over nothing but the host functions.
   branch's reading replaced by a check that nothing was committed. Stage 09
   wires that configuration in when it writes the interview; this stage builds
   the Activity so that it can be.
+- **What an Activity names, it declares** (Set 1771, Q1). The skill a
+  *launch a session* names is `<pack>/<skill>`, and the pack is the Activity's
+  own plugin's or one of its declared **dependencies** (stage 01);
+  `verkstead plugin check` and the loader refuse an `activity` block naming a
+  skill from a pack it does not provide or depend on. The built-in Activities'
+  plugin depends on the `verkstead` pack's, so unticking the pack says first
+  that the Activities, and every Process over them, go with it.
 - **The in-process trait comes first and stays.** Every built-in that has not
   crossed yet runs behind the same Rust trait the component host implements,
   so the runner is cut over to the trait in one move and each later stage
@@ -83,9 +90,11 @@ reached the server over nothing but the host functions.
 
 1. **The `activity` world** — the WIT: start facts, events in, host functions
    out, outcomes back; the `activity` provides-block in `plugin.yaml` naming
-   the component and its outcomes; `verkstead plugin check` reads both. AC: a
-   plugin providing an Activity loads and lists; one whose component lacks the
-   world's exports is listed with its trouble.
+   the component, its outcomes and the skills it launches; `verkstead plugin
+   check` reads them. AC: a plugin providing an Activity loads and lists; one
+   whose component lacks the world's exports is listed with its trouble; one
+   naming a skill from a pack it neither provides nor depends on is refused
+   naming the skill.
 2. **The trait behind the runner** — the runner's drivers (`runner.rs`
    `see_out`, `carry_on`, `follow_up` and the rest, `drivers.rs`'s registry,
    `stalls.rs`) call through one trait shaped like the world; the private

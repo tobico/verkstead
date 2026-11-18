@@ -2946,14 +2946,16 @@ extended and, from the plugins roadmap on, how it is made: a harness, a
 Process, a Forge, a Language, an Activity and a pack of Skills are each one,
 the ones Verkstead ships are Plugins of the same shape bundled inside the
 binary, and a human installs their own from a git URL or a local directory.
-Declarative first — the manifest says what it **provides**, a list each of one
+Declarative first — the manifest says who it is, by a **uuid** that is its
+identity, a display name, an author and a semantic version, the **dependencies**
+it needs by uuid and version specifier, what it **provides**, a list each of one
 **Category**, the **capabilities** it asks for and the settings fields it
 wants drawn — and a WebAssembly component where a piece is code, run by
 wasmtime over a WIT interface whose version the manifest names. Installed into
 `plugins/` under the Data Directory, tracked as a Replicated record so the
 cluster has it, enabled or disabled by its checkbox on the **Plugins** page,
-and listed there with its trouble where it failed to load, which stops nothing
-else. Its code runs on the host beside the server, with what the human
+and listed there with its trouble where it failed to load or a dependency is
+missing, disabled or outdated, which stops nothing else. Its code runs on the host beside the server, with what the human
 granted at **Install** and nothing more, and never inside a Sandbox. See
 ADR-0030.
 _Avoid_: extension, module, add-on, integration, package, mod
