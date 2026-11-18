@@ -1942,8 +1942,30 @@ impl annex::Backend for Boxed {
 
 /// An Annex as the install run leaves one: a `config.yaml` and a
 /// `secrets.yaml` written in, which are what the link rewrites.
+///
+/// **And answering the Keeper's background reads of it with nothing**, the way
+/// a fresh Annex does: its Conversations, whether any are archived and its
+/// records, each read once as the Keeper's workbench starts. Left unserved they
+/// would be refusals, which the Keeper draws on the Annex's row — and whether
+/// one had landed by the time a test reads that row would be a race.
 async fn made_annex() -> Verkstead {
-    made_annex_serving(Router::new()).await
+    let nothing_archived = verkstead_render::ShowingArchived {
+        showing: false,
+        any: false,
+    };
+
+    made_annex_serving(
+        its_conversations(&[])
+            .route(
+                "/api/ui/conversations/archived",
+                axum::routing::get(move || async move { axum::Json(nothing_archived) }),
+            )
+            .route(
+                verkstead_server::replicating::RECORDS,
+                axum::routing::get(|| async { axum::Json(Vec::<serde_json::Value>::new()) }),
+            ),
+    )
+    .await
 }
 
 /// The same, serving `workbench` to its Keeper over the link.
