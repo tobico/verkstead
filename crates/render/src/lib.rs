@@ -97,16 +97,16 @@ pub use onboarding::{
 };
 pub use plugins::{
     PluginAt, PluginCapability, PluginConsent, PluginEnabled, PluginField, PluginFieldEdit,
-    PluginFieldRefused, PluginFieldValue, PluginFieldWrite, PluginFix, PluginInstall,
-    PluginLanguageCache, PluginNeed, PluginRow, PluginSecretValues, PluginSettingsSave,
-    PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdate, PluginUpdated,
-    PluginsView,
+    PluginFieldRefused, PluginFieldValue, PluginFieldWrite, PluginFix, PluginHarness,
+    PluginInstall, PluginLanguageCache, PluginNeed, PluginRow, PluginSecretValues,
+    PluginSettingsSave, PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdate,
+    PluginUpdated, PluginsView,
 };
 pub use profiles::{
-    AccountFile, AccountLogin, AgentType, Broken, HarnessEntry, HarnessModel, HarnessPath,
-    MemoryFile, MemoryLeft, MemoryWanted, PairingView, PickedView, ProfileAccount, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry, ProfileSaved,
-    ProfileTrouble, RepoPairingsView, RoleChoice,
+    AccountFile, AccountLogin, AgentType, Broken, HarnessEntry, HarnessInstall, HarnessModel,
+    HarnessPath, MemoryFile, MemoryLeft, MemoryWanted, PairingView, PickedView, ProfileAccount,
+    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileDevice, ProfileEdit, ProfileEntry,
+    ProfileSaved, ProfileTrouble, RepoPairingsView, RoleChoice,
 };
 pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};

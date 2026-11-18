@@ -1056,7 +1056,7 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * a picker, and a Pairing made against one goes on reading as a Pairing — with
  * a broken Profile in it.
  */
-export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "NoBoundDevice" | "HarnessUnknown" | "HarnessMissing" | "SignedOut";
+export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "NoBoundDevice" | "HarnessUnknown" | "HarnessDisabled" | "HarnessMissing" | "SignedOut";
 
 /**
  * One session's Capture, whole, as the details pane receives it.
@@ -2557,11 +2557,18 @@ author?: string, };
 /**
  * What a row is about.
  *
- * Flat rather than a harness variant carrying an [`crate::AgentType`]: the
- * step draws nine rows with an instruction apiece, and which of them are
- * harnesses is a fact about the objective rather than about the drawing.
+ * **A harness's row is the harness**, by its id: the five built-ins and every
+ * harness an enabled Agent plugin declares (ADR-0030, *Agent*), so which of
+ * them a machine is asked about is the harness list's to say rather than a
+ * closed word list's here.
+ *
+ * **One string on the wire**, the way it always was: `Sandbox`, `Git`, `Gh`,
+ * `Wsl`, or the harness's id — and a built-in's id is the word its row was
+ * called before a harness could be a plugin's, `Claude` to `Agy`, so a
+ * built-in's row reads exactly as it did. A plugin's id is its uuid, which
+ * none of the four words is.
  */
-export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Agy" | "Gh" | "Wsl";
+export type Dependency = "Sandbox" | "Git" | "Gh" | "Wsl" | AgentType;
 
 /**
  * And whether the machine has it.
@@ -3636,7 +3643,33 @@ models: Array<HarnessModel>,
  * The short names it answers to beyond those — `opus` — each with what
  * it reads as: recognised where a Profile holds one, never offered.
  */
-aliases: Array<HarnessModel>, };
+aliases: Array<HarnessModel>, 
+/**
+ * The program a session of it is run as, looked for on a session's
+ * `PATH` by this name: what its onboarding row names under the harness.
+ */
+binary: string, 
+/**
+ * How a plugin's harness is put on a machine, as its manifest declares
+ * it for this one — or `null` for a built-in, whose instructions are
+ * the wizard's own, one per tab.
+ */
+install: HarnessInstall | null, };
+
+/**
+ * How a plugin's harness is installed, as its manifest declares it for the
+ * platform this server is on.
+ */
+export type HarnessInstall = { 
+/**
+ * Where its own install instructions are.
+ */
+instructions: string | null, 
+/**
+ * The lines that install it, which the wizard's install run runs on a
+ * press and at no other time.
+ */
+commands: Array<string>, };
 
 /**
  * One model a harness declares: what it travels as, and what a human reads
@@ -4926,6 +4959,33 @@ export type PluginFieldWrite = { "kind": "Text", value: string, } | { "kind": "S
 export type PluginFix = { "kind": "Install", repository: string, } | { "kind": "Update" };
 
 /**
+ * The harness an Agent plugin's row provides, as this device has it.
+ */
+export type PluginHarness = { 
+/**
+ * Its id, which the install run is pressed with.
+ */
+id: AgentType, 
+/**
+ * The program a session of it runs, looked for on a session's `PATH`.
+ */
+binary: string, 
+/**
+ * Whether a session here would find it, which is its onboarding row's
+ * answer.
+ */
+present: boolean, 
+/**
+ * Whether its manifest declares commands that install it here, which is
+ * what the row's **Install** runs.
+ */
+installable: boolean, 
+/**
+ * And what the install run has made of it, where one has been started.
+ */
+install: InstallState, };
+
+/**
  * **Install**: the directory or git URL, and the capabilities the card
  * showed, which is the grant.
  */
@@ -5032,7 +5092,19 @@ dependents: Array<string>,
  * How many settings fields its manifest declares: where any, the row
  * opens a pane drawing them.
  */
-settings: number, };
+settings: number, 
+/**
+ * How many Agent Profiles name the harness it provides, whatever the
+ * checkbox says: a disabled one's stay, offered on no picker, and while
+ * any stand **Remove** is refused.
+ */
+profiles: number, 
+/**
+ * The harness it provides, where it provides one and has loaded here:
+ * whether its binary is on this machine, and the press that installs
+ * it.
+ */
+harness: PluginHarness | null, };
 
 /**
  * A save of a Plugin's pane: the fields it changed, each by key. A field

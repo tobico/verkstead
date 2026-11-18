@@ -261,4 +261,23 @@ describe("a harness this server has not got", () => {
       ),
     ).toEqual([known.id]);
   });
+
+  /// Nor is one whose plugin is disabled (Set 1764, Q20): it stays on the
+  /// settings page, broken, and no picker offers it.
+  it("is offered on no picker while its plugin is disabled", () => {
+    const known = profile("work", "Claude");
+    const disabled: ProfileEntry = {
+      ...profile("plugged", plugin),
+      id: "33333333-3333-4333-8333-333333333333",
+      account: { agent_type: plugin, paths: { state: "/srv/plugged" } },
+      models: ["gemini-code"],
+      broken: "HarnessDisabled",
+    };
+
+    expect(
+      pairings([{ ...known, models: ["claude-opus-5"] }, disabled]).map(
+        (row) => row.profile.id,
+      ),
+    ).toEqual([known.id]);
+  });
 });

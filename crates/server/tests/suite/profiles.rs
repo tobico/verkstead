@@ -2376,3 +2376,123 @@ async fn a_plugin_harness_offers_its_declared_models_and_defaults_to_its_declare
         "a built-in's Profile is preferred, whenever it was saved"
     );
 }
+
+/// **A disabled Agent plugin's Profiles stay, offered on no picker** (Set 1764,
+/// Q20): each reads broken as its plugin disabled, and a Conversation on a Repo
+/// remembering one starts with that role empty, the roles beside it filled as
+/// they were. Its row counts them, and **Remove** is refused while any stand,
+/// saying how many. Ticking it again offers them again.
+#[tokio::test]
+async fn a_disabled_plugins_profiles_stay_and_are_offered_on_no_picker() {
+    use crate::stub_harness::{self, StubHarness};
+
+    let (accounts, dir, app) = workbench().await;
+    let harness = StubHarness::Silent;
+    harness
+        .installed(&app, dir.path(), ["stub-large", "stub-grilling"])
+        .await;
+
+    let id = conversation(&app, accounts.path()).await;
+    assert_eq!(
+        save(
+            &app,
+            &serde_json::json!({
+                "name": "stubbed",
+                "account": {
+                    "agent_type": harness.uuid(),
+                    "paths": stub_harness::account(accounts.path()),
+                },
+                "models": ["stub-large"],
+            }),
+        )
+        .await,
+        ProfileSaved::Saved
+    );
+    let stubbed = listed(&app)
+        .await
+        .into_iter()
+        .find(|profile| profile.name.as_deref() == Some("stubbed"))
+        .expect("the plugin's Profile is listed");
+    let fable = saved(&app, accounts.path(), "fable").await;
+
+    choose_grilling(&app, id, &stubbed.id, "stub-large").await;
+    choose_implementation(&app, id, &fable.id, MODEL).await;
+    choose_review(&app, id, &fable.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    let picked = |view: &ConversationView| {
+        view.grilling_pairing
+            .as_ref()
+            .map(|pairing| pairing.profile.id.clone())
+    };
+    assert_eq!(
+        picked(&opened(&app, another(&app).await).await),
+        Some(stubbed.id.clone()),
+        "remembered while the plugin is ticked",
+    );
+
+    let enabled = |on: bool| {
+        let app = app.clone();
+        async move {
+            let view: verkstead_render::PluginsView = post(
+                &app,
+                &format!("/api/ui/plugins/{}/enabled", harness.uuid()),
+                &serde_json::json!({ "enabled": on }),
+            )
+            .await;
+            view
+        }
+    };
+
+    let view = enabled(false).await;
+    let row = view
+        .installed
+        .iter()
+        .find(|row| row.uuid == harness.uuid())
+        .unwrap();
+    assert_eq!(row.profiles, 1, "the row counts the Profile it keeps");
+    assert_eq!(row.harness, None, "and offers no harness while disabled");
+
+    let kept = listed(&app)
+        .await
+        .into_iter()
+        .find(|profile| profile.id == stubbed.id)
+        .expect("a disabled plugin's Profile stays");
+    assert_eq!(kept.broken, Some(Broken::HarnessDisabled));
+
+    let view = opened(&app, another(&app).await).await;
+    assert_eq!(
+        picked(&view),
+        None,
+        "the remembered Pairing is not applied: the role starts empty",
+    );
+    assert_eq!(
+        view.implementation_pairing
+            .map(|pairing| pairing.profile.id.clone()),
+        Some(fable.id.clone()),
+        "and the roles beside it are filled as they were",
+    );
+
+    let (status, refusal) = fetch(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/ui/plugins/{}/remove", harness.uuid()))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refusal}");
+    assert!(
+        refusal.contains("can't be removed while 1 agent profile uses it"),
+        "the refusal says how many: {refusal}",
+    );
+
+    enabled(true).await;
+    let back = listed(&app)
+        .await
+        .into_iter()
+        .find(|profile| profile.id == stubbed.id)
+        .unwrap();
+    assert_eq!(back.broken, None, "ticked again, it is offered again");
+}

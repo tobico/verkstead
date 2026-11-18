@@ -42,9 +42,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    AgentType, Broken, HarnessEntry, HarnessModel, HarnessPath, PairingView, PickedView,
-    ProfileAccount, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileDevice, ProfileEdit,
-    ProfileEntry, ProfileSaved, RoleChoice, RowDevice,
+    AgentType, Broken, HarnessEntry, HarnessInstall, HarnessModel, HarnessPath, PairingView,
+    PickedView, ProfileAccount, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileDevice,
+    ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice, RowDevice,
 };
 
 use crate::resolved::{Resolved, resolve};
@@ -272,6 +272,7 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
         .collect();
     let machine = state.onboarding.machine().clone();
     let signed_out = state.logins.signed_out();
+    let plugged = Plugged::read(state).await?;
 
     Ok(tokio::task::spawn_blocking(move || {
         // Whether each harness a Profile not bound here runs is on this
@@ -304,7 +305,9 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
 
                 ProfileEntry {
                     id: profile.id.clone(),
-                    broken: broken(&profile, reachable, &harnesses, &signed_out),
+                    broken: plugged
+                        .withheld(profile.agent_type())
+                        .or_else(|| broken(&profile, reachable, &harnesses, &signed_out)),
                     login: lends(&profile),
                     bound: profile.unbound.is_none(),
                     name: profile.name,
@@ -317,6 +320,49 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
             .collect()
     })
     .await?)
+}
+
+/// Which plugin harnesses this server offers, and which of the rest are a
+/// disabled plugin's — what a Profile of a harness that is not built in is
+/// judged by before anything else.
+struct Plugged {
+    offered: Vec<store::AgentType>,
+    disabled: HashSet<store::AgentType>,
+}
+
+impl Plugged {
+    async fn read(state: &AppState) -> Result<Plugged> {
+        let disabled =
+            crate::store::replicated::live_records::<crate::replicating::plugins::Plugins>(
+                &state.pool,
+            )
+            .await?
+            .into_iter()
+            .filter(|record| !record.fields.enabled)
+            .map(|record| store::AgentType::read(&record.uuid))
+            .collect();
+
+        Ok(Plugged {
+            offered: state.plugins.harnesses(),
+            disabled,
+        })
+    }
+
+    /// Why a Profile of `agent_type` is offered on no picker, where it is a
+    /// plugin's harness this server does not offer (Set 1764, Q20): its plugin
+    /// disabled, or not loaded here at all. Nothing for a built-in, or for a
+    /// harness this server offers.
+    fn withheld(&self, agent_type: store::AgentType) -> Option<Broken> {
+        if agent_type.built_in().is_some() || self.offered.contains(&agent_type) {
+            return None;
+        }
+
+        Some(if self.disabled.contains(&agent_type) {
+            Broken::HarnessDisabled
+        } else {
+            Broken::HarnessUnknown
+        })
+    }
 }
 
 /// What a Profile card's line per device is drawn off: every device of the
@@ -924,6 +970,11 @@ pub(crate) fn harnesses(plugged: &[store::AgentType]) -> Vec<HarnessEntry> {
             first_run: harness.first_run().to_owned(),
             models: modelled(harness.models()),
             aliases: modelled(harness.aliases()),
+            binary: harness.binary().to_owned(),
+            install: harness.install().map(|install| HarnessInstall {
+                instructions: install.instructions.map(str::to_owned),
+                commands: install.commands.to_vec(),
+            }),
         })
         .collect()
 }

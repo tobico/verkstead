@@ -7986,7 +7986,11 @@ async fn directories(Query(browsing): Query<Browsing>) -> HttpResponse {
 /// is not a reading at all. See [`crate::onboarding`], where the whole of that
 /// difference is written down.
 async fn onboarding(State(state): State<AppState>) -> HttpResponse {
-    match state.onboarding.read(&state.pool, &state.settings).await {
+    match state
+        .onboarding
+        .read(&state.pool, &state.settings, &state.plugins.harnesses())
+        .await
+    {
         Ok(reading) => Json(reading).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading the onboarding objective failed");

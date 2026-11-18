@@ -26,11 +26,13 @@ import type {
   Dependency,
   DependencyState,
   Distro,
+  HarnessEntry,
   InstallState,
   OnboardingView,
   RunView,
   Seen,
 } from "../src/api/types";
+import { knowHarnesses } from "../src/harnesses";
 import { Dependencies } from "../src/setup/Dependencies";
 import { SetupPage } from "../src/setup/SetupPage";
 import type { Instruction } from "../src/setup/instructions";
@@ -38,6 +40,7 @@ import { DISTROS, GUIDES, instructionFor } from "../src/setup/instructions";
 import { SETUP_SCREEN, SETUP_STEP } from "../src/setup/steps";
 import { json, serving, whenever } from "./serving";
 import failed from "./fixtures/onboarding-failed.json" with { type: "json" };
+import harnesses from "./fixtures/harnesses.json" with { type: "json" };
 import fresh from "./fixtures/onboarding-fresh.json" with { type: "json" };
 import installing from "./fixtures/onboarding-installing.json" with { type: "json" };
 import partWay from "./fixtures/onboarding-part-way.json" with { type: "json" };
@@ -1342,10 +1345,10 @@ describe("where each program was found", () => {
     expect(note.textContent).not.toContain("npm install");
     expect(note.textContent).not.toContain("install.ps1");
 
-    expect(GUIDES.Windows.rows.Claude.command).toBe(
+    expect(GUIDES.Windows.harnesses.Claude.command).toBe(
       "irm https://claude.ai/install.ps1 | iex",
     );
-    expect(GUIDES.Windows.rows.Claude.alternative?.command).toBe(
+    expect(GUIDES.Windows.harnesses.Claude.alternative?.command).toBe(
       "npm install -g @anthropic-ai/claude-code",
     );
   });
@@ -1437,23 +1440,23 @@ describe("what each machine is told to run", () => {
         // own nor a package this Mac can use — so it is a link, the way Grok
         // Build is on every tab.
         if (distro === "MacOsIntel" && harness === "Codex") {
-          expect(GUIDES[distro].rows[harness].command).toBeUndefined();
-          expect(GUIDES[distro].rows[harness].link).toBeTruthy();
+          expect(GUIDES[distro].harnesses[harness].command).toBeUndefined();
+          expect(GUIDES[distro].harnesses[harness].link).toBeTruthy();
           continue;
         }
 
-        expect(GUIDES[distro].rows[harness].command).toBeTruthy();
+        expect(GUIDES[distro].harnesses[harness].command).toBeTruthy();
       }
     }
 
     // The cask Homebrew keeps Codex under, which a plain `brew install` would
     // not find.
-    expect(GUIDES.MacOs.rows.Codex.command).toBe("brew install --cask codex");
-    expect(GUIDES.MacOs.rows.OpenCode.command).toBe("brew install opencode");
+    expect(GUIDES.MacOs.harnesses.Codex.command).toBe("brew install --cask codex");
+    expect(GUIDES.MacOs.harnesses.OpenCode.command).toBe("brew install opencode");
 
     // And OpenCode's own installer on the Mac that has no Homebrew to install
     // the formula with.
-    expect(GUIDES.MacOsIntel.rows.OpenCode.command).toBe(
+    expect(GUIDES.MacOsIntel.harnesses.OpenCode.command).toBe(
       "curl -fsSL https://opencode.ai/install | bash",
     );
   });
@@ -1467,7 +1470,7 @@ describe("what each machine is told to run", () => {
   /// one on Windows, and no alternative under either.
   it("gives the Antigravity CLI Google's installer on every one of them", () => {
     for (const distro of DISTROS) {
-      const agy = GUIDES[distro].rows.Agy;
+      const agy = GUIDES[distro].harnesses.Agy;
 
       expect(agy.command).toBe(
         distro === "Windows"
@@ -1483,7 +1486,7 @@ describe("what each machine is told to run", () => {
 
   it("gives Grok Build the vendor's page on every one of them", () => {
     for (const distro of DISTROS) {
-      const grok = GUIDES[distro].rows.Grok;
+      const grok = GUIDES[distro].harnesses.Grok;
 
       expect(grok.command).toBeUndefined();
       expect(grok.link).toBe("https://x.ai/cli");
@@ -1496,7 +1499,7 @@ describe("what each machine is told to run", () => {
       // from the wire — no tab says it. What a tab still says is where each
       // installer puts its binary, which on Windows is the same directory
       // under the name Windows gives it.
-      expect(GUIDES[distro].rows.Claude.note).toContain(
+      expect(GUIDES[distro].harnesses.Claude.note).toContain(
         distro === "Windows" ? "%USERPROFILE%\\.local\\bin" : "~/.local/bin",
       );
     }
@@ -1507,7 +1510,7 @@ describe("what each machine is told to run", () => {
   /// current is what a row leads with, and the packaged one waits under it.
   it("leads Claude Code with the native installer on every tab", () => {
     for (const distro of DISTROS) {
-      const claude = GUIDES[distro].rows.Claude;
+      const claude = GUIDES[distro].harnesses.Claude;
 
       expect(claude.command).toBe(
         distro === "Windows"
@@ -1539,8 +1542,8 @@ describe("what each machine is told to run", () => {
   /// see that directory, and it is gone.
   it("says nothing about a shell's PATH on either Mac's Claude row", () => {
     for (const claude of [
-      GUIDES.MacOs.rows.Claude,
-      GUIDES.MacOsIntel.rows.Claude,
+      GUIDES.MacOs.harnesses.Claude,
+      GUIDES.MacOsIntel.harnesses.Claude,
     ]) {
       expect(claude.command).toBe(
         "curl -fsSL https://claude.ai/install.sh | bash",
@@ -1908,5 +1911,79 @@ describe("what the WSL row is told to run", () => {
         note: "Restart Windows to finish turning WSL on, then come back to this step.",
       });
     }
+  });
+});
+
+describe("a plugin's harness", () => {
+  /// The stub harness an enabled Agent plugin declares, as the harness list
+  /// says it: its name, its mark, its binary, and the command its manifest
+  /// declares for the machine the server is on.
+  const STUB = "a05b6f7c-8d9e-4fa0-9b1c-3d4e5f6a7b8c";
+
+  const entry: HarnessEntry = {
+    ...(harnesses as HarnessEntry[])[0]!,
+    id: STUB,
+    name: "Stub Harness",
+    mark: '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    binary: "stub-harness",
+    login: null,
+    install: {
+      instructions: "https://example.com/stub-harness",
+      commands: ["npm install -g stub-harness"],
+    },
+  };
+
+  /// A bare machine with the plugin's row drawn after the built-ins, the way
+  /// the server draws it.
+  const WITH_A_PLUGIN: OnboardingView = {
+    ...FRESH,
+    dependencies: [
+      ...FRESH.dependencies.filter((row) => row.dependency !== "Gh"),
+      {
+        dependency: STUB,
+        state: { state: "Absent", trouble: null, seen: null },
+        install: { install: "Idle" },
+      },
+      ...FRESH.dependencies.filter((row) => row.dependency === "Gh"),
+    ],
+  };
+
+  beforeEach(() =>
+    knowHarnesses([...(harnesses as HarnessEntry[]), entry]),
+  );
+  afterEach(() => knowHarnesses(harnesses as HarnessEntry[]));
+
+  it("is a tile among the harnesses, named as the list names it", () => {
+    const { container } = mount(WITH_A_PLUGIN);
+    const tile = row(container, STUB);
+
+    expect(tile.textContent).toContain("Stub Harness");
+    expect(tile.textContent).toContain("stub-harness");
+    expect(box(container, STUB)!.checked).toBe(false);
+
+    // One harness is enough, and this one is a harness like the rest.
+    fireEvent.click(box(container, STUB)!);
+    expect(onwards(container).disabled).toBe(false);
+  });
+
+  it("is told to run what its manifest declares, on every tab", () => {
+    for (const distro of DISTROS) {
+      const told = instructionFor(distro, STUB, null);
+
+      expect(told.command).toBe("npm install -g stub-harness");
+      expect(told.link).toBe("https://example.com/stub-harness");
+    }
+  });
+
+  it("says so where its manifest declares nothing to run", () => {
+    knowHarnesses([
+      ...(harnesses as HarnessEntry[]),
+      { ...entry, install: { instructions: null, commands: [] } },
+    ]);
+
+    const told = instructionFor("Ubuntu", STUB, null);
+
+    expect(told.command).toBeUndefined();
+    expect(told.note).toBe("Its plugin doesn't say how to install it.");
   });
 });

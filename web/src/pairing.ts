@@ -35,6 +35,12 @@ import type {
   RoleChoice,
 } from "./api/types";
 
+/// The broken rows no picker offers.
+const WITHHELD: (ProfileEntry["broken"])[] = [
+  "HarnessUnknown",
+  "HarnessDisabled",
+];
+
 /// One row of a pairing picker: an account, and one thing that account can run.
 export type Pairing = {
   profile: ProfileEntry;
@@ -44,13 +50,14 @@ export type Pairing = {
 /// Every pairing the saved profiles come to, in the order they are listed —
 /// profiles by name, and each profile's models as the human typed them.
 ///
-/// **Less the profiles of a harness this server has not got**, the one broken
-/// row a picker leaves out: there is nothing here to launch it with, nothing to
-/// put right from here, and nothing to name it by but an id. The settings page
-/// still draws it, broken, where it can be removed.
+/// **Less the profiles of a harness this server has not got or whose plugin is
+/// disabled**, the two broken rows a picker leaves out: there is nothing here
+/// to launch them with, and a disabled plugin's are held back on purpose (Set
+/// 1764, Q20). The settings page still draws them, broken, where they can be
+/// removed.
 export function pairings(profiles: ProfileEntry[]): Pairing[] {
   return profiles
-    .filter((profile) => profile.broken !== "HarnessUnknown")
+    .filter((profile) => !WITHHELD.includes(profile.broken))
     .flatMap((profile) => profile.models.map((model) => ({ profile, model })));
 }
 

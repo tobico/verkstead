@@ -39,8 +39,15 @@
 //! **Unticking is allowed over what stands on a plugin; Remove is refused by
 //! it** (Set 1769, Q45). Unticking one that ticked plugins depend on asks
 //! first, naming the ones that go with it. **Remove** asks too, saying what
-//! goes, and the server refuses it while installed plugins depend on it,
-//! counting and naming them on the row. A built-in has no Remove.
+//! goes, and the server refuses it while installed plugins depend on it or
+//! agent profiles use its harness, counting them on the row. A built-in has no
+//! Remove.
+//!
+//! **An Agent plugin's row says how many profiles use its harness** (Set 1764,
+//! Q20): a disabled one's stay, offered on no picker. And where its harness's
+//! binary is not on this machine, the row says so, with **Install** where the
+//! manifest declares commands for it — the wizard's own install run, which is
+//! the only thing that runs them.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -58,6 +65,7 @@ import { PathField } from "../PathField";
 import {
   enablePlugin,
   installPlugin,
+  installPluginHarness,
   loadPlugins,
   readPlugin,
   removePlugin,
@@ -66,12 +74,14 @@ import {
 import type {
   PluginCapability,
   PluginConsent,
+  PluginHarness,
   PluginNeed,
   PluginRow,
   PluginsView,
   PluginUpdated,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { RUNNING } from "../setup/steps";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./Plugins.module.css";
@@ -82,6 +92,17 @@ function usePlugins() {
   return useReading(() => ({
     queryKey: ["plugins"],
     queryFn: loadPlugins,
+    // Read again at the wizard's run cadence while a harness is installing,
+    // the run moving nothing a Nudge says.
+    refetchInterval: (query) => {
+      const view = query.state.data as PluginsView | undefined;
+
+      return view?.installed.some(
+        (row) => row.harness?.install.install === "Installing",
+      )
+        ? RUNNING
+        : false;
+    },
     freshness: { reconcile: "uuid" },
   }));
 }
@@ -228,12 +249,19 @@ export function PluginsPane(props: {
     onError: (error: Error, uuid) => setRefused({ uuid, why: error.message }),
   }));
 
+  const installingHarness = useMutation(() => ({
+    mutationFn: (uuid: string) => installPluginHarness(uuid),
+    onSuccess: read,
+    onError: (error: Error, uuid) => setRefused({ uuid, why: error.message }),
+  }));
+
   const pressing = (): boolean =>
     enable.isPending ||
     update.isPending ||
     fetching.isPending ||
     installing.isPending ||
-    removing.isPending;
+    removing.isPending ||
+    installingHarness.isPending;
 
   return (
     <>
@@ -284,6 +312,7 @@ export function PluginsPane(props: {
                               ? undefined
                               : () => removing.mutate(row.uuid)
                           }
+                          install={() => installingHarness.mutate(row.uuid)}
                           fix={(need) => fix(row.uuid, need)}
                           open={() => props.open(row.uuid)}
                           refused={
@@ -397,6 +426,8 @@ function Row(props: {
   /// A press on one of its needs, where the row has trouble a press puts
   /// right.
   fix?: (need: PluginNeed) => void;
+  /// **Install** on the harness it provides, where that binary is missing.
+  install?: () => void;
   /// Opening its settings pane, drawn where its manifest declares fields.
   open: () => void;
   refused: string | null;
@@ -542,6 +573,22 @@ function Row(props: {
         {(from) => <p class={styles.source}>{from()}</p>}
       </Show>
 
+      <Show when={props.of.profiles > 0}>
+        <p class={styles.provides} data-profiles>
+          {profilesUsing(props.of)}
+        </p>
+      </Show>
+
+      <Show when={props.of.harness}>
+        {(harness) => (
+          <Harnessed
+            of={harness()}
+            pressing={props.pressing}
+            install={props.install}
+          />
+        )}
+      </Show>
+
       <Show when={props.of.elsewhere}>
         {(device) => <Note>On {device()}. It's loaded there.</Note>}
       </Show>
@@ -572,6 +619,55 @@ function Row(props: {
 
       {props.children}
     </li>
+  );
+}
+
+/// How many agent profiles use the harness a row provides, and — where it is
+/// disabled — that none of them is offered.
+function profilesUsing(row: PluginRow): string {
+  const used =
+    row.profiles === 1
+      ? "1 agent profile uses it."
+      : `${row.profiles} agent profiles use it.`;
+
+  return row.enabled
+    ? used
+    : `${used} ${row.profiles === 1 ? "It isn't" : "They aren't"} offered while it's disabled.`;
+}
+
+/// The harness an Agent plugin's row provides, where its binary is not on this
+/// machine: what is missing, and **Install** where the manifest declares
+/// commands for it.
+function Harnessed(props: {
+  of: PluginHarness;
+  pressing: boolean;
+  install?: () => void;
+}): JSX.Element {
+  const installing = (): boolean =>
+    props.of.install.install === "Installing";
+
+  const failed = (): string | null =>
+    props.of.install.install === "Failed" ? props.of.install.why : null;
+
+  return (
+    <Show when={!props.of.present}>
+      <div class={styles.needs} data-harness={props.of.id}>
+        <p class={styles.missing}>
+          <code>{props.of.binary}</code> isn't on this machine.
+        </p>
+        <Show when={props.of.installable && props.install !== undefined}>
+          <button
+            type="button"
+            class={styles.press}
+            disabled={props.pressing || installing()}
+            onClick={() => props.install?.()}
+          >
+            {installing() ? "Installing…" : "Install"}
+          </button>
+        </Show>
+      </div>
+      <Show when={failed()}>{(why) => <ErrorLine>{why()}</ErrorLine>}</Show>
+    </Show>
   );
 }
 

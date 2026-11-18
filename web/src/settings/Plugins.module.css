@@ -128,6 +128,14 @@
   margin-inline-start: 0;
 }
 
+/* An Agent plugin's binary that isn't on this machine, beside its Install. */
+.missing {
+  align-self: center;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
 .add {
   margin-top: 1.25rem;
 }

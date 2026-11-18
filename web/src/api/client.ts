@@ -2209,6 +2209,12 @@ export function removePlugin(uuid: string): Promise<PluginsView> {
   return post<PluginsView>(`/api/ui/plugins/${uuid}/remove`);
 }
 
+/// **Install** on an Agent plugin's row: the wizard's install run, started for
+/// the binary of the harness it provides.
+export function installPluginHarness(uuid: string): Promise<PluginsView> {
+  return post<PluginsView>(`/api/ui/plugins/${uuid}/harness`);
+}
+
 /// A plugin's settings pane: the fields its manifest declares, each with the
 /// cluster's value, and only whether a secret is set.
 export function loadPluginSettings(uuid: string): Promise<PluginSettingsView> {

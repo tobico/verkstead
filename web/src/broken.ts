@@ -88,6 +88,8 @@ export function troubleReading(said: ProfileTrouble): string {
       return "No device it's bound on with a login is reachable, so no session here can run under it.";
     case "HarnessUnknown":
       return "Its harness isn't installed on this Verkstead.";
+    case "HarnessDisabled":
+      return "Its plugin is disabled. Tick it in Plugins to run sessions under this profile.";
     case "HarnessMissing":
       return harnessAbsent(said.agent_type);
     case "SignedOut":
@@ -112,6 +114,8 @@ export function brokenBriefly(broken: Broken): string {
       return "no bound device reachable";
     case "HarnessUnknown":
       return "harness not installed";
+    case "HarnessDisabled":
+      return "plugin disabled";
     case "HarnessMissing":
       return "not on this machine";
     case "SignedOut":

@@ -29,4 +29,4 @@ Roadmap stage: [03: The Agent interface](docs/roadmaps/plugins/03-the-agent-inte
 - [x] 06: Its Transcript drawn — [details](06-its-transcript-drawn.md)
 - [x] 07: Its login — [details](07-its-login.md)
 - [x] 08: Models and the Guide — [details](08-models-and-the-guide.md)
-- [ ] 09: Detection, install, disable and remove — [details](09-detection-install-disable-remove.md)
+- [x] 09: Detection, install, disable and remove — [details](09-detection-install-disable-remove.md)
