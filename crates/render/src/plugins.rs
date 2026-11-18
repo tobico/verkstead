@@ -6,9 +6,9 @@
 //! list, which is a Replicated record, and off what this device made of loading
 //! it — its trouble — which is this device's alone.
 //!
-//! **The consent card is a reading of its own**: the manifest at a path read
-//! without anything being written, so that what the human grants at **Install**
-//! is what they were shown. The grant travels back with the press, and a
+//! **The consent card is a reading of its own**: the manifest at a path, or in
+//! a clone of a git URL taken back once it is read, with nothing written, so
+//! that what the human grants at **Install** is what they were shown. The grant travels back with the press, and a
 //! manifest asking for more by then is refused rather than installed.
 
 use serde::{Deserialize, Serialize};
@@ -58,13 +58,17 @@ pub struct PluginRow {
 pub enum PluginSource {
     /// A directory on one device, read where it is.
     Local { path: String },
+    /// A git repository every device clones for itself, checked out at the
+    /// revision pinned at install or at the last **Update**.
+    Git { url: String, revision: String },
 }
 
-/// A path to read a manifest at, for the consent card.
+/// Where to read a manifest for the consent card: a directory's absolute path,
+/// or a git URL.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct PluginAt {
-    pub path: String,
+    pub source: String,
 }
 
 /// The consent card: who the plugin is, what it provides, and every
@@ -95,12 +99,12 @@ pub enum PluginCapability {
     Environment { name: String },
 }
 
-/// **Install**: the path, and the capabilities the card showed, which is the
-/// grant.
+/// **Install**: the directory or git URL, and the capabilities the card
+/// showed, which is the grant.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct PluginInstall {
-    pub path: String,
+    pub source: String,
     pub granted: Vec<PluginCapability>,
 }
 

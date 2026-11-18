@@ -75,4 +75,15 @@ pub enum Source {
         /// The Device Id of the device it is on.
         device: String,
     },
+
+    /// A git repository tracking its default branch, which every device
+    /// clones for itself under the Data Directory's `plugins/<uuid>/` and
+    /// checks out at `revision` (Set 1762, Q10). Nothing fetches on its own:
+    /// an **Update** is the press that moves `revision`, and the other devices
+    /// follow the record.
+    Git {
+        url: String,
+        /// The commit pinned at **Install**, or at the last Update.
+        revision: String,
+    },
 }

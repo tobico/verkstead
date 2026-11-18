@@ -50,6 +50,24 @@ finds it fixed; and one that now asks for more capabilities than were granted
 shows the consent card again before anything changes. Until then it is loaded
 by nobody.
 
+## Installing one from git
+
+**Add a plugin…** takes a git URL in the same field — `https://`, `ssh://`,
+`file://` or `git@host:path`. The server clones it the way it clones a Repo,
+as the one Author where there is one, reads the manifest into the same consent
+card, and takes the clone back: a URL that isn't a repository is refused with
+nothing listed or kept. **Install** clones it again into the Data Directory's
+`plugins/<uuid>/`, and the record pins the revision it is at.
+
+A git plugin is **every device's**: each device of the cluster clones it for
+itself and checks out the pinned revision, and is in trouble until it can. It
+tracks its repository's default branch, and nothing fetches on its own.
+**Update** on its row is the pull: the default branch is fetched and read at its
+new revision, and the record re-pinned, which every other device follows. A
+pull that fails, or a manifest there that no longer reads, leaves the old
+checkout loaded and says why on the row; one asking for more capabilities shows
+the consent card again before the new revision lands.
+
 ## The smallest plugin
 
 ```yaml

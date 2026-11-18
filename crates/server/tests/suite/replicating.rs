@@ -831,10 +831,17 @@ impl Verkstead {
         .unwrap();
         let path = at.to_str().unwrap().to_owned();
 
+        self.installs_plugin_from(&path).await;
+        path
+    }
+
+    /// The plugin at a directory or git URL, read through the consent card and
+    /// installed with the grant it showed.
+    async fn installs_plugin_from(&self, source: &str) {
         let (status, said) = pressing(
             &self.workbench,
             "/api/ui/plugins/read",
-            Some(&serde_json::json!({ "path": path }).to_string()),
+            Some(&serde_json::json!({ "source": source }).to_string()),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{said}");
@@ -842,12 +849,10 @@ impl Verkstead {
         let (status, said) = pressing(
             &self.workbench,
             "/api/ui/plugins",
-            Some(&serde_json::json!({ "path": path, "granted": [] }).to_string()),
+            Some(&serde_json::json!({ "source": source, "granted": [] }).to_string()),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{said}");
-
-        path
     }
 
     /// The stamps this device holds for the Author `id`: `updated_at` and the
@@ -2159,4 +2164,93 @@ async fn a_local_plugin_is_listed_on_another_device_as_the_ones_it_is_on() {
 
     a.plugins_saying(|view| view.installed.iter().any(|row| !row.enabled))
         .await;
+}
+
+/// One git command in `dir`, answering what it printed.
+fn git_in(dir: &Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Ada Lovelace",
+            "-c",
+            "user.email=ada@example.com",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("git should be on the PATH for these tests");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed in {}: {}",
+        dir.display(),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// A plugin installed from git on A is listed on B, and B clones it for itself
+/// at the revision A pinned: loaded on both, and greyed on neither.
+#[tokio::test]
+async fn a_git_plugin_is_cloned_by_another_device_at_the_pinned_revision() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    linked(&a, &b).await;
+    let _a_holding = a.holding();
+    let _b_holding = b.holding();
+
+    let sources = tempfile::tempdir().unwrap();
+    let origin = sources.path().join("gitlab");
+    std::fs::create_dir_all(&origin).unwrap();
+    std::fs::write(
+        origin.join("plugin.yaml"),
+        format!(
+            "uuid: {PLUGIN}\nname: GitLab\nauthor:\n  name: Ada Lovelace\n  email: \
+             ada@example.com\nversion: 1.4.0\ninterface: 1\nprovides:\n  - category: forge\n"
+        ),
+    )
+    .unwrap();
+    git_in(&origin, &["init", "--quiet"]);
+    git_in(&origin, &["add", "plugin.yaml"]);
+    git_in(&origin, &["commit", "--quiet", "-m", "the manifest"]);
+    let revision = git_in(&origin, &["rev-parse", "HEAD"]);
+    let path = origin.to_string_lossy().replace('\\', "/");
+    let url = match path.starts_with('/') {
+        true => format!("file://{path}"),
+        false => format!("file:///{path}"),
+    };
+
+    a.installs_plugin_from(&url).await;
+
+    let on_b = b
+        .plugins_saying(|view| view.installed.iter().any(|row| row.uuid == PLUGIN))
+        .await;
+    let row = &on_b.installed[0];
+    assert_eq!(row.name, "GitLab");
+    assert_eq!(
+        row.source,
+        PluginSource::Git {
+            url: url.clone(),
+            revision: revision.clone()
+        }
+    );
+    assert_eq!(row.elsewhere, None, "a git plugin is every device's");
+
+    let checkout = b.dir.path().join("plugins").join(PLUGIN);
+    let cloned = tokio::time::timeout(WAITING, async {
+        loop {
+            if checkout.join("plugin.yaml").is_file() {
+                return git_in(&checkout, &["rev-parse", "HEAD"]);
+            }
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await
+    .expect("B cloned the plugin");
+    assert_eq!(cloned, revision);
+
+    let on_b = b
+        .plugins_saying(|view| view.installed.iter().all(|row| row.trouble.is_none()))
+        .await;
+    assert!(on_b.installed[0].enabled);
 }

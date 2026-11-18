@@ -1,13 +1,15 @@
-//! **Plugins installed from a local directory**, on one device: the consent
-//! card read off a path, **Install** with the grant it showed, the row on the
-//! Plugins page, the trouble a broken manifest is after **Update**, the
-//! checkbox, and the uuids that are refused (ADR-0030).
+//! **Plugins installed from a local directory or a git URL**, on one device:
+//! the consent card read off a path or a clone, **Install** with the grant it
+//! showed, the row on the Plugins page, the trouble a broken manifest or a
+//! failed pull is after **Update**, the checkbox, and the uuids that are
+//! refused (ADR-0030).
 //!
 //! Every press is the one the section makes, on a router kept over a Data
 //! Directory of its own; the plugins are directories written here. What the
 //! record does across two devices is `replicating.rs`'s.
 
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use axum::Router;
 use axum::body::Body;
@@ -95,7 +97,7 @@ async fn read(app: &Router, path: &str) -> PluginConsent {
     let (status, said) = pressing(
         app,
         "/api/ui/plugins/read",
-        serde_json::json!({ "path": path }),
+        serde_json::json!({ "source": path }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{said}");
@@ -108,7 +110,7 @@ async fn installs(app: &Router, path: &str) -> PluginsView {
     let (status, said) = pressing(
         app,
         PLUGINS,
-        serde_json::json!({ "path": path, "granted": consent.capabilities }),
+        serde_json::json!({ "source": path, "granted": consent.capabilities }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{said}");
@@ -281,7 +283,7 @@ async fn a_uuid_installed_or_built_in_is_refused() {
     let (status, said) = pressing(
         &app,
         "/api/ui/plugins/read",
-        serde_json::json!({ "path": twin }),
+        serde_json::json!({ "source": twin }),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{said}");
@@ -291,7 +293,7 @@ async fn a_uuid_installed_or_built_in_is_refused() {
     let (status, said) = pressing(
         &app,
         PLUGINS,
-        serde_json::json!({ "path": shipped, "granted": [] }),
+        serde_json::json!({ "source": shipped, "granted": [] }),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{said}");
@@ -308,11 +310,249 @@ async fn a_directory_that_is_not_a_plugin_is_refused() {
     let (status, said) = pressing(
         &app,
         "/api/ui/plugins/read",
-        serde_json::json!({ "path": dir.path() }),
+        serde_json::json!({ "source": dir.path() }),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
     assert!(said.contains("isn't a plugin"), "{said}");
+}
+
+/// One git command in `dir`, answering what it printed.
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Ada Lovelace",
+            "-c",
+            "user.email=ada@example.com",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        // Dated, so a commit of the same tree is the same commit every run and
+        // the viewer's fixture names one revision.
+        .env("GIT_AUTHOR_DATE", "2026-11-18T12:00:00+11:00")
+        .env("GIT_COMMITTER_DATE", "2026-11-18T12:00:00+11:00")
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .output()
+        .expect("git should be on the PATH for these tests");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed in {}: {}",
+        dir.display(),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// A git repository under `dir` holding `text` as its `plugin.yaml`, by its
+/// `file://` URL and the commit it is at.
+fn repository(dir: &Path, name: &str, text: &str) -> (String, String) {
+    let at = dir.join(name);
+    std::fs::create_dir_all(&at).unwrap();
+    git(&at, &["init", "--quiet"]);
+    committed(&at, text)
+}
+
+/// `text` committed as the repository at `at`'s `plugin.yaml`, answering its
+/// URL and the new commit.
+fn committed(at: &Path, text: &str) -> (String, String) {
+    std::fs::write(at.join("plugin.yaml"), text).unwrap();
+    git(at, &["add", "plugin.yaml"]);
+    git(at, &["commit", "--quiet", "-m", "the manifest"]);
+    (file_url(at), git(at, &["rev-parse", "HEAD"]))
+}
+
+/// `at` as a `file://` URL, which git clones like any other.
+fn file_url(at: &Path) -> String {
+    let path = at.to_string_lossy().replace('\\', "/");
+    match path.starts_with('/') {
+        true => format!("file://{path}"),
+        false => format!("file:///{path}"),
+    }
+}
+
+/// What the Data Directory's `plugins/` holds, by name.
+fn plugins_dir(dir: &Path) -> Vec<String> {
+    std::fs::read_dir(dir.join("plugins"))
+        .map(|entries| {
+            entries
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A URL that isn't a repository is refused before anything is listed, and the
+/// clone that was tried leaves nothing behind.
+#[tokio::test]
+async fn a_url_that_is_not_a_repository_is_refused_before_anything_is_written() {
+    let (app, dir) = kept().await;
+    let nowhere = file_url(&dir.path().join("nowhere"));
+
+    let (status, said) = pressing(
+        &app,
+        "/api/ui/plugins/read",
+        serde_json::json!({ "source": nowhere }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
+    assert!(said.contains("couldn't be cloned"), "{said}");
+
+    let (status, said) = pressing(
+        &app,
+        PLUGINS,
+        serde_json::json!({ "source": nowhere, "granted": [] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
+
+    assert!(page(&app).await.installed.is_empty());
+    assert_eq!(plugins_dir(dir.path()), Vec::<String>::new());
+}
+
+/// A git plugin's card shows the host it asks for before Install; Install
+/// clones it under `plugins/<uuid>/` at the revision the record pins, and the
+/// card's own clone is gone.
+#[tokio::test]
+async fn a_git_plugin_shows_its_card_then_installs_at_a_pinned_revision() {
+    let (app, dir) = kept().await;
+    let sources = tempfile::tempdir().unwrap();
+    let (url, revision) = repository(
+        sources.path(),
+        "gitlab",
+        &manifest(PLUGIN, "GitLab", &["outbound: gitlab.com"]),
+    );
+
+    let consent = read(&app, &url).await;
+    assert_eq!(
+        consent.capabilities,
+        [PluginCapability::Outbound {
+            host: "gitlab.com".to_owned()
+        }],
+    );
+    assert!(page(&app).await.installed.is_empty());
+    assert_eq!(
+        plugins_dir(dir.path()),
+        Vec::<String>::new(),
+        "the card's clone is taken back"
+    );
+
+    let view = installs(&app, &url).await;
+
+    let row = row(&view, PLUGIN);
+    assert_eq!(
+        row.source,
+        PluginSource::Git {
+            url: url.clone(),
+            revision: revision.clone()
+        }
+    );
+    assert_eq!(row.trouble, None);
+    assert_eq!(row.elsewhere, None);
+    assert_eq!(plugins_dir(dir.path()), [PLUGIN]);
+    assert_eq!(
+        git(
+            &dir.path().join("plugins").join(PLUGIN),
+            &["rev-parse", "HEAD"]
+        ),
+        revision
+    );
+}
+
+/// A pull that fails leaves the old checkout loaded and says so on the row; a
+/// pull that reads lands and re-pins; one asking for more shows the card
+/// before the new revision lands.
+#[tokio::test]
+async fn update_on_a_git_row_pulls_and_re_pins() {
+    let (app, dir) = kept().await;
+    let sources = tempfile::tempdir().unwrap();
+    let origin = sources.path().join("one");
+    let (url, first) = repository(sources.path(), "one", &manifest(PLUGIN, "One", &[]));
+    installs(&app, &url).await;
+    let checkout = dir.path().join("plugins").join(PLUGIN);
+
+    // A manifest that doesn't read: the old checkout stays, with the trouble.
+    committed(
+        &origin,
+        &manifest(PLUGIN, "One", &[]).replace("version: 1.4.0", "version: 1.4"),
+    );
+    let PluginUpdated::Updated { plugins } = updates(&app, PLUGIN, None).await else {
+        panic!("nothing new was asked for");
+    };
+    let trouble = row(&plugins, PLUGIN).trouble.clone().expect("trouble");
+    assert!(trouble.contains("`version`"), "{trouble}");
+    assert_eq!(
+        row(&plugins, PLUGIN).source,
+        PluginSource::Git {
+            url: url.clone(),
+            revision: first.clone()
+        }
+    );
+    assert_eq!(git(&checkout, &["rev-parse", "HEAD"]), first);
+
+    // Fixed, the pull lands and re-pins.
+    let (_, second) = committed(&origin, &manifest(PLUGIN, "One again", &[]));
+    let PluginUpdated::Updated { plugins } = updates(&app, PLUGIN, None).await else {
+        panic!("nothing new was asked for");
+    };
+    assert_eq!(row(&plugins, PLUGIN).trouble, None);
+    assert_eq!(row(&plugins, PLUGIN).name, "One again");
+    assert_eq!(
+        row(&plugins, PLUGIN).source,
+        PluginSource::Git {
+            url: url.clone(),
+            revision: second.clone()
+        }
+    );
+    assert_eq!(git(&checkout, &["rev-parse", "HEAD"]), second);
+
+    // Asking for more: the card first, and nothing lands until it is granted.
+    let (_, third) = committed(
+        &origin,
+        &manifest(PLUGIN, "One again", &["outbound: gitlab.com"]),
+    );
+    let PluginUpdated::Consent { consent } = updates(&app, PLUGIN, None).await else {
+        panic!("the card comes back first");
+    };
+    assert_eq!(
+        consent.capabilities,
+        [PluginCapability::Outbound {
+            host: "gitlab.com".to_owned()
+        }],
+    );
+    assert_eq!(
+        row(&page(&app).await, PLUGIN).source,
+        PluginSource::Git {
+            url: url.clone(),
+            revision: second.clone()
+        }
+    );
+    assert_eq!(git(&checkout, &["rev-parse", "HEAD"]), second);
+
+    let PluginUpdated::Updated { plugins } =
+        updates(&app, PLUGIN, Some(&consent.capabilities)).await
+    else {
+        panic!("granted, it lands");
+    };
+    assert_eq!(
+        row(&plugins, PLUGIN).source,
+        PluginSource::Git {
+            url: url.clone(),
+            revision: third.clone()
+        }
+    );
+    assert_eq!(row(&plugins, PLUGIN).trouble, None);
+
+    // The repository gone: the pull fails, and the old checkout stays loaded.
+    std::fs::remove_dir_all(&origin).unwrap();
+    let PluginUpdated::Updated { plugins } = updates(&app, PLUGIN, None).await else {
+        panic!("nothing new was asked for");
+    };
+    let trouble = row(&plugins, PLUGIN).trouble.clone().expect("trouble");
+    assert!(trouble.contains("The pull failed"), "{trouble}");
+    assert_eq!(git(&checkout, &["rev-parse", "HEAD"]), third);
 }
 
 /// Where the golden fixtures are written, relative to this crate — the
@@ -320,8 +560,8 @@ async fn a_directory_that_is_not_a_plugin_is_refused() {
 const FIXTURES: &str = "../../web/tests/fixtures";
 
 /// Leave the viewer's tests the page and the consent card as the server writes
-/// them: a plugin that loaded, one in trouble, and the card for one asking for
-/// a host. The directories are written as `/home/you/src`, so that a fixture
+/// them: a plugin that loaded, one in trouble, one from git, and the card for
+/// one asking for a host. The directories are written as `/home/you/src`, so that a fixture
 /// is not rewritten by where a test happened to run.
 #[tokio::test]
 async fn the_page_and_the_card_are_written_for_the_viewer() {
@@ -340,6 +580,12 @@ async fn the_page_and_the_card_are_written_for_the_viewer() {
     )
     .unwrap();
     updates(&app, ANOTHER, None).await;
+    let (url, _) = repository(
+        &dir.path().join("sources"),
+        "skills",
+        &manifest("2e4f6a8b-1c3d-4e5f-8a7b-9c0d1e2f3a4b", "Shared skills", &[]),
+    );
+    installs(&app, &url).await;
 
     let card = plugin(
         dir.path(),

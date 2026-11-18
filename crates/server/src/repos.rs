@@ -685,15 +685,7 @@ fn cloned_by(
 ) -> Command {
     let mut command = Command::new("git");
 
-    for (key, value) in crate::sandbox::github_credentials() {
-        if key.ends_with(".insteadOf") {
-            command.arg("-c").arg(format!("{key}={value}"));
-        }
-    }
-
-    credential.on(&mut command);
-
-    command
+    reaching_as(&mut command, credential)
         .args(["clone", "--quiet", "--", origin, name])
         .current_dir(parent)
         .unseen()
@@ -702,6 +694,22 @@ fn cloned_by(
         .stderr(Stdio::piped());
 
     command
+}
+
+/// A git that reaches a remote, authenticated as `credential` with GitHub's
+/// SSH spellings rewritten to HTTPS — see [`cloned_by`], whose reasons these
+/// are. A plugin's clone and pull go the same way (ADR-0030).
+pub(crate) fn reaching_as<'c>(
+    command: &'c mut Command,
+    credential: &crate::github::Credential,
+) -> &'c mut Command {
+    for (key, value) in crate::sandbox::github_credentials() {
+        if key.ends_with(".insteadOf") {
+            command.arg("-c").arg(format!("{key}={value}"));
+        }
+    }
+
+    credential.on(command)
 }
 
 /// Take back a directory a clone made, logging rather than failing where it

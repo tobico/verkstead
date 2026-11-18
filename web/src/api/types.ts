@@ -4815,9 +4815,10 @@ export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": Ta
 export type Platform = "Linux" | "MacOs" | "Windows";
 
 /**
- * A path to read a manifest at, for the consent card.
+ * Where to read a manifest for the consent card: a directory's absolute path,
+ * or a git URL.
  */
-export type PluginAt = { path: string, };
+export type PluginAt = { source: string, };
 
 /**
  * One capability a plugin's wasm component asks for.
@@ -4836,10 +4837,10 @@ export type PluginConsent = { uuid: string, name: string, version: string, autho
 export type PluginEnabled = { enabled: boolean, };
 
 /**
- * **Install**: the path, and the capabilities the card showed, which is the
- * grant.
+ * **Install**: the directory or git URL, and the capabilities the card
+ * showed, which is the grant.
  */
-export type PluginInstall = { path: string, granted: Array<PluginCapability>, };
+export type PluginInstall = { source: string, granted: Array<PluginCapability>, };
 
 /**
  * One Plugin's row.
@@ -4876,7 +4877,7 @@ elsewhere: string | null, };
 /**
  * Where a Plugin came from.
  */
-export type PluginSource = { "kind": "Local", path: string, };
+export type PluginSource = { "kind": "Local", path: string, } | { "kind": "Git", url: string, revision: string, };
 
 /**
  * **Update**: nothing the first time, and the capabilities the card showed
