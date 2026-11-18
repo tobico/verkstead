@@ -7093,7 +7093,20 @@ async fn save_settings(
         // And the sizes, which are values like everything else the page writes
         // and refused like the two lists above: a word Verkstead cannot read as
         // a size is a store nothing could hold to it.
-        let refused_sizes = size_refusals(&settings.config().languages(), &edit.languages);
+        //
+        // Not a built-in language's once the plugins' records are held: its
+        // size is its plugin's setting, and what the page sends of it is not
+        // written — see below.
+        let ticks_held = settings.config().plugin_languages().is_some();
+        let pluginless: Vec<LanguageEdit> = edit
+            .languages
+            .iter()
+            .filter(|language| {
+                !(ticks_held && crate::plugins::built_in::providing(&language.name).is_some())
+            })
+            .cloned()
+            .collect();
+        let refused_sizes = size_refusals(&settings.config().languages(), &pluginless);
 
         if !refused.is_empty() || !refused_servers.is_empty() || !refused_sizes.is_empty() {
             return Ok((
@@ -7161,7 +7174,6 @@ async fn save_settings(
             )
         });
 
-        let ticks_held = settings.config().unticked_languages().is_some();
         settings.save_config(
             &Config::of(
                 author.clone(),
@@ -7172,13 +7184,18 @@ async fn save_settings(
                 // not a size. Everything else in a descriptor is an installer's
                 // and is kept from the file below. And no switch for a language
                 // a built-in plugin provides once the plugins' ticks are held,
-                // its tick being its switch: an `enabled` the file still holds
+                // its tick being its switch, nor a size, its `size` setting
+                // being its size: an `enabled` or a `size` the file still holds
                 // for it was taken up, and goes.
                 crate::languages::Languages::of_page(edit.languages.into_iter().map(|language| {
                     let ticked =
                         ticks_held && crate::plugins::built_in::providing(&language.name).is_some();
                     let enabled = (!ticked).then_some(language.enabled);
-                    (language.name, enabled, language.size)
+                    let size = match ticked {
+                        true => String::new(),
+                        false => language.size,
+                    };
+                    (language.name, enabled, size)
                 })),
                 // And the Cleanup's two rows, each a switch and a duration as it
                 // was typed — an empty field is the default asked for back, and so

@@ -362,9 +362,9 @@ A value is text, and these stand for what only the server knows:
   copy anyway**: a Worktree and this directory are two bind mounts, and
   `link(2)` answers `EXDEV` across two mounts whatever is underneath. So what a
   store here saves today is the download, as `{cache}` does.
-- **`{size}`** — how big this language's store may grow: its size as the
-  installation says it, 10G where nobody has, and 30G for Rust, whose sccache
-  has always been started at that.
+- **`{size}`** — how big this language's store may grow: its plugin's `size`
+  setting (below), 10G where nobody has set one, and 30G for Rust, whose
+  sccache has always been started at that.
 - **`{sccache}`** — where a session reaches the sccache this server found. Only
   inside the `sccache` capability.
 
@@ -445,6 +445,15 @@ reach a session. Its `enabled` here was taken up into the plugin's record once,
 at the first start of a release that has the ticks — on where any of its
 languages was on, on any device — and is not read again; `enabled` switches
 only a language no plugin provides.
+
+**And its size is its plugin's `size` setting**, cluster-wide, drawn in the
+plugin's pane with the default as its placeholder. Every Language plugin
+declares one, of kind `size` — a plugin providing a language may call no other
+kind of setting `size` — and it sizes every language the plugin provides, so
+Rust & C/C++ has one size for its one Compile Server. A language's `size` here
+was taken up once beside its `enabled` — the larger wins, across a plugin's
+languages and across devices, and a size that will not read is none — and is
+not read again; `size` sizes only a language no plugin provides.
 
 ## Per-platform overrides
 

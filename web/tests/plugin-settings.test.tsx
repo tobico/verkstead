@@ -56,6 +56,26 @@ describe("a plugin's settings pane", () => {
     screen.getByText("The GitLab instance, where it isn't gitlab.com.");
   });
 
+  /// A size's placeholder is the server's: a Language plugin's default size,
+  /// and nothing where the field has none.
+  it("draws a size's placeholder as the server gives it", async () => {
+    const sized = (placeholder: string | null): PluginSettingsView => ({
+      ...SETTINGS,
+      fields: SETTINGS.fields.map((field) =>
+        field.label === "Cache size" ? { ...field, placeholder } : field,
+      ),
+    });
+
+    serving(whenever(AT, json(sized("30G"))));
+    const { unmount } = pane();
+    expect((await box("Cache size")).placeholder).toBe("30G");
+    unmount();
+
+    serving(whenever(AT, json(sized(null))));
+    pane();
+    expect((await box("Cache size")).placeholder).toBe("");
+  });
+
   it("draws a set secret as its presses, and never its value", async () => {
     serving(whenever(AT, json(SETTINGS)));
     pane();

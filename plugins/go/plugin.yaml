@@ -8,6 +8,14 @@ author:
 version: 0.1.0
 interface: 1
 description: Shares Go's module cache and build cache between sessions.
+# The stores' size, in sccache's grammar (`30G`), and the cluster's: what the
+# sweep holds every store below to, and what `{size}` reads, for every language
+# here. Empty is the default, which the pane shows as its placeholder.
+settings:
+  - key: size
+    label: Store size limit
+    kind: size
+    description: Go's module cache and build cache are held to this size, oldest first.
 provides:
   - category: language
     language: go

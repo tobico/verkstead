@@ -352,7 +352,7 @@ describe("the languages as the pane draws them", () => {
   /// gave and what it is running on meanwhile — and its controls are off, the
   /// two keys they write being keys of the entry nothing could read.
   it("says why a language's entry was not used and what it is running on", async () => {
-    theSettings(unread(compiling(TOLD), RUST, "BuiltIn"));
+    theSettings(unread(unplugged(compiling(TOLD)), RUST, "BuiltIn"));
     const { container } = mountPane();
 
     await waitFor(() =>
@@ -521,7 +521,7 @@ describe("the size in a language's panel", () => {
   /// cargo half to it, so the field stays live while Rust is on — beside the
   /// warning that its compiling is not cached.
   it("keeps the size live where there is no sccache, for the cargo half", async () => {
-    theSettings(UNSET);
+    theSettings(unplugged(UNSET));
     mountPane();
 
     const panel = await opened();
@@ -533,7 +533,7 @@ describe("the size in a language's panel", () => {
   /// And greyed where Rust is off with no sccache: C/C++ on compiles through
   /// nothing that reads it, and Rust's own store is the box's that is off.
   it("greys the size where there is no sccache and Rust is off", async () => {
-    theSettings(off(UNSET));
+    theSettings(unplugged(off(UNSET)));
     mountPane();
 
     await opened();
@@ -543,7 +543,7 @@ describe("the size in a language's panel", () => {
   /// And greyed again while the box is unticked. Both boxes naming the Compile
   /// Server, because with C/C++ on the size is still live under Rust's.
   it("greys the size while the box is unticked", async () => {
-    theSettings(off(off(compiling(TOLD)), CPP));
+    theSettings(unplugged(off(off(compiling(TOLD)), CPP)));
     mountPane();
 
     await opened();
@@ -552,17 +552,46 @@ describe("the size in a language's panel", () => {
 
   /// And it takes input where both halves say it means something.
   it("lets the size be typed where the box is on and sccache is there", async () => {
-    theSettings(compiling(TOLD));
+    theSettings(unplugged(compiling(TOLD)));
     mountPane();
 
     await opened();
     expect(theSize().matches(":disabled")).toBe(false);
   });
 
-  /// Every language with a store directory has a size — and only Rust's
-  /// panel has the Compile Server's.
-  it("draws a size in the panel of every language with a store", async () => {
+  /// A built-in language's size is its plugin's `size` setting, so its panel
+  /// draws no field and says where the size is set instead.
+  it("draws no size in a built-in language's panel, and says where it is set", async () => {
     theSettings(compiling(TOLD));
+    mountPane();
+
+    for (const [label, plugin] of [
+      ["Rust", "Rust & C/C++"],
+      ["Go", "Go"],
+      ["Node", "Node"],
+      ["Python", "Python"],
+      [".NET", ".NET"],
+      ["JVM", "JVM"],
+    ] as const) {
+      const panel = await opened(label);
+      expect(panel.querySelector("input"), `${label} draws no field`).toBe(
+        null,
+      );
+      expect(panel.textContent).toContain(
+        `Its store size limit is set in ${plugin}'s settings, on the Plugins page.`,
+      );
+      fireEvent.keyDown(document, { key: "Escape" });
+    }
+  });
+
+  /// Every language no plugin provides with a store directory has a size —
+  /// and only Rust's panel, were it such a language, the Compile Server's.
+  it("draws a size in the panel of every installer's language with a store", async () => {
+    let standing = compiling(TOLD);
+    for (const name of [RUST, GO, NODE, PYTHON, DOTNET, JVM]) {
+      standing = unplugged(standing, name);
+    }
+    theSettings(standing);
     mountPane();
 
     for (const [label, name] of [
@@ -575,6 +604,7 @@ describe("the size in a language's panel", () => {
     ] as const) {
       const panel = await opened(label);
       expect(panel.contains(theSize(name))).toBe(true);
+      expect(panel.textContent).not.toContain("on the Plugins page");
       fireEvent.keyDown(document, { key: "Escape" });
     }
   });
@@ -582,7 +612,7 @@ describe("the size in a language's panel", () => {
   /// And a store nothing but Verkstead bounds takes its size whether or not
   /// there is an sccache: only the Compile Server's size is sccache's word.
   it("lets a package store's size be typed where there is no sccache", async () => {
-    theSettings(UNSET);
+    theSettings(unplugged(UNSET, GO));
     mountPane();
 
     await opened("Go");
@@ -591,7 +621,7 @@ describe("the size in a language's panel", () => {
 
   /// And greys it while its own box is unticked, like Rust's.
   it("greys a package store's size while its box is unticked", async () => {
-    theSettings(off(compiling(TOLD), GO));
+    theSettings(unplugged(off(compiling(TOLD), GO), GO));
     mountPane();
 
     await opened("Go");
@@ -602,7 +632,7 @@ describe("the size in a language's panel", () => {
   /// through the server — the same answer the server gives about which size it
   /// starts at.
   it("keeps the size on Rust, live, when Rust is off and C/C++ is on", async () => {
-    theSettings(off(compiling(TOLD)));
+    theSettings(unplugged(off(compiling(TOLD))));
     mountPane();
 
     await opened();
@@ -612,7 +642,7 @@ describe("the size in a language's panel", () => {
   /// An unconfigured size is the default drawn as a placeholder rather than as
   /// text somebody typed.
   it("draws a size nobody configured as the placeholder", async () => {
-    theSettings(compiling(UNSET));
+    theSettings(unplugged(unplugged(compiling(UNSET)), GO));
     mountPane();
 
     await opened();
@@ -629,7 +659,7 @@ describe("the size in a language's panel", () => {
   /// And the placeholder is the default even where a size is configured, so
   /// that clearing the field shows what clearing it asks for.
   it("draws a configured size as the value, over the default", async () => {
-    theSettings(compiling(TOLD));
+    theSettings(unplugged(compiling(TOLD)));
     mountPane();
 
     await opened();
@@ -640,7 +670,7 @@ describe("the size in a language's panel", () => {
   /// A size a hand-edit wrote that is not one is drawn as written, with the
   /// server's reason and the default the store is held to meanwhile.
   it("says why a hand-written size is not the one in force", async () => {
-    const standing = compiling(TOLD);
+    const standing = unplugged(compiling(TOLD), GO);
     theSettings({
       ...standing,
       languages: standing.languages.map((language) =>
@@ -931,7 +961,7 @@ describe("changing the languages", () => {
           { name: NODE, enabled: true, size: "" },
           { name: PYTHON, enabled: true, size: "" },
           { name: DOTNET, enabled: true, size: "" },
-          { name: CPP, enabled: true, size: "" },
+          { name: CPP, enabled: true, size: "50G" },
           { name: JVM, enabled: true, size: "" },
           { name: GLEAM, enabled: false, size: "8G" },
         ],
@@ -968,7 +998,7 @@ describe("changing the languages", () => {
         { name: NODE, enabled: true, size: "" },
         { name: PYTHON, enabled: true, size: "" },
         { name: DOTNET, enabled: true, size: "" },
-        { name: CPP, enabled: true, size: "" },
+        { name: CPP, enabled: true, size: "50G" },
         { name: JVM, enabled: true, size: "" },
         { name: GLEAM, enabled: false, size: "8G" },
       ]),
@@ -1004,8 +1034,8 @@ describe("changing the languages", () => {
   /// stays open over the answer.
   it("saves a size on Enter, and only then", async () => {
     const fetching = theSettings(
-      compiling(TOLD),
-      json(answering(compiling(TOLD))),
+      unplugged(compiling(TOLD)),
+      json(answering(unplugged(compiling(TOLD)))),
     );
     mountPane();
 
@@ -1032,7 +1062,7 @@ describe("changing the languages", () => {
           { name: NODE, enabled: true, size: "" },
           { name: PYTHON, enabled: true, size: "" },
           { name: DOTNET, enabled: true, size: "" },
-          { name: CPP, enabled: true, size: "" },
+          { name: CPP, enabled: true, size: "50G" },
           { name: JVM, enabled: true, size: "" },
           { name: GLEAM, enabled: true, size: "8G" },
         ],
@@ -1055,8 +1085,8 @@ describe("changing the languages", () => {
   /// And on leaving the field, which is how a panel is usually left.
   it("saves a size on leaving the field", async () => {
     const fetching = theSettings(
-      compiling(TOLD),
-      json(answering(compiling(TOLD))),
+      unplugged(compiling(TOLD), GO),
+      json(answering(unplugged(compiling(TOLD), GO))),
     );
     mountPane();
 
@@ -1077,8 +1107,8 @@ describe("changing the languages", () => {
   /// with the focus still in it — no blur — and is leaving it all the same.
   it("saves a size when the panel is closed by Escape", async () => {
     const fetching = theSettings(
-      compiling(TOLD),
-      json(answering(compiling(TOLD))),
+      unplugged(compiling(TOLD), GO),
+      json(answering(unplugged(compiling(TOLD), GO))),
     );
     mountPane();
 
@@ -1101,7 +1131,7 @@ describe("changing the languages", () => {
   /// But not on leaving one nobody typed in, nor one put back to what it was
   /// showing: every close of the panel is a blur, and a close is not a save.
   it("does not save on leaving a field nothing was changed in", async () => {
-    const fetching = theSettings(compiling(TOLD));
+    const fetching = theSettings(unplugged(compiling(TOLD)));
     mountPane();
 
     await opened();
@@ -1122,8 +1152,8 @@ describe("changing the languages", () => {
   /// means to the server — and the placeholder is what says so.
   it("sends an empty size for a field the human cleared", async () => {
     const fetching = theSettings(
-      compiling(TOLD),
-      json(answering(compiling(UNSET))),
+      unplugged(compiling(TOLD)),
+      json(answering(unplugged(compiling(UNSET)))),
     );
     mountPane();
 
@@ -1158,7 +1188,7 @@ describe("changing the languages", () => {
         { name: NODE, enabled: true, size: "" },
         { name: PYTHON, enabled: true, size: "" },
         { name: DOTNET, enabled: true, size: "" },
-        { name: CPP, enabled: true, size: "" },
+        { name: CPP, enabled: true, size: "50G" },
         { name: JVM, enabled: true, size: "" },
         { name: GLEAM, enabled: false, size: "8G" },
       ]),
@@ -1170,9 +1200,9 @@ describe("changing the languages", () => {
   /// left open, and not sent again by leaving the field.
   it("draws a refused size's reason and keeps what was typed", async () => {
     const fetching = theSettings(
-      compiling(TOLD),
+      unplugged(compiling(TOLD), GO),
       json({
-        ...answering(compiling(TOLD)),
+        ...answering(unplugged(compiling(TOLD), GO)),
         refused_sizes: [{ language: GO, why: "isn't a size: write 10G" }],
       }),
     );

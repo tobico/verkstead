@@ -11,6 +11,14 @@ author:
 version: 0.1.0
 interface: 1
 description: Shares Cargo's downloads between sessions, and compiles Rust and C/C++ through one sccache Compile Server for the machine.
+# The stores' size, in sccache's grammar (`30G`), and the cluster's: what the
+# sweep holds every store below to, and what `{size}` reads, for every language
+# here. Empty is the default, which the pane shows as its placeholder.
+settings:
+  - key: size
+    label: Store size limit
+    kind: size
+    description: Cargo's downloads and the compile cache are each held to this size, oldest first.
 provides:
   - category: language
     language: rust

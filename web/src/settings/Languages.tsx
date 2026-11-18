@@ -14,12 +14,13 @@
 //! this page writes are the switch and the size, and an installer who wants a
 //! variable, a manifest or a label edits `config.yaml`.
 //!
-//! **And no switch for a built-in language.** The seven Verkstead ships are
-//! six built-in Language plugins, and a plugin's tick on the Plugins page is
-//! its languages' switch, cluster-wide (Set 1762, Q11a) — so a row of one is
-//! its name and its link, greyed while its plugin is unticked. Only a
-//! language `config.yaml` alone describes, an installer's own, has its box
-//! here.
+//! **And no switch or size for a built-in language.** The seven Verkstead
+//! ships are six built-in Language plugins, and a plugin's tick on the Plugins
+//! page is its languages' switch, cluster-wide (Set 1762, Q11a), and its `size`
+//! setting, on its pane there, their size — so a row of one is its name and its
+//! link, greyed while its plugin is unticked, and its panel says where the size
+//! is set. Only a language `config.yaml` alone describes, an installer's own,
+//! has its box and its size field here.
 //!
 //! Which is why a language whose entry in that file would not load is drawn
 //! with its box off and a sentence under it saying why: the two keys they write
@@ -309,9 +310,9 @@ function sizeable(
   );
 }
 
-/// Whether a language draws a size field at all: one with a store of its own,
-/// or the one the Compile Server is sized by.
-function sized(
+/// Whether a language has a size at all: one with a store of its own, or the
+/// one the Compile Server is sized by.
+function sizes(
   told: SettingsView | undefined,
   language: LanguageView,
 ): boolean {
@@ -319,6 +320,16 @@ function sized(
     language.store ||
     (language.compiling !== null && sizer(told)?.name === language.name)
   );
+}
+
+/// Whether a language draws a size field here: one with a size that no plugin
+/// provides. A built-in language's size is its plugin's `size` setting, set
+/// on that plugin's pane.
+function sized(
+  told: SettingsView | undefined,
+  language: LanguageView,
+): boolean {
+  return language.plugin === null && sizes(told, language);
 }
 
 /// The units a figure is said in, each 1024 of the one before — the size
@@ -865,6 +876,14 @@ export function BuildCaches(): JSX.Element {
               )}
             </Show>
           </form>
+        </Show>
+
+        {/* A built-in language's size is its plugin's, set on its pane. */}
+        <Show when={language().plugin !== null && sizes(set(), language())}>
+          <p class={styles.note}>
+            Its store size limit is set in {language().plugin}'s settings, on
+            the Plugins page.
+          </p>
         </Show>
 
         {/* A language compiling through another's Compile Server, which is all

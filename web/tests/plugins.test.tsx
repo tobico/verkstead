@@ -159,7 +159,8 @@ describe("a row", () => {
 
 describe("the Built-in group", () => {
   /// The six Language plugins, each saying the languages it provides by
-  /// label, ticked, with no source line, Update or Remove.
+  /// label, ticked, with no source line, Update or Remove — only Settings,
+  /// which opens the pane its size is set in.
   it("lists the Language plugins, each saying the languages it provides", async () => {
     serving(whenever("/api/ui/plugins", json(PLUGINS)));
     pane();
@@ -171,7 +172,9 @@ describe("the Built-in group", () => {
       "checked",
       true,
     );
-    expect(rust.querySelectorAll("button")).toHaveLength(0);
+    expect(
+      [...rust.querySelectorAll("button")].map((button) => button.textContent),
+    ).toEqual(["Settings"]);
     expect((await theRow("Go")).textContent).toContain("Provides Go.");
     expect(
       [...screen.getAllByRole("heading", { level: 3 })].map(

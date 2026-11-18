@@ -345,6 +345,8 @@ impl Manifest {
         let uuid = uuid(required(&fields, "uuid")?, "uuid")?;
         let provides = languages(list(&fields, "provides", provision)?, text, platform)?;
         let packs = walk.packs(&provides, &uuid)?;
+        let settings = settings(&fields)?;
+        sized(&provides, &settings)?;
 
         Ok(Manifest {
             uuid,
@@ -359,7 +361,7 @@ impl Manifest {
             provides,
             packs,
             capabilities: list(&fields, "capabilities", capability)?,
-            settings: settings(&fields)?,
+            settings,
             component: walk.component(&fields)?,
         })
     }
@@ -1116,6 +1118,36 @@ fn settings(fields: &Map<String, Value>) -> Result<Vec<Setting>, Refusal> {
     Ok(settings)
 }
 
+/// A plugin providing a language may declare a `size` setting only of kind
+/// `size`: it is what `{size}` reads and what the language's stores are held
+/// to, so a value that is not a size would be a store held to nothing anybody
+/// typed.
+fn sized(provides: &[Provision], settings: &[Setting]) -> Result<(), Refusal> {
+    if !provides
+        .iter()
+        .any(|provision| provision.language.is_some())
+    {
+        return Ok(());
+    }
+
+    match settings
+        .iter()
+        .position(|setting| setting.key == crate::languages::SIZE_SETTING)
+    {
+        Some(index) if settings[index].kind != SettingKind::Size => {
+            let field = format!("settings[{index}].kind");
+            Err(Refusal::of(
+                &field,
+                format!(
+                    "`{field}` should be `size`: a language's `size` setting is the size its \
+                     stores are held to."
+                ),
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
 fn setting(value: &Value, field: &str) -> Result<Setting, Refusal> {
     let map = entry(value, field, &["key", "label", "kind", "description"])?;
     let kind_field = format!("{field}.kind");
@@ -1257,6 +1289,24 @@ provides: []
             "provides: []",
             &format!("provides:\n  - category: language\n    language: rust\n{rest}"),
         )
+    }
+
+    #[test]
+    fn a_languages_size_setting_is_a_size() {
+        let settings = |kind: &str| {
+            providing("    label: Rust\n").replace(
+                "provides:",
+                &format!("settings:\n  - key: size\n    label: Size\n    kind: {kind}\nprovides:"),
+            )
+        };
+
+        assert!(read(&settings("size")).is_ok());
+        assert_eq!(refused_at(&settings("text")), "settings[0].kind");
+
+        // A plugin providing no language may call a setting what it likes.
+        let elsewhere =
+            format!("{MINIMAL}settings:\n  - key: size\n    label: Size\n    kind: text\n");
+        assert!(read(&elsewhere).is_ok());
     }
 
     #[test]

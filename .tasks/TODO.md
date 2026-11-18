@@ -22,6 +22,6 @@ Roadmap stage: [02: Languages as plugins](docs/roadmaps/plugins/02-languages.md)
 
 - [x] 01: The `language` block and six built-in plugins — [details](01-the-language-block.md)
 - [x] 02: The Built-in rows and the tick — [details](02-the-rows-and-the-tick.md)
-- [ ] 03: The size field — [details](03-the-size-field.md)
+- [x] 03: The size field — [details](03-the-size-field.md)
 - [ ] 04: The cache panel in the plugin's pane — [details](04-the-cache-panel.md)
 - [ ] 05: The installer's languages — [details](05-the-installers-languages.md)
