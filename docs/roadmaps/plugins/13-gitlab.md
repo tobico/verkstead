@@ -50,10 +50,13 @@ at the local repository. The plugin's repository is the Forge template stage
 - **It lives outside this repository.** A plugin is a repository of its own,
   installed from its URL, and this one is written exactly as a user's would be
   so that stage 14's template is a thing that has been installed rather than a
-  skeleton nobody ran. What lands in *this* repository is the proof — a server
-  suite that installs the plugin from a local checkout, points a Repo at an
-  HTTP stand-in answering as gitlab.com, and drives a Tinker to a merge request
-  — and the docs naming where the plugin lives.
+  skeleton nobody ran. **Its end-to-end proof lives with it** (Set 1771, Q3):
+  the plugin's own repository carries the suite that installs it into a
+  Verkstead, points a Repo at an HTTP stand-in answering as gitlab.com, and
+  drives a Tinker to a merge request, so nothing in *this* repository's CI
+  needs a checkout or a build of a repository it does not hold. What lands
+  here is the docs naming where the plugin lives; this repository's proof of a
+  Forge lacking capabilities stays stage 12's fake Forge.
 - **One token per Forge per Author** (stage 12): the Author gains a GitLab
   field in the Git section once the plugin is enabled, verified through the
   plugin's `verify` export.
@@ -65,9 +68,10 @@ at the local repository. The plugin's repository is the Forge template stage
    next Forge author, passing `verkstead plugin check`. AC: the check passes;
    installed from its URL, the Plugins page lists it under Installed with
    *merge request*, its hosts and its three absent capabilities drawn.
-2. **The proof in this repository** — a suite that installs the plugin from a
-   checkout, enables it, registers a Repo whose remote is a gitlab.com URL
-   answered by an HTTP stand-in, and runs a Tinker through to Wrapping.
+2. **The proof in the plugin's repository** — a suite there that installs the
+   plugin into a pinned Verkstead release, enables it, registers a
+   Repo whose remote is a gitlab.com URL answered by an HTTP stand-in, and runs
+   a Tinker through to Wrapping, run by that repository's own CI.
    AC: the merge request is recorded and drawn by its noun; the Share pane has
    no Publish and says why; `verkstead done` is accepted once the merge
    request stands and refused before it.
