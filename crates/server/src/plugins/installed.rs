@@ -142,7 +142,11 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         .map(|homes| homes.servers().to_owned());
     let credential = credential(state);
 
-    let records = replicated::live_records::<Plugins>(&state.pool).await?;
+    let records = replicated::records::<Plugins>(&state.pool).await?;
+    let (removed, records): (Vec<_>, Vec<_>) =
+        records.into_iter().partition(|record| record.removed());
+    forget(state, &removed).await;
+
     let mut troubles = BTreeMap::new();
     let mut manifests = BTreeMap::new();
     for record in &records {
@@ -197,6 +201,30 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// This device's clones of the git plugins `removed` deleted, where it still
+/// has them. A removal is final, so nothing will clone one again. A local
+/// plugin's directory is the human's own and is never touched.
+async fn forget(state: &AppState, removed: &[Record<Fields>]) {
+    let checkouts: Vec<PathBuf> = removed
+        .iter()
+        .filter(|record| matches!(record.fields.source, Source::Git { .. }))
+        .map(|record| git::checkout(&state.data_dir, &record.uuid))
+        .filter(|checkout| checkout.exists())
+        .collect();
+
+    for checkout in checkouts {
+        let at = checkout.clone();
+        let gone = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(at)).await;
+        if let Ok(Err(error)) = gone {
+            tracing::error!(
+                error = ?error,
+                checkout = %checkout.display(),
+                "a removed plugin's clone couldn't be deleted",
+            );
+        }
+    }
 }
 
 /// Load at the start, beside everything else a start sets going: a plugin's
@@ -493,6 +521,11 @@ fn fields(manifest: &Manifest, source: Source, enabled: bool) -> Fields {
         version: manifest.version.to_string(),
         author: manifest.author.name.clone(),
         provides: provides(manifest),
+        dependencies: manifest
+            .dependencies
+            .iter()
+            .map(|dependency| dependency.uuid.clone())
+            .collect(),
     }
 }
 
@@ -509,8 +542,13 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
         None => BTreeMap::new(),
     };
 
-    let installed = replicated::live_records::<Plugins>(&state.pool)
-        .await?
+    let records = replicated::live_records::<Plugins>(&state.pool).await?;
+    let going: BTreeMap<String, Vec<String>> = records
+        .iter()
+        .map(|record| (record.uuid.clone(), going_with(&records, &record.uuid)))
+        .collect();
+
+    let installed = records
         .into_iter()
         .map(|record| {
             let here = on_this_device(state, &record.fields);
@@ -538,6 +576,7 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                 },
                 elsewhere,
                 source,
+                dependents: going.get(&record.uuid).cloned().unwrap_or_default(),
                 uuid: record.uuid,
                 name: record.fields.name,
                 version: record.fields.version,
@@ -564,6 +603,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/api/ui/plugins/read", post(read))
         .route("/api/ui/plugins/{uuid}/update", post(update))
         .route("/api/ui/plugins/{uuid}/enabled", post(enable))
+        .route("/api/ui/plugins/{uuid}/remove", post(remove))
 }
 
 /// `GET /api/ui/plugins` — the Plugins page.
@@ -1019,5 +1059,152 @@ async fn enable(
     match moved(&state).await {
         Ok(plugins) => Json(plugins).into_response(),
         Err(refusal) => refusal,
+    }
+}
+
+/// The names of the ticked plugins that go with `uuid` when it is unticked:
+/// those depending on it, and on those in turn, in the order they were
+/// installed.
+fn going_with(records: &[Record<Fields>], uuid: &str) -> Vec<String> {
+    let mut going: Vec<&str> = vec![uuid];
+    loop {
+        let more: Vec<&str> = records
+            .iter()
+            .filter(|record| record.fields.enabled && !going.contains(&record.uuid.as_str()))
+            .filter(|record| {
+                record
+                    .fields
+                    .dependencies
+                    .iter()
+                    .any(|dependency| going.contains(&dependency.as_str()))
+            })
+            .map(|record| record.uuid.as_str())
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        going.extend(more);
+    }
+
+    records
+        .iter()
+        .filter(|record| going[1..].contains(&record.uuid.as_str()))
+        .map(|record| record.fields.name.clone())
+        .collect()
+}
+
+/// Something open that stands on a plugin, and keeps it from being removed
+/// (ADR-0030). Only another installed plugin depending on it, so far: the
+/// later stages add what stands on the Categories they bring.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Standing {
+    /// An installed plugin, ticked or not, whose manifest depends on it.
+    Dependent { name: String },
+}
+
+/// Everything standing on the plugin `uuid`, among the installed `records`.
+fn standing(records: &[Record<Fields>], uuid: &str) -> Vec<Standing> {
+    records
+        .iter()
+        .filter(|record| record.uuid != uuid)
+        .filter(|record| {
+            record
+                .fields
+                .dependencies
+                .iter()
+                .any(|dependency| dependency == uuid)
+        })
+        .map(|record| Standing::Dependent {
+            name: record.fields.name.clone(),
+        })
+        .collect()
+}
+
+/// The refusal of a Remove over what `standing` counts: how many, and which.
+fn stood_on(name: &str, standing: &[Standing]) -> String {
+    let dependents: Vec<&str> = standing
+        .iter()
+        .map(|standing| match standing {
+            Standing::Dependent { name } => name.as_str(),
+        })
+        .collect();
+
+    let (count, them) = match dependents.len() {
+        1 => ("1 plugin depends".to_owned(), "it"),
+        n => (format!("{n} plugins depend"), "them"),
+    };
+    format!(
+        "{name} can't be removed while {count} on it: {}. Remove {them} first.",
+        listed(&dependents)
+    )
+}
+
+/// `names` as a sentence lists them, with the serial comma.
+fn listed(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [one, two] => format!("{one} and {two}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
+}
+
+/// `POST /api/ui/plugins/{uuid}/remove` — **Remove**: the record taken off the
+/// cluster, and this device's clone of a git plugin deleted; every other
+/// device deletes its own as the removal merges. Refused while anything open
+/// stands on it, counted and named. A built-in has no record, and no Remove.
+async fn remove(State(state): State<AppState>, Path(uuid): Path<String>) -> Response {
+    let records = match replicated::live_records::<Plugins>(&state.pool).await {
+        Ok(records) => records,
+        Err(error) => return failed(error),
+    };
+    let Some(record) = records.iter().find(|record| record.uuid == uuid) else {
+        return refused(
+            StatusCode::NOT_FOUND,
+            ApiError::new("That plugin isn't installed."),
+        );
+    };
+
+    let standing = standing(&records, &uuid);
+    if !standing.is_empty() {
+        return refused(
+            StatusCode::CONFLICT,
+            ApiError::new(stood_on(&record.fields.name, &standing)),
+        );
+    }
+
+    if let Err(error) = replicated::remove::<Plugins>(&state.pool, &state.device, &uuid).await {
+        return failed(error);
+    }
+    state.plugins.pulled(&uuid, None);
+
+    match moved(&state).await {
+        Ok(plugins) => Json(plugins).into_response(),
+        Err(refusal) => refusal,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_refusal_counts_and_names_what_stands() {
+        let dependent = |name: &str| Standing::Dependent {
+            name: name.to_owned(),
+        };
+
+        assert_eq!(
+            stood_on("Base", &[dependent("One")]),
+            "Base can't be removed while 1 plugin depends on it: One. Remove it first.",
+        );
+        assert_eq!(
+            stood_on(
+                "Base",
+                &[dependent("One"), dependent("Two"), dependent("Top")]
+            ),
+            "Base can't be removed while 3 plugins depend on it: One, Two, and Top. Remove \
+             them first.",
+        );
     }
 }

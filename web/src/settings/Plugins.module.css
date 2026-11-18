@@ -72,7 +72,8 @@
   overflow-wrap: anywhere;
 }
 
-/* Update, drawn as the Components pane draws its presses. */
+/* Update and Remove, drawn as the Components pane draws its presses, the pair
+   together at the row's far end. */
 .press {
   flex: none;
   margin-inline-start: auto;
@@ -90,6 +91,10 @@
 .press:disabled {
   cursor: not-allowed;
   opacity: 0.65;
+}
+
+.press + .press {
+  margin-inline-start: 0;
 }
 
 @media (hover: hover) {

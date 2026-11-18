@@ -31,5 +31,5 @@ Roadmap stage: [01: The framework and the Plugins page](docs/roadmaps/plugins/01
 - [x] 05: Add a plugin from a local directory, and the Plugins section — [details](05-local-install-and-the-section.md)
 - [x] 06: Install from git, and Update — [details](06-git-install-and-update.md)
 - [x] 07: Dependencies — [details](07-dependencies.md)
-- [ ] 08: Disable and Remove over dependents — [details](08-disable-and-remove.md)
+- [x] 08: Disable and Remove over dependents — [details](08-disable-and-remove.md)
 - [ ] 09: The settings pane — [details](09-the-settings-pane.md)

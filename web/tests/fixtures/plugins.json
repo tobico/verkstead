@@ -3,6 +3,7 @@
   "installed": [
     {
       "author": "Ada Lovelace",
+      "dependents": [],
       "elsewhere": null,
       "enabled": true,
       "name": "GitLab",
@@ -21,6 +22,7 @@
     },
     {
       "author": "Ada Lovelace",
+      "dependents": [],
       "elsewhere": null,
       "enabled": true,
       "name": "Broken",
@@ -39,6 +41,7 @@
     },
     {
       "author": "Ada Lovelace",
+      "dependents": [],
       "elsewhere": null,
       "enabled": true,
       "name": "Shared skills",
@@ -58,6 +61,7 @@
     },
     {
       "author": "Ada Lovelace",
+      "dependents": [],
       "elsewhere": null,
       "enabled": true,
       "name": "Dependent",

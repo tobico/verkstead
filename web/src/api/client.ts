@@ -2145,6 +2145,13 @@ export function enablePlugin(
   return post<PluginsView>(`/api/ui/plugins/${uuid}/enabled`, { enabled });
 }
 
+/// **Remove** on an installed row: its record taken off the cluster, and every
+/// device's clone of a git one deleted. Refused, counting and naming them,
+/// while installed plugins depend on it.
+export function removePlugin(uuid: string): Promise<PluginsView> {
+  return post<PluginsView>(`/api/ui/plugins/${uuid}/remove`);
+}
+
 /// **Install** on the Components pane's Annex row: the wizard's install run
 /// for the WSL row alone, taken after the wizard is over.
 ///

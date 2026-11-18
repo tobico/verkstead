@@ -2190,7 +2190,8 @@ fn git_in(dir: &Path, args: &[&str]) -> String {
 }
 
 /// A plugin installed from git on A is listed on B, and B clones it for itself
-/// at the revision A pinned: loaded on both, and greyed on neither.
+/// at the revision A pinned: loaded on both, and greyed on neither. Removed on
+/// A, it goes from B too, and B deletes its clone.
 #[tokio::test]
 async fn a_git_plugin_is_cloned_by_another_device_at_the_pinned_revision() {
     let a = Verkstead::answering(A).await;
@@ -2253,4 +2254,23 @@ async fn a_git_plugin_is_cloned_by_another_device_at_the_pinned_revision() {
         .plugins_saying(|view| view.installed.iter().all(|row| row.trouble.is_none()))
         .await;
     assert!(on_b.installed[0].enabled);
+
+    // Removed on A, it goes from B's page, and B deletes its own clone.
+    let (status, said) = pressing(
+        &a.workbench,
+        &format!("/api/ui/plugins/{PLUGIN}/remove"),
+        Some("{}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(!a.dir.path().join("plugins").join(PLUGIN).exists());
+
+    b.plugins_saying(|view| view.installed.is_empty()).await;
+    tokio::time::timeout(WAITING, async {
+        while checkout.exists() {
+            tokio::time::sleep(LOOKING).await;
+        }
+    })
+    .await
+    .expect("B deleted its clone");
 }
