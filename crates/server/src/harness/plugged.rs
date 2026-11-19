@@ -521,7 +521,8 @@ impl Harness for Plugged {
 }
 
 /// Where a session of a plugin harness keeps its record, as its
-/// `parse-transcript` is handed it: the account's root on the host, and the
+/// `parse-transcript` is handed it: the account's root on the host, which the
+/// export is handed as [`crate::plugins::component::ACCOUNT`], and the
 /// session's id.
 #[derive(Clone)]
 pub(crate) struct Reader {
@@ -640,7 +641,7 @@ impl Entries {
         let answered = exports
             .call_parse_transcript(
                 &mut loaded.store,
-                &account.to_string_lossy(),
+                crate::plugins::component::ACCOUNT,
                 &self.reader.session,
             )
             .await
@@ -892,5 +893,34 @@ mod tests {
     #[test]
     fn a_file_that_is_neither_is_handed_over_as_it_is() {
         assert_eq!(serverless(b"plain = = text"), b"plain = = text");
+    }
+
+    /// The stub harness's component finds a session's record under the name
+    /// it is handed for the account, wherever the account is on the host — a
+    /// `C:\…` directory on Windows among them.
+    #[tokio::test]
+    async fn parse_transcript_reads_the_record_under_the_account_it_is_handed() {
+        let account = tempfile::tempdir().unwrap();
+        std::fs::create_dir(account.path().join("memory")).unwrap();
+        std::fs::write(
+            account.path().join("memory").join("s1.jsonl"),
+            "{\"said\":\"agent\",\"markdown\":\"Reading the brief.\"}\n",
+        )
+        .unwrap();
+
+        let bytes = std::fs::read(env!("VERKSTEAD_STUB_HARNESS_WASM")).unwrap();
+        let loaded = crate::plugins::component::instantiate(&bytes, &[], None)
+            .await
+            .expect("the stub harness's component should load");
+        let reader = Reader {
+            again: loaded.again,
+            account: account.path().to_owned(),
+            session: "s1".to_owned(),
+        };
+
+        let lines = Entries::of(reader, 0).take().await;
+
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("Reading the brief."), "{lines:?}");
     }
 }

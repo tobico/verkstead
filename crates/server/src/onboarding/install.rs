@@ -2588,6 +2588,66 @@ mod tests {
         );
     }
 
+    /// And under the shell Windows raises, Windows PowerShell 5.1, as the one
+    /// script the raise hands it: a comment ending one step takes nothing with
+    /// it, and the first step that fails — a program exiting non-zero or a
+    /// cmdlet that throws — stops the rest and fails the script, with the
+    /// program's own exit code.
+    #[cfg(windows)]
+    #[test]
+    fn a_plugins_commands_run_under_windows_powershell_a_step_apiece() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = |name: &str| said(&dir.path().join(name).to_string_lossy());
+        let made = |name: &str| format!("New-Item -ItemType File -Path {} | Out-Null", at(name));
+        let ran = |commands: &[String]| {
+            let script = raising(
+                Platform::Windows,
+                &stepped(Platform::Windows, commands),
+                None,
+            );
+            let (program, arguments) = script.split_first().unwrap();
+            std::process::Command::new(program)
+                .args(arguments)
+                .output()
+                .unwrap()
+        };
+
+        let edition = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", "$PSVersionTable.PSVersion.Major"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&edition.stdout).trim(),
+            "5",
+            "the shell raised is Windows PowerShell 5.1"
+        );
+
+        let all = ran(&[
+            format!("{}  # the first", made("one")),
+            "cmd.exe /c exit 0".to_owned(),
+            made("two"),
+        ]);
+        assert!(all.status.success(), "{all:?}");
+        assert!(
+            dir.path().join("two").exists(),
+            "a comment swallowed the next step"
+        );
+
+        let exited = ran(&["cmd.exe /c exit 3".to_owned(), made("three")]);
+        assert_eq!(exited.status.code(), Some(3), "{exited:?}");
+        assert!(
+            !dir.path().join("three").exists(),
+            "a step ran after a program failed"
+        );
+
+        let threw = ran(&[format!("Get-Item {}", at("missing")), made("four")]);
+        assert!(!threw.status.success(), "{threw:?}");
+        assert!(
+            !dir.path().join("four").exists(),
+            "a step ran after a cmdlet threw"
+        );
+    }
+
     /// And on Windows, where the shell is Windows PowerShell and has no `&&`,
     /// each is a script block of its own lines, checked once it is closed.
     #[test]
