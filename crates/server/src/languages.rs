@@ -424,13 +424,30 @@ fn known(value: Option<&Raw>, field: &str, allowed: &[&str]) -> Result<(), Refus
 /// provides — an installer's own — is switched and sized the same way by the
 /// record of the plugin it is drawn as, once it has one, and by its entry
 /// until then.
+///
+/// **An installed Language plugin's languages come after the built-ins'**, in
+/// the order the plugins were installed, once a load here has read them —
+/// see [`Held::installed`] — and are switched and sized by its record the way
+/// a built-in's are. `config.yaml` merges over them as over a built-in.
 pub fn configured(config: &crate::settings::Config) -> Languages {
-    let languages = built_in().merged(&config.languages());
+    let Some(held) = config.plugin_languages() else {
+        return built_in().merged(&config.languages());
+    };
 
-    match config.plugin_languages() {
-        Some(held) => languages.held(held),
-        None => languages,
-    }
+    built_in()
+        .with_installed(&held.installed)
+        .merged(&config.languages())
+        .held(held)
+}
+
+/// Whether a plugin provides `name` on this installation: a built-in, or an
+/// installed Language plugin loaded here. An entry of `config.yaml` naming
+/// any other language is an installer's own.
+pub fn provided_by_a_plugin(config: &crate::settings::Config, name: &str) -> bool {
+    built_in().get(name).is_some()
+        || config
+            .plugin_languages()
+            .is_some_and(|held| held.provides(name))
 }
 
 /// The key of the settings field a Language plugin declares for its store's
@@ -439,8 +456,13 @@ pub const SIZE_SETTING: &str = "size";
 
 /// What the Language plugins' records say of their languages, held for every
 /// session to read — see [`crate::replicating::plugins::held`].
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Held {
+    /// The languages the installed Language plugins loaded here provide, each
+    /// beside its plugin's uuid, in the order the plugins were installed — see
+    /// [`crate::plugins::installed`]'s load. A plugin unticked, in trouble or
+    /// on another device is not loaded here, and its languages are not here.
+    pub installed: Vec<(String, Provided)>,
     /// The installer's own languages that have a record: switched and sized
     /// by it, as a built-in is, rather than by their entry. One with none yet
     /// is still its entry's.
@@ -450,6 +472,15 @@ pub struct Held {
     /// The size each language's plugin has saved, by language. A language
     /// whose plugin holds none is not here, and runs at its default.
     pub sizes: std::collections::BTreeMap<String, String>,
+}
+
+impl Held {
+    /// Whether an installed Language plugin loaded here provides `name`.
+    pub fn provides(&self, name: &str) -> bool {
+        self.installed
+            .iter()
+            .any(|(_, provided)| provided.name == name)
+    }
 }
 
 /// A map of descriptors keyed by language, in the order they were written.
@@ -541,19 +572,20 @@ impl Languages {
     ///
     /// Except an installer's own whose entry would not load, which stays off
     /// whatever its tick says — see [`Descriptor::alone`]: there is nothing
-    /// behind it to turn on.
+    /// behind it to turn on. An installed plugin's language is a built-in's
+    /// here: an override of it that would not load falls back to the plugin's.
     fn held(self, held: &Held) -> Languages {
         Languages(Ordered(
             self.0
                 .0
                 .into_iter()
                 .map(|(name, descriptor)| {
-                    let shipped = built_in().get(&name).is_some();
-                    let descriptor = match shipped || held.recorded.contains(&name) {
+                    let provided = built_in().get(&name).is_some() || held.provides(&name);
+                    let descriptor = match provided || held.recorded.contains(&name) {
                         true => Descriptor {
                             enabled: Some(
                                 !held.off.contains(&name)
-                                    && (shipped || descriptor.unread.is_none()),
+                                    && (provided || descriptor.unread.is_none()),
                             ),
                             size: held.sizes.get(&name).cloned(),
                             ..descriptor
@@ -564,6 +596,22 @@ impl Languages {
                 })
                 .collect(),
         ))
+    }
+
+    /// This with the installed Language plugins' languages on the end, in
+    /// the order given — each one a built-in does not already provide, which
+    /// a load has already refused.
+    fn with_installed(&self, installed: &[(String, Provided)]) -> Languages {
+        let mut languages = self.clone();
+        for (_, provided) in installed {
+            if languages.get(&provided.name).is_none() {
+                languages
+                    .0
+                    .0
+                    .push((provided.name.clone(), provided.descriptor.clone()));
+            }
+        }
+        languages
     }
 
     /// The descriptor of `name`, where there is one.

@@ -331,8 +331,9 @@ async fn installers_taken_up(pool: &SqlitePool, settings: &Settings, device: &st
 
 /// Hand what the Language plugins' records say — which languages are
 /// unticked, and each one's size — on to the settings, which is what every
-/// session's languages are read out of: the built-ins', and those an
-/// installer's own languages are drawn as.
+/// session's languages are read out of: the built-ins', the installed
+/// Language plugins' the last load read, and those an installer's own
+/// languages are drawn as.
 ///
 /// One at a time: the records are read and handed on under one lock, so a
 /// load that read them before a save wrote can never hand its older reading
@@ -343,7 +344,22 @@ pub async fn held(pool: &SqlitePool, settings: &Settings) -> Result<()> {
 
     let records = replicated::live_records::<Plugins>(pool).await?;
 
-    let mut held = crate::languages::Held::default();
+    let mut held = crate::languages::Held {
+        installed: settings.installed_languages(),
+        ..crate::languages::Held::default()
+    };
+
+    // An installed Language plugin's, by its record's uuid. Only a ticked
+    // one is loaded, so only its size is left to say.
+    for (uuid, provided) in &held.installed {
+        if let Some(size) = records
+            .iter()
+            .find(|record| record.uuid == *uuid)
+            .and_then(|record| size_of(&record.fields))
+        {
+            held.sizes.insert(provided.name.clone(), size.to_owned());
+        }
+    }
 
     // An installer's own language, by the language its record names: held
     // whatever this device's file says, and laid over the entry only where the
