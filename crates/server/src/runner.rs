@@ -2079,6 +2079,18 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
 /// The registration it is handed is held across the component and whatever its
 /// Outcome sets going, as every driver here holds one.
 pub(crate) async fn follow_up_rounds(state: AppState, conversation_id: i64, driving: Driving) {
+    // A server with no skills installed starts no session of any kind, and
+    // says so in its log rather than on the Timeline, as every launch here
+    // always has: the component would otherwise stop the Conversation over a
+    // skill it was never going to be handed.
+    if state.sessions.skills().is_none() {
+        tracing::error!(
+            conversation_id,
+            "this server has no skills to send a session into, so no follow-up was started"
+        );
+        return;
+    }
+
     // Read before the session starts, so what it lands is this follow-up's own:
     // whether the wrap-up's checks go back to waiting turns on whether *this*
     // follow-up pushed anything, and a Conversation on a pull request has a run
