@@ -35,7 +35,6 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
-use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     PluginField, PluginFieldEdit, PluginFieldRefused, PluginFieldValue, PluginFieldWrite,
     PluginLanguageCache, PluginSettingsSave, PluginSettingsSaved, PluginSettingsView,
@@ -199,10 +198,7 @@ fn caches(state: &AppState, uuid: &str) -> Vec<PluginLanguageCache> {
                 size: descriptor.size(name).to_owned(),
                 disk_use: crate::ui::disk_use_of(name, descriptor, &state.disk_use),
                 stores: crate::ui::stores_of(descriptor),
-                swept: state
-                    .sweeps
-                    .of(name)
-                    .and_then(|at| at.format(&Rfc3339).ok()),
+                swept: crate::ui::swept_of(name, &state.sweeps),
                 compiling: compiling.then(|| crate::ui::compile_caching(caches_compiles)),
                 through: sizer
                     .filter(|(sizer, _)| compiling && *sizer != name)

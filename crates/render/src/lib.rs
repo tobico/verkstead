@@ -120,9 +120,9 @@ pub use settings::{
     CleanupView, CompileCaching, ConflictResolution, DiskUse, Eviction, HeaderEdit, IgnoreRule,
     IgnoredCommentsEdit, InstructionsEdit, LanguageCleared, LanguageView, McpHeader, McpHeaderEdit,
     McpHeaderValues, McpServer, McpServerEdit, McpServersEdit, PathResolution, PathSource,
-    PathsView, PointingRepo, RuleField, RuleRefused, Running, RunningOn, ServerField,
-    ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView, StoreView, TokenEdit,
-    TokenSaved, Tried, UnreadEntry, UnrepointedRepo, Unrepointing, Verified,
+    PathsView, PointingRepo, RuleField, RuleRefused, Running, ServerField, ServerRefused,
+    ServerTried, SettingsEdit, SettingsSaved, SettingsView, StoreView, TokenEdit, TokenSaved,
+    Tried, UnrepointedRepo, Unrepointing, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,
