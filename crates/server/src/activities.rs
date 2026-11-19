@@ -26,6 +26,7 @@
 //! read.
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use verkstead_store as store;
@@ -33,6 +34,7 @@ use verkstead_store as store;
 use crate::AppState;
 use crate::drivers::Driving;
 use crate::lending::Lent;
+use crate::memos::Building;
 use crate::plugins::component::worlds::category::activity::verkstead::plugin::{
     activity_types as world, host,
 };
@@ -83,8 +85,20 @@ impl Hosting {
                 &activity.name,
             )
             .await
+            .map(|ran| ran.outcome)
         })
     }
+}
+
+/// How a component's run ended, where it ended in an Outcome.
+pub(crate) struct Ran {
+    /// The word it answered: one the block declares, or `steered`.
+    pub(crate) outcome: String,
+
+    /// The Timeline Event the newest session it launched printed into, where
+    /// it launched one — what a stop over what that session left behind
+    /// carries the tail of.
+    pub(crate) writing: Option<i64>,
 }
 
 /// Run `activity` on `conversation_id` to its Outcome, `driving` held
@@ -105,7 +119,7 @@ pub(crate) async fn run(
     capabilities: &[Capability],
     options: Vec<(String, String)>,
     doing: &str,
-) -> Option<String> {
+) -> Option<Ran> {
     let name = &activity.name;
 
     let facts = match facts(state, conversation_id, activity, options).await {
@@ -125,12 +139,15 @@ pub(crate) async fn run(
 
     let home = crate::sandbox::Homes::of_the_server(&state.data_dir)
         .map(|homes| homes.servers().to_owned());
+    let writing = Arc::new(Mutex::new(None));
     let lent = Hosted {
         lent: Lent::new(state, conversation_id).doing(doing),
         state: state.clone(),
         conversation_id,
         name: name.clone(),
         declared: activity.skills.clone(),
+        doing: doing.to_owned(),
+        writing: writing.clone(),
     };
 
     let ran =
@@ -150,7 +167,11 @@ pub(crate) async fn run(
                 outcome,
                 "an Activity ended"
             );
-            return Some(outcome);
+            let writing = *writing
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+            return Some(Ran { outcome, writing });
         }
         Ok(outcome) => {
             format!("{name} ended in `{outcome}`, which isn't one of the outcomes it declares.")
@@ -187,7 +208,20 @@ async fn stopping(state: &AppState, conversation_id: i64, name: &str, how: &str)
 /// Whether a stop stands on the Conversation, read and nothing written — a
 /// Stop the human asked for after the step is the session's to land, at its
 /// next launch.
+///
+/// **Or nothing is to drive it any more**: a steer put it in a state nothing
+/// drives — into Done, its session left to finish — or the work is being moved
+/// to another device. Either refuses the component's next launch with no stop
+/// behind it, and a stop written over that refusal would put a badge on work
+/// the human has finished with or sent elsewhere. See
+/// [`crate::stopping::stopped`], which asks the same two of every launch.
 async fn already_stopped(state: &AppState, conversation_id: i64) -> bool {
+    if crate::stopping::undriven(state, conversation_id).await
+        || crate::transfers::going(state, conversation_id).await
+    {
+        return true;
+    }
+
     match store::stopped(&state.pool, conversation_id).await {
         Ok(stopped) => stopped.is_some(),
         Err(error) => {
@@ -303,6 +337,14 @@ struct Hosted {
     /// (Set 1771, Q1), so a launch under any other is refused, as the loader
     /// refuses a block naming a skill it cannot reach.
     declared: Vec<String>,
+
+    /// What the rescue and a stop say it is doing between the steps its
+    /// launches name — see [`step`].
+    doing: String,
+
+    /// The Event the newest session launched here prints into, read back by
+    /// [`run`] once the component has ended.
+    writing: Arc<Mutex<Option<i64>>>,
 }
 
 impl Hosted {
@@ -342,21 +384,43 @@ impl host::Host for Hosted {
             )));
         }
 
+        // What the session builds, and what it is said to be doing, read off
+        // what it is expected to leave — see [`step`].
+        match step(&self.state, self.conversation_id, &evidence).await {
+            Some((building, doing)) => self.lent.now(Some(building), &doing),
+            None => self.lent.now(None, &self.doing),
+        }
+
         let launched =
             host::Host::launch(&mut self.lent, skill, role, prompt, evidence, ends).await?;
 
-        if launched.is_err() {
-            self.ended_by_a_stop().await?;
+        match &launched {
+            Ok(session) => {
+                *self
+                    .writing
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                    Some(self.lent.event_id(*session));
+            }
+            Err(_) => self.ended_by_a_stop().await?,
         }
 
         Ok(launched)
     }
 
+    /// A session that gave its Done signal and has been quiet since is ended
+    /// as the wait comes back, as the runner always ended a step's: whatever
+    /// the component does next — another launch, a placement that moves the
+    /// Conversation — happens with nothing running.
     async fn wait(&mut self, session: world::Session) -> wasmtime::Result<world::Waited> {
         let waited = host::Host::wait(&mut self.lent, session).await?;
 
-        if !matches!(waited, world::Waited::Done) {
-            self.ended_by_a_stop().await?;
+        match waited {
+            world::Waited::Done => {
+                self.state.sessions.end(self.conversation_id).await;
+                self.lent.now(None, &self.doing);
+            }
+            _ => self.ended_by_a_stop().await?,
         }
 
         Ok(waited)
@@ -393,5 +457,64 @@ impl host::Host for Hosted {
         path: String,
     ) -> wasmtime::Result<Result<Option<Vec<String>>, String>> {
         host::Host::list_directory(&mut self.lent, repo, at, path).await
+    }
+
+    async fn place_task(
+        &mut self,
+        task: u32,
+        label: String,
+        platform: String,
+    ) -> wasmtime::Result<host::Placed> {
+        host::Host::place_task(&mut self.lent, task, label, platform).await
+    }
+}
+
+/// What a session launched expecting `evidence` builds, and what it is said to
+/// be doing, where it builds: the host's reading of the evidence rather than
+/// anything the component says, so no launch needs a word for it (Set 1839).
+/// A box ticked is that task, `.tasks/TODO.md` gone is the finish, and the
+/// list arriving is a stage's planning — the three a backlog's sessions are
+/// launched expecting. See [`crate::memos`].
+async fn step(
+    state: &AppState,
+    conversation_id: i64,
+    evidence: &world::Evidence,
+) -> Option<(Building, String)> {
+    let world::Evidence::Landed(landing) = evidence else {
+        return None;
+    };
+
+    let todo = Path::new(crate::tasks::BACKLOG).join(crate::tasks::TODO);
+
+    match landing {
+        world::Landing::Ticked(number) => {
+            let worktree = store::load_conversation(&state.pool, conversation_id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|conversation| conversation.worktree);
+
+            let file = worktree.and_then(|worktree| {
+                crate::tasks::files(&worktree.join(crate::tasks::BACKLOG)).remove(number)
+            });
+
+            let doing = match file {
+                Some(file) => format!(
+                    "the task in {}",
+                    Path::new(crate::tasks::BACKLOG).join(file).display()
+                ),
+                None => format!("task {number} of the backlog"),
+            };
+
+            Some((Building::Task(*number), doing))
+        }
+        world::Landing::Gone(path) if Path::new(path) == todo => {
+            Some((Building::Finish, "finishing the feature".to_owned()))
+        }
+        world::Landing::Arrived(path) if Path::new(path) == todo => Some((
+            Building::Stage,
+            "planning the roadmap stage into a backlog".to_owned(),
+        )),
+        _ => None,
     }
 }

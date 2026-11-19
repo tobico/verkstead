@@ -728,6 +728,13 @@ async fn backlog_again(
         return nothing_left(state, conversation_id, working_in, base, driving).await;
     }
 
+    // A task list's is the **Backlog runner**'s from here, which asks the same
+    // boxes what is next, refuses the same entry naming no file and places the
+    // same tasks — see [`backlog_runner`]. A stage's is still worked below.
+    if !a_stage(&state, conversation_id).await {
+        return backlog_runner(state, conversation_id, driving).await;
+    }
+
     // And an entry that is not ticked and names no file is refused here exactly
     // as the loop refuses it — see [`nothing_to_work_from`]. A Resume is the
     // human's leave to try the run again rather than their leave to work a
@@ -1183,10 +1190,41 @@ pub(crate) async fn backlog_landed(worktree: &Path) -> bool {
 /// in that first session — the breakdown's own, or the grilling session that
 /// wrote the backlog in its place.
 ///
-/// The registration is held for the whole loop and let go as it returns, which
+/// A task list's backlog is the **Backlog runner** Activity's — see
+/// [`backlog_runner`] — and a stage's is still worked here, until the
+/// component can join a chain.
+///
+/// The registration is held for the whole run and let go as it returns, which
 /// is what makes the quiet gaps between one step's session and the next read as
 /// a Conversation being driven rather than as one standing still.
-async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
+async fn carry_on(state: AppState, conversation_id: i64, driving: Driving) {
+    match a_stage(&state, conversation_id).await {
+        true => stage_backlog(state, conversation_id, driving).await,
+        false => backlog_runner(state, conversation_id, driving).await,
+    }
+}
+
+/// Whether `conversation_id` is a roadmap stage — made as one here, or a copy
+/// of one away from its home device — whose backlog is still worked here
+/// rather than by the **Backlog runner**: its finish joins its roadmap's
+/// chain, which the component cannot ask for yet. A record that will not be
+/// read reads as a stage, the way the run always worked one.
+async fn a_stage(state: &AppState, conversation_id: i64) -> bool {
+    let made = store::stacks_on(&state.pool, conversation_id).await;
+    let away = store::away_from_home(&state.pool, conversation_id, &state.device).await;
+
+    match (made, away) {
+        (Ok(made), Ok(away)) => made.is_some() || away.is_some(),
+        (Err(error), _) | (_, Err(error)) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a Conversation is a roadmap stage failed");
+            true
+        }
+    }
+}
+
+/// Work a stage's backlog in process, one fresh session per step, until it is
+/// empty — see [`carry_on`].
+async fn stage_backlog(state: AppState, conversation_id: i64, _driving: Driving) {
     loop {
         let Some(worktree) = worktree(&state, conversation_id).await else {
             return;
@@ -1262,6 +1300,96 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
             return;
         }
     }
+}
+
+/// Work a task list's backlog under the **Backlog runner** Activity, from
+/// whichever box `.tasks/TODO.md` says is next to the pull request.
+///
+/// The component reads the boxes, launches each task's session and the
+/// finish's, places a task that wants a platform through the host, and stops
+/// over a step that did not land or an entry naming no task file — all of it
+/// read off the Repo, so a Resume or a restart is this started again. What it
+/// ends in is mapped here, until a Process says it as data:
+///
+/// - **`finished`** is the finish landed, its session ended already, so the
+///   pull request is recorded and the wrap-up starts — or, where the finish
+///   left none, one is sent for: see [`to_a_pull_request`].
+/// - **`steered`**, or a stop, has said where the Conversation went already,
+///   and nothing is done here.
+///
+/// The registration it is handed is held across the component and whatever its
+/// Outcome sets going, as every driver here holds one.
+async fn backlog_runner(state: AppState, conversation_id: i64, driving: Driving) {
+    // As every launch here always has: a server with no skills starts no
+    // session of any kind, and says so in its log.
+    if state.sessions.skills().is_none() {
+        tracing::error!(
+            conversation_id,
+            "this server has no skills to send a session into, so no backlog was worked"
+        );
+        return;
+    }
+
+    let shipped = crate::plugins::built_in::activities();
+    let Some(activity) = shipped_activity(&shipped, BACKLOG_RUNNER) else {
+        tracing::error!(
+            conversation_id,
+            "this build carries no Backlog runner Activity, so no backlog was worked"
+        );
+
+        return stop(
+            &state,
+            conversation_id,
+            crate::stopping::Decided::Verkstead,
+            "working the backlog",
+            "This build of Verkstead can't work a backlog.",
+            None,
+        )
+        .await;
+    };
+
+    let ran = crate::activities::run(
+        &state,
+        conversation_id,
+        &driving,
+        shipped.files(),
+        &activity,
+        &[],
+        Vec::new(),
+        "working the backlog",
+    )
+    .await;
+
+    let Some(ran) = ran else {
+        return;
+    };
+
+    if ran.outcome == "finished" {
+        // Held across the wrap-up's start, or the session sent for a pull
+        // request: dropping first would leave a moment where a sweep could
+        // find the Conversation undriven.
+        let _driving = driving;
+
+        to_a_pull_request(&state, conversation_id, ran.writing).await;
+    }
+}
+
+/// The id the **Backlog runner** Activity has in the built-in Activities
+/// plugin's manifest.
+const BACKLOG_RUNNER: &str = "backlog-runner";
+
+/// The Activity called `id` in the built-in Activities plugin, as this build
+/// ships it.
+fn shipped_activity(
+    shipped: &crate::plugins::built_in::BuiltIn,
+    id: &str,
+) -> Option<crate::plugins::manifest::Activity> {
+    shipped
+        .manifest(crate::platform::Platform::HERE)
+        .ok()?
+        .activities
+        .into_iter()
+        .find(|activity| activity.id == id)
 }
 
 /// Carry work that is built and committed on to the pull request it ends on —
@@ -2126,17 +2254,7 @@ pub(crate) async fn follow_up_rounds(state: AppState, conversation_id: i64, driv
     }
 
     let shipped = crate::plugins::built_in::activities();
-    let activity = shipped
-        .manifest(crate::platform::Platform::HERE)
-        .ok()
-        .and_then(|manifest| {
-            manifest
-                .activities
-                .into_iter()
-                .find(|activity| activity.id == FOLLOW_UP_ROUNDS)
-        });
-
-    let Some(activity) = activity else {
+    let Some(activity) = shipped_activity(&shipped, FOLLOW_UP_ROUNDS) else {
         tracing::error!(
             conversation_id,
             "this build carries no Follow-up rounds Activity, so no follow-up was started"
@@ -2165,7 +2283,7 @@ pub(crate) async fn follow_up_rounds(state: AppState, conversation_id: i64, driv
     )
     .await;
 
-    let committed = match outcome.as_deref() {
+    let committed = match outcome.as_ref().map(|ran| ran.outcome.as_str()) {
         Some("committed") => true,
         Some("nothing") => false,
         _ => return,

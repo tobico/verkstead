@@ -68,6 +68,11 @@ pub(crate) struct Lent {
     /// The Timeline Event the newest session launched here prints into, which
     /// is what a stop asked for through the world carries the tail of.
     writing: Option<i64>,
+
+    /// Whether the newest session launched here was building — see
+    /// [`Lent::building`] — so that what it asked and left standing is
+    /// answered into the next session's prompt rather than closed by a stop.
+    folding: bool,
 }
 
 /// Whether a launch waits for the Conversation's Turn.
@@ -130,6 +135,7 @@ impl Lent {
             watched: HashMap::new(),
             issued: 0,
             writing: None,
+            folding: false,
         }
     }
 
@@ -162,6 +168,14 @@ impl Lent {
     pub(crate) fn doing(mut self, doing: &str) -> Lent {
         self.doing = doing.to_owned();
         self
+    }
+
+    /// The same two, changed between one launch and the next — a component's
+    /// launches, which each say what they build through the evidence they
+    /// expect. See [`crate::activities`].
+    pub(crate) fn now(&mut self, building: Option<Building>, doing: &str) {
+        self.building = building;
+        self.doing = doing.to_owned();
     }
 
     /// Launch a session through the world's *launch a session*, saying nothing
@@ -422,6 +436,8 @@ impl host::Host for Lent {
                     folding.recorded(&state.pool).await;
                 }
 
+                self.folding = self.building.is_some();
+
                 Ok(Ok(self.watch(session, evidence, taken_ends(ends))))
             }
             Ok(None) => Ok(self.refused("The session couldn't be started.")),
@@ -551,8 +567,15 @@ impl host::Host for Lent {
     /// Stop where the Conversation stands, closing any Set left open first, with
     /// `reason` as what the stop's Notice says happened and the newest
     /// session's last words as its evidence.
+    ///
+    /// **Except a building session's Sets**, which stay standing: a backlog
+    /// step's ask is an ordinary one, whose Answers open the prompt of the
+    /// session the human's Resume starts — see [`crate::deferrals`] — as the
+    /// runner always left one when it stopped over its step.
     async fn stop(&mut self, reason: String) -> wasmtime::Result<()> {
-        crate::runner::left_open(&self.state, self.conversation_id).await;
+        if !self.folding {
+            crate::runner::left_open(&self.state, self.conversation_id).await;
+        }
 
         crate::runner::stop(
             &self.state,
@@ -593,6 +616,28 @@ impl host::Host for Lent {
             .reading(repo, at, path, Reading::Directory)
             .await
             .map(|read| read.and_then(Read::directory)))
+    }
+
+    /// Place a backlog task whose line wants `platform`, as the runner always
+    /// placed one before launching it — see [`crate::placing`]. Moving, or
+    /// asking the human, is `elsewhere`; a word naming no platform is `here`.
+    async fn place_task(
+        &mut self,
+        task: u32,
+        label: String,
+        platform: String,
+    ) -> wasmtime::Result<host::Placed> {
+        let Some(wants) = crate::declarations::matching(&platform) else {
+            return Ok(host::Placed::Here);
+        };
+
+        let placed =
+            crate::placing::wanting(&self.state, self.conversation_id, task, label, wants).await;
+
+        Ok(match placed.here() {
+            true => host::Placed::Here,
+            false => host::Placed::Elsewhere,
+        })
     }
 }
 

@@ -656,6 +656,15 @@ mod unlent {
         ) -> wasmtime::Result<Result<Option<Vec<String>>, String>> {
             Err(refused())
         }
+
+        async fn place_task(
+            &mut self,
+            _task: u32,
+            _label: String,
+            _platform: String,
+        ) -> wasmtime::Result<host::Placed> {
+            Err(refused())
+        }
     }
 }
 

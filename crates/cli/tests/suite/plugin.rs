@@ -499,7 +499,7 @@ fn the_activities_verkstead_ships_pass() {
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("providing activity — its activities Follow-up rounds."),
+        stdout.contains("providing activity — its activities Follow-up rounds and Backlog runner."),
         "{stdout}"
     );
 }

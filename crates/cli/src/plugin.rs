@@ -64,14 +64,18 @@ fn check(dir: &Path) -> Result<()> {
                 }
             }
 
-            let provides: Vec<String> = manifest
-                .provides
-                .iter()
-                .map(|provision| match &provision.language {
+            // A category once however many blocks provide it: a plugin of two
+            // Activities provides `activity`, which the names after it count.
+            let mut provides: Vec<String> = Vec::new();
+            for provision in &manifest.provides {
+                let word = match &provision.language {
                     Some(provided) => format!("{} {}", provision.category.word(), provided.name),
                     None => provision.category.word().to_owned(),
-                })
-                .collect();
+                };
+                if !provides.contains(&word) {
+                    provides.push(word);
+                }
+            }
             let mut provides = if provides.is_empty() {
                 "nothing".to_owned()
             } else {
@@ -83,7 +87,7 @@ fn check(dir: &Path) -> Result<()> {
                     .iter()
                     .map(|activity| activity.name.as_str())
                     .collect();
-                provides.push_str(&format!(" — its activities {}", names.join(", ")));
+                provides.push_str(&format!(" — its activities {}", listed(&names)));
             }
 
             println!(
@@ -119,5 +123,28 @@ fn check(dir: &Path) -> Result<()> {
                 lines.join("\n")
             )
         }
+    }
+}
+
+/// Names joined as a sentence says them — `A`, `A and B`, `A, B, and C` —
+/// the serial comma, as the Plugins row lists the same names.
+fn listed(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::listed;
+
+    #[test]
+    fn names_are_listed_with_the_serial_comma() {
+        assert_eq!(listed(&["A"]), "A");
+        assert_eq!(listed(&["A", "B"]), "A and B");
+        assert_eq!(listed(&["A", "B", "C"]), "A, B, and C");
     }
 }
