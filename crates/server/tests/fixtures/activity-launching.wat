@@ -12,15 +12,15 @@
 ;;
 ;; The canonical ABI, as these calls lower: `launch`'s eleven flat parameters
 ;; and a pointer to where its `result<session, string>` goes (the tag at 0, the
-;; session at 8); `wait` a session in, a `waited` tag out; `git-facts` a string
-;; and a pointer to its `result<branch-facts, string>` (the tag at 0, the
-;; commits at 12).
+;; session at 8); `wait` a session and a pointer to where its `waited` goes
+;; (sixteen bytes, at 144); `git-facts` a string and a pointer to its
+;; `result<branch-facts, string>` (the tag at 0, the commits at 12).
 (module
   (import "verkstead:plugin/host@1.0.0" "launch"
     (func $launch
       (param i32 i32 i32 i32 i32 i32 i32 i64 i32 i32 i32 i32)))
   (import "verkstead:plugin/host@1.0.0" "wait"
-    (func $wait (param i64) (result i32)))
+    (func $wait (param i64 i32)))
   (import "verkstead:plugin/host@1.0.0" "git-facts"
     (func $git_facts (param i32 i32 i32)))
 
@@ -77,7 +77,7 @@
       (then (return (call $answer (i32.const 480) (i32.const 7)))))
 
     ;; Whatever the wait came to, the branch is what says how it ended.
-    (drop (call $wait (i64.load (i32.const 136))))
+    (call $wait (i64.load (i32.const 136)) (i32.const 144))
 
     (call $git_facts
       (i32.load (local.get $facts))
