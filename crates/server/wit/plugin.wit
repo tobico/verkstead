@@ -358,8 +358,10 @@ interface host {
   notice: func(text: string);
 
   /// Stop: the Conversation stays where it is, the reason goes on the
-  /// Timeline, and any Set left open is closed. What `run` returns after is
-  /// not read.
+  /// Timeline, and any Set left open is closed — unless the newest session
+  /// launched was building (a backlog task, the finish, a stage's planning),
+  /// whose Sets stand to be answered into the next session's prompt. What
+  /// `run` returns after is not read.
   stop: func(reason: string);
 
   // Reading the Repo (stage 10). Committed bytes only, never the working
@@ -393,6 +395,26 @@ interface host {
   /// as `read-file` is, and for a path that is a file.
   list-directory: func(repo: string, at: revision, path: string)
     -> result<option<list<string>>, string>;
+
+  // Placing work by platform (stage 10). Which device runs it is the host's
+  // (ADR-0029): the Activity names the platform a line of the Repo wants, and
+  // never a device.
+
+  /// Where a task is to run, once the host has placed it.
+  enum placed {
+    /// On this device: launch its session here.
+    here,
+    /// Not here: the Conversation is moving to a device of that platform, or
+    /// the human is being asked where it runs. Launch nothing. The Activity is
+    /// started again wherever the Conversation lands, so it ends `steered`.
+    elsewhere,
+  }
+
+  /// Place the backlog task numbered `task` — `label` being that number as
+  /// `.tasks/TODO.md` writes it — whose line wants `platform`, the word after
+  /// its `on`, before its session is launched. A word that is not `linux`,
+  /// `macos` or `windows` wants no platform, and the task runs here.
+  place-task: func(task: u32, label: string, platform: string) -> placed;
 }
 
 /// An Activity's component, run once per start.

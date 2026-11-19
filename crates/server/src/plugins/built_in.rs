@@ -247,7 +247,8 @@ pub fn languages(manifest: &Manifest) -> impl Iterator<Item = &crate::languages:
 }
 
 /// The uuid of the built-in whose blocks are the Activities Verkstead ships,
-/// one component each: *Follow-up rounds* first (Set 1803, Q3).
+/// one component each: *Follow-up rounds* first, then the *Backlog runner*
+/// (Set 1803, Q3).
 pub const ACTIVITIES: &str = "d7a5e719-8491-46a7-b7d7-8f9f85e57bd6";
 
 /// The built-in the shipped Activities are.
@@ -366,10 +367,10 @@ mod tests {
     }
 
     /// The shipped Activities are a built-in depending on the pack
-    /// `verkstead`, whose *Follow-up rounds* block names a component of its
-    /// own that is written against the `activity` world.
+    /// `verkstead`, whose *Follow-up rounds* and *Backlog runner* blocks each
+    /// name a component of their own written against the `activity` world.
     #[tokio::test]
-    async fn the_activities_are_a_built_in_with_follow_up_rounds() {
+    async fn the_activities_are_a_built_in_with_their_components() {
         let shipped = activities();
 
         let started = start(shipped, Platform::HERE, None).await;
@@ -380,19 +381,28 @@ mod tests {
         assert_eq!(manifest.dependencies.len(), 1);
         assert_eq!(manifest.dependencies[0].uuid, VERKSTEAD);
 
-        let [rounds] = manifest.activities.as_slice() else {
-            panic!("one Activity: {:?}", manifest.activities);
+        let [rounds, backlog] = manifest.activities.as_slice() else {
+            panic!("two Activities: {:?}", manifest.activities);
         };
         assert_eq!(rounds.id, "follow-up-rounds");
         assert_eq!(rounds.name, "Follow-up rounds");
         assert_eq!(rounds.outcomes, ["committed", "nothing"]);
         assert_eq!(rounds.skills, ["verkstead/following-up"]);
-        assert!(
-            shipped.files.iter().any(
-                |(name, bytes)| *name == "follow-up-rounds.wasm" && bytes.starts_with(b"\0asm")
-            ),
-            "the block's component is embedded beside the manifest",
-        );
+
+        assert_eq!(backlog.id, "backlog-runner");
+        assert_eq!(backlog.name, "Backlog runner");
+        assert_eq!(backlog.outcomes, ["finished"]);
+        assert_eq!(backlog.skills, ["verkstead/next-task"]);
+
+        for component in ["follow-up-rounds.wasm", "backlog-runner.wasm"] {
+            assert!(
+                shipped
+                    .files
+                    .iter()
+                    .any(|(name, bytes)| *name == component && bytes.starts_with(b"\0asm")),
+                "each block's component is embedded beside the manifest: {component}",
+            );
+        }
     }
 
     /// Codex's plugin is what `verkstead plugin check` would accept, on every

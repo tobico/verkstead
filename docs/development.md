@@ -1626,7 +1626,9 @@ Today there are four:
 - **`activities`**, the Activities Verkstead runs through the same host
   functions a stranger's would: a block per Activity, each a component built
   from the crate beside it — today *Follow-up rounds*, from
-  [`plugins/activities/follow-up-rounds/`](../plugins/activities/follow-up-rounds).
+  [`plugins/activities/follow-up-rounds/`](../plugins/activities/follow-up-rounds),
+  and the *Backlog runner*, from
+  [`plugins/activities/backlog-runner/`](../plugins/activities/backlog-runner).
   It depends on the `verkstead` pack's plugin for the skills its sessions run
   under, and is the Built-in group's second row. Its directory holds the
   components' sources rather than their bytes, so `verkstead plugin check`

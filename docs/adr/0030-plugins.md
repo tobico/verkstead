@@ -253,6 +253,16 @@ and not asked for (Set 1839, Q2): the `filesystem` capability is a fixed path
 on the device and cannot name a Worktree, and the Repos read are the ones the
 Conversation already works in, so there is nothing for the human to grant.
 
+**Placing is the host's, named by the Activity.** A backlog task whose line
+says `on windows` is placed before its session starts, as ADR-0029 says: the
+backlog runner reads the word off the line and asks the host to place the
+task, and the host decides whether it runs here, moves the Conversation, or
+asks the human where. The Activity never names a device; where the work goes
+elsewhere it ends `steered`, and is started again where the Conversation lands.
+A placement hidden inside *launch* was weighed and not taken (Set 1839, Q3):
+each of the host's decisions is a call the Activity makes, so a reader of the
+component sees every one.
+
 **One wrap-up, with declared watchers.** The wrap-up watches checks, comments,
 the review and mergeability at once; Fix Merge Issues is the same Activity with
 two watchers off. A watcher per Activity, several running in one state, was

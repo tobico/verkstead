@@ -1,0 +1,344 @@
+//! **The backlog runner**, a built-in Activity (ADR-0030, *Activity*): a
+//! task list worked box by box, one fresh session on the next-task skill per
+//! task, and the finish after the last.
+//!
+//! **It reaches the server through the host functions and nothing else.** What
+//! is next is read off `.tasks/TODO.md` as the Worktree's HEAD holds it — the
+//! lowest-numbered entry whose box is not ticked, in the list's own order, and
+//! the finish once every box is — so what a session has ticked and not
+//! committed is not ticked yet. What each session is started on is written
+//! here, off the start facts, in the words the server's own builder has always
+//! used: which task is not said, the skill reading `.tasks/` and taking the
+//! same one by the same rule.
+//!
+//! **A task's session is done when its box is ticked and committed, and the
+//! finish's when `.tasks/TODO.md` is gone and a pull request is open.** That is
+//! the evidence each is launched expecting, and the host holds `verkstead done`
+//! to it; what the session builds, and so where its Memos go, the host reads
+//! off the same evidence.
+//!
+//! **It ends in an Outcome, and never names a state.** `finished` once the
+//! finish has landed, and `steered` where the human took the Conversation
+//! elsewhere — or where the host moved it to a device of the platform a task
+//! wants, which starts this Activity again over there. A step whose session is
+//! gone without landing it, or an entry naming no task file, is a stop: what
+//! happens next is the human's, and Resume starts this again.
+//!
+//! **Started again rather than remembered.** Nothing is kept for it between
+//! starts: a server restarted mid-backlog starts it over the Repo as it now
+//! stands, and the boxes say where it got to.
+
+wit_bindgen::generate!({
+    world: "activity",
+    path: "../../../crates/server/wit",
+});
+
+use verkstead::plugin::activity_types::{Ends, Evidence, Landing, Waited};
+use verkstead::plugin::host::{self, Placed, Revision};
+
+/// The skill every session of a backlog runs inside, the finish's included.
+const NEXT_TASK: &str = "verkstead/next-task";
+
+/// The backlog's directory, and its list inside the Repo.
+const BACKLOG: &str = ".tasks";
+const TODO: &str = ".tasks/TODO.md";
+
+/// What a stop says of a session that ended without landing its step, where
+/// the host had nothing worse to say.
+const UNFINISHED: &str = "The session ended without finishing the step.";
+
+struct Backlog;
+
+impl Guest for Backlog {
+    fn run(facts: Facts) -> String {
+        let Some(skill) = facts.skills.iter().find(|named| named.name == NEXT_TASK) else {
+            host::stop(&format!(
+                "There's no `{NEXT_TASK}` skill to start the backlog's sessions in."
+            ));
+            return String::new();
+        };
+
+        let repo = &facts.worktree.repo;
+        let prompt = prompt(&skill.path, &facts);
+
+        loop {
+            let step = match next(repo) {
+                Ok(step) => step,
+                Err(why) => {
+                    host::stop(&why);
+                    return String::new();
+                }
+            };
+
+            let (evidence, ends) = match &step {
+                Step::Task {
+                    number,
+                    label,
+                    platform,
+                } => {
+                    // Placed before anything is launched for it: where the
+                    // host moves the Conversation, or asks the human where it
+                    // runs, this run stands down and is started again there.
+                    if let Some(platform) = platform
+                        && host::place_task(*number, label, platform) == Placed::Elsewhere
+                    {
+                        return "steered".to_owned();
+                    }
+
+                    (
+                        Evidence::Landed(Landing::Ticked(*number)),
+                        Ends::WithItsWork,
+                    )
+                }
+                Step::Finish => (
+                    Evidence::Landed(Landing::Gone(TODO.to_owned())),
+                    Ends::OnAPullRequest,
+                ),
+                Step::Broken { label } => {
+                    host::stop(&broken(label));
+                    return String::new();
+                }
+            };
+
+            let session = match host::launch(NEXT_TASK, "implementation", &prompt, &evidence, ends)
+            {
+                Ok(session) => session,
+                Err(why) => {
+                    host::stop(&why);
+                    return String::new();
+                }
+            };
+
+            let how = match host::wait(session) {
+                Waited::Done => None,
+                Waited::Steered => return "steered".to_owned(),
+                Waited::Gone(how) => Some(how),
+                Waited::Stalled | Waited::Marked => Some(None),
+            };
+
+            // A session that is over may have landed its step as its last act
+            // and exited before the host saw it signal, which is the ordinary
+            // shape of one that finishes rather than idles: the Repo is asked
+            // once more before it is read as a run that has stopped.
+            if let Some(how) = how
+                && !landed(repo, &step)
+            {
+                host::stop(how.as_deref().unwrap_or(UNFINISHED));
+                return String::new();
+            }
+
+            if step == Step::Finish {
+                return "finished".to_owned();
+            }
+        }
+    }
+}
+
+export!(Backlog);
+
+/// What to run next, read off the list.
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+    /// The lowest-numbered entry whose box is not ticked, by its number, its
+    /// label as the list writes it, and the platform its line wants.
+    Task {
+        number: u32,
+        label: String,
+        platform: Option<String>,
+    },
+
+    /// An entry that is not ticked and names no task file: nothing for a
+    /// session to work from.
+    Broken { label: String },
+
+    /// Every box ticked: take `.tasks/` away and open the pull request.
+    Finish,
+}
+
+/// What to run next in `repo`, off `.tasks/` as its HEAD holds it — or why
+/// there is nothing to say, in a sentence.
+///
+/// The list decides all of it, and the directory beside it only says whether
+/// the entry has a file to work from: a list part way through being written
+/// has entries with none yet, and reading those as done would be finishing a
+/// feature nobody had started.
+fn next(repo: &str) -> Result<Step, String> {
+    let entries = entries(repo)?.ok_or_else(|| {
+        format!("There's no backlog in `{TODO}` to work, so there's nothing to start a session on.")
+    })?;
+
+    // In the list's own order rather than sorted: `TODO.md` is written in the
+    // order the tasks are meant to be worked.
+    let Some(next) = entries.into_iter().find(|entry| !entry.checked) else {
+        return Ok(Step::Finish);
+    };
+
+    let files = host::list_directory(repo, &Revision::Head, BACKLOG)?.unwrap_or_default();
+
+    let named = files.iter().any(|file| numbered(file) == Some(next.number));
+
+    Ok(match named {
+        true => Step::Task {
+            number: next.number,
+            label: next.label,
+            platform: next.platform,
+        },
+        false => Step::Broken { label: next.label },
+    })
+}
+
+/// Whether `step` has landed at the Worktree's HEAD: its box ticked, or — the
+/// finish — the list gone. Anything the Repo will not say reads as not.
+fn landed(repo: &str, step: &Step) -> bool {
+    match step {
+        Step::Task { number, .. } => entries(repo).is_ok_and(|entries| {
+            entries.is_some_and(|entries| {
+                entries
+                    .iter()
+                    .any(|entry| entry.number == *number && entry.checked)
+            })
+        }),
+        Step::Finish => matches!(host::read_file(repo, &Revision::Head, TODO), Ok(None)),
+        Step::Broken { .. } => false,
+    }
+}
+
+/// One entry of the list.
+struct Entry {
+    number: u32,
+    label: String,
+    checked: bool,
+    platform: Option<String>,
+}
+
+/// The entries of `.tasks/TODO.md` at `repo`'s HEAD, in the list's own order,
+/// or none where there is no list.
+fn entries(repo: &str) -> Result<Option<Vec<Entry>>, String> {
+    let Some(list) = host::read_file(repo, &Revision::Head, TODO)? else {
+        return Ok(None);
+    };
+
+    Ok(Some(
+        String::from_utf8_lossy(&list)
+            .lines()
+            .filter_map(entry)
+            .collect(),
+    ))
+}
+
+/// The entry `line` is — `- [ ] 01: <title> — [details](01-<slug>.md)`, and
+/// whatever the list wrote after the link — or none where it is not one.
+fn entry(line: &str) -> Option<Entry> {
+    let line = line.trim();
+
+    let (rest, checked) = [("- [ ] ", false), ("- [x] ", true), ("- [X] ", true)]
+        .iter()
+        .find_map(|(mark, checked)| Some((line.strip_prefix(mark)?, *checked)))?;
+
+    let (label, title) = rest.split_once(':')?;
+    let label = label.trim();
+
+    if label.is_empty() || !label.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+
+    Some(Entry {
+        number: label.parse().ok()?,
+        label: label.to_owned(),
+        checked,
+        platform: platform(after(title)),
+    })
+}
+
+/// What the line wrote after the link to its task file, where it has one.
+fn after(title: &str) -> &str {
+    let Some(open) = title.find("](").and_then(|link| title[..link].rfind('[')) else {
+        return "";
+    };
+
+    title[open..]
+        .split_once("](")
+        .and_then(|(_, target)| target.split_once(')'))
+        .map(|(_, after)| after.trim())
+        .unwrap_or_default()
+}
+
+/// The word after `on` in what a line wrote after its link — `windows` of `—
+/// on windows` — or none where it names none, read as the server reads a
+/// declaration. Whether the word is a platform is the host's to say. Nothing
+/// inside an annotation, `*(…)*`, is read, and one that never closes takes the
+/// rest of the line with it.
+fn platform(after: &str) -> Option<String> {
+    let mut pieces = Vec::new();
+    let mut rest = after;
+
+    while let Some(open) = rest.find("*(") {
+        pieces.push(&rest[..open]);
+
+        match rest[open..].find(")*") {
+            Some(close) => rest = &rest[open + close + ")*".len()..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    pieces.push(rest);
+
+    let mut words = pieces.into_iter().flat_map(|piece| {
+        piece
+            .split(|c: char| c.is_whitespace() || [',', '-', '—', '–', ';'].contains(&c))
+            .filter(|word| !word.is_empty())
+    });
+
+    let mut platform = None;
+
+    while let Some(word) = words.next() {
+        if word.eq_ignore_ascii_case("on") {
+            platform = words.next().map(str::to_owned);
+        }
+    }
+
+    platform
+}
+
+/// The number a task file leads with — `05` of `05-pinned-task-list.md` — or
+/// none where the name is not one the breakdown wrote.
+fn numbered(name: &str) -> Option<u32> {
+    let (number, slug) = name.strip_suffix(".md")?.split_once('-')?;
+
+    if slug.is_empty() || number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+
+    number.parse().ok()
+}
+
+/// Why the run stopped at an entry with no task file: the entry, which is the
+/// line the human has to go and look at.
+fn broken(label: &str) -> String {
+    format!(
+        "Entry {label} of `{TODO}` isn't ticked off and names no task file, so there's \
+         nothing for a session to work from."
+    )
+}
+
+/// Every session's prompt: the line that sends it into next-task, and the two
+/// documents the work is written down in — the task file says where a session
+/// stops, and these say what it is a slice of.
+fn prompt(skill: &str, facts: &Facts) -> String {
+    let mut prompt = format!(
+        "Read {skill} and work the next task of the backlog for the work described below, the \
+         way it says. Nothing else in this session tells you how to reach me.\n\n\
+         # The Brief this started from\n\n{}\n",
+        facts.brief,
+    );
+
+    if let Some(handoff) = &facts.handoff {
+        prompt.push_str(&format!(
+            "\n# What the grilling settled, in its own words\n\n{handoff}\n"
+        ));
+    }
+
+    prompt
+}

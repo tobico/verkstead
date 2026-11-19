@@ -335,6 +335,19 @@ pub(crate) async fn task(
         return Placed::Here;
     };
 
+    wanting(state, conversation_id, number, label, wants).await
+}
+
+/// Place task `number` of the backlog, written `label`, whose line wants
+/// `wants` — read off the line by whoever is launching it: the backlog runner's
+/// component, through the `activity` world's `place-task`.
+pub(crate) async fn wanting(
+    state: &AppState,
+    conversation_id: i64,
+    number: u32,
+    label: String,
+    wants: Platform,
+) -> Placed {
     place(state, conversation_id, Work::Task { number, label }, wants).await
 }
 

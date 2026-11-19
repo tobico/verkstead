@@ -25,3 +25,9 @@ provides:
     component: follow-up-rounds.wasm
     outcomes: [committed, nothing]
     skills: [verkstead/following-up]
+  - category: activity
+    id: backlog-runner
+    name: Backlog runner
+    component: backlog-runner.wasm
+    outcomes: [finished]
+    skills: [verkstead/next-task]

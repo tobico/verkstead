@@ -280,7 +280,10 @@ of Verkstead's:
   branch, the commits past its base, and whether anything is uncommitted.
 - **`notice`**, which puts a notice on the Timeline.
 - **`stop`**, with a reason: the Conversation stays where it is, the reason goes
-  on the Timeline, and a question set left open is closed.
+  on the Timeline, and a question set left open is closed — unless the newest
+  session launched was building (a backlog task, the finish, a stage's
+  planning), whose question sets stand to be answered into the next session's
+  prompt.
 - **`read-file`** and **`list-directory`** of the Worktree's repository or a
   Companion's, at the Worktree's HEAD or at a named branch or commit — one no
   Worktree holds as well — answering a file's bytes or a directory's entry
@@ -289,6 +292,12 @@ of Verkstead's:
   Conversation's own, as for `git-facts`. A repository that is neither, a
   revision naming no commit, or a path leading out of the repository is refused
   in a sentence.
+- **`place-task`**, for a backlog task whose line wants a platform — the word
+  after its `on` — before its session is launched: the host answers `here`, or
+  `elsewhere` where it moved the Conversation to a device of that platform or
+  asked the human where the task runs. Which device is always the host's. An
+  Activity told `elsewhere` launches nothing and ends `steered`; it is started
+  again wherever the Conversation lands.
 
 **An Activity keeps nothing between starts.** A server restarted starts it
 again with the same facts and the Timeline as it now stands, and the files in
