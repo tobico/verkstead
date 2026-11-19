@@ -201,7 +201,11 @@ interface activity-types {
   }
 
   /// One entry of the Timeline so far: its kind and its body, the body as the
-  /// JSON the Timeline holds it as.
+  /// text the Timeline stores, which is not JSON. A brief, a handoff or a
+  /// notice is its markdown; a move is the state's word, `follow-up` say; a
+  /// steer is the state's word, then a newline and the instruction where the
+  /// human wrote one; and a kind whose substance is held elsewhere — a
+  /// session's output, a question set, a commit — has an empty body.
   record entry {
     id: s64,
     kind: string,
