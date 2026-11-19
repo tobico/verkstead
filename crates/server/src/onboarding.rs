@@ -1285,17 +1285,27 @@ impl Onboarding {
     /// it, and what boots and links that Annex once it is made — see
     /// [`crate::annex::booting::Annexed::up`] — and `None` on a server with no
     /// identity to keep one by.
+    ///
+    /// `offered` is the plugin harnesses this server offers: a row of any other
+    /// plugin's harness is never drawn, so one a press names anyway — a
+    /// disabled plugin's, its harness still standing in this process — is
+    /// left out of the run rather than having its commands run.
     pub(crate) async fn install(
         &self,
         settings: &Settings,
         ticked: Vec<Dependency>,
+        offered: &[store::AgentType],
         devices: Option<&crate::device::Devices>,
     ) -> Result<(), Refusal> {
         if !self.wizarding() {
             return Err(Refusal::Over);
         }
 
-        let ticked = ticked.iter().map(Row::of).collect();
+        let ticked = ticked
+            .iter()
+            .map(Row::of)
+            .filter(|row| row.plugged().is_none_or(|harness| offered.contains(&harness)))
+            .collect();
 
         self.run(settings, ticked, devices).await
     }
@@ -3712,7 +3722,7 @@ echo {token}
 
         assert_eq!(
             onboarding
-                .install(&settings, vec![Dependency::Git], None)
+                .install(&settings, vec![Dependency::Git], &[], None)
                 .await,
             Err(Refusal::Over),
         );
