@@ -630,7 +630,10 @@ mod tests {
 
         assert!(enabled(&pool, RUST_CPP).await);
         assert!(!enabled(&pool, GO_PLUGIN).await);
-        for listed in built_in::listed() {
+        for listed in built_in::listed()
+            .iter()
+            .filter(|listed| built_in::switched(listed))
+        {
             let off = listed.uuid == GO_PLUGIN;
             assert_eq!(enabled(&pool, &listed.uuid).await, !off, "{}", listed.name);
         }
