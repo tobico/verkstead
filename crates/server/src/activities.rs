@@ -126,8 +126,57 @@ pub(crate) struct Ran {
 ///
 /// `brought` is what brought the run about, which a Conversation the component
 /// starts is held to the limits by — see [`crate::continuing::begin`].
+///
+/// **The `building` option is the host's**: where it names a kind — see
+/// [`Building::named`] — every session the component launches builds that,
+/// which is what permits its Memos and previews and stamps the Memos it
+/// leaves.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run(
+    state: &AppState,
+    conversation_id: i64,
+    driving: &Driving,
+    files: Files<'_>,
+    activity: &Activity,
+    capabilities: &[Capability],
+    options: Vec<(String, String)>,
+    doing: &str,
+    brought: Brought,
+) -> Option<Ran> {
+    let (outcome, seen) = run_seeing(
+        state,
+        conversation_id,
+        driving,
+        files,
+        activity,
+        capabilities,
+        options,
+        doing,
+        brought,
+    )
+    .await;
+
+    outcome.map(|outcome| Ran {
+        outcome,
+        writing: seen.event_id,
+    })
+}
+
+/// What the newest session a component launched came to, read back by an
+/// in-process caller where the world's `waited` says only *gone* — as
+/// [`Lent::see`] reads it back for a driver of its own.
+#[derive(Debug, Default)]
+pub(crate) struct Seen {
+    /// The Timeline Event it printed into, where one was launched.
+    pub(crate) event_id: Option<i64>,
+
+    /// How it ended, where a wait saw it end without its Done signal taken.
+    pub(crate) ended: Option<crate::sessions::Ended>,
+}
+
+/// [`run`], and what the newest session the component launched came to.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_seeing(
     state: &AppState,
     conversation_id: i64,
     _driving: &Driving,
@@ -137,8 +186,13 @@ pub(crate) async fn run(
     options: Vec<(String, String)>,
     doing: &str,
     brought: Brought,
-) -> Option<Ran> {
+) -> (Option<String>, Seen) {
     let name = &activity.name;
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let building = options
+        .iter()
+        .find(|(key, _)| key == "building")
+        .and_then(|(_, kind)| Building::named(kind));
 
     let facts = match facts(state, conversation_id, activity, options).await {
         Ok(facts) => facts,
@@ -151,24 +205,24 @@ pub(crate) async fn run(
                 &format!("{name} couldn't be started: the conversation couldn't be read."),
             )
             .await;
-            return None;
+            return (None, Seen::default());
         }
     };
 
     let home = crate::sandbox::Homes::of_the_server(&state.data_dir)
         .map(|homes| homes.servers().to_owned());
-    let writing = Arc::new(Mutex::new(None));
     let lent = Hosted {
         lent: Lent::new(state, conversation_id)
             .doing(doing)
-            .brought(brought),
+            .brought(brought)
+            .building(building),
+        seen: seen.clone(),
         state: state.clone(),
         conversation_id,
         name: name.clone(),
         declared: activity.skills.clone(),
         starts: capabilities.contains(&Capability::Conversations),
         doing: doing.to_owned(),
-        writing: writing.clone(),
         planning: None,
         beside: false,
     };
@@ -176,10 +230,12 @@ pub(crate) async fn run(
     let ran =
         component::run_activity(files, activity, capabilities, home.as_deref(), lent, &facts).await;
 
+    let seen = std::mem::take(&mut *seen.lock().expect("nothing panics holding it"));
+
     // Whatever it answered, a stop that landed while it ran is the last word:
     // its own `stop`, or the human's.
     if already_stopped(state, conversation_id).await {
-        return None;
+        return (None, seen);
     }
 
     let how = match ran {
@@ -190,11 +246,7 @@ pub(crate) async fn run(
                 outcome,
                 "an Activity ended"
             );
-            let writing = *writing
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-            return Some(Ran { outcome, writing });
+            return (Some(outcome), seen);
         }
         Ok(outcome) => {
             format!("{name} ended in `{outcome}`, which isn't one of the outcomes it declares.")
@@ -210,7 +262,7 @@ pub(crate) async fn run(
     );
     stopping(state, conversation_id, name, &how).await;
 
-    None
+    (None, seen)
 }
 
 /// Run `activity` **beside** `conversation_id` rather than driving it: the
@@ -256,7 +308,7 @@ pub(crate) async fn beside(
         declared: activity.skills.clone(),
         starts: capabilities.contains(&Capability::Conversations),
         doing: name.clone(),
-        writing: Arc::new(Mutex::new(None)),
+        seen: Arc::new(Mutex::new(Seen::default())),
         planning: None,
         beside: true,
     };
@@ -431,6 +483,10 @@ fn shown(path: Option<&Path>) -> String {
 /// component at the next one.
 struct Hosted {
     lent: Lent,
+
+    /// What the newest session launched came to, for [`run_seeing`]'s caller.
+    seen: Arc<Mutex<Seen>>,
+
     state: AppState,
     conversation_id: i64,
 
@@ -449,10 +505,6 @@ struct Hosted {
     /// What the rescue and a stop say it is doing between the steps its
     /// launches name — see [`step`].
     doing: String,
-
-    /// The Event the newest session launched here prints into, read back by
-    /// [`run`] once the component has ended.
-    writing: Arc<Mutex<Option<i64>>>,
 
     /// The session launched to plan a roadmap stage, where the newest was one:
     /// its backlog landing is the host's to record once it has been waited on.
@@ -551,11 +603,10 @@ impl host::Host for Hosted {
             Ok(session) => {
                 self.planning = planning.then_some(*session);
 
-                *self
-                    .writing
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-                    Some(self.lent.event_id(*session));
+                *self.seen.lock().expect("nothing panics holding it") = Seen {
+                    event_id: Some(self.lent.event_id(*session)),
+                    ended: None,
+                }
             }
             Err(_) => self.ended_by_a_stop().await?,
         }
@@ -574,6 +625,8 @@ impl host::Host for Hosted {
     /// writes nothing — see [`crate::conversations::backlog_landed`].
     async fn wait(&mut self, session: world::Session) -> wasmtime::Result<world::Waited> {
         let waited = host::Host::wait(&mut self.lent, session).await?;
+
+        self.seen.lock().expect("nothing panics holding it").ended = self.lent.ended(session);
 
         if self.planning == Some(session) && self.backlog_committed().await {
             crate::conversations::backlog_landed(&self.state, self.conversation_id).await;

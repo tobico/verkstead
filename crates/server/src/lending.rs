@@ -264,6 +264,14 @@ impl Lent {
         }
     }
 
+    /// How `session` ended, once a wait has seen it end without its Done
+    /// signal taken — `None` before then, and where the signal was taken.
+    pub(crate) fn ended(&self, session: world::Session) -> Option<Ended> {
+        self.watched
+            .get(&session)
+            .and_then(|watched| watched.ended.clone())
+    }
+
     fn watch(&mut self, session: Session, evidence: Evidence, ends: Ends) -> world::Session {
         self.issued += 1;
         self.writing = Some(session.event_id);
@@ -1190,6 +1198,33 @@ fn lent_evidence(evidence: &Evidence) -> world::Evidence {
         Evidence::Nothing => world::Evidence::Nothing,
         Evidence::NothingElse => world::Evidence::NothingElse,
         Evidence::Investigated => world::Evidence::Investigated,
+    }
+}
+
+/// `evidence` as the **One session** Activity's `evidence` option spells it: a
+/// bare word, or a word, a colon and what it is of — `committed-since:3`. A
+/// landing's Worktree goes unsaid, as it does across the world.
+pub(crate) fn evidence_option(evidence: &Evidence) -> String {
+    match lent_evidence(evidence) {
+        world::Evidence::Landed(landing) => match landing {
+            world::Landing::Gone(path) => format!("gone:{path}"),
+            world::Landing::Arrived(path) => format!("arrived:{path}"),
+            world::Landing::Ticked(number) => format!("ticked:{number}"),
+            world::Landing::Roadmap(base) => format!("roadmap:{base}"),
+            world::Landing::Handoff(path) => format!("handoff:{path}"),
+        },
+        world::Evidence::CommittedSince(already) => format!("committed-since:{already}"),
+        world::Evidence::Nothing => "nothing".to_owned(),
+        world::Evidence::NothingElse => "nothing-else".to_owned(),
+        world::Evidence::Investigated => "investigated".to_owned(),
+    }
+}
+
+/// `ends` as the **One session** Activity's `ends` option spells it.
+pub(crate) fn ends_option(ends: Ends) -> &'static str {
+    match ends {
+        Ends::WithItsWork => "with-its-work",
+        Ends::OnAPullRequest => "on-a-pull-request",
     }
 }
 
