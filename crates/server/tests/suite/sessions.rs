@@ -5811,6 +5811,59 @@ sleep 300
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
+/// A plugin harness told no session id on its line names itself, as Codex
+/// does: its record is the one naming this session's Worktree, written since
+/// it was launched — here beside another Worktree's written at the same
+/// moment, which would be followed instead were the finder wrong — and the id
+/// that record gives is what Verkstead writes down as the session's name.
+#[tokio::test]
+async fn a_plugin_harness_that_names_itself_is_found_by_its_worktree_and_named_by_its_record() {
+    let fixture = grilling_on_a_plugin(
+        StubHarness::Naming,
+        r#"
+memory=$HOME/.stub/memory
+mkdir -p "$memory"
+printf 'args=%s\n' "$*"
+
+printf '%s\n' '{"session":"7e57ab1e-theirs","cwd":"/srv/worktrees/tables"}' \
+    '{"said":"agent","markdown":"Not this one."}' > "$memory/7e57ab1e-theirs.jsonl"
+log=$memory/c0ffee00-chosen.jsonl
+printf '{"session":"c0ffee00-chosen","cwd":"%s"}\n' "$(pwd)" > "$log"
+printf '%s\n' '{"said":"agent","markdown":"Reading the brief."}' >> "$log"
+
+sleep 300
+"#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let spoken = fixture.spoken(event, 1).await;
+
+    assert_eq!(
+        spoken.turns,
+        vec![Turn::Prose(verkstead_render::Prose {
+            id: 1,
+            html: "<p>Reading the brief.</p>\n".to_owned(),
+        })],
+        "the record naming this session's own Worktree is the one followed"
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    assert_eq!(
+        verkstead_store::session_id(&pool, event).await.unwrap(),
+        Some("c0ffee00-chosen".to_owned()),
+        "and the id it chose is the one written down beside the session's Event"
+    );
+
+    let said = fixture.capture(event).await;
+    assert!(
+        said.contains("args=") && !said.contains("--session-id"),
+        "it was told no id on its line: {said}"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
 /// A Codex session's log is found rather than named: codex takes no session id,
 /// so what says a rollout is this session's is the Worktree its own first line
 /// names and its having appeared after this session was launched.

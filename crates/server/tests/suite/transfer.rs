@@ -72,6 +72,8 @@ use verkstead_server::{
 };
 use verkstead_store::{Linking, record_member};
 
+use crate::stub_harness::{self, StubHarness};
+
 /// The device the work is on, where every press is made.
 const A: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
@@ -663,6 +665,50 @@ impl Verkstead {
         .await;
 
         assert_eq!(said, "\"Saved\"", "saving the Codex account");
+
+        self.profile_called(ACCOUNT).await.id
+    }
+
+    /// And an account of the **stub harness plugin that names itself**, the
+    /// plugin installed here first, as it is on every device a Profile of it
+    /// runs on.
+    ///
+    /// Here because a plugin harness told no id at launch is Codex's shape in a
+    /// plugin's hands: what a carried conversation is resumed by is the id its
+    /// component read out of the record the session wrote.
+    async fn naming_stub_account(&self) -> String {
+        StubHarness::Naming
+            .installed(
+                &self.workbench,
+                self.elsewhere.path(),
+                [STUB_MODEL, STUB_MODEL_TOO],
+            )
+            .await;
+
+        let under = self.elsewhere.path().join(ACCOUNT);
+        let paths = stub_harness::account(&under);
+        std::fs::write(
+            under.join(".stub").join("auth.json"),
+            "{\"access\":\"the-desk\"}",
+        )
+        .unwrap();
+
+        let said = press(
+            &self.workbench,
+            PROFILES,
+            Some(
+                &serde_json::json!({
+                    "name": ACCOUNT,
+                    "account": { "agent_type": StubHarness::Naming.uuid(), "paths": paths },
+                    "models": [STUB_MODEL, STUB_MODEL_TOO],
+                    "memory": true,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "saving the stub harness's account");
 
         self.profile_called(ACCOUNT).await.id
     }
@@ -1887,6 +1933,64 @@ printf '%s\n' '{asked}' >> "$log"
     )
 }
 
+/// The models the stub harness plugin offers, the first its default.
+const STUB_MODEL: &str = "stub-large";
+const STUB_MODEL_TOO: &str = "stub-small";
+
+/// The session id **the stub harness that names itself chooses**, which nothing
+/// on either machine could have known before it ran: its line names none.
+const STUB_CHOSE: &str = "5e1f0c40-5e00-4c4a-9bd1-0d1e5ca1ab1e";
+
+/// What it is asking when the move is pressed, and what it says once it carries
+/// on — in the stub's own record's shape.
+const STUB_ASKED: &str = r#"{"said":"agent","markdown":"Where should the counter live?"}"#;
+const STUB_CARRYING_ON: &str = r#"{"said":"agent","markdown":"So, back to the counter."}"#;
+
+/// And what stands where the **stub harness that names itself** goes, on either
+/// machine: one script for both launches, a resume being a `--resume` on the
+/// line.
+///
+/// **A launch it was not told to resume** writes its record under an id it
+/// made up, opening with the line saying which session it is and which
+/// directory it runs in, asks, and waits at the gate.
+///
+/// **A launch it was told to resume** says the id it was handed and appends to
+/// the record **of that id**, which is proof both that the record is there and
+/// that the line named the right session.
+fn naming_stub_that_carries_on_at(gate: &Path, opening: &str) -> String {
+    format!(
+        r#"
+memory="$HOME/.stub/memory"
+
+resumed=
+previous=
+for word in "$0" "$@"; do
+  if [ "$previous" = --resume ]; then resumed=$word; fi
+  previous=$word
+done
+
+if [ -n "$resumed" ]; then
+  printf 'carried on\r\n'
+  printf 'resumed=%s\r\n' "$resumed"
+  if [ -f "$memory/$resumed.jsonl" ]; then printf '%s\n' '{carrying}' >> "$memory/$resumed.jsonl"; fi
+  exit 0
+fi
+
+printf '{opening}\r\n'
+mkdir -p "$memory"
+log="$memory/{chose}.jsonl"
+printf '{{"session":"{chose}","cwd":"%s"}}\n' "$PWD" > "$log"
+printf '%s\n' '{asked}' >> "$log"
+
+{waiting}
+"#,
+        chose = STUB_CHOSE,
+        carrying = STUB_CARRYING_ON,
+        asked = STUB_ASKED,
+        waiting = waits_at(gate),
+    )
+}
+
 /// And what stands where **opencode** goes, on either machine: one script for
 /// both of the launches a device makes, because whether a launch opens a
 /// conversation or carries one on is what the line says.
@@ -2112,7 +2216,7 @@ fn probing(dir: &Path) -> Machine {
     let bin = dir.join("probed");
     std::fs::create_dir_all(&bin).unwrap();
 
-    for harness in ["claude", "codex", "grok", "opencode", "agy"] {
+    for harness in ["claude", "codex", "grok", "opencode", "agy", "stub-harness"] {
         let at = bin.join(harness);
 
         std::fs::write(&at, "#!/bin/sh\nexit 0\n").unwrap();
@@ -2389,6 +2493,52 @@ async fn ready_to_carry_codex_on(
     a.grills(conversation).await;
 
     (a, b, holding, conversation)
+}
+
+/// And the same again on the **stub harness plugin that names itself**: both
+/// machines run the one script that opens a conversation or carries one on as
+/// its line says, each waiting at a gate of its own.
+///
+/// Hands back B's mirror of the account too, which is where the record has to
+/// be for B to carry it on.
+async fn ready_to_carry_a_naming_stub_on(
+    here: &Path,
+    there: &Path,
+    spill: &Path,
+) -> (Verkstead, Verkstead, Holding, i64, String) {
+    let a = Verkstead::running(A, &naming_stub_that_carries_on_at(here, OPENED_HERE), spill).await;
+    let b = Verkstead::running(
+        B,
+        &naming_stub_that_carries_on_at(there, RE_PRIMED_THERE),
+        spill,
+    )
+    .await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let theirs = a.repo().await;
+    b.cloned_from(&theirs).await;
+
+    let account = a.naming_stub_account().await;
+    StubHarness::Naming
+        .installed(
+            &b.workbench,
+            b.elsewhere.path(),
+            [STUB_MODEL, STUB_MODEL_TOO],
+        )
+        .await;
+
+    let holding = b.holding();
+    let mirror = b.profile_called(ACCOUNT).await.id;
+
+    let conversation = a.drafting_under_on(&account, STUB_MODEL).await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation, mirror)
 }
 
 /// And the same again on **OpenCode**, the harness whose store is one database:
@@ -7236,6 +7386,85 @@ async fn a_codex_grilling_transferred_mid_interview_carries_on_under_a_name_nobo
         "and it is still a grilling: what moved is where the work is being done \
          rather than how far it has got",
     );
+}
+
+/// **A plugin harness that names itself carries on, on another device, under the
+/// id its record chose** — Codex's whole difficulty, in a plugin's hands.
+///
+/// A's record names the session by the id the component read out of it, not
+/// the one the Capture was opened under; B's session is told to resume that
+/// id; and B's Transcript holds what B's session said and nothing the session on
+/// A had written — read past where the record had got to when it crossed,
+/// rather than from the top.
+///
+/// **The record is carried by hand.** A plugin harness's memory does not cross
+/// a link yet, so the test puts A's record where the sync would, in B's mirror
+/// of the account, as the OpenCode tests write a store from outside.
+#[tokio::test]
+async fn a_plugin_harness_that_names_itself_transferred_mid_interview_carries_on_under_its_id() {
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation, mirror) =
+        ready_to_carry_a_naming_stub_on(&here, &there, spill.path()).await;
+
+    a.printed(conversation, OPENED_HERE).await;
+
+    let on_a = a.transcript_of(conversation, 0).await;
+    assert!(
+        on_a.last()
+            .is_some_and(|line| line.contains("Where should the counter live?")),
+        "the interview is on A's Transcript: {on_a:?}",
+    );
+    assert_eq!(
+        session_names(&a.pool)
+            .await
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<String>>(),
+        vec![STUB_CHOSE.to_owned()],
+        "and A's record calls that session what its record calls it",
+    );
+
+    let record = format!("{STUB_CHOSE}.jsonl");
+    let landed = b
+        ._dir
+        .path()
+        .join("accounts")
+        .join(&mirror)
+        .join(".stub")
+        .join("memory");
+    std::fs::create_dir_all(&landed).unwrap();
+    std::fs::copy(
+        a.elsewhere
+            .path()
+            .join(ACCOUNT)
+            .join(".stub/memory")
+            .join(&record),
+        landed.join(&record),
+    )
+    .unwrap();
+
+    std::fs::write(&here, "go").unwrap();
+
+    let there_id = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there_id).await;
+
+    let said = b.latest_capture_saying(there_id, "carried on").await;
+    assert!(
+        said.contains(&format!("resumed={STUB_CHOSE}")),
+        "B's session was told to resume the session its record named: {said:?}",
+    );
+
+    let on_b = b.transcript_of(there_id, 1).await;
+    assert_eq!(
+        on_b.len(),
+        1,
+        "the resumed session's Transcript holds what it said and nothing the \
+         session on A had already written: {on_b:?}",
+    );
+    assert!(on_b[0].contains("So, back to the counter."), "{on_b:?}");
 }
 
 /// **And a rollout that never said which session it was of leaves Verkstead's own

@@ -94,7 +94,9 @@ pub struct Launch {
     /// How the session Verkstead named is named, holding `{session}`, or
     /// `None` for a harness that takes no session id.
     pub session: Option<Vec<String>>,
-    /// How a conversation is carried on, or `None` where it is not.
+    /// How a conversation is carried on, or `None` where it is not: under the
+    /// id the session was named, or, where `session` is `None`, the one its
+    /// record gave.
     pub resume: Option<Resume>,
     /// What goes last.
     pub tail: Vec<String>,
@@ -405,19 +407,6 @@ fn launch(value: &Value, field: &str) -> Result<Launch, Refusal> {
         tail,
         settings,
     };
-
-    // A resume is said by the id the harness was told at launch, so a harness
-    // told none has none to be resumed by.
-    if launch.resume.is_some() && launch.session.is_none() {
-        return Err(Refusal::of(
-            &at("resume"),
-            format!(
-                "`{}` needs `{}`: a session is resumed by the id it was named at launch.",
-                at("resume"),
-                at("session")
-            ),
-        ));
-    }
 
     // `{settings}` may stand in any part of the line, the resume's among them.
     let mut parts: Vec<&[String]> = vec![&launch.model, &launch.prompt, &launch.tail];
@@ -1206,11 +1195,16 @@ provides:
         assert_eq!(refused_at(&yaml), "provides[0].launch.settings");
     }
 
+    /// A harness told no id at launch names itself, and is resumed by the id
+    /// its record gave.
     #[test]
-    fn a_resume_without_a_session_is_refused() {
+    fn a_resume_without_a_session_is_read() {
         let yaml = AGENT.replace("      session: [--session-id, \"{session}\"]\n", "");
 
-        assert_eq!(refused_at(&yaml), "provides[0].launch.resume");
+        let launch = agent_for(&yaml, Platform::Linux).launch;
+
+        assert_eq!(launch.session, None);
+        assert!(launch.resume.is_some());
     }
 
     #[test]

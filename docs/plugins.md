@@ -655,11 +655,12 @@ is written as it is and its `{worktree}` still filled.
 - **`prompt`** — required, holding `{prompt}`: how the Brief is given, a flag
   and it or it alone.
 - **`session`** — optional, holding `{session}`: how the session id Verkstead
-  picked is named. A harness that takes none leaves it out, and its transcript
-  is then found rather than named.
-- **`resume`** — optional, and only beside a `session`: how a conversation is
-  carried on, under the id the session that was having it was named at launch.
-  Either a **`flag`** holding `{session}`, written where `session` would have
+  picked is named. A harness that takes none leaves it out: it **names
+  itself**, its transcript is found by the Worktree and the launch rather than
+  named, and the id `parse-transcript` answers with is what it is called from
+  then on.
+- **`resume`** — optional: how a conversation is carried on, under the id the
+  session that was having it was named at launch, or named itself. Either a **`flag`** holding `{session}`, written where `session` would have
   been, or a **`subcommand`** holding `{session}`, written straight after the
   binary, with **`also`** the words a resume needs on the end that a launch
   does not. Without one, a resumed Conversation opens a session of its own.
@@ -808,14 +809,20 @@ The component of a plugin providing an agent is written against the `agent`
 world of `crates/server/wit/plugin.wit`, and is refused at load where it does
 not export all three of:
 
-- **`parse-transcript(account, session)`** — the record of a session, found
-  under the account's directory by the session's id and read into what the
-  Transcript pane draws: something said, a tool call, its result, a notice of
-  the harness's own bookkeeping, and a line it does not know, which folds away
-  under its own name. None where there is no record of it yet. `account` is
-  always `/account`: the account's directory, granted read-only under that
-  name on every platform whatever its path on the host, so the record is found
-  by joining `/`-separated paths onto it.
+- **`parse-transcript(account, looking)`** — the record of a session, found
+  under the account's directory and read into what the Transcript pane draws:
+  something said, a tool call, its result, a notice of the harness's own
+  bookkeeping, and a line it does not know, which folds away under its own
+  name. None where there is no record of it yet. `account` is always
+  `/account`: the account's directory, granted read-only under that name on
+  every platform whatever its path on the host, so the record is found by
+  joining `/`-separated paths onto it. `looking` holds the session's id where
+  there is one, the Worktree it runs in and when it was launched, and the
+  cursor the last answer gave. The answer holds only what is past that cursor,
+  a cursor to carry on from — the export's own, which the host hands back and
+  never reads — and the id the record was found under. A harness that names
+  itself is handed no id until an answer gives one: the host writes it down as
+  the session's name, asks by it from then on, and a resume names it.
 - **`write-configuration(found, servers)`** — what a session's root holds of
   the account's configuration, given each configuration file as the account
   holds it, with the account's own MCP servers already taken out, and the
