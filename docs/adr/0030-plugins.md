@@ -230,7 +230,8 @@ functions, and ending in one of the **outcomes** its manifest declares. The
 host lends it sessions — launch one under a named skill and role with a
 prompt and the Done-signal evidence it expects, wait on its signal — the
 Forge, a Question Set of Verkstead's own, a Timeline notice, the Worktree's
-git facts, and whatever WASI capabilities its manifest asked for. The narrower
+git facts, the Repo's committed files, and whatever WASI capabilities its
+manifest asked for. The narrower
 shapes — sessions and outcomes alone, or sessions plus a read-only view of
 everything else — were offered and the widest taken, for the same reason the
 capability model was: an Activity nobody here has imagined yet is the point of
@@ -242,6 +243,15 @@ from the files in the Repo, which stay the truth where they exist —
 `.tasks/TODO.md`, the roadmap. A key-value store per Activity per
 Conversation was offered and declined: state nothing else can read is state
 nothing else can repair.
+
+**Reading the Repo needs no capability.** The backlog and stage runners read
+`.tasks/TODO.md`, a roadmap and `docs/agents/git-workflow.md` at a revision —
+the Worktree's HEAD, or a branch no Worktree holds — and the host lends that
+read as it lends the git facts: of the Conversation's own Repo and Companions,
+committed bytes only, never the working tree. A capability for it was weighed
+and not asked for (Set 1839, Q2): the `filesystem` capability is a fixed path
+on the device and cannot name a Worktree, and the Repos read are the ones the
+Conversation already works in, so there is nothing for the human to grant.
 
 **One wrap-up, with declared watchers.** The wrap-up watches checks, comments,
 the review and mergeability at once; Fix Merge Issues is the same Activity with

@@ -638,6 +638,24 @@ mod unlent {
         async fn stop(&mut self, _reason: String) -> wasmtime::Result<()> {
             Err(refused())
         }
+
+        async fn read_file(
+            &mut self,
+            _repo: String,
+            _at: host::Revision,
+            _path: String,
+        ) -> wasmtime::Result<Result<Option<Vec<u8>>, String>> {
+            Err(refused())
+        }
+
+        async fn list_directory(
+            &mut self,
+            _repo: String,
+            _at: host::Revision,
+            _path: String,
+        ) -> wasmtime::Result<Result<Option<Vec<String>>, String>> {
+            Err(refused())
+        }
     }
 }
 

@@ -43224,6 +43224,10 @@ fn activity_component(wat: &str) -> Vec<u8> {
 /// — see the WAT.
 const LAUNCHING: &str = include_str!("../fixtures/activity-launching.wat");
 
+/// The Activity that reads the Repo and puts each answer on the Timeline — see
+/// the WAT.
+const READING: &str = include_str!("../fixtures/activity-reading.wat");
+
 /// One whose `run` traps the moment it is called.
 const TRAPPING: &str = r#"
 (module
@@ -43365,6 +43369,84 @@ async fn a_component_launching_under_an_undeclared_skill_is_refused() {
         outputs(&fixture.view().await).len(),
         before,
         "and no session was started under the skill",
+    );
+}
+
+/// A component reads the Repo's committed files through the host, and nothing
+/// else: the list at HEAD shows a box ticked only once the tick is committed,
+/// a directory lists by name, a branch the Worktree does not hold reads from
+/// the Repo, and a Repo, a path or a revision that is not the Conversation's
+/// to read is refused in a sentence, while a path that is not there is none.
+#[tokio::test]
+async fn a_component_reads_what_the_repo_has_committed() {
+    let fixture = grilling(&under_an_activity("    sleep 300")).await;
+    fixture.grilling_printed().await;
+
+    let view = fixture.view().await;
+    let worktree = PathBuf::from(view.worktree.clone().expect("the work has a Worktree").path);
+    let repo = view.repo.name.clone();
+
+    std::fs::create_dir(worktree.join(".tasks")).unwrap();
+    std::fs::write(worktree.join(".tasks/TODO.md"), "- [ ] 01: One\n").unwrap();
+    std::fs::write(worktree.join(".tasks/01-one.md"), "# One\n").unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "plan"]);
+    std::fs::write(worktree.join(".tasks/TODO.md"), "- [x] 01: One\n").unwrap();
+
+    // A branch of the Repo's that no Worktree holds.
+    let checkout = fixture.repo();
+    git(&checkout, &["switch", "-c", "elsewhere"]);
+    std::fs::write(checkout.join("note.md"), "From elsewhere.\n").unwrap();
+    git(&checkout, &["add", "note.md"]);
+    git(&checkout, &["commit", "-m", "note"]);
+    git(&checkout, &["switch", "-"]);
+
+    let read = async || {
+        let before = notices(&fixture.view().await).len();
+        let outcome = tokio::time::timeout(*PATIENCE, fixture.activity(READING, &["read"]))
+            .await
+            .expect("the component should end")
+            .expect("the component's task should not panic");
+        assert_eq!(outcome.as_deref(), Some("read"));
+
+        notices(&fixture.view().await).split_off(before)
+    };
+
+    // Unfolded, as a Notice's HTML wraps wherever it likes.
+    let said = |notices: Vec<String>| -> Vec<String> {
+        notices
+            .iter()
+            .map(|notice| notice.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect()
+    };
+
+    let mut answers = vec![
+        "<ul> <li>[ ] 01: One</li> </ul>".to_owned(),
+        "<p>01-one.md</p>".to_owned(),
+        "<p>TODO.md</p>".to_owned(),
+        "<p>From elsewhere.</p>".to_owned(),
+        "<p><code>nowhere</code> is neither this Conversation's repo nor one of its companions.</p>"
+            .to_owned(),
+        format!("<p><code>../outside</code> leads out of <code>{repo}</code>.</p>"),
+        format!(
+            "<p><code>no-such-branch</code> isn't a branch or a commit of <code>{repo}</code>.</p>"
+        ),
+        "<p>none</p>".to_owned(),
+    ];
+
+    assert_eq!(
+        said(read().await),
+        answers,
+        "the tick merely written is not read, and every other answer is as committed",
+    );
+
+    git(&worktree, &["commit", "-am", "tick"]);
+
+    answers[0] = "<ul> <li>[x] 01: One</li> </ul>".to_owned();
+    assert_eq!(
+        said(read().await),
+        answers,
+        "the tick is read once it is committed"
     );
 }
 

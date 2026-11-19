@@ -361,6 +361,38 @@ interface host {
   /// Timeline, and any Set left open is closed. What `run` returns after is
   /// not read.
   stop: func(reason: string);
+
+  // Reading the Repo (stage 10). Committed bytes only, never the working
+  // tree: what a session has merely written is not there until it commits.
+  // **No capability is declared for these**: the Repos read are the
+  // Conversation's own, on the same footing as `git-facts`, and nothing else
+  // on the device is reachable through them.
+
+  /// Where in a Repo's history a read is made.
+  variant revision {
+    /// The HEAD of the named Repo's Worktree: what the Conversation has
+    /// committed there.
+    head,
+    /// A branch or a commit, resolved in the Repo itself, so a branch no
+    /// Worktree holds — a roadmap chain's top, say — reads as well as one
+    /// that does.
+    named(string),
+  }
+
+  /// The file at `path` in `repo` — the Worktree's Repo or a Companion's, by
+  /// the name `git-facts` takes — as committed at `at`, from the Repo's root:
+  /// its bytes, or none where nothing is there. Refused, in a sentence, for a
+  /// Repo that is neither, a revision that names no commit, a path that leads
+  /// out of the Repo, or a path that is a directory.
+  read-file: func(repo: string, at: revision, path: string)
+    -> result<option<list<u8>>, string>;
+
+  /// The names of the entries of the directory at `path` in `repo` as
+  /// committed at `at`, `""` being the Repo's root: files and directories
+  /// alike, sorted as git sorts them, or none where nothing is there. Refused
+  /// as `read-file` is, and for a path that is a file.
+  list-directory: func(repo: string, at: revision, path: string)
+    -> result<option<list<string>>, string>;
 }
 
 /// An Activity's component, run once per start.

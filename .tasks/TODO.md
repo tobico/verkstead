@@ -20,7 +20,7 @@ Roadmap stage: [10: The backlog and stage runners across](docs/roadmaps/plugins/
 
 ## Tasks
 
-- [ ] 01: Reading the Repo — [details](01-reading-the-repo.md)
+- [x] 01: Reading the Repo — [details](01-reading-the-repo.md)
 - [ ] 02: The backlog runner for a task list — [details](02-the-backlog-runner.md)
 - [ ] 03: Stage backlogs, the join and placement — [details](03-stage-backlogs-join-and-placement.md)
 - [ ] 04: Start a Conversation — [details](04-start-a-conversation.md)
