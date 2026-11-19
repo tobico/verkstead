@@ -7298,11 +7298,17 @@ async fn a_codex_grilling_transferred_mid_interview_carries_on_under_a_name_nobo
     // conversation is waiting for the log to be there.
     a.printed(conversation, OPENED_HERE).await;
 
-    assert_eq!(
-        a.transcript_of(conversation, 0).await.pop(),
-        Some(THE_QUESTION_IT_WAS_ON.to_owned()),
+    // Drawn, rather than kept as codex wrote it (Set 1836, Q3b): a line of a
+    // kind codex never writes is folded away under its own name.
+    let drawn = verkstead_render::transcript_view(&a.transcript_of(conversation, 0).await);
+    assert!(
+        drawn
+            .bookkeeping
+            .last()
+            .is_some_and(|kept| kept.kind == "assistant"
+                && kept.line.contains("Where should the counter live?")),
         "the interview is on A's Transcript, read out of the rollout codex wrote \
-         — under the opening line, which is a line of the log like any other",
+         — under the opening line, which is a line of the log like any other"
     );
 
     assert_eq!(
@@ -7371,9 +7377,14 @@ async fn a_codex_grilling_transferred_mid_interview_carries_on_under_a_name_nobo
          running findable",
     );
 
-    assert_eq!(
-        b.transcript_of(there_id, 1).await,
-        vec![CARRYING_ON.to_owned()],
+    // Drawn, rather than kept as codex wrote it (Set 1836, Q3b).
+    let drawn = verkstead_render::transcript_view(&b.transcript_of(there_id, 1).await);
+    assert!(
+        drawn.bookkeeping.len() == 1
+            && drawn.turns.is_empty()
+            && drawn.bookkeeping[0]
+                .line
+                .contains("So, back to the counter."),
         "and the resumed session's Transcript holds what it said and not what the \
          session on A had already written into the same rollout — which is also \
          what says the append landed in the carried rollout at all: the session \
@@ -7469,11 +7480,17 @@ async fn a_codex_rollout_that_named_no_session_falls_through_to_verksteads_resum
 
     a.printed(conversation, OPENED_HERE).await;
 
-    assert_eq!(
-        a.transcript_of(conversation, 0).await.pop(),
-        Some(THE_QUESTION_IT_WAS_ON.to_owned()),
+    // Drawn, rather than kept as codex wrote it (Set 1836, Q3b): a line of a
+    // kind codex never writes is folded away under its own name.
+    let drawn = verkstead_render::transcript_view(&a.transcript_of(conversation, 0).await);
+    assert!(
+        drawn
+            .bookkeeping
+            .last()
+            .is_some_and(|kept| kept.kind == "assistant"
+                && kept.line.contains("Where should the counter live?")),
         "the interview is on A's Transcript all the same: a log that says nothing \
-         about itself is still a log to follow",
+         about itself is still a log to follow"
     );
 
     std::fs::write(&here, "go").unwrap();

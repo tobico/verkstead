@@ -3,10 +3,12 @@
 //!
 //! **Two groups, Installed above Built-in**, one row per Plugin whatever it
 //! provides. The Built-in group is drawn only once it has a row (Set 1772, Q4):
-//! the Skill Pack `verkstead` first, then the six Language plugins, each saying
-//! the languages it provides. A built-in has no Remove, and is always on, so
-//! its row has no checkbox — but for a Language plugin, whose tick is whether
-//! sessions get its languages. An installer's own language — a `languages:`
+//! the Skill Pack `verkstead` first, then Codex and the six Language plugins,
+//! each Language plugin saying the languages it provides. A built-in has no
+//! Remove, and is always on, so its row has no checkbox — but for a Language
+//! plugin, whose tick is whether sessions get its languages, and an Agent
+//! plugin, whose tick is whether its harness is offered. An installer's own
+//! language — a `languages:`
 //! entry of this device's `config.yaml` that no plugin provides — is a row
 //! under Installed, saying where it comes from, with no Update or Remove: the
 //! entry is the file's.
@@ -383,7 +385,8 @@ export function PluginsPane(props: {
                           of={row}
                           pressing={enable.isPending}
                           flip={
-                            row.languages.length > 0
+                            row.languages.length > 0 ||
+                            row.provides.includes("agent")
                               ? (enabled) =>
                                   enable.mutate({ uuid: row.uuid, enabled })
                               : undefined
@@ -415,7 +418,7 @@ function Row(props: {
   of: PluginRow;
   pressing: boolean;
   /// Its checkbox, where it has one: every installed plugin, and a built-in
-  /// only where it is a Language plugin — the rest are always on.
+  /// only where it is a Language or an Agent plugin — the rest are always on.
   flip?: (enabled: boolean) => void;
   /// **Update**, where the row has one: a git plugin, or a local plugin on
   /// this device.

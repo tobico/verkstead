@@ -58,13 +58,23 @@ provides:
         allowlist: [config.toml]
         credentials: [auth.json]
         # The rollouts every session writes, filed by date and synced by the
-        # Worktree they name; and the files the memories feature keeps, whole.
-        # Not the SQLite databases beside them, which are each session's own.
+        # Worktree they name; and the files the memories feature keeps, whole,
+        # carried as the part `memory`, which is what the in-process Codex
+        # called it and a device on an older release still sends.
+        # Not the SQLite databases beside them — `state_5.sqlite`,
+        # `memories_1.sqlite` and the rest in codex 0.154 — which are each
+        # session's own: one linked a file at a time loses its write-ahead-log
+        # siblings and won't open. A fresh state database beside shared
+        # `sessions/` does no paid work: codex fills it from the rollouts as it
+        # starts, and the memories feature that would summarise them is off
+        # unless `[features]` turns it on, which a root's `config.toml` never
+        # carries.
         memory:
           - path: sessions
             synced: worktree
           - path: memories
             synced: everything
+            part: memory
     # Read off codex 0.164.0, mid-turn: `• Working (13s • esc to interrupt)`,
     # and gone from the frame it leaves when the turn is over. The fragment
     # rather than the line, since the spinner and the seconds move.

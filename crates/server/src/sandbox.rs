@@ -371,10 +371,10 @@ const COMPLAINT: usize = 500;
 ///
 /// Claude's pair, and the one directory each backend after it keeps its whole
 /// account under. Written out rather than derived, because they are the paths
-/// those programs look in and not a scheme any of them follows.
+/// those programs look in and not a scheme any of them follows. A plugin
+/// harness's — Codex's — is its manifest's `mounted`.
 pub(crate) const CLAUDE_DIR_INSIDE_HOME: &str = ".claude";
 pub(crate) const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
-pub(crate) const CODEX_INSIDE_HOME: &str = ".codex";
 pub(crate) const GROK_INSIDE_HOME: &str = ".grok";
 pub(crate) const AGY_INSIDE_HOME: &str = ".gemini";
 
@@ -1453,8 +1453,8 @@ fn system(platform: Platform) -> &'static [&'static str] {
     }
 }
 
-/// Every program a session is launched as or reaches for by name: the five
-/// harnesses, then `git` and `gh`.
+/// Every program a session is launched as or reaches for by name: the
+/// built-in harnesses, then `git` and `gh`.
 ///
 /// **One list, and it is every name the wizard has a row for** — see
 /// [`crate::onboarding`], whose rows are drawn from the same names and whose
@@ -1463,18 +1463,14 @@ fn system(platform: Platform) -> &'static [&'static str] {
 /// rule: it is resolved on a session's `PATH`, followed into whatever install
 /// it links into, and granted where that install is the human's own.
 ///
-/// The harness names are [`crate::harness::BINARIES`] rather than written
+/// The harness names are [`crate::harness::binaries`] rather than written
 /// again, because what a row is about is the program a session of that type is
-/// launched as.
-pub(crate) const PROGRAMS: &[&str] = &[
-    crate::harness::BINARIES[0],
-    crate::harness::BINARIES[1],
-    crate::harness::BINARIES[2],
-    crate::harness::BINARIES[3],
-    crate::harness::BINARIES[4],
-    GIT,
-    GH,
-];
+/// launched as — Codex's read off its plugin's manifest.
+pub(crate) fn programs() -> Vec<&'static str> {
+    let mut programs = crate::harness::binaries();
+    programs.extend([GIT, GH]);
+    programs
+}
 
 /// The two names on that list that are nobody's harness: the one every session
 /// works with and the one it opens a pull request with.
@@ -1673,9 +1669,8 @@ pub(crate) enum Standing {
 /// [`crate::harness::Harness::desktop_app`] — and Claude Code's is the one
 /// that has one. A name that is no harness's, `git` and `gh`, is never one.
 fn desktop_app(platform: Platform, program: &str, at: &Path) -> bool {
-    crate::harness::BUILT_IN
-        .iter()
-        .any(|harness| harness.binary() == program && harness.desktop_app(platform, at))
+    crate::harness::every()
+        .any(|(_, harness)| harness.binary() == program && harness.desktop_app(platform, at))
 }
 
 /// Where `program` was seen on the `PATH` the server itself was started with,
@@ -1881,7 +1876,7 @@ fn normalised(path: &Path) -> PathBuf {
 const HOPS: usize = 40;
 
 /// The directories a session has to be granted on a *program's* account: for
-/// every name on [`PROGRAMS`], the directory holding each file that name is
+/// every name on [`programs`], the directory holding each file that name is
 /// opened through, where that is under the home of whoever runs the server.
 ///
 /// [`per_user`]'s sibling and the other half of the same hole. That one grants
@@ -1922,7 +1917,7 @@ pub(crate) fn installs(platform: Platform, path: &OsStr, home: &Path) -> Vec<Pat
     // And every harness a plugin declares, followed as the built-ins are.
     let plugged = crate::harness::plugged_binaries();
 
-    for program in PROGRAMS.iter().chain(plugged.iter()) {
+    for program in programs().iter().chain(plugged.iter()) {
         for landed in opened(platform, program, Some(path), None, Some(home)) {
             let Some(directory) = holding(&landed, home) else {
                 continue;
@@ -3185,12 +3180,6 @@ impl Home {
     /// session's transcript is written when its Profile shares no memory.
     pub(crate) fn claude_projects(&self) -> PathBuf {
         root::Root::projects_in(&self.built.join(CLAUDE_DIR_INSIDE_HOME))
-    }
-
-    /// And the root's own `sessions/` on the host, which is where a Codex
-    /// session's rollout is written when its Profile shares no memory.
-    pub(crate) fn codex_sessions(&self) -> PathBuf {
-        root::Root::sessions_in(&self.built.join(CODEX_INSIDE_HOME))
     }
 
     /// And the root's own `sessions/` on the host, which is where a Grok Build
@@ -7421,7 +7410,7 @@ mod tests {
     #[test]
     fn the_names_a_session_is_followed_into_are_the_harnesses_and_the_two_tools() {
         assert_eq!(
-            PROGRAMS,
+            programs(),
             &["claude", "codex", "grok", "opencode", "agy", "git", "gh"],
             "the five harnesses, then the one every session works with and the \
              one it opens a pull request with",

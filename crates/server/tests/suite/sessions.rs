@@ -5884,16 +5884,24 @@ async fn a_codex_session_follows_the_rollout_that_names_its_own_worktree() {
         .find_map(|line| line.strip_prefix("where="))
         .expect("the session says where it ran");
 
+    // Drawn, rather than kept as codex wrote them: since Codex became a
+    // plugin, what is stored is what its component read each line as (Set
+    // 1836, Q3b).
+    let drawn = verkstead_render::transcript_view(&transcript);
     assert_eq!(
-        transcript,
-        vec![
-            format!(r#"{{"type":"session_meta","payload":{{"cwd":"{worktree}"}}}}"#),
-            r#"{"type":"response_item","payload":{"type":"message","role":"assistant"}}"#
-                .to_owned(),
-        ],
-        "the rollout naming this session's own Worktree is the one followed, and its \
-         lines should be kept exactly as codex wrote them — a line caught half-written \
-         waiting for the rest of itself"
+        drawn
+            .bookkeeping
+            .iter()
+            .map(|kept| kept.kind.as_str())
+            .collect::<Vec<_>>(),
+        ["session_meta", "response_item"],
+        "the rollout naming this session's own Worktree is the one followed, its \
+         lines drawn in order — a line caught half-written waiting for the rest of \
+         itself"
+    );
+    assert!(
+        drawn.bookkeeping[0].line.contains(worktree),
+        "and its opening line is this Worktree's: {drawn:?}"
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
@@ -5931,12 +5939,13 @@ async fn a_codex_sessions_rollout_is_followed_out_of_its_root_where_memory_is_of
         .find_map(|line| line.strip_prefix("where="))
         .expect("the session says where it ran");
 
-    assert_eq!(
-        transcript,
-        vec![format!(
-            r#"{{"type":"session_meta","payload":{{"cwd":"{worktree}"}}}}"#
-        )],
-        "the rollout in the root is followed onto the Transcript"
+    // Drawn, rather than kept as codex wrote it (Set 1836, Q3b).
+    let drawn = verkstead_render::transcript_view(&transcript);
+    assert!(
+        drawn.bookkeeping.len() == 1
+            && drawn.bookkeeping[0].kind == "session_meta"
+            && drawn.bookkeeping[0].line.contains(worktree),
+        "the rollout in the root is followed onto the Transcript: {drawn:?}"
     );
 
     let rollouts = |sessions: PathBuf| {

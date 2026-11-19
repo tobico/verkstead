@@ -439,10 +439,13 @@ impl Plugged {
 
     /// Why a Profile of `agent_type` is offered on no picker, where it is a
     /// plugin's harness this server does not offer (Set 1764, Q20): its plugin
-    /// disabled, or not loaded here at all. Nothing for a built-in, or for a
-    /// harness this server offers.
+    /// disabled, or not loaded here at all. Nothing for a harness this server
+    /// offers, or for a built-in — but a built-in plugin's, Codex's, whose tick
+    /// is off, is disabled as an installed one's is.
     fn withheld(&self, agent_type: store::AgentType) -> Option<Broken> {
-        if agent_type.built_in().is_some() || self.offered.contains(&agent_type) {
+        if self.offered.contains(&agent_type)
+            || (agent_type.built_in().is_some() && !self.disabled.contains(&agent_type))
+        {
             return None;
         }
 
@@ -1155,16 +1158,19 @@ pub(crate) fn stored(agent_type: &AgentType) -> store::AgentType {
 ///
 /// **And after those, the harnesses withheld**, `withheld` — see
 /// [`withheld`] — each not offered: a disabled Agent plugin's, which the
-/// Profiles still standing on it are drawn by. Drawn from the harness itself
-/// where this process stood it up, and by its plugin's name alone where it
-/// never did, its manifest not having been read since the server started.
+/// Profiles still standing on it are drawn by, and a built-in plugin's whose
+/// tick is off. Drawn from the harness itself where this process stood it up,
+/// and by its plugin's name alone where it never did, its manifest not having
+/// been read since the server started.
 pub(crate) fn harnesses(
     plugged: &[store::AgentType],
     withheld: &[(store::AgentType, String)],
 ) -> Vec<HarnessEntry> {
-    let offered = crate::harness::every().chain(plugged.iter().filter_map(|agent_type| {
-        crate::harness::of(*agent_type).map(|harness| (*agent_type, harness))
-    }));
+    let offered = crate::harness::every()
+        .filter(|(agent_type, _)| !withheld.iter().any(|(held, _)| held == agent_type))
+        .chain(plugged.iter().filter_map(|agent_type| {
+            crate::harness::of(*agent_type).map(|harness| (*agent_type, harness))
+        }));
 
     offered
         .map(|(agent_type, harness)| entry(agent_type, harness, true))
@@ -1190,8 +1196,9 @@ pub(crate) fn harnesses(
         .collect()
 }
 
-/// The harnesses of disabled Agent plugins that Profiles still stand on, each
-/// with its plugin's name — what [`harnesses`] lists as not offered.
+/// The harnesses of disabled Agent plugins that Profiles still stand on, and
+/// of every built-in one whose tick is off, each with its plugin's name —
+/// what [`harnesses`] lists as not offered.
 pub(crate) async fn withheld(state: &AppState) -> Result<Vec<(store::AgentType, String)>> {
     let named: HashSet<store::AgentType> = store::profiles(&state.pool)
         .await?
@@ -1206,10 +1213,9 @@ pub(crate) async fn withheld(state: &AppState) -> Result<Vec<(store::AgentType, 
             .into_iter()
             .filter(|record| !record.fields.enabled)
             .map(|record| (store::AgentType::read(&record.uuid), record.fields.name))
-            .filter(|(agent_type, _)| {
-                agent_type.built_in().is_none()
-                    && named.contains(agent_type)
-                    && !offered.contains(agent_type)
+            .filter(|(agent_type, _)| match agent_type.built_in() {
+                Some(_) => crate::harness::of(*agent_type).is_some(),
+                None => named.contains(agent_type) && !offered.contains(agent_type),
             })
             .collect(),
     )

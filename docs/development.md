@@ -1728,12 +1728,13 @@ Today there are four:
   nowhere: it is the proof that the component path works on every platform.
 - **`codex`**, Codex as a harness plugin: its `plugin.yaml` says what about
   Codex is data, and the crate beside it is the component that finds and
-  reads its rollouts and writes its `config.toml`. Embedded and loaded at
-  start, and not yet the harness a Codex Profile runs on, so not listed on
-  the Plugins page. **The first built-in with dependencies**: `toml` is held
-  at the server's own version, and `plugins/Cargo.lock` at the server's
+  reads its rollouts and writes its `config.toml`. It is the harness every
+  Codex Profile runs on, stood up the first time any harness is asked for
+  (`harness::EMBEDDED`), and listed under Built-in with a tick that is the
+  one switch for Codex. **The first built-in with dependencies**: `toml` is
+  held at the server's own version, and `plugins/Cargo.lock` at the server's
   versions of what `toml` brings, so the `config.toml` it writes is the bytes
-  the in-process harness writes. The packaged build vendors that lockfile
+  the in-process harness wrote. The packaged build vendors that lockfile
   beside the server's — see `nix/verkstead.nix`.
 
 The build script looks for the components in `plugins/dist/` first, which is

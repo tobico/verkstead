@@ -240,8 +240,8 @@ base_url = "http://m"
 .
 instructed "": None
 instructed "Be kind.": Some(("<tmp>/built/.codex/AGENTS.md", "Be kind."))
-synced: memory at memories for Everything
 synced: sessions at sessions for Naming("repo-branch")
+synced: memory at memories for Everything
 joined: <tmp>/home/.codex/auth.json -> <tmp>/inside/.codex/auth.json
 joined: <tmp>/home/.codex/sessions -> <tmp>/inside/.codex/sessions
 joined: <tmp>/home/.codex/memories -> <tmp>/inside/.codex/memories

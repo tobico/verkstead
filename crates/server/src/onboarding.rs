@@ -31,7 +31,7 @@
 //! session cannot come to disagree: a harness found somewhere no session looks
 //! would be a row that ticked and a session that could not start, which is
 //! exactly the failure the wizard exists to move forward in time. The names are
-//! [`crate::sandbox::PROGRAMS`]'s, which is the harness names
+//! [`crate::sandbox::programs`]'s, which is the harness names
 //! [`crate::sessions::binary`] gives with `git` and `gh` beside them: what a row
 //! is about is a program a session is launched as or reaches for, and every one
 //! of them is followed into its install by the sandbox and by the probe alike —
@@ -255,7 +255,7 @@ fn sysctl(platform: Platform) -> Option<String> {
 /// [`crate::harness::every`] lists them and after them the harnesses this
 /// server's enabled Agent plugins declare (ADR-0030, *Agent*). Each is probed
 /// under the program a session of it is launched as. The built-ins' names are
-/// the sandbox module's too — [`sandbox::PROGRAMS`], which holds those five with
+/// the sandbox module's too — [`sandbox::programs`], which holds those five with
 /// the `git` and `gh` a row is drawn for beside them — because what is done with
 /// a name is that module's: every name here is followed into its install and
 /// granted where that install is the human's own. What holds the two lists
@@ -2648,7 +2648,7 @@ echo {token}
     }
 
     /// Every name the wizard draws a row for is a name the sandbox follows into
-    /// its install, because they are the one list — see [`sandbox::PROGRAMS`].
+    /// its install, because they are the one list — see [`sandbox::programs`].
     ///
     /// What this holds together is a rule and its reach: a name a row ticked for
     /// and nothing followed would be a session handed a dangling link, and a
@@ -2660,7 +2660,7 @@ echo {token}
             .chain(std::iter::once(sandbox::GH))
             .collect();
 
-        let mut followed: Vec<&str> = sandbox::PROGRAMS.to_vec();
+        let mut followed: Vec<&str> = sandbox::programs();
 
         names.sort_unstable();
         followed.sort_unstable();
