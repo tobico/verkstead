@@ -8,7 +8,8 @@
 //! - **`write-configuration`** hands every configuration file back as it was
 //!   found — so a server that let the account's own MCP servers through would
 //!   be seen to — and writes the servers the Conversation attached into
-//!   `servers.json` beside them.
+//!   `servers.json` beside them. It traps on a file holding `{"trap":true}`,
+//!   so a suite can see what a component that stops does to the next call.
 //! - **`parse-transcript`** reads `memory/<session>.jsonl` under the account's
 //!   root, a line per entry in a shape of the stub's own — see [`entry`] — and
 //!   traps on a line `{"trap":true}`, so a suite can see what a component that
@@ -37,6 +38,17 @@ impl Guest for Stub {
     }
 
     fn write_configuration(found: Vec<Found>, servers: Vec<Server>) -> Configuration {
+        let trap = found.iter().any(|found| {
+            found
+                .contents
+                .as_deref()
+                .and_then(|contents| serde_json::from_slice::<serde_json::Value>(contents).ok())
+                .is_some_and(|contents| contents["trap"].as_bool() == Some(true))
+        });
+        if trap {
+            panic!("the stub's configuration asked it to stop");
+        }
+
         let mut files: Vec<File> = found
             .into_iter()
             .filter_map(|found| {
