@@ -89,7 +89,7 @@ use crate::github;
 use crate::investigations::Investigation;
 use crate::lending::Lent;
 use crate::repos::git;
-use crate::sessions::{Idle, Session};
+use crate::sessions::{Ended, Idle, Session};
 use crate::skills;
 use crate::store;
 use crate::tasks::{BACKLOG, TODO};
@@ -1160,30 +1160,37 @@ async fn asked_for_a_pull_request(state: &AppState, conversation_id: i64, owed: 
 async fn submitted(state: &AppState, conversation_id: i64, against: Option<&str>) -> Option<i64> {
     let documents = documents(state, conversation_id).await?;
 
+    // Every caller is a driver holding a registration of its own already; this
+    // one is held across the session alone, as the Activity's host asks.
+    let driving = state.drivers.driving(conversation_id);
+
     // No signal given and nothing open, with the session sitting there: spoken
     // to, and the human told where it will not answer — see [`crate::rescues`].
-    let mut lent = Lent::new(state, conversation_id).doing("opening the pull request");
-
+    //
     // Nothing on the branch for the signal to be checked against: what this
     // session does is GitHub's to say, so GitHub is what it is checked against.
     // See [`crate::done::Evidence::Nothing`] and [`crate::done::Ends`].
-    let session = lent
-        .start(
-            "verkstead/submitting",
-            store::Role::Implementation,
-            skills::submitting(
+    let ran = one_session(
+        state,
+        conversation_id,
+        &driving,
+        Sent {
+            skill: "verkstead/submitting",
+            prompt: skills::submitting(
                 documents.skills,
                 &documents.brief,
                 documents.handoff(),
                 against,
             ),
-            crate::done::Evidence::Nothing,
-            crate::done::Ends::OnAPullRequest,
-        )
-        .await?;
+            evidence: crate::done::Evidence::Nothing,
+            ends: crate::done::Ends::OnAPullRequest,
+            building: None,
+            doing: "opening the pull request",
+        },
+    )
+    .await?;
 
-    let event_id = lent.event_id(session);
-    let ended = lent.see(session).await;
+    let (event_id, ended) = ran.seen();
 
     match ended {
         // Said it is done and gone quiet since. Ended rather than left holding
@@ -1335,7 +1342,7 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 /// The registration it is handed is held until the session is over and whatever
 /// it left behind has been read, so an inline run is a driven Conversation for
 /// exactly as long as somebody is watching it.
-async fn follow_inline(state: AppState, conversation_id: i64, _driving: Driving) {
+async fn follow_inline(state: AppState, conversation_id: i64, driving: Driving) {
     // Read before the session starts, so it is where the run stood before this
     // session rather than somewhere that includes what it goes on to do.
     let already = match store::commits_landed(&state.pool, conversation_id).await {
@@ -1354,33 +1361,34 @@ async fn follow_inline(state: AppState, conversation_id: i64, _driving: Driving)
     // inline run come to nothing, or finished and not said, with a process
     // still holding the Worktree and nothing on the page to press. Spoken to,
     // and the human told where it will not answer — see [`crate::rescues`].
-    let mut lent = Lent::new(&state, conversation_id)
-        .building(Some(crate::memos::Building::Inline))
-        .doing("implementing the work inline");
-
+    //
     // What the session's Done signal is checked against: a commit past where the
     // run stood, and a pull request open on the branch. See [`crate::done`].
-    let Some(session) = lent
-        .start(
-            "verkstead/implementing",
-            store::Role::Implementation,
-            skills::implementing(documents.skills, &documents.brief, documents.handoff()),
-            crate::done::Evidence::Committed { already },
-            crate::done::Ends::OnAPullRequest,
-        )
-        .await
-    else {
-        return;
-    };
-
-    let event_id = lent.event_id(session);
-
+    //
     // What an inline session that has done its work looks like from here: it
     // said so, the branch bore that out, and it has been idle since. Nothing on
     // the branch ends it, because work does not stop at the first commit — a
     // session may commit a slice and then wait on its tests. See
     // [`signalled_and_idle`].
-    let ended = lent.see(session).await;
+    let Some(ran) = one_session(
+        &state,
+        conversation_id,
+        &driving,
+        Sent {
+            skill: "verkstead/implementing",
+            prompt: skills::implementing(documents.skills, &documents.brief, documents.handoff()),
+            evidence: crate::done::Evidence::Committed { already },
+            ends: crate::done::Ends::OnAPullRequest,
+            building: Some(crate::memos::Building::Inline),
+            doing: "implementing the work inline",
+        },
+    )
+    .await
+    else {
+        return;
+    };
+
+    let (event_id, ended) = ran.seen();
 
     // Said it is done over a commit, and gone quiet since, which is an inline
     // implementation done. The session is ended rather than waited out, and what
@@ -1552,32 +1560,33 @@ pub(crate) async fn instructed(
     // instruction that has come to nothing, or finished and not said, and
     // nobody to say so to. Spoken to, and the human told where it will not
     // answer — see [`crate::rescues`].
-    let mut lent = Lent::new(&state, conversation_id)
-        .building(Some(crate::memos::Building::Instruction))
-        .doing("doing what the instruction said");
-
+    //
     // What the session's Done signal is checked against: a commit past where the
     // branch stood. See [`crate::done`].
-    let Some(session) = lent
-        .start(
-            "verkstead/instruction",
-            store::Role::Implementation,
-            skills::instruction(
+    let Some(ran) = one_session(
+        &state,
+        conversation_id,
+        &driving,
+        Sent {
+            skill: "verkstead/instruction",
+            prompt: skills::instruction(
                 documents.skills,
                 &documents.brief,
                 documents.handoff(),
                 &instruction,
             ),
-            crate::done::Evidence::Committed { already },
-            crate::done::Ends::WithItsWork,
-        )
-        .await
+            evidence: crate::done::Evidence::Committed { already },
+            ends: crate::done::Ends::WithItsWork,
+            building: Some(crate::memos::Building::Instruction),
+            doing: "doing what the instruction said",
+        },
+    )
+    .await
     else {
         return;
     };
 
-    let event_id = lent.event_id(session);
-    let ended = lent.see(session).await;
+    let (event_id, ended) = ran.seen();
 
     let Some(ended) = ended else {
         tracing::info!(
@@ -1747,6 +1756,144 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
         }
     }
 }
+
+/// One session sent under the **One session** Activity: what it is sent to do,
+/// in the shape the Activity's options take it.
+struct Sent<'a> {
+    /// `<pack>/<skill>`, which the Activity's block declares.
+    skill: &'a str,
+    /// The prompt in the words the [`skills`] builder wrote it in.
+    prompt: String,
+    evidence: crate::done::Evidence,
+    ends: crate::done::Ends,
+    /// What its Memos and previews are permitted by, where it builds anything.
+    building: Option<crate::memos::Building>,
+    /// What the rescue says it is doing.
+    doing: &'a str,
+}
+
+/// What a session run under the **One session** Activity came to, where its
+/// caller has anything left to do about it.
+enum Ran {
+    /// It gave its Done signal, had it taken, and has been idle since: the
+    /// Timeline Event it printed into.
+    Done(i64),
+    /// It ended without one, and how.
+    Refused(i64, Ended),
+}
+
+impl Ran {
+    /// The Event it printed into, and how it ended — `None` where its Done
+    /// signal was taken — which is how a driver read [`Lent::see`] before.
+    fn seen(self) -> (i64, Option<Ended>) {
+        match self {
+            Ran::Done(event_id) => (event_id, None),
+            Ran::Refused(event_id, ended) => (event_id, Some(ended)),
+        }
+    }
+}
+
+/// Run one session under the **One session** Activity, the built-in Activities
+/// plugin's component, and say what it came to.
+///
+/// The way the inline build, the `submitting` step and an `instruction` steer
+/// launch their session: the component launches it under the skill, expecting
+/// the evidence, with the prompt written here, and answers `done` or `refused`
+/// — and what either means is still the caller's, which reads how the session
+/// ended back off the host.
+///
+/// `None` where nothing is left for the caller: no session launched — the
+/// component stopped the Conversation over the host's refusal, or this server
+/// has no skills, which is said in its log as every launch here always has —
+/// or the Conversation was stopped or steered elsewhere while it ran.
+async fn one_session(
+    state: &AppState,
+    conversation_id: i64,
+    driving: &Driving,
+    sent: Sent<'_>,
+) -> Option<Ran> {
+    if state.sessions.skills().is_none() {
+        tracing::error!(
+            conversation_id,
+            skill = sent.skill,
+            "this server has no skills to send a session into, so none was started"
+        );
+        return None;
+    }
+
+    let shipped = crate::plugins::built_in::activities();
+    let activity = shipped
+        .manifest(crate::platform::Platform::HERE)
+        .ok()
+        .and_then(|manifest| {
+            manifest
+                .activities
+                .into_iter()
+                .find(|activity| activity.id == ONE_SESSION)
+        });
+
+    let Some(activity) = activity else {
+        tracing::error!(
+            conversation_id,
+            "this build carries no One session Activity, so no session was started"
+        );
+
+        stop(
+            state,
+            conversation_id,
+            crate::stopping::Decided::Verkstead,
+            sent.doing,
+            "This build of Verkstead can't run a session.",
+            None,
+        )
+        .await;
+
+        return None;
+    };
+
+    let mut options = vec![
+        ("skill".to_owned(), sent.skill.to_owned()),
+        ("role".to_owned(), "implementation".to_owned()),
+        ("prompt".to_owned(), sent.prompt),
+        (
+            "evidence".to_owned(),
+            crate::lending::evidence_option(&sent.evidence),
+        ),
+        (
+            "ends".to_owned(),
+            crate::lending::ends_option(sent.ends).to_owned(),
+        ),
+    ];
+
+    if let Some(building) = sent.building {
+        options.push(("building".to_owned(), building.option()));
+    }
+
+    let (outcome, seen) = crate::activities::run_seeing(
+        state,
+        conversation_id,
+        driving,
+        shipped.files(),
+        &activity,
+        &[],
+        options,
+        sent.doing,
+        crate::continuing::Brought::Settle,
+    )
+    .await;
+
+    let event_id = seen.event_id?;
+
+    match outcome.as_deref() {
+        Some("done") => Some(Ran::Done(event_id)),
+        Some("refused") => Some(Ran::Refused(event_id, seen.ended.unwrap_or(Ended::Unknown))),
+        _ => None,
+    }
+}
+
+/// The id the **One session** Activity has in the built-in Activities plugin's
+/// manifest.
+const ONE_SESSION: &str = "one-session";
 
 /// Run a follow-up's rounds under the **Follow-up rounds** Activity, and land
 /// the Conversation wherever its Outcome says.

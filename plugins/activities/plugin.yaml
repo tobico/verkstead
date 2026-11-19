@@ -39,3 +39,9 @@ provides:
     name: Stage runner
     component: stage-runner.wasm
     outcomes: [finished, continued]
+  - category: activity
+    id: one-session
+    name: One session
+    component: one-session.wasm
+    outcomes: [done, refused]
+    skills: [verkstead/implementing, verkstead/submitting, verkstead/instruction]

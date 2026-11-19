@@ -247,8 +247,8 @@ pub fn languages(manifest: &Manifest) -> impl Iterator<Item = &crate::languages:
 }
 
 /// The uuid of the built-in whose blocks are the Activities Verkstead ships,
-/// one component each: *Follow-up rounds* first, then the *Backlog runner*
-/// (Set 1803, Q3).
+/// one component each: *Follow-up rounds* first, then the *Backlog runner*,
+/// the *Stage runner* and *One session* (Set 1803, Q3).
 pub const ACTIVITIES: &str = "d7a5e719-8491-46a7-b7d7-8f9f85e57bd6";
 
 /// The built-in the shipped Activities are.
@@ -368,9 +368,9 @@ mod tests {
     }
 
     /// The shipped Activities are a built-in depending on the pack
-    /// `verkstead`, whose *Follow-up rounds*, *Backlog runner* and *Stage
-    /// runner* blocks each name a component of their own written against the
-    /// `activity` world.
+    /// `verkstead`, whose *Follow-up rounds*, *Backlog runner*, *Stage runner*
+    /// and *One session* blocks each name a component of their own written
+    /// against the `activity` world.
     #[tokio::test]
     async fn the_activities_are_a_built_in_with_their_components() {
         let shipped = activities();
@@ -383,8 +383,8 @@ mod tests {
         assert_eq!(manifest.dependencies.len(), 1);
         assert_eq!(manifest.dependencies[0].uuid, VERKSTEAD);
 
-        let [rounds, backlog, stages] = manifest.activities.as_slice() else {
-            panic!("three Activities: {:?}", manifest.activities);
+        let [rounds, backlog, stages, one] = manifest.activities.as_slice() else {
+            panic!("four Activities: {:?}", manifest.activities);
         };
         assert_eq!(rounds.id, "follow-up-rounds");
         assert_eq!(rounds.name, "Follow-up rounds");
@@ -403,6 +403,18 @@ mod tests {
         assert_eq!(stages.name, "Stage runner");
         assert_eq!(stages.outcomes, ["finished", "continued"]);
         assert!(stages.skills.is_empty(), "it launches no session");
+
+        assert_eq!(one.id, "one-session");
+        assert_eq!(one.name, "One session");
+        assert_eq!(one.outcomes, ["done", "refused"]);
+        assert_eq!(
+            one.skills,
+            [
+                "verkstead/implementing",
+                "verkstead/submitting",
+                "verkstead/instruction"
+            ]
+        );
         assert_eq!(
             manifest.capabilities,
             [Capability::Conversations],
@@ -413,6 +425,7 @@ mod tests {
             "follow-up-rounds.wasm",
             "backlog-runner.wasm",
             "stage-runner.wasm",
+            "one-session.wasm",
         ] {
             assert!(
                 shipped

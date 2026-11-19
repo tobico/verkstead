@@ -8,6 +8,7 @@ resolver = "3"
 members = [
     "activities/backlog-runner",
     "activities/follow-up-rounds",
+    "activities/one-session",
     "activities/stage-runner",
     "codex",
     "fixture",

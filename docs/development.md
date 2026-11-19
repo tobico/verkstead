@@ -1721,9 +1721,12 @@ Today there are four:
   [`plugins/activities/follow-up-rounds/`](../plugins/activities/follow-up-rounds),
   the *Backlog runner*, from
   [`plugins/activities/backlog-runner/`](../plugins/activities/backlog-runner),
-  and the *Stage runner*, from
+  the *Stage runner*, from
   [`plugins/activities/stage-runner/`](../plugins/activities/stage-runner),
-  which is why the plugin declares `conversations: start`.
+  which is why the plugin declares `conversations: start`, and *One session*,
+  from [`plugins/activities/one-session/`](../plugins/activities/one-session),
+  which the inline build, the `submitting` step and an `instruction` steer each
+  run under with options of their own.
   It depends on the `verkstead` pack's plugin for the skills its sessions run
   under, and is the Built-in group's second row. Its directory holds the
   components' sources rather than their bytes, so `verkstead plugin check`
