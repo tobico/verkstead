@@ -204,6 +204,7 @@ describe("the Built-in group", () => {
       ),
     ).toEqual(["Installed", "Built-in"]);
     expect(PLUGINS.built_in.map((row) => row.name)).toEqual([
+      "Verkstead",
       ".NET",
       "Go",
       "JVM",

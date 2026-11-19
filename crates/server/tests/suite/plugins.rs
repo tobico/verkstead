@@ -184,13 +184,15 @@ async fn the_verkstead_pack_is_a_built_in_row() {
     assert_eq!(row.trouble, None);
     assert!(view.installed.iter().all(|row| row.uuid != FIXTURE));
 
-    let (status, _) = pressing(
+    let (status, said) = pressing(
         &app,
         &format!("/api/ui/plugins/{VERKSTEAD}/remove"),
         serde_json::json!({}),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "a built-in has no Remove");
+    assert_eq!(status, StatusCode::CONFLICT, "a built-in has no Remove");
+    assert!(said.contains("built in"), "{said}");
+    assert!(!said.contains("Untick"), "it has no tick: {said}");
 
     let (status, said) = pressing(
         &app,

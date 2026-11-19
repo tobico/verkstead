@@ -899,10 +899,7 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
 /// Remove and no Update, and is always on but for a Language plugin, whose
 /// tick is read off its record — on where it has none — and whose trouble is
 /// an override of one of its languages that won't load.
-fn built_ins(
-    records: &[Record<Fields>],
-    loaded: &crate::languages::Languages,
-) -> Vec<PluginRow> {
+fn built_ins(records: &[Record<Fields>], loaded: &crate::languages::Languages) -> Vec<PluginRow> {
     let mut rows: Vec<PluginRow> = BUILT_INS
         .iter()
         .filter_map(|built_in| match built_in.manifest(Platform::HERE) {
@@ -1237,11 +1234,11 @@ async fn update(
     Path(uuid): Path<String>,
     Json(press): Json<PluginUpdate>,
 ) -> Response {
-    if built_in::listed()
+    if let Some(manifest) = built_in::listed()
         .iter()
-        .any(|manifest| manifest.uuid == uuid)
+        .find(|manifest| manifest.uuid == uuid)
     {
-        return built_in_refused("updated");
+        return built_in_refused("updated", built_in::switched(manifest));
     }
     if installer_of(&state, &uuid).is_some() {
         return config_refused("edited");
@@ -1263,7 +1260,7 @@ async fn update(
     }
 
     let answered = match &record.fields.source {
-        Source::BuiltIn => Some(built_in_refused("updated")),
+        Source::BuiltIn => Some(built_in_refused("updated", true)),
         Source::Config { .. } => Some(config_refused("edited")),
         Source::Local { path, .. } => update_local(&state, &record, path, &press).await,
         Source::Git { url, revision } => {
@@ -1404,13 +1401,17 @@ async fn update_git(
 }
 
 /// The refusal of a press a built-in has no row button for, `done` saying
-/// which: it comes and goes with Verkstead.
-fn built_in_refused(done: &str) -> Response {
+/// which: it comes and goes with Verkstead. Unticking it is offered only
+/// where it has a tick — `switched`, a Language plugin.
+fn built_in_refused(done: &str, switched: bool) -> Response {
+    let why = format!("That plugin is built in, so it's {done} with Verkstead.");
     refused(
         StatusCode::CONFLICT,
-        ApiError::new(format!(
-            "That plugin is built in, so it's {done} with Verkstead. Untick it to turn it off."
-        )),
+        ApiError::new(if switched {
+            format!("{why} Untick it to turn it off.")
+        } else {
+            why
+        }),
     )
 }
 
@@ -1613,11 +1614,11 @@ fn listed(names: &[&str]) -> String {
 /// device deletes its own as the removal merges. Refused while anything open
 /// stands on it, counted and named. A built-in has no Remove.
 async fn remove(State(state): State<AppState>, Path(uuid): Path<String>) -> Response {
-    if built_in::listed()
+    if let Some(manifest) = built_in::listed()
         .iter()
-        .any(|manifest| manifest.uuid == uuid)
+        .find(|manifest| manifest.uuid == uuid)
     {
-        return built_in_refused("removed");
+        return built_in_refused("removed", built_in::switched(manifest));
     }
     if installer_of(&state, &uuid).is_some() {
         return config_refused("taken out");
