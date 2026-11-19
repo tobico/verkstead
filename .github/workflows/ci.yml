@@ -645,13 +645,19 @@ jobs:
       # address with every other runner asking — so one refusal is not a reason
       # to fail every proof below it. `--retry` takes a 429 as transient and
       # waits out the `Retry-After` it comes with.
+      #
+      # And Central answers a runner a 404 now and then for a file it holds —
+      # four runs of one branch in a day — and curl takes a 404 as final, so it
+      # is retried through every error, and the archive is still the fallback.
       - name: Install JDK 21, Maven 3.9.12 and Gradle 8.14.4
         run: |
           sudo ln -sf /usr/lib/jvm/temurin-21-jdk-amd64/bin/java /usr/local/bin/java
           sudo ln -sf /usr/lib/jvm/temurin-21-jdk-amd64/bin/javac /usr/local/bin/javac
 
-          curl -sSfL --retry 5 -o "$RUNNER_TEMP/maven.tar.gz" \
-            https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.12/apache-maven-3.9.12-bin.tar.gz
+          curl -sSfL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/maven.tar.gz" \
+            https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.12/apache-maven-3.9.12-bin.tar.gz \
+            || curl -sSfL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/maven.tar.gz" \
+              https://archive.apache.org/dist/maven/maven-3/3.9.12/binaries/apache-maven-3.9.12-bin.tar.gz
           sudo mkdir -p /usr/local/maven
           sudo tar -C /usr/local/maven --strip-components=1 -xzf "$RUNNER_TEMP/maven.tar.gz"
           sudo ln -sf /usr/local/maven/bin/mvn /usr/local/bin/mvn
