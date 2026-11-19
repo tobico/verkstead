@@ -2043,8 +2043,99 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
     }
 }
 
+/// Run a follow-up's rounds under the **Follow-up rounds** Activity, and land
+/// the Conversation wherever its Outcome says.
+///
+/// The way in for a steer into Follow-up and for a **Tinker** start. The
+/// component is the built-in Activities plugin's, and it reaches the server
+/// through the host functions alone: it reads what to follow up on off the
+/// Timeline, writes the session's prompt, launches it expecting the human's
+/// Nothing-else mark, and reads the branches at the end. What it answers is an
+/// Outcome, and where that leaves the Conversation is decided here — a Process
+/// says it as data from stage 11 on.
+///
+/// - **On a pull request**, either Outcome is the follow-up over: back to the
+///   wrap-up it was opened over — see [`back_to_the_wrap_up`], whose `pushed`
+///   is read against where the commits stood before the session launched, which
+///   is this host's reading and never the component's.
+/// - **`committed` with none** is a Tinker that built something, here or in a
+///   companion: a `submitting` session is sent for its pull request.
+/// - **`nothing` with none** is a Tinker that built nothing anywhere: Done.
+/// - **`steered`**, or a stop, has said where the Conversation went already,
+///   and nothing is done here.
+///
+/// The registration it is handed is held across the component and whatever its
+/// Outcome sets going, as every driver here holds one.
+pub(crate) async fn follow_up_rounds(state: AppState, conversation_id: i64, driving: Driving) {
+    // Read before the session starts, so what it lands is this follow-up's own:
+    // see [`following_up`], which read it at the same point.
+    let already = match store::commits_landed(&state.pool, conversation_id).await {
+        Ok(landed) => landed,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
+            return;
+        }
+    };
+
+    let shipped = crate::plugins::built_in::activities();
+    let activity = shipped
+        .manifest(crate::platform::Platform::HERE)
+        .ok()
+        .and_then(|manifest| {
+            manifest
+                .activities
+                .into_iter()
+                .find(|activity| activity.id == FOLLOW_UP_ROUNDS)
+        });
+
+    let Some(activity) = activity else {
+        tracing::error!(
+            conversation_id,
+            "this build carries no Follow-up rounds Activity, so no follow-up was started"
+        );
+
+        return stop(
+            &state,
+            conversation_id,
+            crate::stopping::Decided::Verkstead,
+            "following the work up",
+            "This build of Verkstead can't run follow-up rounds.",
+            None,
+        )
+        .await;
+    };
+
+    let outcome = crate::activities::run(
+        &state,
+        conversation_id,
+        &driving,
+        shipped.files(),
+        &activity,
+        &[],
+        Vec::new(),
+        "following the work up",
+    )
+    .await;
+
+    let committed = match outcome.as_deref() {
+        Some("committed") => true,
+        Some("nothing") => false,
+        _ => return,
+    };
+
+    over(&state, conversation_id, already, Some(committed), driving).await
+}
+
+/// The id the **Follow-up rounds** Activity has in the built-in Activities
+/// plugin's manifest.
+const FOLLOW_UP_ROUNDS: &str = "follow-up-rounds";
+
 /// See out a follow-up's session, and land the Conversation back in its wrap-up
 /// once the human says there is nothing else.
+///
+/// **In process, for a follow-up picked up again** — see [`follow_up_again`]. A
+/// steer into Follow-up and a Tinker start run [`follow_up_rounds`] instead,
+/// whose component does what this does through the host functions.
 ///
 /// `follow_up` is what the session is started on: the brief a steer into
 /// Follow-up carried, and — where this is a follow-up being picked up again
@@ -2170,7 +2261,7 @@ pub(crate) async fn following_up(
     let ended = lent.see(session).await;
 
     let Some(ended) = ended else {
-        return over(&state, conversation_id, already, driving).await;
+        return over(&state, conversation_id, already, None, driving).await;
     };
 
     // Verkstead ended it — the human closed the Conversation or force-stopped it,
@@ -2210,7 +2301,7 @@ pub(crate) async fn following_up(
              marked, so the follow-up is over rather than gone",
         );
 
-        return over(&state, conversation_id, already, driving).await;
+        return over(&state, conversation_id, already, None, driving).await;
     }
 
     // Held until the stop is written, which is what every driver here holds it
@@ -2348,13 +2439,21 @@ const NOBODY_FOLLOWING_UP: &str = "Nobody is left to ask you anything or to act 
 /// pull request and nothing watching it. So what stands past the commits they
 /// were cut from is asked of git — the Conversation's own branch and every
 /// read-write companion's, see [`holds_commits`] — and `pushed` goes on meaning
-/// what it has always meant.
+/// what it has always meant. `committed` is that reading where the **Follow-up
+/// rounds** Activity has made it already — see [`follow_up_rounds`] — and `None`
+/// asks it here, for a follow-up picked up again in process.
 ///
 /// The session is ended first, because the Worktree is about to be handed to
 /// whatever comes next: a review or a `submitting` session queueing behind an
 /// agent that has nothing left to do would wait for a session Verkstead is
 /// finished with.
-async fn over(state: &AppState, conversation_id: i64, already: i64, driving: Driving) {
+async fn over(
+    state: &AppState,
+    conversation_id: i64,
+    already: i64,
+    committed: Option<bool>,
+    driving: Driving,
+) {
     tracing::info!(
         conversation_id,
         "the human has nothing else, so the follow-up is over and its session is being ended",
@@ -2385,7 +2484,12 @@ async fn over(state: &AppState, conversation_id: i64, already: i64, driving: Dri
         return back_to_the_wrap_up(state, conversation_id, already, driving).await;
     }
 
-    if holds_commits(state, &conversation).await {
+    let committed = match committed {
+        Some(committed) => committed,
+        None => holds_commits(state, &conversation).await,
+    };
+
+    if committed {
         tracing::info!(
             conversation_id,
             "the follow-up built something, here or in a companion, and the branch is on no \

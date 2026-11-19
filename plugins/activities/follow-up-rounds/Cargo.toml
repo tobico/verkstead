@@ -1,0 +1,15 @@
+[package]
+name = "verkstead-activity-follow-up-rounds"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Embedded as `follow-up-rounds.wasm`, which is what the `activity` block in
+# `../plugin.yaml` names: see `crates/server/build.rs`.
+[lib]
+name = "follow_up_rounds"
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.46"

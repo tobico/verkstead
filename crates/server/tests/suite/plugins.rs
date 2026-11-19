@@ -21,7 +21,7 @@ use verkstead_render::{
     PluginCapability, PluginConsent, PluginFieldRefused, PluginFieldValue, PluginFix, PluginNeed,
     PluginRow, PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdated, PluginsView,
 };
-use verkstead_server::plugins::built_in::{FIXTURE, VERKSTEAD};
+use verkstead_server::plugins::built_in::{ACTIVITIES, FIXTURE, VERKSTEAD};
 use verkstead_server::settings::Settings;
 use verkstead_server::{open_database, router_keeping};
 
@@ -317,6 +317,35 @@ async fn an_activity_naming_a_skill_its_dependency_lacks_loads_in_trouble() {
     );
 }
 
+/// The Activities Verkstead ships are a Built-in row of their own after the
+/// pack's, naming *Follow-up rounds*, always on and with no Remove.
+#[tokio::test]
+async fn the_activities_are_a_built_in_row_naming_follow_up_rounds() {
+    let (app, _dir) = kept().await;
+
+    let view = page(&app).await;
+
+    let [first, row, ..] = view.built_in.as_slice() else {
+        panic!("two built-ins are listed: {view:?}");
+    };
+    assert_eq!(first.uuid, VERKSTEAD);
+    assert_eq!(row.uuid, ACTIVITIES);
+    assert_eq!(row.name, "Activities");
+    assert_eq!(row.provides, ["activity"]);
+    assert_eq!(row.activities, ["Follow-up rounds"]);
+    assert_eq!(row.source, PluginSource::BuiltIn);
+    assert!(row.enabled);
+    assert_eq!(row.trouble, None);
+
+    let (status, _) = pressing(
+        &app,
+        &format!("/api/ui/plugins/{ACTIVITIES}/remove"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "a built-in has no Remove");
+}
+
 /// The skills Verkstead ships are the Built-in group's first row: providing
 /// skills, always on with no tick, and with no Remove — and the fixture is not
 /// listed.
@@ -329,7 +358,7 @@ async fn the_verkstead_pack_is_a_built_in_row() {
     let Some(row) = view.built_in.first() else {
         panic!("a built-in is listed: {view:?}");
     };
-    assert_eq!(row.uuid, VERKSTEAD);
+    assert_eq!(row.uuid, VERKSTEAD, "the pack `verkstead` first");
     assert_eq!(row.name, "Verkstead");
     assert_eq!(row.provides, ["skills"]);
     assert_eq!(row.source, PluginSource::BuiltIn);

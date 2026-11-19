@@ -64,6 +64,10 @@ pub(crate) struct Lent {
     /// by.
     watched: HashMap<world::Session, Watched>,
     issued: world::Session,
+
+    /// The Timeline Event the newest session launched here prints into, which
+    /// is what a stop asked for through the world carries the tail of.
+    writing: Option<i64>,
 }
 
 /// Whether a launch waits for the Conversation's Turn.
@@ -125,6 +129,7 @@ impl Lent {
             doing: "working".to_owned(),
             watched: HashMap::new(),
             issued: 0,
+            writing: None,
         }
     }
 
@@ -222,6 +227,7 @@ impl Lent {
 
     fn watch(&mut self, session: Session, evidence: Evidence, ends: Ends) -> world::Session {
         self.issued += 1;
+        self.writing = Some(session.event_id);
 
         self.watched.insert(
             self.issued,
@@ -234,6 +240,52 @@ impl Lent {
         );
 
         self.issued
+    }
+
+    /// What a session that ended without its Done signal taken is to the one
+    /// waiting on it.
+    ///
+    /// **Ended on purpose, with no stop standing, is the human taking the
+    /// Conversation elsewhere** — a steer ends the session it moves past, and
+    /// so does a transfer, after which the work carries on at the far end —
+    /// so it is `steered`, and whatever was waiting has nothing left to do.
+    /// Under a stop it is `gone`, the stop's own Notice being the whole of it.
+    ///
+    /// **And a session whose rounds the human had already marked over is
+    /// `marked`**, where its evidence is that mark: an agent that finishes its
+    /// turn and exits before the grace runs out is the ordinary shape of a
+    /// follow-up that is over, rather than one nobody is left to have. A Set
+    /// still standing is asked about first — the human holding a question is
+    /// worth a stop whatever the newest answer said — and both read the safe
+    /// way round: a store that will not answer reads as open and not marked.
+    async fn gone(&self, ended: &Ended, evidence: &Evidence) -> world::Waited {
+        let state = &self.state;
+        let conversation_id = self.conversation_id;
+
+        if ended.on_purpose() {
+            return match store::stopped(&state.pool, conversation_id).await {
+                Ok(None) => world::Waited::Steered,
+                Ok(Some(_)) => world::Waited::Gone,
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id, "reading whether a Conversation had stopped under its session failed");
+                    world::Waited::Gone
+                }
+            };
+        }
+
+        let within = match evidence {
+            Evidence::NothingElse => store::Lifecycle::FollowUp,
+            Evidence::Investigated => store::Lifecycle::Investigating,
+            _ => return world::Waited::Gone,
+        };
+
+        if !crate::runner::open(state, conversation_id).await
+            && crate::runner::marked(state, conversation_id, within).await
+        {
+            return world::Waited::Marked;
+        }
+
+        world::Waited::Gone
     }
 
     /// Whatever a launch is refused over is logged here, where the reason is
@@ -383,7 +435,8 @@ impl host::Host for Lent {
     /// exactly as long as it is waited on, and taken away with the wait if the
     /// driver is cancelled. A session that goes idle with nothing open and no
     /// signal given is spoken to, and the human told where it will not answer:
-    /// see [`crate::rescues`]. Never an ending of its own.
+    /// see [`crate::rescues`]. Never an ending of its own. A session that ends
+    /// is `gone`, `steered` or `marked` as [`Lent::gone`] reads it.
     async fn wait(&mut self, session: world::Session) -> wasmtime::Result<world::Waited> {
         let conversation_id = self.conversation_id;
 
@@ -428,8 +481,10 @@ impl host::Host for Lent {
 
         match ended {
             Some(ended) => {
-                watched.ended = Some(ended);
-                Ok(world::Waited::Gone)
+                let evidence = watched.evidence.clone();
+                watched.ended = Some(ended.clone());
+
+                Ok(self.gone(&ended, &evidence).await)
             }
             None => Ok(world::Waited::Done),
         }
@@ -531,7 +586,8 @@ impl host::Host for Lent {
     }
 
     /// Stop where the Conversation stands, closing any Set left open first, with
-    /// `reason` as what the stop's Notice says happened.
+    /// `reason` as what the stop's Notice says happened and the newest
+    /// session's last words as its evidence.
     async fn stop(&mut self, reason: String) -> wasmtime::Result<()> {
         crate::runner::left_open(&self.state, self.conversation_id).await;
 
@@ -541,7 +597,7 @@ impl host::Host for Lent {
             crate::stopping::Decided::Verkstead,
             &self.doing,
             &reason,
-            None,
+            self.writing,
         )
         .await;
 

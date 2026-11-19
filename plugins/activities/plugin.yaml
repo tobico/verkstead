@@ -1,0 +1,27 @@
+# The Activities Verkstead ships, one `activity` block each, every block naming
+# a wasm component of its own built from the crate in the directory beside it
+# (Set 1803, Q3). Built in, and so listed under Built-in on the Plugins page,
+# where its row names each Activity. It depends on the `verkstead` pack's
+# plugin, which is where the skills its sessions run under come from.
+uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6
+name: Activities
+author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+version: 0.1.0
+interface: 1
+description: What Verkstead does while a conversation is in one of its states.
+dependencies:
+  - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755
+    name: Verkstead
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+provides:
+  - category: activity
+    id: follow-up-rounds
+    name: Follow-up rounds
+    component: follow-up-rounds.wasm
+    outcomes: [committed, nothing]
+    skills: [verkstead/following-up]

@@ -476,3 +476,30 @@ fn an_agent_whose_component_exports_nothing_is_refused() {
         "{stderr}"
     );
 }
+
+/// The Activities Verkstead ships pass as an author's plugin would: the
+/// checkout's `plugin.yaml`, beside each block's component as this binary
+/// embeds it — the one file a built-in's directory holds the source of rather
+/// than the bytes.
+#[test]
+fn the_activities_verkstead_ships_pass() {
+    let shipped = verkstead_server::plugins::built_in::activities();
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/activities");
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::copy(checkout.join("plugin.yaml"), dir.path().join("plugin.yaml")).unwrap();
+    for (name, bytes) in shipped.files {
+        if name.ends_with(".wasm") {
+            std::fs::write(dir.path().join(name), bytes).unwrap();
+        }
+    }
+
+    let output = check(dir.path());
+
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("providing activity — its activities Follow-up rounds."),
+        "{stdout}"
+    );
+}

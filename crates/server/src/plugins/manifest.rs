@@ -1009,12 +1009,10 @@ fn skilled(
     // an installed one's are not known until it loads.
     let mut unknown = false;
     for dependency in dependencies {
-        let built_in = super::built_in::BUILT_INS.iter().find_map(|built_in| {
-            built_in
-                .manifest(platform)
-                .ok()
-                .filter(|manifest| manifest.uuid == dependency.uuid)
-        });
+        let built_in = super::built_in::BUILT_INS
+            .iter()
+            .filter(|built_in| built_in.is(&dependency.uuid))
+            .find_map(|built_in| built_in.manifest(platform).ok());
         match built_in {
             Some(manifest) => {
                 if let Some(theirs) = manifest.packs.iter().find(|theirs| theirs.name == pack) {

@@ -23,6 +23,27 @@
       "version": "0.1.0"
     },
     {
+      "activities": [
+        "Follow-up rounds"
+      ],
+      "author": "Tobias Cohen",
+      "dependents": [],
+      "elsewhere": null,
+      "enabled": true,
+      "name": "Activities",
+      "needs": [],
+      "provides": [
+        "activity"
+      ],
+      "settings": 0,
+      "source": {
+        "kind": "BuiltIn"
+      },
+      "trouble": null,
+      "uuid": "d7a5e719-8491-46a7-b7d7-8f9f85e57bd6",
+      "version": "0.1.0"
+    },
+    {
       "author": "Tobias Cohen",
       "dependents": [],
       "elsewhere": null,

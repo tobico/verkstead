@@ -74,34 +74,6 @@ pub(crate) struct FollowUp {
     pub(crate) from_the_brief: bool,
 }
 
-impl FollowUp {
-    /// A follow-up that is starting now: the brief and nothing else.
-    ///
-    /// What a steer makes. There is nothing to prime it with — the steer *is*
-    /// the first thing said — and a heading over an empty digest would tell the
-    /// session that something had been.
-    pub(crate) fn opening(brief: String) -> FollowUp {
-        FollowUp {
-            brief,
-            settled: String::new(),
-            again: false,
-            from_the_brief: false,
-        }
-    }
-
-    /// And the one a **Tinker** start opens, on the Conversation's own Brief.
-    ///
-    /// The same follow-up with one thing different: nothing has been built, so
-    /// there are no documents for the session to be told the work in and the
-    /// Brief is the whole of what it is being asked to take up.
-    pub(crate) fn priming(brief: String) -> FollowUp {
-        FollowUp {
-            from_the_brief: true,
-            ..FollowUp::opening(brief)
-        }
-    }
-}
-
 /// Read back what the Conversation's follow-up was opened about and what it has
 /// been through, or `None` where the Timeline holds no brief to pick up.
 ///

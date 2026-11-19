@@ -2123,14 +2123,9 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // on. Spawned rather than awaited, exactly as a steer into Follow-up spawns
     // it — what drives the Conversation from here is that run, and the human is
     // standing at the button this is answering. See
-    // [`crate::runner::following_up`].
+    // [`crate::runner::follow_up_rounds`].
     if process == store::Process::Tinker {
-        tokio::spawn(crate::runner::following_up(
-            state.clone(),
-            id,
-            crate::follow_ups::FollowUp::priming(brief),
-            driving,
-        ));
+        tokio::spawn(crate::runner::follow_up_rounds(state.clone(), id, driving));
 
         return Ok(GrillingStarted::Started);
     }
