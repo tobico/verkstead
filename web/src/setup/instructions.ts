@@ -748,18 +748,18 @@ function packaged(
 ): Instruction | undefined {
   switch (distro) {
     case "MacOs":
-      if (install.cask !== null) {
+      if (install.cask) {
         return {
           command: `brew install --cask ${install.cask}`,
           note: "A cask rather than a formula.",
         };
       }
-      return install.brew !== null
+      return install.brew
         ? { command: `brew install ${install.brew}` }
         : undefined;
 
     case "MacOsIntel":
-      return install.cask !== null || install.brew !== null
+      return install.cask || install.brew
         ? {
             ...(link !== undefined ? { link } : {}),
             note:
@@ -770,10 +770,10 @@ function packaged(
         : undefined;
 
     case "Windows":
-      return install.npm !== null ? windowsNpm(install.npm) : undefined;
+      return install.npm ? windowsNpm(install.npm) : undefined;
 
     case "NixOs":
-      return install.nix !== null ? nixos(install.nix) : undefined;
+      return install.nix ? nixos(install.nix) : undefined;
 
     case "Ubuntu":
     case "Fedora":
@@ -781,7 +781,7 @@ function packaged(
     case "Arch":
     case "OtherLinux": {
       const node = GUIDES[distro].node;
-      return install.npm !== null && node !== undefined
+      return install.npm && node !== undefined
         ? npm(install.npm, node)
         : undefined;
     }
