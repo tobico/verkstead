@@ -2489,6 +2489,24 @@ async fn a_disabled_plugins_profiles_stay_and_are_offered_on_no_picker() {
         .expect("a disabled plugin's Profile stays");
     assert_eq!(kept.broken, Some(Broken::HarnessDisabled));
 
+    // And its harness is still listed, not offered, so that the Profile is
+    // drawn under its name and mark rather than its id.
+    let harnesses: Vec<verkstead_render::HarnessEntry> = get(&app, "/api/ui/harnesses").await;
+    let withheld = harnesses
+        .iter()
+        .find(|entry| entry.id.as_str() == harness.uuid())
+        .expect("a disabled plugin's harness its Profile stands on is listed");
+    assert!(!withheld.offered, "and not offered");
+    assert_eq!(withheld.name, "Stub Harness");
+    assert!(!withheld.mark.is_empty(), "drawn with its mark");
+    assert!(
+        harnesses
+            .iter()
+            .filter(|entry| entry.id.as_str() != harness.uuid())
+            .all(|entry| entry.offered),
+        "every other harness is offered",
+    );
+
     let view = opened(&app, another(&app).await).await;
     assert_eq!(
         picked(&view),

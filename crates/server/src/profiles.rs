@@ -1113,38 +1113,102 @@ pub(crate) fn stored(agent_type: &AgentType) -> store::AgentType {
 /// Every harness this server can run a session on, as the viewer draws it —
 /// see [`verkstead_render::HarnessEntry`]: the built-ins, and after them the
 /// ones the Agent plugins that loaded here declare, `plugged`.
-pub(crate) fn harnesses(plugged: &[store::AgentType]) -> Vec<HarnessEntry> {
-    crate::harness::every()
-        .chain(plugged.iter().filter_map(|agent_type| {
-            crate::harness::of(*agent_type).map(|harness| (*agent_type, harness))
-        }))
-        .map(|(agent_type, harness)| HarnessEntry {
-            id: self::agent_type(agent_type),
-            name: harness.named().to_owned(),
-            mark: harness.mark().to_owned(),
-            paths: harness
-                .paths()
-                .into_iter()
-                .map(|declared| HarnessPath {
-                    key: declared.key.to_owned(),
-                    label: declared.label.to_owned(),
-                    purpose: declared.purpose.to_owned(),
-                    placeholder: declared.placeholder.to_owned(),
-                    file: declared.file,
-                })
-                .collect(),
-            login: harness.speaking().map(|speaking| speaking.name.to_owned()),
-            found_at: harness.found_at().into_iter().map(str::to_owned).collect(),
-            first_run: harness.first_run().to_owned(),
-            models: modelled(harness.models()),
-            aliases: modelled(harness.aliases()),
-            binary: harness.binary().to_owned(),
-            install: harness.install().map(|install| HarnessInstall {
-                instructions: install.instructions.map(str::to_owned),
-                commands: install.commands.to_vec(),
-            }),
-        })
+///
+/// **And after those, the harnesses withheld**, `withheld` — see
+/// [`withheld`] — each not offered: a disabled Agent plugin's, which the
+/// Profiles still standing on it are drawn by. Drawn from the harness itself
+/// where this process stood it up, and by its plugin's name alone where it
+/// never did, its manifest not having been read since the server started.
+pub(crate) fn harnesses(
+    plugged: &[store::AgentType],
+    withheld: &[(store::AgentType, String)],
+) -> Vec<HarnessEntry> {
+    let offered = crate::harness::every().chain(plugged.iter().filter_map(|agent_type| {
+        crate::harness::of(*agent_type).map(|harness| (*agent_type, harness))
+    }));
+
+    offered
+        .map(|(agent_type, harness)| entry(agent_type, harness, true))
+        .chain(withheld.iter().map(
+            |(agent_type, named)| match crate::harness::of(*agent_type) {
+                Some(harness) => entry(*agent_type, harness, false),
+                None => HarnessEntry {
+                    id: self::agent_type(*agent_type),
+                    name: named.clone(),
+                    mark: String::new(),
+                    paths: Vec::new(),
+                    login: None,
+                    found_at: Vec::new(),
+                    first_run: String::new(),
+                    models: Vec::new(),
+                    aliases: Vec::new(),
+                    binary: String::new(),
+                    install: None,
+                    offered: false,
+                },
+            },
+        ))
         .collect()
+}
+
+/// The harnesses of disabled Agent plugins that Profiles still stand on, each
+/// with its plugin's name — what [`harnesses`] lists as not offered.
+pub(crate) async fn withheld(state: &AppState) -> Result<Vec<(store::AgentType, String)>> {
+    let named: HashSet<store::AgentType> = store::profiles(&state.pool)
+        .await?
+        .iter()
+        .map(store::Profile::agent_type)
+        .collect();
+    let offered = state.plugins.harnesses();
+
+    Ok(
+        crate::store::replicated::live_records::<crate::replicating::plugins::Plugins>(&state.pool)
+            .await?
+            .into_iter()
+            .filter(|record| !record.fields.enabled)
+            .map(|record| (store::AgentType::read(&record.uuid), record.fields.name))
+            .filter(|(agent_type, _)| {
+                agent_type.built_in().is_none()
+                    && named.contains(agent_type)
+                    && !offered.contains(agent_type)
+            })
+            .collect(),
+    )
+}
+
+/// One harness as the viewer draws it.
+fn entry(
+    agent_type: store::AgentType,
+    harness: &dyn crate::harness::Harness,
+    offered: bool,
+) -> HarnessEntry {
+    HarnessEntry {
+        id: self::agent_type(agent_type),
+        name: harness.named().to_owned(),
+        mark: harness.mark().to_owned(),
+        paths: harness
+            .paths()
+            .into_iter()
+            .map(|declared| HarnessPath {
+                key: declared.key.to_owned(),
+                label: declared.label.to_owned(),
+                purpose: declared.purpose.to_owned(),
+                placeholder: declared.placeholder.to_owned(),
+                file: declared.file,
+            })
+            .collect(),
+        login: harness.speaking().map(|speaking| speaking.name.to_owned()),
+        found_at: harness.found_at().into_iter().map(str::to_owned).collect(),
+        first_run: harness.first_run().to_owned(),
+        models: modelled(harness.models()),
+        aliases: modelled(harness.aliases()),
+        binary: harness.binary().to_owned(),
+        install: harness.install().map(|install| HarnessInstall {
+            instructions: install.instructions.map(str::to_owned),
+            commands: install.commands.to_vec(),
+        }),
+        offered,
+    }
 }
 
 /// Models as a harness answers them, as the wire carries them.
