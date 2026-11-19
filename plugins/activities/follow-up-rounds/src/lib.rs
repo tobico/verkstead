@@ -16,6 +16,16 @@
 //! say: back to the wrap-up over a pull request, a pull request sent for, or
 //! Done.
 //!
+//! **Started again rather than remembered.** Nothing is kept for it between
+//! starts, so a follow-up picked up again — a Resume, or a server restarted
+//! mid-rounds — is this Activity started over the Timeline as it now stands.
+//! The host hands it two readings of that Timeline it has no other way to make:
+//! `settled`, the rounds already answered inside this follow-up as one digest,
+//! which the fresh session is primed with; and `marked`, where the newest of
+//! them carries the Nothing-else mark. A marked round with work standing is a
+//! follow-up whose ending got as far as owing a pull request, so it ends
+//! `committed` at once rather than asking the human for another round.
+//!
 //! **Configured rather than copied.** The skill and the evidence are options,
 //! defaulting to the follow-up's, so investigating rounds are this Activity
 //! started with `skill: verkstead/investigating` and `evidence: investigated`.
@@ -57,6 +67,13 @@ impl Guest for Rounds {
             host::stop("There's nothing on the timeline to follow up on.");
             return String::new();
         };
+
+        // The rounds are over and the work is standing: the ending was made
+        // already, and what it sent for is what is still owed. Read as the
+        // ending reads, so the two cannot disagree about which this is.
+        if option(&facts, "marked") == Some("true") && ending(&facts) == "committed" {
+            return "committed".to_owned();
+        }
 
         let prompt = prompt(&path.path, &facts, &follow_up);
 
@@ -138,7 +155,8 @@ fn opened(timeline: &[Entry]) -> Option<FollowUp<'_>> {
 
 /// The follow-up session's prompt: the documents the work is written down in,
 /// and under them what the human wants followed up — or, where the follow-up
-/// *is* the Brief, that alone, said once under the heading that says act on it.
+/// *is* the Brief, that alone, said once under the heading that says act on it —
+/// and last the rounds already answered, where there were any.
 fn prompt(skill: &str, facts: &Facts, follow_up: &FollowUp<'_>) -> String {
     let prompt = match follow_up.from_the_brief || facts.brief.trim().is_empty() {
         true => alone(&format!(
@@ -163,10 +181,19 @@ fn prompt(skill: &str, facts: &Facts, follow_up: &FollowUp<'_>) -> String {
         }
     };
 
-    format!(
+    let prompt = format!(
         "{prompt}\n# What I want to follow up on\n\n{}\n",
         follow_up.brief.trim()
-    )
+    );
+
+    // The rounds already answered, where this is a follow-up picked up again:
+    // a heading over nothing would tell a fresh session something had been said.
+    match option(facts, "settled").map(str::trim) {
+        Some(settled) if !settled.is_empty() => {
+            format!("{prompt}\n# What you have already asked, and what I said\n\n{settled}\n")
+        }
+        _ => prompt,
+    }
 }
 
 fn alone(opening: &str) -> String {

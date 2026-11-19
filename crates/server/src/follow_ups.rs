@@ -1,5 +1,4 @@
-//! What a follow-up session is started on, and where it is read back from when
-//! one has to be started again.
+//! What a follow-up session is primed with when one has to be started again.
 //!
 //! A follow-up is a conversation rather than a step, so nothing it is doing is
 //! written down on the branch: what a session of one is *for* is the brief the
@@ -28,54 +27,16 @@ use crate::AppState;
 use crate::answer_files::OnAnswers;
 use crate::store;
 
-/// What a follow-up session is primed with.
+/// The rounds already asked and answered inside the Conversation's follow-up,
+/// as one markdown document, or `None` where the Timeline holds no brief to
+/// follow up on.
 ///
-/// One thing rather than two arguments, because the two always travel together:
-/// a session is started on the brief and on whatever has been said about it
-/// since, and a launch that carried one without the other would be either a
-/// follow-up with no subject or one that had forgotten its own rounds.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct FollowUp {
-    /// The brief the human steered it into Follow-up with, as they wrote it.
-    pub(crate) brief: String,
-
-    /// The rounds already asked and answered inside this follow-up, as one
-    /// markdown document — empty for a follow-up that is just starting, which
-    /// is every one a steer launches.
-    pub(crate) settled: String,
-
-    /// Whether this is a follow-up being picked up again rather than opened.
-    ///
-    /// What turns on it is what the session before this one left behind. A
-    /// follow-up that is being picked up had a session that died mid-round, and
-    /// an ask it was idling on when it went is a question with nobody behind it
-    /// — locked as the fresh session starts, exactly as a relaunched grilling
-    /// locks what its dead interview left. See [`crate::runner::following_up`].
-    ///
-    /// `false` where a steer opened it, which is a launch with nothing of its
-    /// own behind it: what a steer displaces is displaced by the launch itself,
-    /// and it is the same steer's business rather than this one's.
-    ///
-    /// Not read off `settled`: a session can die before its first round comes
-    /// back, and that one is being picked up too.
-    pub(crate) again: bool,
-
-    /// Whether [`brief`] is the Conversation's own Brief rather than something
-    /// the human steered it with.
-    ///
-    /// True for the follow-up a **Tinker** start opens, where the Brief *is* the
-    /// thing to follow up on: it goes under *What I want to follow up on* and
-    /// nowhere else, so the session reads it once, under the heading that says
-    /// act on it. False for a steer, where the documents describe work that is
-    /// already on a pull request and the brief is what the human wants taken up
-    /// about it — two different things, said in two places.
-    ///
-    /// [`brief`]: FollowUp::brief
-    pub(crate) from_the_brief: bool,
-}
-
-/// Read back what the Conversation's follow-up was opened about and what it has
-/// been through, or `None` where the Timeline holds no brief to pick up.
+/// What the **Follow-up rounds** Activity is handed as its `settled` option —
+/// see [`crate::runner::follow_up_rounds`] — and so what a fresh session on a
+/// follow-up picked up again is primed with. Empty for a follow-up that is just
+/// starting, which is every one a steer or a Tinker start opens. The component
+/// reads the brief itself, off the same Timeline; what it cannot make there is
+/// this digest, which needs each Set's schema and the Data Directory's paths.
 ///
 /// **Two ways in, and the newer of them wins.** A steer is one, and a **Tinker**
 /// start is the other: that one writes no steer, because it is the press that
@@ -90,38 +51,29 @@ pub(crate) struct FollowUp {
 /// for. The press that asked says so by name rather than starting a session on
 /// nothing — see [`crate::resume`].
 ///
-/// One read of the Timeline for both halves, as a relaunched grilling takes one
-/// for its three: a Conversation on a pull request has a long Timeline behind
-/// it, and picking a follow-up up again is no reason to read it twice.
-///
 /// The state rather than the pool alone, because the digest names the files put
 /// on those Answers at the path this session will open them — which is a
 /// question about the Data Directory as well as about the record. See
 /// [`OnAnswers`].
-pub(crate) async fn opened(state: &AppState, conversation_id: i64) -> Result<Option<FollowUp>> {
+pub(crate) async fn settled(state: &AppState, conversation_id: i64) -> Result<Option<String>> {
     let timeline = store::timeline(&state.pool, conversation_id).await?;
 
-    let Some((opened, brief, from_the_brief)) = steered(&timeline)
-        .map(|(at, brief)| (at, brief, false))
-        .or_else(|| briefed(&timeline).map(|(at, brief)| (at, brief, true)))
+    let Some(opened) = steered(&timeline)
+        .or_else(|| briefed(&timeline))
+        .map(|(at, _)| at)
     else {
         return Ok(None);
     };
 
-    Ok(Some(FollowUp {
-        brief: brief.to_owned(),
-        // Everything answered since this follow-up was last entered, which is
-        // what makes these its own rounds rather than the whole Conversation's:
-        // a wrap-up's review, the grilling that settled the work and the round
-        // before this one are all above it. See [`window`], which is why that is
-        // not the same event as the one the brief was read off.
-        settled: crate::grillings::settled(
-            &timeline[window(&timeline, opened) + 1..],
-            &OnAnswers::of(state, conversation_id).await,
-        ),
-        again: true,
-        from_the_brief,
-    }))
+    // Everything answered since this follow-up was last entered, which is what
+    // makes these its own rounds rather than the whole Conversation's: a
+    // wrap-up's review, the grilling that settled the work and the round before
+    // this one are all above it. See [`window`], which is why that is not the
+    // same event as the one the brief was read off.
+    Ok(Some(crate::grillings::settled(
+        &timeline[window(&timeline, opened) + 1..],
+        &OnAnswers::of(state, conversation_id).await,
+    )))
 }
 
 /// Where on the Timeline this follow-up was steered into being, and the brief
