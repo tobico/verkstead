@@ -808,25 +808,17 @@ testers.runNixOSTest {
         section left out of a save is a section emptied, so every part of it but
         the author's goes back exactly as it was read a moment before. A value
         nobody typed goes back empty rather than as the default it is being
-        shown as — which is what leaves the build cache's size the default the
-        sandbox probe reads further down — and the installation's own binds are
-        filtered out, being the unit's word rather than anything this file
-        holds. The Author's uuid and display name go back as read too: a `null`
-        uuid, on a machine with no Author yet, is the save that makes the first.
+        shown as, and the installation's own binds are filtered out, being the
+        unit's word rather than anything this file holds. The languages are not
+        in it at all: a language's switch and size are its Language plugin's,
+        saved on the Plugins page, so this save leaves the build cache's size
+        the default the sandbox probe reads further down. The Author's uuid and
+        display name go back as read too: a `null` uuid, on a machine with no
+        Author yet, is the save that makes the first.
         """
         stood = json.loads(
             machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/settings")
         )
-
-        def sized(language):
-            """A language's size as a save says it: what somebody typed, and the
-            empty string for the default being shown. Every language's, whether
-            the pane draws a field for it or not — a save that sent only the
-            sizes it drew would empty the rest."""
-            if language["size_configured"]:
-                return language["size"]
-
-            return ""
 
         saved = json.loads(
             post(
@@ -839,14 +831,6 @@ testers.runNixOSTest {
                         "email": email,
                     },
                     "github_token": "Keep",
-                    "languages": [
-                        {
-                            "name": language["name"],
-                            "enabled": language["enabled"],
-                            "size": sized(language),
-                        }
-                        for language in stood["languages"]
-                    ],
                     "cleanup": {
                         which: {
                             "enabled": step["enabled"],
@@ -1331,8 +1315,8 @@ testers.runNixOSTest {
         )
         assert reported["sccache-size"] == "30G", (
             f"the default nobody has typed over — the one save this test makes "
-            f"sends the size back empty, which is what a value nobody chose "
-            f"means: {reported['sccache-size']!r}"
+            f"is the settings page's, which says nothing of a language's size: "
+            f"{reported['sccache-size']!r}"
         )
 
         # And the operations the hardening is what would forbid: a UTS namespace
