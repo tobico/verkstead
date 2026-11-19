@@ -109,18 +109,38 @@ impl Plugged {
         &self.agent.account[0]
     }
 
-    /// What reads the record of `session` under the account at `account`,
-    /// which is the directory the account is where the Profile shares its
-    /// memory and the session's own root on the host where it does not — the
-    /// built-ins' rule, said from the first path.
-    fn reader(&self, account: &Path, memory: bool, home: &Home, session: &str) -> Reader {
+    /// What reads the record of `session`, launched in `worktree` at
+    /// `launched`, under the account at `account` — which is the directory the
+    /// account is where the Profile shares its memory and the session's own
+    /// root on the host where it does not, the built-ins' rule said from the
+    /// first path.
+    ///
+    /// **`session` is looked for by only where the line named it**: a harness
+    /// whose line names no `{session}` was never told it, and is found by its
+    /// Worktree and its launch until its record says what it chose.
+    fn reader(
+        &self,
+        account: &Path,
+        memory: bool,
+        home: &Home,
+        session: &str,
+        worktree: Option<&Path>,
+        launched: SystemTime,
+    ) -> Reader {
         Reader {
             again: self.again.clone(),
             account: match memory {
                 true => account.to_owned(),
                 false => home.built().join(&self.first().mounted),
             },
-            session: session.to_owned(),
+            session: self
+                .agent
+                .launch
+                .session
+                .as_ref()
+                .map(|_| session.to_owned()),
+            worktree: worktree.map(Path::to_owned),
+            launched,
         }
     }
 
@@ -444,40 +464,56 @@ impl Harness for Plugged {
             .collect()
     }
 
-    /// What its `parse-transcript` export answers for the session, by the id
-    /// the session was named — where the record is kept being the export's to
-    /// find.
+    /// What its `parse-transcript` export answers for the session — where the
+    /// record is kept being the export's to find, by the id the session was
+    /// named or, for a harness that names itself, by its Worktree and its
+    /// launch. A session of the latter with no Worktree has nothing to be
+    /// found by.
     fn search(
         &self,
         account: &Path,
         memory: bool,
         home: &Home,
         session: &str,
-        _worktree: Option<&Path>,
-        _launched: SystemTime,
+        worktree: Option<&Path>,
+        launched: SystemTime,
     ) -> Search {
-        Search::Parsed(self.reader(account, memory, home, session))
+        let reader = self.reader(account, memory, home, session, worktree, launched);
+        if reader.session.is_none() && reader.worktree.is_none() {
+            return Search::Nowhere;
+        }
+        Search::Parsed(reader)
     }
 
-    /// As far as `parse-transcript` reads the record now, before the resumed
-    /// session adds to it; none where it finds none, or can't read it.
+    /// As far as `parse-transcript` reads the record of `session` now, before
+    /// the resumed session adds to it; none where it finds none, or can't read
+    /// it. Looked for by `session` whatever the line names, since that is the
+    /// id the record gave or the session was named.
     fn carried<'a>(
         &'a self,
         account: &'a Path,
         memory: bool,
         session: &'a str,
-        _worktree: &'a Path,
+        worktree: &'a Path,
         home: &'a Home,
     ) -> Carrying<'a> {
-        let reader = self.reader(account, memory, home, session);
+        let reader = self.reader(
+            account,
+            memory,
+            home,
+            session,
+            Some(worktree),
+            SystemTime::UNIX_EPOCH,
+        );
 
         Box::pin(async move {
-            let mut entries = Entries::of(reader, 0);
+            let mut entries = Entries::resuming(reader, session.to_owned(), None);
             let Ok(Some(answered)) = entries.answered().await else {
                 return None;
             };
             Some(Carried::Entries {
-                taken: answered.len(),
+                session: answered.session.unwrap_or_else(|| session.to_owned()),
+                cursor: answered.cursor,
             })
         })
     }
@@ -524,22 +560,31 @@ impl Harness for Plugged {
 
 /// Where a session of a plugin harness keeps its record, as its
 /// `parse-transcript` is handed it: the account's root on the host, which the
-/// export is handed as [`crate::plugins::component::ACCOUNT`], and the
-/// session's id.
+/// export is handed as [`crate::plugins::component::ACCOUNT`], the session's id
+/// where its line named one, and the Worktree and the moment it was launched
+/// in, which a harness that names itself is found by.
 #[derive(Clone)]
 pub(crate) struct Reader {
     again: Again,
     account: PathBuf,
-    session: String,
+    session: Option<String>,
+    worktree: Option<PathBuf>,
+    launched: SystemTime,
 }
 
 /// A session's record as its plugin harness's `parse-transcript` reads it,
 /// followed as far as it has been taken.
 ///
-/// **The export answers the whole record every time it is asked**, the finding
-/// of it included, so following it is remembering how many of its entries are
-/// on the Transcript already and writing the rest — each as the line
-/// [`verkstead_render::Entry::line`] makes, which the render crate draws.
+/// **The export answers only what is past the cursor it is handed**, and hands
+/// back the next one, so following it is keeping the last cursor and writing
+/// what each answer holds — each entry as the line
+/// [`verkstead_render::Entry::line`] makes, which the render crate draws. A
+/// record that runs to megabytes is read once rather than every poll.
+///
+/// **And the id an answer gives is the session's from then on.** A harness
+/// that names itself is looked for by its Worktree until it says what it
+/// chose; it is then asked for by that id, and the id is written down beside
+/// the session once — see [`Entries::found_itself`].
 ///
 /// **The component reads in a store of its own**, started with the account's
 /// root granted read-only beside what its manifest was granted — see
@@ -553,19 +598,33 @@ pub(crate) struct Reader {
 pub(crate) struct Entries {
     reader: Reader,
     loaded: Option<Loaded>,
-    taken: usize,
+    cursor: Option<String>,
+
+    /// An id an answer gave that is not written down yet.
+    named: Option<String>,
+
     over: bool,
 }
 
 impl Entries {
-    /// The following of `reader`'s record, with `taken` of its entries on the
-    /// Transcript already.
-    pub(crate) fn of(reader: Reader, taken: usize) -> Entries {
+    /// The following of `reader`'s record from the top.
+    pub(crate) fn of(reader: Reader) -> Entries {
         Entries {
             reader,
             loaded: None,
-            taken,
+            cursor: None,
+            named: None,
             over: false,
+        }
+    }
+
+    /// The following of the record of `session`, carried on from `cursor` —
+    /// a resumed session's, whose record is known by the id it already has.
+    pub(crate) fn resuming(mut reader: Reader, session: String, cursor: Option<String>) -> Entries {
+        reader.session = Some(session);
+        Entries {
+            cursor,
+            ..Entries::of(reader)
         }
     }
 
@@ -579,13 +638,19 @@ impl Entries {
             // No record yet, or no root yet to find one in.
             Ok(None) => Vec::new(),
             Ok(Some(answered)) => {
-                let arrived: Vec<String> = answered
+                if let Some(session) = answered.session
+                    && self.reader.session.as_ref() != Some(&session)
+                {
+                    self.reader.session = Some(session.clone());
+                    self.named = Some(session);
+                }
+                self.cursor = Some(answered.cursor);
+
+                answered
+                    .entries
                     .into_iter()
-                    .skip(self.taken)
                     .map(|entry| entered(entry).line())
-                    .collect();
-                self.taken += arrived.len();
-                arrived
+                    .collect()
             }
             Err(why) => {
                 tracing::warn!(
@@ -607,9 +672,16 @@ impl Entries {
         }
     }
 
-    /// What `parse-transcript` answers for the session now: none where there
-    /// is no record of it, or no account root yet to look in.
-    async fn answered(&mut self) -> Result<Option<Vec<world::Entry>>, String> {
+    /// The id the record gave the session, the once: on the take that first
+    /// found it, and never after. What the session is written down as — see
+    /// [`crate::transcript`].
+    pub(crate) fn found_itself(&mut self) -> Option<String> {
+        self.named.take()
+    }
+
+    /// What `parse-transcript` answers for the session now, past the cursor:
+    /// none where there is no record of it, or no account root yet to look in.
+    async fn answered(&mut self) -> Result<Option<world::Transcript>, String> {
         let account = &self.reader.account;
 
         let loaded = match &mut self.loaded {
@@ -633,6 +705,21 @@ impl Entries {
             }
         };
 
+        let looking = world::Looking {
+            session: self.reader.session.clone(),
+            worktree: self
+                .reader
+                .worktree
+                .as_ref()
+                .map(|worktree| worktree.to_string_lossy().into_owned()),
+            launched: self
+                .reader
+                .launched
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_or(0, |since| since.as_millis() as u64),
+            cursor: self.cursor.clone(),
+        };
+
         let exports = world::Agent::new(&mut loaded.store, &loaded.instance)
             .map_err(|error| crate::plugins::component::worded(&error))?;
         loaded.store.set_epoch_deadline(
@@ -644,7 +731,7 @@ impl Entries {
             exports.call_parse_transcript(
                 &mut loaded.store,
                 crate::plugins::component::ACCOUNT,
-                &self.reader.session,
+                &looking,
             ),
             failed,
         )
@@ -940,20 +1027,98 @@ mod tests {
         )
         .unwrap();
 
-        let bytes = std::fs::read(env!("VERKSTEAD_STUB_HARNESS_WASM")).unwrap();
-        let loaded = crate::plugins::component::instantiate(&bytes, &[], None)
-            .await
-            .expect("the stub harness's component should load");
-        let reader = Reader {
-            again: loaded.again,
-            account: account.path().to_owned(),
-            session: "s1".to_owned(),
-        };
+        let reader = named("s1", stub().await.again, account.path());
 
-        let lines = Entries::of(reader, 0).take().await;
+        let lines = Entries::of(reader).take().await;
 
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(lines[0].contains("Reading the brief."), "{lines:?}");
+    }
+
+    /// A reader of the session named `session`, under `account`.
+    fn named(session: &str, again: Again, account: &Path) -> Reader {
+        Reader {
+            again,
+            account: account.to_owned(),
+            session: Some(session.to_owned()),
+            worktree: None,
+            launched: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    /// The stub harness's component, loaded.
+    async fn stub() -> Loaded {
+        let bytes = std::fs::read(env!("VERKSTEAD_STUB_HARNESS_WASM")).unwrap();
+        crate::plugins::component::instantiate(&bytes, &[], None)
+            .await
+            .expect("the stub harness's component should load")
+    }
+
+    /// A poll after the first is handed the cursor the first answered, and
+    /// what the component answers past it is all that is written: a record
+    /// changed under what was read already would be read again from the top.
+    #[tokio::test]
+    async fn a_poll_after_the_first_reads_only_past_the_cursor() {
+        let account = tempfile::tempdir().unwrap();
+        let memory = account.path().join("memory");
+        std::fs::create_dir(&memory).unwrap();
+        let first = "{\"said\":\"agent\",\"markdown\":\"First.\"}\n";
+        std::fs::write(memory.join("s1.jsonl"), first).unwrap();
+
+        let mut entries = Entries::of(named("s1", stub().await.again, account.path()));
+        let lines = entries.take().await;
+        assert_eq!(lines.len(), 1, "{lines:?}");
+
+        // The line already read, written over with one of the same length: a
+        // reading from the top would answer it again, as something else.
+        let changed = first.replace("First.", "Again.");
+        std::fs::write(
+            memory.join("s1.jsonl"),
+            format!("{changed}{{\"said\":\"agent\",\"markdown\":\"Second.\"}}\n"),
+        )
+        .unwrap();
+
+        let lines = entries.take().await;
+        assert_eq!(lines.len(), 1, "only the line past the cursor: {lines:?}");
+        assert!(lines[0].contains("Second."), "{lines:?}");
+    }
+
+    /// A harness that names itself is found by its Worktree, among a record
+    /// of another Worktree's written at the same moment; and the id its
+    /// record gave is the session's, found the once.
+    #[tokio::test]
+    async fn a_record_that_names_itself_is_found_by_its_worktree() {
+        let account = tempfile::tempdir().unwrap();
+        let memory = account.path().join("memory");
+        std::fs::create_dir(&memory).unwrap();
+        std::fs::write(
+            memory.join("theirs.jsonl"),
+            "{\"session\":\"theirs\",\"cwd\":\"/srv/tables\"}\n\
+             {\"said\":\"agent\",\"markdown\":\"Not this one.\"}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            memory.join("mine.jsonl"),
+            "{\"session\":\"mine\",\"cwd\":\"/srv/counter\"}\n\
+             {\"said\":\"agent\",\"markdown\":\"This one.\"}\n",
+        )
+        .unwrap();
+
+        let mut entries = Entries::of(Reader {
+            again: stub().await.again,
+            account: account.path().to_owned(),
+            session: None,
+            worktree: Some(PathBuf::from("/srv/counter")),
+            launched: SystemTime::now() - Duration::from_secs(5),
+        });
+
+        let lines = entries.take().await;
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("This one."), "{lines:?}");
+        assert_eq!(entries.found_itself().as_deref(), Some("mine"));
+
+        entries.take().await;
+        assert_eq!(entries.found_itself(), None, "the once");
     }
 
     /// A component waiting on the host runs none of its own code, which the
@@ -969,17 +1134,9 @@ mod tests {
         )
         .unwrap();
 
-        let bytes = std::fs::read(env!("VERKSTEAD_STUB_HARNESS_WASM")).unwrap();
-        let loaded = crate::plugins::component::instantiate(&bytes, &[], None)
-            .await
-            .expect("the stub harness's component should load");
-        let reader = Reader {
-            again: loaded.again,
-            account: account.path().to_owned(),
-            session: "s1".to_owned(),
-        };
+        let reader = named("s1", stub().await.again, account.path());
 
-        let lines = tokio::time::timeout(CALLING * 3, Entries::of(reader, 0).take())
+        let lines = tokio::time::timeout(CALLING * 3, Entries::of(reader).take())
             .await
             .expect("the call should have been ended at its deadline");
 

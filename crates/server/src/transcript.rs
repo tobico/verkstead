@@ -32,17 +32,19 @@
 //! the index answers — see [`Brain`] and [`crate::summaries`].
 //!
 //! **A harness a plugin declares finds and reads its own**: its component's
-//! `parse-transcript` is handed the account's root and the session id and
-//! answers with the record whole, in the kinds the Transcript pane draws, so
-//! what is followed is how many of those have been taken — see
-//! [`crate::harness::plugged::Entries`]. Those go to the store as lines the
-//! render crate wrote the shape of rather than any harness's own.
+//! `parse-transcript` is handed the account's root, the session id where the
+//! line named one, the Worktree and the launch, and a cursor, and answers with
+//! what is past the cursor in the kinds the Transcript pane draws and a cursor
+//! to carry on from — see [`crate::harness::plugged::Entries`]. Those go to
+//! the store as lines the render crate wrote the shape of rather than any
+//! harness's own.
 //!
 //! **And what the search finds is what gives the two unnamed backends their
 //! names.** Codex and opencode each choose their own, so the Capture is opened
 //! under a name nothing ever uses — and a rollout names *itself*, in the line the
 //! finder is reading anyway, while a store answers with the id of the row the
-//! finder matched. So the moment the record is found, the id it turns out to be
+//! finder matched. A plugin harness taking none is the same again, its
+//! component answering with the id its record gives. So the moment the record is found, the id it turns out to be
 //! of goes on the record beside the session, where the id Verkstead picked would
 //! have gone for the backends that take one. Which is what lets a machine that
 //! never ran the session carry its conversation on: the resume is by that id and
@@ -292,12 +294,16 @@ impl Tail {
                         taken,
                     } => Following::Records(records::Reader::resuming(database, session, taken)),
 
-                    // Read again by the export, past what it read before the
-                    // session started.
-                    Carried::Entries { taken } => {
-                        match search(profile, session, worktree, launched, home) {
+                    // Read again by the export, by the id it was found under
+                    // and past where it read to before the session started.
+                    Carried::Entries { session, cursor } => {
+                        match search(profile, &session, worktree, launched, home) {
                             Search::Parsed(reader) => Following::Entries(Box::new(
-                                crate::harness::plugged::Entries::of(reader, taken),
+                                crate::harness::plugged::Entries::resuming(
+                                    reader,
+                                    session,
+                                    Some(cursor),
+                                ),
                             )),
                             _ => Following::Looking,
                         }
@@ -351,7 +357,17 @@ impl Tail {
         let arrived = match &mut self.following {
             Following::Looking => Vec::new(),
             Following::Log(log) => log.take().await,
-            Following::Entries(entries) => entries.take().await,
+            Following::Entries(entries) => {
+                let arrived = entries.take().await;
+
+                // And a plugin harness that names itself has a name the
+                // moment its record says what it is — the same once.
+                if let Some(session) = entries.found_itself() {
+                    named_by_its_harness(pool, event_id, &session).await;
+                }
+
+                arrived
+            }
 
             Following::Records(records) => {
                 let arrived = records.take().await;
@@ -400,7 +416,7 @@ impl Tail {
             // Nothing to look for, the export doing its own finding on every
             // poll — as a store's reader does.
             Search::Parsed(reader) => Following::Entries(Box::new(
-                crate::harness::plugged::Entries::of(reader.clone(), 0),
+                crate::harness::plugged::Entries::of(reader.clone()),
             )),
             Search::Records {
                 database,
@@ -635,12 +651,17 @@ pub(crate) enum Carried {
         taken: i64,
     },
 
-    /// A plugin harness's record, read by its component, and how many entries
-    /// it held before the session started — see
+    /// A plugin harness's record, read by its component, and where its
+    /// reading of it had got to before the session started — see
     /// [`crate::harness::plugged::Entries`].
     Entries {
-        /// Which is where this session's Transcript opens.
-        taken: usize,
+        /// The id the record was found under, which is the one the harness is
+        /// told to resume.
+        session: String,
+
+        /// And the cursor its last answer gave, which is where this session's
+        /// Transcript opens.
+        cursor: String,
     },
 }
 
@@ -1515,6 +1536,19 @@ async fn names_itself(pool: &SqlitePool, event_id: i64, log: &Path) {
 async fn found_in_the_store(pool: &SqlitePool, event_id: i64, session: &str) {
     if let Err(error) = store::found_as(pool, event_id, session).await {
         tracing::error!(error = ?error, event_id, session, "writing down which session of its store an OpenCode session is failed, so nothing on another device could carry its conversation on");
+    }
+}
+
+/// And the same for a plugin harness that names itself, whose name is the id
+/// its component's `parse-transcript` answered with — see
+/// [`crate::harness::plugged::Entries::found_itself`].
+///
+/// Codex's bargain in a plugin's hands: the component finds the record and says
+/// what it is of, and from here on that is the session's name, which a resume
+/// is by.
+async fn named_by_its_harness(pool: &SqlitePool, event_id: i64, session: &str) {
+    if let Err(error) = store::found_as(pool, event_id, session).await {
+        tracing::error!(error = ?error, event_id, session, "writing down what a plugin harness's session calls itself failed, so nothing on another device could carry its conversation on");
     }
 }
 

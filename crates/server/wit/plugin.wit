@@ -134,13 +134,46 @@ world agent {
     done,
   }
 
-  /// The record of `session`, found under the account rooted at `account`
-  /// and read in the kinds above — or none where there is no record of it
-  /// yet. Where the record is kept is the harness's own business, so finding
-  /// it is this export's as much as reading it. `account` is always
-  /// `/account`: the account's directory, granted read-only under that name
-  /// on every platform, whatever its path on the host.
-  export parse-transcript: func(account: string, session: string) -> option<list<entry>>;
+  /// What a session's record is looked for by, and how far it was read.
+  record looking {
+    /// The id the session is known by, where there is one: Verkstead's own
+    /// for a harness named on its line, or the one an earlier answer gave.
+    session: option<string>,
+    /// The Worktree it runs in, for a harness that takes no id and has to be
+    /// found by it.
+    worktree: option<string>,
+    /// And when it was launched, in milliseconds since the epoch: a record
+    /// older than that is an earlier session's.
+    launched: u64,
+    /// What the last answer said to carry on from; none to read from the top.
+    cursor: option<string>,
+  }
+
+  /// What a session's record holds past where it was last read.
+  record transcript {
+    /// The id the record was found under — what a resume names. None where
+    /// the record does not say.
+    session: option<string>,
+    /// Only what is past the cursor it was handed.
+    entries: list<entry>,
+    /// Where this answer read to, handed back on the next call: the export's
+    /// own, which the host never reads.
+    cursor: string,
+  }
+
+  /// The record of the session `looking` describes, found under the account
+  /// rooted at `account` and read in the kinds above from where `looking`'s
+  /// cursor says — or none where there is no record of it yet. Where the
+  /// record is kept is the harness's own business, so finding it is this
+  /// export's as much as reading it. `account` is always `/account`: the
+  /// account's directory, granted read-only under that name on every
+  /// platform, whatever its path on the host.
+  ///
+  /// **A harness that names itself** — one whose launch line names no
+  /// `{session}` — is looked for by `worktree` and `launched` until an answer
+  /// gives its id, and by that id from then on: the host writes it down as
+  /// what the session is called, and a resume names it.
+  export parse-transcript: func(account: string, looking: looking) -> option<transcript>;
 
   /// What a session's root is to hold, given the account's configuration
   /// files as found — with the account's own MCP servers already taken out
