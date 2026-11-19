@@ -798,6 +798,114 @@ world reader {
         );
     }
 
+    /// An account's paths after its directory are given to a session too: a
+    /// file joined as it is, and a directory built in the root as the first
+    /// is — its login joined, its memory joined or made empty of its own by
+    /// the switch, and its configuration copied in with the account's own MCP
+    /// servers taken out.
+    #[tokio::test]
+    async fn every_path_of_a_plugin_account_is_given_to_a_session() {
+        use crate::sandbox::root::Root;
+
+        let stub = std::fs::read(env!("VERKSTEAD_STUB_HARNESS_WASM")).unwrap();
+        let loaded = load_agent(&stub).await.unwrap().unwrap();
+        let yaml = crate::plugins::manifest::agent::tests::AGENT.replace(
+            "      - key: file\n        label: Settings file\n",
+            "      - key: shared\n        label: Shared directory\n        kind: directory\n        \
+             mounted: .config/stub\n        allowlist: [prefs.json]\n        credentials: \
+             [token]\n        memory: [notes]\n      - key: file\n        label: Settings file\n",
+        );
+        let agent = Manifest::parse(
+            &yaml,
+            Files::Embedded(&[("mark.svg", b"<svg/>"), ("agent.wasm", b"")]),
+            crate::platform::Platform::HERE,
+        )
+        .expect("the agent manifest should be read")
+        .provides
+        .iter()
+        .find_map(|provision| provision.agent().cloned())
+        .expect("it provides an agent");
+        let id = crate::harness::plugged(
+            "5e1f9c37-2a8d-4b60-8e4c-d3f7a1b9c205",
+            &agent,
+            "<svg/>".to_owned(),
+            loaded,
+        );
+
+        let host = tempfile::tempdir().unwrap();
+        let (dir, shared, file) = (
+            host.path().join("dir"),
+            host.path().join("shared"),
+            host.path().join("stub.json"),
+        );
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(shared.join("token"), "secret").unwrap();
+        std::fs::write(
+            shared.join("prefs.json"),
+            r#"{"tone":"dry","mcpServers":{"own":{"url":"http://own"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(&file, "{}").unwrap();
+        let account = crate::store::Account::new(
+            id,
+            [
+                ("dir", dir.clone()),
+                ("shared", shared.clone()),
+                ("file", file.clone()),
+            ],
+        );
+
+        let root = Root::of(
+            &account,
+            crate::platform::Platform::HERE,
+            host.path(),
+            host.path(),
+        )
+        .expect("the harness is stood up");
+        root.made_in_account().unwrap();
+        let (built, inside) = (Path::new("/built"), Path::new("/home"));
+
+        assert_eq!(root.built(), [".stub", ".config/stub"]);
+        let joined = root.joined(inside);
+        for (from, to) in [
+            (shared.join("token"), "/home/.config/stub/token"),
+            (shared.join("notes"), "/home/.config/stub/notes"),
+            (file.clone(), "/home/.stub.json"),
+        ] {
+            assert!(
+                joined.contains(&(from.clone(), PathBuf::from(to))),
+                "{from:?}: {joined:?}"
+            );
+        }
+        assert!(
+            shared.join("notes").is_dir(),
+            "its memory is made to be joined"
+        );
+
+        let prefs = root
+            .written(built, &[])
+            .into_iter()
+            .find(|(path, _)| path == Path::new("/built/.config/stub/prefs.json"))
+            .map(|(_, contents)| serde_json::from_slice::<serde_json::Value>(&contents).unwrap());
+        assert_eq!(prefs, Some(serde_json::json!({ "tone": "dry" })));
+
+        let unshared = root.remembering(false);
+        assert!(
+            unshared
+                .unshared_in(built)
+                .contains(&PathBuf::from("/built/.config/stub/notes")),
+            "a root sharing no memory makes the directory's own"
+        );
+        assert!(
+            !unshared
+                .joined(inside)
+                .iter()
+                .any(|(from, _)| from == &shared.join("notes")),
+            "and joins none of the account's"
+        );
+    }
+
     #[tokio::test]
     async fn a_component_exporting_nothing_is_refused_for_an_agent() {
         let trouble = load_agent(&assembled(EMPTY))

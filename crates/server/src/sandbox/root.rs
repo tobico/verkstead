@@ -48,7 +48,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::harness::Harness;
+use crate::harness::{Beside, Harness};
 use crate::platform::Platform;
 use crate::settings::AttachedServer;
 
@@ -483,6 +483,10 @@ pub(crate) struct Root {
     /// Whether the memory store is joined at all: the Profile's memory switch —
     /// see [`Root::remembering`].
     memory: bool,
+
+    /// The account's paths after its directory, each as a session is given
+    /// it — see [`Beside`]. None, for every built-in.
+    beside: Vec<Beside>,
 }
 
 /// Which harness a root is for, which is what answers what its allowlist is
@@ -617,13 +621,16 @@ impl Root {
     ) -> Option<Root> {
         let harness = crate::harness::of(account.agent_type())?;
 
-        Some(Root::with(
-            harness,
-            harness.directory(account),
-            platform,
-            git_dir,
-            worktree,
-        ))
+        Some(Root {
+            beside: harness.beside(account),
+            ..Root::with(
+                harness,
+                harness.directory(account),
+                platform,
+                git_dir,
+                worktree,
+            )
+        })
     }
 
     /// The root `harness` gives a session logged in as the account at
@@ -642,6 +649,7 @@ impl Root {
                 .placed()
                 .then(|| Place::at(platform, git_dir, worktree)),
             memory: true,
+            beside: Vec::new(),
         }
     }
 
@@ -854,11 +862,27 @@ impl Root {
             .map(|file| std::fs::read(self.account.join(file)).ok())
             .collect();
 
+        let beside = self
+            .beside
+            .iter()
+            .filter(|beside| !beside.file)
+            .flat_map(|beside| {
+                beside.configuration.iter().filter_map(|file| {
+                    let found = std::fs::read(beside.host.join(file)).ok()?;
+                    Some((
+                        built.join(&beside.mounted).join(file),
+                        crate::harness::plugged::serverless(&found),
+                    ))
+                })
+            })
+            .collect::<Vec<_>>();
+
         self.harness
             .0
             .configured(found, servers)
             .into_iter()
             .map(|(inside, contents)| (root.join(inside), contents))
+            .chain(beside)
             .collect()
     }
 
@@ -988,6 +1012,14 @@ impl Root {
             }
         }
 
+        if self.memory {
+            for beside in self.beside.iter().filter(|beside| !beside.file) {
+                for store in &beside.memory {
+                    std::fs::create_dir_all(beside.host.join(store))?;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -1017,6 +1049,30 @@ impl Root {
             ));
         }
 
+        for beside in &self.beside {
+            let there = inside.join(&beside.mounted);
+
+            if beside.file {
+                if beside.host.is_file() {
+                    joined.push((beside.host.clone(), there));
+                }
+                continue;
+            }
+
+            for credentials in &beside.credentials {
+                let host = beside.host.join(credentials);
+                if host.is_file() {
+                    joined.push((host, there.join(credentials)));
+                }
+            }
+
+            if self.memory {
+                for store in &beside.memory {
+                    joined.push((beside.host.join(store), there.join(store)));
+                }
+            }
+        }
+
         joined
     }
 
@@ -1036,11 +1092,23 @@ impl Root {
 
         let root = built.join(self.landing());
 
+        let beside = self
+            .beside
+            .iter()
+            .filter(|beside| !beside.file)
+            .flat_map(|beside| {
+                beside
+                    .memory
+                    .iter()
+                    .map(|store| built.join(&beside.mounted).join(store))
+            });
+
         self.harness
             .0
             .unshared()
             .into_iter()
             .map(|store| root.join(store))
+            .chain(beside)
             .collect()
     }
 

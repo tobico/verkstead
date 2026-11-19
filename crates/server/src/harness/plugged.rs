@@ -19,8 +19,7 @@
 //! **The account is said from its first path**, which the manifest reader
 //! holds to being a directory: that is where it lands in HOME, where its login
 //! and its memory are said from, and what the root is built in place of. The
-//! paths after it are judged on a save like the first, and are not yet given
-//! to a session.
+//! paths after it are given to a session beside it — see [`Beside`].
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -29,7 +28,7 @@ use std::time::{Duration, SystemTime};
 use verkstead_render::{Broken, ProfileSaved};
 
 use super::{
-    Carrying, Declared, HOME_REFUSED, Harness, Install, Line, ReadIn, Resume, SETTINGS_FILE,
+    Beside, Carrying, Declared, HOME_REFUSED, Harness, Install, Line, ReadIn, Resume, SETTINGS_FILE,
     SignedOut,
 };
 use crate::logins::Speaking;
@@ -122,15 +121,18 @@ impl Plugged {
     /// Of the first path's allowlist, what is neither its login nor its
     /// memory: the account's configuration, handed to `write-configuration`.
     fn configured_files(&self) -> Vec<PathBuf> {
-        let first = self.first();
-
-        first
-            .allowlist
-            .iter()
-            .filter(|path| !first.credentials.contains(path) && !first.memory.contains(path))
-            .cloned()
-            .collect()
+        configured(self.first())
     }
+}
+
+/// Of `path`'s allowlist, what is neither its login nor its memory: the
+/// account's configuration in it.
+fn configured(path: &manifest::agent::AccountPath) -> Vec<PathBuf> {
+    path.allowlist
+        .iter()
+        .filter(|file| !path.credentials.contains(file) && !path.memory.contains(file))
+        .cloned()
+        .collect()
 }
 
 impl Harness for Plugged {
@@ -253,6 +255,22 @@ impl Harness for Plugged {
         account.path(&self.first().key).unwrap_or(Path::new(""))
     }
 
+    fn beside(&self, account: &store::Account) -> Vec<Beside> {
+        self.agent.account[1..]
+            .iter()
+            .filter_map(|path| {
+                Some(Beside {
+                    host: account.path(&path.key)?.to_owned(),
+                    mounted: path.mounted.clone(),
+                    file: path.file,
+                    credentials: path.credentials.clone(),
+                    memory: path.memory.clone(),
+                    configuration: configured(path),
+                })
+            })
+            .collect()
+    }
+
     fn account_inside(&self, account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBuf)> {
         self.agent
             .account
@@ -284,6 +302,18 @@ impl Harness for Plugged {
             .mounted
             .to_str()
             .expect("a manifest is read as UTF-8")
+    }
+
+    /// The first path's directory, and each directory after it, which a root
+    /// is built in place of too — see [`Beside`].
+    fn built(&self, _memory: bool) -> Vec<&str> {
+        self.agent
+            .account
+            .iter()
+            .enumerate()
+            .filter(|(at, path)| *at == 0 || !path.file)
+            .filter_map(|(_, path)| path.mounted.to_str())
+            .collect()
     }
 
     /// The first credentials file of the first path, or the directory itself

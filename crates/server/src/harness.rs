@@ -187,6 +187,13 @@ pub(crate) trait Harness: Send + Sync {
     /// harness itself would have written it — see [`crate::sandbox::kept_in`].
     fn kept_in(&self, home: &Path) -> store::Account;
 
+    /// Each of `account`'s paths after the one it is said from, as a session
+    /// is given it — see [`Beside`]. None, for every built-in: what Claude's
+    /// config file is given as is [`Harness::copied`].
+    fn beside(&self, _account: &store::Account) -> Vec<Beside> {
+        Vec::new()
+    }
+
     /// The directory `account` is, which its login and its memory are said
     /// from: the first path it declares, which [`store::Account::directory`]
     /// is for every built-in. A plugin's account is held by its keys, so its
@@ -589,6 +596,36 @@ pub(crate) struct Declared<'a> {
     /// Directories inside it a save judges as well, said from it, refused as
     /// it is: what is mounted of an account kept somewhere inside a home.
     pub(crate) within: &'a [&'a str],
+}
+
+/// One of an account's paths after the one it is said from, as a session is
+/// given it — see [`Harness::beside`] and [`crate::sandbox::root::Root`].
+///
+/// **A file is joined as it is**, at `mounted`. **A directory is built in the
+/// root at `mounted`**, as the first path is: its `credentials` joined, its
+/// `memory` joined where the Profile shares memory and made empty of its own
+/// where it does not, and its `configuration` copied in as it is found with
+/// the account's own MCP servers taken out — the host's rule of ADR-0011, the
+/// export composing the first path's alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Beside {
+    /// Where it is on the host, as the Profile names it.
+    pub(crate) host: PathBuf,
+
+    /// Where a session finds it, said from HOME.
+    pub(crate) mounted: PathBuf,
+
+    /// Whether it is a file rather than a directory.
+    pub(crate) file: bool,
+
+    /// A directory's files that hold the login, said from it.
+    pub(crate) credentials: Vec<PathBuf>,
+
+    /// A directory's memory store, said from it.
+    pub(crate) memory: Vec<PathBuf>,
+
+    /// A directory's configuration files, said from it.
+    pub(crate) configuration: Vec<PathBuf>,
 }
 
 /// What a home an account is kept under is refused as — see
