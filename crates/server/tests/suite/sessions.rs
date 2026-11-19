@@ -80,6 +80,7 @@ use verkstead_render::{
     TerminalView, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
+use verkstead_server::activities::Hosting;
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::device::Devices;
@@ -93,7 +94,7 @@ use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::{
-    Agents, Gh, Pace, open_database, router_running_sessions,
+    Agents, Gh, Pace, open_database, router_hosting_activities, router_running_sessions,
     router_running_sessions_answering_devices,
 };
 use verkstead_store::{Decision, StageOf, stage_roadmap};
@@ -184,6 +185,10 @@ struct Grilling {
     /// The stand-in for `verkstead done` — see [`signalling`]. Stopped when the
     /// fixture goes.
     _signalling: Signalling,
+
+    /// What starts an Activity on this Conversation, where the bench's server
+    /// hands one out — see [`Grilling::activity`].
+    hosting: Option<Hosting>,
 
     /// This fixture's place in the suite — see [`ROOM`]. Last, so that it is
     /// handed back only once everything above has been let go of.
@@ -3210,6 +3215,10 @@ struct Bench {
     repo: PathBuf,
     repo_id: i64,
 
+    /// What starts an Activity on one of its Conversations: every bench's but
+    /// a desktop install's.
+    hosting: Option<Hosting>,
+
     /// Held from the moment this bench was built and handed on to the
     /// [`Grilling`] it becomes — see [`ROOM`].
     room: tokio::sync::OwnedSemaphorePermit,
@@ -3592,6 +3601,7 @@ impl Bench {
             id,
             repo_id: self.repo_id,
             _signalling: signalling,
+            hosting: self.hosting,
             database: self.database,
             _room: self.room,
         }
@@ -3708,9 +3718,11 @@ async fn bench_serving(
         None => agents,
     };
 
-    let app = match serving {
+    let (app, hosting) = match serving {
         Serving::Sessions => {
-            router_running_sessions(pool, state.path().to_owned(), agents, gh_stub(gh))
+            let (app, hosting) =
+                router_hosting_activities(pool, state.path().to_owned(), agents, gh_stub(gh));
+            (app, Some(hosting))
         }
         Serving::ADesktopInstall => {
             let devices = Devices::of(
@@ -3731,13 +3743,14 @@ async fn bench_serving(
             )
             .installed_as(InstallKind::AppImage);
 
-            router_running_sessions_answering_devices(
+            let app = router_running_sessions_answering_devices(
                 pool,
                 state.path().to_owned(),
                 agents,
                 gh_stub(gh),
                 devices,
-            )
+            );
+            (app, None)
         }
     };
 
@@ -3758,6 +3771,7 @@ async fn bench_serving(
         database,
         repo,
         repo_id,
+        hosting,
         room,
     }
 }
@@ -42984,4 +42998,225 @@ async fn a_grilling_session_is_refused_a_preview_naming_the_kinds_that_may() {
         "naming the kinds that may: {body}",
     );
     assert!(previews(&fixture).await.is_empty(), "and nothing lands");
+}
+
+/// An Activity's core module, made into a component against `wit/plugin.wit`'s
+/// `activity` world, as the plugins suite makes one — so the suite needs no
+/// wasm toolchain.
+fn activity_component(wat: &str) -> Vec<u8> {
+    let mut resolve = wit_parser::Resolve::default();
+    let (package, _) = resolve
+        .push_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("wit"))
+        .expect("the plugin WIT should parse");
+    let world = resolve
+        .select_world(&[package], Some("activity"))
+        .expect("the activity world should be there");
+
+    let mut module = wat::parse_str(wat).expect("the activity should assemble");
+    wit_component::embed_component_metadata(
+        &mut module,
+        &resolve,
+        world,
+        wit_component::StringEncoding::UTF8,
+        false,
+    )
+    .expect("the activity world should embed");
+
+    wit_component::ComponentEncoder::default()
+        .module(&module)
+        .expect("the activity should be a module wit-component reads")
+        .validate(true)
+        .encode()
+        .expect("the activity should encode as a component")
+}
+
+/// The Activity that launches one session, waits on it and reads the branch
+/// — see the WAT.
+const LAUNCHING: &str = include_str!("../fixtures/activity-launching.wat");
+
+/// One whose `run` traps the moment it is called.
+const TRAPPING: &str = r#"
+(module
+  (memory (export "memory") 1)
+  (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32)
+    (i32.const 1024))
+  (func (export "run") (param i32) (result i32)
+    unreachable))
+"#;
+
+impl Grilling {
+    /// Start an Activity called *Rounds*, whose component is `wat`'s and
+    /// which declares `outcomes`, on this Conversation — answering, once it
+    /// is over, its Outcome, or `None` where it stopped instead.
+    fn activity(&self, wat: &str, outcomes: &[&str]) -> tokio::task::JoinHandle<Option<String>> {
+        self.hosting
+            .as_ref()
+            .expect("this bench hosts Activities")
+            .start(
+                self.id,
+                activity_component(wat),
+                verkstead_server::plugins::manifest::Activity {
+                    id: "rounds".to_owned(),
+                    name: "Rounds".to_owned(),
+                    component: PathBuf::from("rounds.wasm"),
+                    outcomes: outcomes
+                        .iter()
+                        .map(|outcome| (*outcome).to_owned())
+                        .collect(),
+                    skills: vec!["verkstead/implementing".to_owned()],
+                },
+            )
+    }
+
+    /// Wait until the grilling has a session printing, so that what starts
+    /// next is not raced by its launch.
+    async fn grilling_printed(&self) {
+        self.until(|view| output(view).filter(|output| output.lines > 0).map(|_| ()))
+            .await;
+    }
+}
+
+/// A grilling that prints and waits, and an Activity's session that commits
+/// only once its first signal is refused.
+fn under_an_activity(activity: &str) -> String {
+    format!(
+        r#"
+case "$2" in
+*"fixture Activity"*)
+{activity}
+    ;;
+*)
+    printf 'grilling\n'
+    sleep 300
+    ;;
+esac
+"#
+    )
+}
+
+/// A component reaches the server through nothing but the host functions: it
+/// launches a session on a skill, the session's Done signal is held to the
+/// evidence the component registered — refused until a commit lands, taken
+/// after — and the component's Outcome, read off the branch, comes back.
+#[tokio::test]
+async fn a_component_launches_a_session_and_its_outcome_comes_back() {
+    let fixture = grilling(&under_an_activity(SIGNALS_BEFORE_COMMITTING)).await;
+    fixture.grilling_printed().await;
+
+    let running = fixture.activity(LAUNCHING, &["committed", "nothing"]);
+
+    assert!(
+        fixture.view().await.driven,
+        "the Conversation counts as driven while the component runs",
+    );
+
+    let said = refused(&fixture).await;
+    assert!(
+        said.contains("nothing has been committed since this session began"),
+        "the signal is held to the evidence the component registered: {said:?}",
+    );
+
+    let outcome = tokio::time::timeout(*PATIENCE, running)
+        .await
+        .expect("the component should end")
+        .expect("the component's task should not panic");
+
+    assert_eq!(outcome.as_deref(), Some("committed"));
+
+    // The session committed at all only because it was launched on the
+    // component's own prompt: the stub's grilling branch never does.
+    let view = fixture.view().await;
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view)
+    );
+}
+
+/// A component that traps leaves the Conversation stopped with a Notice saying
+/// so — never a server that panics, and never one left looking driven.
+#[tokio::test]
+async fn a_component_that_traps_stops_the_conversation_saying_so() {
+    let fixture = grilling(&under_an_activity("    sleep 300")).await;
+    fixture.grilling_printed().await;
+
+    let outcome = fixture.activity(TRAPPING, &["committed"]).await.unwrap();
+
+    assert_eq!(outcome, None);
+
+    let notice = fixture.stopped().await;
+    assert!(
+        notice.html.contains("Rounds stopped while it was running")
+            && notice.html.contains("unreachable"),
+        "the Notice says the component trapped: {}",
+        notice.html,
+    );
+
+    let view = fixture.view().await;
+    assert!(!view.driven, "nothing is left looking driven");
+}
+
+/// And one that answers an Outcome it never declared stops it the same way,
+/// naming the word.
+#[tokio::test]
+async fn a_component_answering_an_undeclared_outcome_stops_the_conversation_saying_so() {
+    let fixture = grilling(&under_an_activity("    sleep 300")).await;
+    fixture.grilling_printed().await;
+
+    let answers_committed = include_str!("../fixtures/activity.wat");
+    let outcome = fixture
+        .activity(answers_committed, &["nothing"])
+        .await
+        .unwrap();
+
+    assert_eq!(outcome, None);
+
+    let notice = fixture.stopped().await;
+    assert!(
+        notice.html.contains("<code>committed</code>")
+            && notice.html.contains("one of the outcomes it declares"),
+        "the Notice names the undeclared word: {}",
+        notice.html,
+    );
+
+    // And the server carries on: the next press is answered as ever.
+    assert_eq!(fixture.view().await.id, fixture.id);
+}
+
+/// A Force stop ends both the component's session and the component: the
+/// Outcome it would have read off the branch is never taken, and nothing is
+/// left driving.
+#[tokio::test]
+async fn a_force_stop_ends_a_components_session_and_the_component() {
+    let fixture = grilling(&under_an_activity(
+        "    printf 'the fixture is working\\n'\n    sleep 300",
+    ))
+    .await;
+    fixture.grilling_printed().await;
+
+    let running = fixture.activity(LAUNCHING, &["committed", "nothing"]);
+
+    fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .any(|output| output.running && output.latest.contains("the fixture is working"))
+                .then_some(())
+        })
+        .await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+
+    let outcome = tokio::time::timeout(*PATIENCE, running)
+        .await
+        .expect("the component should be ended")
+        .expect("the component's task should not panic");
+
+    assert_eq!(outcome, None, "the component's Outcome is not taken");
+
+    fixture
+        .until(|view| {
+            (!view.driven && outputs(view).iter().all(|output| !output.running)).then_some(())
+        })
+        .await;
 }

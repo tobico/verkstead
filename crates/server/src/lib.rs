@@ -21,6 +21,10 @@ mod answer_files;
 /// Set until its Submit (ADR-0028).
 mod answer_additions;
 
+/// An Activity's component, started on a Conversation and run to its Outcome
+/// over the same host every driver launches through (ADR-0030, *Activity*).
+pub mod activities;
+
 /// What a Keeper does to its Annex's box, said once for every way of having
 /// one, and the WSL distro that is the first of them (ADR-0024).
 pub mod annex;
@@ -1060,6 +1064,40 @@ pub fn router_running_sessions(
         onboarding::Machine::here(),
         None,
         no_device(),
+    )
+}
+
+/// And the same again, handing back beside it the seam that starts an
+/// Activity on one of its Conversations — what the suite drives a fixture
+/// component through, until a Process names which Activity a state runs.
+pub fn router_hosting_activities(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    agents: Agents,
+    gh: Gh,
+) -> (Router, activities::Hosting) {
+    // Taken off the agents for the reason [`router_running_sessions`] does.
+    let binds = agents.binds().clone();
+    let gate = key::Gate::open();
+
+    let state = standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        binds,
+        data_dir,
+        sessions::Sessions::under(agents),
+        gh,
+        tailnet(),
+        &gate,
+        onboarding::Machine::here(),
+        None,
+        no_device(),
+        nudge::Nudges::new(),
+    );
+
+    (
+        serving(state.clone(), &gate),
+        activities::Hosting::over(state),
     )
 }
 

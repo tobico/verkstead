@@ -467,6 +467,126 @@ pub fn checked(files: Files<'_>, activity: &Activity) -> Result<(), Trouble> {
     Ok(())
 }
 
+/// What a running Activity's store holds: the WASI context its manifest
+/// granted, as any component's, and what the host lends it.
+pub(crate) struct Lending<T> {
+    host: Host,
+    lent: T,
+}
+
+impl<T: Send> WasiView for Lending<T> {
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        self.host.ctx()
+    }
+}
+
+impl<T: Send> WasiHttpView for Lending<T> {
+    fn http(&mut self) -> WasiHttpCtxView<'_> {
+        self.host.http()
+    }
+}
+
+/// Run an Activity's component, read out of `files`, under `capabilities`,
+/// with `lent` as its host functions, to the Outcome word it answers.
+///
+/// What fails is a [`Trouble`] saying so, as at load: a component that
+/// cannot be read or started, and one that traps — a host function trapping
+/// it included — while it runs. A running Activity has no deadline, its
+/// sessions taking as long as they take, but it yields to the runtime on every
+/// tick, so one spinning in a loop of its own holds up nothing else.
+pub(crate) async fn run_activity<T>(
+    files: Files<'_>,
+    activity: &Activity,
+    capabilities: &[Capability],
+    home: Option<&Path>,
+    lent: T,
+    facts: &worlds::category::activity::verkstead::plugin::activity_types::Facts,
+) -> Result<String, Trouble>
+where
+    T: worlds::category::activity::verkstead::plugin::host::Host
+        + worlds::category::activity::verkstead::plugin::activity_types::Host
+        + Send
+        + 'static,
+{
+    use worlds::category::activity::Activity as World;
+
+    let name = &activity.name;
+    let bytes = files.read(&activity.component).ok_or_else(|| {
+        Trouble::of(format!(
+            "The component `{}`, for {name}, couldn't be read.",
+            activity.component.display()
+        ))
+    })?;
+
+    let component = Component::new(&ENGINE, &bytes).map_err(|error| {
+        Trouble::of(format!(
+            "The component for {name} isn't a WebAssembly component Verkstead can load: {}.",
+            worded(&error)
+        ))
+    })?;
+
+    let mut linker = Linker::<Lending<T>>::new(&ENGINE);
+    wasmtime_wasi::p2::add_to_linker_async(&mut linker).map_err(internal)?;
+    wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker).map_err(internal)?;
+    World::add_to_linker::<Lending<T>, wasmtime::component::HasSelf<T>>(&mut linker, |lending| {
+        &mut lending.lent
+    })
+    .map_err(internal)?;
+
+    let mut store = Store::new(
+        &ENGINE,
+        Lending {
+            host: granted(capabilities, home)?,
+            lent,
+        },
+    );
+    store.epoch_deadline_trap();
+    store.set_epoch_deadline(STARTING.div_duration_f64(TICK).ceil() as u64);
+
+    let world = World::instantiate_async(&mut store, &component, &linker)
+        .await
+        .map_err(|error| {
+            Trouble::of(format!(
+                "{name} couldn't be started: {}.",
+                trapped(&error).unwrap_or_else(|| worded(&error))
+            ))
+        })?;
+
+    store.epoch_deadline_async_yield_and_update(1);
+
+    world.call_run(&mut store, facts).await.map_err(|error| {
+        Trouble::of(format!(
+            "{name} stopped while it was running: {}.",
+            trapped(&error).unwrap_or_else(|| worded(&error))
+        ))
+    })
+}
+
+/// A trap worded as the trap alone, the backtrace wasmtime wraps around it
+/// left out — or, where a host function trapped the component, what that
+/// function said. `None` where the error is not a trap.
+fn trapped(error: &wasmtime::Error) -> Option<String> {
+    match error.downcast_ref::<Trap>() {
+        Some(trap) => Some(trap.to_string()),
+        None => error
+            .downcast_ref::<Ended>()
+            .map(|ended| ended.0.trim_end_matches('.').to_owned()),
+    }
+}
+
+/// What a host function traps a running Activity with, in the sentence that
+/// says why.
+#[derive(Debug)]
+pub(crate) struct Ended(pub(crate) String);
+
+impl std::fmt::Display for Ended {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Ended {}
+
 /// The host functions an Activity's component is checked against: every one
 /// linked, and none lent, since a check never runs the component.
 struct Unlent;
