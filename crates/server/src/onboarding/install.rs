@@ -1053,6 +1053,34 @@ fn work(
     run.over();
 }
 
+/// A plugin's install `commands` as one line of `platform`'s shell that runs
+/// each as a step of its own and stops at the first that fails.
+///
+/// **A step apiece rather than the lines joined.** A line is the plugin
+/// author's and may end in a comment, or be several lines itself: joined with
+/// `&&`, a `# comment` swallows every command after it and the run reads as
+/// installed. And the shell Windows raises is Windows PowerShell, which has no
+/// `&&` at all. So each command stands on lines of its own, closed before the
+/// check on it begins. **One unit even so**, so that Windows asks for the
+/// elevation once rather than once a command.
+fn stepped(platform: Platform, commands: &[String]) -> String {
+    commands
+        .iter()
+        .map(|command| match platform {
+            // A subshell apiece, so nothing one step sets reaches the next, as
+            // nothing would between units.
+            Platform::Linux | Platform::MacOs => format!("(\n{command}\n) || exit $?"),
+            // A cmdlet that fails throws, `$ErrorActionPreference` being
+            // `Stop` — see [`powershell`] — and a program that fails says so
+            // in `$LASTEXITCODE`.
+            Platform::Windows => {
+                format!("& {{\n{command}\n}}\nif ($LASTEXITCODE) {{ exit $LASTEXITCODE }}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Put `unit` behind the platform's password dialog, moving the status line on
 /// where `marker` appears.
 fn raised(
@@ -1433,7 +1461,8 @@ fn plan(machine: &Machine, ticked: &[Row]) -> Plan {
 
 /// What each ticked harness a plugin declares adds to `plan`, after the
 /// package manager's and the vendors' units: the commands its manifest
-/// declares for this platform, joined into one unit (Set 1764, Q19).
+/// declares for this platform, in one unit of a step apiece (Set 1764, Q19)
+/// — see [`stepped`].
 ///
 /// **As the user**, the way a vendor's installer runs: what a manifest says to
 /// run is that plugin author's, and nothing about it asks for a privilege — a
@@ -1459,7 +1488,7 @@ fn plugging(machine: &Machine, plugged: &[Row], plan: &mut Plan) {
         };
 
         plan.units.push(Unit {
-            line: install.commands.join(" && "),
+            line: stepped(machine.platform, install.commands),
             covers: vec![*row],
             doing: format!("Installing {name}…"),
             how: match machine.platform {
@@ -2527,6 +2556,54 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::platform::{Environment, Platform};
+
+    /// A plugin's commands run a step apiece: a comment ending one takes
+    /// nothing after it with it, and the first that fails stops the rest and
+    /// fails the line.
+    #[cfg(unix)]
+    #[test]
+    fn a_plugins_commands_run_a_step_apiece_and_stop_at_a_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let ran = |commands: &[&str]| {
+            let commands: Vec<String> = commands.iter().map(|line| (*line).to_owned()).collect();
+            std::process::Command::new(SHELL)
+                .arg("-c")
+                .arg(stepped(Platform::HERE, &commands))
+                .current_dir(dir.path())
+                .status()
+                .unwrap()
+                .success()
+        };
+
+        assert!(ran(&["touch one  # the first", "touch two"]));
+        assert!(
+            dir.path().join("two").exists(),
+            "a comment swallowed the next step"
+        );
+
+        assert!(!ran(&["false", "touch three"]));
+        assert!(
+            !dir.path().join("three").exists(),
+            "a step ran after a failure"
+        );
+    }
+
+    /// And on Windows, where the shell is Windows PowerShell and has no `&&`,
+    /// each is a script block of its own lines, checked once it is closed.
+    #[test]
+    fn a_plugins_commands_on_windows_are_a_block_apiece() {
+        let commands = [
+            "npm i -g stub  # global".to_owned(),
+            "stub --setup".to_owned(),
+        ];
+
+        assert_eq!(
+            stepped(Platform::Windows, &commands),
+            "& {\nnpm i -g stub  # global\n}\nif ($LASTEXITCODE) { exit $LASTEXITCODE }\n\
+             & {\nstub --setup\n}\nif ($LASTEXITCODE) { exit $LASTEXITCODE }"
+        );
+        assert!(!stepped(Platform::Windows, &commands).contains("&&"));
+    }
 
     /// The sandbox, git and one npm harness, which is the ticking the whole of
     /// this is about: two packages, a package manager that has neither of the

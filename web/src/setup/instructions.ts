@@ -718,7 +718,9 @@ function declared(install: HarnessInstall | null | undefined): Instruction {
   }
 
   return {
-    ...(commands.length > 0 ? { command: commands.join(" && ") } : {}),
+    // A line apiece, as the run takes them: joined with `&&`, a comment ending
+    // one would swallow the rest, and Windows PowerShell has no `&&` at all.
+    ...(commands.length > 0 ? { command: commands.join("\n") } : {}),
     ...(link !== undefined ? { link } : {}),
     note: "As its plugin declares it for the machine Verkstead runs on.",
   };
