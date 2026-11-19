@@ -44,7 +44,7 @@ harness's login runs under — the brief says to re-verify there by hand.
 ## Stages
 
 - [x] 01: The framework and the Plugins page — [brief](01-the-framework.md) — no dependencies
-- [ ] 02: Languages as plugins — [brief](02-languages.md) — after 01 *(in progress: `roadmaps/plugins/02-languages`)*
+- [x] 02: Languages as plugins — [brief](02-languages.md) — after 01
 - [ ] 03: The Agent interface — [brief](03-the-agent-interface.md) — after 01
 - [ ] 04: Codex across — [brief](04-codex-across.md) — after 03
 - [ ] 05: Grok, OpenCode and Antigravity across — [brief](05-grok-opencode-antigravity-across.md) — after 04 — on windows
