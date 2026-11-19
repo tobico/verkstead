@@ -518,6 +518,18 @@ fn account(value: &Value, field: &str) -> Result<Vec<AccountPath>, Refusal> {
                 ),
             ));
         }
+        // The first path's credentials are its login, which is one file: the
+        // file a login is said from, and the one a root joins.
+        if index == 0 && path.credentials.len() > 1 {
+            let second = format!("{entry_field}.credentials[1]");
+            return Err(Refusal::of(
+                &second,
+                format!(
+                    "`{second}` is a second file. The first path's credentials are the one file \
+                     its login is kept in; a later path may hold more."
+                ),
+            ));
+        }
         paths.push(path);
     }
     Ok(paths)
@@ -820,14 +832,32 @@ fn login(value: &Value, field: &str) -> Result<Login, Refusal> {
         }
     };
     Ok(Login {
-        line: words(within(map, field, "line")?, &format!("{field}.line"), None)?,
-        status: words(
-            within(map, field, "status")?,
-            &format!("{field}.status"),
-            None,
-        )?,
+        line: unfilled(within(map, field, "line")?, &format!("{field}.line"))?,
+        status: unfilled(within(map, field, "status")?, &format!("{field}.status"))?,
         terminal,
     })
+}
+
+/// A list of words at `field` that the host fills nothing into: a login's
+/// lines are run as they are written, so a placeholder there would reach the
+/// harness as the braces themselves.
+fn unfilled(value: &Value, field: &str) -> Result<Vec<String>, Refusal> {
+    let words = words(value, field, None)?;
+    for (index, word) in words.iter().enumerate() {
+        if let Some(placeholder) = PLACEHOLDERS
+            .iter()
+            .find(|name| word.contains(&format!("{{{name}}}")))
+        {
+            let word_field = format!("{field}[{index}]");
+            return Err(Refusal::of(
+                &word_field,
+                format!(
+                    "`{word_field}` holds `{{{placeholder}}}`, which isn't filled on a login's                      line."
+                ),
+            ));
+        }
+    }
+    Ok(words)
 }
 
 fn environment(fields: &Map<String, Value>, field: &str) -> Result<Vec<(String, String)>, Refusal> {
@@ -1077,6 +1107,30 @@ provides:
 
             assert_eq!(refused_at(&yaml), "provides[0].install.instructions", "{link}");
         }
+    }
+
+    #[test]
+    fn a_second_agent_is_refused() {
+        let (_, entry) = AGENT.split_once("provides:\n").unwrap();
+        let yaml = format!("{AGENT}{entry}");
+
+        assert_eq!(refused_at(&yaml), "provides[1]");
+    }
+
+    #[test]
+    fn a_placeholder_on_a_login_s_line_is_refused() {
+        let line = AGENT.replace("line: [login]", "line: [login, --settings, \"{settings}\"]");
+        let status = AGENT.replace("status: [status]", "status: [status, \"{model}\"]");
+
+        assert_eq!(refused_at(&line), "provides[0].login.line[2]");
+        assert_eq!(refused_at(&status), "provides[0].login.status[1]");
+    }
+
+    #[test]
+    fn a_second_credentials_file_on_the_first_path_is_refused() {
+        let yaml = AGENT.replace("credentials: [auth.json]", "credentials: [auth.json, refresh.json]");
+
+        assert_eq!(refused_at(&yaml), "provides[0].account[0].credentials[1]");
     }
 
     #[test]

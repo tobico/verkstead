@@ -493,7 +493,7 @@ as Claude Code or Codex. What about it is data is written here; the three
 things about it that are code — finding and reading a session's transcript,
 writing its configuration, and driving its login — are the exports of the
 plugin's `component`, against the `agent` world (below). A plugin providing an
-agent is refused without a `component`.
+agent is refused without a `component`, and a plugin provides one agent at most.
 
 ```yaml
 provides:
@@ -592,8 +592,8 @@ unattended, inside its Sandbox.
 **`account`** — required, at least one: the paths an account is made of, in
 the order the Profile form draws a field apiece for them. **The first is a
 directory**, and is the one the account is said from: a session is given a
-root built in its place at `mounted` — its `credentials` (the first of them)
-joined in as the login, its `memory` joined where the Profile shares memory,
+root built in its place at `mounted` — its `credentials`, which here are one
+file, joined in as the login, its `memory` joined where the Profile shares memory,
 and what `write-configuration` answers written beside them. The rest of its
 `allowlist` is the account's configuration, handed to that export as found.
 
@@ -688,7 +688,8 @@ is written as the word every release reads, and never waits.
 
 **`login`** — optional: how Verkstead logs a Profile of it in. **`line`** is the
 words after the binary that log in, **`status`** the words that ask whether
-the account is logged in, and **`terminal`**, `false` unless it says
+the account is logged in — both run as they are written, so a placeholder in
+either is refused — and **`terminal`**, `false` unless it says
 otherwise, whether the harness reads the code it is given off a terminal
 rather than a pipe. An agent with no `login` is one Verkstead does not log in.
 

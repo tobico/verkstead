@@ -1069,16 +1069,86 @@ fn stepped(platform: Platform, commands: &[String]) -> String {
         .map(|command| match platform {
             // A subshell apiece, so nothing one step sets reaches the next, as
             // nothing would between units.
-            Platform::Linux | Platform::MacOs => format!("(\n{command}\n) || exit $?"),
+            //
+            // **And under `set -e` inside it**, so that a command running over
+            // several lines fails where any of them does rather than where its
+            // last one does. Not `|| exit` on the subshell, which would turn
+            // `set -e` off inside it: the shell ignores `-e` throughout
+            // anything whose status a `||` is testing.
+            Platform::Linux | Platform::MacOs => format!(
+                "(\nset -e\n{command}\n)\nstep=$?\nif [ \"$step\" -ne 0 ]; then exit \"$step\"; fi"
+            ),
             // A cmdlet that fails throws, `$ErrorActionPreference` being
             // `Stop` — see [`powershell`] — and a program that fails says so
-            // in `$LASTEXITCODE`.
-            Platform::Windows => {
-                format!("& {{\n{command}\n}}\nif ($LASTEXITCODE) {{ exit $LASTEXITCODE }}")
-            }
+            // in `$LASTEXITCODE`, which is asked after every line of it that
+            // ends a statement: see [`each_line_checked`].
+            Platform::Windows => format!(
+                "& {{\n{}\n}}\nif ($LASTEXITCODE) {{ exit $LASTEXITCODE }}",
+                each_line_checked(command)
+            ),
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// `command`, a PowerShell command of a plugin's that may run over several
+/// lines, with `$LASTEXITCODE` asked after each line that ends a statement.
+///
+/// **Windows PowerShell 5.1 does not stop at a program that fails**, whatever
+/// `$ErrorActionPreference` says, and `$LASTEXITCODE` holds only the last
+/// program's: an `npm` that failed followed by one that did not would read as
+/// a step that passed. So the check goes after every line it can go after —
+/// one not inside a here-string, not inside a bracket left open, and not ending
+/// in what carries the statement on to the next line. A line the check cannot
+/// follow is checked at the next line it can.
+fn each_line_checked(command: &str) -> String {
+    const CHECK: &str = "if ($LASTEXITCODE) { exit $LASTEXITCODE }";
+
+    let mut depth: i64 = 0;
+    let mut here: Option<char> = None;
+    let mut out: Vec<String> = Vec::new();
+
+    for line in command.lines() {
+        out.push(line.to_owned());
+
+        let trimmed = line.trim();
+        if let Some(quote) = here {
+            if trimmed.starts_with(&format!("{quote}@")) {
+                here = None;
+            } else {
+                continue;
+            }
+        }
+        if trimmed.ends_with("@\"") || trimmed.ends_with("@'") {
+            here = trimmed.chars().last();
+            continue;
+        }
+
+        // The line as code: what is quoted counted as nothing, and nothing
+        // after a comment begins.
+        let mut code = String::new();
+        let mut quote: Option<char> = None;
+        for c in line.chars() {
+            match quote {
+                Some(open) if c == open => quote = None,
+                Some(_) => {}
+                None if c == '"' || c == '\'' => quote = Some(c),
+                None if c == '#' => break,
+                None => code.push(c),
+            }
+        }
+        let opened = code.chars().filter(|c| matches!(c, '{' | '(')).count();
+        let closed = code.chars().filter(|c| matches!(c, '}' | ')')).count();
+        depth += opened as i64 - closed as i64;
+
+        let code = code.trim_end();
+        let carried = code.ends_with(['|', '`', ',', '=']);
+        if depth <= 0 && !carried && !code.is_empty() {
+            out.push(CHECK.to_owned());
+        }
+    }
+
+    out.join("\n")
 }
 
 /// Put `unit` behind the platform's password dialog, moving the status line on
@@ -2586,6 +2656,32 @@ mod tests {
             !dir.path().join("three").exists(),
             "a step ran after a failure"
         );
+
+        assert!(!ran(&["false\ntouch four", "touch five"]));
+        assert!(
+            !dir.path().join("four").exists() && !dir.path().join("five").exists(),
+            "a step running over several lines went on past a line that failed"
+        );
+    }
+
+    /// A check after each line that ends a statement, and none inside a block
+    /// left open, a here-string, or a line carried on to the next.
+    #[test]
+    fn a_windows_step_is_checked_after_every_statement_it_holds() {
+        const CHECK: &str = "if ($LASTEXITCODE) { exit $LASTEXITCODE }";
+
+        assert_eq!(
+            each_line_checked("npm i -g one\nnpm i -g two"),
+            format!("npm i -g one\n{CHECK}\nnpm i -g two\n{CHECK}")
+        );
+        assert_eq!(
+            each_line_checked("foreach ($p in 'a', 'b') {\n  npm i -g $p\n}"),
+            format!("foreach ($p in 'a', 'b') {{\n  npm i -g $p\n}}\n{CHECK}")
+        );
+        assert_eq!(
+            each_line_checked("$text = @\"\nnot (a statement\n\"@\nGet-Item x |\n  Out-Null"),
+            format!("$text = @\"\nnot (a statement\n\"@\nGet-Item x |\n  Out-Null\n{CHECK}")
+        );
     }
 
     /// And under the shell Windows raises, Windows PowerShell 5.1, as the one
@@ -2640,6 +2736,13 @@ mod tests {
             "a step ran after a program failed"
         );
 
+        let early = ran(&[format!("cmd.exe /c exit 5\n{}", made("five")), made("six")]);
+        assert_eq!(early.status.code(), Some(5), "{early:?}");
+        assert!(
+            !dir.path().join("five").exists() && !dir.path().join("six").exists(),
+            "a step running over several lines went on past a program that failed"
+        );
+
         let threw = ran(&[format!("Get-Item {}", at("missing")), made("four")]);
         assert!(!threw.status.success(), "{threw:?}");
         assert!(
@@ -2659,8 +2762,10 @@ mod tests {
 
         assert_eq!(
             stepped(Platform::Windows, &commands),
-            "& {\nnpm i -g stub  # global\n}\nif ($LASTEXITCODE) { exit $LASTEXITCODE }\n\
-             & {\nstub --setup\n}\nif ($LASTEXITCODE) { exit $LASTEXITCODE }"
+            "& {\nnpm i -g stub  # global\nif ($LASTEXITCODE) { exit $LASTEXITCODE }\n}\n\
+             if ($LASTEXITCODE) { exit $LASTEXITCODE }\n\
+             & {\nstub --setup\nif ($LASTEXITCODE) { exit $LASTEXITCODE }\n}\n\
+             if ($LASTEXITCODE) { exit $LASTEXITCODE }"
         );
         assert!(!stepped(Platform::Windows, &commands).contains("&&"));
     }
