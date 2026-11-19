@@ -52,6 +52,10 @@ use crate::{AppState, store};
 
 /// Save a new Profile, or say why not.
 pub(crate) async fn create(pool: &SqlitePool, edit: &ProfileEdit) -> Result<ProfileSaved> {
+    if let Some(refusal) = behind(pool, &edit.account.agent_type).await? {
+        return Ok(refusal);
+    }
+
     let (facts, login) = match checked(edit).await? {
         Ok(checked) => checked,
         Err(refusal) => return Ok(refusal),
@@ -77,6 +81,10 @@ pub(crate) async fn edit(pool: &SqlitePool, id: &str, edit: &ProfileEdit) -> Res
     let Some(held) = store::load_profile(pool, id).await? else {
         return Ok(ProfileSaved::NoSuchProfile);
     };
+
+    if let Some(refusal) = behind(pool, &edit.account.agent_type).await? {
+        return Ok(refusal);
+    }
 
     let saving = match held.unbound {
         None => match checked(edit).await? {
@@ -155,6 +163,36 @@ pub(crate) async fn bind(
             store::Saving::DefaultTaken => ProfileSaved::DefaultTaken,
         },
     ))
+}
+
+/// Why a Profile of `agent_type` cannot be saved while the cluster is as it
+/// is, or nothing where it can.
+///
+/// **A Profile replicates to every member**, and a release older than this
+/// one reads a Profile naming a harness it does not know as an error that
+/// takes the whole of its list with it — pickers, prefill and cards. A
+/// built-in is written as the word every release reads, so only a plugin's
+/// harness waits, and it waits for every member to be on this release.
+async fn behind(pool: &SqlitePool, agent_type: &AgentType) -> Result<Option<ProfileSaved>> {
+    if stored(agent_type).built_in().is_some() {
+        return Ok(None);
+    }
+
+    Ok(store::members(pool)
+        .await?
+        .into_iter()
+        .find(|member| crate::updates::older(member.version.as_deref()))
+        .map(|member| {
+            let name = &member.name;
+            let on = member
+                .version
+                .as_deref()
+                .map_or_else(|| "an older release".to_owned(), str::to_owned);
+
+            ProfileSaved::MemberBehind(format!(
+                "{name} is on {on}, which can't read a profile of a plugin's agent. Update {name} first."
+            ))
+        }))
 }
 
 /// Remove one, whoever had chosen it.
@@ -836,14 +874,14 @@ fn inspect(account: &ProfileAccount) -> Result<store::Account, ProfileSaved> {
             Path::new(typed.trim()),
             declared.file,
             declared.made,
-            declared.refused,
+            &declared.refused,
         )?;
 
         // What is mounted of an account kept somewhere inside the path, each
         // judged by the same rule and refused in the same words, because for
         // this harness they *are* the path the account is kept under.
         for inside in declared.within {
-            judged(&path.join(inside), false, false, declared.refused)?;
+            judged(&path.join(inside), false, false, &declared.refused)?;
         }
 
         paths.push((declared.key, path));
@@ -862,9 +900,9 @@ fn judged(
     path: &Path,
     file: bool,
     make: bool,
-    refused: [ProfileSaved; 3],
+    refused: &[ProfileSaved; 3],
 ) -> Result<PathBuf, ProfileSaved> {
-    let [not_absolute, missing, not_of_its_kind] = refused;
+    let [not_absolute, missing, not_of_its_kind] = refused.clone();
 
     let path = match resolve(path) {
         Resolved::Missing if make => match made(path, file) {

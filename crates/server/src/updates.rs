@@ -154,6 +154,13 @@ pub(crate) fn gap(name: &str, theirs: Option<&str>, ours: Option<&str>) -> Optio
     ))
 }
 
+/// Whether a member saying `theirs` is on a release older than this binary's:
+/// one saying none is from before versions were said, so older than any.
+pub(crate) fn older(theirs: Option<&str>) -> bool {
+    theirs
+        .is_none_or(|theirs| semver::Version::parse(theirs).is_ok_and(|theirs| theirs < running()))
+}
+
 /// The release this binary was built as.
 fn running() -> semver::Version {
     semver::Version::parse(RUNNING).expect("the version cargo built this with is a semver version")

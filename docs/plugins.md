@@ -668,6 +668,13 @@ remembered Pairing on one is not applied, and a session already running under
 it finishes. Its row says how many Profiles use it, and **Remove** is refused
 while any do.
 
+**A Profile of it waits for the whole cluster.** A Profile replicates to every
+member, and a release from before plugin harnesses reads one naming a harness
+it does not know as an error that takes its whole Profile list with it. So a
+Profile of a plugin's harness is refused while any member is on a release older
+than the device saving it, the refusal naming the member to update. A built-in's
+is written as the word every release reads, and never waits.
+
 **`login`** — optional: how Verkstead logs a Profile of it in. **`line`** is the
 words after the binary that log in, **`status`** the words that ask whether
 the account is logged in, and **`terminal`**, `false` unless it says
