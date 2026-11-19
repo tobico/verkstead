@@ -126,9 +126,9 @@ mod closing;
 mod rendering;
 mod surface;
 
-// And what a session is given of its account: a `.claude`, a `.codex`, a `.grok`
-// or OpenCode's two directories of Verkstead's own, built out of an allowlist —
-// see [`root`].
+// And what a session is given of its account: a `.claude`, a `.grok`, a plugin
+// harness's mounted directory or OpenCode's two directories of Verkstead's own,
+// built out of an allowlist — see [`root`].
 #[cfg(test)]
 mod built_roots;
 pub(crate) mod root;
@@ -372,7 +372,7 @@ const COMPLAINT: usize = 500;
 /// Claude's pair, and the one directory each backend after it keeps its whole
 /// account under. Written out rather than derived, because they are the paths
 /// those programs look in and not a scheme any of them follows. A plugin
-/// harness's — Codex's — is its manifest's `mounted`.
+/// harness's is its manifest's `mounted`.
 pub(crate) const CLAUDE_DIR_INSIDE_HOME: &str = ".claude";
 pub(crate) const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
 pub(crate) const GROK_INSIDE_HOME: &str = ".grok";
@@ -1465,7 +1465,7 @@ fn system(platform: Platform) -> &'static [&'static str] {
 ///
 /// The harness names are [`crate::harness::binaries`] rather than written
 /// again, because what a row is about is the program a session of that type is
-/// launched as — Codex's read off its plugin's manifest.
+/// launched as — a plugin harness's read off its manifest.
 pub(crate) fn programs() -> Vec<&'static str> {
     let mut programs = crate::harness::binaries();
     programs.extend([GIT, GH]);
@@ -1836,7 +1836,7 @@ fn landing(program: &Path) -> Landing {
 /// What a link's target is spelled as, once it has been joined onto the
 /// directory the link sits in — see [`landing`], the one caller. A `..` is the
 /// ordinary way an installer writes a target, `npm` leaving
-/// `~/.npm-global/bin/codex` pointing at `../lib/node_modules/…`, and the name
+/// `~/.npm-global/bin/opencode` pointing at `../lib/node_modules/…`, and the name
 /// that join makes is what [`within`] and [`beneath`] are then asked about.
 /// Those two read the name rather than the place, so a `..` in it is a path
 /// that reads as under one directory and is under another.
@@ -2532,7 +2532,7 @@ fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBu
 ///
 /// **At most one per harness**, which is what a home being asked about at all
 /// turns on: each shape is a fixed path under it, so a home holds one Claude
-/// account and one Codex account and no more — which is the same fact an
+/// account and one Grok Build account and no more — which is the same fact an
 /// unnamed Profile is unique per harness for.
 ///
 /// Blocking: one `stat` per path of the shape.
@@ -3809,15 +3809,15 @@ pub struct Sandbox {
     ///
     /// Claude's pair is `~/.claude` and `~/.claude.json`, and travels together
     /// or not at all: the pair is what keeps accounts apart. A session is given
-    /// a root built out of the first and a copy of the second. Codex and Grok
-    /// Build each keep a whole account under one directory, and OpenCode under
+    /// a root built out of the first and a copy of the second. A plugin harness
+    /// and Grok Build each keep a whole account under one directory, and OpenCode under
     /// two in one home, and a session is given a root built out of that. Which
     /// arm this is also says which backend a session is running, which is what
     /// [`AGENT_TYPE`] carries inside.
     account: store::Account,
 
     /// What a session is given of that account in place of the whole of
-    /// `~/.claude`, `~/.codex`, `~/.grok` or OpenCode's two directories — see
+    /// `~/.claude`, `~/.grok`, a plugin harness's mounted directory or OpenCode's two directories — see
     /// [`root`].
     root: root::Root,
 
@@ -4875,7 +4875,7 @@ impl Sandbox {
         // make one, while a session was joined to the whole account. A built
         // root has none of the account's skills in it to hide — see [`root`].
         //
-        // A Codex, a Grok Build or an OpenCode root has none of them either.
+        // A plugin harness's, a Grok Build or an OpenCode root has none of them either.
         // OpenCode's two global paths — `~/.claude/skills` and
         // `~/.agents/skills` — sit under a HOME that is fresh inside, so there is
         // nothing at either to hide.
@@ -5070,7 +5070,7 @@ impl Sandbox {
     ///
     /// **Built on the host and joined in.** Each directory the root is made of
     /// is emptied and made in the Conversation's own directory under the Data
-    /// Directory: one for Claude, Codex and Grok Build, and up to two for
+    /// Directory: one for Claude, a plugin harness and Grok Build, and up to two for
     /// OpenCode — see [`root::Root::built`]. Each is then put where the harness
     /// looks, which is a bind on Linux and on a Mac is where it already is, and
     /// the account's login and memory store are joined into them — the store
@@ -5093,7 +5093,7 @@ impl Sandbox {
     /// joined, so it is never the account's file and nothing of it is written
     /// back.
     ///
-    /// **Which is where a Codex, a Grok Build or an OpenCode session is
+    /// **Which is where a plugin harness's, a Grok Build or an OpenCode session is
     /// launched with the Conversation's MCP servers**, each in the form that
     /// harness reads: the account's own are still left out of it, and
     /// Verkstead's go in beside what it carries — see [`Sandbox::mcp_servers`],
@@ -5377,8 +5377,8 @@ impl Sandbox {
     /// [`closing`] — so a login written through the link is left alone, and
     /// only one the session replaced, or made where there was none, is written
     /// back. Claude saves its login by writing a temporary file and renaming it
-    /// over the top, and so does Grok Build 1.0.13. Codex 0.154 writes
-    /// `auth.json` in place, so a link of it stays the account's file — see
+    /// over the top, and so does Grok Build 1.0.13. A harness that writes
+    /// its login in place leaves a link of it the account's file — see
     /// [`root`].
     ///
     /// **A Mac always.** A symbolic link is written through, and replaced by a

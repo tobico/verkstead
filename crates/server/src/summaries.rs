@@ -2,11 +2,12 @@
 //! the program that is writing it.
 //!
 //! agy takes no conversation id at launch, so nothing Verkstead knows before a
-//! session starts names its conversation — the Codex and OpenCode case. What
+//! session starts names its conversation — the OpenCode case, and a plugin harness's that names
+//! itself. What
 //! names it afterwards is `conversation_summaries.db` beside the conversations:
 //! a row per conversation, with the directories it was working in and when it
 //! was last written. The session's is the row naming this Worktree and written
-//! at or after launch, the newest of them — Codex's rule against a third store.
+//! at or after launch, the newest of them — the rule a rollout is found by, against a third store.
 //!
 //! **Only the id is read here.** The record of what was said is a file of lines
 //! under `brain/`, named for that id, and following it is the ordinary file

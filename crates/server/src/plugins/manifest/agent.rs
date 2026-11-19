@@ -167,7 +167,7 @@ pub struct Memory {
 pub enum Synced {
     /// Every file under it.
     Everything,
-    /// The Codex-shaped rollouts — `rollout-*.jsonl`, opening with a
+    /// The rollouts — `rollout-*.jsonl`, opening with a
     /// `session_meta` line — whose session worked in this Worktree.
     Worktree,
     /// The directories in it, or one level down, called by one of the
@@ -230,6 +230,18 @@ pub struct Install {
     pub instructions: Option<String>,
     /// The lines that install it, run only on a press.
     pub commands: Vec<String>,
+    /// The package npm carries it as, which the wizard installs the way it
+    /// installs a built-in's: joined onto the one raised batch on a Linux,
+    /// with node in front where the machine has no npm, and raised with
+    /// winget's node in front on Windows.
+    pub npm: Option<String>,
+    /// The Homebrew formula it is, behind the Homebrew the wizard installs
+    /// first on a Mac that has none.
+    pub brew: Option<String>,
+    /// Or the Homebrew cask, the same way.
+    pub cask: Option<String>,
+    /// And the nixpkgs attribute, which NixOS's by-hand line names.
+    pub nix: Option<String>,
 }
 
 /// How Verkstead runs a login.
@@ -376,8 +388,8 @@ fn words(value: &Value, field: &str, needs: Option<&str>) -> Result<Vec<String>,
 /// Refused where `word` holds a `{name}` the host does not fill.
 ///
 /// **Only a bare name between braces is read as a placeholder.** Any other
-/// brace is the word's own: a harness taking an inline table on its line, as
-/// codex's `-c projects={"{worktree}"={trust_level="trusted"}}` does, writes
+/// brace is the word's own: a harness taking an inline table on its line, as a
+/// `-c projects={"{worktree}"={trust_level="trusted"}}` does, writes
 /// its braces as they are, and the `{worktree}` inside them is still filled.
 fn placeholders(word: &str, field: &str) -> Result<(), Refusal> {
     let mut rest = word;
@@ -500,8 +512,8 @@ fn resume(value: &Value, field: &str) -> Result<Resume, Refusal> {
             }
             Ok(Resume::Flag(words(flag, &at("flag"), Some("session"))?))
         }
-        // A subcommand without `{session}` is codex's: the id goes in front
-        // of the prompt.
+        // A subcommand without `{session}` puts the id in front of the
+        // prompt.
         (None, Some(subcommand)) => Ok(Resume::Subcommand {
             words: words(subcommand, &at("subcommand"), None)?,
             also,
@@ -950,7 +962,11 @@ fn tools(value: &Value, field: &str) -> Result<String, Refusal> {
 fn install(fields: &Map<String, Value>, field: &str) -> Result<Install, Refusal> {
     let map = match fields.get("install") {
         Some(Value::Null) | None => return Ok(Install::default()),
-        Some(value) => entry(value, field, &["instructions", "commands"])?,
+        Some(value) => entry(
+            value,
+            field,
+            &["instructions", "commands", "npm", "brew", "cask", "nix"],
+        )?,
     };
     let instructions = optional_within(map, field, "instructions")?;
     if let Some(link) = &instructions {
@@ -966,7 +982,35 @@ fn install(fields: &Map<String, Value>, field: &str) -> Result<Install, Refusal>
     Ok(Install {
         instructions,
         commands: texts(map, "commands", &format!("{field}.commands"))?,
+        npm: package(map, field, "npm")?,
+        brew: package(map, field, "brew")?,
+        cask: package(map, field, "cask")?,
+        nix: package(map, field, "nix")?,
     })
+}
+
+/// A package's name at `key`, where there is one.
+///
+/// **One word of a package name's own characters**, because the host writes
+/// it into a line it runs — on a Linux, raised — so a space, a `;` or a
+/// leading `-` would be a second command or a flag rather than a name.
+fn package(map: &Map<String, Value>, field: &str, key: &str) -> Result<Option<String>, Refusal> {
+    let Some(name) = optional_within(map, field, key)? else {
+        return Ok(None);
+    };
+    let named = !name.is_empty()
+        && !name.starts_with('-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "@/._+-".contains(c));
+    if !named {
+        let at = format!("{field}.{key}");
+        return Err(Refusal::of(
+            &at,
+            format!("`{at}` should be one package name, such as `@scope/name`."),
+        ));
+    }
+    Ok(Some(name))
 }
 
 fn login(value: &Value, field: &str) -> Result<Login, Refusal> {
@@ -1115,6 +1159,8 @@ provides:
     install:
       instructions: https://example.com/stub
       commands: [npm install -g stub]
+      npm: "@example/stub"
+      nix: stub
     login:
       line: [login]
       status: [status]
@@ -1176,6 +1222,9 @@ provides:
             [(store::Role::Review, "stub-small".to_owned())]
         );
         assert_eq!(agent.install.commands, ["npm install -g stub"]);
+        assert_eq!(agent.install.npm.as_deref(), Some("@example/stub"));
+        assert_eq!(agent.install.nix.as_deref(), Some("stub"));
+        assert_eq!(agent.install.brew, None);
         assert_eq!(agent.login.unwrap().line, ["login"]);
         assert_eq!(agent.environment, [("STUB_NO_UPDATE".into(), "1".into())]);
         assert_eq!(agent.instructions, PathBuf::from("STUB.md"));
@@ -1265,6 +1314,22 @@ provides:
                 "provides[0].install.instructions",
                 "{link}"
             );
+        }
+    }
+
+    /// A package name is written into a line the host runs, raised on a
+    /// Linux, so anything that is not one word of a name's own is refused.
+    #[test]
+    fn an_install_package_that_is_not_one_name_is_refused() {
+        for name in [
+            "\"stub; rm -rf /\"",
+            "\"--global\"",
+            "\"two words\"",
+            "\"\"",
+        ] {
+            let yaml = AGENT.replace("npm: \"@example/stub\"", &format!("npm: {name}"));
+
+            assert_eq!(refused_at(&yaml), "provides[0].install.npm", "{name}");
         }
     }
 

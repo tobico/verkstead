@@ -132,3 +132,16 @@ provides:
     # Read off codex 0.155.1.
     tools: mcp__<server>__<tool>
     instructions: AGENTS.md
+    # npm carries it everywhere but a Mac, where Homebrew carries it as a cask:
+    # the wizard installs either the way it installs a built-in harness, npm's
+    # behind the one raised package batch with node where there is none, and
+    # the cask behind the Homebrew it installs first. An Intel Mac has neither,
+    # and its releases page is what is left.
+    install:
+      instructions: https://github.com/openai/codex/releases
+      npm: "@openai/codex"
+      nix: codex
+    macos:
+      install:
+        instructions: https://github.com/openai/codex/releases
+        cask: codex

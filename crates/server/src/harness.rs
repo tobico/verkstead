@@ -26,8 +26,8 @@
 //! wording in each is the harness's own and will move — so it is kept in one
 //! place, and moving it costs one edit there. **And a fifth**, [`plugged`]:
 //! a harness a plugin declares, answering out of its manifest and its
-//! component, which is what a third-party harness is and what Codex is now
-//! too — a built-in plugin, embedded in the binary and stood up the first
+//! component, which is what a third-party harness is and what a built-in
+//! plugin's is too — embedded in the binary and stood up the first
 //! time it is asked for (see [`EMBEDDED`]). [`of`] is the one place a type is
 //! turned into its harness.
 
@@ -113,11 +113,12 @@ pub(crate) trait Harness: Send + Sync {
     /// stopped to ask for approval would be asking it in front of nobody, with the
     /// whole backlog behind it waiting on an answer that is not coming. What stops
     /// a session doing harm is the Sandbox, which this does not touch and which is
-    /// still the boundary — and codex's own sandbox is off rather than nested,
-    /// because it will not start inside bwrap and bwrap is already the boundary.
+    /// still the boundary — and a harness's own sandbox is off rather than
+    /// nested, since one may not start inside bwrap and bwrap is already the
+    /// boundary.
     ///
-    /// Codex and grok both draw a full-screen TUI, and `--no-alt-screen` keeps each
-    /// drawing inline instead: the Capture and the Screen are the record of what a
+    /// A harness that draws a full-screen TUI is kept drawing inline instead —
+    /// grok by `--no-alt-screen`: the Capture and the Screen are the record of what a
     /// session did, and an alternate screen is a record that is thrown away as the
     /// program leaves it.
     fn line(&self, worktree: Option<&Path>, companions: &[PathBuf]) -> Line;
@@ -311,11 +312,11 @@ pub(crate) trait Harness: Send + Sync {
     ///
     /// - **Claude** — the two entries a root already names, one for the Repo and
     ///   one for the Worktree.
-    /// - **Codex** — the memory files whole, and out of the one flat directory
-    ///   of rollouts the ones this Conversation's sessions wrote, which is what
-    ///   `worktree` picks out: the store is filed by date and holds every
-    ///   repository the human has ever worked in, and none of the rest of it is
-    ///   this Repo's anything.
+    /// - **A plugin harness** — what its manifest's `memory` declares: a
+    ///   directory whole, or out of one flat store of logs the ones this
+    ///   Conversation's sessions wrote, which is what `worktree` picks out: a
+    ///   store filed by date holds every repository the human has ever worked
+    ///   in, and none of the rest of it is this Repo's anything.
     /// - **Grok Build** — the same, its sessions picked out by the ids Verkstead
     ///   named them with, which is what its store files a session's directory
     ///   under. Not `session_search.sqlite` at the top of it, which is the
@@ -435,6 +436,16 @@ pub(crate) struct Install<'a> {
 
     /// The lines that install it, each one shell line of this platform's.
     pub(crate) commands: &'a [String],
+
+    /// The packages it is, where a package manager the wizard already drives
+    /// carries it — see [`crate::onboarding`]'s install run, which installs
+    /// these the way it installs a built-in's.
+    pub(crate) npm: Option<&'a str>,
+    pub(crate) brew: Option<&'a str>,
+    pub(crate) cask: Option<&'a str>,
+
+    /// And the nixpkgs attribute, which only the by-hand screen says.
+    pub(crate) nix: Option<&'a str>,
 }
 
 /// The *Running the ask* section of the harness `agent_type`, with how its
@@ -558,7 +569,8 @@ static IN_PROCESS: [(store::AgentType, &dyn Harness); 4] = [
 ];
 
 /// The harnesses the built-in plugins declare, each under its plugin's uuid —
-/// Codex's, which [`store::BUILT_IN`] reads the word `codex` as.
+/// which, for one built in before it was a plugin, is the uuid
+/// [`store::BUILT_IN`] reads its stored word as.
 ///
 /// **Stood up the first time any harness is asked for**, rather than as the
 /// server starts, because a harness is asked for wherever a Profile is read —
@@ -721,7 +733,7 @@ pub(crate) const SETTINGS_FILE: &str = "verkstead-settings.json";
 /// readily as one written here.
 pub struct Line {
     /// How the model is said, holding [`MODEL`]. `--model` reads as claude's
-    /// own; codex takes `-m`.
+    /// own; another may take `-m`.
     pub(crate) model: Vec<String>,
 
     /// How the Brief is given, holding [`PROMPT`]: a flag and it, or it alone
@@ -750,7 +762,7 @@ pub struct Line {
     /// conversation carried on keeps the id it already had, so there is
     /// nothing left to name it.
     ///
-    /// And it is not always a flag — see [`Resume`]: codex's is a subcommand, and
+    /// And it is not always a flag — see [`Resume`]: it may be a subcommand, and
     /// what a subcommand changes is the shape of the whole line rather than what
     /// is on the end of it.
     ///
@@ -783,9 +795,9 @@ pub struct Line {
 /// [`Line::resume`].
 ///
 /// **Two shapes rather than one spelling**, because the backends do not agree on
-/// what a resume *is*. For four of the five it is another option on the same line,
-/// and the id goes where the id would have gone. For codex it is a subcommand:
-/// the line is `codex resume <session-id> <prompt>`, so the word comes ahead of
+/// what a resume *is*. For every built-in it is another option on the same line,
+/// and the id goes where the id would have gone. For a plugin's it may be a
+/// subcommand: the line is `<binary> resume <session-id> <prompt>`, so the word comes ahead of
 /// everything the ordinary line says and the id is a positional in front of the
 /// prompt rather than a value after a flag.
 ///
@@ -804,8 +816,8 @@ pub enum Resume {
     ///
     /// Where they hold [`SESSION`], the id is said there, which is the shape a
     /// plugin's manifest writes. Where they do not, the id is a positional in
-    /// front of the prompt, after the model — codex's, whose words are
-    /// `resume` alone.
+    /// front of the prompt, after the model, where the words are `resume`
+    /// alone.
     Subcommand {
         /// The words themselves.
         words: Vec<String>,

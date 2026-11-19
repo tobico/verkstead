@@ -3676,7 +3676,24 @@ instructions: string | null,
  * The lines that install it, which the wizard's install run runs on a
  * press and at no other time.
  */
-commands: Array<string>, };
+commands: Array<string>, 
+/**
+ * The package npm carries it as, which the wizard installs as it does a
+ * built-in's npm package.
+ */
+npm: string | null, 
+/**
+ * The Homebrew formula it is.
+ */
+brew: string | null, 
+/**
+ * Or the Homebrew cask.
+ */
+cask: string | null, 
+/**
+ * And the nixpkgs attribute, which the NixOS tab's line names.
+ */
+nix: string | null, };
 
 /**
  * One model a harness declares: what it travels as, and what a human reads

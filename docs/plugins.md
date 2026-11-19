@@ -798,6 +798,18 @@ install instructions, an `http://` or `https://` address; **`commands`** are
 lines that install its binary, run only when the human presses for it. Write a
 platform's own under that platform's block.
 
+Or name the package a package manager Verkstead already drives carries it as,
+and it is installed the way a built-in harness is: **`npm`**, joined onto the
+one raised package batch on Linux — with node in front where the machine has no
+npm — and raised behind winget's node on Windows; **`brew`** or **`cask`**, a
+Homebrew formula or cask, behind the Homebrew the wizard installs first on a Mac
+that has none; and **`nix`**, the nixpkgs attribute NixOS's by-hand line names.
+Each is one package name. Where this platform's block names one of them for the
+machine, the `commands` are not run. An Intel Mac has no Homebrew, so a harness
+whose macOS install is a `brew` or a `cask` is a row for the by-hand screen
+there, saying to put its binary in `~/.local/bin` and linking its
+`instructions`. Codex's manifest, `plugins/codex/plugin.yaml`, is one.
+
 While the plugin is enabled, its harness is a row of the setup wizard's first
 step, after the built-ins: present once `binary` is on a session's PATH, the
 same walk the built-ins' rows are. Ticking the row and pressing Next runs the

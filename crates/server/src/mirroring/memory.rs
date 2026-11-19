@@ -80,8 +80,8 @@ pub(crate) const MOST_A_STORE_IS: usize = 64 * 1024 * 1024;
 
 /// How much of a rollout is read to say whose session wrote it.
 ///
-/// Generous against the eighteen kilobytes codex 0.149.0 opens one with — the
-/// session's whole system prompt is in there — and small against a log that runs
+/// Generous against the eighteen kilobytes a rollout has been seen to open with —
+/// the session's whole system prompt is in there — and small against a log that runs
 /// to megabytes. [`crate::transcript`]'s own bound, for its reason.
 const FIRST_LINE: u64 = 256 * 1024;
 
@@ -856,9 +856,9 @@ fn taken(
 ///
 /// One line rather than the file, which is [`crate::transcript`]'s reading of the
 /// same thing: a rollout opens with the session's own metadata, and in it is the
-/// directory codex was launched in. Anything that is not a rollout at all is not
-/// this Conversation's — codex compresses its older logs and keeps an index
-/// beside them, and neither is something to carry a piece of.
+/// directory the harness was launched in. Anything that is not a rollout at all is
+/// not this Conversation's — a harness may compress its older logs and keep an
+/// index beside them, and neither is something to carry a piece of.
 ///
 /// Blocking.
 fn wrote_in(log: &Path, stem: &str) -> bool {
