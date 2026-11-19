@@ -1708,7 +1708,12 @@ describe("the pane the plus opens", () => {
     ["Modelless", /at least one model/i],
     ["NameTaken", /another profile is called that already/i],
     ["DefaultTaken", /already has a profile with no name/i],
-  ])("says why %s was refused, in words", async (outcome, said) => {
+    // A plugin harness's path, by the label its manifest gave the field.
+    [{ PathNotAbsolute: "Stub directory" }, /stub directory's absolute path/i],
+    [{ PathMissing: "Stub config file" }, /nothing at the stub config file's path/i],
+    [{ PathNotADirectory: "Stub directory" }, /stub directory has to be a directory/i],
+    [{ PathNotAFile: "Stub config file" }, /stub config file has to be a file/i],
+  ] as const)("says why %o was refused, in words", async (outcome, said) => {
     theProfiles(json(outcome));
     const { done } = mountPane("new");
 
@@ -1918,12 +1923,29 @@ describe("the models a profile lists", () => {
   });
 
   /// A plugin harness's Profile is offered the models its manifest declares,
-  /// by the names it gives them — the form keeps no list of its own.
-  it("offers a plugin harness the models its manifest declares", async () => {
+  /// by the names it gives them — the form keeps no list of its own — and asks
+  /// for the paths it declares, a field apiece labelled as it labels them.
+  it("offers a plugin harness the models and the paths its manifest declares", async () => {
     const plugged: HarnessEntry = {
       ...harnesses()[1]!,
       id: "3f0c9a12-7b4e-4c1d-8e2f-5a6b7c8d9e0f",
       name: "Stub Harness",
+      paths: [
+        {
+          key: "dir",
+          label: "Stub directory",
+          purpose: "Mounted at `~/.stub`.",
+          placeholder: "/home/you/.stub",
+          file: false,
+        },
+        {
+          key: "config",
+          label: "Stub config file",
+          purpose: "",
+          placeholder: "/home/you/.stub.json",
+          file: true,
+        },
+      ],
       models: [
         { id: "stub-large", name: "Stub Large" },
         { id: "stub-small", name: "Stub Small" },
@@ -1934,7 +1956,10 @@ describe("the models a profile lists", () => {
 
     const stub: ProfileEntry = {
       ...FABLE,
-      account: { agent_type: plugged.id, paths: { home: "/srv/accounts/stub" } },
+      account: {
+        agent_type: plugged.id,
+        paths: { dir: "/srv/accounts/.stub", config: "/srv/accounts/.stub.json" },
+      },
       models: ["stub-large"],
     };
     serving(whenever("/api/ui/profiles", json([stub])));
@@ -1943,6 +1968,13 @@ describe("the models a profile lists", () => {
     await waitFor(() => screen.getByLabelText("Stub Large"));
 
     expect(offered()).toEqual(["Stub Largestub-large", "Stub Smallstub-small"]);
+    expect(
+      (screen.getByLabelText(/^Stub directory/) as HTMLInputElement).value,
+    ).toBe("/srv/accounts/.stub");
+    expect(
+      (screen.getByLabelText(/^Stub config file/) as HTMLInputElement).value,
+    ).toBe("/srv/accounts/.stub.json");
+    expect(screen.queryByLabelText(/^Home directory/)).toBeNull();
     expect(screen.queryByLabelText("Fable 5")).toBeNull();
   });
 

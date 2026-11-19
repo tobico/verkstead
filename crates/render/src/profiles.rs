@@ -541,6 +541,20 @@ pub enum ProfileSaved {
     /// bind-mounted over, so a file cannot stand in for it.
     HomeNotADirectory,
 
+    /// A path of a plugin's harness was named relatively — each of these four
+    /// carrying the label the plugin's manifest gives that path's field, so
+    /// that the refusal says which of the form's fields it is about.
+    PathNotAbsolute(String),
+
+    /// Nothing is at that path.
+    PathMissing(String),
+
+    /// Something is there and it is not the directory the path declares.
+    PathNotADirectory(String),
+
+    /// Something is there and it is not the file the path declares.
+    PathNotAFile(String),
+
     /// The harness it names is not one this server has.
     NoSuchHarness,
 

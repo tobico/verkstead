@@ -173,9 +173,31 @@ import { LoggingIn } from "./LoggingIn";
 /// What each way of being refused a save says, once, wherever it is met — the
 /// server's own sentence where it sends one, and these words for the rest.
 export function profileRefusal(outcome: ProfileSaved): string {
-  return typeof outcome === "string"
-    ? PROFILE_REFUSAL[outcome]
-    : outcome.MemberBehind;
+  if (typeof outcome === "string") {
+    return PROFILE_REFUSAL[outcome];
+  }
+  if ("MemberBehind" in outcome) {
+    return outcome.MemberBehind;
+  }
+
+  // A plugin harness's path, named by the label its manifest gives the field
+  // rather than in any built-in's words: which of the form's fields it is about
+  // is the one thing the human needs from it.
+  if ("PathNotAbsolute" in outcome) {
+    return `Give the ${field(outcome.PathNotAbsolute)}'s absolute path, starting with a slash.`;
+  }
+  if ("PathMissing" in outcome) {
+    return `There's nothing at the ${field(outcome.PathMissing)}'s path.`;
+  }
+  if ("PathNotADirectory" in outcome) {
+    return `The ${field(outcome.PathNotADirectory)} has to be a directory, and that isn't one.`;
+  }
+  return `The ${field(outcome.PathNotAFile)} has to be a file, and that isn't one.`;
+}
+
+/// A field's label as a sentence names it, inside rather than at its start.
+function field(label: string): string {
+  return label.charAt(0).toLowerCase() + label.slice(1);
 }
 
 /// The refusals the server says in a word rather than a sentence.

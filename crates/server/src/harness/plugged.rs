@@ -28,7 +28,7 @@ use std::time::{Duration, SystemTime};
 use verkstead_render::{Broken, ProfileSaved};
 
 use super::{
-    Beside, Carrying, Declared, HOME_REFUSED, Harness, Install, Line, Resume, SETTINGS_FILE,
+    Beside, Carrying, Declared, Harness, Install, Line, Resume, SETTINGS_FILE,
     SignedOut,
 };
 use crate::logins::Speaking;
@@ -42,13 +42,20 @@ use crate::settings::AttachedServer;
 use crate::store;
 use crate::transcript::{Carried, Search};
 
-/// What a file of an account is refused as on a save — see
-/// [`Declared::refused`].
-const FILE_REFUSED: [ProfileSaved; 3] = [
-    ProfileSaved::ConfigNotAbsolute,
-    ProfileSaved::ConfigMissing,
-    ProfileSaved::NotAFile,
-];
+/// What the path labelled `label` is refused as on a save, a `file` or a
+/// directory — see [`Declared::refused`]: in the words of no built-in's, and
+/// naming the field the manifest labelled, so that with two paths of one kind
+/// the refusal says which.
+fn refused(label: &str, file: bool) -> [ProfileSaved; 3] {
+    [
+        ProfileSaved::PathNotAbsolute(label.to_owned()),
+        ProfileSaved::PathMissing(label.to_owned()),
+        match file {
+            true => ProfileSaved::PathNotAFile(label.to_owned()),
+            false => ProfileSaved::PathNotADirectory(label.to_owned()),
+        },
+    ]
+}
 
 /// How long one call into a plugin's component may take before it is stopped.
 const CALLING: Duration = Duration::from_secs(10);
@@ -158,11 +165,7 @@ impl Harness for Plugged {
                 purpose: path.purpose.as_deref().unwrap_or_default(),
                 placeholder: path.example.as_deref().unwrap_or_default(),
                 file: path.file,
-                refused: if path.file {
-                    FILE_REFUSED
-                } else {
-                    HOME_REFUSED
-                },
+                refused: refused(&path.label, path.file),
                 within: &[],
             })
             .collect()

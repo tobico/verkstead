@@ -2377,6 +2377,52 @@ async fn a_plugin_harness_offers_its_declared_models_and_defaults_to_its_declare
     );
 }
 
+/// A plugin harness's paths are refused in no built-in's words, each naming
+/// the field its manifest labelled — so with a directory and a file declared,
+/// the refusal says which of the two was wrong.
+#[tokio::test]
+async fn a_plugin_harness_path_is_refused_by_the_label_its_manifest_gave_it() {
+    use crate::stub_harness::{self, StubHarness};
+
+    let (accounts, dir, app) = workbench().await;
+    let harness = StubHarness::Offering;
+    harness
+        .installed(&app, dir.path(), ["stub-large", "stub-grilling"])
+        .await;
+
+    let saving = |paths: serde_json::Value| {
+        serde_json::json!({
+            "name": null,
+            "account": { "agent_type": harness.uuid(), "paths": paths },
+            "models": ["stub-large"],
+        })
+    };
+    let paths = stub_harness::account(accounts.path());
+    let with = |key: &str, at: serde_json::Value| {
+        let mut paths = paths.clone();
+        paths[key] = at;
+        saving(paths)
+    };
+
+    assert_eq!(
+        save(&app, &with("config", serde_json::json!(accounts.path().join(".stub")))).await,
+        ProfileSaved::PathNotAFile("Stub config file".to_owned()),
+    );
+    assert_eq!(
+        save(&app, &with("dir", serde_json::json!(accounts.path().join(".stub.json")))).await,
+        ProfileSaved::PathNotADirectory("Stub directory".to_owned()),
+    );
+    assert_eq!(
+        save(&app, &with("config", serde_json::json!(accounts.path().join("gone.json")))).await,
+        ProfileSaved::PathMissing("Stub config file".to_owned()),
+    );
+    assert_eq!(
+        save(&app, &with("dir", "relative/.stub".into())).await,
+        ProfileSaved::PathNotAbsolute("Stub directory".to_owned()),
+    );
+    assert_eq!(save(&app, &saving(paths.clone())).await, ProfileSaved::Saved);
+}
+
 /// **A Profile of a plugin's harness waits for every member to be on this
 /// release**: an older one reads a Profile naming a harness it does not know as
 /// an error that takes its whole list with it. The refusal names the member
