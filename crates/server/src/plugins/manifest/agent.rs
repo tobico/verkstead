@@ -789,8 +789,19 @@ fn install(fields: &Map<String, Value>, field: &str) -> Result<Install, Refusal>
         Some(Value::Null) | None => return Ok(Install::default()),
         Some(value) => entry(value, field, &["instructions", "commands"])?,
     };
+    let instructions = optional_within(map, field, "instructions")?;
+    if let Some(link) = &instructions {
+        let lower = link.to_ascii_lowercase();
+        if !(lower.starts_with("https://") || lower.starts_with("http://")) {
+            let link_field = format!("{field}.instructions");
+            return Err(Refusal::of(
+                &link_field,
+                format!("`{link_field}` should be a web address, starting `https://`."),
+            ));
+        }
+    }
     Ok(Install {
-        instructions: optional_within(map, field, "instructions")?,
+        instructions,
         commands: texts(map, "commands", &format!("{field}.commands"))?,
     })
 }
@@ -1051,6 +1062,20 @@ provides:
             let yaml = AGENT.replace("    binary: stub\n", &format!("    binary: {path:?}\n"));
 
             assert_eq!(refused_at(&yaml), "provides[0].binary", "{path}");
+        }
+    }
+
+    /// What the setup wizard draws as a link a human presses: a web page, and
+    /// nothing a link could run.
+    #[test]
+    fn install_instructions_that_are_not_a_web_address_are_refused() {
+        for link in ["javascript:alert(1)", "file:///etc/passwd", "example.com/stub"] {
+            let yaml = AGENT.replace(
+                "instructions: https://example.com/stub",
+                &format!("instructions: {link:?}"),
+            );
+
+            assert_eq!(refused_at(&yaml), "provides[0].install.instructions", "{link}");
         }
     }
 

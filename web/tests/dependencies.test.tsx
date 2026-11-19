@@ -1992,6 +1992,21 @@ describe("a plugin's harness", () => {
     expect(told.command).toBe("npm install -g stub-harness  # global\nstub-harness --setup");
   });
 
+  it("links nothing but a web page, whatever its manifest says", () => {
+    knowHarnesses([
+      ...(harnesses as HarnessEntry[]),
+      {
+        ...entry,
+        install: { instructions: "javascript:alert(1)", commands: ["stub-harness --setup"] },
+      },
+    ]);
+
+    const told = instructionFor("Ubuntu", STUB, null);
+
+    expect(told.link).toBeUndefined();
+    expect(told.command).toBe("stub-harness --setup");
+  });
+
   it("says so where its manifest declares nothing to run", () => {
     knowHarnesses([
       ...(harnesses as HarnessEntry[]),
