@@ -2,7 +2,8 @@
 //! answered by, and the mode a server that cannot enters at startup.
 //!
 //! **The objective is three things** (ADR-0016): a sandbox, `git` and at least
-//! one of the five harnesses present; at least one Agent Profile; a git author.
+//! one harness present, a built-in or one an enabled Agent plugin declares; at
+//! least one Agent Profile; a git author.
 //! The GitHub token is not among them — GitHub may not be in use at all, while
 //! git is not optional and its author is what git asks for.
 //!

@@ -513,7 +513,8 @@ pub struct AccountView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct StepsView {
-    /// A sandbox, `git`, and at least one of the five harnesses.
+    /// A sandbox, `git`, and at least one harness: a built-in, or one an
+    /// enabled Agent plugin declares.
     pub dependencies: bool,
 
     /// At least one Agent Profile, however it was made — a **mirror** of a

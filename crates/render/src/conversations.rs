@@ -2840,7 +2840,7 @@ pub struct AgentOutputEvent {
     pub model: Option<String>,
 
     /// And which agent ran it, which is what says whose mark goes beside the
-    /// reading — the same four words a Profile's account is discriminated by.
+    /// reading — the id a Profile names its harness by.
     ///
     /// Off the record beside the other two and for their reason. `null` for a
     /// session started before this was written down, which the reading draws

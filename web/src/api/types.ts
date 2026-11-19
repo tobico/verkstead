@@ -385,7 +385,7 @@ profile: string | null,
 model: string | null, 
 /**
  * And which agent ran it, which is what says whose mark goes beside the
- * reading — the same four words a Profile's account is discriminated by.
+ * reading — the id a Profile names its harness by.
  *
  * Off the record beside the other two and for their reason. `null` for a
  * session started before this was written down, which the reading draws
@@ -7925,7 +7925,8 @@ branch: string, };
  */
 export type StepsView = { 
 /**
- * A sandbox, `git`, and at least one of the five harnesses.
+ * A sandbox, `git`, and at least one harness: a built-in, or one an
+ * enabled Agent plugin declares.
  */
 dependencies: boolean, 
 /**
