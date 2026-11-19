@@ -585,7 +585,7 @@ fn named_in_a_pack(skill: &str) -> bool {
 }
 
 /// A role as the world spells it, which is as the store does.
-fn role_named(role: store::Role) -> &'static str {
+pub(crate) fn role_named(role: store::Role) -> &'static str {
     match role {
         store::Role::Grilling => "grilling",
         store::Role::Implementation => "implementation",
