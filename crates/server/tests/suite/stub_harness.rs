@@ -268,7 +268,7 @@ pub(crate) fn account(under: &Path) -> serde_json::Value {
     .unwrap();
 
     let config = under.join(".stub.json");
-    std::fs::write(&config, "{}").unwrap();
+    std::fs::write(&config, r#"{"beside":true}"#).unwrap();
 
     serde_json::json!({ "dir": dir, "config": config })
 }

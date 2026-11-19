@@ -5290,7 +5290,8 @@ async fn an_agy_session_is_launched_with_the_line_agy_takes() {
 /// `write-configuration` answered: the account's own `settings.json` handed
 /// back with the account's own MCP server taken out before the export saw it,
 /// and the server the Conversation attached written into `servers.json`. What
-/// the manifest says in `environment` and `excluded` is said too.
+/// the manifest says in `environment` and `excluded` is said too. **And the
+/// account's second path**, a file, is joined at `~/.stub.json`.
 #[tokio::test]
 async fn a_plugin_harness_session_is_launched_with_its_declared_line_and_root() {
     let fixture = grilling_however_started_serving(
@@ -5300,6 +5301,7 @@ async fn a_plugin_harness_session_is_launched_with_its_declared_line_and_root() 
         printf 'root=%s\n' "$(ls -A "$HOME/.stub" | tr '\n' ' ')"
         printf 'servers=%s\n' "$(cat "$HOME/.stub/servers.json")"
         printf 'settings=%s\n' "$(tr -d '\n ' < "$HOME/.stub/settings.json")"
+        printf 'beside=%s\n' "$(cat "$HOME/.stub.json")"
         printf 'says=%s\n' "$STUB_HARNESS_SAYS"
         printf 'excluded=%s\n' "$(cat "$(git rev-parse --path-format=absolute --git-path info/exclude)" | tr '\n' ' ')"
         for arg in "$0" "$@"; do printf 'arg=%s\n' "$arg" | tr -d '\n'; printf '\n'; done
@@ -5396,6 +5398,10 @@ async fn a_plugin_harness_session_is_launched_with_its_declared_line_and_root() 
     assert!(
         !settings.contains("the-accounts-own") && !said.contains("the-accounts-own"),
         "and the account's own server never reached it: {said:?}"
+    );
+    assert!(
+        said.contains("beside={\"beside\":true}\n"),
+        "the account's path after its directory is given too: {said:?}"
     );
 
     assert!(

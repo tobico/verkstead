@@ -593,8 +593,16 @@ root built in its place at `mounted` — its `credentials` (the first of them)
 joined in as the login, its `memory` joined where the Profile shares memory,
 and what `write-configuration` answers written beside them. The rest of its
 `allowlist` is the account's configuration, handed to that export as found.
-The paths after the first are judged when a Profile is saved, and are not yet
-given to a session.
+
+The paths after the first are given to a session too, each at its `mounted`.
+**A file is joined as it is**, and a session writing to it writes the
+account's. **A directory is built in the root as the first is**: its
+`credentials` joined, its `memory` joined where the Profile shares memory and
+made empty of the session's own where it does not, and its `allowlist` copied
+in as found with the account's own MCP servers taken out. `write-configuration`
+composes the first path's configuration alone. A Profile launched on a device
+that holds no binding of it is given the first path's files, which are what its
+mirror carries.
 
 - **`key`** — what the Profile holds the path under, unique in the list.
 - **`label`** — what the form labels the field. **`purpose`**, optional, is
