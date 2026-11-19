@@ -8,4 +8,4 @@ the human chose to have that proved and fixed on Windows as work of its own.
 
 ## Tasks
 
-- [ ] 01: Prove and fix a plugin harness on Windows — [details](01-a-plugin-harness-on-windows.md)
+- [x] 01: Prove and fix a plugin harness on Windows — [details](01-a-plugin-harness-on-windows.md)

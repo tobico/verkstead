@@ -719,7 +719,10 @@ not export all three of:
   under the account's directory by the session's id and read into what the
   Transcript pane draws: something said, a tool call, its result, a notice of
   the harness's own bookkeeping, and a line it does not know, which folds away
-  under its own name. None where there is no record of it yet.
+  under its own name. None where there is no record of it yet. `account` is
+  always `/account`: the account's directory, granted read-only under that
+  name on every platform whatever its path on the host, so the record is found
+  by joining `/`-separated paths onto it.
 - **`write-configuration(found, servers)`** — what a session's root holds of
   the account's configuration, given each configuration file as the account
   holds it, with the account's own MCP servers already taken out, and the

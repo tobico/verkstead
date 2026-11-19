@@ -137,7 +137,9 @@ world agent {
   /// The record of `session`, found under the account rooted at `account`
   /// and read in the kinds above — or none where there is no record of it
   /// yet. Where the record is kept is the harness's own business, so finding
-  /// it is this export's as much as reading it.
+  /// it is this export's as much as reading it. `account` is always
+  /// `/account`: the account's directory, granted read-only under that name
+  /// on every platform, whatever its path on the host.
   export parse-transcript: func(account: string, session: string) -> option<list<entry>>;
 
   /// What a session's root is to hold, given the account's configuration

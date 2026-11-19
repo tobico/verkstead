@@ -122,6 +122,10 @@ pub struct Again {
     digest: [u8; 32],
 }
 
+/// What a directory granted by [`Again::reading`] is named inside the
+/// component, on every platform.
+pub const ACCOUNT: &str = "/account";
+
 impl Again {
     /// Whether `other` starts the same component as this, under the same
     /// grant: a plugin **Update** may change its component and nothing in its
@@ -133,12 +137,17 @@ impl Again {
     }
 
     /// The component started again with `dir` granted read-only beside what
-    /// its manifest was granted, named by its own path.
+    /// its manifest was granted, named [`ACCOUNT`] inside it.
+    ///
+    /// **The name is fixed rather than the host's path**, so that the export is
+    /// handed one absolute path on every platform: a Windows path such as
+    /// `C:\Users\…` is not absolute inside the component, and says where
+    /// the host keeps its accounts, which is nothing of the component's.
     pub async fn reading(&self, dir: &Path) -> Result<Loaded, Trouble> {
         let mut grant = grant(&self.capabilities, self.home.as_deref())?;
         grant
             .wasi
-            .preopened_dir(dir, dir.to_string_lossy(), FsPerms::ReadOnly)
+            .preopened_dir(dir, ACCOUNT, FsPerms::ReadOnly)
             .map_err(|error| {
                 Trouble::of(format!(
                     "`{}` couldn't be opened for the component: {}.",
