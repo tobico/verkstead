@@ -67,6 +67,10 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       # them.
       ../.github/workflows/pages.yml
       ../crates/server/src/sharing.rs
+      # And the built-in harnesses' marks, which the server serves on its
+      # harness list and the suite reads as the files they are, so that what a
+      # fixture says a mark is cannot drift from what the server sends.
+      ../crates/server/src/harness/marks
     ];
   };
 
