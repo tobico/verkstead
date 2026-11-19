@@ -654,12 +654,14 @@ platform's block.
 While the plugin is enabled, its harness is a row of the setup wizard's first
 step, after the built-ins: present once `binary` is on a session's PATH, the
 same walk the built-ins' rows are. Ticking the row and pressing Next runs the
-`commands`, joined with `&&`, as the user that runs Verkstead — PowerShell
-behind the elevation dialog on Windows, where every install is — in the same
-install run as everything else on the step. The plugin's row on the Plugins
+`commands` in order, each a step of its own and the first that fails stopping
+the rest, as the user that runs Verkstead — PowerShell behind one elevation
+dialog on Windows, where every install is — in the same install run as
+everything else on the step. A command may end in a comment, or run over
+several lines, without reaching the next. The plugin's row on the Plugins
 page offers the same press, **Install**, where the binary is missing. Nothing
-else runs them. The by-hand screen shows the `commands` and the
-`instructions` link; a harness with neither says so.
+else runs them. The by-hand screen shows the `commands`, a line apiece, and
+the `instructions` link; a harness with neither says so.
 
 **Disabling** the plugin keeps its Profiles: they are offered on no picker, a
 remembered Pairing on one is not applied, and a session already running under

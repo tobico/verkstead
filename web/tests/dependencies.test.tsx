@@ -1975,6 +1975,23 @@ describe("a plugin's harness", () => {
     }
   });
 
+  it("shows a line apiece where its manifest declares several", () => {
+    knowHarnesses([
+      ...(harnesses as HarnessEntry[]),
+      {
+        ...entry,
+        install: {
+          instructions: null,
+          commands: ["npm install -g stub-harness  # global", "stub-harness --setup"],
+        },
+      },
+    ]);
+
+    const told = instructionFor("Ubuntu", STUB, null);
+
+    expect(told.command).toBe("npm install -g stub-harness  # global\nstub-harness --setup");
+  });
+
   it("says so where its manifest declares nothing to run", () => {
     knowHarnesses([
       ...(harnesses as HarnessEntry[]),
