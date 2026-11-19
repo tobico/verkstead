@@ -27,10 +27,7 @@ use std::time::{Duration, SystemTime};
 
 use verkstead_render::{Broken, ProfileSaved};
 
-use super::{
-    Beside, Carrying, Declared, Harness, Install, Line, Resume, SETTINGS_FILE,
-    SignedOut,
-};
+use super::{Beside, Carrying, Declared, Harness, Install, Line, Resume, SETTINGS_FILE, SignedOut};
 use crate::logins::Speaking;
 use crate::platform::Platform;
 use crate::plugins::component::worlds::category::agent as world;
@@ -979,6 +976,9 @@ mod tests {
             .expect("the call should have been ended at its deadline");
 
         assert_eq!(lines.len(), 1, "{lines:?}");
-        assert!(lines[0].contains("took longer than 10 seconds"), "{lines:?}");
+        assert!(
+            lines[0].contains("took longer than 10 seconds"),
+            "{lines:?}"
+        );
     }
 }

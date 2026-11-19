@@ -248,11 +248,7 @@ impl Walk<'_> {
 /// every harness, which nothing the human agreed to covers.
 fn binary(value: &Value, field: &str) -> Result<String, Refusal> {
     let name = text_of(value, field)?;
-    if name.is_empty()
-        || name == "."
-        || name == ".."
-        || name.contains(['/', '\\', ':'])
-    {
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', ':']) {
         return Err(Refusal::of(
             field,
             format!(
@@ -1099,13 +1095,21 @@ provides:
     /// nothing a link could run.
     #[test]
     fn install_instructions_that_are_not_a_web_address_are_refused() {
-        for link in ["javascript:alert(1)", "file:///etc/passwd", "example.com/stub"] {
+        for link in [
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "example.com/stub",
+        ] {
             let yaml = AGENT.replace(
                 "instructions: https://example.com/stub",
                 &format!("instructions: {link:?}"),
             );
 
-            assert_eq!(refused_at(&yaml), "provides[0].install.instructions", "{link}");
+            assert_eq!(
+                refused_at(&yaml),
+                "provides[0].install.instructions",
+                "{link}"
+            );
         }
     }
 
@@ -1128,7 +1132,10 @@ provides:
 
     #[test]
     fn a_second_credentials_file_on_the_first_path_is_refused() {
-        let yaml = AGENT.replace("credentials: [auth.json]", "credentials: [auth.json, refresh.json]");
+        let yaml = AGENT.replace(
+            "credentials: [auth.json]",
+            "credentials: [auth.json, refresh.json]",
+        );
 
         assert_eq!(refused_at(&yaml), "provides[0].account[0].credentials[1]");
     }

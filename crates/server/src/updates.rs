@@ -168,9 +168,7 @@ pub(crate) fn reads_plugin_harnesses(theirs: Option<&str>) -> bool {
 fn reads_plugin_harnesses_beside(theirs: Option<&str>, running: &semver::Version) -> bool {
     let first = semver::Version::new(0, 3, 2).min(running.clone());
 
-    theirs.is_some_and(|theirs| {
-        semver::Version::parse(theirs).is_ok_and(|theirs| theirs >= first)
-    })
+    theirs.is_some_and(|theirs| semver::Version::parse(theirs).is_ok_and(|theirs| theirs >= first))
 }
 
 /// The release this binary was built as.

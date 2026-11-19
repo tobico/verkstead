@@ -1304,7 +1304,10 @@ impl Onboarding {
         let ticked = ticked
             .iter()
             .map(Row::of)
-            .filter(|row| row.plugged().is_none_or(|harness| offered.contains(&harness)))
+            .filter(|row| {
+                row.plugged()
+                    .is_none_or(|harness| offered.contains(&harness))
+            })
             .collect();
 
         self.run(settings, ticked, devices).await

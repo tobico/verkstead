@@ -2405,22 +2405,40 @@ async fn a_plugin_harness_path_is_refused_by_the_label_its_manifest_gave_it() {
     };
 
     assert_eq!(
-        save(&app, &with("config", serde_json::json!(accounts.path().join(".stub")))).await,
+        save(
+            &app,
+            &with("config", serde_json::json!(accounts.path().join(".stub")))
+        )
+        .await,
         ProfileSaved::PathNotAFile("Stub config file".to_owned()),
     );
     assert_eq!(
-        save(&app, &with("dir", serde_json::json!(accounts.path().join(".stub.json")))).await,
+        save(
+            &app,
+            &with("dir", serde_json::json!(accounts.path().join(".stub.json")))
+        )
+        .await,
         ProfileSaved::PathNotADirectory("Stub directory".to_owned()),
     );
     assert_eq!(
-        save(&app, &with("config", serde_json::json!(accounts.path().join("gone.json")))).await,
+        save(
+            &app,
+            &with(
+                "config",
+                serde_json::json!(accounts.path().join("gone.json"))
+            )
+        )
+        .await,
         ProfileSaved::PathMissing("Stub config file".to_owned()),
     );
     assert_eq!(
         save(&app, &with("dir", "relative/.stub".into())).await,
         ProfileSaved::PathNotAbsolute("Stub directory".to_owned()),
     );
-    assert_eq!(save(&app, &saving(paths.clone())).await, ProfileSaved::Saved);
+    assert_eq!(
+        save(&app, &saving(paths.clone())).await,
+        ProfileSaved::Saved
+    );
 }
 
 /// **A Profile of a plugin's harness waits for every member to be on this
