@@ -415,6 +415,23 @@ interface host {
   /// its `on`, before its session is launched. A word that is not `linux`,
   /// `macos` or `windows` wants no platform, and the task runs here.
   place-task: func(task: u32, label: string, platform: string) -> placed;
+
+  // Joining a roadmap's chain (stage 10). Which stages joined, and in what
+  // order, is the host's record; the rebase onto the top is the session's.
+
+  /// One branch of the chain a stage joins.
+  record link {
+    /// Which stage of the roadmap the branch is, or none for the branch the
+    /// chain starts at, at its foot.
+    stage: option<string>,
+    branch: string,
+  }
+
+  /// Hold the finish until this Conversation may join its roadmap's chain —
+  /// every stage already in it settled — and answer the chain, bottom to top,
+  /// for the finish's prompt. A Conversation that is no roadmap's stage joins
+  /// nothing: it is answered at once, with no branches.
+  join-chain: func() -> list<link>;
 }
 
 /// An Activity's component, run once per start.

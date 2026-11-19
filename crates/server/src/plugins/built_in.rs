@@ -392,7 +392,10 @@ mod tests {
         assert_eq!(backlog.id, "backlog-runner");
         assert_eq!(backlog.name, "Backlog runner");
         assert_eq!(backlog.outcomes, ["finished"]);
-        assert_eq!(backlog.skills, ["verkstead/next-task"]);
+        assert_eq!(
+            backlog.skills,
+            ["verkstead/next-task", "verkstead/next-stage"]
+        );
 
         for component in ["follow-up-rounds.wasm", "backlog-runner.wasm"] {
             assert!(

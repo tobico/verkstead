@@ -11,11 +11,17 @@
 //! used: which task is not said, the skill reading `.tasks/` and taking the
 //! same one by the same rule.
 //!
-//! **A task's session is done when its box is ticked and committed, and the
-//! finish's when `.tasks/TODO.md` is gone and a pull request is open.** That is
-//! the evidence each is launched expecting, and the host holds `verkstead done`
-//! to it; what the session builds, and so where its Memos go, the host reads
-//! off the same evidence.
+//! **A roadmap stage's backlog too**, the host saying it is one with the
+//! `stage` option, whose value is the branch the stage's own was cut from. A
+//! stage with no list yet is planned first, a session on the next-stage skill
+//! writing one; and its finish waits on the roadmap's chain through the host,
+//! which answers the branches it goes on top of, for the finish's prompt.
+//!
+//! **A task's session is done when its box is ticked and committed, the
+//! planning's when the list is, and the finish's when `.tasks/TODO.md` is gone
+//! and a pull request is open.** That is the evidence each is launched
+//! expecting, and the host holds `verkstead done` to it; what the session
+//! builds, and so where its Memos go, the host reads off the same evidence.
 //!
 //! **It ends in an Outcome, and never names a state.** `finished` once the
 //! finish has landed, and `steered` where the human took the Conversation
@@ -39,6 +45,14 @@ use verkstead::plugin::host::{self, Placed, Revision};
 /// The skill every session of a backlog runs inside, the finish's included.
 const NEXT_TASK: &str = "verkstead/next-task";
 
+/// The skill a roadmap stage's backlog is planned in, before there is one.
+const NEXT_STAGE: &str = "verkstead/next-stage";
+
+/// The option saying the Conversation is a roadmap stage, its value the branch
+/// the stage's branch was cut from — empty where it came off the repository's
+/// default branch.
+const STAGE: &str = "stage";
+
 /// The backlog's directory, and its list inside the Repo.
 const BACKLOG: &str = ".tasks";
 const TODO: &str = ".tasks/TODO.md";
@@ -59,10 +73,11 @@ impl Guest for Backlog {
         };
 
         let repo = &facts.worktree.repo;
+        let stage = stage(&facts);
         let prompt = prompt(&skill.path, &facts);
 
         loop {
-            let step = match next(repo) {
+            let step = match next(repo, stage.as_ref()) {
                 Ok(step) => step,
                 Err(why) => {
                     host::stop(&why);
@@ -70,7 +85,23 @@ impl Guest for Backlog {
                 }
             };
 
-            let (evidence, ends) = match &step {
+            let (skill, prompt, evidence, ends) = match &step {
+                Step::Plan { cut_from } => {
+                    let Some(planning) = facts.skills.iter().find(|named| named.name == NEXT_STAGE)
+                    else {
+                        host::stop(&format!(
+                            "There's no `{NEXT_STAGE}` skill to plan the stage's backlog in."
+                        ));
+                        return String::new();
+                    };
+
+                    (
+                        NEXT_STAGE,
+                        planned(&planning.path, &facts.brief, cut_from.as_deref()),
+                        Evidence::Landed(Landing::Arrived(TODO.to_owned())),
+                        Ends::WithItsWork,
+                    )
+                }
                 Step::Task {
                     number,
                     label,
@@ -86,11 +117,18 @@ impl Guest for Backlog {
                     }
 
                     (
+                        NEXT_TASK,
+                        prompt.clone(),
                         Evidence::Landed(Landing::Ticked(*number)),
                         Ends::WithItsWork,
                     )
                 }
+                // A stage's finish waits on its roadmap's chain and is told
+                // what it joins, the rebase coming before the push; anything
+                // else's is answered at once with nothing to join.
                 Step::Finish => (
+                    NEXT_TASK,
+                    joining(&prompt, &host::join_chain()),
                     Evidence::Landed(Landing::Gone(TODO.to_owned())),
                     Ends::OnAPullRequest,
                 ),
@@ -100,8 +138,7 @@ impl Guest for Backlog {
                 }
             };
 
-            let session = match host::launch(NEXT_TASK, "implementation", &prompt, &evidence, ends)
-            {
+            let session = match host::launch(skill, "implementation", &prompt, &evidence, ends) {
                 Ok(session) => session,
                 Err(why) => {
                     host::stop(&why);
@@ -139,6 +176,10 @@ export!(Backlog);
 /// What to run next, read off the list.
 #[derive(Debug, PartialEq, Eq)]
 enum Step {
+    /// A roadmap stage with no list yet: write one, from the stage's Brief,
+    /// told the branch its own was cut from, where that was not the default.
+    Plan { cut_from: Option<String> },
+
     /// The lowest-numbered entry whose box is not ticked, by its number, its
     /// label as the list writes it, and the platform its line wants.
     Task {
@@ -161,11 +202,21 @@ enum Step {
 /// The list decides all of it, and the directory beside it only says whether
 /// the entry has a file to work from: a list part way through being written
 /// has entries with none yet, and reading those as done would be finishing a
-/// feature nobody had started.
-fn next(repo: &str) -> Result<Step, String> {
-    let entries = entries(repo)?.ok_or_else(|| {
-        format!("There's no backlog in `{TODO}` to work, so there's nothing to start a session on.")
-    })?;
+/// feature nobody had started. A roadmap stage, `stage` being what it was cut
+/// from, has no list until it is planned: that is its first step. The host
+/// starts this over a stage only while it is unplanned or part way through,
+/// never over one whose finish took the list away.
+fn next(repo: &str, stage: Option<&Stage>) -> Result<Step, String> {
+    let Some(entries) = entries(repo)? else {
+        return match stage {
+            Some(stage) => Ok(Step::Plan {
+                cut_from: stage.cut_from.clone(),
+            }),
+            None => Err(format!(
+                "There's no backlog in `{TODO}` to work, so there's nothing to start a session on."
+            )),
+        };
+    };
 
     // In the list's own order rather than sorted: `TODO.md` is written in the
     // order the tasks are meant to be worked.
@@ -187,10 +238,12 @@ fn next(repo: &str) -> Result<Step, String> {
     })
 }
 
-/// Whether `step` has landed at the Worktree's HEAD: its box ticked, or — the
-/// finish — the list gone. Anything the Repo will not say reads as not.
+/// Whether `step` has landed at the Worktree's HEAD: its box ticked, the list
+/// there — a stage's planning — or, the finish, the list gone. Anything the
+/// Repo will not say reads as not.
 fn landed(repo: &str, step: &Step) -> bool {
     match step {
+        Step::Plan { .. } => matches!(host::read_file(repo, &Revision::Head, TODO), Ok(Some(_))),
         Step::Task { number, .. } => entries(repo).is_ok_and(|entries| {
             entries.is_some_and(|entries| {
                 entries
@@ -314,6 +367,21 @@ fn numbered(name: &str) -> Option<u32> {
     number.parse().ok()
 }
 
+/// The roadmap stage this Conversation is, where it is one, read off the
+/// options the host started it with.
+#[derive(Debug, PartialEq, Eq)]
+struct Stage {
+    cut_from: Option<String>,
+}
+
+fn stage(facts: &Facts) -> Option<Stage> {
+    let (_, cut_from) = facts.options.iter().find(|(key, _)| key == STAGE)?;
+
+    Some(Stage {
+        cut_from: (!cut_from.is_empty()).then(|| cut_from.clone()),
+    })
+}
+
 /// Why the run stopped at an entry with no task file: the entry, which is the
 /// line the human has to go and look at.
 fn broken(label: &str) -> String {
@@ -341,4 +409,75 @@ fn prompt(skill: &str, facts: &Facts) -> String {
     }
 
     prompt
+}
+
+/// A stage's planning prompt: the line that sends it into next-stage, the
+/// stage's Brief, and where its branch came from — the one thing about a stage
+/// the repository does not say. The base rather than what the stage ends up
+/// stacked on: the join is at the finish, and a session told otherwise now
+/// would be told something the finish contradicts.
+fn planned(skill: &str, brief: &str, cut_from: Option<&str>) -> String {
+    let branch = match cut_from {
+        Some(base) => format!(
+            "This stage's branch was cut from `{base}`, the highest settled branch of its \
+             roadmap's chain, which is not merged yet. Where it goes in that chain is settled \
+             at this stage's finish rather than now, so there is nothing to stack here.",
+        ),
+        None => "This stage's branch came off the repository's default branch, there being \
+                 nothing unmerged left to stand on."
+            .to_owned(),
+    };
+
+    format!(
+        "Read {skill} and plan the roadmap stage described below, the way it says. Nothing \
+         else in this session tells you how to reach me.\n\n\
+         # The Brief this started from\n\n{brief}\n\n\
+         # Where this stage's branch came from\n\n{branch}\n"
+    )
+}
+
+/// The finish's prompt with the chain the stage joins listed under it, bottom
+/// to top, and the one instruction it is told for: the rebase comes before the
+/// push. The chain is the host's to say and the rebase the session's to do. No
+/// chain is the prompt unchanged: an empty heading would tell a session there
+/// was one to join.
+fn joining(prompt: &str, chain: &[host::Link]) -> String {
+    let Some((top, under)) = chain.split_last() else {
+        return prompt.to_owned();
+    };
+
+    let listed: Vec<String> = chain
+        .iter()
+        .map(|link| match &link.stage {
+            Some(stage) => format!("- `{}` — stage {stage}.", link.branch),
+            None => format!(
+                "- `{}` — the branch this stage was cut from, which the chain starts at.",
+                link.branch
+            ),
+        })
+        .collect();
+
+    let top = &top.branch;
+
+    let bottom = match under.is_empty() {
+        true => "one branch".to_owned(),
+        false => format!("{} branches, bottom to top", chain.len()),
+    };
+
+    format!(
+        "{}\n\n# The chain this stage joins\n\nThis stage's roadmap is one chain of branches, in \
+         the order its stages finished, and this branch joins it at this finish. The chain is \
+         {bottom}:\n\n{listed}\n\nSo **rebase this branch onto `{top}` before anything is \
+         pushed**, and open the pull request against `{top}`. Do the rebase the way this \
+         repository's own `docs/agents/git-workflow.md` says a stage joins a chain, where it says \
+         anything; where it records no stacking mechanism, rebase onto `{top}` all the same and \
+         open an ordinary pull request against it, which carries the stage below this one until \
+         that one merges.\n\nA branch already sitting on top of `{top}` is a rebase that moves \
+         nothing, which is the ordinary case rather than a sign anything is wrong. Rebase **once**, \
+         before the pull request exists: nothing in the chain below moves because this stage \
+         joined above it — no branch of it is rebased, and no pull request of it changes base — \
+         and this branch is never force-pushed once its own pull request is open.\n",
+        prompt.trim_end(),
+        listed = listed.join("\n"),
+    )
 }
