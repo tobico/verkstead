@@ -565,17 +565,18 @@ on the line. The words may hold **placeholders** the host fills: `{model}`,
 - **`session`** — optional, holding `{session}`: how the session id Verkstead
   picked is named. A harness that takes none leaves it out, and its transcript
   is then found rather than named.
-- **`resume`** — optional: how a conversation is carried on, under the id of
-  the session that was having it. Either a **`flag`** holding `{session}`,
-  written where `session` would have been, or a **`subcommand`** holding
-  `{session}`, written straight after the binary, with **`also`** the words a
-  resume needs on the end that a launch does not. Without one, a resumed
-  Conversation opens a session of its own.
+- **`resume`** — optional, and only beside a `session`: how a conversation is
+  carried on, under the id the session that was having it was named at launch.
+  Either a **`flag`** holding `{session}`, written where `session` would have
+  been, or a **`subcommand`** holding `{session}`, written straight after the
+  binary, with **`also`** the words a resume needs on the end that a launch
+  does not. Without one, a resumed Conversation opens a session of its own.
 - **`tail`** — optional: what goes last. `{worktree}` is the Worktree the
   session works in.
 - **`settings`** — optional: settings for this session alone, as a map, which
-  the host writes as JSON to a file and names on the line as `{settings}`. One
-  without the other is refused. The file is `verkstead-settings.json` in the
+  the host writes as JSON to a file and names on the line as `{settings}`, in
+  whichever part the harness takes it, the resume's among them. One without
+  the other is refused. The file is `verkstead-settings.json` in the
   session's root, beside the configuration, and where `write-configuration`
   answers settings of its own those are written instead.
 

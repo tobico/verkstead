@@ -359,22 +359,7 @@ fn launch(value: &Value, field: &str) -> Result<Launch, Refusal> {
             ));
         }
     };
-    let names_settings = tail.iter().any(|word| word.contains("{settings}"));
-    if settings.is_some() && !names_settings {
-        return Err(Refusal::of(
-            &at("tail"),
-            format!(
-                "`{}` should say where `{{settings}}` goes, since `{}` is written.",
-                at("tail"),
-                at("settings")
-            ),
-        ));
-    }
-    if names_settings && settings.is_none() {
-        return Err(Refusal::missing(&at("settings")));
-    }
-
-    Ok(Launch {
+    let launch = Launch {
         model: words(within(map, field, "model")?, &at("model"), Some("model"))?,
         prompt: words(within(map, field, "prompt")?, &at("prompt"), Some("prompt"))?,
         session: optional("session", Some("session"))?,
@@ -384,7 +369,47 @@ fn launch(value: &Value, field: &str) -> Result<Launch, Refusal> {
         },
         tail,
         settings,
-    })
+    };
+
+    // A resume is said by the id the harness was told at launch, so a harness
+    // told none has none to be resumed by.
+    if launch.resume.is_some() && launch.session.is_none() {
+        return Err(Refusal::of(
+            &at("resume"),
+            format!(
+                "`{}` needs `{}`: a session is resumed by the id it was named at launch.",
+                at("resume"),
+                at("session")
+            ),
+        ));
+    }
+
+    // `{settings}` may stand in any part of the line, the resume's among them.
+    let mut parts: Vec<&[String]> = vec![&launch.model, &launch.prompt, &launch.tail];
+    parts.extend(launch.session.as_deref());
+    match &launch.resume {
+        Some(Resume::Flag(words)) => parts.push(words),
+        Some(Resume::Subcommand { words, also }) => parts.extend([&words[..], &also[..]]),
+        None => {}
+    }
+    let names_settings = parts
+        .into_iter()
+        .any(|words| words.iter().any(|word| word.contains("{settings}")));
+    if launch.settings.is_some() && !names_settings {
+        return Err(Refusal::of(
+            &at("tail"),
+            format!(
+                "`{}` should say where `{{settings}}` goes, since `{}` is written.",
+                at("tail"),
+                at("settings")
+            ),
+        ));
+    }
+    if names_settings && launch.settings.is_none() {
+        return Err(Refusal::missing(&at("settings")));
+    }
+
+    Ok(launch)
 }
 
 fn resume(value: &Value, field: &str) -> Result<Resume, Refusal> {
@@ -976,6 +1001,36 @@ provides:
         let yaml = AGENT.replace("--settings, \"{settings}\", ", "");
 
         assert_eq!(refused_at(&yaml), "provides[0].launch.tail");
+    }
+
+    #[test]
+    fn settings_named_in_any_part_of_the_line_are_read() {
+        let yaml = AGENT.replace("--settings, \"{settings}\", ", "").replace(
+            "flag: [--resume, \"{session}\"]",
+            "subcommand: [resume, \"{session}\"]\n        also: [--settings, \"{settings}\"]",
+        );
+
+        assert!(agent_for(&yaml, Platform::Linux).launch.settings.is_some());
+    }
+
+    #[test]
+    fn settings_named_with_none_written_are_refused() {
+        let yaml = AGENT
+            .replace("--settings, \"{settings}\", ", "")
+            .replace(
+                "model: [--model, \"{model}\"]",
+                "model: [--model, \"{model}\", --settings, \"{settings}\"]",
+            )
+            .replace("      settings:\n        quiet: true\n", "");
+
+        assert_eq!(refused_at(&yaml), "provides[0].launch.settings");
+    }
+
+    #[test]
+    fn a_resume_without_a_session_is_refused() {
+        let yaml = AGENT.replace("      session: [--session-id, \"{session}\"]\n", "");
+
+        assert_eq!(refused_at(&yaml), "provides[0].launch.resume");
     }
 
     #[test]
