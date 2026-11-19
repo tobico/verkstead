@@ -711,7 +711,12 @@ function theAccount(directory: string | null): Instruction {
 /// version of.
 function declared(install: HarnessInstall | null | undefined): Instruction {
   const commands = install?.commands ?? [];
-  const link = install?.instructions ?? undefined;
+  // A web page and nothing else, as the server reads a manifest's: what is
+  // drawn here is a link the human presses, and a plugin is not to put one in
+  // front of them that runs anything.
+  const link = /^https?:\/\//i.test(install?.instructions ?? "")
+    ? (install?.instructions ?? undefined)
+    : undefined;
 
   if (commands.length === 0 && link === undefined) {
     return { note: "Its plugin doesn't say how to install it." };

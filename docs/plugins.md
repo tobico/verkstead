@@ -658,9 +658,9 @@ harness only where no built-in harness has a Profile.
 model, with `<server>` and `<tool>` where the two names go.
 
 **`install`** — optional. **`instructions`** is a link to the harness's own
-install instructions; **`commands`** are lines that install its binary, run
-only when the human presses for it. Write a platform's own under that
-platform's block.
+install instructions, an `http://` or `https://` address; **`commands`** are
+lines that install its binary, run only when the human presses for it. Write a
+platform's own under that platform's block.
 
 While the plugin is enabled, its harness is a row of the setup wizard's first
 step, after the built-ins: present once `binary` is on a session's PATH, the
