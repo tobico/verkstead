@@ -460,8 +460,8 @@ function ProfileCard(props: {
           </span>
           <span class={styles.end}>
             {/* The login, which the server runs in the Profile's own sandbox —
-                see `LoggingIn.tsx`. A Claude or an Antigravity CLI account bound
-                here only: one bound elsewhere runs from a copy, and its login is
+                see `LoggingIn.tsx`. An account of a harness Verkstead logs in,
+                bound here only: one bound elsewhere runs from a copy, and its login is
                 made on a machine it is bound on. A press of its own inside the
                 card, so it stands out of the card's press and the card's keys
                 alike. */}

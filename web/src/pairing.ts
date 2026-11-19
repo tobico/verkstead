@@ -129,8 +129,8 @@ export function shown(
 ///
 /// Said once here rather than at each of the four places a pairing is read,
 /// because it is one rule. A profile nothing can be launched under stays in
-/// every picker — but for one of a harness this server has not got, see
-/// [`pairings`] — a row saying why is something to go and put right, and a row
+/// every picker — but for one of a harness this server has not got, or whose
+/// plugin is disabled, see [`pairings`] — a row saying why is something to go and put right, and a row
 /// quietly missing is a human looking for a profile they know they saved — so
 /// the row has to carry the why. The words are
 /// [`brokenBriefly`](./broken.ts), which is the short form of the sentence the

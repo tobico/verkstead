@@ -582,10 +582,11 @@ impl Agents {
     /// reason every other choice here is: the arm this machine will never run
     /// is still an arm a test on it can ask for.
     ///
-    /// `None` is a prompt that could not be written down, which is a session
-    /// with nothing to be started on — the caller starts none, the way it
-    /// starts none for a sandbox it could not build. Nothing else here can fail,
-    /// so the platform that keeps its prompt on the line is always `Some`.
+    /// `None` is a prompt that could not be written down, or a harness this
+    /// server has not got — either a session with nothing to be started on, so
+    /// the caller starts none, the way it starts none for a sandbox it could not
+    /// build. The second never reaches here in practice: the root is built
+    /// first, and refused for the same missing harness.
     ///
     /// **This blocks on the platform that writes the file**, which is why it is
     /// asked from the same blocking thread the sandbox is built on.
@@ -4641,7 +4642,7 @@ mod tests {
     /// And one override the ordinary line does not carry: which directory codex
     /// resumes *in*. A carried rollout records the sending device's Worktree, and
     /// codex 0.155.1 stops to ask which of the two directories to use — see
-    /// [`CODEX_RESUME_CWD`], which is that question answered with the one the work
+    /// codex's `RESUME_CWD`, which is that question answered with the one the work
     /// is now in.
     #[test]
     fn a_continued_codex_session_is_told_to_resume_by_a_subcommand() {

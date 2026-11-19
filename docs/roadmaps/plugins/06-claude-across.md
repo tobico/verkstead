@@ -29,9 +29,10 @@ grilling to pull request looks exactly as it did the day before.
   standard error for a cut code and the harness waiting on, `auth status`
   answering by exit code, an API key reading as logged in.
 - **Two declared paths.** The pair is the manifest's `account:` list with two
-  entries, labelled as the Profile form has labelled them; the per-path table
-  stage 03 made holds both, and the migration that moved `claude_dir` and
-  `config_file` into it is already behind this stage.
+  entries, labelled as the Profile form has labelled them. Stage 03 already
+  holds both: a Profile's binding is a map of its account's paths by key, the
+  pair under `claude_dir` and `config_file`, with the two old fields written
+  beside it so that a release before stage 03 still reads it. No table moved.
 - **`write-configuration` writes the whole of what ADR-0011 writes**: the
   `settings.json` with the bypass and the attached servers, the `.claude.json`
   copy with the account's servers taken out — the host hands the export the
