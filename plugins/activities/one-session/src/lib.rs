@@ -58,7 +58,7 @@ impl Guest for OneSession {
         };
 
         match host::wait(session) {
-            Waited::Done | Waited::Marked => "done",
+            Waited::Done | Waited::Marked | Waited::Picked(_) => "done",
             Waited::Steered => "steered",
             Waited::Gone(_) | Waited::Stalled => "refused",
         }

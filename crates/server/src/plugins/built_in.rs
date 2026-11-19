@@ -248,7 +248,7 @@ pub fn languages(manifest: &Manifest) -> impl Iterator<Item = &crate::languages:
 
 /// The uuid of the built-in whose blocks are the Activities Verkstead ships,
 /// one component each: *Follow-up rounds* first, then the *Backlog runner*,
-/// the *Stage runner* and *One session* (Set 1803, Q3).
+/// the *Stage runner*, *One session* and the *Interview* (Set 1803, Q3).
 pub const ACTIVITIES: &str = "d7a5e719-8491-46a7-b7d7-8f9f85e57bd6";
 
 /// The built-in the shipped Activities are.
@@ -368,9 +368,9 @@ mod tests {
     }
 
     /// The shipped Activities are a built-in depending on the pack
-    /// `verkstead`, whose *Follow-up rounds*, *Backlog runner*, *Stage runner*
-    /// and *One session* blocks each name a component of their own written
-    /// against the `activity` world.
+    /// `verkstead`, whose *Follow-up rounds*, *Backlog runner*, *Stage runner*,
+    /// *One session* and *Interview* blocks each name a component of their own
+    /// written against the `activity` world.
     #[tokio::test]
     async fn the_activities_are_a_built_in_with_their_components() {
         let shipped = activities();
@@ -383,8 +383,8 @@ mod tests {
         assert_eq!(manifest.dependencies.len(), 1);
         assert_eq!(manifest.dependencies[0].uuid, VERKSTEAD);
 
-        let [rounds, backlog, stages, one] = manifest.activities.as_slice() else {
-            panic!("four Activities: {:?}", manifest.activities);
+        let [rounds, backlog, stages, one, interview] = manifest.activities.as_slice() else {
+            panic!("five Activities: {:?}", manifest.activities);
         };
         assert_eq!(rounds.id, "follow-up-rounds");
         assert_eq!(rounds.name, "Follow-up rounds");
@@ -421,11 +421,25 @@ mod tests {
             "the stage runner starts conversations, and the plugin says so at install",
         );
 
+        assert_eq!(interview.id, "interview");
+        assert_eq!(interview.name, "Interview");
+        assert_eq!(
+            interview.outcomes,
+            [
+                "direction:inline",
+                "direction:task-list",
+                "direction:roadmap",
+                "gone"
+            ]
+        );
+        assert_eq!(interview.skills, ["verkstead/grilling"]);
+
         for component in [
             "follow-up-rounds.wasm",
             "backlog-runner.wasm",
             "stage-runner.wasm",
             "one-session.wasm",
+            "interview.wasm",
         ] {
             assert!(
                 shipped

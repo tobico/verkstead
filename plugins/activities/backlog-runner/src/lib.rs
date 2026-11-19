@@ -147,7 +147,7 @@ impl Guest for Backlog {
             };
 
             let how = match host::wait(session) {
-                Waited::Done => None,
+                Waited::Done | Waited::Picked(_) => None,
                 Waited::Steered => return "steered".to_owned(),
                 Waited::Gone(how) => Some(how),
                 Waited::Stalled | Waited::Marked => Some(None),
