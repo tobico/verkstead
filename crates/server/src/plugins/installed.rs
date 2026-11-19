@@ -954,6 +954,8 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                 author: fields.author,
                 provides: fields.provides,
                 enabled,
+                profiles: 0,
+                harness: None,
             }
         })
         .collect();
@@ -1080,6 +1082,8 @@ fn built_ins(
                 elsewhere: None,
                 dependents: going_with(records, &manifest.uuid),
                 settings: u32::try_from(manifest.settings.len()).unwrap_or(u32::MAX),
+                profiles: 0,
+                harness: None,
             }),
             Err(refusal) => Some(PluginRow {
                 uuid: built_in.directory.to_owned(),
@@ -1095,6 +1099,8 @@ fn built_ins(
                 elsewhere: None,
                 dependents: Vec::new(),
                 settings: 0,
+                profiles: 0,
+                harness: None,
             }),
         })
         .collect();
