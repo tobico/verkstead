@@ -63,6 +63,21 @@ grilling to pull request looks exactly as it did the day before.
   `RUNNING_CLAUDE` says today — is the manifest's markdown, fetched by the CLI
   since stage 03; a Guide printed outside a sandbox prints the core alone.
 
+## Left open by stage 03
+
+- **A declared file path skips the strip-and-never-write-back.** Stage 03's
+  wasm-backed harness joins a `kind: file` account path into the session as it
+  is: the account's own MCP servers reach the session, and whatever the session
+  writes goes straight back to the account. Only a directory path's allowlist
+  is copied in stripped. `docs/plugins.md` says so, and it is not yet a problem
+  because no plugin harness declares such a file; Claude's `.claude.json` is
+  exactly one, and holds `mcpServers` at the top level and under each project.
+  So before Claude's pair can be two declared paths, this stage settles how a
+  file path is given to a session under ADR-0011's rule — copied in with the
+  account's servers taken out and only what the host wrote merged back, as
+  `Harness::copied` does for `.claude.json` today, or another shape — and the
+  host, not the component, owns it.
+
 ## Proposed tasks (provisional)
 
 1. **The manifest** — two declared paths, the allowlist and credential file,
