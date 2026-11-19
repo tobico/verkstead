@@ -2158,10 +2158,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // Read back rather than assembled from what was just recorded: what the
     // session runs against is the Conversation as it now stands, worktree and
     // all, and the one thing that must not be guessed at is where an agent is
-    // about to be let loose.
-    let Some(conversation) = store::load_conversation(pool, id).await? else {
+    // about to be let loose. The host reads it back again as it launches.
+    if store::load_conversation(pool, id).await?.is_none() {
         return Ok(GrillingStarted::NoSuchConversation);
-    };
+    }
 
     // The grilling Profile is what this session runs under. The implementation
     // one is fixed before starting
@@ -2176,29 +2176,28 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // bundled grilling skill: nothing in a sandbox says what a session is for —
     // a global instructions file there holds the human's own text and never
     // Verkstead's — so the prompt is where it is said — see [`crate::skills`].
-    if let Some(pairing) = conversation.grilling_pairing.clone()
-        && let Some(prompt) = state
-            .sessions
-            .skills()
-            .map(|skills| skills::grilling(skills, &brief))
-        && let Err(error) = state
-            .sessions
-            .start(
-                pool,
-                &state.nudges,
-                state.devices.as_ref(),
-                &conversation,
-                &pairing,
-                &prompt,
-                // A grilling may not retire a Memo, so it is not told how.
-                false,
-                // Nothing held: this is a Conversation's first session, so there
-                // is nothing anybody left open for it.
-                crate::sessions::Held::nothing(&state.settlements),
-            )
-            .await
+    //
+    // Through the host, as every launch is: under the grilling role, taking no
+    // Turn — nothing else is driving a Conversation that has only just started —
+    // and waited on by nothing here. What its Done signal is checked against is
+    // the pick's, written down when its tail is seen out — see
+    // [`crate::runner::follow_the_tail`] — so the evidence below is never
+    // registered. A grilling may not retire a Memo, so it is not told how.
+    if let Some(prompt) = state
+        .sessions
+        .skills()
+        .map(|skills| skills::grilling(skills, &brief))
     {
-        tracing::error!(error = ?error, conversation_id = id, "a grilling session could not be started");
+        crate::lending::Lent::new(state, id)
+            .turn_held()
+            .start(
+                "verkstead/grilling",
+                store::Role::Grilling,
+                prompt,
+                crate::done::Evidence::Nothing,
+                crate::done::Ends::WithItsWork,
+            )
+            .await;
     }
 
     Ok(GrillingStarted::Started)

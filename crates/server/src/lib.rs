@@ -165,6 +165,7 @@ pub mod key;
 /// is the product's own promise rather than an implementation detail, and the
 /// suite that proves it stands outside this crate.
 pub mod languages;
+mod lending;
 mod limits;
 /// A Profile's login, run by Verkstead in the Profile's own sandbox and drawn in
 /// a modal any device can open.
