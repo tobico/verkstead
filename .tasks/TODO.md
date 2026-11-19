@@ -22,6 +22,6 @@ Roadmap stage: [04: Codex across](docs/roadmaps/plugins/04-codex-across.md)
 
 - [x] 01: A plugin harness that names itself — [details](01-a-plugin-harness-that-names-itself.md)
 - [x] 02: The rest of the grammar Codex needs — [details](02-the-rest-of-the-grammar-codex-needs.md)
-- [ ] 03: Codex's plugin, manifest and component — [details](03-codex-plugin-manifest-and-component.md)
+- [x] 03: Codex's plugin, manifest and component — [details](03-codex-plugin-manifest-and-component.md)
 - [ ] 04: The crossing — [details](04-the-crossing.md)
 - [ ] 05: Codex's install and onboarding row from its manifest — [details](05-codex-install-and-onboarding-from-its-manifest.md)

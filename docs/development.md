@@ -1613,7 +1613,7 @@ a crate in a directory just inside its own, `plugins/<name>/<block>/`, whose
 `[lib]` is `<block>`: it is a member of the workspace, it is embedded as
 `<block>.wasm` at the top of the built-in's files, which is what the block's
 `component:` names, and none of its own files are embedded.
-Today there are three:
+Today there are four:
 
 - **`verkstead`**, the skills every session is told to read: one Skill Pack
   named `verkstead`, its thirteen skills under
@@ -1634,6 +1634,15 @@ Today there are three:
   `crates/cli/tests/suite/plugin.rs` checks with the bytes the server embeds.
 - the **fixture**, which provides nothing, exports nothing and is listed
   nowhere: it is the proof that the component path works on every platform.
+- **`codex`**, Codex as a harness plugin: its `plugin.yaml` says what about
+  Codex is data, and the crate beside it is the component that finds and
+  reads its rollouts and writes its `config.toml`. Embedded and loaded at
+  start, and not yet the harness a Codex Profile runs on, so not listed on
+  the Plugins page. **The first built-in with dependencies**: `toml` is held
+  at the server's own version, and `plugins/Cargo.lock` at the server's
+  versions of what `toml` brings, so the `config.toml` it writes is the bytes
+  the in-process harness writes. The packaged build vendors that lockfile
+  beside the server's — see `nix/verkstead.nix`.
 
 The build script looks for the components in `plugins/dist/` first, which is
 where the release and CI workflows put the one build of them every leg
@@ -1655,9 +1664,9 @@ changing a component's source, or the server goes on embedding the old build.
 
 **Components that are no built-in's** are under `plugins/tests/`, each a
 workspace of its own: the server's suites install them as plugins of their
-own. Apart, because they have dependencies the built-ins have not, and the
-packaged build (`nix/`) vendors only what the server's own `Cargo.lock` names;
-it leaves `plugins/tests/` out of its source, and compiles no test. Today that
+own. Apart, because the packaged build (`nix/`) vendors only what the
+server's `Cargo.lock` and the built-ins' name; it leaves `plugins/tests/` out of
+its source, and compiles no test. Today that
 is the **stub harness**, whose component the suites write a `plugin.yaml`
 beside and install from a directory to launch sessions on a harness a plugin
 declares — see `crates/server/tests/suite/stub_harness.rs`. The build script

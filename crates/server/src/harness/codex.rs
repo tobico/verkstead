@@ -186,6 +186,7 @@ impl Harness for Codex {
                 also: vec!["-c".to_owned(), format!("{RESUME_CWD}=\"current\"")],
             }),
             tail,
+            worktree: Vec::new(),
         }
     }
 
@@ -354,5 +355,161 @@ impl Harness for Codex {
     /// answers` is what fetches the Answers when the nudge lands.
     fn running(&self) -> &str {
         include_str!("running/store-and-nudge.md")
+    }
+}
+
+/// Codex's plugin — `plugins/codex/`, embedded and stood up beside this one —
+/// held to what this harness says and writes: the plugin is to be this
+/// harness, so every difference here is one in the plugin.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::harness::plugged::Plugged;
+
+    async fn plugin() -> Plugged {
+        crate::plugins::built_in::codex_plugged().await
+    }
+
+    /// A Profile form drawn from the manifest has the one path field this
+    /// harness draws, labelled and explained as it is.
+    #[tokio::test]
+    async fn the_plugins_profile_form_is_one_home_directory() {
+        let plugin = plugin().await;
+        let (drawn, ours) = (plugin.paths(), Codex.paths());
+        assert_eq!(drawn.len(), 1, "one path field");
+        assert_eq!(ours.len(), 1);
+        let (drawn, ours) = (&drawn[0], &ours[0]);
+
+        assert_eq!(drawn.key, ours.key);
+        assert_eq!(drawn.label, "Home directory");
+        assert_eq!(drawn.label, ours.label);
+        assert_eq!(drawn.purpose, ours.purpose);
+        assert_eq!(drawn.placeholder, ours.placeholder);
+        assert!(!drawn.file);
+    }
+
+    /// Everything about Codex that is data, as the manifest says it.
+    #[tokio::test]
+    async fn the_plugin_says_what_this_harness_says() {
+        let plugin = plugin().await;
+
+        assert_eq!(plugin.binary(), Codex.binary());
+        assert_eq!(plugin.named(), Codex.named());
+        assert_eq!(plugin.mark(), Codex.mark());
+        assert_eq!(plugin.at_work(), Codex.at_work());
+        assert_eq!(plugin.exhausted(), Codex.exhausted());
+        assert_eq!(plugin.signed_out(), None);
+        assert!(plugin.speaking().is_none(), "Verkstead runs no Codex login");
+        assert_eq!(plugin.channel(), Codex.channel());
+        assert_eq!(plugin.tools_named(), Codex.tools_named());
+        assert_eq!(plugin.running(), Codex.running());
+        assert_eq!(plugin.models(), Codex.models());
+        for role in [
+            store::Role::Grilling,
+            store::Role::Implementation,
+            store::Role::Review,
+        ] {
+            assert_eq!(plugin.model(role), Codex.model(role), "{role:?}");
+        }
+        assert_eq!(plugin.instructions(), Codex.instructions());
+        assert_eq!(plugin.root(), Codex.root());
+        assert_eq!(plugin.login(), Codex.login());
+        assert_eq!(plugin.configuration(), Codex.configuration());
+        assert_eq!(plugin.mirrored(), Codex.mirrored());
+        assert_eq!(plugin.memory(None), Codex.memory(None));
+        assert_eq!(plugin.unshared(), Codex.unshared());
+        assert_eq!(
+            plugin.environment(Platform::HERE),
+            Codex.environment(Platform::HERE)
+        );
+        assert_eq!(plugin.written_in_worktree(), Codex.written_in_worktree());
+
+        // The same directories synced by the same rules, each under the path
+        // it is rather than this harness's own names for them.
+        let synced = |parts: Vec<Part>| {
+            let mut parts: Vec<(PathBuf, Whose)> = parts
+                .into_iter()
+                .map(|part| (part.inside, part.whose))
+                .collect();
+            parts.sort_by(|a, b| a.0.cmp(&b.0));
+            parts
+        };
+        let sessions = ["s1".to_owned()];
+        assert_eq!(
+            synced(plugin.synced(None, Some("/srv/worktrees/tables"), &sessions)),
+            synced(Codex.synced(None, Some("/srv/worktrees/tables"), &sessions)),
+        );
+    }
+
+    /// What the sandbox suite's Codex accounts keep in their `config.toml`.
+    const ACCOUNTS: &[Option<&str>] = &[
+        None,
+        Some(
+            "model_provider = \"proxy\"\nnotify = [\"notify-send\"]\n\n\
+             [model_providers.proxy]\nname = \"The proxy\"\n\
+             base_url = \"https://proxy.example/v1\"\n\n\
+             [mcp_servers.the-humans]\ncommand = \"npx\"\n\n\
+             [features]\nmemories = true\n",
+        ),
+        Some(
+            "model_provider = \"proxy\"\n\n[model_providers.proxy]\n\
+             base_url = \"https://proxy.example/v1\"\n\n\
+             [mcp_servers.the-humans]\ncommand = \"npx\"\n",
+        ),
+        Some("model = \"gpt-5-codex\"\n"),
+        Some("model_provider = "),
+    ];
+
+    /// For each of them, with and without attached servers, `write-configuration`
+    /// answers the `config.toml` this harness writes, byte for byte.
+    #[tokio::test]
+    async fn the_plugin_writes_the_config_toml_this_harness_writes() {
+        let plugin = plugin().await;
+        let attached = [
+            AttachedServer::of(
+                "docs",
+                "https://mcp.example.com/docs",
+                &[
+                    ("Authorization", "Bearer sk-averysecretkey"),
+                    ("X-Tenant", "verkstead"),
+                ],
+            ),
+            AttachedServer::of("tickets", "https://mcp.example.com/tickets", &[]),
+            AttachedServer::of("dotted.name", "https://mcp.example.com/\"quoted\"", &[]),
+        ];
+
+        for account in ACCOUNTS {
+            for servers in [&[][..], &attached[..]] {
+                let found = vec![account.map(|text| text.as_bytes().to_vec())];
+
+                assert_eq!(
+                    plugin.configured(found.clone(), servers),
+                    Codex.configured(found, servers),
+                    "{account:?} with {} servers",
+                    servers.len()
+                );
+            }
+        }
+    }
+
+    /// And an account's mirror holds what this harness's does.
+    #[tokio::test]
+    async fn the_plugins_mirror_is_this_harness_s() {
+        let plugin = plugin().await;
+
+        for config in ACCOUNTS {
+            let home = tempfile::tempdir().unwrap();
+            if let Some(config) = config {
+                std::fs::write(home.path().join(root::CODEX_CONFIG), config).unwrap();
+            }
+            let account = store::Account::home(store::AgentType::CODEX, home.path().to_owned());
+
+            assert_eq!(
+                plugin.mirroring(&account),
+                Codex.mirroring(&account),
+                "{config:?}"
+            );
+        }
     }
 }

@@ -217,6 +217,7 @@ impl Harness for Plugged {
                 },
             }),
             tail: launch.tail.clone(),
+            worktree: launch.worktree.clone(),
         }
     }
 
@@ -1154,6 +1155,193 @@ mod tests {
 
         entries.take().await;
         assert_eq!(entries.found_itself(), None, "the once");
+    }
+
+    /// The render suite's Codex rollout fixtures, as one rollout — and after
+    /// them a line apiece of what it has no fixture of: the other three tool
+    /// items, thinking with no summary, a message with a picture in it and one
+    /// with nothing, an event naming no item or nothing at all, a line with no
+    /// kind, and one that is not JSON.
+    const ROLLOUT: &[&str] = &[
+        r#"{"timestamp":"2026-08-30T08:11:27.307Z","ordinal":0,"type":"session_meta","payload":{"session_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","cwd":"/srv/worktrees/tables","originator":"codex_exec"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.307Z","ordinal":1,"type":"event_msg","payload":{"type":"task_started","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","started_at":1788077487,"model_context_window":258400,"collaboration_mode_kind":"default"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.311Z","ordinal":2,"type":"response_item","payload":{"type":"message","id":"msg_01a051b9-34cf-75b2-93a0-acaca50f73a3","role":"developer","content":[{"type":"input_text","text":"<skills_instructions>\n## Skills\nA skill is a set of instructions provided through a `SKILL.md` source."}]}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.311Z","ordinal":3,"type":"response_item","payload":{"type":"message","id":"msg_01a051b9-34cf-75b2-93a0-acb06c799843","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/srv/worktrees/tables</cwd>\n  <shell>bash</shell>\n</environment_context>"}]}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.311Z","ordinal":4,"type":"world_state","payload":{"full":true,"state":{"agents_md":{},"apps_instructions":false}}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.311Z","ordinal":5,"type":"turn_context","payload":{"turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","cwd":"/srv/worktrees/tables"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.316Z","ordinal":6,"type":"response_item","payload":{"type":"message","id":"msg_01a051b9-34d4-7612-95dc-1001c4fb2884","role":"user","content":[{"type":"input_text","text":"What is in the task list?"}],"internal_chat_message_metadata_passthrough":{"turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","create_time":1788077487.3162456}}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.316Z","ordinal":7,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"UserMessage","id":"01a051b9-34d4-7612-95dc-10185af451bf","content":[{"type":"text","text":"What is in the task list?","text_elements":[]}]},"started_at_ms":1788077487316,"completed_at_ms":1788077487316}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.335Z","ordinal":8,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"Reasoning","id":"rs-1","summary_text":["**Reading the task list**\n\nThe backlog is where to start."],"raw_content":[]},"started_at_ms":1788077487335,"completed_at_ms":1788077487335}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.335Z","ordinal":9,"type":"response_item","payload":{"type":"reasoning","id":"rs-1","summary":[{"type":"summary_text","text":"**Reading the task list**\n\nThe backlog is where to start."}],"content":null,"encrypted_content":null}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.336Z","ordinal":10,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"I'll look at the **task list** first."}]},"started_at_ms":1788077487336,"completed_at_ms":1788077487336}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.336Z","ordinal":11,"type":"response_item","payload":{"type":"message","id":"msg-1","role":"assistant","content":[{"type":"output_text","text":"I'll look at the **task list** first."}]}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.337Z","ordinal":12,"type":"response_item","payload":{"type":"function_call","id":"fc_01a051b9-34e9-7e33-b5b0-7ec74bfd68c9","name":"exec_command","arguments":"{\"cmd\":\"ls .tasks\"}","call_id":"call-1"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.369Z","ordinal":13,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"CommandExecution","id":"call-1","process_id":"45936","command":["/bin/bash","-lc","ls .tasks"],"cwd":"file:///srv/worktrees/tables","parsed_cmd":[{"type":"list_files","cmd":"ls .tasks","path":".tasks"}],"source":"unified_exec_startup","status":"completed","stdout":"04-render.md\n05-summaries.md\n","stderr":"","aggregated_output":"04-render.md\n05-summaries.md\n","exit_code":0,"duration":{"secs":0,"nanos":2425},"formatted_output":"04-render.md\n05-summaries.md\n"},"started_at_ms":1788077487369,"completed_at_ms":1788077487369}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.370Z","ordinal":14,"type":"response_item","payload":{"type":"function_call_output","id":"fco_01a051b9-350a-7a20-932c-94ffaad12aba","call_id":"call-1","output":"Chunk ID: 57be28\nProcess exited with code 0\nOutput:\n04-render.md\n05-summaries.md\n"}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.371Z","ordinal":15,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1200,"output_tokens":40,"total_tokens":1240},"model_context_window":258400}}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.388Z","ordinal":16,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a051b9-34c0-7e60-b078-f31f1f443ebe","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","item":{"type":"AgentMessage","id":"msg-2","content":[{"type":"Text","text":"Two files: `04-render.md` and `05-summaries.md`."}]},"started_at_ms":1788077487388,"completed_at_ms":1788077487388}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.388Z","ordinal":17,"type":"response_item","payload":{"type":"message","id":"msg-2","role":"assistant","content":[{"type":"output_text","text":"Two files: `04-render.md` and `05-summaries.md`."}]}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.390Z","ordinal":19,"type":"event_msg","payload":{"type":"task_complete","turn_id":"01a051b9-34c8-7bb2-ba8e-2969c9c4df12","last_agent_message":"Two files: `04-render.md` and `05-summaries.md`.","started_at":1788077487,"completed_at":1788077487,"duration_ms":85}}"#,
+        r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"call-9","command":["/bin/bash","-lc","cargo test"],"status":"failed","aggregated_output":"error: could not compile","exit_code":101}}}"#,
+        r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"mcp-1","server":"github","tool":"list_issues","arguments":{"query":"is:open label:bug"},"status":"failed","error":{"message":"the token is not authorised"}}}}"#,
+        r#"{"timestamp":"2026-08-30T08:11:27.390Z","ordinal":20,"type":"seance","payload":{"heard":"a kind from a later version"}}"#,
+        r#"{"type":"event_msg","payload":{"type":"stream_error","message":"retrying"}}"#,
+        r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Telepathy","id":"tp-1","thought":"a kind from a later version"}}}"#,
+        r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"msg-1","content":[{"type":"Text","text":"And the *rollout* was read too."}]}}}"#,
+        r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"FileChange","id":"fc-1","changes":{"src/a.rs":{"type":"update"},"src/b.rs":{"type":"add"}},"status":"completed","stdout":"Success."}}}"#,
+        r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"WebSearch","id":"ws-1","query":"toml inline tables","action":{"type":"search"},"results":null}}}"#,
+        r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"DynamicToolCall","id":"dt-1","namespace":"","tool":"lookup","arguments":{"description":"Look up every place the rate limiter is constructed, and every place its window is read, across the server and the CLI both"},"status":"completed","content_items":[{"type":"text","text":"found"}]}}}"#,
+        r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"call-10","command":["/bin/bash","-lc","cargo test --workspace"],"status":"completed","formatted_output":"ok","exit_code":0}}}"#,
+        r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Reasoning","id":"rs-2","summary_text":[],"raw_content":["The window first.","Then the counter."]}}}"#,
+        r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"um-2","content":[{"type":"image","url":"file:///tmp/a.png"},{"type":"text","text":" Like this."}]}}}"#,
+        r#"{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"msg-9","content":[]}}}"#,
+        r#"{"type":"event_msg","payload":{"type":"item_completed"}}"#,
+        r#"{"type":"event_msg","payload":{}}"#,
+        r#"{"type":"compacted","payload":{"message":"The story so far."}}"#,
+        r#"{"ordinal":30}"#,
+        r#"not a line of JSON"#,
+    ];
+
+    /// The Worktree [`ROLLOUT`] names, and the id it gives itself.
+    const ROLLOUT_WORKTREE: &str = "/srv/worktrees/tables";
+    const ROLLOUT_SESSION: &str = "01a051b9-34c0-7e60-b078-f31f1f443ebe";
+
+    /// `lines` as a rollout codex filed under `account`'s `sessions/` on `day`.
+    fn filed(account: &Path, day: &str, name: &str, lines: &[&str]) -> PathBuf {
+        let dir = account.join("sessions").join(day);
+        std::fs::create_dir_all(&dir).unwrap();
+        let rollout = dir.join(name);
+        std::fs::write(
+            &rollout,
+            lines
+                .iter()
+                .map(|line| format!("{line}\n"))
+                .collect::<String>(),
+        )
+        .unwrap();
+        rollout
+    }
+
+    /// A reader of Codex's plugin, looking for `session` or by its Worktree.
+    async fn codex(account: &Path, session: Option<&str>) -> Reader {
+        let plugin = crate::plugins::built_in::codex_plugged().await;
+        Reader {
+            again: plugin.component().clone(),
+            account: account.to_owned(),
+            session: session.map(str::to_owned),
+            worktree: Some(PathBuf::from(ROLLOUT_WORKTREE)),
+            launched: SystemTime::now() - Duration::from_secs(60),
+        }
+    }
+
+    /// Codex's rollout, read by its plugin, is drawn as the render crate draws
+    /// the rollout itself: the same things said, the same tool calls and
+    /// results, and the same lines folded away under the same names.
+    #[tokio::test]
+    async fn codexs_plugin_reads_a_rollout_into_what_the_render_crate_draws() {
+        let account = tempfile::tempdir().unwrap();
+        filed(
+            account.path(),
+            "2026/08/30",
+            "rollout-2026-08-30T08-11-27-01a051b9-34c0-7e60-b078-f31f1f443ebe.jsonl",
+            ROLLOUT,
+        );
+
+        let mut entries = Entries::of(codex(account.path(), None).await);
+        let lines = entries.take().await;
+
+        let read = verkstead_render::transcript_view(&lines);
+        let drawn = verkstead_render::transcript_view(
+            &ROLLOUT
+                .iter()
+                .map(|line| (*line).to_owned())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(read.turns, drawn.turns);
+        assert_eq!(read.bookkeeping, drawn.bookkeeping);
+        assert_eq!(entries.found_itself().as_deref(), Some(ROLLOUT_SESSION));
+    }
+
+    /// Codex names itself: its rollout is found by the Worktree its opening
+    /// line names, among another Worktree's written the same day and what else
+    /// codex keeps beside them — and once it has said which session it is, by
+    /// that id, on whichever day it was filed.
+    #[tokio::test]
+    async fn codexs_plugin_finds_a_rollout_by_its_worktree_and_then_by_its_id() {
+        let account = tempfile::tempdir().unwrap();
+        let theirs = r#"{"type":"session_meta","payload":{"session_id":"theirs","cwd":"/srv/worktrees/counter"}}"#;
+        let said = |text: &str| {
+            format!(
+                r#"{{"type":"event_msg","payload":{{"type":"item_completed","item":{{"type":"AgentMessage","id":"m","content":[{{"type":"Text","text":"{text}"}}]}}}}}}"#
+            )
+        };
+        filed(
+            account.path(),
+            "2026/08/30",
+            "rollout-theirs.jsonl",
+            &[theirs, &said("Not this one.")],
+        );
+        filed(
+            account.path(),
+            "2026/08/30",
+            "rollout-ours.jsonl.zst",
+            &[ROLLOUT[0], &said("Nor this.")],
+        );
+        filed(
+            account.path(),
+            "2026/08/30",
+            "rollout-ours.jsonl",
+            &[ROLLOUT[0], &said("This one.")],
+        );
+
+        let spoken = |lines: Vec<String>| -> Vec<String> {
+            lines
+                .into_iter()
+                .filter(|line| line.contains("\"said\""))
+                .collect()
+        };
+        let mut entries = Entries::of(codex(account.path(), None).await);
+        let lines = spoken(entries.take().await);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("This one."), "{lines:?}");
+        assert_eq!(entries.found_itself().as_deref(), Some(ROLLOUT_SESSION));
+
+        // Carried to another device, where the memory sync filed it another
+        // day, and asked for by the id alone.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let rollout = filed(
+            elsewhere.path(),
+            "2026/09/01",
+            "rollout-carried.jsonl",
+            &[ROLLOUT[0], &said("Carried.")],
+        );
+        filed(
+            elsewhere.path(),
+            "2026/09/02",
+            "rollout-theirs.jsonl",
+            &[theirs],
+        );
+        let mut reader = codex(elsewhere.path(), Some(ROLLOUT_SESSION)).await;
+        reader.worktree = None;
+        reader.launched = SystemTime::UNIX_EPOCH;
+        let mut entries = Entries::of(reader);
+        let lines = spoken(entries.take().await);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("Carried."), "{lines:?}");
+
+        // And a poll after the first reads what was added since, and no more.
+        let mut more = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&rollout)
+            .unwrap();
+        std::io::Write::write_all(
+            &mut more,
+            format!("{}\n{{\"type\"", said("Then this.")).as_bytes(),
+        )
+        .unwrap();
+        let lines = entries.take().await;
+        assert_eq!(lines.len(), 1, "the line half-written waits: {lines:?}");
+        assert!(lines[0].contains("Then this."), "{lines:?}");
     }
 
     /// A component waiting on the host runs none of its own code, which the

@@ -153,6 +153,7 @@ impl Harness for OpenCode {
             session: None,
             resume: Some(Resume::Flag(said(&["--session", SESSION]))),
             tail: said(&["--auto"]),
+            worktree: Vec::new(),
         }
     }
 

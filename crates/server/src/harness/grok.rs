@@ -124,6 +124,7 @@ impl Harness for Grok {
             session: Some(said(&["--session-id", SESSION])),
             resume: Some(Resume::Flag(said(&["--resume", SESSION]))),
             tail: said(&["--always-approve", "--sandbox", "off", "--no-alt-screen"]),
+            worktree: Vec::new(),
         }
     }
 

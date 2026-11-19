@@ -597,6 +597,7 @@ provides:
       resume:
         flag: [--resume, "{session}"]
       tail: [--yes, --settings, "{settings}", --add-dir, "{worktree}"]
+      worktree: [--trust, "{worktree}"]    # optional: left off with no Worktree
       settings:
         autoUpdates: false
     account:
@@ -671,6 +672,11 @@ is written as it is and its `{worktree}` still filled.
   `resume`, a resumed Conversation opens a session of its own.
 - **`tail`** — optional: what goes last. `{worktree}` is the Worktree the
   session works in.
+- **`worktree`** — optional, holding `{worktree}`: words about the Worktree
+  that are written after the `tail` only where the session has one, and are
+  left off whole where it has none — a flag and the value it takes, such as
+  codex's `[-c, 'projects={"{worktree}"={trust_level="trusted"}}']`, rather
+  than a flag left with nothing after it.
 - **`settings`** — optional: settings for this session alone, as a map, which
   the host writes as JSON to a file and names on the line as `{settings}`, in
   whichever part the harness takes it, the resume's among them. One without
