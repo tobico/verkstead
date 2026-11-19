@@ -301,12 +301,12 @@ impl Harness for Agy {
     ) -> Vec<Part> {
         vec![
             Part {
-                label: root::CONVERSATIONS,
+                label: root::CONVERSATIONS.into(),
                 inside: PathBuf::from(root::AGY_MEMORY[0]),
                 whose: Whose::Databases(sessions.to_vec()),
             },
             Part {
-                label: root::BRAIN,
+                label: root::BRAIN.into(),
                 inside: PathBuf::from(root::AGY_MEMORY[1]),
                 whose: Whose::Called(sessions.to_vec()),
             },

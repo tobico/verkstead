@@ -608,7 +608,9 @@ provides:
         mounted: .stub
         allowlist: [settings.json, config.toml]
         credentials: [auth.json]
-        memory: [memory]
+        memory:
+          - path: memory
+            synced: everything          # or a path alone, kept on its device
     idle:
       signature: esc to interrupt
     phrases:
@@ -660,10 +662,13 @@ is written as it is and its `{worktree}` still filled.
   named, and the id `parse-transcript` answers with is what it is called from
   then on.
 - **`resume`** — optional: how a conversation is carried on, under the id the
-  session that was having it was named at launch, or named itself. Either a **`flag`** holding `{session}`, written where `session` would have
-  been, or a **`subcommand`** holding `{session}`, written straight after the
-  binary, with **`also`** the words a resume needs on the end that a launch
-  does not. Without one, a resumed Conversation opens a session of its own.
+  session that was having it was named at launch, or named itself. Either a
+  **`flag`** holding `{session}`, written where `session` would have been, or
+  a **`subcommand`**, written straight after the binary, with **`also`** the
+  words a resume needs on the end that a launch does not. A subcommand
+  holding no `{session}` — `[resume]`, as codex's is — has the id written as
+  a word of its own after the model, in front of the prompt. Without a
+  `resume`, a resumed Conversation opens a session of its own.
 - **`tail`** — optional: what goes last. `{worktree}` is the Worktree the
   session works in.
 - **`settings`** — optional: settings for this session alone, as a map, which
@@ -695,7 +700,10 @@ made empty of the session's own where it does not, and its `allowlist` copied
 in as found with the account's own MCP servers taken out. `write-configuration`
 composes the first path's configuration alone. A Profile launched on a device
 that holds no binding of it is given the first path's files, which are what its
-mirror carries.
+mirror carries: the login as it is, and each configuration file as
+`write-configuration` answers it handed the account's and no servers — what a
+root built from the mirror would hold, and nothing more of how the human works.
+Its memory is synced, a directory at a time, as the next list says.
 
 - **`key`** — what the Profile holds the path under, unique in the list.
 - **`label`** — what the form labels the field. **`purpose`**, optional, is
@@ -712,6 +720,33 @@ mirror carries.
   directories that are the memory store. Nothing else of the directory reaches
   a session: with no `allowlist`, the export is handed no configuration and
   writes what it will from nothing.
+
+  **A `memory` entry is a path, or a map of its `path` and how it is
+  `synced`.** A path alone is memory that stays on the device it was written
+  on: a session away from where the Profile is bound starts it empty. The
+  first path's memory may say instead which of its files a session on another
+  device is given, and sends back when it ends — one of the host's own rules:
+
+  - `everything` — every file under it.
+  - `worktree` — the codex-shaped rollouts under it, `rollout-*.jsonl` opening
+    with a `session_meta` line, whose session worked in a Worktree of this
+    Conversation's name.
+  - `sessions` — the directories in it, or one level down, called by one of
+    the Conversation's session ids.
+  - `database` — the SQLite file named by **`database`**, directly in it, with
+    its `-wal` and `-shm` beside it, and nothing else there.
+
+  ```yaml
+  memory:
+    - path: sessions
+      synced: worktree
+    - path: memories
+      synced: everything
+  ```
+
+  A word that is none of these is refused naming the field, and so is
+  `synced` on a later path: what crosses is said from the account's directory.
+  Nothing crosses where the Profile's memory switch is off.
 
 Every path written relatively here, and `instructions` below, is refused where
 it would climb out of where it is said from.

@@ -1180,7 +1180,11 @@ pub(crate) const BRAIN: &str = "brain";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Part {
     /// What it is called on the link — [`REPO`] and the four beside it.
-    pub(crate) label: &'static str,
+    ///
+    /// **Borrowed for a built-in**, whose labels are the constants above, and
+    /// owned for a plugin harness, whose are the memory paths its manifest
+    /// declares.
+    pub(crate) label: std::borrow::Cow<'static, str>,
 
     /// And where it is inside the account's own directory on this machine.
     pub(crate) inside: PathBuf,
@@ -1230,7 +1234,7 @@ pub(crate) enum Whose {
     ///
     /// A sibling that is not there is nothing to carry rather than a failure,
     /// which is a database whose log has been folded back into it.
-    Database(&'static str),
+    Database(String),
 
     /// And a database apiece directly under the part, `<id>.db` for each of
     /// these ids, with the two siblings SQLite keeps beside each.
