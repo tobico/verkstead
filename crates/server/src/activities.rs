@@ -135,7 +135,7 @@ pub(crate) struct Ran {
 pub(crate) async fn run(
     state: &AppState,
     conversation_id: i64,
-    driving: &Driving,
+    _driving: &Driving,
     files: Files<'_>,
     activity: &Activity,
     capabilities: &[Capability],
@@ -146,13 +146,13 @@ pub(crate) async fn run(
     let (outcome, seen) = run_seeing(
         state,
         conversation_id,
-        driving,
         files,
         activity,
         capabilities,
         options,
-        doing,
-        brought,
+        Lent::new(state, conversation_id)
+            .doing(doing)
+            .brought(brought),
     )
     .await;
 
@@ -165,27 +165,41 @@ pub(crate) async fn run(
 /// What the newest session a component launched came to, read back by an
 /// in-process caller where the world's `waited` says only *gone* — as
 /// [`Lent::see`] reads it back for a driver of its own.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct Seen {
     /// The Timeline Event it printed into, where one was launched.
     pub(crate) event_id: Option<i64>,
 
     /// How it ended, where a wait saw it end without its Done signal taken.
     pub(crate) ended: Option<crate::sessions::Ended>,
+
+    /// The Direction a wait answered `picked`, its artifact written — which
+    /// stands where a stop that landed beside it took the Outcome away.
+    pub(crate) picked: Option<String>,
+
+    /// The registration the host took as the human picked a Direction, handed
+    /// on with the wait's `picked` to whatever the Direction sets going — see
+    /// [`Lent::wait`].
+    pub(crate) driving: Option<Driving>,
 }
 
-/// [`run`], and what the newest session the component launched came to.
-#[allow(clippy::too_many_arguments)]
+/// [`run`], and what the newest session the component launched came to — lent
+/// `lent`, which carries what only an in-process caller can say to the host:
+/// what the rescue says the session is doing, a Turn already held, the Sets a
+/// relaunched grilling holds open, a registration to let go once its session
+/// is launched.
+///
+/// The Driving registration is the caller's to hold across the run, as for
+/// [`run`] — or the [`Lent`]'s, for the interview, whose grilling is driven by
+/// its session until the human picks.
 pub(crate) async fn run_seeing(
     state: &AppState,
     conversation_id: i64,
-    _driving: &Driving,
     files: Files<'_>,
     activity: &Activity,
     capabilities: &[Capability],
     options: Vec<(String, String)>,
-    doing: &str,
-    brought: Brought,
+    lent: Lent,
 ) -> (Option<String>, Seen) {
     let name = &activity.name;
     let seen = Arc::new(Mutex::new(Seen::default()));
@@ -212,17 +226,15 @@ pub(crate) async fn run_seeing(
     let home = crate::sandbox::Homes::of_the_server(&state.data_dir)
         .map(|homes| homes.servers().to_owned());
     let lent = Hosted {
-        lent: Lent::new(state, conversation_id)
-            .doing(doing)
-            .brought(brought)
-            .building(building),
+        doing: lent.doing_now().to_owned(),
+        lent: lent.building(building),
         seen: seen.clone(),
         state: state.clone(),
         conversation_id,
         name: name.clone(),
         declared: activity.skills.clone(),
         starts: capabilities.contains(&Capability::Conversations),
-        doing: doing.to_owned(),
+        building,
         planning: None,
         beside: false,
     };
@@ -308,6 +320,7 @@ pub(crate) async fn beside(
         declared: activity.skills.clone(),
         starts: capabilities.contains(&Capability::Conversations),
         doing: name.clone(),
+        building: None,
         seen: Arc::new(Mutex::new(Seen::default())),
         planning: None,
         beside: true,
@@ -506,6 +519,10 @@ struct Hosted {
     /// launches name — see [`step`].
     doing: String,
 
+    /// What the sessions its launches name no step for build, from its
+    /// `building` option — see [`run`].
+    building: Option<Building>,
+
     /// The session launched to plan a roadmap stage, where the newest was one:
     /// its backlog landing is the host's to record once it has been waited on.
     planning: Option<world::Session>,
@@ -593,7 +610,7 @@ impl host::Host for Hosted {
 
         match building {
             Some((building, doing)) => self.lent.now(Some(building), &doing),
-            None => self.lent.now(None, &self.doing),
+            None => self.lent.now(self.building, &self.doing),
         }
 
         let launched =
@@ -605,7 +622,7 @@ impl host::Host for Hosted {
 
                 *self.seen.lock().expect("nothing panics holding it") = Seen {
                     event_id: Some(self.lent.event_id(*session)),
-                    ended: None,
+                    ..Seen::default()
                 }
             }
             Err(_) => self.ended_by_a_stop().await?,
@@ -626,7 +643,15 @@ impl host::Host for Hosted {
     async fn wait(&mut self, session: world::Session) -> wasmtime::Result<world::Waited> {
         let waited = host::Host::wait(&mut self.lent, session).await?;
 
-        self.seen.lock().expect("nothing panics holding it").ended = self.lent.ended(session);
+        {
+            let mut seen = self.seen.lock().expect("nothing panics holding it");
+            seen.ended = self.lent.ended(session);
+
+            if let world::Waited::Picked(direction) = &waited {
+                seen.picked = Some(direction.clone());
+                seen.driving = self.lent.driving();
+            }
+        }
 
         if self.planning == Some(session) && self.backlog_committed().await {
             crate::conversations::backlog_landed(&self.state, self.conversation_id).await;
@@ -635,8 +660,9 @@ impl host::Host for Hosted {
         match waited {
             world::Waited::Done => {
                 self.state.sessions.end(self.conversation_id).await;
-                self.lent.now(None, &self.doing);
+                self.lent.now(self.building, &self.doing);
             }
+            world::Waited::Picked(_) => {}
             _ => self.ended_by_a_stop().await?,
         }
 

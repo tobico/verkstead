@@ -294,6 +294,11 @@ interface activity-types {
     nothing-else,
     /// The same mark in Investigating's window, uncommitted changes allowed.
     investigated,
+    /// The artefact of the Direction the human picks on the session's own
+    /// proposal — the handoff, the plan commit, or the roadmap commit and its
+    /// pull request — the latest pick superseding any before it. Nothing is
+    /// expected before a pick, so a signal then is refused.
+    picked,
   }
 
   /// How a session ends once it is done: with the work standing, or on a pull
@@ -322,6 +327,11 @@ interface activity-types {
     steered,
     /// The human answered a round with the Nothing-else mark.
     marked,
+    /// It gave its Done signal over the artefact of the Direction the human
+    /// picked, which was taken, and is idle — or it ended with that artefact
+    /// written: the Direction, `inline`, `task-list` or `roadmap`. Only a
+    /// session launched expecting `picked` is answered this.
+    picked(string),
   }
 
   /// What one repository's branch holds, read-only.

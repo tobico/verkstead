@@ -27,12 +27,14 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use verkstead_schema::Nudge;
+use tokio::sync::watch;
+use verkstead_schema::{Direction, Nudge};
 use verkstead_store as store;
 
 use crate::AppState;
 use crate::continuing::{Began, Brought};
 use crate::done::{Ends, Evidence};
+use crate::drivers::Driving;
 use crate::memos::Building;
 use crate::plugins::component::worlds::category::activity::verkstead::plugin::{
     activity_types as world, host,
@@ -61,7 +63,19 @@ pub(crate) struct Lent {
     /// word.
     doing: String,
 
-    /// Every session launched or adopted here, by the handle the world names it
+    /// Dropped once the next launch is over, which is what wakes a caller
+    /// waiting on it — see [`Lent::telling`].
+    telling: Option<tokio::sync::oneshot::Sender<()>>,
+
+    /// A registration held across the next launch alone — see
+    /// [`Lent::launching`].
+    launching: Option<Driving>,
+
+    /// The registration a pick took, held from then on — see
+    /// [`Lent::wait_for_the_pick`].
+    picked: Option<Driving>,
+
+    /// Every session launched here, by the handle the world names it
     /// by.
     watched: HashMap<world::Session, Watched>,
     issued: world::Session,
@@ -117,21 +131,33 @@ pub(crate) struct Lent {
 /// its stop outright, and so does a Stop pressed in one of the quiet moments
 /// between sessions. A launch that looked for the waiting press alone would walk
 /// straight past both of them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Turn {
     Take,
     Held,
+    /// Taken by the caller and handed over, to be held across the next launch
+    /// and let go once it is over — a relaunched grilling, which waited for
+    /// whatever was running to finish before it decided anything.
+    Handed(crate::sessions::Turn),
 }
 
 /// One session the host is watching, and what its Done signal is checked
 /// against while it is waited on.
 struct Watched {
     session: Session,
-    evidence: Evidence,
+    expected: Expected,
     ends: Ends,
 
     /// How it ended, once a wait has seen it end.
     ended: Option<Ended>,
+}
+
+/// What a session's Done signal is checked against: evidence known at its
+/// launch, or the artifact of whichever Direction the human picks.
+enum Expected {
+    Evidence(Evidence),
+
+    /// The latest pick, as [`crate::followers`] carries it.
+    Picked(watch::Receiver<Option<Direction>>),
 }
 
 impl Lent {
@@ -146,6 +172,9 @@ impl Lent {
             held: Vec::new(),
             building: None,
             doing: "working".to_owned(),
+            telling: None,
+            launching: None,
+            picked: None,
             watched: HashMap::new(),
             issued: 0,
             writing: None,
@@ -172,6 +201,36 @@ impl Lent {
         self
     }
 
+    /// Hold `turn`, which the caller took, across the next launch and let it
+    /// go once that is over: neither waiting for it nor asking after a stop.
+    pub(crate) fn turn_handed(mut self, turn: crate::sessions::Turn) -> Lent {
+        self.turn = Turn::Handed(turn);
+        self
+    }
+
+    /// Wake whoever holds the other half of `launched` once the next launch is
+    /// over, whichever way it went — or once this host is gone without one.
+    /// What a press that runs its session under a component spawned elsewhere
+    /// waits on, so that it answers with the session there, as it always has.
+    pub(crate) fn telling(mut self, launched: tokio::sync::oneshot::Sender<()>) -> Lent {
+        self.telling = Some(launched);
+        self
+    }
+
+    /// Hold `driving`, the caller's registration, across the next launch and
+    /// let it go once that is over — a grilling, which its session drives from
+    /// then on until the human picks.
+    pub(crate) fn launching(mut self, driving: Driving) -> Lent {
+        self.launching = Some(driving);
+        self
+    }
+
+    /// The registration a pick took, handed on to whatever the Direction sets
+    /// going.
+    pub(crate) fn driving(&mut self) -> Option<Driving> {
+        self.picked.take()
+    }
+
     /// Leave `sets` open across the launch rather than locking them — a
     /// grilling relaunched over an arrival. See [`crate::sessions::Held`].
     pub(crate) fn holding(mut self, sets: Vec<i64>) -> Lent {
@@ -193,6 +252,12 @@ impl Lent {
     pub(crate) fn doing(mut self, doing: &str) -> Lent {
         self.doing = doing.to_owned();
         self
+    }
+
+    /// What the rescue is to say the session is doing, as [`Lent::doing`] last
+    /// set it.
+    pub(crate) fn doing_now(&self) -> &str {
+        &self.doing
     }
 
     /// The same two, changed between one launch and the next — a component's
@@ -229,18 +294,6 @@ impl Lent {
         }
     }
 
-    /// Watch a session something else launched — the grilling, whose tail is
-    /// seen out once the human has picked — as though it had been launched
-    /// here, expecting `evidence` of it.
-    pub(crate) fn adopt(
-        &mut self,
-        session: Session,
-        evidence: Evidence,
-        ends: Ends,
-    ) -> world::Session {
-        self.watch(session, evidence, ends)
-    }
-
     /// The Timeline Event `session` prints into.
     pub(crate) fn event_id(&self, session: world::Session) -> i64 {
         self.watched
@@ -272,7 +325,7 @@ impl Lent {
             .and_then(|watched| watched.ended.clone())
     }
 
-    fn watch(&mut self, session: Session, evidence: Evidence, ends: Ends) -> world::Session {
+    fn watch(&mut self, session: Session, expected: Expected, ends: Ends) -> world::Session {
         self.issued += 1;
         self.writing = Some(session.event_id);
 
@@ -280,13 +333,154 @@ impl Lent {
             self.issued,
             Watched {
                 session,
-                evidence,
+                expected,
                 ends,
                 ended: None,
             },
         );
 
         self.issued
+    }
+
+    /// Wait on a session launched expecting `picked`: a grilling, whose Done
+    /// signal is checked against nothing until the human picks a Direction on
+    /// its proposal, and against that Direction's artifact from then on — the
+    /// latest pick's, a later one moving the wait onto its own. See
+    /// [`crate::runner::tail`] for which artifact each is.
+    ///
+    /// **Before a pick nothing is held to anything**: no signal is expected, so
+    /// one is refused saying nothing has been picked, and nobody speaks to the
+    /// session, whose questions are the work. Its ending is `gone` with how it
+    /// went — nothing else is written, and a grilling session dying is left to
+    /// the stall sweep as it always was.
+    ///
+    /// **After one, the session is seen out the way any step's is**: spoken to
+    /// where it goes quiet without its artifact, and answered `picked` once it
+    /// has signalled over it and been idle since — or once it ended, where the
+    /// artifact was its last act. A session that ended without it stops the
+    /// Conversation in the host's own sentence, which the wait then answers as
+    /// `gone` with nothing to add.
+    async fn wait_for_the_pick(
+        &mut self,
+        session: world::Session,
+    ) -> wasmtime::Result<world::Waited> {
+        let state = self.state.clone();
+        let conversation_id = self.conversation_id;
+        let pace = state.sessions.pace();
+
+        let Some(watched) = self.watched.get_mut(&session) else {
+            return Err(wasmtime::Error::msg(format!(
+                "there is no session {session} to wait on"
+            )));
+        };
+
+        let Expected::Picked(picks) = &mut watched.expected else {
+            return Err(wasmtime::Error::msg(format!(
+                "session {session} was not launched expecting a pick"
+            )));
+        };
+
+        let event_id = watched.session.event_id;
+        let idle = watched.session.idle.clone();
+        let mut picked = *picks.borrow_and_update();
+
+        let (ended, tail) = loop {
+            let tail = match picked {
+                Some(direction) => crate::runner::tail(&state, conversation_id, direction)
+                    .await
+                    .map(|tail| (direction, tail)),
+                None => None,
+            };
+
+            // A grilling picked on is driven by this wait from now on, rather
+            // than by its session alone: the moves the Direction makes go on
+            // after the session is ended, and a roadmap's pull request moves
+            // the Conversation on while it still runs. See [`crate::drivers`].
+            if picked.is_some() && self.picked.is_none() {
+                self.picked = Some(state.drivers.driving(conversation_id));
+            }
+
+            let Some((direction, tail)) = tail else {
+                tokio::select! {
+                    ended = watched.session.ended() => break (ended, None),
+                    next = next_pick(picks) => {
+                        picked = Some(next);
+                        continue;
+                    }
+                }
+            };
+
+            let expecting = state.signals.expecting(
+                conversation_id,
+                event_id,
+                tail.evidence.clone(),
+                tail.ends,
+                None,
+            );
+            let signal = expecting.signal();
+
+            tokio::select! {
+                ended = watched.session.ended() => break (ended, Some((direction, tail))),
+                () = crate::runner::signalled_and_idle(signal.clone(), &idle, pace) => {
+                    return Ok(world::Waited::Picked(direction_word(direction).to_owned()));
+                }
+                next = next_pick(picks) => {
+                    picked = Some(next);
+                    continue;
+                }
+                never = crate::rescues::watched(
+                    &state,
+                    conversation_id,
+                    event_id,
+                    &idle,
+                    pace,
+                    signal,
+                    &tail.doing,
+                ) => match never {},
+            }
+        };
+
+        watched.ended = Some(ended.clone());
+
+        let Some((direction, tail)) = tail else {
+            return Ok(self.gone(&ended, &Evidence::Nothing).await);
+        };
+
+        // It may have written the artifact as its last act and exited before a
+        // poll caught it, which is the ordinary shape of a session that
+        // finishes rather than idles — so the Worktree is asked once more,
+        // whichever way it ended.
+        if crate::runner::check(&tail.worktree, &tail.landing).await {
+            return Ok(world::Waited::Picked(direction_word(direction).to_owned()));
+        }
+
+        // Stopped or steered from outside, which has said so already.
+        if ended.on_purpose() {
+            return Ok(self.gone(&ended, &tail.evidence).await);
+        }
+
+        tracing::warn!(
+            conversation_id,
+            event_id,
+            ?direction,
+            "a grilling session ended without writing what the pick asked for, so the run stops here",
+        );
+
+        let how = ended
+            .badly()
+            .unwrap_or_else(|| "The session ended without finishing the step.".to_owned());
+
+        crate::runner::stop(
+            &state,
+            conversation_id,
+            crate::stopping::Decided::Verkstead,
+            &tail.doing,
+            &how,
+            Some(event_id),
+        )
+        .await;
+
+        Ok(world::Waited::Gone(None))
     }
 
     /// What a session that ended without its Done signal taken is to the one
@@ -369,6 +563,11 @@ impl host::Host for Lent {
         let state = self.state.clone();
         let conversation_id = self.conversation_id;
 
+        // Let go however this returns: see [`Lent::telling`] and
+        // [`Lent::launching`].
+        let _telling = self.telling.take();
+        let _launching = self.launching.take();
+
         if !named_in_a_pack(&skill) {
             return Ok(self.refused(&format!(
                 "`{skill}` isn't a skill named as `<pack>/<skill>`."
@@ -381,8 +580,10 @@ impl host::Host for Lent {
 
         // See [`Turn`]: held across the launch alone, and a stop asked after
         // the wait for it rather than before.
-        let _turn = match self.turn {
+        let _turn = match std::mem::replace(&mut self.turn, Turn::Held) {
             Turn::Take => {
+                self.turn = Turn::Take;
+
                 let turn = state.sessions.turn(conversation_id).await;
 
                 if crate::stopping::stopped(&state, conversation_id).await {
@@ -392,6 +593,7 @@ impl host::Host for Lent {
                 Some(turn)
             }
             Turn::Held => None,
+            Turn::Handed(turn) => Some(turn),
         };
 
         // Read back every time rather than held: where an agent is about to be
@@ -421,8 +623,18 @@ impl host::Host for Lent {
             )));
         };
 
-        let Some(evidence) = taken_evidence(evidence, conversation.worktree.as_deref()) else {
-            return Ok(self.refused("The Conversation has no Worktree left to land anything in."));
+        // A pick is listened for from before the session exists, so none on
+        // its proposal can arrive with nothing to hear it.
+        let expected = match evidence {
+            world::Evidence::Picked => Expected::Picked(state.followers.listen(conversation_id)),
+            evidence => match taken_evidence(evidence, conversation.worktree.as_deref()) {
+                Some(evidence) => Expected::Evidence(evidence),
+                None => {
+                    return Ok(
+                        self.refused("The Conversation has no Worktree left to land anything in.")
+                    );
+                }
+            },
         };
 
         // And whatever the human has since answered on this Conversation's
@@ -471,7 +683,7 @@ impl host::Host for Lent {
 
                 self.folding = self.building.is_some();
 
-                Ok(Ok(self.watch(session, evidence, taken_ends(ends))))
+                Ok(Ok(self.watch(session, expected, taken_ends(ends))))
             }
             Ok(None) => Ok(self.refused("The session couldn't be started.")),
             Err(error) => {
@@ -501,6 +713,11 @@ impl host::Host for Lent {
             return Ok(world::Waited::Gone(ended.badly()));
         }
 
+        let evidence = match &watched.expected {
+            Expected::Evidence(evidence) => evidence.clone(),
+            Expected::Picked(_) => return self.wait_for_the_pick(session).await,
+        };
+
         let event_id = watched.session.event_id;
         let idle = watched.session.idle.clone();
         let pace = self.state.sessions.pace();
@@ -508,7 +725,7 @@ impl host::Host for Lent {
         let expecting = self.state.signals.expecting(
             conversation_id,
             event_id,
-            watched.evidence.clone(),
+            evidence.clone(),
             watched.ends,
             self.building,
         );
@@ -532,7 +749,6 @@ impl host::Host for Lent {
 
         match ended {
             Some(ended) => {
-                let evidence = watched.evidence.clone();
                 watched.ended = Some(ended.clone());
 
                 Ok(self.gone(&ended, &evidence).await)
@@ -1157,6 +1373,29 @@ fn read_branch(
     })
 }
 
+/// The next Direction the human picks, however many listeners ago; never, once
+/// the channel is another interview's.
+async fn next_pick(picks: &mut watch::Receiver<Option<Direction>>) -> Direction {
+    loop {
+        if picks.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+
+        if let Some(direction) = *picks.borrow_and_update() {
+            return direction;
+        }
+    }
+}
+
+/// A Direction as the world's `picked` says it, which is as a Set does.
+fn direction_word(direction: Direction) -> &'static str {
+    match direction {
+        Direction::Inline => "inline",
+        Direction::TaskList => "task-list",
+        Direction::Roadmap => "roadmap",
+    }
+}
+
 /// Whether `skill` is named `<pack>/<skill>`, as stage 07 names every skill.
 fn named_in_a_pack(skill: &str) -> bool {
     skill
@@ -1217,6 +1456,7 @@ pub(crate) fn evidence_option(evidence: &Evidence) -> String {
         world::Evidence::Nothing => "nothing".to_owned(),
         world::Evidence::NothingElse => "nothing-else".to_owned(),
         world::Evidence::Investigated => "investigated".to_owned(),
+        world::Evidence::Picked => "picked".to_owned(),
     }
 }
 
@@ -1229,7 +1469,9 @@ pub(crate) fn ends_option(ends: Ends) -> &'static str {
 }
 
 /// The world's evidence as [`crate::done`] checks it, a landing in `worktree` —
-/// `None` where it is a landing and there is no Worktree to land it in.
+/// `None` where it is a landing and there is no Worktree to land it in, and for
+/// `picked`, which is no evidence until there is a pick: see
+/// [`Lent::wait_for_the_pick`].
 fn taken_evidence(evidence: world::Evidence, worktree: Option<&Path>) -> Option<Evidence> {
     Some(match evidence {
         world::Evidence::Landed(landing) => Evidence::Landed {
@@ -1246,6 +1488,7 @@ fn taken_evidence(evidence: world::Evidence, worktree: Option<&Path>) -> Option<
         world::Evidence::Nothing => Evidence::Nothing,
         world::Evidence::NothingElse => Evidence::NothingElse,
         world::Evidence::Investigated => Evidence::Investigated,
+        world::Evidence::Picked => return None,
     })
 }
 

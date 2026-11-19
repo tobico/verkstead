@@ -784,7 +784,8 @@ async fn abandoned(state: &AppState, conversation_id: i64, event_id: i64) {
 ///
 /// A grilling that has not been picked on is the one said by name: it has no
 /// artifact to have finished, and the move that gives it one is the human's. A
-/// Direction picked a moment ago is the watcher not yet armed, and says so.
+/// Direction picked a moment ago is the interview's wait not yet moved onto its
+/// artifact, and says so.
 async fn unexpected(state: &AppState, conversation_id: i64) -> String {
     let grilling = matches!(
         store::state(&state.pool, conversation_id).await,

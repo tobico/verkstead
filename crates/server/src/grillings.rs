@@ -72,17 +72,17 @@ pub(crate) enum Digest {
 /// the Brief of the round it is in and, where `digest` says so, what has already
 /// been settled — which is the whole of what survives an interview.
 ///
-/// `driving` is the registration the press took as it arrived, held across the
-/// launch and let go once the session is registered.
-/// What drives a grilling is its session and nothing else — see
-/// [`crate::drivers`] — so this is a handover to the session rather than to a
-/// task of Verkstead's, and it is over the moment there is one.
+/// `driving` is the registration the press took as it arrived, handed on to the
+/// interview the relaunch runs under, which holds it for as long as the grilling
+/// is driven — see [`crate::runner::interview`].
 pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Driving, digest: Digest) {
     // Waited for rather than tried for: the human presses Resume whenever they
     // get to it, and nothing is holding a request open on what it starts. So
     // whatever is running — a session they steered the work into while it stood
     // still — finishes, and this goes next rather than killing it mid-sentence.
-    let _turn = state.sessions.turn(conversation_id).await;
+    // Held across the launch and let go once it is over: see
+    // [`crate::lending::Lent::turn_handed`].
+    let turn = state.sessions.turn(conversation_id).await;
 
     // One read for all three of the things a relaunch needs off the record: the
     // Brief it starts from, what has already been settled, and what was left
@@ -125,7 +125,16 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
         Vec::new()
     };
 
-    let started = relaunching(&state, conversation_id, &timeline, digest, &held).await;
+    let started = relaunching(
+        &state,
+        conversation_id,
+        &timeline,
+        digest,
+        &held,
+        turn,
+        driving,
+    )
+    .await;
 
     // And where no session came of it, whatever was held is made good here
     // instead: the launch settles what it was handed, and a launch that did not
@@ -136,22 +145,18 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
     if !held.is_empty() && !started {
         orphaned(&state, conversation_id, &timeline).await;
     }
-
-    // Whatever came of it, the registration goes now: either there is a session
-    // driving the Conversation or there is nothing to drive it with, and the
-    // second of those is a stall the next sweep should find.
-    drop(driving);
 }
 
-/// The relaunch itself: the prompt built, the Conversation and the Pairing it
-/// runs under read back, and the session started. `true` where there is a session
-/// driving the Conversation at the end of it.
+/// The relaunch itself: the prompt built, and the interview run on it, which
+/// launches the session and sees the grilling through. `true` where a session
+/// was launched — answered once the interview is over, which for one that
+/// launched is whenever the grilling ends.
 ///
 /// **Its own function so that every way of giving up is one answer.** What the
 /// caller owes the Question Sets it held turns on whether a session started, and
 /// there are four ways to leave here without one — a server with no grilling
 /// skill to name, a Conversation that has gone, a grilling Pairing that has gone,
-/// and the launch itself. Each of them is `false`, and the caller makes the
+/// and the launch itself, the last three the interview's host's to refuse. Each of them is `false`, and the caller makes the
 /// holding good once rather than at four returns that would each have to remember
 /// to.
 ///
@@ -165,6 +170,8 @@ async fn relaunching(
     timeline: &[store::TimelineEvent],
     digest: Digest,
     held: &[i64],
+    turn: crate::sessions::Turn,
+    driving: Driving,
 ) -> bool {
     // What the prompt names first is the grilling skill, by the path this
     // server installed it at — and a server that installed none runs no
@@ -200,38 +207,17 @@ async fn relaunching(
     // morning, and where an agent is about to be let loose is the one thing that
     // must not be guessed at.
     //
-    // No Turn taken, as a grilling never took one, and nothing it may build: a
-    // grilling may not retire a Memo, so it is not told how. What its Done
-    // signal is checked against is the pick's, written down when its tail is
-    // seen out — see [`crate::runner::follow_the_tail`] — so nothing is waited
-    // on here and the evidence below is never registered.
-    let mut lent = Lent::new(state, conversation_id)
-        .turn_held()
+    // The Turn this relaunch took handed to the launch, and nothing it may
+    // build: a grilling may not retire a Memo, so it is not told how. What its
+    // Done signal is checked against is the pick's — see
+    // [`crate::runner::interview`].
+    tracing::info!(conversation_id, "a stalled grilling is being grilled again");
+
+    let lent = Lent::new(state, conversation_id)
+        .turn_handed(turn)
         .holding(held.to_vec());
 
-    let started = lent
-        .start(
-            "verkstead/grilling",
-            store::Role::Grilling,
-            prompt,
-            crate::done::Evidence::Nothing,
-            crate::done::Ends::WithItsWork,
-        )
-        .await;
-
-    match started {
-        Some(session) => tracing::info!(
-            conversation_id,
-            event_id = lent.event_id(session),
-            "a stalled grilling is being grilled again"
-        ),
-        None => tracing::error!(
-            conversation_id,
-            "no session could be started to grill the work again"
-        ),
-    }
-
-    started.is_some()
+    crate::runner::interview(state.clone(), conversation_id, driving, prompt, lent).await
 }
 
 /// Lock every Question Set the dead grilling left open, so that nothing is left

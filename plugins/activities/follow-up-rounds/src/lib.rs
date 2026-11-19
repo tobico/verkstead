@@ -96,7 +96,7 @@ impl Guest for Rounds {
         };
 
         match host::wait(session) {
-            Waited::Done | Waited::Marked => ending(&facts),
+            Waited::Done | Waited::Marked | Waited::Picked(_) => ending(&facts),
             Waited::Steered => "steered".to_owned(),
             // How it ended, where the ending itself was the trouble; otherwise
             // the ending is the whole of it, a session that has finished with

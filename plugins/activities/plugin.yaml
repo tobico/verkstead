@@ -45,3 +45,9 @@ provides:
     component: one-session.wasm
     outcomes: [done, refused]
     skills: [verkstead/implementing, verkstead/submitting, verkstead/instruction]
+  - category: activity
+    id: interview
+    name: Interview
+    component: interview.wasm
+    outcomes: ["direction:inline", "direction:task-list", "direction:roadmap", gone]
+    skills: [verkstead/grilling]

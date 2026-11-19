@@ -1,0 +1,15 @@
+[package]
+name = "verkstead-activity-interview"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Embedded as `interview.wasm`, which is what the `activity` block in
+# `../plugin.yaml` names: see `crates/server/build.rs`.
+[lib]
+name = "interview"
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.46"

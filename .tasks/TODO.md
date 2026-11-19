@@ -21,7 +21,7 @@ Roadmap stage: [09: The interview, one session and the wrap-up across](docs/road
 ## Tasks
 
 - [x] 01: One session — [details](01-one-session.md)
-- [ ] 02: The interview — [details](02-the-interview.md)
+- [x] 02: The interview — [details](02-the-interview.md)
 - [ ] 03: The offered Directions — [details](03-the-offered-directions.md)
 - [ ] 04: Investigating as follow-up rounds configured — [details](04-investigating-as-follow-up-rounds.md)
 - [ ] 05: The world grows for the wrap-up — [details](05-the-world-grows-for-the-wrap-up.md)

@@ -89,7 +89,7 @@ use crate::github;
 use crate::investigations::Investigation;
 use crate::lending::Lent;
 use crate::repos::git;
-use crate::sessions::{Ended, Idle, Session};
+use crate::sessions::{Ended, Idle};
 use crate::skills;
 use crate::store;
 use crate::tasks::{BACKLOG, TODO};
@@ -381,16 +381,22 @@ fn todo() -> PathBuf {
     Path::new(BACKLOG).join(TODO)
 }
 
-/// Follow the grilling session as it writes what the pick asked for.
+/// Run a grilling under the **Interview** Activity, and carry the Conversation
+/// on wherever the Direction picked says.
 ///
-/// Nothing is launched: the session is the one that proposed, idling on the
-/// blocking ask the Response is being delivered through, and it goes on from
-/// there with the whole thread still in its context. What this is, is the watch:
-/// the session's Done signal, checked against the artifact the pick asked for, is
-/// what ends it and moves the Conversation on.
+/// The component launches the grilling session on `verkstead/grilling` under
+/// the Grilling role, with `prompt` — the [`skills`] builder's words, a fresh
+/// grilling's or a relaunch's with its digest — and waits on it expecting
+/// `picked`: nothing before the human picks, and after it the picked
+/// Direction's artifact, which [`tail`] says. The proposals the session puts are
+/// the host's to settle, as ever — see
+/// [`crate::conversations::settle_a_proposal`]. Breaking down and staging go on
+/// inside the same session, so the interview is one session and launches no
+/// second.
 ///
-/// The three tails differ in what the artifact is and in where landing it leaves
-/// the Conversation. A backlog is the start of a run — the tasks it names are
+/// The three Directions differ in what the artifact is and in where landing it
+/// leaves the Conversation, which is this function's mapping until a Process
+/// says it (stage 11). A backlog is the start of a run — the tasks it names are
 /// worked one fresh session each, under the Profile that builds — so the
 /// Conversation goes on to Implementing. The handoff an inline pick asks for
 /// leaves it in the same place, one session rather than a run standing on the
@@ -399,42 +405,157 @@ fn todo() -> PathBuf {
 /// carries the branch to a pull request and the Conversation goes straight on to
 /// wrapping that up.
 ///
-/// `driving` is the registration that says this Conversation is being driven,
-/// taken by whoever armed the watcher rather than here, and held from the pick
-/// through to wherever the tail leaves the Conversation — see [`crate::drivers`]
-/// for why it is handed over rather than taken again. A watcher is the one thing
-/// that follows a grilling session, so it is also what says a grilling picked on
-/// is not standing still.
-pub(crate) async fn follow_the_tail(
+/// `lent` is the host the component is lent, carrying what only an in-process
+/// caller can say: that nothing else is driving a grilling just started, or the
+/// Turn a relaunch took and the Sets it holds open.
+///
+/// **A grilling is driven by its session until the human picks** — see
+/// [`crate::drivers`] — so `driving`, the press's registration, is held across
+/// the launch alone, and a session that dies before a pick leaves a
+/// Conversation the stall sweep finds. The pick is what takes a registration of
+/// the host's own, held through to wherever the Direction leaves the
+/// Conversation.
+///
+/// Whether a session was launched at all, which is what a relaunch holding Sets
+/// open owes them on: see [`crate::grillings::again`]. Answered once the
+/// interview is over.
+pub(crate) async fn interview(
     state: AppState,
     conversation_id: i64,
-    direction: Direction,
-    session: Session,
     driving: Driving,
-) {
+    prompt: String,
+    lent: Lent,
+) -> bool {
+    let Some((shipped, activity)) = built_in(INTERVIEW) else {
+        tracing::error!(
+            conversation_id,
+            "this build carries no Interview Activity, so no grilling session was started"
+        );
+        return false;
+    };
+
+    let (outcome, seen) = crate::activities::run_seeing(
+        &state,
+        conversation_id,
+        shipped.files(),
+        &activity,
+        &[],
+        vec![("prompt".to_owned(), prompt)],
+        lent.doing("grilling the work").launching(driving),
+    )
+    .await;
+
+    let Some(writing) = seen.event_id else {
+        return false;
+    };
+
+    // Taken as the pick was, so there is no moment between the session being
+    // seen out and the move where nothing drives the Conversation.
+    let driving = seen
+        .driving
+        .unwrap_or_else(|| state.drivers.driving(conversation_id));
+
+    // The Outcome, or — where a stop landed as the artifact did, and took the
+    // Outcome away — the Direction whose artifact was written: a step that
+    // landed is landed, so it is taken, and the launch past it is what asks
+    // after the stop.
+    let picked = match outcome.as_deref() {
+        Some(outcome) => outcome.strip_prefix("direction:"),
+        None => seen.picked.as_deref(),
+    };
+
+    let direction = match picked {
+        Some("inline") => Direction::Inline,
+        Some("task-list") => Direction::TaskList,
+        Some("roadmap") => Direction::Roadmap,
+        // Steered elsewhere, which is the steer's to carry on; or gone before
+        // anything was picked, which leaves the Conversation to the stall sweep
+        // as a grilling session dying always has; or stopped.
+        _ => return true,
+    };
+
+    tracing::info!(
+        conversation_id,
+        event_id = writing,
+        ?direction,
+        "a grilling session wrote what the pick asked for and has gone quiet since, so it is being ended",
+    );
+
+    state.sessions.end(conversation_id).await;
+
     match direction {
-        Direction::Inline => follow_handoff(state, conversation_id, session, driving).await,
-        Direction::TaskList => follow_breakdown(state, conversation_id, session, driving).await,
-        Direction::Roadmap => follow_staging(state, conversation_id, session, driving).await,
+        Direction::Inline => handed_off(state, conversation_id, driving).await,
+        Direction::TaskList => broken_down(state, conversation_id, driving).await,
+        Direction::Roadmap => {
+            if let Some(base) = base(&state, conversation_id).await {
+                staged(&state, conversation_id, &base, writing).await;
+            }
+        }
     }
+
+    true
 }
 
-/// Work `conversation_id`'s backlog to empty, starting from the session that is
-/// writing it.
+/// The id the **Interview** Activity has in the built-in Activities plugin's
+/// manifest.
+const INTERVIEW: &str = "interview";
+
+/// What the grilling session's Done signal is checked against once `direction`
+/// is picked: the step its artifact is, read for the Conversation as it stands.
 ///
-/// `writing` is the session that will commit the backlog: the grilling session
-/// itself, which got the human's pick back through its blocking ask and breaks
-/// the work down without leaving the context that settled it. It is the run's
-/// first step rather than something that happened before the run — an ordinary
-/// interactive session, which will idle once its plan is committed, so something
-/// has to see it out, and what sees a session out is exactly this.
+/// `None` where there is nothing to check it against — no Worktree left, or a
+/// roadmap pick on a Conversation with no base commit, which nothing could say a
+/// roadmap is this branch's own against.
+pub(crate) async fn tail(
+    state: &AppState,
+    conversation_id: i64,
+    direction: Direction,
+) -> Option<Tail> {
+    let step = match direction {
+        Direction::Inline => Step::Handoff(
+            crate::handoffs::Handoffs::under(&state.data_dir).document(conversation_id),
+        ),
+        Direction::TaskList => Step::Planning,
+        Direction::Roadmap => Step::Staging(base(state, conversation_id).await?),
+    };
+
+    let worktree = worktree(state, conversation_id).await?;
+    let landing = step.landing();
+
+    Some(Tail {
+        evidence: crate::done::Evidence::Landed {
+            worktree: worktree.clone(),
+            landing: landing.clone(),
+        },
+        ends: step.ends(),
+        doing: step.what(),
+        worktree,
+        landing,
+    })
+}
+
+/// A picked Direction's artifact, as the wait on the grilling session holds its
+/// Done signal to it — see [`tail`].
+pub(crate) struct Tail {
+    pub(crate) evidence: crate::done::Evidence,
+    pub(crate) ends: crate::done::Ends,
+
+    /// What the rescue and a stop say the session is doing.
+    pub(crate) doing: String,
+
+    /// Where the artifact lands, asked once more of a session that ended.
+    pub(crate) worktree: PathBuf,
+    pub(crate) landing: Landing,
+}
+
+/// Carry a task-list Conversation on from its committed backlog: the run.
 ///
 /// The plan commit is the end of the planning as well as the start of the run, so
-/// the Conversation moves as the session is seen out: grilling until then and
-/// implementing afterwards — see [`crate::conversations::grilling_over`]. No
-/// handoff is taken or written on this path: the backlog is what the grilling
-/// settled, committed to the branch, and every session that works it reads the
-/// repository rather than a summary of a conversation it never had.
+/// the Conversation moves here: grilling until then and implementing afterwards
+/// — see [`crate::conversations::grilling_over`]. No handoff is taken or written
+/// on this path: the backlog is what the grilling settled, committed to the
+/// branch, and every session that works it reads the repository rather than a
+/// summary of a conversation it never had.
 ///
 /// Returns when there is nothing left to run: the backlog worked through, a
 /// Conversation that has gone, or a step whose session ended without landing it.
@@ -444,25 +565,9 @@ pub(crate) async fn follow_the_tail(
 /// stop, and the Notice saying what stopped.
 ///
 /// `driving` is the registration that says this Conversation is being driven,
-/// taken by whoever armed the watcher or pressed Resume rather than here — see
+/// taken by whoever started the interview rather than here — see
 /// [`crate::drivers`] for why it is handed over rather than taken again.
-async fn follow_breakdown(
-    state: AppState,
-    conversation_id: i64,
-    writing: Session,
-    driving: Driving,
-) {
-    let Some(adopted) = adopted(&state, conversation_id, &Step::Planning, writing).await else {
-        return;
-    };
-
-    if see_out(&state, conversation_id, Step::Planning, adopted)
-        .await
-        .is_none()
-    {
-        return;
-    }
-
+async fn broken_down(state: AppState, conversation_id: i64, driving: Driving) {
     // The backlog is on the branch, so the record says where that happened —
     // before the move, because it is what the move is being made on the
     // strength of.
@@ -1229,15 +1334,12 @@ async fn submitted(state: &AppState, conversation_id: i64, against: Option<&str>
     Some(event_id)
 }
 
-/// Follow the grilling session as it writes the handoff, and start the session
-/// that builds from it.
+/// Start the session that builds from the handoff the grilling session wrote.
 ///
-/// The inline counterpart to [`follow_breakdown`], and the same move with a
-/// different artifact: the session that settled the work is the one that writes
+/// The inline counterpart to [`broken_down`], and the same move with a
+/// different artifact: the session that settled the work is the one that wrote
 /// down what it settled, after the pick rather than before it, so what the human
-/// said beside the pick is part of what the handoff has to say. Nothing is
-/// launched here either — the session is already running, idling on the ask the
-/// Response came back through.
+/// said beside the pick is part of what the handoff says.
 ///
 /// Then the three things the far side of an inline pick needs, in the order they
 /// have to happen in. The handoff goes on the Timeline, which is where a
@@ -1248,30 +1350,11 @@ async fn submitted(state: &AppState, conversation_id: i64, against: Option<&str>
 /// accounts the Conversation fixed separately and a session cannot change the
 /// one it is running as, which is the whole reason the handoff exists.
 ///
-/// A session that goes without writing one stops, the way every other step does:
-/// nothing is driving the Conversation and a Notice says so, and starting it
-/// again is Resume's. One still sitting there without it is refused its signal
-/// and spoken to instead, which is the same rule read a moment earlier.
-///
-/// The registration is held across all of it — the watch, the move, and the run
-/// on the other side of it — so there is no moment between the handoff landing
-/// and the implementation session starting where the Conversation reads as one
-/// nothing is driving.
-async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session, driving: Driving) {
-    let handoffs = crate::handoffs::Handoffs::under(&state.data_dir);
-    let step = Step::Handoff(handoffs.document(conversation_id));
-
-    let Some(adopted) = adopted(&state, conversation_id, &step, writing).await else {
-        return;
-    };
-
-    if see_out(&state, conversation_id, step, adopted)
-        .await
-        .is_none()
-    {
-        return;
-    }
-
+/// The registration is held across all of it — the move, and the run on the
+/// other side of it — so there is no moment between the handoff landing and the
+/// implementation session starting where the Conversation reads as one nothing
+/// is driving.
+async fn handed_off(state: AppState, conversation_id: i64, driving: Driving) {
     crate::conversations::hand_over(&state, conversation_id).await;
     crate::conversations::grilling_over(&state, conversation_id).await;
 
@@ -1809,7 +1892,7 @@ impl Ran {
 async fn one_session(
     state: &AppState,
     conversation_id: i64,
-    driving: &Driving,
+    _driving: &Driving,
     sent: Sent<'_>,
 ) -> Option<Ran> {
     if state.sessions.skills().is_none() {
@@ -1821,18 +1904,7 @@ async fn one_session(
         return None;
     }
 
-    let shipped = crate::plugins::built_in::activities();
-    let activity = shipped
-        .manifest(crate::platform::Platform::HERE)
-        .ok()
-        .and_then(|manifest| {
-            manifest
-                .activities
-                .into_iter()
-                .find(|activity| activity.id == ONE_SESSION)
-        });
-
-    let Some(activity) = activity else {
+    let Some((shipped, activity)) = built_in(ONE_SESSION) else {
         tracing::error!(
             conversation_id,
             "this build carries no One session Activity, so no session was started"
@@ -1872,13 +1944,11 @@ async fn one_session(
     let (outcome, seen) = crate::activities::run_seeing(
         state,
         conversation_id,
-        driving,
         shipped.files(),
         &activity,
         &[],
         options,
-        sent.doing,
-        crate::continuing::Brought::Settle,
+        Lent::new(state, conversation_id).doing(sent.doing),
     )
     .await;
 
@@ -1894,6 +1964,24 @@ async fn one_session(
 /// The id the **One session** Activity has in the built-in Activities plugin's
 /// manifest.
 const ONE_SESSION: &str = "one-session";
+
+/// The built-in Activities plugin, and its Activity whose id is `id`.
+fn built_in(
+    id: &str,
+) -> Option<(
+    crate::plugins::built_in::BuiltIn,
+    crate::plugins::manifest::Activity,
+)> {
+    let shipped = crate::plugins::built_in::activities();
+    let activity = shipped
+        .manifest(crate::platform::Platform::HERE)
+        .ok()?
+        .activities
+        .into_iter()
+        .find(|activity| activity.id == id)?;
+
+    Some((shipped, activity))
+}
 
 /// Run a follow-up's rounds under the **Follow-up rounds** Activity, and land
 /// the Conversation wherever its Outcome says.
@@ -2678,30 +2766,6 @@ pub(crate) async fn marked(
 
 /// Follow the grilling session as it stages the work into a roadmap.
 ///
-/// The roadmap's counterpart to [`follow_breakdown`], and the same move: the
-/// session that settled the work writes the artifact without leaving the context
-/// that settled it, so nothing is launched here and what is followed is the
-/// session already running.
-///
-/// The commit the branch came off is read here rather than handed in, because
-/// this entry has nobody to have decided it — the pick arrives on a Response and
-/// what it arms is a watcher, not a session. Without one there is nothing that
-/// could say a roadmap in the Worktree is this branch's own, so the session is
-/// left running rather than followed.
-async fn follow_staging(state: AppState, conversation_id: i64, writing: Session, driving: Driving) {
-    let Some(base) = base(&state, conversation_id).await else {
-        return;
-    };
-
-    let step = Step::Staging(base.clone());
-
-    let Some(adopted) = adopted(&state, conversation_id, &step, writing).await else {
-        return;
-    };
-
-    follow_roadmap(state, conversation_id, base, adopted, driving).await
-}
-
 /// See a roadmap session out, and carry the Conversation on to wrapping the
 /// pull request it opened.
 ///
@@ -2726,8 +2790,9 @@ async fn follow_staging(state: AppState, conversation_id: i64, writing: Session,
 /// what the grilling settled is in the stage briefs it committed, and each Stage
 /// is a Conversation with a grilling of its own.
 ///
-/// `writing` is the session that will commit the roadmap: the grilling session
-/// itself, or a fresh one Resume launched. `base` is the commit the branch came
+/// `launched` is the session Resume launched to commit the roadmap — the
+/// grilling session's own is seen out by the interview instead, see
+/// [`interview`]. `base` is the commit the branch came
 /// off, which is what says a roadmap on it is one this branch wrote — see
 /// [`Landing::Roadmap`].
 ///
@@ -2751,15 +2816,22 @@ async fn follow_roadmap(
         return;
     };
 
+    staged(&state, conversation_id, &base, writing).await;
+}
+
+/// Carry a roadmap Conversation on from its committed roadmap to wrapping the
+/// pull request the same session opened, `writing` being the Event that session
+/// printed into.
+async fn staged(state: &AppState, conversation_id: i64, base: &str, writing: i64) {
     // The roadmap is on the branch, so the record says where that happened —
     // before the pull request the same session went on to open, which is the
     // order the two happened in. Which roadmap this Conversation wrote is
     // settled in the same call, off the Worktree it was written in.
-    let worktree = worktree(&state, conversation_id).await;
+    let worktree = worktree(state, conversation_id).await;
 
-    crate::conversations::roadmap_landed(&state, conversation_id, worktree.as_deref(), &base).await;
+    crate::conversations::roadmap_landed(state, conversation_id, worktree.as_deref(), base).await;
 
-    to_a_pull_request(&state, conversation_id, Some(writing)).await;
+    to_a_pull_request(state, conversation_id, Some(writing)).await;
 }
 
 /// Run one fix session about `feedback`, and wait until it is over.
@@ -3133,7 +3205,7 @@ async fn see_out(
     let worktree = worktree(state, conversation_id).await?;
 
     // What the session's Done signal is checked against — its landing, which it
-    // was launched or adopted expecting — is written down for as long as it is
+    // was launched expecting — is written down for as long as it is
     // being seen out, and taken away with this if the watch is cancelled, which
     // a later pick does. See [`crate::done`]. A session that has not said it is
     // done and is not asking about anything is spoken to, and the human told
@@ -3654,8 +3726,8 @@ async fn documents(state: &AppState, conversation_id: i64) -> Option<Documents<'
     }
 }
 
-/// The host a step's session is launched or adopted under: what the rescue
-/// says it is doing.
+/// The host a step's session is launched under: what the rescue says it is
+/// doing.
 fn lent_for(state: &AppState, conversation_id: i64, step: &Step) -> Lent {
     Lent::new(state, conversation_id).doing(&step.what())
 }
@@ -3694,21 +3766,6 @@ async fn launch_step(
             step.ends(),
         )
         .await?;
-
-    Some((lent, session))
-}
-
-/// Watch the grilling's own session as it writes `step`'s artifact, as though
-/// it had been launched for it.
-async fn adopted(
-    state: &AppState,
-    conversation_id: i64,
-    step: &Step,
-    session: Session,
-) -> Option<(Lent, u64)> {
-    let evidence = expected(state, conversation_id, step).await?;
-    let mut lent = lent_for(state, conversation_id, step);
-    let session = lent.adopt(session, evidence, step.ends());
 
     Some((lent, session))
 }

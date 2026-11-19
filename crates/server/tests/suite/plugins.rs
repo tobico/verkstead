@@ -318,8 +318,8 @@ async fn an_activity_naming_a_skill_its_dependency_lacks_loads_in_trouble() {
 }
 
 /// The Activities Verkstead ships are a Built-in row of their own after the
-/// pack's, naming *Follow-up rounds*, the *Backlog runner*, the *Stage runner*
-/// and *One session*, always on and with no Remove.
+/// pack's, naming *Follow-up rounds*, the *Backlog runner*, the *Stage runner*,
+/// *One session* and *Interview*, always on and with no Remove.
 #[tokio::test]
 async fn the_activities_are_a_built_in_row_naming_each_activity() {
     let (app, _dir) = kept().await;
@@ -339,7 +339,8 @@ async fn the_activities_are_a_built_in_row_naming_each_activity() {
             "Follow-up rounds",
             "Backlog runner",
             "Stage runner",
-            "One session"
+            "One session",
+            "Interview"
         ]
     );
     assert_eq!(row.source, PluginSource::BuiltIn);
