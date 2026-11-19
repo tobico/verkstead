@@ -1,13 +1,21 @@
-[package]
-name = "verkstead-plugin-stub-harness"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-publish = false
-
 # A harness plugin's component for the server's suites, and never a built-in:
 # its directory is under `tests/`, where `crates/server/build.rs` embeds
 # nothing, and the build script hands the suites the file's path instead.
+#
+# **A workspace of its own**, apart from the built-ins' beside it: it is the
+# one component with dependencies, and the packaged build — `nix/`, whose
+# source leaves `plugins/tests/` out — vendors the crates the server's own
+# lockfile names and no others. Kept out of that workspace, the built-ins build
+# there with nothing to vendor, and this builds wherever the suites run.
+[workspace]
+
+[package]
+name = "verkstead-plugin-stub-harness"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
 [lib]
 name = "stub_harness"
 crate-type = ["cdylib"]
@@ -15,3 +23,10 @@ crate-type = ["cdylib"]
 [dependencies]
 wit-bindgen = "0.51"
 serde_json = "1"
+
+# As the built-ins' are: small, and quick to instantiate.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

@@ -344,6 +344,12 @@ jobs:
         run: |
           cargo build --release --locked --target wasm32-wasip2 \
             --manifest-path plugins/Cargo.toml
+          # And the suites' own components, each a workspace apart (see
+          # plugins/tests/stub-harness/Cargo.toml): embedded nowhere, but where
+          # plugins/dist/ lacks one the build script builds it on every leg.
+          cargo build --release --locked --target wasm32-wasip2 \
+            --target-dir plugins/target \
+            --manifest-path plugins/tests/stub-harness/Cargo.toml
           mkdir -p plugins/dist
           cp plugins/target/wasm32-wasip2/release/*.wasm plugins/dist/
           ls -l plugins/dist
