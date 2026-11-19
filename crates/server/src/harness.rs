@@ -746,7 +746,7 @@ pub struct Line {
 /// [`Line::resume`].
 ///
 /// **Two shapes rather than one spelling**, because the backends do not agree on
-/// what a resume *is*. For three of them it is another option on the same line,
+/// what a resume *is*. For four of the five it is another option on the same line,
 /// and the id goes where the id would have gone. For codex it is a subcommand:
 /// the line is `codex resume <session-id> <prompt>`, so the word comes ahead of
 /// everything the ordinary line says and the id is a positional in front of the
@@ -759,8 +759,8 @@ pub struct Line {
 /// up logged out and sitting on a trust prompt.
 pub enum Resume {
     /// Words holding [`SESSION`], written where the session would have been
-    /// named. Claude's and Grok Build's, both `--resume`, and OpenCode's,
-    /// `--session`.
+    /// named. Claude's and Grok Build's, both `--resume`, OpenCode's,
+    /// `--session`, and the Antigravity CLI's, `--conversation`.
     Flag(Vec<String>),
 
     /// Words written straight after the binary, ahead of the line.
