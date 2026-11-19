@@ -43177,6 +43177,17 @@ impl Grilling {
     /// which declares `outcomes`, on this Conversation — answering, once it
     /// is over, its Outcome, or `None` where it stopped instead.
     fn activity(&self, wat: &str, outcomes: &[&str]) -> tokio::task::JoinHandle<Option<String>> {
+        self.activity_declaring(wat, outcomes, &["verkstead/implementing"])
+    }
+
+    /// The same, its block declaring `skills` rather than the one the
+    /// launching fixture launches under.
+    fn activity_declaring(
+        &self,
+        wat: &str,
+        outcomes: &[&str],
+        skills: &[&str],
+    ) -> tokio::task::JoinHandle<Option<String>> {
         self.hosting
             .as_ref()
             .expect("this bench hosts Activities")
@@ -43191,7 +43202,7 @@ impl Grilling {
                         .iter()
                         .map(|outcome| (*outcome).to_owned())
                         .collect(),
-                    skills: vec!["verkstead/implementing".to_owned()],
+                    skills: skills.iter().map(|skill| (*skill).to_owned()).collect(),
                 },
             )
     }
@@ -43258,6 +43269,40 @@ async fn a_component_launches_a_session_and_its_outcome_comes_back() {
         notices(&view).is_empty(),
         "and nothing stopped: {:?}",
         notices(&view)
+    );
+}
+
+/// A component launching under a skill its block does not declare is refused,
+/// and no session is started: **what an Activity names, it declares**. The
+/// fixture answers `refused` to a refused launch, which is no Outcome it
+/// declares, so the Conversation stops naming that word.
+#[tokio::test]
+async fn a_component_launching_under_an_undeclared_skill_is_refused() {
+    let fixture = grilling(&under_an_activity(
+        "    printf 'the fixture is working\\n'\n    sleep 300",
+    ))
+    .await;
+    fixture.grilling_printed().await;
+
+    let before = outputs(&fixture.view().await).len();
+
+    let outcome = fixture
+        .activity_declaring(LAUNCHING, &["committed", "nothing"], &[])
+        .await
+        .unwrap();
+
+    assert_eq!(outcome, None);
+
+    let notice = fixture.stopped().await;
+    assert!(
+        notice.html.contains("<code>refused</code>"),
+        "the launch was refused, which the fixture answers as `refused`: {}",
+        notice.html,
+    );
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        before,
+        "and no session was started under the skill",
     );
 }
 

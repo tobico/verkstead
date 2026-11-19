@@ -129,6 +129,8 @@ pub(crate) async fn run(
         lent: Lent::new(state, conversation_id).doing(doing),
         state: state.clone(),
         conversation_id,
+        name: name.clone(),
+        declared: activity.skills.clone(),
     };
 
     let ran =
@@ -286,12 +288,21 @@ fn shown(path: Option<&Path>) -> String {
         .unwrap_or_default()
 }
 
-/// The host lent to a component: [`Lent`]'s every call, and a stop that
-/// landed while it ran ending the component at the next one.
+/// The host lent to a component: [`Lent`]'s every call, held to the skills
+/// its block declares, and a stop that landed while it ran ending the
+/// component at the next one.
 struct Hosted {
     lent: Lent,
     state: AppState,
     conversation_id: i64,
+
+    /// The Activity's drawn name, which a refused launch is said in.
+    name: String,
+
+    /// The skills its block declares: **what an Activity names, it declares**
+    /// (Set 1771, Q1), so a launch under any other is refused, as the loader
+    /// refuses a block naming a skill it cannot reach.
+    declared: Vec<String>,
 }
 
 impl Hosted {
@@ -318,6 +329,19 @@ impl host::Host for Hosted {
         evidence: world::Evidence,
         ends: world::Ends,
     ) -> wasmtime::Result<Result<world::Session, String>> {
+        if !self.declared.contains(&skill) {
+            tracing::error!(
+                conversation_id = self.conversation_id,
+                skill,
+                "an Activity asked to launch a session under a skill its block doesn't declare",
+            );
+
+            return Ok(Err(format!(
+                "{} doesn't declare the `{skill}` skill, so it can't launch a session under it.",
+                self.name
+            )));
+        }
+
         let launched =
             host::Host::launch(&mut self.lent, skill, role, prompt, evidence, ends).await?;
 
