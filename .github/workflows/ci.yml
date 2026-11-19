@@ -52,6 +52,11 @@ jobs:
         run: |
           cargo build --release --locked --target wasm32-wasip2 \
             --manifest-path plugins/Cargo.toml
+          # And the suites' own components, each a workspace apart (see
+          # plugins/tests/stub-harness/Cargo.toml), into the same directory.
+          cargo build --release --locked --target wasm32-wasip2 \
+            --target-dir plugins/target \
+            --manifest-path plugins/tests/stub-harness/Cargo.toml
           mkdir -p plugins/dist
           cp plugins/target/wasm32-wasip2/release/*.wasm plugins/dist/
 
