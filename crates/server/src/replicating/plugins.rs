@@ -240,8 +240,9 @@ const LANGUAGES_TAKEN_UP: &str = "plugins.languages";
 /// — a size that will not read being none, so the default stands — written as
 /// this device's take-up, and put together with every other device's by on
 /// winning and the larger size winning — see [`Plugins`]. The file's `enabled`
-/// and `size` are not read again from here on, and a save of the settings page
-/// takes them out — see [`crate::settings::Config::languages`].
+/// and `size` are not read again from here on; a save of the settings page
+/// leaves them in the file as written, it writing no key of a `languages:`
+/// entry — see [`crate::settings::Config::keeping_what_the_page_never_drew`].
 pub async fn taken_up(pool: &SqlitePool, settings: &Settings, device: &str) -> Result<()> {
     if !replicated::taken_up_as(pool, LANGUAGES_TAKEN_UP).await? {
         let settings_ = settings.clone();

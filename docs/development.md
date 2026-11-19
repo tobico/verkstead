@@ -638,17 +638,9 @@ author_tokens:
 ```yaml
 # config.yaml
 languages:
-  rust:
-    enabled: true
-    size: 30G
   go:
-    enabled: true
-  node:
-    enabled: true
-  python:
-    enabled: true
-  dotnet:
-    enabled: false
+    env:
+      GOFLAGS: -mod=mod
   gleam:
     label: Gleam
     detect:
@@ -669,16 +661,17 @@ sandbox_binds:
   - /var/cache/verkstead-cargo
 ```
 
-`languages` is one entry per language, merged key by key over the descriptors
-embedded in the binary — the seven Verkstead ships are Rust, C/C++, the four
-package stores and the JVM, and a save from the settings page writes an entry for each: `enabled`
-and `size` are the two the page writes, and everything else in an entry is the
-installer's. `dotnet: enabled: false` above is a machine that builds no .NET and
-would rather not have NuGet's three variables in every session. `gleam` is a
-language Verkstead has never heard of and works all the same. `rust_build_cache`
-is where Rust's two used to be said, and is still read as Rust's — the map wins
-where both say something, and the first save from the settings page carries it
-into the map and leaves the old key out of the file.
+`languages` is the installer's alone: one entry per language, merged key by key
+over the language of its name as its plugin provides it — the seven Verkstead
+ships are Rust, C/C++, the four package stores and the JVM, as six built-in
+Language plugins. `go` above adds one variable to Go's and keeps the rest.
+`gleam` is a language no plugin provides, and is drawn on the Plugins page as
+a plugin of its own. The settings page writes no key of any entry: whether
+sessions get a language is its plugin's tick and how big its stores grow is its
+plugin's `size` setting, both the cluster's. An entry's `enabled` and `size`,
+and `rust_build_cache`, where Rust's two used to be said, were taken up into
+those plugins' records at the first start that had them, and are not read
+again.
 
 A Data Directory from before the list said `git_author:` in `config.yaml` and
 `github_token:` in `secrets.yaml`. The first start moves the two into the list

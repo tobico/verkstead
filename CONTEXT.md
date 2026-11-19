@@ -1274,7 +1274,7 @@ C/C++, which compile, the four **package stores**, Go, Node, Python and
 built-in **Plugins**, written the way an installer writes one, so they are the
 grammar's own worked examples rather than a second shape nobody ever sees. **One entry per
 ecosystem rather than per tool**, which is what makes Node six tools, Python
-four and the JVM two: what one box on the settings page turns off is every tool that installs
+four and the JVM two: what one plugin's tick turns off is every tool that installs
 from one registry.
 **Data rather than behaviour.** A descriptor cannot say a command to run: a
 settings file that started programs would be one whose sandbox somebody then
@@ -1387,11 +1387,10 @@ and `%LOCALAPPDATA%\Verkstead\Cache` on Windows, the local rather than the
 roaming application data because a compiled crate follows nobody between
 machines. The packaged unit says `/var/cache/verkstead`); which languages a
 Sandbox gets at all, and how big each one's stores may grow, is the human's, in
-the workbench settings — a row per descriptor under **Build caches**: its
-box, and on every one that has a store of its own a link saying what the store
-holds against its size, which opens the size (a built-in language's being
-its plugin's, set on its pane), a Clear and the rest (C/C++'s
-link saying instead that its objects are Rust's sccache's). It is kept under those sizes
+the workbench settings — each language's Language plugin, cluster-wide: its
+tick on the Plugins page, and in its pane the size and, for every language
+with a store of its own, what the store holds against it, its directories and
+a Clear (C/C++'s saying instead that its objects are Rust's sccache's). It is kept under those sizes
 by sccache for the compiled half and by the **Sweep** for the rest. The one control
 there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.

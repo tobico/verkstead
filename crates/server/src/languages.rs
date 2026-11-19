@@ -106,7 +106,7 @@ pub const GO: &str = "go";
 pub const NODE: &str = "node";
 
 /// And Python, which is one entry for pip and uv — and for poetry and pipenv
-/// after them, an ecosystem being one box on the settings page. uv is the
+/// after them, an ecosystem being one plugin's tick. uv is the
 /// fourth store beside the Worktrees, and the second tool to say out loud that
 /// it could not link out of one.
 pub const PYTHON: &str = "python";
@@ -960,7 +960,7 @@ impl Descriptor {
     ///
     /// Except where nothing could read it, and then it is a language **off**:
     /// what a descriptor saying nothing comes to with nothing underneath it is
-    /// a name with no variables, and a box on the settings page that turns on a
+    /// a name with no variables, and a tick on the Plugins page that turns on a
     /// language that does not exist would be worse than the language being
     /// plainly off until the entry is fixed.
     ///

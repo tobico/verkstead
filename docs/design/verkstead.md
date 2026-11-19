@@ -702,6 +702,17 @@ flowchart LR
     The compile server writes each object where the compile names it, so a
     build directory outside the Worktree, or a compiler reached only through
     one Conversation's own binds, fails the compile rather than missing.)
+    (*revised 2026-11-19, plugins stage 02;
+    [ADR 0030](../adr/0030-plugins.md)*: a descriptor is a **Language
+    plugin's** `language` entry, the seven shipping as six built-in plugins,
+    Rust and C/C++ one plugin for their one compile server. The switch is that
+    plugin's tick on the Plugins page and the size its `size` setting, and
+    both are the cluster's record rather than a device's `config.yaml` key:
+    each device's `enabled` and `size` — `rust_build_cache`'s too — were taken
+    up once, on winning and the larger size winning, and are not read again;
+    the settings page writes no key of a `languages:` entry. An installer's
+    entry still merges over the language of its name, and one naming a
+    language no plugin provides is drawn as a plugin of its own.)
 
     **Compile caching is off on Windows, and the downloads are not** (*settled
     2026-09-06, the AppContainer stage's probe;
@@ -1439,15 +1450,16 @@ Timeline events:
   the server cannot see is what the warning on it is drawn from: a bind that has
   quietly stopped resolving is what nobody goes looking for. **Every section's
   card is one line** — its name at the near end and how it stands at the far one
-  in a few words, `2 build caches · 3 binds`, cut with an ellipsis rather than
+  in a few words, `3 binds`, cut with an ellipsis rather than
   wrapped, and in the stopped colour where the section is waiting on the human:
   `No GitHub token`, `No sccache`, `1 bind unseen` (*revised 2026-10-12, building
   compose-page-ui-fixes*: each card said how its section stood in a sentence or
   two, which was read once and read past forever after). What is on a card is
   what a list is scanned for and the rest is in the pane — a Profile's account
-  paths, the models it lists, its agent type as a field and Remove; the Build
-  caches' checkbox per language and, behind the link beside it, each store's
-  size and Clear. **A Profile's card is one line: the harness's mark, the harness's name,
+  paths, the models it lists, its agent type as a field and Remove; a Language
+  plugin's size and, under it, each of its stores and Clear (*revised
+  2026-11-19, building plugins stage 02*: the Build caches' checkbox per
+  language, and behind the link beside it each store's size and Clear). **A Profile's card is one line: the harness's mark, the harness's name,
   and the Profile's own name after an em dash** — "Claude Code — Personal", and
   "Claude Code" for the one nobody named, there being nothing for a name to tell
   it apart from — and at the far end which machine the account is on, where
