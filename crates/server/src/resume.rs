@@ -429,14 +429,13 @@ async fn recompute(
                 // says why not. See [`crate::runner::stage_to_plan`], which is
                 // the same reading [`crate::runner::backlog_again`] makes a
                 // moment later to decide what to launch.
-                let planned = crate::runner::stage_to_plan(
+                let planned = !crate::runner::stage_to_plan(
                     state,
                     conversation_id,
                     &worktree,
                     conversation.base_commit.as_deref(),
                 )
-                .await
-                .is_none();
+                .await;
 
                 // And what the branch has written since it was made, which is
                 // the same reading again asked for the other thing it decides:

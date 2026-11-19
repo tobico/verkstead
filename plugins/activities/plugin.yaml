@@ -30,4 +30,4 @@ provides:
     name: Backlog runner
     component: backlog-runner.wasm
     outcomes: [finished]
-    skills: [verkstead/next-task]
+    skills: [verkstead/next-task, verkstead/next-stage]

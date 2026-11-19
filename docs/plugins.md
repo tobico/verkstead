@@ -298,6 +298,11 @@ of Verkstead's:
   asked the human where the task runs. Which device is always the host's. An
   Activity told `elsewhere` launches nothing and ends `steered`; it is started
   again wherever the Conversation lands.
+- **`join-chain`**, before a roadmap stage's finish: the host holds it until
+  every stage already in the roadmap's chain has settled, then answers the
+  chain, bottom to top, for the finish's prompt — the rebase onto its top is
+  the session's. A Conversation that is no stage is answered at once, with no
+  branches.
 
 **An Activity keeps nothing between starts.** A server restarted starts it
 again with the same facts and the Timeline as it now stands, and the files in

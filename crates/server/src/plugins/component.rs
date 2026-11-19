@@ -665,6 +665,10 @@ mod unlent {
         ) -> wasmtime::Result<host::Placed> {
             Err(refused())
         }
+
+        async fn join_chain(&mut self) -> wasmtime::Result<Vec<host::Link>> {
+            Err(refused())
+        }
     }
 }
 

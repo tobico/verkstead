@@ -1384,12 +1384,7 @@ async fn start(
     // [`crate::runner::plan_stage`].
     let driving = state.drivers.driving(id);
 
-    tokio::spawn(crate::runner::plan_stage(
-        state.clone(),
-        id,
-        cut_from,
-        driving,
-    ));
+    tokio::spawn(crate::runner::plan_stage(state.clone(), id, driving));
 }
 
 /// Place `stage`, just recorded at home as Conversation `id`, where its line

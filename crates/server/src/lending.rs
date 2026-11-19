@@ -639,6 +639,20 @@ impl host::Host for Lent {
             false => host::Placed::Elsewhere,
         })
     }
+
+    /// Hold the finish until the stage may join its roadmap's chain, and
+    /// answer that chain, as the runner always held a stage's finish — see
+    /// [`crate::joins::let_in`]. Not a stage, nothing is held or answered.
+    async fn join_chain(&mut self) -> wasmtime::Result<Vec<host::Link>> {
+        Ok(crate::joins::let_in(&self.state, self.conversation_id)
+            .await
+            .into_iter()
+            .map(|link| host::Link {
+                stage: link.stage,
+                branch: link.branch,
+            })
+            .collect())
+    }
 }
 
 /// A Repo of the Conversation's, found by name: where it is, its Worktree, and

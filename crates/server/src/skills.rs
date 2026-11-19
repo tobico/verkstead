@@ -86,11 +86,13 @@ const STAGING: &str = "verkstead/staging/SKILL.md";
 /// And the fork of next-stage, which the one session a roadmap stage starts
 /// with runs inside: the session that re-grounds the stage's brief and writes
 /// the backlog the runner then works.
+#[cfg(test)]
 const NEXT_STAGE: &str = "verkstead/next-stage/SKILL.md";
 
 /// And the fork of next-task, which every session the runner launches is put
 /// inside — the task sessions and the finish one alike, because which of them it
 /// is, is read off `.tasks/` rather than told.
+#[cfg(test)]
 const NEXT_TASK: &str = "verkstead/next-task/SKILL.md";
 
 /// And the submitting skill's, which the one session launched over a finish
@@ -649,6 +651,11 @@ pub(crate) fn staging(skills: &Skills, brief: &str) -> String {
 /// whatever is there by then — see [`crate::joins`]. A planning session told
 /// *stacks on* would be told something its own finish contradicts, and would go
 /// and register a stack the join is about to rebuild.
+///
+/// **The Backlog runner component writes this prompt itself now**, in these
+/// words; kept, under test only, for the tests that hold the words to the
+/// skill, until the runner is emptied.
+#[cfg(test)]
 pub(crate) fn next_stage(skills: &Skills, brief: &str, cut_from: Option<&str>) -> String {
     let skill = skills.named(NEXT_STAGE);
 
@@ -683,6 +690,11 @@ pub(crate) fn next_stage(skills: &Skills, brief: &str, cut_from: Option<&str>) -
 /// still the work: the task file says where this session stops, and the two
 /// documents say what it is a slice of. A session that had only the first would
 /// be building to a description written for somebody who had read the other two.
+///
+/// **The Backlog runner component writes this prompt itself now**, in these
+/// words; kept, under test only, for the tests that hold the words to the
+/// skill, until the runner is emptied.
+#[cfg(test)]
 pub(crate) fn next_task(skills: &Skills, brief: &str, handoff: Option<&str>) -> String {
     let skill = skills.named(NEXT_TASK);
 
@@ -1279,6 +1291,11 @@ pub(crate) struct Link {
 /// leaves its companion's branch behind. **Known and not yet done**, and it
 /// costs nothing until a roadmap both declares and has a companion its stages
 /// commit in. See CONTEXT's **Chain**, where the deferral is written down.
+///
+/// **The Backlog runner component writes this prompt itself now**, in these
+/// words; kept, under test only, for the tests that hold the words to the
+/// skill, until the runner is emptied.
+#[cfg(test)]
 pub(crate) fn joining(prompt: &str, chain: &[Link]) -> String {
     let Some((top, under)) = chain.split_last() else {
         return prompt.to_owned();

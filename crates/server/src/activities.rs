@@ -148,6 +148,7 @@ pub(crate) async fn run(
         declared: activity.skills.clone(),
         doing: doing.to_owned(),
         writing: writing.clone(),
+        planning: None,
     };
 
     let ran =
@@ -345,6 +346,10 @@ struct Hosted {
     /// The Event the newest session launched here prints into, read back by
     /// [`run`] once the component has ended.
     writing: Arc<Mutex<Option<i64>>>,
+
+    /// The session launched to plan a roadmap stage, where the newest was one:
+    /// its backlog landing is the host's to record once it has been waited on.
+    planning: Option<world::Session>,
 }
 
 impl Hosted {
@@ -357,6 +362,22 @@ impl Hosted {
         }
 
         Ok(())
+    }
+}
+
+impl Hosted {
+    /// Whether `.tasks/TODO.md` is in the Worktree, committed as it stands.
+    async fn backlog_committed(&self) -> bool {
+        let worktree = store::load_conversation(&self.state.pool, self.conversation_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|conversation| conversation.worktree);
+
+        match worktree {
+            Some(worktree) => crate::runner::backlog_landed(&worktree).await,
+            None => false,
+        }
     }
 }
 
@@ -386,7 +407,10 @@ impl host::Host for Hosted {
 
         // What the session builds, and what it is said to be doing, read off
         // what it is expected to leave — see [`step`].
-        match step(&self.state, self.conversation_id, &evidence).await {
+        let building = step(&self.state, self.conversation_id, &evidence).await;
+        let planning = matches!(building, Some((Building::Stage, _)));
+
+        match building {
             Some((building, doing)) => self.lent.now(Some(building), &doing),
             None => self.lent.now(None, &self.doing),
         }
@@ -396,6 +420,8 @@ impl host::Host for Hosted {
 
         match &launched {
             Ok(session) => {
+                self.planning = planning.then_some(*session);
+
                 *self
                     .writing
                     .lock()
@@ -412,8 +438,17 @@ impl host::Host for Hosted {
     /// as the wait comes back, as the runner always ended a step's: whatever
     /// the component does next — another launch, a placement that moves the
     /// Conversation — happens with nothing running.
+    ///
+    /// **And a stage's backlog landing is recorded** once its planning session
+    /// is waited on and the list is committed, however the session ended, as
+    /// the runner recorded it after seeing the planning out. A second sighting
+    /// writes nothing — see [`crate::conversations::backlog_landed`].
     async fn wait(&mut self, session: world::Session) -> wasmtime::Result<world::Waited> {
         let waited = host::Host::wait(&mut self.lent, session).await?;
+
+        if self.planning == Some(session) && self.backlog_committed().await {
+            crate::conversations::backlog_landed(&self.state, self.conversation_id).await;
+        }
 
         match waited {
             world::Waited::Done => {
@@ -466,6 +501,16 @@ impl host::Host for Hosted {
         platform: String,
     ) -> wasmtime::Result<host::Placed> {
         host::Host::place_task(&mut self.lent, task, label, platform).await
+    }
+
+    /// The chain's wait, and a stop that landed while it waited ending the
+    /// component rather than letting it launch the finish.
+    async fn join_chain(&mut self) -> wasmtime::Result<Vec<host::Link>> {
+        let chain = host::Host::join_chain(&mut self.lent).await?;
+
+        self.ended_by_a_stop().await?;
+
+        Ok(chain)
     }
 }
 
