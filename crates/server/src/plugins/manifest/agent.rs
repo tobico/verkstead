@@ -908,12 +908,12 @@ provides:
         assert_eq!(agent.excluded, [".stub/"]);
     }
 
-    /// The example `docs/plugins.md` writes under *An agent* is one this
+    /// The example `docs/plugins.md` writes under *Agent* is one this
     /// reads, so the grammar and its document say the same.
     #[test]
     fn the_documented_example_is_read() {
         let docs = include_str!("../../../../../docs/plugins.md");
-        let (_, after) = docs.split_once("### An agent").unwrap();
+        let (_, after) = docs.split_once("\n### Agent\n").unwrap();
         let (_, after) = after.split_once("```yaml\n").unwrap();
         let (example, _) = after.split_once("```").unwrap();
         let (header, _) = AGENT.split_once("provides:\n").unwrap();
