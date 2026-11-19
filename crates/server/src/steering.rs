@@ -50,7 +50,7 @@
 //!
 //! **What ends that session is the submit rather than the press.** One Worktree
 //! holds one agent, so the session a steer starts takes the Worktree from
-//! whatever is still in it — see the runner's `launch_in_turn`, which waits for
+//! whatever is still in it — see [`crate::lending`]'s launch, which waits for
 //! a session that cannot be displaced and ends one that can. So a steer into a
 //! target something runs in ends what was running, at once or once a review
 //! waiting on an ask has finished; a steer into Done launches nothing and ends

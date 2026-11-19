@@ -3216,16 +3216,6 @@ pub(crate) struct Held<'a> {
     pub(crate) settlements: &'a store::Settlements,
 }
 
-impl<'a> Held<'a> {
-    /// Nothing held, which is what every launch but one hands over.
-    pub(crate) fn nothing(settlements: &'a store::Settlements) -> Held<'a> {
-        Held {
-            sets: &[],
-            settlements,
-        }
-    }
-}
-
 /// A session launched as the harness's own **resume** of an earlier one: what it
 /// is told to carry on from, what it is primed with, and the record it is already
 /// part way through.

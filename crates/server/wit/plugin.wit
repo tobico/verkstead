@@ -307,6 +307,8 @@ interface host {
     -> result<session, string>;
 
   /// Wait on a session until something happens to it or the Conversation.
+  /// Its Done signal is checked against the `evidence` it was launched
+  /// expecting for as long as it is waited on, and refused while it is not.
   wait: func(session: session) -> waited;
 
   /// The git facts of the Worktree's repository or a Companion's, by the
