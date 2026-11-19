@@ -296,9 +296,9 @@ impl Tail {
                     // session started.
                     Carried::Entries { taken } => {
                         match search(profile, session, worktree, launched, home) {
-                            Search::Parsed(reader) => Following::Entries(
+                            Search::Parsed(reader) => Following::Entries(Box::new(
                                 crate::harness::plugged::Entries::of(reader, taken),
-                            ),
+                            )),
                             _ => Following::Looking,
                         }
                     }
@@ -399,9 +399,9 @@ impl Tail {
             Search::Brain(brain) => following(brain.looked(pool, event_id).await),
             // Nothing to look for, the export doing its own finding on every
             // poll — as a store's reader does.
-            Search::Parsed(reader) => {
-                Following::Entries(crate::harness::plugged::Entries::of(reader.clone(), 0))
-            }
+            Search::Parsed(reader) => Following::Entries(Box::new(
+                crate::harness::plugged::Entries::of(reader.clone(), 0),
+            )),
             Search::Records {
                 database,
                 worktree,
@@ -464,7 +464,7 @@ enum Following {
 
     /// A plugin harness's record as its component reads it, and how many of
     /// its entries have been taken.
-    Entries(crate::harness::plugged::Entries),
+    Entries(Box<crate::harness::plugged::Entries>),
 }
 
 /// A found log, read as far as it has been written.
