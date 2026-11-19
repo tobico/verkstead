@@ -256,7 +256,11 @@ handed the **start facts** and answers the Outcome as its word:
   base — and each Companion the same way, with whether it may be committed in;
 - the roles' Pairings;
 - the Brief, and the handoff document where there is one;
-- the Timeline so far, each entry its kind and its body as JSON;
+- the Timeline so far, each entry its kind and its body as the text the
+  Timeline stores, which is not JSON: a brief, a handoff or a notice is its
+  markdown; a move is the state's word, `follow-up` say; a steer is the
+  state's word, then a newline and the instruction where the human wrote one;
+  and a session's output, a question set or a commit has an empty body;
 - the options the Process configured the Activity with;
 - each skill it declared, with the path a session reads its `SKILL.md` at.
 

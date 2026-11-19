@@ -3732,8 +3732,8 @@ pub(crate) async fn settle(
     Ok(true)
 }
 
-/// A Conversation's Timeline as it is held: each Event's id, kind and JSON
-/// body, oldest first, read nothing into.
+/// A Conversation's Timeline as it is held: each Event's id, kind and body as
+/// the `body` column stores it, oldest first, read nothing into.
 ///
 /// What an Activity is started with — see the server's `activities` — which
 /// is a component's to make sense of in its own terms, so nothing is joined in
