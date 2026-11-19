@@ -1279,6 +1279,24 @@ async fn readable(state: &AppState, asked: &str) -> Result<(Manifest, Reading), 
         ));
     }
 
+    // And a built-in harness's, which an id is read as ignoring case — see
+    // [`crate::store::AgentType::read`]: a plugin under one would be read as
+    // that built-in, its harness shadowed and its Profiles run as the
+    // built-in's.
+    let harness = crate::store::BUILT_IN
+        .iter()
+        .find(|built_in| built_in.uuid.eq_ignore_ascii_case(&manifest.uuid));
+    if let Some(harness) = harness {
+        let named = crate::harness::of(harness.agent_type).map_or("", |harness| harness.named());
+        return Err(refused(
+            StatusCode::CONFLICT,
+            ApiError::new(format!(
+                "Its uuid `{}` is {named}'s, which is built in. Give it a uuid of its own.",
+                manifest.uuid
+            )),
+        ));
+    }
+
     let installed = match replicated::live_records::<Plugins>(&state.pool).await {
         Ok(records) => records,
         Err(error) => return Err(failed(error)),

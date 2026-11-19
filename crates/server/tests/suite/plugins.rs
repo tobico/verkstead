@@ -496,6 +496,21 @@ async fn a_uuid_installed_or_built_in_is_refused() {
     assert_eq!(status, StatusCode::CONFLICT, "{said}");
     assert!(said.contains("built-in"), "{said}");
 
+    // And a built-in harness's, which an id is read as ignoring case.
+    let claude = plugin(
+        dir.path(),
+        "claude",
+        &manifest("985E669B-5CF2-4AEE-BBF2-6074626949F4", "Claude", &[]),
+    );
+    let (status, said) = pressing(
+        &app,
+        PLUGINS,
+        serde_json::json!({ "source": claude, "granted": [] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(said.contains("Claude Code's, which is built in"), "{said}");
+
     assert_eq!(page(&app).await.installed.len(), 1);
 }
 
