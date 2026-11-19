@@ -2377,6 +2377,74 @@ async fn a_plugin_harness_offers_its_declared_models_and_defaults_to_its_declare
     );
 }
 
+/// **A Profile of a plugin's harness waits for every member to be on this
+/// release**: an older one reads a Profile naming a harness it does not know as
+/// an error that takes its whole list with it. The refusal names the member
+/// and what to update; a built-in's Profile saves as it always has, and once
+/// the member says this release the plugin's saves too.
+#[tokio::test]
+async fn a_plugin_harness_profile_waits_for_a_member_on_an_older_release() {
+    use crate::stub_harness::{self, StubHarness};
+    use verkstead_server::device::reading::RUNNING;
+
+    let (accounts, dir, app) = workbench().await;
+    let harness = StubHarness::Silent;
+    harness
+        .installed(&app, dir.path(), ["stub-large", "stub-grilling"])
+        .await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let member = |version: Option<&str>| store::Linking {
+        device: "b9848802c777ffdd4da2761f540a8e99".to_owned(),
+        name: "winvm".to_owned(),
+        os: "Windows".to_owned(),
+        addresses: vec!["127.0.0.1:9".to_owned()],
+        fingerprint: "00".repeat(32),
+        kept_by: None,
+        version: version.map(str::to_owned),
+        install: None,
+    };
+    store::record_member(&pool, &member(Some("0.1.0")))
+        .await
+        .unwrap();
+
+    let plugged = serde_json::json!({
+        "name": "stubbed",
+        "account": {
+            "agent_type": harness.uuid(),
+            "paths": stub_harness::account(accounts.path()),
+        },
+        "models": ["stub-large"],
+    });
+    assert_eq!(
+        save(&app, &plugged).await,
+        ProfileSaved::MemberBehind(
+            "winvm is on 0.1.0, which can't read a profile of a plugin's agent. Update winvm \
+             first."
+                .to_owned()
+        )
+    );
+    saved(&app, accounts.path(), "work").await;
+
+    store::record_member(&pool, &member(None)).await.unwrap();
+    assert_eq!(
+        save(&app, &plugged).await,
+        ProfileSaved::MemberBehind(
+            "winvm is on an older release, which can't read a profile of a plugin's agent. \
+             Update winvm first."
+                .to_owned()
+        ),
+        "a member that says no version is older than any",
+    );
+
+    store::record_member(&pool, &member(Some(RUNNING)))
+        .await
+        .unwrap();
+    assert_eq!(save(&app, &plugged).await, ProfileSaved::Saved);
+}
+
 /// **A disabled Agent plugin's Profiles stay, offered on no picker** (Set 1764,
 /// Q20): each reads broken as its plugin disabled, and a Conversation on a Repo
 /// remembering one starts with that role empty, the roles beside it filled as

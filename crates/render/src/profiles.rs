@@ -489,7 +489,7 @@ fn memory_on() -> bool {
 /// The refusals are the server's and not the form's: a check the browser made
 /// is a courtesy, and every request reaching the endpoint is decided there
 /// whether or not a form was involved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum ProfileSaved {
     /// Recorded. It is on the list, and it is there after a restart.
@@ -543,6 +543,12 @@ pub enum ProfileSaved {
 
     /// The harness it names is not one this server has.
     NoSuchHarness,
+
+    /// It is of a plugin's harness, and a member of the cluster is on a
+    /// release older than this device's, which cannot read a Profile naming a
+    /// harness it does not know: one such record takes every Profile off its
+    /// list. The sentence, naming the member and what to update.
+    MemberBehind(String),
 }
 
 /// What became of removing a Profile.

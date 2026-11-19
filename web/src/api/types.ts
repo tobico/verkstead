@@ -5520,7 +5520,7 @@ devices: Array<ProfileDevice>, };
  * is a courtesy, and every request reaching the endpoint is decided there
  * whether or not a form was involved.
  */
-export type ProfileSaved = "Saved" | "NoSuchProfile" | "Modelless" | "NameTaken" | "DefaultTaken" | "DirNotAbsolute" | "DirMissing" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "NotAFile" | "HomeNotAbsolute" | "HomeMissing" | "HomeNotADirectory" | "NoSuchHarness";
+export type ProfileSaved = "Saved" | "NoSuchProfile" | "Modelless" | "NameTaken" | "DefaultTaken" | "DirNotAbsolute" | "DirMissing" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "NotAFile" | "HomeNotAbsolute" | "HomeMissing" | "HomeNotADirectory" | "NoSuchHarness" | { "MemberBehind": string };
 
 /**
  * Why a press that would have started a session was refused over a Profile:

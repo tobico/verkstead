@@ -66,7 +66,7 @@ import { ErrorLine } from "../notices";
 import { rowPress } from "../rows";
 import {
   blankProfile,
-  PROFILE_REFUSAL,
+  profileRefusal,
   ProfileForm,
 } from "../profiles/ProfileList";
 import { Foot } from "./Foot";
@@ -308,7 +308,7 @@ export function Accounts(props: {
       </Show>
 
       <Show when={refused()}>
-        {(outcome) => <ErrorLine>{PROFILE_REFUSAL[outcome()]}</ErrorLine>}
+        {(outcome) => <ErrorLine>{profileRefusal(outcome())}</ErrorLine>}
       </Show>
       <Show when={save.isError}>
         <ErrorLine>

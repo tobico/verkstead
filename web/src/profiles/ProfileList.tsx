@@ -170,12 +170,20 @@ import app from "../App.module.css";
 import styles from "./ProfileList.module.css";
 import { LoggingIn } from "./LoggingIn";
 
-/// What each way of being refused a save says, once, wherever it is met.
+/// What each way of being refused a save says, once, wherever it is met — the
+/// server's own sentence where it sends one, and these words for the rest.
+export function profileRefusal(outcome: ProfileSaved): string {
+  return typeof outcome === "string"
+    ? PROFILE_REFUSAL[outcome]
+    : outcome.MemberBehind;
+}
+
+/// The refusals the server says in a word rather than a sentence.
 ///
 /// `Saved` is here for completeness of the mapping and never drawn: nothing is
 /// said about a save that worked, because the profile appearing on the list
 /// behind the pane is what says it.
-export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
+const PROFILE_REFUSAL: Record<Extract<ProfileSaved, string>, string> = {
   Saved: "",
   NoSuchProfile: "That profile is gone.",
   Modelless:
@@ -1191,7 +1199,7 @@ export function ProfileForm(props: {
       <Show when={refused()}>
         {(outcome) => (
           <ErrorLine class={styles.failure}>
-            {PROFILE_REFUSAL[outcome()]}
+            {profileRefusal(outcome())}
           </ErrorLine>
         )}
       </Show>
