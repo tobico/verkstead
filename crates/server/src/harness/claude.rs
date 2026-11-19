@@ -103,6 +103,7 @@ impl Harness for Claude {
             session: Some(said(&["--session-id", SESSION])),
             resume: Some(Resume::Flag(said(&["--resume", SESSION]))),
             tail: said(&["--dangerously-skip-permissions"]),
+            worktree: Vec::new(),
         }
     }
 

@@ -100,6 +100,9 @@ pub struct Launch {
     pub resume: Option<Resume>,
     /// What goes last.
     pub tail: Vec<String>,
+    /// How the Worktree is said, holding `{worktree}`: written after the tail,
+    /// and left off whole for a session with no Worktree.
+    pub worktree: Vec<String>,
     /// The settings for this session only, written as JSON to the file
     /// `{settings}` names.
     pub settings: Option<Value>,
@@ -405,7 +408,9 @@ fn launch(value: &Value, field: &str) -> Result<Launch, Refusal> {
     let map = entry(
         value,
         field,
-        &["model", "prompt", "session", "resume", "tail", "settings"],
+        &[
+            "model", "prompt", "session", "resume", "tail", "worktree", "settings",
+        ],
     )?;
     let at = |key: &str| format!("{field}.{key}");
     let optional = |key: &str, needs: Option<&str>| match map.get(key) {
@@ -436,11 +441,17 @@ fn launch(value: &Value, field: &str) -> Result<Launch, Refusal> {
             Some(value) => Some(resume(value, &at("resume"))?),
         },
         tail,
+        worktree: optional("worktree", Some("worktree"))?.unwrap_or_default(),
         settings,
     };
 
     // `{settings}` may stand in any part of the line, the resume's among them.
-    let mut parts: Vec<&[String]> = vec![&launch.model, &launch.prompt, &launch.tail];
+    let mut parts: Vec<&[String]> = vec![
+        &launch.model,
+        &launch.prompt,
+        &launch.tail,
+        &launch.worktree,
+    ];
     parts.extend(launch.session.as_deref());
     match &launch.resume {
         Some(Resume::Flag(words)) => parts.push(words),
@@ -1292,6 +1303,35 @@ provides:
             ),
             [r#"projects={"/work/tree"={trust_level="trusted"}}"#]
         );
+    }
+
+    /// The Worktree said apart from the tail, which the host leaves off whole
+    /// where a session has none — Codex's trust, a flag and a table.
+    #[test]
+    fn the_worktree_is_said_apart_where_it_is_written() {
+        let word = r#"projects={"{worktree}"={trust_level="trusted"}}"#;
+        let yaml = AGENT.replace(
+            "      settings:\n        quiet: true\n",
+            &format!("      worktree: [-c, '{word}']\n      settings:\n        quiet: true\n"),
+        );
+
+        let launch = agent_for(&yaml, Platform::Linux).launch;
+
+        assert_eq!(launch.worktree, ["-c", word]);
+        assert_eq!(
+            agent_for(AGENT, Platform::Linux).launch.worktree,
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_worktree_part_without_its_placeholder_is_refused() {
+        let yaml = AGENT.replace(
+            "      settings:\n        quiet: true\n",
+            "      worktree: [--trusted]\n      settings:\n        quiet: true\n",
+        );
+
+        assert_eq!(refused_at(&yaml), "provides[0].launch.worktree");
     }
 
     #[test]

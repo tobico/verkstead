@@ -740,6 +740,15 @@ pub struct Line {
     /// Owned rather than borrowed, because the trust pre-seed below names the
     /// Worktree this session is being launched in.
     pub(crate) tail: Vec<String>,
+
+    /// And how the Worktree is said, holding [`WORKTREE`], where the session
+    /// has one: written after the tail, and left off whole where it has none —
+    /// a flag with nothing after it would be a line that says something else.
+    ///
+    /// Empty for every built-in, which say their Worktree, where they say it,
+    /// in [`Harness::line`] from the Worktree it is handed. A plugin's manifest
+    /// is data, and this is how data says the same.
+    pub(crate) worktree: Vec<String>,
 }
 
 /// How a backend is told to carry a conversation on rather than open one — see

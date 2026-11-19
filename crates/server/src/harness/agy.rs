@@ -137,6 +137,7 @@ impl Harness for Agy {
             session: None,
             resume: Some(Resume::Flag(said(&["--conversation", SESSION]))),
             tail,
+            worktree: Vec::new(),
         }
     }
 

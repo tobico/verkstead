@@ -41,12 +41,12 @@ rustPlatform.buildRustPackage {
   };
 
   # The crates of both workspaces the build compiles, in one vendor directory:
-  # the root's, and the built-in plugins', whose Activity components are
-  # written with `wit-bindgen` — which no crate of the root's depends on, so
-  # its lock alone would leave `build.rs`'s offline build of them short. A
-  # crate both locks name is the same bytes from either. Named as
-  # `importCargoLock` names its own, which is the directory the
-  # `.cargo/config.toml` inside it points cargo at once the hook has copied it.
+  # the root's, and the built-in plugins', whose components are written with
+  # `wit-bindgen` and Codex's with `toml` beside it — the root's lock alone
+  # would leave `build.rs`'s offline build of them short. A crate both locks
+  # name is the same bytes from either. Named as `importCargoLock` names its
+  # own, which is the directory the `.cargo/config.toml` inside it points cargo
+  # at once the hook has copied it.
   cargoDeps = symlinkJoin {
     name = "cargo-vendor-dir";
     paths = [
