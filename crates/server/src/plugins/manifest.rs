@@ -626,12 +626,27 @@ impl Walk<'_> {
     }
 
     fn provides(&self, fields: &Map<String, Value>) -> Result<Vec<Provision>, Refusal> {
+        let mut agents = 0;
+
         list(fields, "provides", provision)?
             .into_iter()
             .enumerate()
             .map(|(index, (category, body))| {
                 let body = match category {
+                    // One harness to a plugin: a harness is known by its
+                    // plugin's uuid, so a second would be one nothing could
+                    // tell apart from the first, and never stood up.
+                    Category::Agent if agents > 0 => {
+                        let field = format!("provides[{index}]");
+                        return Err(Refusal::of(
+                            &field,
+                            format!(
+                                "`{field}` is a second agent. A plugin provides one harness at                                  most."
+                            ),
+                        ));
+                    }
                     Category::Agent => {
+                        agents += 1;
                         Body::Agent(Box::new(self.agent(&body, &format!("provides[{index}]"))?))
                     }
                     _ => Body::Unread(body),
