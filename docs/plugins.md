@@ -281,6 +281,14 @@ of Verkstead's:
 - **`notice`**, which puts a notice on the Timeline.
 - **`stop`**, with a reason: the Conversation stays where it is, the reason goes
   on the Timeline, and a question set left open is closed.
+- **`read-file`** and **`list-directory`** of the Worktree's repository or a
+  Companion's, at the Worktree's HEAD or at a named branch or commit — one no
+  Worktree holds as well — answering a file's bytes or a directory's entry
+  names, or none where nothing is there. They read what is committed, never the
+  working tree, and need no capability: the repositories are the
+  Conversation's own, as for `git-facts`. A repository that is neither, a
+  revision naming no commit, or a path leading out of the repository is refused
+  in a sentence.
 
 **An Activity keeps nothing between starts.** A server restarted starts it
 again with the same facts and the Timeline as it now stands, and the files in

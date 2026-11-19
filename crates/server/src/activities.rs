@@ -376,4 +376,22 @@ impl host::Host for Hosted {
     async fn stop(&mut self, reason: String) -> wasmtime::Result<()> {
         host::Host::stop(&mut self.lent, reason).await
     }
+
+    async fn read_file(
+        &mut self,
+        repo: String,
+        at: host::Revision,
+        path: String,
+    ) -> wasmtime::Result<Result<Option<Vec<u8>>, String>> {
+        host::Host::read_file(&mut self.lent, repo, at, path).await
+    }
+
+    async fn list_directory(
+        &mut self,
+        repo: String,
+        at: host::Revision,
+        path: String,
+    ) -> wasmtime::Result<Result<Option<Vec<String>>, String>> {
+        host::Host::list_directory(&mut self.lent, repo, at, path).await
+    }
 }
