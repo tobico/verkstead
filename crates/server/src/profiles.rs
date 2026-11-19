@@ -440,8 +440,8 @@ impl Plugged {
     /// Why a Profile of `agent_type` is offered on no picker, where it is a
     /// plugin's harness this server does not offer (Set 1764, Q20): its plugin
     /// disabled, or not loaded here at all. Nothing for a harness this server
-    /// offers, or for a built-in — but a built-in plugin's, Codex's, whose tick
-    /// is off, is disabled as an installed one's is.
+    /// offers, or for a built-in — but a built-in plugin's whose tick is
+    /// off is disabled as an installed one's is.
     fn withheld(&self, agent_type: store::AgentType) -> Option<Broken> {
         if self.offered.contains(&agent_type)
             || (agent_type.built_in().is_some() && !self.disabled.contains(&agent_type))
@@ -1251,6 +1251,10 @@ fn entry(
         install: harness.install().map(|install| HarnessInstall {
             instructions: install.instructions.map(str::to_owned),
             commands: install.commands.to_vec(),
+            npm: install.npm.map(str::to_owned),
+            brew: install.brew.map(str::to_owned),
+            cask: install.cask.map(str::to_owned),
+            nix: install.nix.map(str::to_owned),
         }),
         offered,
     }

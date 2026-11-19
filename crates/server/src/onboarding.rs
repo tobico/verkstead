@@ -272,6 +272,7 @@ pub(crate) enum Row {
 
 impl Row {
     pub(crate) const CLAUDE: Row = Row::Harness(store::AgentType::CLAUDE);
+    #[cfg(test)]
     pub(crate) const CODEX: Row = Row::Harness(store::AgentType::CODEX);
     pub(crate) const GROK: Row = Row::Harness(store::AgentType::GROK);
     pub(crate) const OPENCODE: Row = Row::Harness(store::AgentType::OPENCODE);

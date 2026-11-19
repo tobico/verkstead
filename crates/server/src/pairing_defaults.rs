@@ -29,13 +29,13 @@ use crate::store::{self, AgentType, Picked, Profile, Role};
 /// The model a harness's default Pairing runs for a role.
 ///
 /// Ids as a Profile lists them, since a Profile's list is what the default is
-/// matched against. Codex has one model it is known to run, so both tiers are
-/// it; Grok 4.6 is Grok Build's value tier because the older 4.5 reads as older
-/// rather than cheaper. The Antigravity CLI's are Gemini 3.8 Flash at two of
-/// its three thinking levels, high for the grilling and medium for the rest:
-/// read off `agy models` on agy 1.4.12 signed in to a Google account on its
-/// starter quota, which lists those three, two Claude models and GPT-OSS, and
-/// no Pro to grill on.
+/// matched against. A plugin harness's is the model its manifest names for
+/// the role, or its `default`; Grok 4.6 is Grok Build's value tier because the
+/// older 4.5 reads as older rather than cheaper. The Antigravity CLI's are
+/// Gemini 3.8 Flash at two of its three thinking levels, high for the grilling
+/// and medium for the rest: read off `agy models` on agy 1.4.12 signed in to a
+/// Google account on its starter quota, which lists those three, two Claude
+/// models and GPT-OSS, and no Pro to grill on.
 fn model(harness: AgentType, role: Role) -> Option<&'static str> {
     crate::harness::of(harness).map(|harness| harness.model(role))
 }

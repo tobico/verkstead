@@ -40,9 +40,10 @@ pub(crate) const BINARY: &str = "opencode";
 /// keybinding label is a harder thing to find by accident in what the session
 /// printed than a run of block characters is.
 ///
-/// Two words where codex's is three — opencode writes `esc interrupt` where
-/// codex writes `esc to interrupt` — so neither backend's constant reads the
-/// other's frame, which is what the tests on this reading turn on.
+/// Two words where a built-in plugin's `idle.signature` is three — opencode
+/// writes `esc interrupt` where that one is `esc to interrupt` — so neither
+/// reading takes the other's frame, which is what the tests on this reading
+/// turn on.
 ///
 /// **And it is the same label in either interface opencode offers.** The
 /// minimal one — `--mini`, which is what draws inline rather than taking the
@@ -51,9 +52,8 @@ pub(crate) const BINARY: &str = "opencode";
 /// on which of the two a session was started in, whatever a later stage
 /// decides about the Capture (ADR-0011).
 ///
-/// Named for the same reason [`super::codex::AT_WORK`] is, and it is the same bargain
-/// the usage-limit phrase makes: the wording is opencode's and it will move,
-/// and moving it costs one edit here.
+/// Named for the bargain the usage-limit phrase makes: the wording is
+/// opencode's and it will move, and moving it costs one edit here.
 const AT_WORK: &str = "esc interrupt";
 
 /// OpenCode.
@@ -117,22 +117,22 @@ impl Harness for OpenCode {
     /// switch off, and it takes no session id at launch: `--session` means
     /// *continue this one* and is validated against the store before the TUI
     /// starts, so a fresh name would be a session that never starts rather than a
-    /// session named — which is why its log is found rather than named, as codex's
-    /// is. Everything else about the account is in the directories the Profile
+    /// session named — which is why its log is found rather than named, as a
+    /// harness that names itself has its log found. Everything else about the account is in the directories the Profile
     /// named — see [`crate::sandbox`].
     ///
     /// **And that same flag is its resume**, the shortest line here staying the
     /// shortest: `--session <session-id>` where the name a session that took one
     /// would have gone, the prompt under its own flag exactly where it already is,
     /// and the model and the approvals unchanged. Nothing is added and nothing comes
-    /// off — opencode has no equivalent of codex's question about which directory to
-    /// resume in, because it does not ask: it resumes in the directory the session's
+    /// off — opencode asks no question about which directory to resume in, for a
+    /// manifest's `resume.also` to answer the way a plugin harness's does: it resumes in the directory the session's
     /// own row records, which is why that row is what has to be put right. `--fork`
     /// beside the flag is what would make it a conversation branched rather than
     /// carried on, and it is never passed (opencode 1.18.31's own help, and driven to
     /// prove the rest of this).
     ///
-    /// **Its id is the store's own, as Codex's is.** opencode names no session on the
+    /// **Its id is the store's own, as a harness's that names itself is.** opencode names no session on the
     /// line, so what goes after the flag is the id the row in its store turned out to
     /// be under — read as the records reader finds that row and written onto the
     /// record there, which is what leaves a device that never ran the session able to

@@ -15,19 +15,18 @@
 //!
 //! **ADR-0006 is unchanged, which is why it survives the change of medium.**
 //! Every record's payload is JSON, so a record reaches the Transcript verbatim
-//! and is parsed at render time exactly as a Claude line or a Codex rollout line
-//! is. What is stored is the payload byte for byte, with the record's own kind
-//! and its place in the session's sequence around it — the two things the
-//! renderer needs and nothing this invented on the way in. Nothing here parses
-//! a payload.
+//! and is parsed at render time exactly as a Claude line is. What is stored is
+//! the payload byte for byte, with the record's own kind and its place in
+//! the session's sequence around it — the two things the renderer needs and
+//! nothing this invented on the way in. Nothing here parses a payload.
 //!
 //! **The session is found rather than named.** opencode takes no session id at
 //! launch, so nothing Verkstead knows beforehand names its session; what
 //! identifies it is what the session wrote about itself. That is the directory
 //! it opened in — the Conversation's Worktree, bound into the sandbox at the
 //! path it has outside one, so the two are the same string — and the moment it
-//! was created. The rule is the Codex rollout finder's; only the mechanism
-//! differs.
+//! was created. The rule is the one a rollout is found by; only the
+//! mechanism differs.
 //!
 //! **Read as an outsider.** The database belongs to a program that is writing
 //! it while this reads, so it is opened read-only and never written to. A poll
@@ -464,7 +463,7 @@ fn opened_to_write(database: &Path) -> SqlitePool {
 /// `launched`.
 ///
 /// Two tests rather than one, because neither is enough on its own — this is
-/// the Codex rollout finder's rule, said in SQL. The Worktree alone would find
+/// the rule a rollout is found by, said in SQL. The Worktree alone would find
 /// whatever earlier session last worked in it, and the moment alone would find
 /// whichever Conversation happened to start a session at the same time.
 /// Together they are one session: one Conversation per Worktree and one session

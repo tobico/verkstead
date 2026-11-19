@@ -33,15 +33,13 @@
 //! what is past the cursor in the kinds the Transcript pane draws and a cursor
 //! to carry on from — see [`crate::harness::plugged::Entries`]. Those go to
 //! the store as lines the render crate wrote the shape of rather than any
-//! harness's own. Codex is one: its component finds its rollout by the
-//! Worktree the opening line names and the launch, and reads it into those
-//! kinds. A Codex Transcript stored before it was a plugin holds the rollout's
-//! raw lines, which the render crate still draws.
+//! harness's own. A Transcript stored before its harness was a plugin holds
+//! the record's raw lines, which the render crate still draws.
 //!
 //! **And what the search finds is what gives the unnamed backends their
 //! names.** opencode chooses its own, so the Capture is opened under a name
 //! nothing ever uses — and a store answers with the id of the row the finder
-//! matched. A plugin harness taking none — Codex — is the same again, its
+//! matched. A plugin harness taking none is the same again, its
 //! component answering with the id its record gives. So the moment the record
 //! is found, the id it turns out to be
 //! of goes on the record beside the session, where the id Verkstead picked would
@@ -640,8 +638,8 @@ pub(crate) enum Carried {
 /// device's name for the *sending* device's Worktree, so it is relocated before
 /// there is anything here to resume against — see [`relocated`]. A plugin
 /// harness's is its component's to find, by the id the session was named or gave
-/// itself — Codex's among them, filed by date so it crosses to the same relative
-/// path it left. And OpenCode's is not a log at all but a row of the one database its account keeps,
+/// itself — a store filed by date crossing to the same relative path it left.
+/// And OpenCode's is not a log at all but a row of the one database its account keeps,
 /// which crosses whole — so what is looked for is the row, and what has to be put
 /// right is the directory it records, opencode resuming a session in the directory
 /// its row names rather than in the one it was started in. See
@@ -1237,8 +1235,8 @@ async fn found_in_the_store(pool: &SqlitePool, event_id: i64, session: &str) {
 /// its component's `parse-transcript` answered with — see
 /// [`crate::harness::plugged::Entries::found_itself`].
 ///
-/// **Which is the only moment Verkstead learns such a session's name** —
-/// Codex's, which takes none at launch: the component finds the record and
+/// **Which is the only moment Verkstead learns such a session's name** — one
+/// that takes none at launch: the component finds the record and
 /// says what it is of, and from here on that is the session's name, which a
 /// device that never ran the session is told to resume by. A write that fails
 /// leaves the name the Capture opened with, which no harness answers to, and a

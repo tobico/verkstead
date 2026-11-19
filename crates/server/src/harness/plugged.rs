@@ -47,8 +47,8 @@ use crate::transcript::{Carried, Search};
 /// labelled, so that with two paths of one kind the refusal says which.
 ///
 /// **But a directory kept under [`store::HOME`] is a home**, refused in the
-/// words a home always has been — Codex's, which is a plugin now and kept its
-/// Profiles' words when it became one.
+/// words a home always has been, which a built-in's Profiles kept when it
+/// became a plugin.
 fn refused(key: &str, label: &str, file: bool) -> [ProfileSaved; 3] {
     if key == store::HOME && !file {
         return super::HOME_REFUSED;
@@ -619,13 +619,17 @@ impl Harness for Plugged {
     /// None where the manifest declares neither commands nor instructions.
     fn install(&self) -> Option<Install<'_>> {
         let install = &self.agent.install;
-        if install.commands.is_empty() && install.instructions.is_none() {
+        if *install == Default::default() {
             return None;
         }
 
         Some(Install {
-            instructions: self.agent.install.instructions.as_deref(),
-            commands: &self.agent.install.commands,
+            instructions: install.instructions.as_deref(),
+            commands: &install.commands,
+            npm: install.npm.as_deref(),
+            brew: install.brew.as_deref(),
+            cask: install.cask.as_deref(),
+            nix: install.nix.as_deref(),
         })
     }
 }
