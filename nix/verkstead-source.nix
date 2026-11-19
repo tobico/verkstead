@@ -4,6 +4,7 @@
 {
   lib,
   rustPlatform,
+  symlinkJoin,
   makeWrapper,
   git,
   # The viewer, built by vite — see web.nix. Two directories under it: the site
@@ -28,10 +29,10 @@ rustPlatform.buildRustPackage {
       ../crates
       # The built-in plugins, whose wasm components `crates/server/build.rs`
       # builds for `wasm32-wasip2` and embeds — `rustBuildToolchain` carries that
-      # target, and the components have no dependencies to vendor. Not
-      # `plugins/tests/`, the suites' own components, which do and are a
-      # workspace apart: `cargoLock` vendors the crates `Cargo.lock` names
-      # alone, and this build compiles no test that would ask for them.
+      # target, and `cargoDeps` below vendors `plugins/Cargo.lock`'s crates
+      # beside the workspace's. Not `plugins/tests/`, the suites' own
+      # components, which are a workspace apart with a lock of their own: this
+      # build compiles no test that would ask for them.
       (lib.fileset.difference ../plugins ../plugins/tests)
       # Read by the server for the stable channel the Annex it makes is on —
       # see `crates/server/src/annex/flake.rs`.
@@ -39,7 +40,20 @@ rustPlatform.buildRustPackage {
     ];
   };
 
-  cargoLock.lockFile = ../Cargo.lock;
+  # The crates of both workspaces the build compiles, in one vendor directory:
+  # the root's, and the built-in plugins', whose Activity components are
+  # written with `wit-bindgen` — which no crate of the root's depends on, so
+  # its lock alone would leave `build.rs`'s offline build of them short. A
+  # crate both locks name is the same bytes from either. Named as
+  # `importCargoLock` names its own, which is the directory the
+  # `.cargo/config.toml` inside it points cargo at once the hook has copied it.
+  cargoDeps = symlinkJoin {
+    name = "cargo-vendor-dir";
+    paths = [
+      (rustPlatform.importCargoLock { lockFile = ../Cargo.lock; })
+      (rustPlatform.importCargoLock { lockFile = ../plugins/Cargo.lock; })
+    ];
+  };
 
   nativeBuildInputs = [ makeWrapper ];
 
