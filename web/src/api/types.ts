@@ -3654,7 +3654,14 @@ binary: string,
  * it for this one — or `null` for a built-in, whose instructions are
  * the wizard's own, one per tab.
  */
-install: HarnessInstall | null, };
+install: HarnessInstall | null, 
+/**
+ * Whether this server offers it: `false` for a disabled Agent plugin's
+ * harness, listed only so that the Profiles that still stand on it are
+ * drawn under its name and mark (Set 1764, Q20). Never on a picker, and
+ * never a harness a new Profile is made of.
+ */
+offered: boolean, };
 
 /**
  * How a plugin's harness is installed, as its manifest declares it for the

@@ -13,7 +13,9 @@ import { describe, expect, it } from "vitest";
 
 import { briefly, reading } from "../src/agents";
 import { pairings } from "../src/pairing";
-import type { ProfileEntry } from "../src/api/types";
+import { harness, harnesses, harnessName, knowHarnesses } from "../src/harnesses";
+import type { HarnessEntry, ProfileEntry } from "../src/api/types";
+import listed from "./fixtures/harnesses.json" with { type: "json" };
 
 /// One saved profile of a backend, which is all this cares about them: a name
 /// and an agent type. `null` for the name is a profile nobody named.
@@ -279,5 +281,32 @@ describe("a harness this server has not got", () => {
         (row) => row.profile.id,
       ),
     ).toEqual([known.id]);
+  });
+});
+
+/// A disabled Agent plugin's harness, which the server lists not offered so that
+/// the Profiles still standing on it are drawn under its name (Set 1764, Q20).
+describe("a harness its plugin's disabling withholds", () => {
+  const plugin = "3f0c7a52-9d14-4b8e-a6f1-2c5d8e9b7a40";
+  const withheld: HarnessEntry = {
+    ...(listed as HarnessEntry[])[0]!,
+    id: plugin,
+    name: "Stub Harness",
+    login: null,
+    install: null,
+    offered: false,
+  };
+
+  it("is named by its name and drawn with its mark", () => {
+    knowHarnesses([...(listed as HarnessEntry[]), withheld]);
+
+    expect(harnessName(plugin)).toBe("Stub Harness");
+    expect(harness(plugin)?.mark).toBe(withheld.mark);
+  });
+
+  it("is never a harness a new Profile is made of", () => {
+    knowHarnesses([...(listed as HarnessEntry[]), withheld]);
+
+    expect(harnesses().map((entry) => entry.id)).not.toContain(plugin);
   });
 });

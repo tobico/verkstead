@@ -3597,6 +3597,13 @@ async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpRe
 
     let commits = shared_commits(state, &view).await?;
 
+    // And the harnesses withheld here, so that a session run under a disabled
+    // plugin's harness is drawn under its name.
+    let withheld = crate::profiles::withheld(state).await.map_err(|error| {
+        tracing::error!(error = ?error, "listing the harnesses for a share failed");
+        unavailable("The harnesses couldn't be listed.")
+    })?;
+
     let taken = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_default();
@@ -3606,7 +3613,7 @@ async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpRe
         sets,
         commits,
         taken,
-        crate::profiles::harnesses(&state.plugins.harnesses()),
+        crate::profiles::harnesses(&state.plugins.harnesses(), &withheld),
     ))
 }
 
@@ -6277,8 +6284,18 @@ async fn choose_review_pairing(
 
 /// `GET /api/ui/harnesses` — every harness this server can run a session on,
 /// with what the Profile form, the cards and the pickers draw of each.
-async fn harnesses(State(state): State<AppState>) -> Json<Vec<verkstead_render::HarnessEntry>> {
-    Json(crate::profiles::harnesses(&state.plugins.harnesses()))
+async fn harnesses(State(state): State<AppState>) -> HttpResponse {
+    match crate::profiles::withheld(&state).await {
+        Ok(withheld) => Json(crate::profiles::harnesses(
+            &state.plugins.harnesses(),
+            &withheld,
+        ))
+        .into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "listing the harnesses failed");
+            unavailable("The harnesses couldn't be listed.")
+        }
+    }
 }
 
 /// `GET /api/ui/profiles` — the Agent Profiles, by name, each saying whether its

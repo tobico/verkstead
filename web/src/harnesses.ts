@@ -27,11 +27,15 @@ import { useReading } from "./freshness";
 const [listed, setListed] = createSignal<HarnessEntry[]>([]);
 
 /// Every harness this server can run, in the order the pickers offer them.
+///
+/// Not a disabled Agent plugin's, which the list carries only so that the
+/// Profiles still standing on it are named — see [`harness`].
 export function harnesses(): HarnessEntry[] {
-  return listed();
+  return listed().filter((entry) => entry.offered);
 }
 
-/// The harness of `id`, where this server has it.
+/// The harness of `id`, where this server has it — offered or not, so that a
+/// Profile of a disabled plugin's harness is drawn under its name and mark.
 export function harness(id: AgentType): HarnessEntry | undefined {
   return listed().find((entry) => entry.id === id);
 }
