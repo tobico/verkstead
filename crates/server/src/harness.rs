@@ -471,10 +471,12 @@ static PLUGGED: RwLock<BTreeMap<store::AgentType, &'static plugged::Plugged>> =
 ///
 /// **Held for the life of the process**, as a built-in is: every answer of
 /// [`Harness`] is borrowed from it, by sessions that may outlive a reload of
-/// the plugin. So a plugin read again and declaring the same harness keeps
-/// the one already standing and the component it was handed is let go, and
-/// one declaring a different harness — after an **Update** — replaces it, the
-/// old one left behind for whatever is still holding it. A plugin disabled or
+/// the plugin. So a plugin read again declaring the same harness, run by the
+/// same component, keeps the one already standing and the component it was
+/// handed is let go; and one declaring a different harness or bringing a
+/// different component — after an **Update**, which may change nothing but
+/// the component — replaces it, the old one left behind for whatever is still
+/// holding it. A plugin disabled or
 /// removed keeps its harness here too, which is what lets a session already
 /// running under it finish: what is offered is each server's own list — see
 /// [`crate::plugins::installed`].
@@ -489,9 +491,9 @@ pub(crate) fn plugged(
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let standing = plugged
-        .get(&id)
-        .is_some_and(|held| held.declared() == agent && held.mark() == mark);
+    let standing = plugged.get(&id).is_some_and(|held| {
+        held.declared() == agent && held.mark() == mark && held.component().same_as(&loaded.again)
+    });
     if !standing {
         let harness = plugged::Plugged::new(id, agent.clone(), mark, loaded);
         plugged.insert(id, Box::leak(Box::new(harness)));

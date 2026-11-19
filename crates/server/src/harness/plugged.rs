@@ -93,6 +93,12 @@ impl Plugged {
         &self.agent
     }
 
+    /// What starts its component, which says whether a plugin read again is
+    /// running the same code — see [`Again::same_as`].
+    pub(crate) fn component(&self) -> &Again {
+        &self.again
+    }
+
     /// The first of the account's paths, which the account is said from.
     fn first(&self) -> &manifest::agent::AccountPath {
         &self.agent.account[0]

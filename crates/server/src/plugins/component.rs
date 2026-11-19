@@ -26,6 +26,8 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use sha2::{Digest, Sha256};
+
 use wasmtime::component::{Component, Instance, InstancePre, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store, Trap};
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
@@ -114,9 +116,22 @@ pub struct Again {
     pre: InstancePre<Host>,
     capabilities: Vec<Capability>,
     home: Option<PathBuf>,
+
+    /// The SHA-256 of the component's bytes, which is what says whether a
+    /// plugin read again is running the same code — see [`Again::same_as`].
+    digest: [u8; 32],
 }
 
 impl Again {
+    /// Whether `other` starts the same component as this, under the same
+    /// grant: a plugin **Update** may change its component and nothing in its
+    /// manifest, and what it was loaded as is then not what it is.
+    pub fn same_as(&self, other: &Again) -> bool {
+        self.digest == other.digest
+            && self.capabilities == other.capabilities
+            && self.home == other.home
+    }
+
     /// The component started again with `dir` granted read-only beside what
     /// its manifest was granted, named by its own path.
     pub async fn reading(&self, dir: &Path) -> Result<Loaded, Trouble> {
@@ -328,6 +343,7 @@ async fn started_within(
         pre,
         capabilities: capabilities.to_vec(),
         home: home.map(Path::to_owned),
+        digest: Sha256::digest(bytes).into(),
     };
     let grant = grant(capabilities, home)?;
     started(again, grant, within).await
@@ -697,6 +713,44 @@ world reader {
         let loaded = load_agent(&exporting_an_agent()).await;
 
         assert!(matches!(loaded, Ok(Some(_))), "{:?}", loaded.err());
+    }
+
+    /// A plugin read again keeps the harness already standing only where its
+    /// component is the same: an **Update** that changed nothing but the
+    /// component stands up a new one, running the new code.
+    #[tokio::test]
+    async fn a_harness_read_again_with_another_component_is_replaced() {
+        let agent = Manifest::parse(
+            crate::plugins::manifest::agent::tests::AGENT,
+            Files::Embedded(&[("mark.svg", b"<svg/>"), ("agent.wasm", b"")]),
+            crate::platform::Platform::HERE,
+        )
+        .expect("the agent manifest should be read")
+        .provides
+        .iter()
+        .find_map(|provision| provision.agent().cloned())
+        .expect("it provides an agent");
+        let uuid = "3a7d1c52-0e8b-4f6a-9d21-7b5c4e8f0a13";
+        let standing = |bytes: Vec<u8>| {
+            let agent = agent.clone();
+            async move {
+                let loaded = load_agent(&bytes).await.unwrap().unwrap();
+                let id = crate::harness::plugged(uuid, &agent, "<svg/>".to_owned(), loaded);
+                crate::harness::of(id).expect("it is stood up")
+                    as *const dyn crate::harness::Harness as *const ()
+            }
+        };
+
+        let first = standing(exporting_an_agent()).await;
+        let same = standing(exporting_an_agent()).await;
+        // The same component with a custom section on the end: other bytes,
+        // the same exports.
+        let mut changed = exporting_an_agent();
+        changed.extend_from_slice(&[0, 5, 4, b'n', b'e', b'x', b't']);
+        let updated = standing(changed).await;
+
+        assert_eq!(first, same, "the same component keeps the harness standing");
+        assert_ne!(first, updated, "another component replaces it");
     }
 
     #[tokio::test]
