@@ -168,16 +168,7 @@ pub async fn of(
     for (role, pairing) in pairings(conversation) {
         let agent_type = pairing.profile.agent_type();
 
-        // Absent from the answer is a harness the far end has never heard of,
-        // which is a Verkstead older than this one: read as *there* rather than
-        // as missing, a move refused over a probe nobody made being worse than
-        // one made and found wanting.
-        let there = harnesses
-            .iter()
-            .find(|harness| harness.agent_type == crate::profiles::agent_type(agent_type))
-            .is_none_or(|harness| harness.there);
-
-        if !there {
+        if !there(&harnesses, agent_type) {
             lacks.push(Lacking::Harness {
                 role,
                 profile: pairing.profile.name.clone(),
@@ -236,6 +227,22 @@ async fn ask(
 /// The three roles, and only the ones something was picked for: a role picked
 /// away runs no session at all, and a role nothing has been picked for yet is
 /// not a harness anybody is asking the far end about.
+/// Whether `agent_type` is among the harnesses the far end answered it could
+/// launch, `harnesses`.
+///
+/// Absent from the answer is a built-in the far end has never heard of, which
+/// is a Verkstead older than this one: read as *there* rather than as missing,
+/// a move refused over a probe nobody made being worse than one made and
+/// found wanting. **But a plugin's harness absent is one the far end does not
+/// offer** — its plugin in trouble there, or a release that runs no plugin
+/// harness at all — and is missing.
+fn there(harnesses: &[HarnessThere], agent_type: store::AgentType) -> bool {
+    harnesses
+        .iter()
+        .find(|harness| harness.agent_type == crate::profiles::agent_type(agent_type))
+        .map_or(agent_type.built_in().is_some(), |harness| harness.there)
+}
+
 fn pairings(conversation: &store::Conversation) -> Vec<(PairingRole, &store::Pairing)> {
     [
         (
@@ -251,4 +258,30 @@ fn pairings(conversation: &store::Conversation) -> Vec<(PairingRole, &store::Pai
     .into_iter()
     .filter_map(|(role, pairing)| pairing.map(|pairing| (role, pairing)))
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A built-in the far end did not answer about is one it has never heard
+    /// of, and is taken as there; a plugin's harness it did not answer about
+    /// is one it does not offer, and is not.
+    #[test]
+    fn a_plugin_harness_the_far_end_did_not_answer_about_is_not_there() {
+        let plugin = store::AgentType::read("8d2b6f1e-4c3a-4b7e-9f05-1a6c3e8d2b74");
+        let answered = |agent_type, there| HarnessThere {
+            agent_type: crate::profiles::agent_type(agent_type),
+            there,
+        };
+
+        assert!(there(&[], store::AgentType::AGY));
+        assert!(!there(&[], plugin));
+        assert!(there(&[answered(plugin, true)], plugin));
+        assert!(!there(&[answered(plugin, false)], plugin));
+        assert!(!there(
+            &[answered(store::AgentType::AGY, false)],
+            store::AgentType::AGY
+        ));
+    }
 }

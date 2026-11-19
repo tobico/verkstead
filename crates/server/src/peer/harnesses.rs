@@ -49,10 +49,11 @@ pub const HARNESSES: &str = "/api/peer/v1/harnesses";
 /// before a move rather than on every page.
 pub(crate) async fn here(State(state): State<AppState>) -> Response {
     let machine = state.onboarding.machine().clone();
+    let plugged = state.plugins.harnesses();
 
     let answered = tokio::task::spawn_blocking(move || {
         machine
-            .harnesses()
+            .harnesses(&plugged)
             .into_iter()
             .map(|(agent_type, there)| HarnessThere {
                 agent_type: crate::profiles::agent_type(agent_type),
