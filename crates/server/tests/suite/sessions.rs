@@ -31611,6 +31611,16 @@ const A_MARKED_ROUND_THEN_GONE: &str = "    SAYING='following it up'\n    \
      printf 'still tidying up\\n'; sleep 0.1; LEFT=$((LEFT - 1)); done\n    \
      printf 'that is that, then\\n'";
 
+/// A follow-up whose round is answered with the mark, and which goes on doing
+/// what the answer asked for without signalling: a session stopped in that
+/// window leaves a marked round whose work is undone.
+const A_MARKED_ROUND_STILL_WORKING: &str = "    SAYING='following it up'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'doing what you asked\\n'\n    \
+     sleep 300";
+
 /// A follow-up that does its round, is answered, and then finishes: a session
 /// that is gone with the human never having said there was nothing else, which
 /// is the stop a follow-up is picked up again from.
@@ -37435,6 +37445,76 @@ async fn resume_follows_the_work_up_again_on_the_brief_and_the_rounds_answered()
     assert!(
         printed.contains("About the 429s") && printed.contains("It counts them against"),
         "which is the round it asked: {printed:?}",
+    );
+}
+
+/// A marked round on a pull request is a round still being worked, picked up
+/// again: Resume starts another follow-up session rather than carrying the
+/// Conversation back to its wrap-up.
+///
+/// The mark says there is nothing *else*, and the work the last answer asked
+/// for comes after it. A branch on a pull request always holds commits past its
+/// base, so reading *marked, work standing* as an ending owed would carry that
+/// work back to the wrap-up undone. That reading is a Tinker's on no pull
+/// request alone — see `resume_on_a_tinker_that_owes_a_pull_request_sends_for_it_rather_than_another_round`.
+#[tokio::test]
+async fn resume_on_a_marked_follow_up_on_a_pull_request_follows_it_up_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let stub = a_backlog_then_a_follow_up(&reviews, A_MARKED_ROUND_STILL_WORKING);
+
+    let fixture = grilling_spilling(spill, &stub, &gh_about(GREEN, "", "")).await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    // The round marked, and the session stopped while it is still doing what
+    // the answer asked for.
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let working = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .rfind(|output| output.running)
+                .map(|output| output.id)
+        })
+        .await;
+    fixture.printed(working, "doing what you asked").await;
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+    fixture.stopped().await;
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let printed = fixture.printed_after(before).await;
+
+    assert!(
+        printed.contains("/verkstead/skills/verkstead/following-up/SKILL.md"),
+        "the press follows the work up again, the last round's work being \
+         undone: {printed:?}",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::FollowUp,
+        "and the Conversation stays in Follow-up rather than going back to its \
+         wrap-up",
     );
 }
 

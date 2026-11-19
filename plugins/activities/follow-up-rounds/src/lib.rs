@@ -22,9 +22,10 @@
 //! The host hands it two readings of that Timeline it has no other way to make:
 //! `settled`, the rounds already answered inside this follow-up as one digest,
 //! which the fresh session is primed with; and `marked`, where the newest of
-//! them carries the Nothing-else mark. A marked round with work standing is a
-//! follow-up whose ending got as far as owing a pull request, so it ends
-//! `committed` at once rather than asking the human for another round.
+//! them carries the Nothing-else mark and the work is on no pull request. A
+//! marked round with work standing is then a follow-up whose ending got as far
+//! as owing a pull request, so it ends `committed` at once rather than asking
+//! the human for another round.
 //!
 //! **Configured rather than copied.** The skill and the evidence are options,
 //! defaulting to the follow-up's, so investigating rounds are this Activity

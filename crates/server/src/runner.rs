@@ -2058,9 +2058,10 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
 /// start facts is two readings of the Timeline as it now stands, which a
 /// component has no way to make for itself: the rounds already answered inside
 /// this follow-up, as the digest a fresh session is primed with — see
-/// [`crate::follow_ups`] — and whether the newest of them carries the
-/// Nothing-else mark. Both are empty for a follow-up just opened, and both are
-/// what a restarted one derives where it was from.
+/// [`crate::follow_ups`] — and, for a follow-up on no pull request, whether
+/// the newest of them carries the Nothing-else mark. Both are empty for a
+/// follow-up just opened, and both are what a restarted one derives where it
+/// was from.
 ///
 /// - **On a pull request**, either Outcome is the follow-up over: back to the
 ///   wrap-up it was opened over — see [`back_to_the_wrap_up`], whose `pushed`
@@ -2100,7 +2101,15 @@ pub(crate) async fn follow_up_rounds(state: AppState, conversation_id: i64, driv
 
     let mut options = vec![("settled".to_owned(), settled)];
 
-    if marked(&state, conversation_id, store::Lifecycle::FollowUp).await {
+    // Said only of a follow-up on no pull request, which is the one whose
+    // ending can stand owed: one on a pull request always holds commits past
+    // its base, so a marked round there would end it at once — and a restart
+    // between the mark and the work that round asked for would carry that work
+    // back to the wrap-up undone. Picked up again, it runs another session,
+    // which finds the mark and ends on it.
+    if marked(&state, conversation_id, store::Lifecycle::FollowUp).await
+        && owed_ending(&state, conversation_id).await
+    {
         options.push(("marked".to_owned(), "true".to_owned()));
     }
 
@@ -2151,6 +2160,20 @@ pub(crate) async fn follow_up_rounds(state: AppState, conversation_id: i64, driv
     };
 
     over(&state, conversation_id, already, committed, driving).await
+}
+
+/// Whether the Conversation's work is on no pull request, which is the only
+/// follow-up whose ending can stand owed — see [`follow_up_rounds`]. Anything
+/// the record will not say reads as *no*, which starts another round.
+async fn owed_ending(state: &AppState, conversation_id: i64) -> bool {
+    match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => on_a_pull_request(state, &conversation).await == Some(false),
+        Ok(None) => false,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation a follow-up is on failed");
+            false
+        }
+    }
 }
 
 /// The id the **Follow-up rounds** Activity has in the built-in Activities
