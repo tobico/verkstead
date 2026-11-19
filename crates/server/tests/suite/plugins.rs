@@ -51,7 +51,7 @@ fn manifest(uuid: &str, name: &str, capabilities: &[&str]) -> String {
          author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
          version: 1.4.0\n\
          interface: 1\n\
-         provides:\n  - category: forge\n  - category: activity\n  - category: forge\n\
+         provides:\n  - category: forge\n  - category: language\n  - category: forge\n\
          {capabilities}"
     )
 }
@@ -149,7 +149,7 @@ async fn kept() -> (Router, tempfile::TempDir) {
 /// the Skill Pack `pack` holding the one skill `reviewing`.
 fn packing(dir: &Path, uuid: &str, name: &str, pack: &str) -> String {
     let text = manifest(uuid, name, &[]).replace(
-        "provides:\n  - category: forge\n  - category: activity\n  - category: forge\n",
+        "provides:\n  - category: forge\n  - category: language\n  - category: forge\n",
         &format!("provides:\n  - category: skills\n    name: {pack}\n    directory: skills\n"),
     );
     let at = plugin(dir, name, &text);
@@ -162,6 +162,159 @@ fn packing(dir: &Path, uuid: &str, name: &str, pack: &str) -> String {
     .unwrap();
     std::fs::write(skill.join("notes.md"), "Be kind.\n").unwrap();
     at
+}
+
+/// The least that is an Activity, made into a component against the
+/// `activity` world — see the WAT.
+fn activity_component() -> Vec<u8> {
+    let mut resolve = wit_parser::Resolve::default();
+    let (package, _) = resolve
+        .push_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("wit"))
+        .expect("the plugin WIT should parse");
+    let world = resolve
+        .select_world(&[package], Some("activity"))
+        .expect("the activity world should be there");
+
+    let mut module = wat::parse_str(include_str!("../fixtures/activity.wat"))
+        .expect("the activity should assemble");
+    wit_component::embed_component_metadata(
+        &mut module,
+        &resolve,
+        world,
+        wit_component::StringEncoding::UTF8,
+        false,
+    )
+    .expect("the activity world should embed");
+
+    wit_component::ComponentEncoder::default()
+        .module(&module)
+        .expect("the activity should be a module wit-component reads")
+        .validate(true)
+        .encode()
+        .expect("the activity should encode as a component")
+}
+
+/// `text` with an Activity, *Review rounds*, provided after what it provides
+/// already, its component `rounds.wasm` and launching each of `skills`.
+fn acting(text: &str, skills: &str) -> String {
+    text.replace(
+        "  - category: forge\n  - category: language\n  - category: forge\n",
+        &format!(
+            "  - category: forge\n  - category: language\n  - category: forge\n  \
+             - category: activity\n    id: review-rounds\n    name: Review rounds\n    \
+             component: rounds.wasm\n    outcomes: [approved, abandoned]\n    \
+             skills: {skills}\n"
+        ),
+    )
+}
+
+/// A plugin directory under `dir/<name>` whose manifest is `text`, holding
+/// `component` as `rounds.wasm`.
+fn with_activity(dir: &Path, name: &str, text: &str, component: &[u8]) -> String {
+    let at = plugin(dir, name, text);
+    std::fs::write(Path::new(&at).join("rounds.wasm"), component).unwrap();
+    at
+}
+
+/// A plugin providing an Activity whose component exports the `activity`
+/// world loads, and its row names the Activity by its drawn name.
+#[tokio::test]
+async fn a_plugin_providing_an_activity_loads_and_its_row_names_it() {
+    let (app, dir) = kept().await;
+    let path = with_activity(
+        dir.path(),
+        "rounds",
+        &acting(&manifest(PLUGIN, "Rounds", &[]), "[]"),
+        &activity_component(),
+    );
+
+    assert_eq!(read(&app, &path).await.activities, ["Review rounds"]);
+    let view = installs(&app, &path).await;
+
+    let row = row(&view, PLUGIN);
+    assert_eq!(row.trouble, None);
+    assert_eq!(row.provides, ["forge", "language", "activity"]);
+    assert_eq!(row.activities, ["Review rounds"]);
+}
+
+/// One whose component isn't an Activity — it exports nothing — loads in
+/// trouble, the row saying so.
+#[tokio::test]
+async fn an_activity_whose_component_lacks_the_worlds_exports_loads_in_trouble() {
+    let (app, dir) = kept().await;
+    let path = with_activity(
+        dir.path(),
+        "rounds",
+        &acting(&manifest(PLUGIN, "Rounds", &[]), "[]"),
+        &wat::parse_str("(component)").unwrap(),
+    );
+
+    let view = installs(&app, &path).await;
+
+    let trouble = row(&view, PLUGIN).trouble.clone().expect("trouble");
+    assert!(
+        trouble.starts_with(
+            "The component for Review rounds isn't written against Verkstead's activity world"
+        ),
+        "{trouble}"
+    );
+}
+
+/// An Activity launching a skill from a pack its plugin neither provides nor
+/// depends on is refused at the card, naming the skill and the field.
+#[tokio::test]
+async fn an_activity_naming_a_skill_from_a_pack_it_cannot_reach_is_refused() {
+    let (app, dir) = kept().await;
+    let path = with_activity(
+        dir.path(),
+        "rounds",
+        &acting(&manifest(PLUGIN, "Rounds", &[]), "[verkstead/following-up]"),
+        &activity_component(),
+    );
+
+    let (status, said) = pressing(
+        &app,
+        "/api/ui/plugins/read",
+        serde_json::json!({ "source": path }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
+    assert!(
+        said.contains("`provides[3].skills[0]` is `verkstead/following-up`"),
+        "{said}"
+    );
+}
+
+/// A skill from an installed dependency's pack is checked once that
+/// dependency has loaded: one its packs don't hold is trouble, naming it.
+#[tokio::test]
+async fn an_activity_naming_a_skill_its_dependency_lacks_loads_in_trouble() {
+    let (app, dir) = kept().await;
+    let base = packing(dir.path(), ANOTHER, BASE, "rust-review");
+    installs(&app, &base).await;
+
+    let text = depending(
+        &acting(
+            &manifest(PLUGIN, "Rounds", &[]),
+            "[rust-review/reviewing, rust-review/linting]",
+        ),
+        ANOTHER,
+        BASE,
+        "^1",
+        None,
+    );
+    let path = with_activity(dir.path(), "rounds", &text, &activity_component());
+
+    let view = installs(&app, &path).await;
+
+    assert_eq!(
+        row(&view, PLUGIN).trouble.as_deref(),
+        Some(
+            "Its activity Review rounds launches `rust-review/linting`, and neither it nor a \
+             plugin it depends on provides that skill."
+        )
+    );
 }
 
 /// The skills Verkstead ships are the Built-in group's first row: providing
@@ -350,7 +503,7 @@ async fn a_local_plugin_installed_through_the_card_is_listed_on_its_row() {
 
     let consent = read(&app, &path).await;
     assert_eq!(consent.name, "GitLab");
-    assert_eq!(consent.provides, ["forge", "activity"]);
+    assert_eq!(consent.provides, ["forge", "language"]);
     assert_eq!(
         consent.capabilities,
         [PluginCapability::Outbound {
@@ -368,7 +521,7 @@ async fn a_local_plugin_installed_through_the_card_is_listed_on_its_row() {
     assert_eq!(row.name, "GitLab");
     assert_eq!(row.version, "1.4.0");
     assert_eq!(row.author, "Ada Lovelace");
-    assert_eq!(row.provides, ["forge", "activity"]);
+    assert_eq!(row.provides, ["forge", "language"]);
     assert_eq!(row.source, PluginSource::Local { path: path.clone() });
     assert!(row.enabled);
     assert_eq!(row.trouble, None);
@@ -1829,13 +1982,14 @@ async fn a_plugin_in_trouble_still_draws_its_fields() {
 #[tokio::test]
 async fn the_page_and_the_card_are_written_for_the_viewer() {
     let (app, dir) = kept().await;
-    let path = plugin(
+    let path = with_activity(
         dir.path(),
         "gitlab",
         &format!(
             "{}{SETTINGS}",
-            manifest(PLUGIN, "GitLab", &["outbound: gitlab.com"])
+            acting(&manifest(PLUGIN, "GitLab", &["outbound: gitlab.com"]), "[]")
         ),
+        &activity_component(),
     );
     let other = plugin(dir.path(), "broken", &manifest(ANOTHER, "Broken", &[]));
     installs(&app, &path).await;

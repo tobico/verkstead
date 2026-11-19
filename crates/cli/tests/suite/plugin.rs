@@ -135,6 +135,81 @@ fn a_component_that_traps_while_starting_is_refused_saying_so() {
     );
 }
 
+/// The least that is an Activity, made into a component against the server's
+/// `activity` world — see the WAT.
+fn activity_component() -> Vec<u8> {
+    let server = Path::new(env!("CARGO_MANIFEST_DIR")).join("../server");
+    let mut resolve = wit_parser::Resolve::default();
+    let (package, _) = resolve
+        .push_dir(server.join("wit"))
+        .expect("the plugin WIT should parse");
+    let world = resolve
+        .select_world(&[package], Some("activity"))
+        .expect("the activity world should be there");
+
+    let mut module = wat::parse_str(
+        std::fs::read_to_string(server.join("tests/fixtures/activity.wat")).unwrap(),
+    )
+    .expect("the activity should assemble");
+    wit_component::embed_component_metadata(
+        &mut module,
+        &resolve,
+        world,
+        wit_component::StringEncoding::UTF8,
+        false,
+    )
+    .expect("the activity world should embed");
+
+    wit_component::ComponentEncoder::default()
+        .module(&module)
+        .expect("the activity should be a module wit-component reads")
+        .validate(true)
+        .encode()
+        .expect("the activity should encode as a component")
+}
+
+/// A plugin providing one Activity, *Review rounds*, whose component is
+/// `component`.
+fn with_activity(component: &[u8]) -> tempfile::TempDir {
+    let dir = plugin(&MINIMAL.replace(
+        "provides: []",
+        "provides:\n  - category: activity\n    id: review-rounds\n    name: Review rounds\n    \
+         component: rounds.wasm\n    outcomes: [approved, abandoned]\n",
+    ));
+    std::fs::write(dir.path().join("rounds.wasm"), component).unwrap();
+    dir
+}
+
+#[test]
+fn a_plugin_providing_an_activity_passes_naming_it() {
+    let dir = with_activity(&activity_component());
+
+    let output = check(dir.path());
+
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("providing activity — its activities Review rounds."),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn an_activity_whose_component_lacks_the_worlds_exports_is_refused_saying_so() {
+    let dir = with_activity(&wat::parse_str("(component)").unwrap());
+
+    let output = check(dir.path());
+
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "The component for Review rounds isn't written against Verkstead's activity world"
+        ),
+        "{stderr}"
+    );
+}
+
 /// A plugin whose one `provides:` entry is the Skill Pack `pack`, its skills
 /// each a directory of `skills/` holding the `SKILL.md` given.
 fn with_pack(pack: &str, skills: &[(&str, &str)]) -> tempfile::TempDir {
