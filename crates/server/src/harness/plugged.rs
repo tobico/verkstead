@@ -787,6 +787,21 @@ impl Component {
                                 loaded.store.set_epoch_deadline(u64::MAX);
                                 configuration
                             });
+
+                            // A component that trapped, or ran out of time,
+                            // is never entered again, so the next call is
+                            // answered by one started afresh — as a Tail's
+                            // reader is — rather than by the one that failed.
+                            if configuration.is_err() {
+                                match runtime.block_on(loaded.again.afresh()) {
+                                    Ok(fresh) => loaded = fresh,
+                                    Err(trouble) => tracing::error!(
+                                        trouble = %trouble,
+                                        "a plugin harness's component couldn't be started again",
+                                    ),
+                                }
+                            }
+
                             let _ = answered.send(configuration);
                         }
                     }

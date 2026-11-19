@@ -753,6 +753,51 @@ world reader {
         assert_ne!(first, updated, "another component replaces it");
     }
 
+    /// A `write-configuration` that traps answers nothing, and the call after
+    /// it is answered by a component started afresh rather than by the one
+    /// that stopped, which would never be entered again.
+    #[tokio::test]
+    async fn a_harness_whose_configuration_trapped_configures_the_next_session() {
+        use crate::harness::Harness as _;
+
+        let stub = std::fs::read(env!("VERKSTEAD_STUB_HARNESS_WASM")).unwrap();
+        let loaded = load_agent(&stub).await.unwrap().unwrap();
+        let agent = Manifest::parse(
+            crate::plugins::manifest::agent::tests::AGENT,
+            Files::Embedded(&[("mark.svg", b"<svg/>"), ("agent.wasm", b"")]),
+            crate::platform::Platform::HERE,
+        )
+        .expect("the agent manifest should be read")
+        .provides
+        .iter()
+        .find_map(|provision| provision.agent().cloned())
+        .expect("it provides an agent");
+        let harness = crate::harness::plugged::Plugged::new(
+            crate::store::AgentType::read("6c0e2f4a-8b1d-4e7a-a3c5-9f2d1b7e4c80"),
+            agent,
+            "<svg/>".to_owned(),
+            loaded,
+        );
+        let settings = |found: &[u8]| {
+            harness
+                .configured(vec![Some(found.to_vec()), None], &[])
+                .into_iter()
+                .find(|(path, _)| path == Path::new("settings.json"))
+                .map(|(_, contents)| contents)
+        };
+
+        assert_eq!(
+            settings(br#"{"trap":true}"#),
+            None,
+            "a trap answers nothing"
+        );
+        assert_eq!(
+            settings(br#"{"model":"large"}"#).as_deref(),
+            Some(&serde_json::to_vec_pretty(&serde_json::json!({ "model": "large" })).unwrap()[..]),
+            "the next call is answered"
+        );
+    }
+
     #[tokio::test]
     async fn a_component_exporting_nothing_is_refused_for_an_agent() {
         let trouble = load_agent(&assembled(EMPTY))
