@@ -944,7 +944,7 @@ async fn an_override_that_will_not_load_is_trouble_on_its_plugins_row() {
             .unwrap_or_else(|| panic!("{name} is given: {given:?}"))
     };
     assert!(
-        value("GOMODCACHE").ends_with("go/mod"),
+        Path::new(&value("GOMODCACHE")).ends_with("go/mod"),
         "{}",
         value("GOMODCACHE")
     );
