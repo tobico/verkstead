@@ -517,7 +517,7 @@ provides:
         example: /home/you/accounts/work/.stub
         kind: directory
         mounted: .stub
-        allowlist: [settings.json, sessions]
+        allowlist: [settings.json, config.toml]
         credentials: [auth.json]
         memory: [memory]
     idle:
@@ -603,9 +603,14 @@ given to a session.
 - **`kind`** — `directory` or `file`.
 - **`mounted`** — where it is joined into a session's HOME, said from there.
 - **`allowlist`**, **`credentials`** and **`memory`** — optional, a
-  directory's only, each a list of paths said from it: what of it is mounted
-  (all of it where there is no list), the files that hold the login, and the
-  directories that are the memory store.
+  directory's only, each a list of paths said from it. `allowlist` is the
+  account's configuration files, each read whole and handed to
+  `write-configuration` as found, or as none where the account has no such
+  file; a path written as a directory (ending `/`) or inside `memory` is
+  refused. `credentials` are the files that hold the login, and `memory` the
+  directories that are the memory store. Nothing else of the directory reaches
+  a session: with no `allowlist`, the export is handed no configuration and
+  writes what it will from nothing.
 
 Every path written relatively here, and `instructions` below, is refused where
 it would climb out of where it is said from.
