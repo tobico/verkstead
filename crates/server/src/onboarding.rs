@@ -786,16 +786,18 @@ impl Machine {
         present(&self.installed(program))
     }
 
-    /// And every one of them, which is what a device answers a member asking
-    /// what could be launched here at all — see [`crate::peer::harnesses`].
+    /// And every one of them, the built-ins and the ones the Agent plugins
+    /// this server offers declare, `plugged` — which is what a device answers
+    /// a member asking what could be launched here at all — see
+    /// [`crate::peer::harnesses`].
     ///
     /// **The dependency step's own list**, walked in the order those rows are
-    /// drawn: a second spelling of *the five harnesses* is a list that would go
-    /// out of step with the one the wizard installs from.
+    /// drawn: a second spelling of *the harnesses* is a list that would go out
+    /// of step with the one the wizard installs from.
     ///
     /// Blocks: one `PATH` walk apiece.
-    pub(crate) fn harnesses(&self) -> Vec<(store::AgentType, bool)> {
-        harnesses(&[])
+    pub(crate) fn harnesses(&self, plugged: &[store::AgentType]) -> Vec<(store::AgentType, bool)> {
+        harnesses(plugged)
             .map(|agent_type| (agent_type, self.harness(agent_type)))
             .collect()
     }
