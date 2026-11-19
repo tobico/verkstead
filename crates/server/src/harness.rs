@@ -864,6 +864,15 @@ mod tests {
                 agent_type.built_in().expect("a built-in").paths,
                 "{agent_type}"
             );
+
+            // And the right harness at all: [`of`] and [`every`] pair the two
+            // lists by place, and four of the five declare the same one path,
+            // so it is the program each runs that tells a swap.
+            assert_eq!(harness.binary(), agent_type.word(), "{agent_type}");
+            assert!(
+                std::ptr::addr_eq(of(agent_type).unwrap(), harness),
+                "{agent_type}"
+            );
         }
     }
 }

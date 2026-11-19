@@ -35,7 +35,9 @@ pub(crate) async fn section(
     Path(_conversation_id): Path<i64>,
     Query(asked): Query<Asked>,
 ) -> Response {
-    match harness::running(store::AgentType::read(&asked.agent)) {
+    // Looked up rather than read: an id this process has never met is no
+    // harness here, and reading it would keep it for good.
+    match store::AgentType::known(&asked.agent).and_then(harness::running) {
         Some((channel, running)) => yaml(
             StatusCode::OK,
             &GuideSection {

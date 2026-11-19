@@ -151,9 +151,6 @@ impl AgentType {
             return built_in.agent_type;
         }
 
-        static INTERNED: std::sync::Mutex<std::collections::BTreeSet<&'static str>> =
-            std::sync::Mutex::new(std::collections::BTreeSet::new());
-
         let mut interned = INTERNED
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -168,11 +165,37 @@ impl AgentType {
         Self(held)
     }
 
+    /// The id `id` is, where it is one already known to this process — a
+    /// built-in's, or one read before — and nothing where it is not.
+    ///
+    /// **For an id from outside**, which [`AgentType::read`] would keep for
+    /// the life of the process: asked by anyone who can reach an open route, a
+    /// new id each time, that is memory nothing gives back.
+    pub fn known(id: &str) -> Option<Self> {
+        if let Some(built_in) = BUILT_IN
+            .iter()
+            .find(|built_in| built_in.agent_type.0 == id || built_in.uuid.eq_ignore_ascii_case(id))
+        {
+            return Some(built_in.agent_type);
+        }
+
+        INTERNED
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(id)
+            .map(|held| Self(held))
+    }
+
     /// The built-in this is, where it is one.
     pub fn built_in(self) -> Option<&'static BuiltIn> {
         BUILT_IN.iter().find(|built_in| built_in.agent_type == self)
     }
 }
+
+/// Every id [`AgentType::read`] has kept, each held for the life of the
+/// process.
+static INTERNED: std::sync::Mutex<std::collections::BTreeSet<&'static str>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
 
 impl std::fmt::Display for AgentType {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

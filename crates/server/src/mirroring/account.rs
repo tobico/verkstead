@@ -250,9 +250,11 @@ pub async fn fetched(
     let (Some(inside), Some(account)) =
         (root::login_inside(agent_type), kept_in(agent_type, &under))
     else {
-        return Err(Refusal::ours(format!(
-            "There's no harness {agent_type} on this device to run it on."
-        )));
+        // Only a plugin's harness is ever missing, and its uuid is no name to
+        // show: the plugin that would say what it is called is what is not here.
+        return Err(Refusal::ours(
+            "The plugin its harness comes from isn't installed on this device.".to_owned(),
+        ));
     };
 
     let came_down = said

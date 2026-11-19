@@ -205,6 +205,22 @@ async fn a_built_in_named_by_its_uuid_is_that_built_in() {
     }
 }
 
+/// An id looked up rather than read is one this process already knows — a
+/// built-in's, or one read before — and an id it has never met stays unknown,
+/// however often it is asked after.
+#[tokio::test]
+async fn an_id_looked_up_is_never_kept() {
+    let never = "6a0b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d";
+
+    assert_eq!(AgentType::known("codex"), Some(AgentType::CODEX));
+    assert_eq!(AgentType::known(BUILT_IN[0].uuid), Some(AgentType::CLAUDE));
+    assert_eq!(AgentType::known(never), None);
+    assert_eq!(AgentType::known(never), None, "asking did not keep it");
+
+    let read = AgentType::read(never);
+    assert_eq!(AgentType::known(never), Some(read));
+}
+
 /// **A Claude Profile with its binding as the previous release wrote it** — the
 /// pair as two fields and no map — reads back with both paths, under the keys
 /// the harness declares them by.

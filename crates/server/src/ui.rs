@@ -8097,7 +8097,12 @@ async fn onboarding_install(
     // is booted and linked by.
     match state
         .onboarding
-        .install(&state.settings, press.dependencies, state.devices.as_ref())
+        .install(
+            &state.settings,
+            press.dependencies,
+            &state.plugins.harnesses(),
+            state.devices.as_ref(),
+        )
         .await
     {
         Ok(()) => onboarding(State(state)).await,
