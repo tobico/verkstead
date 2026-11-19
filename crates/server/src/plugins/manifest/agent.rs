@@ -337,7 +337,12 @@ fn words(value: &Value, field: &str, needs: Option<&str>) -> Result<Vec<String>,
     Ok(words)
 }
 
-/// Refused where `word` holds a `{…}` the host does not fill.
+/// Refused where `word` holds a `{name}` the host does not fill.
+///
+/// **Only a bare name between braces is read as a placeholder.** Any other
+/// brace is the word's own: a harness taking an inline table on its line, as
+/// codex's `-c projects={"{worktree}"={trust_level="trusted"}}` does, writes
+/// its braces as they are, and the `{worktree}` inside them is still filled.
 fn placeholders(word: &str, field: &str) -> Result<(), Refusal> {
     let mut rest = word;
     while let Some(open) = rest.find('{') {
@@ -345,6 +350,14 @@ fn placeholders(word: &str, field: &str) -> Result<(), Refusal> {
             break;
         };
         let name = &rest[open + 1..open + close];
+        let bare = !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        if !bare {
+            rest = &rest[open + 1..];
+            continue;
+        }
         if !PLACEHOLDERS.contains(&name) {
             return Err(Refusal::of(
                 field,
@@ -1046,6 +1059,28 @@ provides:
         let yaml = AGENT.replace("--add-dir, \"{worktree}\"", "--add-dir, \"{repo}\"");
 
         assert_eq!(refused_at(&yaml), "provides[0].launch.tail[4]");
+    }
+
+    /// Codex's trust table, as stage 04 will declare it: braces of the word's
+    /// own around a placeholder the host fills.
+    #[test]
+    fn braces_that_are_not_a_placeholder_are_the_word_s_own() {
+        let word = r#"projects={"{worktree}"={trust_level="trusted"}}"#;
+        let yaml = AGENT.replace("--add-dir, \"{worktree}\"", &format!("-c, '{word}'"));
+
+        let tail = agent_for(&yaml, Platform::Linux).launch.tail;
+
+        assert_eq!(tail.last().map(String::as_str), Some(word));
+        assert_eq!(
+            crate::harness::filled(
+                &tail[tail.len() - 1..],
+                crate::harness::Filling {
+                    worktree: Some("/work/tree"),
+                    ..Default::default()
+                }
+            ),
+            [r#"projects={"/work/tree"={trust_level="trusted"}}"#]
+        );
     }
 
     #[test]

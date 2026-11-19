@@ -557,7 +557,10 @@ with neither is refused.
 
 **`launch`** — required: its launch line, in parts, each a list of the words
 on the line. The words may hold **placeholders** the host fills: `{model}`,
-`{prompt}`, `{session}`, `{worktree}` and `{settings}`, and nothing else.
+`{prompt}`, `{session}`, `{worktree}` and `{settings}`. Any other bare
+`{name}` is refused; braces around anything that isn't a bare name are the
+word's own, so an inline table such as `projects={"{worktree}"={trust="yes"}}`
+is written as it is and its `{worktree}` still filled.
 
 - **`model`** — required, holding `{model}`: how the model is said.
 - **`prompt`** — required, holding `{prompt}`: how the Brief is given, a flag
