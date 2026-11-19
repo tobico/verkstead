@@ -331,7 +331,7 @@ impl host::Host for Hosted {
     async fn wait(&mut self, session: world::Session) -> wasmtime::Result<world::Waited> {
         let waited = host::Host::wait(&mut self.lent, session).await?;
 
-        if waited != world::Waited::Done {
+        if !matches!(waited, world::Waited::Done) {
             self.ended_by_a_stop().await?;
         }
 

@@ -269,7 +269,7 @@ of Verkstead's:
   nothing, the Nothing-else mark, or an investigation's; and whether the session
   ends with its work or on a pull request.
 - **`wait`** on it, answering what happened: it gave its Done signal, it is
-  gone, it stalled, the human steered the Conversation, or the human answered a
+  gone — with the host's sentence for how, where it ended badly — it stalled, the human steered the Conversation, or the human answered a
   round with the Nothing-else mark. Every event an Activity is handed arrives
   here.
 - **`git-facts`** of the Worktree's repository or a Companion's, read-only: the

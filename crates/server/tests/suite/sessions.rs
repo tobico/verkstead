@@ -33375,6 +33375,54 @@ async fn an_investigation_steered_out_of_a_closed_conversation_lands_done() {
     );
 }
 
+/// And one that fell over says how, where it went badly, rather than that it
+/// finished: the component is told how the session ended as well as that it is
+/// gone.
+#[tokio::test]
+async fn a_follow_up_session_that_exits_badly_says_how_it_ended() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_a_follow_up(&reviews, "    printf 'falling over\\n'\n    exit 1"),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("The session exited with status 1."),
+        "how it ended, which was the trouble: {:?}",
+        stopped.html,
+    );
+    assert!(
+        !stopped.html.contains("The follow-up session finished"),
+        "rather than that it finished: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("Nobody is left to ask you anything"),
+        "and why that is a stop: {:?}",
+        stopped.html,
+    );
+}
+
 /// A follow-up session that is gone stops the Conversation, with the ordinary
 /// Notice saying what it was doing.
 ///

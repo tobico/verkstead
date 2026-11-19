@@ -42,10 +42,13 @@ wit_bindgen::generate!({
 use verkstead::plugin::activity_types::{Ends, Entry, Evidence, Waited};
 use verkstead::plugin::host;
 
-/// What a gone session's stop says, where the human never said there was
-/// nothing else: the server's own sentence for it.
-const GONE: &str = "The follow-up session finished. Nobody is left to ask you anything or to \
-     act on what you say. Any question the session put to you has been closed unanswered.";
+/// What a gone session's stop says beyond how it went, where the human never
+/// said there was nothing else: the server's own sentence for it.
+const NOBODY: &str = "Nobody is left to ask you anything or to act on what you say. Any \
+     question the session put to you has been closed unanswered.";
+
+/// How a session that finished went, where the host had nothing worse to say.
+const FINISHED: &str = "The follow-up session finished.";
 
 struct Rounds;
 
@@ -95,8 +98,16 @@ impl Guest for Rounds {
         match host::wait(session) {
             Waited::Done | Waited::Marked => ending(&facts),
             Waited::Steered => "steered".to_owned(),
-            Waited::Gone | Waited::Stalled => {
-                host::stop(GONE);
+            // How it ended, where the ending itself was the trouble; otherwise
+            // the ending is the whole of it, a session that has finished with
+            // the follow-up still running being exactly as gone as one that
+            // fell over.
+            Waited::Gone(how) => {
+                host::stop(&format!("{} {NOBODY}", how.as_deref().unwrap_or(FINISHED)));
+                String::new()
+            }
+            Waited::Stalled => {
+                host::stop(&format!("{FINISHED} {NOBODY}"));
                 String::new()
             }
         }

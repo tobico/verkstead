@@ -271,11 +271,13 @@ interface activity-types {
 
   /// What a wait on a session came to. Every event the Activity is handed
   /// arrives here.
-  enum waited {
+  variant waited {
     /// It gave its Done signal, which was taken, and is idle.
     done,
-    /// It ended without one, or was ended.
-    gone,
+    /// It ended without one, or was ended: with the host's sentence for how,
+    /// where the ending itself was the trouble — *The session exited with …* —
+    /// and none where it finished, or a stop already says why.
+    gone(option<string>),
     /// It stalled, and the rescue did not bring it back.
     stalled,
     /// The human steered the Conversation elsewhere. The Activity ends

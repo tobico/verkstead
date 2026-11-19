@@ -249,7 +249,9 @@ impl Lent {
     /// Conversation elsewhere** — a steer ends the session it moves past, and
     /// so does a transfer, after which the work carries on at the far end —
     /// so it is `steered`, and whatever was waiting has nothing left to do.
-    /// Under a stop it is `gone`, the stop's own Notice being the whole of it.
+    /// Under a stop it is `gone` with nothing said, the stop's own Notice being
+    /// the whole of it; otherwise `gone` carries how it ended, where that was
+    /// the trouble — see [`Ended::badly`].
     ///
     /// **And a session whose rounds the human had already marked over is
     /// `marked`**, where its evidence is that mark: an agent that finishes its
@@ -265,10 +267,10 @@ impl Lent {
         if ended.on_purpose() {
             return match store::stopped(&state.pool, conversation_id).await {
                 Ok(None) => world::Waited::Steered,
-                Ok(Some(_)) => world::Waited::Gone,
+                Ok(Some(_)) => world::Waited::Gone(None),
                 Err(error) => {
                     tracing::error!(error = ?error, conversation_id, "reading whether a Conversation had stopped under its session failed");
-                    world::Waited::Gone
+                    world::Waited::Gone(None)
                 }
             };
         }
@@ -276,7 +278,7 @@ impl Lent {
         let within = match evidence {
             Evidence::NothingElse => store::Lifecycle::FollowUp,
             Evidence::Investigated => store::Lifecycle::Investigating,
-            _ => return world::Waited::Gone,
+            _ => return world::Waited::Gone(ended.badly()),
         };
 
         if !crate::runner::open(state, conversation_id).await
@@ -285,7 +287,7 @@ impl Lent {
             return world::Waited::Marked;
         }
 
-        world::Waited::Gone
+        world::Waited::Gone(ended.badly())
     }
 
     /// Whatever a launch is refused over is logged here, where the reason is
@@ -446,8 +448,8 @@ impl host::Host for Lent {
             )));
         };
 
-        if watched.ended.is_some() {
-            return Ok(world::Waited::Gone);
+        if let Some(ended) = &watched.ended {
+            return Ok(world::Waited::Gone(ended.badly()));
         }
 
         let event_id = watched.session.event_id;
