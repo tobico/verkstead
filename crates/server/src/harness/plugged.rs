@@ -632,16 +632,37 @@ impl Entries {
                 .div_duration_f64(crate::plugins::component::TICK)
                 .ceil() as u64,
         );
-        let answered = exports
-            .call_parse_transcript(
+        let answered = within_time(
+            exports.call_parse_transcript(
                 &mut loaded.store,
                 crate::plugins::component::ACCOUNT,
                 &self.reader.session,
-            )
-            .await
-            .map_err(|error| failed(&error));
+            ),
+            failed,
+        )
+        .await;
         loaded.store.set_epoch_deadline(u64::MAX);
         answered
+    }
+}
+
+/// What `call` answers, or why it failed, worded by `worded` — and its
+/// running out of time where it has not answered within [`CALLING`].
+///
+/// **The epoch deadline alone is not a deadline.** It stops a component only
+/// while the component's own code runs, and one waiting in a call to the host
+/// — a sleep, or a request it was granted the network for — runs none: it
+/// would wait there for ever, and a `write-configuration` doing so would hold
+/// every later root of its harness behind it. So the call is also held to the
+/// clock on the wall, and dropped where it runs over; the instance it was in is
+/// never entered again, as one that trapped is not.
+async fn within_time<T>(
+    call: impl Future<Output = wasmtime::Result<T>>,
+    worded: fn(&wasmtime::Error) -> String,
+) -> Result<T, String> {
+    match tokio::time::timeout(CALLING, call).await {
+        Ok(answered) => answered.map_err(|error| worded(&error)),
+        Err(_) => Err(format!("it took longer than {} seconds", CALLING.as_secs())),
     }
 }
 
@@ -686,10 +707,7 @@ impl Exchange {
                 .div_duration_f64(crate::plugins::component::TICK)
                 .ceil() as u64,
         );
-        let step = exports
-            .call_login(&mut loaded.store, written)
-            .await
-            .map_err(|error| failed(&error));
+        let step = within_time(exports.call_login(&mut loaded.store, written), failed).await;
         loaded.store.set_epoch_deadline(u64::MAX);
         step
     }
@@ -805,10 +823,15 @@ impl Component {
                                         .div_duration_f64(crate::plugins::component::TICK)
                                         .ceil() as u64,
                                 );
-                                let configuration = exports
-                                    .call_write_configuration(&mut loaded.store, &found, &servers)
-                                    .await
-                                    .map_err(|error| crate::plugins::component::worded(&error));
+                                let configuration = within_time(
+                                    exports.call_write_configuration(
+                                        &mut loaded.store,
+                                        &found,
+                                        &servers,
+                                    ),
+                                    crate::plugins::component::worded,
+                                )
+                                .await;
                                 loaded.store.set_epoch_deadline(u64::MAX);
                                 configuration
                             });
@@ -856,9 +879,16 @@ impl Component {
             })
             .map_err(|_| "its component isn't running".to_owned())?;
 
+        // Twice the call's own time: enough for one that ran out of it and the
+        // component started afresh after it, and never a wait without end.
         answer
-            .recv()
-            .map_err(|_| "its component stopped".to_owned())?
+            .recv_timeout(CALLING * 2)
+            .map_err(|error| match error {
+                mpsc::RecvTimeoutError::Timeout => {
+                    format!("it took longer than {} seconds", (CALLING * 2).as_secs())
+                }
+                mpsc::RecvTimeoutError::Disconnected => "its component stopped".to_owned(),
+            })?
     }
 }
 
@@ -916,5 +946,36 @@ mod tests {
 
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(lines[0].contains("Reading the brief."), "{lines:?}");
+    }
+
+    /// A component waiting on the host runs none of its own code, which the
+    /// epoch deadline is all about — so it is the clock on the wall that ends
+    /// the call, and the Transcript says it ran out of time.
+    #[tokio::test]
+    async fn a_parse_transcript_waiting_on_the_host_runs_out_of_time() {
+        let account = tempfile::tempdir().unwrap();
+        std::fs::create_dir(account.path().join("memory")).unwrap();
+        std::fs::write(
+            account.path().join("memory").join("s1.jsonl"),
+            "{\"sleep\":true}\n",
+        )
+        .unwrap();
+
+        let bytes = std::fs::read(env!("VERKSTEAD_STUB_HARNESS_WASM")).unwrap();
+        let loaded = crate::plugins::component::instantiate(&bytes, &[], None)
+            .await
+            .expect("the stub harness's component should load");
+        let reader = Reader {
+            again: loaded.again,
+            account: account.path().to_owned(),
+            session: "s1".to_owned(),
+        };
+
+        let lines = tokio::time::timeout(CALLING * 3, Entries::of(reader, 0).take())
+            .await
+            .expect("the call should have been ended at its deadline");
+
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("took longer than 10 seconds"), "{lines:?}");
     }
 }

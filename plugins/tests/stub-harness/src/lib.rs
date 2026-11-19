@@ -13,7 +13,8 @@
 //! - **`parse-transcript`** reads `memory/<session>.jsonl` under the account's
 //!   root, a line per entry in a shape of the stub's own — see [`entry`] — and
 //!   traps on a line `{"trap":true}`, so a suite can see what a component that
-//!   stops does to a Transcript.
+//!   stops does to a Transcript — and sleeps on a line `{"sleep":true}`, so
+//!   one can see what a component waiting on the host for ever does to it.
 //! - **`login`** reads what a stub logging in writes — see [`LOGIN`] — and
 //!   answers each thing it recognises as the step it is, in its own words.
 
@@ -136,8 +137,14 @@ const LOGIN: &[(&str, Step)] = &[
 /// - `{"notice": <kind>, "line": …}`
 /// - `{"unknown": <kind> | null, "line": …}`
 /// - `{"trap": true}`, which stops the component where it stands.
+/// - `{"sleep": true}`, which waits an hour on the host's clock, running no
+///   code of its own all the while.
 fn entry(line: &serde_json::Value) -> Entry {
     let text = |key: &str| line[key].as_str().unwrap_or_default().to_owned();
+
+    if line["sleep"].as_bool() == Some(true) {
+        std::thread::sleep(std::time::Duration::from_secs(60 * 60));
+    }
 
     if line["trap"].as_bool() == Some(true) {
         panic!("the stub's record asked it to stop");
