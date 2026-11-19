@@ -92,6 +92,33 @@ describe("a row", () => {
     );
   });
 
+  it("lists several activities as a sentence does", async () => {
+    const gitlab = PLUGINS.installed.find((row) => row.name === "GitLab")!;
+    serving(
+      whenever(
+        "/api/ui/plugins",
+        json({
+          ...PLUGINS,
+          installed: PLUGINS.installed.map((row) =>
+            row === gitlab
+              ? {
+                  ...row,
+                  activities: ["Review rounds", "Triage", "Merge watch"],
+                }
+              : row,
+          ),
+        }),
+      ),
+    );
+    pane();
+
+    const row = await theRow("GitLab");
+
+    expect(row.textContent).toContain(
+      "Its activities are Review rounds, Triage, and Merge watch.",
+    );
+  });
+
   it("reads a git plugin's repository and pinned revision, with Update", async () => {
     serving(whenever("/api/ui/plugins", json(PLUGINS)));
     pane();

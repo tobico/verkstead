@@ -716,7 +716,7 @@ function listed(names: string[]): string {
 function activities(names: string[]): string {
   return names.length === 1
     ? `Its activity is ${names[0]}.`
-    : `Its activities are ${names.join(", ")}.`;
+    : `Its activities are ${listed(names)}.`;
 }
 
 /// Where a row's plugin came from: its directory, its repository and the
