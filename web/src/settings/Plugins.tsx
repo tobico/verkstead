@@ -569,6 +569,10 @@ function Row(props: {
         </p>
       </Show>
 
+      <Show when={props.of.activities.length > 0}>
+        <p class={styles.provides}>{activities(props.of.activities)}</p>
+      </Show>
+
       <Show when={source(props.of)}>
         {(from) => <p class={styles.source}>{from()}</p>}
       </Show>
@@ -708,6 +712,13 @@ function listed(names: string[]): string {
   return `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`;
 }
 
+/// The Activities a plugin provides, by the names its manifest draws them as.
+function activities(names: string[]): string {
+  return names.length === 1
+    ? `Its activity is ${names[0]}.`
+    : `Its activities are ${names.join(", ")}.`;
+}
+
 /// Where a row's plugin came from: its directory, its repository and the
 /// revision this cluster is pinned to, or this device's `config.yaml`. Nothing
 /// for a built-in, whose group says it.
@@ -781,6 +792,10 @@ function Consent(props: {
           ? `Provides ${props.of.provides.join(", ")}.`
           : "Provides nothing yet."}
       </p>
+
+      <Show when={props.of.activities.length > 0}>
+        <p>{activities(props.of.activities)}</p>
+      </Show>
 
       <Show
         when={props.of.capabilities.length > 0}

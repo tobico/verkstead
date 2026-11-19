@@ -1700,6 +1700,11 @@ workspace of their own, never built for the host, and
 server, where the start loads them through the same loader an installed plugin
 goes through ([ADR-0030](adr/0030-plugins.md)). Every file in a built-in's
 directory is embedded, but a component crate's own `Cargo.toml` and `src/`.
+**Each `activity` block names a component of its own**, so a built-in may hold
+a crate in a directory just inside its own, `plugins/<name>/<block>/`, whose
+`[lib]` is `<block>`: it is a member of the workspace, it is embedded as
+`<block>.wasm` at the top of the built-in's files, which is what the block's
+`component:` names, and none of its own files are embedded.
 Today there are two:
 
 - **`verkstead`**, the skills every session is told to read: one Skill Pack

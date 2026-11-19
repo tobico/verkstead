@@ -20,10 +20,15 @@
 //! own `OUT_DIR`, and a toolchain without `wasm32-wasip2` is told the command
 //! that adds it. `docs/development.md`'s *Built-in plugins* says the same.
 //!
-//! A built-in's component is the one with its directory's name: the crate in
-//! `plugins/<name>/` names its `[lib]` `<name>` (a `-` written `_`, as cargo
-//! would), which is the file cargo writes, and the manifest's `component:` is
-//! `<name>.wasm`.
+//! A built-in's components are named by the directories of their crates: the
+//! crate in `plugins/<name>/` names its `[lib]` `<name>` (a `-` written `_`, as
+//! cargo would), which is the file cargo writes, and the manifest's
+//! `component:` is `<name>.wasm`. And **each `activity` block names a component
+//! of its own** (Set 1803, Q3), so a crate in a directory just inside it,
+//! `plugins/<name>/<block>/`, is one more: its `[lib]` is `<block>`, it is
+//! embedded at the top of the built-in's files as `<block>.wasm`, and that is
+//! what the block's `component:` names. None of that crate's files are the
+//! built-in's own.
 //!
 //! **The workspace also holds components that are no built-in's**, under
 //! `plugins/tests/`, which the server's suites install as plugins of their
@@ -69,10 +74,17 @@ fn main() {
         let lib = format!("{}.wasm", name.replace('-', "_"));
 
         let crate_ = dir.join("Cargo.toml").is_file();
+        let mut crates: Vec<String> = fs::read_dir(&dir)
+            .expect("a built-in's directory reads")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().join("Cargo.toml").is_file())
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .collect();
+        crates.sort();
 
         let mut files = String::new();
         let mut inside = Vec::new();
-        walked(&dir, Path::new(""), crate_, &mut inside);
+        walked(&dir, Path::new(""), crate_, &crates, &mut inside);
         inside.sort();
         for file in &inside {
             let name = file
@@ -88,7 +100,18 @@ fn main() {
             .unwrap();
         }
 
-        if crate_ {
+        let components = crate_
+            .then(|| (file.clone(), lib.clone()))
+            .into_iter()
+            .chain(crates.iter().map(|block| {
+                (
+                    format!("{block}.wasm"),
+                    format!("{}.wasm", block.replace('-', "_")),
+                )
+            }));
+        let mut any = false;
+        for (file, lib) in components {
+            any = true;
             let wasm = match plugins.join("dist").join(&lib) {
                 artefact if artefact.is_file() => artefact,
                 _ => built
@@ -98,7 +121,7 @@ fn main() {
             write!(files, "({file:?}, include_bytes!({:?})),", path(&wasm)).unwrap();
         }
 
-        let checkout = if debug && !crate_ {
+        let checkout = if debug && !any {
             format!("Some({:?})", path(&dir))
         } else {
             "None".to_owned()
@@ -134,20 +157,25 @@ fn main() {
 
 /// Every file under `dir` but its manifest, relative to the built-in's
 /// directory (`at` being `dir`'s place in it) — and, where the built-in is a
-/// component `crate_`, but its `Cargo.toml` and `src/`.
-fn walked(dir: &Path, at: &Path, crate_: bool, found: &mut Vec<PathBuf>) {
+/// component `crate_`, but its `Cargo.toml` and `src/`, and but the whole of
+/// each of its `crates`, an `activity` block's component's.
+fn walked(dir: &Path, at: &Path, crate_: bool, crates: &[String], found: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).expect("a built-in's directory reads") {
         let entry = entry.expect("a built-in's directory reads");
         let inside = at.join(entry.file_name());
         let top = at.as_os_str().is_empty();
         let name = entry.file_name();
-        if top && (name == "plugin.yaml" || (crate_ && (name == "Cargo.toml" || name == "src"))) {
+        if top
+            && (name == "plugin.yaml"
+                || (crate_ && (name == "Cargo.toml" || name == "src"))
+                || crates.iter().any(|block| name == block.as_str()))
+        {
             continue;
         }
 
         let kind = entry.file_type().expect("a built-in's directory reads");
         if kind.is_dir() {
-            walked(&entry.path(), &inside, crate_, found);
+            walked(&entry.path(), &inside, crate_, &[], found);
         } else if kind.is_file() {
             found.push(inside);
         }

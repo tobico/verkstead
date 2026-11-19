@@ -176,8 +176,162 @@ world language {
   include plugin;
 }
 
+/// What an Activity is handed, what it may ask of the host, and how it ends
+/// (ADR-0030, *Activity*). The words are CONTEXT.md's.
+interface activity-types {
+  /// A repository the Conversation works in, as its Worktree stands.
+  record checkout {
+    /// The Repo's name, which is what `git-facts` asks after it by.
+    repo: string,
+    /// The Worktree's path on this device.
+    path: string,
+    /// The branch the Worktree holds, and the one it was cut from.
+    branch: string,
+    base: string,
+    /// Whether the Conversation may commit in it: always, for the Worktree,
+    /// and as the Companion was attached, for a Companion.
+    writable: bool,
+  }
+
+  /// A role of the Conversation's Process, and the Pairing it runs under.
+  record pairing {
+    role: string,
+    profile: string,
+    model: string,
+  }
+
+  /// One entry of the Timeline so far: its kind and its body, the body as the
+  /// JSON the Timeline holds it as.
+  record entry {
+    id: s64,
+    kind: string,
+    body: string,
+  }
+
+  /// A skill the Activity's block declared, `<pack>/<skill>`, and where a
+  /// session reads its `SKILL.md`, so the Activity can name it in the prompt
+  /// it writes.
+  record skill {
+    name: string,
+    path: string,
+  }
+
+  /// Everything an Activity starts with. Nothing is kept for it between
+  /// starts: a server restarted starts it again with these, the Timeline as
+  /// it now stands, and the files in the Repo, which are the truth.
+  record facts {
+    worktree: checkout,
+    companions: list<checkout>,
+    pairings: list<pairing>,
+    brief: string,
+    /// The handoff document, where the Conversation has one.
+    handoff: option<string>,
+    timeline: list<entry>,
+    /// What the Process configured this state's Activity with, by key.
+    options: list<tuple<string, string>>,
+    skills: list<skill>,
+  }
+
+  /// A file whose arrival or going says a session is done.
+  variant landing {
+    /// This path, inside the Worktree, is gone.
+    gone(string),
+    /// This path, inside the Worktree, has arrived.
+    arrived(string),
+    /// `.tasks/TODO.md`'s entry with this number is ticked and committed.
+    ticked(u32),
+    /// The roadmap with this name is written and committed.
+    roadmap(string),
+    /// The handoff document has been written, at this absolute path.
+    handoff(string),
+  }
+
+  /// What `verkstead done` is checked against for a session.
+  variant evidence {
+    landed(landing),
+    /// The Conversation's commits stand past this many, the count at launch.
+    committed-since(s64),
+    /// Nothing to show: the work is judged elsewhere.
+    nothing,
+    /// The human's newest answered round carries the Nothing-else mark.
+    nothing-else,
+    /// The same mark in Investigating's window, uncommitted changes allowed.
+    investigated,
+  }
+
+  /// How a session ends once it is done: with the work standing, or on a pull
+  /// request it opened, in every repository it committed in.
+  enum ends {
+    with-its-work,
+    on-a-pull-request,
+  }
+
+  /// A session the Activity launched, which it waits on by this.
+  type session = u64;
+
+  /// What a wait on a session came to. Every event the Activity is handed
+  /// arrives here.
+  enum waited {
+    /// It gave its Done signal, which was taken, and is idle.
+    done,
+    /// It ended without one, or was ended.
+    gone,
+    /// It stalled, and the rescue did not bring it back.
+    stalled,
+    /// The human steered the Conversation elsewhere. The Activity ends
+    /// `steered`.
+    steered,
+    /// The human answered a round with the Nothing-else mark.
+    marked,
+  }
+
+  /// What one repository's branch holds, read-only.
+  record branch-facts {
+    branch: string,
+    /// Commits on the branch past its base.
+    commits: u32,
+    /// Whether anything in the Worktree is not committed.
+    uncommitted: bool,
+  }
+}
+
+/// What the host lends an Activity: every way it reaches the server.
+interface host {
+  use activity-types.{evidence, ends, session, waited, branch-facts};
+
+  /// Launch a session under `skill`, `<pack>/<skill>`, as `role`, with the
+  /// prompt the Activity wrote — the host adds what every session is told —
+  /// expecting `evidence` of it and ending as `ends` says. Refused, in a
+  /// sentence, where it cannot be launched.
+  launch: func(skill: string, role: string, prompt: string, evidence: evidence, ends: ends)
+    -> result<session, string>;
+
+  /// Wait on a session until something happens to it or the Conversation.
+  wait: func(session: session) -> waited;
+
+  /// The git facts of the Worktree's repository or a Companion's, by the
+  /// Repo's name. Refused where it is neither.
+  git-facts: func(repo: string) -> result<branch-facts, string>;
+
+  /// Put a notice on the Timeline.
+  notice: func(text: string);
+
+  /// Stop: the Conversation stays where it is, the reason goes on the
+  /// Timeline, and any Set left open is closed. What `run` returns after is
+  /// not read.
+  stop: func(reason: string);
+}
+
+/// An Activity's component, run once per start.
 world activity {
   include plugin;
+  import host;
+  use activity-types.{facts};
+
+  /// Run to the end, answering the Outcome: one of the words the block
+  /// declares under `outcomes`, or `steered`, which every Activity has. An
+  /// Outcome never names a state; the Process maps it to one.
+  export run: func(facts: facts) -> string;
 }
 
 world skills {

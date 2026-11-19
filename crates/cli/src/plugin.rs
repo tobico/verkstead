@@ -13,7 +13,8 @@
 //! capabilities the manifest asks for and through the server's own loader: a
 //! component that is not one, needs what Verkstead does not provide, or traps
 //! while it starts is the trouble the page would draw on its row, printed the
-//! same way.
+//! same way. Each Activity's component is checked against the `activity`
+//! world by the same loader, without being run.
 //!
 //! Nothing here needs a server: a manifest is a file, and the check is a read
 //! and an instantiation in this process.
@@ -49,7 +50,7 @@ pub fn plugin(what: What) -> Result<()> {
 fn check(dir: &Path) -> Result<()> {
     match Manifest::check(dir) {
         Ok(manifest) => {
-            if manifest.component.is_some() {
+            if manifest.component.is_some() || !manifest.activities.is_empty() {
                 let home = home_dir(Platform::HERE, &Environment::of_the_process());
                 let loaded = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -71,11 +72,19 @@ fn check(dir: &Path) -> Result<()> {
                     None => provision.category.word().to_owned(),
                 })
                 .collect();
-            let provides = if provides.is_empty() {
+            let mut provides = if provides.is_empty() {
                 "nothing".to_owned()
             } else {
                 provides.join(", ")
             };
+            if !manifest.activities.is_empty() {
+                let names: Vec<&str> = manifest
+                    .activities
+                    .iter()
+                    .map(|activity| activity.name.as_str())
+                    .collect();
+                provides.push_str(&format!(" — its activities {}", names.join(", ")));
+            }
 
             println!(
                 "{} is a plugin Verkstead would load: {} {} by {}, written against interface {}, \
