@@ -39,7 +39,7 @@
 use verkstead_render::{AuthorThere, HarnessThere, Lacking, PairingRole, Preflight};
 
 use crate::device::Devices;
-use crate::peer::harnesses::HARNESSES;
+use crate::peer::harnesses::{HARNESSES, PLUGGED};
 use crate::relaying::{self, Refusal};
 use crate::settings::Config;
 use crate::store;
@@ -204,7 +204,7 @@ async fn ask(
     let rows: Vec<serde_json::Value> = relaying::word_from(
         Some(devices),
         device,
-        relaying::asking(HARNESSES.to_owned()),
+        relaying::asking(format!("{HARNESSES}?{PLUGGED}")),
         MOST_THE_HARNESSES_ARE,
     )
     .await?;
