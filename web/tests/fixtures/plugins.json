@@ -30,8 +30,11 @@
       "dependents": [],
       "elsewhere": null,
       "enabled": true,
+      "harness": null,
+      "languages": [],
       "name": "Activities",
       "needs": [],
+      "profiles": 0,
       "provides": [
         "activity"
       ],
@@ -44,6 +47,7 @@
       "version": "0.1.0"
     },
     {
+      "activities": [],
       "author": "Tobias Cohen",
       "dependents": [],
       "elsewhere": null,
@@ -67,6 +71,7 @@
       "version": "0.1.0"
     },
     {
+      "activities": [],
       "author": "Tobias Cohen",
       "dependents": [],
       "elsewhere": null,
@@ -90,6 +95,7 @@
       "version": "0.1.0"
     },
     {
+      "activities": [],
       "author": "Tobias Cohen",
       "dependents": [],
       "elsewhere": null,
@@ -113,6 +119,7 @@
       "version": "0.1.0"
     },
     {
+      "activities": [],
       "author": "Tobias Cohen",
       "dependents": [],
       "elsewhere": null,
@@ -136,6 +143,7 @@
       "version": "0.1.0"
     },
     {
+      "activities": [],
       "author": "Tobias Cohen",
       "dependents": [],
       "elsewhere": null,
@@ -159,6 +167,7 @@
       "version": "0.1.0"
     },
     {
+      "activities": [],
       "author": "Tobias Cohen",
       "dependents": [],
       "elsewhere": null,
@@ -199,7 +208,7 @@
       "profiles": 0,
       "provides": [
         "forge",
-        "language",
+        "process",
         "activity"
       ],
       "settings": 4,
@@ -224,7 +233,7 @@
       "profiles": 0,
       "provides": [
         "forge",
-        "language"
+        "process"
       ],
       "settings": 0,
       "source": {
@@ -248,12 +257,12 @@
       "profiles": 0,
       "provides": [
         "forge",
-        "language"
+        "process"
       ],
       "settings": 0,
       "source": {
         "kind": "Git",
-        "revision": "ca9b3afa10a2475f440797151a610b121993ccbd",
+        "revision": "d9327cd7b48cc94021a562334dea4377b6560097",
         "url": "file:///home/you/src/sources/skills"
       },
       "trouble": null,
@@ -282,7 +291,7 @@
       "profiles": 0,
       "provides": [
         "forge",
-        "language"
+        "process"
       ],
       "settings": 0,
       "source": {
@@ -294,6 +303,7 @@
       "version": "1.4.0"
     },
     {
+      "activities": [],
       "author": "",
       "dependents": [],
       "elsewhere": null,

@@ -83,7 +83,7 @@ describe("a row", () => {
     const row = await theRow("GitLab");
 
     expect(row.textContent).toContain("1.4.0 · Ada Lovelace");
-    expect(row.textContent).toContain("Provides forge, language, activity.");
+    expect(row.textContent).toContain("Provides forge, process, activity.");
     expect(row.textContent).toContain("Its activity is Review rounds.");
     expect(row.textContent).toContain("/home/you/src/gitlab");
     expect(row.querySelector("input[type=checkbox]")).toHaveProperty(
@@ -99,7 +99,7 @@ describe("a row", () => {
     const row = await theRow("Shared skills");
 
     expect(row.textContent).toContain(
-      "file:///home/you/src/sources/skills at ca9b3af",
+      "file:///home/you/src/sources/skills at d9327cd",
     );
     expect(row.textContent).toContain("Update");
   });
@@ -206,6 +206,7 @@ describe("the Built-in group", () => {
     ).toEqual(["Installed", "Built-in"]);
     expect(PLUGINS.built_in.map((row) => row.name)).toEqual([
       "Verkstead",
+      "Activities",
       ".NET",
       "Go",
       "JVM",

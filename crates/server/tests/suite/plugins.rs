@@ -51,7 +51,7 @@ fn manifest(uuid: &str, name: &str, capabilities: &[&str]) -> String {
          author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
          version: 1.4.0\n\
          interface: 1\n\
-         provides:\n  - category: forge\n  - category: language\n  - category: forge\n\
+         provides:\n  - category: forge\n  - category: process\n  - category: forge\n\
          {capabilities}"
     )
 }
@@ -149,7 +149,7 @@ async fn kept() -> (Router, tempfile::TempDir) {
 /// the Skill Pack `pack` holding the one skill `reviewing`.
 fn packing(dir: &Path, uuid: &str, name: &str, pack: &str) -> String {
     let text = manifest(uuid, name, &[]).replace(
-        "provides:\n  - category: forge\n  - category: language\n  - category: forge\n",
+        "provides:\n  - category: forge\n  - category: process\n  - category: forge\n",
         &format!("provides:\n  - category: skills\n    name: {pack}\n    directory: skills\n"),
     );
     let at = plugin(dir, name, &text);
@@ -198,9 +198,9 @@ fn activity_component() -> Vec<u8> {
 /// already, its component `rounds.wasm` and launching each of `skills`.
 fn acting(text: &str, skills: &str) -> String {
     text.replace(
-        "  - category: forge\n  - category: language\n  - category: forge\n",
+        "  - category: forge\n  - category: process\n  - category: forge\n",
         &format!(
-            "  - category: forge\n  - category: language\n  - category: forge\n  \
+            "  - category: forge\n  - category: process\n  - category: forge\n  \
              - category: activity\n    id: review-rounds\n    name: Review rounds\n    \
              component: rounds.wasm\n    outcomes: [approved, abandoned]\n    \
              skills: {skills}\n"
@@ -233,7 +233,7 @@ async fn a_plugin_providing_an_activity_loads_and_its_row_names_it() {
 
     let row = row(&view, PLUGIN);
     assert_eq!(row.trouble, None);
-    assert_eq!(row.provides, ["forge", "language", "activity"]);
+    assert_eq!(row.provides, ["forge", "process", "activity"]);
     assert_eq!(row.activities, ["Review rounds"]);
 }
 
@@ -337,13 +337,18 @@ async fn the_activities_are_a_built_in_row_naming_follow_up_rounds() {
     assert!(row.enabled);
     assert_eq!(row.trouble, None);
 
-    let (status, _) = pressing(
+    let (status, said) = pressing(
         &app,
         &format!("/api/ui/plugins/{ACTIVITIES}/remove"),
         serde_json::json!({}),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "a built-in has no Remove");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a built-in has no Remove: {said}"
+    );
+    assert!(said.contains("built in"), "{said}");
 }
 
 /// The skills Verkstead ships are the Built-in group's first row: providing
@@ -532,7 +537,7 @@ async fn a_local_plugin_installed_through_the_card_is_listed_on_its_row() {
 
     let consent = read(&app, &path).await;
     assert_eq!(consent.name, "GitLab");
-    assert_eq!(consent.provides, ["forge", "language"]);
+    assert_eq!(consent.provides, ["forge", "process"]);
     assert_eq!(
         consent.capabilities,
         [PluginCapability::Outbound {
@@ -550,7 +555,7 @@ async fn a_local_plugin_installed_through_the_card_is_listed_on_its_row() {
     assert_eq!(row.name, "GitLab");
     assert_eq!(row.version, "1.4.0");
     assert_eq!(row.author, "Ada Lovelace");
-    assert_eq!(row.provides, ["forge", "language"]);
+    assert_eq!(row.provides, ["forge", "process"]);
     assert_eq!(row.source, PluginSource::Local { path: path.clone() });
     assert!(row.enabled);
     assert_eq!(row.trouble, None);
@@ -716,7 +721,11 @@ async fn the_language_plugins_are_listed_under_built_in() {
 
     assert!(view.installed.is_empty());
     let names: Vec<&str> = view.built_in.iter().map(|row| row.name.as_str()).collect();
-    assert_eq!(names.len(), 7, "the pack and six languages: {names:?}");
+    assert_eq!(
+        names.len(),
+        8,
+        "the pack, the Activities and six languages: {names:?}"
+    );
     assert!(!view.built_in.iter().any(|row| row.uuid == FIXTURE));
 
     let rust = built_in(&view, "Rust & C/C++");
@@ -1005,7 +1014,7 @@ async fn an_installers_own_language_is_a_row_of_its_own() {
 /// `size` setting.
 fn languaging(dir: &Path, uuid: &str, name: &str, language: &str) -> String {
     let text = manifest(uuid, name, &[]).replace(
-        "provides:\n  - category: forge\n  - category: activity\n  - category: forge\n",
+        "provides:\n  - category: forge\n  - category: process\n  - category: forge\n",
         &format!(
             "settings:\n  - key: size\n    label: Store size limit\n    kind: size\n\
              provides:\n  - category: language\n    language: {language}\n    label: Zig\n    \
