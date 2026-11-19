@@ -256,6 +256,11 @@ struct Held {
     /// languages — see [`Settings::holding_plugin_languages`]. `None` until
     /// they first are.
     plugin_languages: RwLock<Option<crate::languages::Held>>,
+
+    /// And the languages the installed Language plugins loaded here provide —
+    /// see [`Settings::holding_installed_languages`]. Empty until a load has
+    /// read them.
+    installed_languages: RwLock<Vec<(String, crate::languages::Provided)>>,
 }
 
 /// Every Data Directory's held lists, so that every handle on one directory
@@ -396,6 +401,31 @@ impl Settings {
             .plugin_languages
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(held);
+    }
+
+    /// Hold the languages the installed Language plugins loaded here provide,
+    /// each beside its plugin's uuid, in the order they were installed — what
+    /// the next [`crate::replicating::plugins::held`] lays beside the
+    /// built-ins'. Set by every load, so a plugin unticked or in trouble takes
+    /// its languages with it.
+    pub fn holding_installed_languages(
+        &self,
+        installed: Vec<(String, crate::languages::Provided)>,
+    ) {
+        *self
+            .held
+            .installed_languages
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = installed;
+    }
+
+    /// And those languages, as the last load left them.
+    pub fn installed_languages(&self) -> Vec<(String, crate::languages::Provided)> {
+        self.held
+            .installed_languages
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Forget the declarations held, as a new start of the server would.

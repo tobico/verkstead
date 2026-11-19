@@ -450,6 +450,14 @@ the file's to take out — and its pane has the `size` field and the build cache
 below where its entry names a store. An entry of this kind that will not read
 is in trouble and off.
 
+**A Language plugin installed from a directory or from git** is a language
+every session gets once it loads on a device, after the built-ins' in the
+order the plugins were installed; its tick is the switch and its `size` the
+size, like a built-in's, and an entry under `languages:` merges over it the
+same way. Its row says which languages it provides. One providing a language
+that a built-in or an earlier plugin already provides loads in trouble, and
+that language stays the first plugin's.
+
 **A built-in language's switch is its plugin's tick** on the Plugins page,
 cluster-wide: unticked, none of its languages' variables, stores or grants
 reach a session. Its `enabled` here was taken up into the plugin's record once,

@@ -183,6 +183,16 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
         })
         .collect();
 
+    // And each language, and the plugin that provides it: the built-ins'
+    // first, then each installed plugin's as it loads, the same way.
+    let mut languages: BTreeMap<String, String> = built_in::listed()
+        .iter()
+        .flat_map(|manifest| {
+            built_in::languages(manifest)
+                .map(|provided| (provided.name.clone(), manifest.name.clone()))
+        })
+        .collect();
+
     let mut troubles = BTreeMap::new();
     let mut manifests = BTreeMap::new();
     let mut dirs = BTreeMap::new();
@@ -202,11 +212,16 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
 
         let read = loaded(state, record, home.as_deref(), &credential)
             .await
-            .and_then(|(manifest, dir)| unclaimed(&claimed, &manifest).map(|()| (manifest, dir)));
+            .and_then(|(manifest, dir)| {
+                unclaimed(&claimed, &languages, &manifest).map(|()| (manifest, dir))
+            });
         match read {
             Ok((manifest, dir)) => {
                 for pack in &manifest.packs {
                     claimed.insert(pack.name.clone(), manifest.name.clone());
+                }
+                for provided in built_in::languages(&manifest) {
+                    languages.insert(provided.name.clone(), manifest.name.clone());
                 }
                 dirs.insert(record.uuid.clone(), dir);
                 manifests.insert(record.uuid.clone(), manifest);
@@ -291,6 +306,18 @@ pub(crate) async fn load(state: &AppState) -> Result<()> {
     if moved {
         state.nudges.announce_here(Nudge::Plugins);
     }
+
+    // And the languages the installed Language plugins that loaded provide,
+    // in the order they were installed, for the next session.
+    state.settings.holding_installed_languages(
+        records
+            .iter()
+            .filter_map(|record| Some((&record.uuid, manifests.get(&record.uuid)?)))
+            .flat_map(|(uuid, manifest)| {
+                built_in::languages(manifest).map(|provided| (uuid.clone(), provided.clone()))
+            })
+            .collect(),
+    );
 
     // And which languages a Language plugin's tick has off, for the next
     // session — an installer's language this device has only now read taken
@@ -508,13 +535,26 @@ fn trouble(unmet: &[(&Dependency, Unmet)]) -> Trouble {
 }
 
 /// Refused, naming the plugin that has it, where a pack of `manifest`'s is one
-/// already `claimed`.
-fn unclaimed(claimed: &BTreeMap<String, String>, manifest: &Manifest) -> Result<(), String> {
+/// already `claimed` — or a language it provides is one another plugin
+/// already provides, among `languages`.
+fn unclaimed(
+    claimed: &BTreeMap<String, String>,
+    languages: &BTreeMap<String, String>,
+    manifest: &Manifest,
+) -> Result<(), String> {
     for pack in &manifest.packs {
         if let Some(by) = claimed.get(&pack.name) {
             return Err(format!(
                 "Its skill pack is named `{}`, and so is {by}'s. Give it a name of its own.",
                 pack.name
+            ));
+        }
+    }
+    for provided in built_in::languages(manifest) {
+        if let Some(by) = languages.get(&provided.name) {
+            return Err(format!(
+                "It provides the language `{}`, and so does {by}. Give it a name of its own.",
+                provided.name
             ));
         }
     }
@@ -682,7 +722,7 @@ pub(crate) fn installers(
 ) -> Vec<(String, crate::languages::Descriptor)> {
     crate::languages::configured(config)
         .iter()
-        .filter(|(name, _)| crate::languages::built_in().get(name).is_none())
+        .filter(|(name, _)| !crate::languages::provided_by_a_plugin(config, name))
         .map(|(name, descriptor)| (name.to_owned(), descriptor.clone()))
         .collect()
 }
@@ -750,21 +790,34 @@ pub(crate) fn installer_fields(
 }
 
 /// Why `language`'s entry in `config.yaml` isn't used, as a plugin's trouble,
-/// where it isn't: a built-in's runs on what Verkstead ships meanwhile, and an
-/// installer's own is off.
-fn unread_trouble(language: &str, descriptor: &crate::languages::Descriptor) -> Option<String> {
+/// where it isn't: a built-in's runs on what Verkstead ships meanwhile, an
+/// installed plugin's on what that plugin says, and an installer's own is off.
+fn unread_trouble(
+    config: &crate::settings::Config,
+    language: &str,
+    descriptor: &crate::languages::Descriptor,
+) -> Option<String> {
     let why = descriptor.unread()?;
     let label = descriptor.label().unwrap_or(language);
 
-    Some(match crate::languages::built_in().get(language).is_some() {
-        true => format!(
-            "The {language} entry in config.yaml {why}. {label} runs on what Verkstead ships \
-             until the entry is fixed."
-        ),
-        false => {
-            format!("The {language} entry in config.yaml {why}. It's off until the entry is fixed.")
-        }
-    })
+    Some(
+        match (
+            crate::languages::built_in().get(language).is_some(),
+            crate::languages::provided_by_a_plugin(config, language),
+        ) {
+            (true, _) => format!(
+                "The {language} entry in config.yaml {why}. {label} runs on what Verkstead \
+                 ships until the entry is fixed."
+            ),
+            (false, true) => format!(
+                "The {language} entry in config.yaml {why}. {label} runs on what this plugin \
+                 says until the entry is fixed."
+            ),
+            (false, false) => format!(
+                "The {language} entry in config.yaml {why}. It's off until the entry is fixed."
+            ),
+        },
+    )
 }
 
 /// The languages `manifest` provides, by label.
@@ -801,7 +854,8 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
         .map(|record| (record.uuid.clone(), going_with(&records, &record.uuid)))
         .collect();
 
-    let built_in = built_ins(&records, &loaded);
+    let built_in = built_ins(&records, &config, &loaded);
+    let held_languages = state.settings.installed_languages();
 
     // An installer's own language, drawn only where this device's file has
     // its entry, its tick its record's — or the entry's, where it has none
@@ -821,7 +875,7 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
             let fields = installer_fields(&language, &descriptor, enabled, None);
 
             PluginRow {
-                trouble: unread_trouble(&language, &descriptor),
+                trouble: unread_trouble(&config, &language, &descriptor),
                 needs: Vec::new(),
                 elsewhere: None,
                 source: PluginSource::Config,
@@ -865,8 +919,25 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
             };
 
             let loads = here && record.fields.enabled;
+            // The languages it provides, where it is a Language plugin that
+            // loaded here, and why an override of one won't load, where one
+            // won't.
+            let provided: Vec<&crate::languages::Provided> = held_languages
+                .iter()
+                .filter(|(uuid, _)| *uuid == record.uuid)
+                .map(|(_, provided)| provided)
+                .collect();
+            let overridden = provided
+                .iter()
+                .filter_map(|provided| {
+                    unread_trouble(&config, &provided.name, loaded.get(&provided.name)?)
+                })
+                .reduce(|one, other| format!("{one} {other}"));
             PluginRow {
-                trouble: loads.then(|| state.plugins.trouble(&record.uuid)).flatten(),
+                trouble: loads
+                    .then(|| state.plugins.trouble(&record.uuid))
+                    .flatten()
+                    .or(overridden),
                 needs: if loads {
                     state.plugins.needs(&record.uuid)
                 } else {
@@ -881,7 +952,16 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
                 version: record.fields.version,
                 author: record.fields.author,
                 provides: record.fields.provides,
-                languages: Vec::new(),
+                languages: provided
+                    .iter()
+                    .map(|provided| {
+                        provided
+                            .descriptor
+                            .label()
+                            .unwrap_or(&provided.name)
+                            .to_owned()
+                    })
+                    .collect(),
                 enabled: record.fields.enabled,
             }
         })
@@ -899,7 +979,11 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
 /// Remove and no Update, and is always on but for a Language plugin, whose
 /// tick is read off its record — on where it has none — and whose trouble is
 /// an override of one of its languages that won't load.
-fn built_ins(records: &[Record<Fields>], loaded: &crate::languages::Languages) -> Vec<PluginRow> {
+fn built_ins(
+    records: &[Record<Fields>],
+    config: &crate::settings::Config,
+    loaded: &crate::languages::Languages,
+) -> Vec<PluginRow> {
     let mut rows: Vec<PluginRow> = BUILT_INS
         .iter()
         .filter_map(|built_in| match built_in.manifest(Platform::HERE) {
@@ -921,7 +1005,7 @@ fn built_ins(records: &[Record<Fields>], loaded: &crate::languages::Languages) -
                 // language still runs, on what Verkstead ships.
                 trouble: built_in::languages(&manifest)
                     .filter_map(|provided| {
-                        unread_trouble(&provided.name, loaded.get(&provided.name)?)
+                        unread_trouble(config, &provided.name, loaded.get(&provided.name)?)
                     })
                     .reduce(|one, other| format!("{one} {other}")),
                 needs: Vec::new(),

@@ -116,8 +116,9 @@ async fn held_or_built_in(state: &AppState, uuid: &str) -> Result<Held, Response
 
 /// The languages the Language plugin `uuid` provides on this device, by the
 /// name `config.yaml` keys each by, in the order its manifest lists them: a
-/// built-in's, or the one an installer's own is drawn for where this
-/// device's file has it. Nothing for any other plugin.
+/// built-in's, an installed plugin's that loaded here, or the one an
+/// installer's own is drawn for where this device's file has it. Nothing for
+/// any other plugin.
 fn provided(state: &AppState, uuid: &str) -> Vec<String> {
     if let Some(manifest) = built_in::listed()
         .iter()
@@ -126,6 +127,17 @@ fn provided(state: &AppState, uuid: &str) -> Vec<String> {
         return built_in::languages(manifest)
             .map(|provided| provided.name.clone())
             .collect();
+    }
+
+    let installed: Vec<String> = state
+        .settings
+        .installed_languages()
+        .into_iter()
+        .filter(|(of, _)| of == uuid)
+        .map(|(_, provided)| provided.name)
+        .collect();
+    if !installed.is_empty() {
+        return installed;
     }
 
     installers(&state.settings.config())

@@ -803,6 +803,109 @@ async fn an_installers_own_language_is_a_row_of_its_own() {
     assert_eq!(configured.get("zig").unwrap().size("zig"), "4G");
 }
 
+/// A plugin under `dir/<name>`, called `name`, providing the one language
+/// `language` with the variable `ZIG_GLOBAL_CACHE_DIR` and a store, and a
+/// `size` setting.
+fn languaging(dir: &Path, uuid: &str, name: &str, language: &str) -> String {
+    let text = manifest(uuid, name, &[]).replace(
+        "provides:\n  - category: forge\n  - category: activity\n  - category: forge\n",
+        &format!(
+            "settings:\n  - key: size\n    label: Store size limit\n    kind: size\n\
+             provides:\n  - category: language\n    language: {language}\n    label: Zig\n    \
+             env:\n      ZIG_GLOBAL_CACHE_DIR: \"{{cache}}/zig\"\n    \
+             stores:\n      zig:\n        dir: \"{{cache}}/zig\"\n"
+        ),
+    );
+    plugin(dir, name, &text)
+}
+
+/// A Language plugin installed from a directory is a language every session
+/// gets: its row says which, its tick is the switch, and its pane's size is
+/// what `{size}` reads. One providing a language another plugin already
+/// provides loads in trouble, and leaves that language as it was.
+#[tokio::test]
+async fn an_installed_language_plugin_reaches_sessions() {
+    let (app, dir) = kept().await;
+    let settings = Settings::in_data_dir(dir.path());
+    let named = |settings: &Settings| {
+        given_to_a_session(settings, dir.path())
+            .iter()
+            .any(|(name, _)| name == "ZIG_GLOBAL_CACHE_DIR")
+    };
+    assert!(!named(&settings));
+
+    let view = installs(&app, &languaging(dir.path(), PLUGIN, "Zig support", "zig")).await;
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+    assert_eq!(row(&view, PLUGIN).languages, ["Zig"]);
+    assert!(
+        view.installed
+            .iter()
+            .all(|row| row.source != PluginSource::Config),
+        "no row of its own from config.yaml: {view:#?}",
+    );
+    assert!(named(&settings), "the next session gets zig");
+
+    // Its pane: the size, the default under it, and its cache.
+    let at = format!("{PLUGINS}/{PLUGIN}/settings");
+    let answered = app
+        .clone()
+        .oneshot(Request::builder().uri(&at).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    let pane: PluginSettingsView = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(pane.fields[0].placeholder.as_deref(), Some("10G"));
+    assert_eq!(pane.languages.len(), 1);
+    assert_eq!(pane.languages[0].name, "zig");
+
+    let (status, said) = pressing(
+        &app,
+        &at,
+        serde_json::json!({ "fields": [
+            { "key": "size", "value": { "kind": "Size", "value": "4G" } },
+        ] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let configured = verkstead_server::languages::configured(&settings.config());
+    assert_eq!(configured.get("zig").unwrap().size("zig"), "4G");
+
+    // An override in config.yaml merges over it, as over a built-in.
+    std::fs::write(
+        settings.config_path(),
+        "languages:\n  zig:\n    env:\n      ZIG_LOCAL_CACHE_DIR: /elsewhere\n",
+    )
+    .unwrap();
+    assert!(
+        given_to_a_session(&settings, dir.path())
+            .iter()
+            .any(|(name, value)| name == "ZIG_LOCAL_CACHE_DIR" && value == "/elsewhere")
+    );
+    assert!(named(&settings));
+
+    let (status, said) = pressing(
+        &app,
+        &format!("{PLUGINS}/{PLUGIN}/enabled"),
+        serde_json::json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert!(!named(&settings), "unticked, the next session gets no zig");
+
+    // One providing Go, which a built-in already does.
+    let view = installs(&app, &languaging(dir.path(), ANOTHER, "Other Go", "go")).await;
+    assert_eq!(
+        row(&view, ANOTHER).trouble.as_deref(),
+        Some("It provides the language `go`, and so does Go. Give it a name of its own."),
+    );
+    assert!(
+        !given_to_a_session(&settings, dir.path())
+            .iter()
+            .any(|(name, _)| name == "ZIG_GLOBAL_CACHE_DIR"),
+        "and Go is Go's",
+    );
+}
+
 /// An override of a built-in that won't load — a mistyped `detct` in Go's —
 /// is trouble on Go's row, and Go's sessions get the variables Verkstead
 /// ships; an override that loads, beside it, still wins.
