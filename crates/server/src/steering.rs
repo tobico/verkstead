@@ -158,7 +158,7 @@
 //! watchers over whatever the branch now holds, with the fix attempts
 //! forgotten, which is what that press does there. Into Follow-up it is a
 //! session on the follow-up skill, started on the brief the human wrote and
-//! required to have one — see [`crate::runner::following_up`]. Into Done there
+//! required to have one — see [`crate::runner::follow_up_rounds`]. Into Done there
 //! is nothing to start at all.
 //!
 //! Nothing is reverted, reset or stashed, here or anywhere a stop is written:
@@ -740,14 +740,15 @@ pub(crate) async fn submit(
         // A session on the follow-up skill, started on the brief the human
         // steered with — which is required, so [`refusal`] has already made sure
         // there is one and this cannot come to nothing. See
-        // [`crate::runner::following_up`], which is what drives the Conversation
+        // [`crate::runner::follow_up_rounds`], which is what drives the Conversation
         // while it runs.
         SteerTarget::FollowUp => match follow_up {
-            Some(follow_up) => {
-                tokio::spawn(crate::runner::following_up(
+            // Read back off the Steer Event by the Activity rather than handed
+            // in, which is written by now.
+            Some(_) => {
+                tokio::spawn(crate::runner::follow_up_rounds(
                     state.clone(),
                     conversation_id,
-                    crate::follow_ups::FollowUp::opening(follow_up.to_owned()),
                     driving,
                 ));
             }

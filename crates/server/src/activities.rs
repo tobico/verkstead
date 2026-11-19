@@ -75,30 +75,37 @@ impl Hosting {
             run(
                 &state,
                 conversation_id,
-                driving,
+                &driving,
                 Files::Embedded(&files),
                 &activity,
                 &[],
                 Vec::new(),
+                &activity.name,
             )
             .await
         })
     }
 }
 
-/// Run `activity` on `conversation_id` to its Outcome, holding `driving`
-/// throughout: the word it answered, where it was one the block declares or
+/// Run `activity` on `conversation_id` to its Outcome, `driving` held
+/// throughout and handed back to the caller to hold across whatever the Outcome
+/// sets going: the word it answered, where it was one the block declares or
 /// `steered`, and `None` where the Conversation stopped instead.
+///
+/// `doing` is what the rescue and a stop the component asks for say it was
+/// doing — the words the state it runs in is judged by, *following the work
+/// up*, rather than the Activity's name.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run(
     state: &AppState,
     conversation_id: i64,
-    driving: Driving,
+    _driving: &Driving,
     files: Files<'_>,
     activity: &Activity,
     capabilities: &[Capability],
     options: Vec<(String, String)>,
+    doing: &str,
 ) -> Option<String> {
-    let _driving = driving;
     let name = &activity.name;
 
     let facts = match facts(state, conversation_id, activity, options).await {
@@ -119,7 +126,7 @@ pub(crate) async fn run(
     let home = crate::sandbox::Homes::of_the_server(&state.data_dir)
         .map(|homes| homes.servers().to_owned());
     let lent = Hosted {
-        lent: Lent::new(state, conversation_id).doing(name),
+        lent: Lent::new(state, conversation_id).doing(doing),
         state: state.clone(),
         conversation_id,
     };

@@ -1613,7 +1613,7 @@ a crate in a directory just inside its own, `plugins/<name>/<block>/`, whose
 `[lib]` is `<block>`: it is a member of the workspace, it is embedded as
 `<block>.wasm` at the top of the built-in's files, which is what the block's
 `component:` names, and none of its own files are embedded.
-Today there are two:
+Today there are three:
 
 - **`verkstead`**, the skills every session is told to read: one Skill Pack
   named `verkstead`, its thirteen skills under
@@ -1623,6 +1623,15 @@ Today there are two:
   rather than out of the binary, the way the viewer is read, so a skill edited
   there is what a running `cargo run -p verkstead-cli -- serve` installs at its
   next start, with no recompile. A release embeds it.
+- **`activities`**, the Activities Verkstead runs through the same host
+  functions a stranger's would: a block per Activity, each a component built
+  from the crate beside it — today *Follow-up rounds*, from
+  [`plugins/activities/follow-up-rounds/`](../plugins/activities/follow-up-rounds).
+  It depends on the `verkstead` pack's plugin for the skills its sessions run
+  under, and is the Built-in group's second row. Its directory holds the
+  components' sources rather than their bytes, so `verkstead plugin check`
+  passes on it once each `<block>.wasm` is beside `plugin.yaml` — which
+  `crates/cli/tests/suite/plugin.rs` checks with the bytes the server embeds.
 - the **fixture**, which provides nothing, exports nothing and is listed
   nowhere: it is the proof that the component path works on every platform.
 

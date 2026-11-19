@@ -50,6 +50,19 @@ impl BuiltIn {
     pub fn manifest(&self, platform: Platform) -> Result<Manifest, Refusal> {
         Manifest::parse(self.manifest, self.files(), platform)
     }
+
+    /// Whether its manifest's `uuid` is `uuid`, read off that one key.
+    ///
+    /// What finding a built-in by a dependency's uuid asks before reading the
+    /// whole manifest: reading one checks its own dependencies' skills against
+    /// the built-ins, so a built-in that depends on another would otherwise
+    /// read itself while it was being read.
+    pub fn is(&self, uuid: &str) -> bool {
+        serde_saphyr::from_str::<serde_json::Value>(self.manifest)
+            .ok()
+            .and_then(|tree| tree.get("uuid")?.as_str().map(|own| own == uuid))
+            .unwrap_or(false)
+    }
 }
 
 /// Every built-in this binary carries.
@@ -113,6 +126,18 @@ pub fn languages(manifest: &Manifest) -> impl Iterator<Item = &crate::languages:
         .provides
         .iter()
         .filter_map(|provision| provision.language.as_ref())
+}
+
+/// The uuid of the built-in whose blocks are the Activities Verkstead ships,
+/// one component each: *Follow-up rounds* first (Set 1803, Q3).
+pub const ACTIVITIES: &str = "d7a5e719-8491-46a7-b7d7-8f9f85e57bd6";
+
+/// The built-in the shipped Activities are.
+pub fn activities() -> BuiltIn {
+    *BUILT_INS
+        .iter()
+        .find(|built_in| built_in.directory == "activities")
+        .expect("build.rs embeds every directory under plugins/, and plugins/activities is one")
 }
 
 /// A built-in, once the start has tried to load it.
@@ -220,6 +245,36 @@ mod tests {
                     .any(|skill| skill == "grilling")
             );
         }
+    }
+
+    /// The shipped Activities are a built-in depending on the pack
+    /// `verkstead`, whose *Follow-up rounds* block names a component of its
+    /// own that is written against the `activity` world.
+    #[tokio::test]
+    async fn the_activities_are_a_built_in_with_follow_up_rounds() {
+        let shipped = activities();
+
+        let started = start(shipped, Platform::HERE, None).await;
+        assert_eq!(started.trouble, None);
+
+        let manifest = started.manifest.expect("the manifest reads");
+        assert_eq!(manifest.uuid, ACTIVITIES);
+        assert_eq!(manifest.dependencies.len(), 1);
+        assert_eq!(manifest.dependencies[0].uuid, VERKSTEAD);
+
+        let [rounds] = manifest.activities.as_slice() else {
+            panic!("one Activity: {:?}", manifest.activities);
+        };
+        assert_eq!(rounds.id, "follow-up-rounds");
+        assert_eq!(rounds.name, "Follow-up rounds");
+        assert_eq!(rounds.outcomes, ["committed", "nothing"]);
+        assert_eq!(rounds.skills, ["verkstead/following-up"]);
+        assert!(
+            shipped.files.iter().any(
+                |(name, bytes)| *name == "follow-up-rounds.wasm" && bytes.starts_with(b"\0asm")
+            ),
+            "the block's component is embedded beside the manifest",
+        );
     }
 
     /// Bytes that are not a component are trouble on that built-in, and the

@@ -1129,10 +1129,11 @@ pub(crate) async fn view(state: &AppState) -> Result<PluginsView> {
 }
 
 /// The Built-in group's rows: every built-in this binary ships but the fixture,
-/// which is not listed, the Skill Pack `verkstead` first. A built-in has no
-/// Remove and no Update, and is always on but for a Language plugin, whose
-/// tick is read off its record — on where it has none — and whose trouble is
-/// an override of one of its languages that won't load.
+/// which is not listed, the Skill Pack `verkstead` first and the rest as their
+/// directories sort. A built-in has no Remove and no Update, and is always on
+/// but for a Language plugin, whose tick is read off its record — on where it
+/// has none — and whose trouble is an override of one of its languages that
+/// won't load.
 fn built_ins(
     records: &[Record<Fields>],
     config: &crate::settings::Config,

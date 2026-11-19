@@ -536,7 +536,7 @@ where
     let mut store = Store::new(
         &ENGINE,
         Lending {
-            host: granted(capabilities, home)?,
+            host: grant(capabilities, home)?.host(),
             lent,
         },
     );
