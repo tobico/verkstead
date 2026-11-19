@@ -284,6 +284,37 @@ describe("a harness this server has not got", () => {
   });
 });
 
+/// A plugin's harness whose name is no word a pattern could be made of: its
+/// name is its author's to choose, and it is read as it is spelled.
+describe("a harness named with a pattern's characters", () => {
+  const plugin = "5b1e2d7c-0a4f-4c3e-9d8b-7f6a5e4d3c21";
+  const coder: HarnessEntry = {
+    ...(listed as HarnessEntry[])[0]!,
+    id: plugin,
+    name: "C++ Coder",
+    models: [
+      { id: "cpp-large", name: "C++ Large" },
+      { id: "coder-small", name: "Small" },
+    ],
+    aliases: [],
+    login: null,
+    install: null,
+    offered: true,
+  };
+
+  it("drops the backend from a model named after it, and keeps it beside one that is not", () => {
+    knowHarnesses([...(listed as HarnessEntry[]), coder]);
+    const saved = [{ ...profile("Work", "Codex"), account: { agent_type: plugin, paths: {} } }];
+
+    expect(reading({ agent: plugin, model: "cpp-large", profile: "Work" }, saved)).toBe(
+      "C++ Large",
+    );
+    expect(reading({ agent: plugin, model: "coder-small", profile: "Work" }, saved)).toBe(
+      "C++ Coder Small",
+    );
+  });
+});
+
 /// A disabled Agent plugin's harness, which the server lists not offered so that
 /// the Profiles still standing on it are drawn under its name (Set 1764, Q20).
 describe("a harness its plugin's disabling withholds", () => {

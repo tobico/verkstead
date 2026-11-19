@@ -136,8 +136,15 @@ function words(
 /// model and says so, while "GPT-5.1 Codex" is an OpenCode one and does not.
 /// A whole word rather than a substring, so that a "Codex" anywhere in a name
 /// counts and a "codexed" would not.
+///
+/// **The word is matched as it is spelled**, every character of it literal: a
+/// harness's name is its plugin's to choose, and a "C++ Coder" read as a
+/// pattern would be no pattern at all. Bounded by what is not a word character
+/// rather than by `\b`, which a brand ending in `+` never meets.
 function brands(harness: string, model: string): boolean {
-  return new RegExp(`\\b${harness.split(" ")[0]!}\\b`, "i").test(model);
+  const brand = harness.split(" ")[0]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  return new RegExp(`(?<!\\w)${brand}(?!\\w)`, "i").test(model);
 }
 
 /// The Profile's half of the reading: its name where the name is what tells
