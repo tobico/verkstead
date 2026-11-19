@@ -47,8 +47,8 @@ use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
     CompileCaching, ConflictResolution, DiskUse, Eviction, IgnoreRule, LanguageCleared,
-    LanguageView, McpHeader, McpServer, PathResolution, PathSource, PluginSettingsView, RuleField,
-    RunningOn, ServerField, SettingsSaved, SettingsView, Verified,
+    LanguageView, McpHeader, McpServer, PathResolution, PathSource, PluginSettingsView,
+    PluginsView, RuleField, ServerField, SettingsSaved, SettingsView, Verified,
 };
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
@@ -857,15 +857,14 @@ fn rust_compiling(settings: &SettingsView) -> CompileCaching {
         .expect("Rust's descriptor names the sccache capability")
 }
 
-/// The one language every machine has, said the way the page reads it: on, at
-/// the default size, with the size marked as nobody's choice so the page can
-/// draw it as a placeholder.
+/// The one language every machine has, said the way the page reads it: on,
+/// and compiling through the Compile Server.
 ///
 /// The whole point of the shape — a fresh install should not be the one paying
 /// for every dependency to be compiled twice, and nothing here asks the human to
 /// find a setting first.
 #[tokio::test]
-async fn a_language_nobody_has_configured_is_on_at_the_default_size() {
+async fn a_language_nobody_has_configured_is_on() {
     let (_dir, app) = app().await;
 
     let told = settings(&app).await;
@@ -877,11 +876,6 @@ async fn a_language_nobody_has_configured_is_on_at_the_default_size() {
     );
     assert!(rust.enabled, "on is what an untouched setting means");
 
-    assert_eq!(rust.size, "30G");
-    assert!(
-        !rust.size_configured,
-        "the default is shown rather than chosen"
-    );
     assert_ne!(
         rust_compiling(&told),
         CompileCaching::Cached,
@@ -910,48 +904,51 @@ async fn save_as_it_stands(app: &Router) -> SettingsSaved {
     .await
 }
 
-/// Every language with a store of its own has a size the page draws a field
-/// for, with its default as the placeholder: Rust's sccache keeps the 30G it
-/// always had, and every other store starts at 10G. C/C++ has no store — the
-/// one Compile Server is Rust's — and so no field.
+/// Every built-in Language plugin's pane draws each of its languages at its
+/// own default size — Rust's sccache keeps the 30G it always had, and every
+/// other store starts at 10G — and, on a server that has not measured a
+/// store, says so rather than keeping the pane waiting; C/C++, naming no
+/// store, has nothing to measure.
 #[tokio::test]
-async fn every_language_with_a_store_is_sized_at_its_own_default() {
+async fn every_language_is_sized_at_its_own_default_and_not_yet_measured() {
     let (_dir, app) = app().await;
 
-    let told = settings(&app).await;
+    let mut drawn = Vec::new();
+    for uuid in language_plugins(&app).await {
+        drawn.extend(plugin_pane(&app, &uuid).await.languages);
+    }
+    assert_eq!(drawn.len(), 7, "every built-in: {drawn:?}");
 
-    assert!(told.languages.len() > 2, "every built-in: {told:?}");
-
-    for language in &told.languages {
-        let (default, store) = match language.name.as_str() {
-            "rust" => ("30G", true),
-            "cpp" => ("10G", false),
-            _ => ("10G", true),
+    for language in &drawn {
+        let (size, disk_use) = match language.name.as_str() {
+            "rust" => ("30G", DiskUse::NotMeasured),
+            "cpp" => ("10G", DiskUse::NoStore),
+            _ => ("10G", DiskUse::NotMeasured),
         };
 
-        assert_eq!(language.default_size, default, "{}", language.name);
-        assert_eq!(language.size, default, "{}", language.name);
-        assert!(!language.size_configured, "{}", language.name);
-        assert_eq!(language.size_unread, None, "{}", language.name);
-        assert_eq!(language.store, store, "{}", language.name);
+        assert_eq!(language.size, size, "{}", language.name);
+        assert_eq!(language.disk_use, disk_use, "{}", language.name);
     }
 }
 
-/// Every language naming a store has a disk use on the page, and on a server
-/// that has not measured it the page is told so rather than kept waiting;
-/// C/C++, naming none, has nothing to measure.
-#[tokio::test]
-async fn a_store_not_yet_measured_says_so_and_cpp_has_none() {
-    let (_dir, app) = app().await;
+/// The uuids of the built-in Language plugins, off the Plugins page.
+async fn language_plugins(app: &Router) -> Vec<String> {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .uri("/api/ui/plugins")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
 
-    for language in settings(&app).await.languages {
-        let expected = match language.name.as_str() {
-            "cpp" => DiskUse::NoStore,
-            _ => DiskUse::NotMeasured,
-        };
-
-        assert_eq!(language.disk_use, expected, "{}", language.name);
-    }
+    assert_eq!(status, StatusCode::OK, "the page couldn't be read: {body}");
+    let view: PluginsView = read(&body);
+    view.built_in
+        .into_iter()
+        .filter(|row| !row.languages.is_empty())
+        .map(|row| row.uuid)
+        .collect()
 }
 
 /// A server that runs sessions, over a Build Cache the test holds a handle on
@@ -1037,19 +1034,12 @@ async fn a_clear_empties_one_languages_stores_and_its_disk_use_drops() {
     }
 
     assert!(npm.exists(), "and another language's store is untouched");
-
-    let go = settings
-        .languages
-        .iter()
-        .find(|language| language.name == "go")
-        .unwrap();
-
-    assert_eq!(
-        go.disk_use,
-        DiskUse::Measured {
-            bytes: 0,
-            in_units: Some(0)
-        }
+    assert!(
+        settings
+            .languages
+            .iter()
+            .any(|language| language.name == "go"),
+        "and the page it answers with is the settings as they stand",
     );
 }
 
@@ -1173,34 +1163,27 @@ async fn a_language_plugins_pane_draws_its_cache_and_a_clear_redraws_it() {
     );
 }
 
-/// The page is told how each directory of a store is held to its size: Rust's
-/// cargo half by the sweep and its sccache by its own tool, NuGet's scratch
-/// directory not at all, and C/C++ naming no directory to say it of.
+/// A pane is told how each directory of a store is held to its size: NuGet's
+/// scratch directory not at all — Rust's halves are the pane test's above.
 #[tokio::test]
 async fn each_store_says_how_it_is_held_to_its_size() {
     let (_dir, app) = app().await;
-    let languages = settings(&app).await.languages;
 
-    let stores = |name: &str| -> Vec<(String, Eviction)> {
-        languages
-            .iter()
-            .find(|language| language.name == name)
-            .unwrap()
-            .stores
-            .iter()
-            .map(|store| (store.name.clone(), store.eviction))
-            .collect()
-    };
+    let mut stores = Vec::new();
+    for uuid in language_plugins(&app).await {
+        for language in plugin_pane(&app, &uuid).await.languages {
+            for store in language.stores {
+                stores.push((language.name.clone(), store.name, store.eviction));
+            }
+        }
+    }
 
-    assert_eq!(
-        stores("rust"),
-        [
-            (String::from("cargo"), Eviction::ByUnit),
-            (String::from("sccache"), Eviction::ByItsTool),
-        ],
-    );
-    assert!(stores("dotnet").contains(&(String::from("scratch"), Eviction::NotSwept)));
-    assert!(stores("cpp").is_empty());
+    assert!(stores.contains(&(
+        String::from("dotnet"),
+        String::from("scratch"),
+        Eviction::NotSwept
+    )));
+    assert!(stores.iter().all(|(language, _, _)| language != "cpp"));
 }
 
 /// And a size written into `config.yaml` by hand that is not one goes back as
@@ -1281,14 +1264,10 @@ async fn a_language_with_no_label_is_drawn_under_its_own_name() {
     assert_eq!(zig.label, "zig");
 }
 
-/// And a language whose entry the server could not read reaches the page with
-/// the reason and what it is running on — and a save leaves that entry in the
-/// file as it was written.
-///
-/// The whole of what *falls back to the built-in* comes to, end to end: the
-/// built-in is what the language runs on, the page says which of the two
-/// happened and why, and the text the installer is about to fix is still theirs
-/// after somebody has been to the settings page and pressed something.
+/// And a language whose entry the server could not read is still on the
+/// page — on where it has a built-in to fall back to, off where it has none —
+/// and a save leaves that entry in the file as it was written. Why is its
+/// plugin's row's trouble, on the Plugins page.
 #[tokio::test]
 async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file() {
     let (dir, app) = app().await;
@@ -1302,20 +1281,7 @@ async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file(
 
     let told = settings(&app).await;
     let rust = rust_told(&told);
-    let unread = rust
-        .unread
-        .as_ref()
-        .unwrap_or_else(|| panic!("the entry was refused, so the page says so: {told:?}"));
-
-    assert_eq!(
-        unread.why, "sets RUSTUP_HOME, which is a variable the sandbox sets itself",
-        "the reason names the variable, because that is what there is to fix",
-    );
-    assert!(
-        matches!(unread.running_on, RunningOn::BuiltIn),
-        "and Rust is running on the descriptor Verkstead ships",
-    );
-    assert!(rust.enabled, "which is what it was running on before");
+    assert!(rust.enabled, "Rust runs on the descriptor Verkstead ships");
 
     let gleam = told
         .languages
@@ -1324,13 +1290,9 @@ async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file(
         .unwrap_or_else(|| panic!("and the language beside it is still listed: {told:?}"));
 
     assert!(
-        matches!(
-            gleam.unread.as_ref().map(|unread| &unread.running_on),
-            Some(RunningOn::Nothing)
-        ),
-        "with nothing to fall back to, this one being nobody's built-in",
+        !gleam.enabled,
+        "with nothing to fall back to, it is off rather than on at nothing"
     );
-    assert!(!gleam.enabled, "so it is off rather than on at nothing");
 
     // And a save from the page puts both entries back the way the installer
     // typed them.
@@ -2006,27 +1968,6 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
 
     hand_edit(dir.path(), "config.yaml", descriptor);
 
-    let told = settings(&app).await;
-    let gleam = told
-        .languages
-        .iter()
-        .find(|language| language.name == "gleam")
-        .unwrap_or_else(|| panic!("the descriptor in the file is on the page: {told:?}"));
-
-    assert_eq!(
-        (gleam.size.as_str(), gleam.size_configured),
-        ("8G", true),
-        "the size an installer wrote reaches the page",
-    );
-    assert!(
-        gleam.store,
-        "and its store is under the Build Cache, so there is a field for it"
-    );
-    assert_eq!(
-        gleam.default_size, "10G",
-        "an installer's own starts at 10G"
-    );
-
     save(
         &app,
         &serde_json::json!({
@@ -2068,14 +2009,13 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
 
     // And off the file rather than only out of the answer, which is what the
     // next session reads.
-    let read_back = settings(&app).await;
-    let gleam = read_back
-        .languages
-        .iter()
-        .find(|language| language.name == "gleam")
-        .unwrap();
-
-    assert_eq!((gleam.size.as_str(), gleam.size_configured), ("8G", true));
+    assert!(
+        settings(&app)
+            .await
+            .languages
+            .iter()
+            .any(|language| language.name == "gleam" && language.label == "Gleam")
+    );
 }
 
 /// Save a text and leave everything else alone, which is what the instructions
