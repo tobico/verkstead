@@ -2509,6 +2509,138 @@ async fn a_plugin_harness_profile_waits_for_a_member_on_an_older_release() {
     assert_eq!(save(&app, &plugged).await, ProfileSaved::Saved);
 }
 
+/// **Codex is a built-in plugin, listed under Built-in with a tick and nothing
+/// else** — no Remove, no Update, no harness line — and that tick is the one
+/// switch for Codex, following a disabled Agent plugin's rule: unticked, its
+/// Profiles stay and read broken as their harness disabled, its harness is
+/// listed not offered, and a Conversation on a Repo remembering one starts with
+/// that role empty. Ticked again, they are offered again.
+#[tokio::test]
+async fn codex_is_a_built_in_row_whose_tick_is_the_switch_for_its_profiles() {
+    const CODEX: &str = "49ea40c6-298c-412a-95b5-c89b9f539616";
+    let (accounts, dir, app) = workbench().await;
+
+    let plugins: verkstead_render::PluginsView = get(&app, "/api/ui/plugins").await;
+    let row = plugins
+        .built_in
+        .iter()
+        .find(|row| row.uuid == CODEX)
+        .expect("a fresh data directory lists Codex under Built-in");
+    assert_eq!(row.name, "Codex");
+    assert_eq!(row.provides, ["agent"]);
+    assert_eq!(row.source, verkstead_render::PluginSource::BuiltIn);
+    assert!(row.enabled, "ticked");
+    assert_eq!(row.trouble, None);
+    assert_eq!(row.harness, None, "and nothing else on its row");
+    for press in ["remove", "update"] {
+        let (status, refusal) = fetch(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/ui/plugins/{CODEX}/{press}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{press}: {refusal}");
+        assert!(refusal.contains("Untick it"), "{press}: {refusal}");
+    }
+
+    let id = conversation(&app, accounts.path()).await;
+    let kept = home(accounts.path(), "codex");
+    assert_eq!(
+        save(&app, &codex_edit("codex", &kept, &["gpt-5-codex"])).await,
+        ProfileSaved::Saved
+    );
+    let codex = listed(&app)
+        .await
+        .into_iter()
+        .find(|profile| profile.name.as_deref() == Some("codex"))
+        .expect("the Codex Profile is listed");
+    let fable = saved(&app, accounts.path(), "fable").await;
+
+    choose_grilling(&app, id, &codex.id, "gpt-5-codex").await;
+    choose_implementation(&app, id, &fable.id, MODEL).await;
+    choose_review(&app, id, &fable.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    let picked = |view: &ConversationView| {
+        view.grilling_pairing
+            .as_ref()
+            .map(|pairing| pairing.profile.id.clone())
+    };
+    assert_eq!(
+        picked(&opened(&app, another(&app).await).await),
+        Some(codex.id.clone()),
+        "remembered while Codex is ticked",
+    );
+
+    let enabled = |on: bool| {
+        let app = app.clone();
+        async move {
+            let view: verkstead_render::PluginsView = post(
+                &app,
+                &format!("/api/ui/plugins/{CODEX}/enabled"),
+                &serde_json::json!({ "enabled": on }),
+            )
+            .await;
+            view
+        }
+    };
+
+    let view = enabled(false).await;
+    let row = view.built_in.iter().find(|row| row.uuid == CODEX).unwrap();
+    assert!(!row.enabled, "unticked");
+
+    let broken = listed(&app)
+        .await
+        .into_iter()
+        .find(|profile| profile.id == codex.id)
+        .expect("a Codex Profile stays while Codex is unticked");
+    assert_eq!(broken.broken, Some(Broken::HarnessDisabled));
+
+    let harnesses: Vec<verkstead_render::HarnessEntry> = get(&app, "/api/ui/harnesses").await;
+    let withheld = harnesses
+        .iter()
+        .find(|entry| entry.name == "Codex")
+        .expect("Codex's harness is still listed, for its Profile to be drawn by");
+    assert!(!withheld.offered, "and not offered");
+    assert!(
+        harnesses
+            .iter()
+            .filter(|entry| entry.name != "Codex")
+            .all(|entry| entry.offered),
+        "every other harness is offered",
+    );
+
+    let view = opened(&app, another(&app).await).await;
+    assert_eq!(
+        picked(&view),
+        None,
+        "the remembered Pairing is not applied: the role starts empty",
+    );
+    assert_eq!(
+        view.implementation_pairing
+            .map(|pairing| pairing.profile.id.clone()),
+        Some(fable.id.clone()),
+        "and the roles beside it are filled as they were",
+    );
+
+    enabled(true).await;
+    let back = listed(&app)
+        .await
+        .into_iter()
+        .find(|profile| profile.id == codex.id)
+        .unwrap();
+    assert_eq!(back.broken, None, "ticked again, it is offered again");
+    assert_eq!(
+        picked(&opened(&app, another(&app).await).await),
+        Some(codex.id.clone()),
+        "and remembered again",
+    );
+}
+
 /// **A disabled Agent plugin's Profiles stay, offered on no picker** (Set 1764,
 /// Q20): each reads broken as its plugin disabled, and a Conversation on a Repo
 /// remembering one starts with that role empty, the roles beside it filled as

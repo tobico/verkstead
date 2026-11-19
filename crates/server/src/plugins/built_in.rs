@@ -78,11 +78,9 @@ pub const FIXTURE: &str = "613e2a43-80ee-4307-8623-28969e05330f";
 pub const CODEX: &str = "49ea40c6-298c-412a-95b5-c89b9f539616";
 
 /// Whether the Plugins page leaves the built-in `uuid` out: the fixture,
-/// which is listed nowhere, and Codex, embedded and loaded at start but not
-/// yet the harness a Codex Profile runs on — a row for it would be a switch
-/// that switched nothing.
+/// which is listed nowhere.
 pub fn unlisted(uuid: &str) -> bool {
-    uuid == FIXTURE || uuid == CODEX
+    uuid == FIXTURE
 }
 
 /// The uuid of the built-in that is the Skill Pack `verkstead`: the skills
@@ -90,9 +88,7 @@ pub fn unlisted(uuid: &str) -> bool {
 /// name is reserved for. The first row of the Plugins page's Built-in group.
 pub const VERKSTEAD: &str = "15447a8d-f28d-4573-8b8b-a7226d477755";
 
-/// The built-in that is Codex, whose uuid is its built-in harness's in
-/// [`crate::store::BUILT_IN`] so that a Profile stored as `codex` reads as it.
-/// Embedded, and not yet the harness a Codex Profile runs on.
+/// The built-in that is Codex.
 #[cfg(test)]
 pub(crate) fn codex() -> BuiltIn {
     *BUILT_INS
@@ -101,37 +97,65 @@ pub(crate) fn codex() -> BuiltIn {
         .expect("build.rs embeds every directory under plugins/, and plugins/codex is one")
 }
 
-/// Codex's plugin stood up as a harness of its own, beside the in-process one
-/// rather than in its place: what the tests hold the two to each other with.
-#[cfg(test)]
-pub(crate) async fn codex_plugged() -> crate::harness::plugged::Plugged {
-    let built_in = codex();
+/// The harness each built-in providing an agent declares, stood up out of its
+/// manifest as `platform` reads it and its component — see
+/// [`crate::harness::of`], which is what asks. One that doesn't load is left
+/// out, said in the log.
+pub(crate) async fn agents(platform: Platform) -> Vec<crate::harness::plugged::Plugged> {
+    let mut agents = Vec::new();
+    for built_in in BUILT_INS {
+        match agent(*built_in, platform).await {
+            Ok(Some(plugged)) => agents.push(plugged),
+            Ok(None) => {}
+            Err(trouble) => tracing::warn!(
+                plugin = built_in.directory,
+                %trouble,
+                "a built-in plugin's harness didn't load, and is left out",
+            ),
+        }
+    }
+    agents
+}
+
+/// The harness `built_in` declares, or none where it provides no agent.
+async fn agent(
+    built_in: BuiltIn,
+    platform: Platform,
+) -> Result<Option<crate::harness::plugged::Plugged>, Trouble> {
     let manifest = built_in
-        .manifest(Platform::HERE)
-        .expect("Codex's manifest reads");
-    let agent = manifest
+        .manifest(platform)
+        .map_err(|refusal| Trouble { why: refusal.why })?;
+    let Some(agent) = manifest
         .provides
         .iter()
         .find_map(|provision| provision.agent())
-        .expect("Codex's plugin provides an agent")
-        .clone();
-    let mark = match manifest.mark.as_ref().expect("Codex's plugin has a mark") {
-        super::manifest::Mark::Inline(svg) => svg.clone(),
-        super::manifest::Mark::File(path) => {
-            String::from_utf8(built_in.files().read(path).expect("its mark is embedded")).unwrap()
-        }
+    else {
+        return Ok(None);
     };
-    let loaded = component::load(built_in.files(), &manifest, None)
-        .await
-        .expect("Codex's component loads")
-        .expect("Codex's plugin has a component");
 
-    crate::harness::plugged::Plugged::new(
+    let mark = match agent.mark.as_ref().or(manifest.mark.as_ref()) {
+        Some(super::manifest::Mark::Inline(svg)) => svg.clone(),
+        Some(super::manifest::Mark::File(path)) => built_in
+            .files()
+            .read(path)
+            .and_then(|svg| String::from_utf8(svg).ok())
+            .ok_or_else(|| Trouble {
+                why: format!("Its mark `{}` couldn't be read.", path.display()),
+            })?,
+        None => String::new(),
+    };
+    let Some(loaded) = component::load(built_in.files(), &manifest, None).await? else {
+        return Err(Trouble {
+            why: "It provides an agent and has no component.".to_owned(),
+        });
+    };
+
+    Ok(Some(crate::harness::plugged::Plugged::new(
         crate::store::AgentType::read(&manifest.uuid),
-        agent,
+        agent.clone(),
         mark,
         loaded,
-    )
+    )))
 }
 
 /// The built-in the Skill Pack `verkstead` is.
@@ -170,9 +194,14 @@ pub fn providing(name: &str) -> Option<&'static Manifest> {
 }
 
 /// Whether `manifest`'s built-in has a tick: a Language plugin's is whether
-/// sessions get its languages, and every other built-in is always on.
+/// sessions get its languages, an Agent plugin's whether its harness is
+/// offered, and every other built-in is always on.
 pub fn switched(manifest: &Manifest) -> bool {
     languages(manifest).next().is_some()
+        || manifest
+            .provides
+            .iter()
+            .any(|provision| provision.agent().is_some())
 }
 
 /// The languages `manifest` provides, by the name `config.yaml` keys each by,

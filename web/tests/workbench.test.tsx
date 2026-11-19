@@ -139,7 +139,7 @@ import iconButtonCss from "../src/IconButton.module.css?raw";
 // drawn on more pages than this one.
 import harnessMark from "../src/HarnessMark.module.css";
 import claudeMarkFile from "../../crates/server/src/harness/marks/claude-color.svg?raw";
-import codexMarkFile from "../../crates/server/src/harness/marks/codex.svg?raw";
+import codexMarkFile from "../../plugins/codex/marks/codex.svg?raw";
 import grokMarkFile from "../../crates/server/src/harness/marks/grok.svg?raw";
 import opencodeMarkFile from "../../crates/server/src/harness/marks/opencode.svg?raw";
 import dropdown from "../src/Menu.module.css";

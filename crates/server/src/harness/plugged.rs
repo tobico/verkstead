@@ -41,10 +41,17 @@ use crate::store;
 use crate::transcript::{Carried, Search};
 
 /// What the path labelled `label` is refused as on a save, a `file` or a
-/// directory — see [`Declared::refused`]: in the words of no built-in's, and
-/// naming the field the manifest labelled, so that with two paths of one kind
-/// the refusal says which.
-fn refused(label: &str, file: bool) -> [ProfileSaved; 3] {
+/// directory — see [`Declared::refused`]: naming the field the manifest
+/// labelled, so that with two paths of one kind the refusal says which.
+///
+/// **But a directory kept under [`store::HOME`] is a home**, refused in the
+/// words a home always has been — Codex's, which is a plugin now and kept its
+/// Profiles' words when it became one.
+fn refused(key: &str, label: &str, file: bool) -> [ProfileSaved; 3] {
+    if key == store::HOME && !file {
+        return super::HOME_REFUSED;
+    }
+
     [
         ProfileSaved::PathNotAbsolute(label.to_owned()),
         ProfileSaved::PathMissing(label.to_owned()),
@@ -72,6 +79,9 @@ pub(crate) struct Plugged {
     /// What starts the component again to read a session's record — see
     /// [`Reader`].
     again: Again,
+
+    /// Where each of its paths is kept in a home, said from `~`.
+    found_at: Vec<String>,
 }
 
 impl Plugged {
@@ -84,6 +94,11 @@ impl Plugged {
                 .login
                 .as_ref()
                 .map(|login| Speaking::exported(&agent.name, login, loaded.again.clone())),
+            found_at: agent
+                .account
+                .iter()
+                .map(|path| format!("~/{}", path.mounted.to_string_lossy()))
+                .collect(),
             agent,
             mark,
             again: loaded.again.clone(),
@@ -95,6 +110,11 @@ impl Plugged {
     /// read again is the same harness.
     pub(crate) fn declared(&self) -> &Agent {
         &self.agent
+    }
+
+    /// Its id, which is its plugin's uuid.
+    pub(crate) fn id(&self) -> store::AgentType {
+        self.id
     }
 
     /// What starts its component, which says whether a plugin read again is
@@ -186,18 +206,15 @@ impl Harness for Plugged {
                 purpose: path.purpose.as_deref().unwrap_or_default(),
                 placeholder: path.example.as_deref().unwrap_or_default(),
                 file: path.file,
-                refused: refused(&path.label, path.file),
+                refused: refused(&path.key, &path.label, path.file),
                 within: &[],
             })
             .collect()
     }
 
+    /// Each path where it is mounted, said from `~` as the trait says it.
     fn found_at(&self) -> Vec<&str> {
-        self.agent
-            .account
-            .iter()
-            .filter_map(|path| path.mounted.to_str())
-            .collect()
+        self.found_at.iter().map(String::as_str).collect()
     }
 
     /// The declared line as it is written, placeholders and all: the host
@@ -445,7 +462,8 @@ impl Harness for Plugged {
     }
 
     /// Each of the first path's memory directories the manifest says is
-    /// synced, by the host's rule it names, under its own path as its label.
+    /// synced, by the host's rule it names, under the part it names or its own
+    /// path as its label.
     fn synced(
         &self,
         _place: Option<&Place>,
@@ -463,7 +481,11 @@ impl Harness for Plugged {
                     Synced::Database(name) => Whose::Database(name.clone()),
                 };
                 Some(Part {
-                    label: memory.path.to_string_lossy().into_owned().into(),
+                    label: memory
+                        .part
+                        .clone()
+                        .unwrap_or_else(|| memory.path.to_string_lossy().into_owned())
+                        .into(),
                     inside: memory.path.clone(),
                     whose,
                 })
@@ -586,7 +608,13 @@ impl Harness for Plugged {
         &self.agent.ask.guide
     }
 
+    /// None where the manifest declares neither commands nor instructions.
     fn install(&self) -> Option<Install<'_>> {
+        let install = &self.agent.install;
+        if install.commands.is_empty() && install.instructions.is_none() {
+            return None;
+        }
+
         Some(Install {
             instructions: self.agent.install.instructions.as_deref(),
             commands: &self.agent.install.commands,
@@ -606,6 +634,31 @@ pub(crate) struct Reader {
     session: Option<String>,
     worktree: Option<PathBuf>,
     launched: SystemTime,
+}
+
+#[cfg(test)]
+impl Reader {
+    /// A reader of the record a built-in plugin's harness `agent_type` keeps
+    /// under `account`, looked for by `session` or by `worktree` and
+    /// `launched`: what a session sharing its Profile's memory is read by.
+    pub(crate) fn of_built_in(
+        agent_type: store::AgentType,
+        account: &Path,
+        session: Option<&str>,
+        worktree: Option<&Path>,
+        launched: SystemTime,
+    ) -> Reader {
+        Reader {
+            again: crate::harness::embedded(agent_type)
+                .expect("a built-in plugin's harness")
+                .again
+                .clone(),
+            account: account.to_owned(),
+            session: session.map(str::to_owned),
+            worktree: worktree.map(Path::to_owned),
+            launched,
+        }
+    }
 }
 
 /// A session's record as its plugin harness's `parse-transcript` reads it,
@@ -1224,14 +1277,13 @@ mod tests {
 
     /// A reader of Codex's plugin, looking for `session` or by its Worktree.
     async fn codex(account: &Path, session: Option<&str>) -> Reader {
-        let plugin = crate::plugins::built_in::codex_plugged().await;
-        Reader {
-            again: plugin.component().clone(),
-            account: account.to_owned(),
-            session: session.map(str::to_owned),
-            worktree: Some(PathBuf::from(ROLLOUT_WORKTREE)),
-            launched: SystemTime::now() - Duration::from_secs(60),
-        }
+        Reader::of_built_in(
+            store::AgentType::CODEX,
+            account,
+            session,
+            Some(Path::new(ROLLOUT_WORKTREE)),
+            SystemTime::now() - Duration::from_secs(60),
+        )
     }
 
     /// Codex's rollout, read by its plugin, is drawn as the render crate draws

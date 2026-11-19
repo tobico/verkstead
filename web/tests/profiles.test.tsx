@@ -46,7 +46,7 @@ import { offeredFor, prettify } from "../src/models";
 // published them — so that naming a mark here and drawing it in `HarnessMark`
 // are two independent statements about the same art.
 import claudeMarkFile from "../../crates/server/src/harness/marks/claude-color.svg?raw";
-import codexMarkFile from "../../crates/server/src/harness/marks/codex.svg?raw";
+import codexMarkFile from "../../plugins/codex/marks/codex.svg?raw";
 import grokMarkFile from "../../crates/server/src/harness/marks/grok.svg?raw";
 import opencodeMarkFile from "../../crates/server/src/harness/marks/opencode.svg?raw";
 import antigravityMarkFile from "../../crates/server/src/harness/marks/antigravity.svg?raw";

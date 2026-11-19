@@ -604,34 +604,8 @@ impl Agents {
         worktree: Option<&Path>,
         companions: &[PathBuf],
     ) -> Option<Vec<String>> {
-        let harness = harness::of(pairing.profile.agent_type())?;
-        self.argv_under(
-            harness,
-            conversation_id,
-            pairing,
-            prompt,
-            session,
-            named,
-            worktree,
-            companions,
-        )
-    }
-
-    /// The same, under `harness` rather than the one the Pairing's Profile
-    /// names: what a test holds two of the same harness to each other by.
-    #[allow(clippy::too_many_arguments)]
-    fn argv_under(
-        &self,
-        harness: &dyn harness::Harness,
-        conversation_id: i64,
-        pairing: &store::Pairing,
-        prompt: &str,
-        session: Option<&str>,
-        named: Named,
-        worktree: Option<&Path>,
-        companions: &[PathBuf],
-    ) -> Option<Vec<String>> {
         let agent_type = pairing.profile.agent_type();
+        let harness = harness::of(agent_type)?;
         let line = harness.line(worktree, companions);
 
         let mut argv = match &self.agent {
@@ -4865,38 +4839,6 @@ mod tests {
             argv.contains(&"cli_auth_credentials_store=\"file\"".to_owned()),
             "and the account still needs its credential store file-backed: {argv:?}"
         );
-    }
-
-    /// Codex's plugin is launched on the line this Codex is, word for word: a
-    /// launch and a resume, each with a Worktree and without one — its trust
-    /// override said apart, and left off whole where there is nothing to trust.
-    #[tokio::test]
-    async fn codexs_plugin_is_launched_on_the_line_codex_is() {
-        let state = tempfile::tempdir().unwrap();
-        let agents = agents(vec!["codex".to_owned()], state.path());
-        let plugin = crate::plugins::built_in::codex_plugged().await;
-        let codex = harness::of(store::AgentType::CODEX).unwrap();
-
-        for named in [Named::Opening, Named::Continuing] {
-            for worktree in [worktree(), None] {
-                let line = |harness: &dyn harness::Harness| {
-                    agents
-                        .argv_under(
-                            harness,
-                            CONVERSATION,
-                            &codex_pairing(),
-                            "# Rate limiting\n",
-                            Some("01a0f0e9-3280-7900-9dda-c7d0920b0735"),
-                            named,
-                            worktree,
-                            &[],
-                        )
-                        .unwrap()
-                };
-
-                assert_eq!(line(&plugin), line(codex), "{named:?}, with {worktree:?}");
-            }
-        }
     }
 
     /// And the whole of grok's line: the model as `-m`, the prompt as the one

@@ -754,6 +754,11 @@ Its memory is synced, a directory at a time, as the next list says.
   `synced` on a later path: what crosses is said from the account's directory.
   Nothing crosses where the Profile's memory switch is off.
 
+  What crosses is carried under the directory's path. A synced entry may name
+  that word itself with **`part`** — one word, no `/` — where a device on an
+  older release sends it under another: Codex's `memories` is carried as
+  `memory`, which is what the in-process Codex called it.
+
 Every path written relatively here, and `instructions` below, is refused where
 it would climb out of where it is said from.
 

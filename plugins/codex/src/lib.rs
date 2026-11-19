@@ -114,6 +114,14 @@ const CARRIED: [&str; 2] = ["model_provider", "model_providers"];
 
 /// The table the attached servers are written under, each server's URL as
 /// `url` and its headers as `http_headers`, which is codex's spelling.
+///
+/// Read off codex 0.155.1, whose server configuration takes `http_headers` and
+/// nothing else for a header typed once — and proved on the wire, against a
+/// server that recorded what it received: `initialize`, `tools/list` and
+/// `tools/call` each arrive carrying them. Nothing is said about approvals:
+/// codex's per-server `default_tools_approval_mode` changes nothing for a
+/// session launched with `--dangerously-bypass-approvals-and-sandbox`, which
+/// called an attached server's tool with no prompt and the key absent.
 const MCP_SERVERS: &str = "mcp_servers";
 const URL: &str = "url";
 const HEADERS: &str = "http_headers";

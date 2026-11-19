@@ -154,6 +154,10 @@ pub struct Memory {
     pub path: PathBuf,
     /// `None` for memory that stays on the device it was written on.
     pub synced: Option<Synced>,
+    /// What it is called on the link between devices, where that isn't its
+    /// path — see [`crate::sandbox::root::Part::label`]: the word a device on
+    /// an older release still sends it under.
+    pub part: Option<String>,
 }
 
 /// Which of a memory directory's files a session away from home is given and
@@ -682,10 +686,11 @@ fn memory(map: &Map<String, Value>, field: &str, file: bool) -> Result<Vec<Memor
                 return Ok(Memory {
                     path: relative(path, &entry_field)?,
                     synced: None,
+                    part: None,
                 });
             }
 
-            let entry = entry(value, &entry_field, &["path", "synced", "database"])?;
+            let entry = entry(value, &entry_field, &["path", "synced", "database", "part"])?;
             let at = |key: &str| format!("{entry_field}.{key}");
             let path = relative(
                 &text_of(within(entry, &entry_field, "path")?, &at("path"))?,
@@ -693,6 +698,20 @@ fn memory(map: &Map<String, Value>, field: &str, file: bool) -> Result<Vec<Memor
             )?;
             let database = optional_within(entry, &entry_field, "database")?;
             let word = optional_within(entry, &entry_field, "synced")?;
+            let part = optional_within(entry, &entry_field, "part")?;
+
+            if let Some(part) = &part
+                && (part.is_empty() || part.contains(['/', '\\']) || word.is_none())
+            {
+                let part_field = at("part");
+                return Err(Refusal::of(
+                    &part_field,
+                    format!(
+                        "`{part_field}` should be one word, and goes with `{}` only.",
+                        at("synced")
+                    ),
+                ));
+            }
 
             if let Some(word) = word.as_deref()
                 && !SYNCED.contains(&word)
@@ -739,7 +758,7 @@ fn memory(map: &Map<String, Value>, field: &str, file: bool) -> Result<Vec<Memor
                 (Some("sessions"), None) => Some(Synced::Sessions),
                 (Some(_), None) => Some(Synced::Everything),
             };
-            Ok(Memory { path, synced })
+            Ok(Memory { path, synced, part })
         })
         .collect()
 }
@@ -1441,6 +1460,36 @@ provides:
                 ("data", Some(Synced::Database("store.db".into()))),
             ]
         );
+    }
+
+    /// A synced directory may say what it is called on the link, where that
+    /// is not its path: one word, and only beside `synced`.
+    #[test]
+    fn a_synced_directory_may_name_its_part() {
+        let memory = |entry: &str| {
+            AGENT.replace(
+                "        memory: [memory]\n",
+                &format!("        memory:\n          - {entry}\n"),
+            )
+        };
+
+        let named = agent_for(
+            &memory("{path: memories, synced: everything, part: memory}"),
+            Platform::Linux,
+        );
+        assert_eq!(named.account[0].memory[0].part.as_deref(), Some("memory"));
+
+        for entry in [
+            "{path: memories, part: memory}",
+            "{path: memories, synced: everything, part: a/b}",
+            "{path: memories, synced: everything, part: ''}",
+        ] {
+            assert_eq!(
+                refused_at(&memory(entry)),
+                "provides[0].account[0].memory[0].part",
+                "{entry}"
+            );
+        }
     }
 
     #[test]
