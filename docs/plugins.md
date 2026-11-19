@@ -551,7 +551,7 @@ provides:
 ```
 
 **Who it is.** `binary` is the program a session runs, found on PATH by that
-name. `name` is what a sentence calls it. `mark` is its mark, read as the
+name — a name and never a path, which is refused. `name` is what a sentence calls it. `mark` is its mark, read as the
 top-level `mark` is; where it has none, the plugin's is drawn, and an agent
 with neither is refused.
 

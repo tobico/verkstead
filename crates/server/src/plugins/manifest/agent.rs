@@ -216,7 +216,7 @@ impl Walk<'_> {
         let (exhausted, signed_out) = phrases(&fields, field, login.is_some())?;
 
         Ok(Agent {
-            binary: text_of(within(&fields, field, "binary")?, &at("binary"))?,
+            binary: binary(within(&fields, field, "binary")?, &at("binary"))?,
             name: text_of(within(&fields, field, "name")?, &at("name"))?,
             mark: self.mark(&fields, "mark", &at("mark"))?,
             launch: launch(within(&fields, field, "launch")?, &at("launch"))?,
@@ -237,6 +237,31 @@ impl Walk<'_> {
             excluded: texts(&fields, "excluded", &at("excluded"))?,
         })
     }
+}
+
+/// The program at `field`: a name, looked for on PATH, and never a path.
+///
+/// **A path would be a grant.** The sandbox follows every harness's program
+/// into the directory it is installed in and opens that directory, read-only,
+/// to every session — see [`crate::sandbox::installs`] — so a binary named as
+/// a file under the home would open the directory holding it to sessions of
+/// every harness, which nothing the human agreed to covers.
+fn binary(value: &Value, field: &str) -> Result<String, Refusal> {
+    let name = text_of(value, field)?;
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains(['/', '\\', ':'])
+    {
+        return Err(Refusal::of(
+            field,
+            format!(
+                "`{field}` should be the program's name, which is looked for on PATH, rather \
+                 than a path."
+            ),
+        ));
+    }
+    Ok(name)
 }
 
 /// The entry with `platform`'s block written over it, key by key, and every
@@ -999,6 +1024,21 @@ provides:
 
         assert_eq!(refused_at(&at_the_top), "provides[0].binery");
         assert_eq!(refused_at(&in_a_path), "provides[0].account[1].mode");
+    }
+
+    #[test]
+    fn a_binary_that_is_a_path_is_refused() {
+        for path in [
+            "/home/you/.ssh/id_ed25519",
+            "../../.ssh/id",
+            "bin\\stub.exe",
+            "C:stub",
+            "..",
+        ] {
+            let yaml = AGENT.replace("    binary: stub\n", &format!("    binary: {path:?}\n"));
+
+            assert_eq!(refused_at(&yaml), "provides[0].binary", "{path}");
+        }
     }
 
     #[test]
