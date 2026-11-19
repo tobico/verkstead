@@ -30,4 +30,4 @@ Roadmap stage: [08: The Activity interface and follow-up rounds across](docs/roa
 - [x] 02: Every launch through the host trait — [details](02-every-launch-through-the-host-trait.md)
 - [x] 03: A component hosted end to end — [details](03-a-component-hosted-end-to-end.md)
 - [x] 04: Follow-up rounds as a component — [details](04-follow-up-rounds-as-a-component.md)
-- [ ] 05: Restart without state — [details](05-restart-without-state.md)
+- [x] 05: Restart without state — [details](05-restart-without-state.md)

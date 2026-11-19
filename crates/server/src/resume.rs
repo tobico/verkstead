@@ -559,8 +559,9 @@ async fn recompute(
             }
         }
 
-        // A fresh session on the follow-up skill, on the brief the steer opened
-        // it with and the rounds it has already been through — which is the
+        // The **Follow-up rounds** Activity started again, on the Timeline as
+        // it now stands: a fresh session on the brief the follow-up was opened
+        // with and the rounds it has already been through — which is the
         // grilling's shape, and for the grilling's reason: a follow-up is a
         // conversation, so nothing of it is written on the branch and what
         // outlives the session having it is the Timeline. See
@@ -570,28 +571,30 @@ async fn recompute(
         // missing**, which is a Tinker whose ending sent for one and got nowhere
         // — the state stays Follow-up until that pull request is recorded, so a
         // press or a restart landing in that window has an ending to finish
-        // rather than a round to start. Asked there rather than here, because it
-        // is the runner's own reading and the two must agree: see
-        // [`crate::runner::follow_up_again`].
+        // rather than a round to start. The component reads that off its start,
+        // as it reads its own ending: see [`crate::runner::follow_up_again`].
         //
-        // The brief is read for either way. It costs one read of the Timeline,
-        // and a Conversation in this state with nothing to pick up is one the
-        // press should say so about by name rather than one it acts on halfway.
+        // Whether there is anything to follow up on is read here all the same.
+        // It costs one read of the Timeline, and a Conversation in this state
+        // with nothing to pick up is one the press should say so about by name
+        // rather than one it acts on halfway.
         Lifecycle::FollowUp => {
             if conversation.implementation_pairing.is_none() {
                 return Ok(Resumed::NoImplementationPairing);
             }
 
-            let Some(follow_up) = crate::follow_ups::opened(state, conversation_id).await? else {
+            if crate::follow_ups::settled(state, conversation_id)
+                .await?
+                .is_none()
+            {
                 return Ok(Resumed::NoFollowUpBrief);
-            };
+            }
 
             starting(state, conversation_id, resuming).await?;
 
             tokio::spawn(crate::runner::follow_up_again(
                 state.clone(),
                 conversation_id,
-                follow_up,
                 driving,
             ));
         }
