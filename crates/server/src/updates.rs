@@ -154,11 +154,23 @@ pub(crate) fn gap(name: &str, theirs: Option<&str>, ours: Option<&str>) -> Optio
     ))
 }
 
-/// Whether a member saying `theirs` is on a release older than this binary's:
-/// one saying none is from before versions were said, so older than any.
-pub(crate) fn older(theirs: Option<&str>) -> bool {
-    theirs
-        .is_none_or(|theirs| semver::Version::parse(theirs).is_ok_and(|theirs| theirs < running()))
+/// Whether a member saying `theirs` is on a release that reads a Profile of
+/// a plugin's harness: any after 0.3.1, the last that knew only the five
+/// words. One saying none is from before versions were said, and does not.
+///
+/// **Capped at this binary's own release**, so that builds of the release
+/// still being made — which say 0.3.1 until it is cut — read each other as
+/// they would once it is.
+pub(crate) fn reads_plugin_harnesses(theirs: Option<&str>) -> bool {
+    reads_plugin_harnesses_beside(theirs, &running())
+}
+
+fn reads_plugin_harnesses_beside(theirs: Option<&str>, running: &semver::Version) -> bool {
+    let first = semver::Version::new(0, 3, 2).min(running.clone());
+
+    theirs.is_some_and(|theirs| {
+        semver::Version::parse(theirs).is_ok_and(|theirs| theirs >= first)
+    })
 }
 
 /// The release this binary was built as.
@@ -263,7 +275,23 @@ fn released(tag: &str) -> Option<semver::Version> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RUNNING, UpdateNotice, Updates, gap, released};
+    use super::{RUNNING, UpdateNotice, Updates, gap, reads_plugin_harnesses_beside, released};
+
+    /// The first release past 0.3.1 reads a plugin harness's Profile, whatever
+    /// this binary has been bumped to since.
+    #[test]
+    fn every_release_after_0_3_1_reads_plugin_harnesses() {
+        let later = semver::Version::new(0, 5, 0);
+
+        assert!(!reads_plugin_harnesses_beside(Some("0.3.1"), &later));
+        assert!(!reads_plugin_harnesses_beside(None, &later));
+        assert!(reads_plugin_harnesses_beside(Some("0.3.2"), &later));
+        assert!(reads_plugin_harnesses_beside(Some("0.4.0"), &later));
+        assert!(
+            reads_plugin_harnesses_beside(Some("0.3.1"), &semver::Version::new(0, 3, 1)),
+            "a build of the release still being made"
+        );
+    }
 
     /// The server as it stands once GitHub has answered with `tag`.
     fn answered(tag: &str) -> Updates {

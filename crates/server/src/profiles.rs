@@ -172,7 +172,8 @@ pub(crate) async fn bind(
 /// one reads a Profile naming a harness it does not know as an error that
 /// takes the whole of its list with it — pickers, prefill and cards. A
 /// built-in is written as the word every release reads, so only a plugin's
-/// harness waits, and it waits for every member to be on this release.
+/// harness waits, and it waits for every member to be on a release that reads
+/// one — see [`crate::updates::reads_plugin_harnesses`].
 async fn behind(pool: &SqlitePool, agent_type: &AgentType) -> Result<Option<ProfileSaved>> {
     if stored(agent_type).built_in().is_some() {
         return Ok(None);
@@ -181,7 +182,7 @@ async fn behind(pool: &SqlitePool, agent_type: &AgentType) -> Result<Option<Prof
     Ok(store::members(pool)
         .await?
         .into_iter()
-        .find(|member| crate::updates::older(member.version.as_deref()))
+        .find(|member| !crate::updates::reads_plugin_harnesses(member.version.as_deref()))
         .map(|member| {
             let name = &member.name;
             let on = member
