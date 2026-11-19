@@ -32,9 +32,10 @@ use crate::logins::Speaking;
 use crate::platform::Platform;
 use crate::plugins::component::worlds::category::agent as world;
 use crate::plugins::component::{Again, Loaded};
+use crate::plugins::manifest::agent::Synced;
 use crate::plugins::manifest::{self, Agent};
 use crate::sandbox::Home;
-use crate::sandbox::root::{Part, Place};
+use crate::sandbox::root::{Part, Place, Whose};
 use crate::settings::AttachedServer;
 use crate::store;
 use crate::transcript::{Carried, Search};
@@ -154,7 +155,10 @@ impl Plugged {
 fn configured(path: &manifest::agent::AccountPath) -> Vec<PathBuf> {
     path.allowlist
         .iter()
-        .filter(|file| !path.credentials.contains(file) && !path.memory.contains(file))
+        .filter(|file| {
+            !path.credentials.contains(file)
+                && !path.memory.iter().any(|memory| memory.path == **file)
+        })
         .cloned()
         .collect()
 }
@@ -278,7 +282,11 @@ impl Harness for Plugged {
                     mounted: path.mounted.clone(),
                     file: path.file,
                     credentials: path.credentials.clone(),
-                    memory: path.memory.clone(),
+                    memory: path
+                        .memory
+                        .iter()
+                        .map(|memory| memory.path.clone())
+                        .collect(),
                     configuration: configured(path),
                 })
             })
@@ -420,25 +428,46 @@ impl Harness for Plugged {
     }
 
     fn memory(&self, _place: Option<&Place>) -> Vec<PathBuf> {
-        self.first().memory.clone()
+        self.first()
+            .memory
+            .iter()
+            .map(|memory| memory.path.clone())
+            .collect()
     }
 
     fn unshared(&self) -> Vec<&str> {
         self.first()
             .memory
             .iter()
-            .filter_map(|path| path.to_str())
+            .filter_map(|memory| memory.path.to_str())
             .collect()
     }
 
-    /// Nothing yet: a plugin harness's memory does not cross a link.
+    /// Each of the first path's memory directories the manifest says is
+    /// synced, by the host's rule it names, under its own path as its label.
     fn synced(
         &self,
         _place: Option<&Place>,
-        _worktree: Option<&str>,
-        _sessions: &[String],
+        worktree: Option<&str>,
+        sessions: &[String],
     ) -> Vec<Part> {
-        Vec::new()
+        self.first()
+            .memory
+            .iter()
+            .filter_map(|memory| {
+                let whose = match memory.synced.as_ref()? {
+                    Synced::Everything => Whose::Everything,
+                    Synced::Worktree => Whose::Naming(worktree.unwrap_or_default().to_owned()),
+                    Synced::Sessions => Whose::Called(sessions.to_vec()),
+                    Synced::Database(name) => Whose::Database(name.clone()),
+                };
+                Some(Part {
+                    label: memory.path.to_string_lossy().into_owned().into(),
+                    inside: memory.path.clone(),
+                    whose,
+                })
+            })
+            .collect()
     }
 
     /// Its configuration files, which a root is composed from.
@@ -449,10 +478,24 @@ impl Harness for Plugged {
             .collect()
     }
 
+    /// What `write-configuration` answers for each of them, handed the
+    /// account's configuration and no servers: what a root built from the
+    /// mirror would hold, and nothing of how the human works beyond it. A file
+    /// the export answers nothing for is none in the mirror.
     fn mirroring(&self, account: &store::Account) -> Vec<Option<Vec<u8>>> {
-        self.configured_files()
-            .into_iter()
+        let files = self.configured_files();
+        let found = files
+            .iter()
             .map(|file| std::fs::read(self.directory(account).join(file)).ok())
+            .collect();
+        let mut answered = self.configured(found, &[]);
+
+        files
+            .iter()
+            .map(|file| {
+                let at = answered.iter().position(|(path, _)| path == file)?;
+                Some(answered.swap_remove(at).1)
+            })
             .collect()
     }
 

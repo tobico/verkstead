@@ -111,8 +111,9 @@ pub enum Resume {
     /// Words, holding `{session}`, written where the session would have been
     /// named.
     Flag(Vec<String>),
-    /// Words, holding `{session}`, written straight after the binary, and what
-    /// else the resume needs on the end.
+    /// Words written straight after the binary, and what else the resume needs
+    /// on the end. Where the words hold no `{session}` the id is a positional
+    /// in front of the prompt.
     Subcommand {
         words: Vec<String>,
         also: Vec<String>,
@@ -140,8 +141,38 @@ pub struct AccountPath {
     /// The files in it that hold the login.
     pub credentials: Vec<PathBuf>,
     /// The directories in it that are the memory store.
-    pub memory: Vec<PathBuf>,
+    pub memory: Vec<Memory>,
 }
+
+/// One directory of an account's memory store, and what of it crosses to a
+/// device the Profile is not bound on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Memory {
+    pub path: PathBuf,
+    /// `None` for memory that stays on the device it was written on.
+    pub synced: Option<Synced>,
+}
+
+/// Which of a memory directory's files a session away from home is given and
+/// sends back: one of the host's own rules, named — see
+/// [`crate::sandbox::root::Whose`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Synced {
+    /// Every file under it.
+    Everything,
+    /// The Codex-shaped rollouts — `rollout-*.jsonl`, opening with a
+    /// `session_meta` line — whose session worked in this Worktree.
+    Worktree,
+    /// The directories in it, or one level down, called by one of the
+    /// Conversation's session ids.
+    Sessions,
+    /// The SQLite database of this name directly in it, with its `-wal` and
+    /// `-shm`.
+    Database(String),
+}
+
+/// The words `synced` may be, in the order a refusal lists them.
+const SYNCED: &[&str] = &["everything", "worktree", "sessions", "database"];
 
 /// How a session is told to be idle from at work.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -454,8 +485,10 @@ fn resume(value: &Value, field: &str) -> Result<Resume, Refusal> {
             }
             Ok(Resume::Flag(words(flag, &at("flag"), Some("session"))?))
         }
+        // A subcommand without `{session}` is codex's: the id goes in front
+        // of the prompt.
         (None, Some(subcommand)) => Ok(Resume::Subcommand {
-            words: words(subcommand, &at("subcommand"), Some("session"))?,
+            words: words(subcommand, &at("subcommand"), None)?,
             also,
         }),
         _ => Err(Refusal::of(
@@ -515,6 +548,23 @@ fn account(value: &Value, field: &str) -> Result<Vec<AccountPath>, Refusal> {
                 ),
             ));
         }
+        // What crosses a link is said from the account's directory, which is
+        // the first path: a later path's memory stays where it was written.
+        if index > 0
+            && let Some(at) = path
+                .memory
+                .iter()
+                .position(|memory| memory.synced.is_some())
+        {
+            let synced_field = format!("{entry_field}.memory[{at}].synced");
+            return Err(Refusal::of(
+                &synced_field,
+                format!(
+                    "`{synced_field}` is on a later path. Only the first path's memory is synced \
+                     to another device."
+                ),
+            ));
+        }
         paths.push(path);
     }
     Ok(paths)
@@ -566,10 +616,10 @@ fn account_path(value: &Value, field: &str) -> Result<AccountPath, Refusal> {
     // The allowlist is files, read and handed over whole: one written as a
     // directory, or inside the memory store, is no configuration file.
     let allowlist = inside("allowlist")?;
-    let memory = inside("memory")?;
+    let memory = memory(map, &at("memory"), file)?;
     let written = texts(map, "allowlist", &at("allowlist"))?;
     for (index, (path, written)) in allowlist.iter().zip(&written).enumerate() {
-        if written.ends_with('/') || memory.iter().any(|memory| path.starts_with(memory)) {
+        if written.ends_with('/') || memory.iter().any(|memory| path.starts_with(&memory.path)) {
             let entry = format!("{}[{index}]", at("allowlist"));
             return Err(Refusal::of(
                 &entry,
@@ -595,6 +645,92 @@ fn account_path(value: &Value, field: &str) -> Result<AccountPath, Refusal> {
         credentials: inside("credentials")?,
         memory,
     })
+}
+
+/// The memory directories at `field`: each a path, which stays on the device
+/// it was written on, or a map of its `path` and how it is `synced`.
+fn memory(map: &Map<String, Value>, field: &str, file: bool) -> Result<Vec<Memory>, Refusal> {
+    let entries = match map.get("memory") {
+        Some(Value::Null) | None => return Ok(Vec::new()),
+        Some(Value::Array(entries)) => entries,
+        Some(_) => return Err(Refusal::of(field, format!("`{field}` should be a list."))),
+    };
+    if file && !entries.is_empty() {
+        return Err(Refusal::of(
+            field,
+            format!("`{field}` is only for a directory."),
+        ));
+    }
+
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let entry_field = format!("{field}[{index}]");
+            if let Value::String(path) = value {
+                return Ok(Memory {
+                    path: relative(path, &entry_field)?,
+                    synced: None,
+                });
+            }
+
+            let entry = entry(value, &entry_field, &["path", "synced", "database"])?;
+            let at = |key: &str| format!("{entry_field}.{key}");
+            let path = relative(
+                &text_of(within(entry, &entry_field, "path")?, &at("path"))?,
+                &at("path"),
+            )?;
+            let database = optional_within(entry, &entry_field, "database")?;
+            let word = optional_within(entry, &entry_field, "synced")?;
+
+            if let Some(word) = word.as_deref()
+                && !SYNCED.contains(&word)
+            {
+                let synced_field = at("synced");
+                return Err(Refusal::of(
+                    &synced_field,
+                    format!(
+                        "`{synced_field}` is `{word}`, which isn't a way memory is synced. \
+                         It's one of everything, worktree, sessions, or database."
+                    ),
+                ));
+            }
+
+            let synced = match (word.as_deref(), database) {
+                (None, None) => None,
+                (Some("database"), Some(name)) => {
+                    let name_field = at("database");
+                    if name.is_empty() || name.contains(['/', '\\']) || name == "." || name == ".."
+                    {
+                        return Err(Refusal::of(
+                            &name_field,
+                            format!(
+                                "`{name_field}` should be the database file's name, directly \
+                                 in `{}`.",
+                                at("path")
+                            ),
+                        ));
+                    }
+                    Some(Synced::Database(name))
+                }
+                (Some("database"), None) => return Err(Refusal::missing(&at("database"))),
+                (_, Some(_)) => {
+                    let name_field = at("database");
+                    return Err(Refusal::of(
+                        &name_field,
+                        format!(
+                            "`{name_field}` goes with `{}: database` only.",
+                            at("synced")
+                        ),
+                    ));
+                }
+                (Some("worktree"), None) => Some(Synced::Worktree),
+                (Some("sessions"), None) => Some(Synced::Sessions),
+                (Some(_), None) => Some(Synced::Everything),
+            };
+            Ok(Memory { path, synced })
+        })
+        .collect()
 }
 
 fn idle(value: &Value, field: &str) -> Result<Idle, Refusal> {
@@ -1205,6 +1341,113 @@ provides:
 
         assert_eq!(launch.session, None);
         assert!(launch.resume.is_some());
+    }
+
+    /// Codex's resume: a subcommand the id follows as a positional in front
+    /// of the prompt, and words of its own on the end.
+    #[test]
+    fn a_resume_subcommand_without_a_session_is_read() {
+        let yaml = AGENT.replace(
+            "flag: [--resume, \"{session}\"]",
+            "subcommand: [resume]\n        also: [--last-turn]",
+        );
+
+        assert_eq!(
+            agent_for(&yaml, Platform::Linux).launch.resume,
+            Some(Resume::Subcommand {
+                words: vec!["resume".into()],
+                also: vec!["--last-turn".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn a_resume_flag_without_a_session_is_refused() {
+        let yaml = AGENT.replace("flag: [--resume, \"{session}\"]", "flag: [--continue]");
+
+        assert_eq!(refused_at(&yaml), "provides[0].launch.resume.flag");
+    }
+
+    #[test]
+    fn memory_is_read_with_each_way_it_is_synced() {
+        let yaml = AGENT.replace(
+            "        memory: [memory]\n",
+            "        memory:
+          - memory
+          - path: memories
+            synced: everything
+          - path: sessions
+            synced: worktree
+          - path: conversations
+            synced: sessions
+          - path: data
+            synced: database
+            database: store.db
+",
+        );
+
+        let memory = &agent_for(&yaml, Platform::Linux).account[0].memory;
+
+        assert_eq!(
+            memory
+                .iter()
+                .map(|memory| (memory.path.to_str().unwrap(), memory.synced.clone()))
+                .collect::<Vec<_>>(),
+            [
+                ("memory", None),
+                ("memories", Some(Synced::Everything)),
+                ("sessions", Some(Synced::Worktree)),
+                ("conversations", Some(Synced::Sessions)),
+                ("data", Some(Synced::Database("store.db".into()))),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unknown_way_of_syncing_is_refused_naming_it() {
+        let memory = |entry: &str| {
+            AGENT.replace(
+                "        memory: [memory]\n",
+                &format!("        memory:\n          - {entry}\n"),
+            )
+        };
+
+        for (entry, field) in [
+            (
+                "{path: memory, synced: always}",
+                "provides[0].account[0].memory[0].synced",
+            ),
+            (
+                "{path: memory, synced: database}",
+                "provides[0].account[0].memory[0].database",
+            ),
+            (
+                "{path: memory, synced: everything, database: store.db}",
+                "provides[0].account[0].memory[0].database",
+            ),
+            (
+                "{path: memory, synced: database, database: ../store.db}",
+                "provides[0].account[0].memory[0].database",
+            ),
+            (
+                "{path: ../memory, synced: everything}",
+                "provides[0].account[0].memory[0].path",
+            ),
+        ] {
+            assert_eq!(refused_at(&memory(entry)), field, "{entry}");
+        }
+    }
+
+    /// What crosses is said from the account's directory, which is the first
+    /// path.
+    #[test]
+    fn a_later_path_s_memory_synced_is_refused() {
+        let yaml = AGENT.replace(
+            "        kind: file\n        mounted: .stub.json\n",
+            "        kind: directory\n        mounted: .stub-data\n        memory:\n          - {path: notes, synced: everything}\n",
+        );
+
+        assert_eq!(refused_at(&yaml), "provides[0].account[1].memory[0].synced");
     }
 
     #[test]

@@ -1947,8 +1947,8 @@ const STUB_ASKED: &str = r#"{"said":"agent","markdown":"Where should the counter
 const STUB_CARRYING_ON: &str = r#"{"said":"agent","markdown":"So, back to the counter."}"#;
 
 /// And what stands where the **stub harness that names itself** goes, on either
-/// machine: one script for both launches, a resume being a `--resume` on the
-/// line.
+/// machine: one script for both launches, a resume being a `resume` subcommand
+/// with the id after the model and in front of the prompt, as codex's is.
 ///
 /// **A launch it was not told to resume** writes its record under an id it
 /// made up, opening with the line saying which session it is and which
@@ -1962,14 +1962,8 @@ fn naming_stub_that_carries_on_at(gate: &Path, opening: &str) -> String {
         r#"
 memory="$HOME/.stub/memory"
 
-resumed=
-previous=
-for word in "$0" "$@"; do
-  if [ "$previous" = --resume ]; then resumed=$word; fi
-  previous=$word
-done
-
-if [ -n "$resumed" ]; then
+if [ "$0" = resume ]; then
+  resumed=$3
   printf 'carried on\r\n'
   printf 'resumed=%s\r\n' "$resumed"
   if [ -f "$memory/$resumed.jsonl" ]; then printf '%s\n' '{carrying}' >> "$memory/$resumed.jsonl"; fi
@@ -2498,14 +2492,11 @@ async fn ready_to_carry_codex_on(
 /// And the same again on the **stub harness plugin that names itself**: both
 /// machines run the one script that opens a conversation or carries one on as
 /// its line says, each waiting at a gate of its own.
-///
-/// Hands back B's mirror of the account too, which is where the record has to
-/// be for B to carry it on.
 async fn ready_to_carry_a_naming_stub_on(
     here: &Path,
     there: &Path,
     spill: &Path,
-) -> (Verkstead, Verkstead, Holding, i64, String) {
+) -> (Verkstead, Verkstead, Holding, i64) {
     let a = Verkstead::running(A, &naming_stub_that_carries_on_at(here, OPENED_HERE), spill).await;
     let b = Verkstead::running(
         B,
@@ -2532,13 +2523,13 @@ async fn ready_to_carry_a_naming_stub_on(
         .await;
 
     let holding = b.holding();
-    let mirror = b.profile_called(ACCOUNT).await.id;
+    b.profile_called(ACCOUNT).await;
 
     let conversation = a.drafting_under_on(&account, STUB_MODEL).await;
 
     a.grills(conversation).await;
 
-    (a, b, holding, conversation, mirror)
+    (a, b, holding, conversation)
 }
 
 /// And the same again on **OpenCode**, the harness whose store is one database:
@@ -7397,15 +7388,14 @@ async fn a_codex_grilling_transferred_mid_interview_carries_on_under_a_name_nobo
 /// A had written — read past where the record had got to when it crossed,
 /// rather than from the top.
 ///
-/// **The record is carried by hand.** A plugin harness's memory does not cross
-/// a link yet, so the test puts A's record where the sync would, in B's mirror
-/// of the account, as the OpenCode tests write a store from outside.
+/// **The record crosses by the memory sync**, the stub declaring its `memory`
+/// synced whole: nothing here puts it in B's mirror of the account.
 #[tokio::test]
 async fn a_plugin_harness_that_names_itself_transferred_mid_interview_carries_on_under_its_id() {
     let spill = tempfile::tempdir().unwrap();
     let here = spill.path().join("go-here");
     let there = spill.path().join("go-there");
-    let (a, b, _holding, conversation, mirror) =
+    let (a, b, _holding, conversation) =
         ready_to_carry_a_naming_stub_on(&here, &there, spill.path()).await;
 
     a.printed(conversation, OPENED_HERE).await;
@@ -7425,25 +7415,6 @@ async fn a_plugin_harness_that_names_itself_transferred_mid_interview_carries_on
         vec![STUB_CHOSE.to_owned()],
         "and A's record calls that session what its record calls it",
     );
-
-    let record = format!("{STUB_CHOSE}.jsonl");
-    let landed = b
-        ._dir
-        .path()
-        .join("accounts")
-        .join(&mirror)
-        .join(".stub")
-        .join("memory");
-    std::fs::create_dir_all(&landed).unwrap();
-    std::fs::copy(
-        a.elsewhere
-            .path()
-            .join(ACCOUNT)
-            .join(".stub/memory")
-            .join(&record),
-        landed.join(&record),
-    )
-    .unwrap();
 
     std::fs::write(&here, "go").unwrap();
 

@@ -289,12 +289,12 @@ impl Harness for Codex {
     ) -> Vec<Part> {
         vec![
             Part {
-                label: root::MEMORY,
+                label: root::MEMORY.into(),
                 inside: PathBuf::from(root::CODEX_MEMORY[1]),
                 whose: Whose::Everything,
             },
             Part {
-                label: root::SESSIONS_PART,
+                label: root::SESSIONS_PART.into(),
                 inside: PathBuf::from(root::SESSIONS),
                 whose: Whose::Naming(worktree.unwrap_or_default().to_owned()),
             },

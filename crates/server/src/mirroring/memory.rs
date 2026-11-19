@@ -517,7 +517,7 @@ pub(crate) fn here(
 pub(crate) fn carried(parts: Vec<Part>, repo: bool, worktree: bool) -> Vec<Part> {
     parts
         .into_iter()
-        .filter(|part| match part.label {
+        .filter(|part| match part.label.as_ref() {
             root::REPO => repo,
             root::WORKTREE => worktree,
             _ => true,
@@ -574,7 +574,7 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
         let under = account.join(&part.inside);
 
         match &part.whose {
-            Whose::Everything => walked(&under, &under, part.label, None, &mut files, &mut held)?,
+            Whose::Everything => walked(&under, &under, &part.label, None, &mut files, &mut held)?,
 
             // Directly under the store, and one level down: grok keeps a
             // directory per working directory and the session's inside it, and
@@ -584,13 +584,13 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
             Whose::Called(ids) => {
                 for child in directories_in(&under)? {
                     if called(&child, ids) {
-                        walked(&under, &child, part.label, None, &mut files, &mut held)?;
+                        walked(&under, &child, &part.label, None, &mut files, &mut held)?;
                         continue;
                     }
 
                     for inside in directories_in(&child)? {
                         if called(&inside, ids) {
-                            walked(&under, &inside, part.label, None, &mut files, &mut held)?;
+                            walked(&under, &inside, &part.label, None, &mut files, &mut held)?;
                         }
                     }
                 }
@@ -599,7 +599,7 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
             Whose::Naming(stem) => walked(
                 &under,
                 &under,
-                part.label,
+                &part.label,
                 Some(stem),
                 &mut files,
                 &mut held,
@@ -618,7 +618,7 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
                     taken(
                         &under,
                         &under.join(beside),
-                        part.label,
+                        &part.label,
                         &mut files,
                         &mut held,
                     )?;
@@ -637,7 +637,7 @@ pub(crate) fn gathered(account: &Path, parts: &[Part]) -> io::Result<Vec<MemoryF
                         taken(
                             &under,
                             &under.join(beside),
-                            part.label,
+                            &part.label,
                             &mut files,
                             &mut held,
                         )?;
@@ -739,7 +739,7 @@ pub(crate) fn written_down(
         beside(&path, &bytes)?;
 
         came_down.insert(
-            (part.label.to_owned(), plainly(&inside)),
+            (part.label.to_string(), plainly(&inside)),
             fingerprint(file.bytes.as_bytes()),
         );
     }
@@ -758,7 +758,7 @@ pub(crate) fn written_down(
 fn walked(
     root: &Path,
     at: &Path,
-    label: &'static str,
+    label: &str,
     naming: Option<&str>,
     files: &mut Vec<MemoryFile>,
     held: &mut usize,
@@ -812,7 +812,7 @@ fn walked(
 fn taken(
     root: &Path,
     path: &Path,
-    label: &'static str,
+    label: &str,
     files: &mut Vec<MemoryFile>,
     held: &mut usize,
 ) -> io::Result<()> {
@@ -1338,7 +1338,10 @@ mod tests {
         );
 
         assert_eq!(
-            parts.iter().map(|part| part.label).collect::<Vec<_>>(),
+            parts
+                .iter()
+                .map(|part| part.label.as_ref())
+                .collect::<Vec<_>>(),
             [root::WORKTREE],
         );
     }

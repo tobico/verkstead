@@ -299,9 +299,9 @@ impl Harness for OpenCode {
         _sessions: &[String],
     ) -> Vec<Part> {
         vec![Part {
-            label: root::DATA,
+            label: root::DATA.into(),
             inside: PathBuf::from(root::OPENCODE_DATA),
-            whose: Whose::Database(sandbox::OPENCODE_DB_FILE),
+            whose: Whose::Database(sandbox::OPENCODE_DB_FILE.to_owned()),
         }]
     }
 

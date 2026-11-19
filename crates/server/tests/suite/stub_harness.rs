@@ -74,7 +74,8 @@ pub(crate) enum StubHarness {
 
     /// As [`StubHarness::Silent`], told no session id on its line: it names
     /// itself, its record found by its Worktree and its launch, and is resumed
-    /// by the id that record gave — Codex's shape.
+    /// by the id that record gave, through a `resume` subcommand with the id in
+    /// front of the prompt — Codex's shape.
     Naming,
 }
 
@@ -164,6 +165,21 @@ impl StubHarness {
         }
     }
 
+    /// How its line carries a conversation on: by a flag naming the session,
+    /// or — for the one that names itself — as Codex does, a `resume`
+    /// subcommand with the id it chose in front of the prompt.
+    fn resume(self) -> &'static str {
+        match self {
+            StubHarness::Naming => "      resume:\n        subcommand: [resume]\n",
+            StubHarness::Silent
+            | StubHarness::Drawing
+            | StubHarness::DrawingBlocking
+            | StubHarness::LoggingIn
+            | StubHarness::Offering
+            | StubHarness::Installing => "      resume:\n        flag: [--resume, \"{session}\"]\n",
+        }
+    }
+
     /// Its `plugin.yaml`, offering `models` with the first the default and
     /// the second the grilling role's.
     pub(crate) fn manifest(self, models: [&str; 2]) -> String {
@@ -186,9 +202,7 @@ provides:
     launch:
       model: [--model, "{{model}}"]
       prompt: ["{{prompt}}"]
-{session}      resume:
-        flag: [--resume, "{{session}}"]
-      tail: [--yes, --worktree, "{{worktree}}", --settings, "{{settings}}"]
+{session}{resume}      tail: [--yes, --worktree, "{{worktree}}", --settings, "{{settings}}"]
       settings:
         quiet: true
     account:
@@ -200,7 +214,9 @@ provides:
         mounted: .stub
         allowlist: [settings.json]
         credentials: [auth.json]
-        memory: [memory]
+        memory:
+          - path: memory
+            synced: everything
       - key: config
         label: Stub config file
         kind: file
@@ -227,6 +243,7 @@ provides:
             idle = self.idle(),
             channel = self.channel(),
             session = self.session(),
+            resume = self.resume(),
             install = self.install(),
             login = self.login(),
             says = SAYS.0,
