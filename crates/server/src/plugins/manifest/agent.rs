@@ -131,8 +131,9 @@ pub struct AccountPath {
     pub file: bool,
     /// Where it is mounted in a session's HOME, said from there.
     pub mounted: PathBuf,
-    /// What of a directory is mounted, each said from it; all of it where
-    /// empty.
+    /// The account's configuration files in a directory, each said from it:
+    /// what `write-configuration` is handed as found. Nothing else of the
+    /// directory reaches a session but its credentials and its memory.
     pub allowlist: Vec<PathBuf>,
     /// The files in it that hold the login.
     pub credentials: Vec<PathBuf>,
@@ -527,6 +528,24 @@ fn account_path(value: &Value, field: &str) -> Result<AccountPath, Refusal> {
             .collect()
     };
 
+    // The allowlist is files, read and handed over whole: one written as a
+    // directory, or inside the memory store, is no configuration file.
+    let allowlist = inside("allowlist")?;
+    let memory = inside("memory")?;
+    let written = texts(map, "allowlist", &at("allowlist"))?;
+    for (index, (path, written)) in allowlist.iter().zip(&written).enumerate() {
+        if written.ends_with('/') || memory.iter().any(|memory| path.starts_with(memory)) {
+            let entry = format!("{}[{index}]", at("allowlist"));
+            return Err(Refusal::of(
+                &entry,
+                format!(
+                    "`{entry}` names a directory. `{}` is the account's configuration files.",
+                    at("allowlist")
+                ),
+            ));
+        }
+    }
+
     Ok(AccountPath {
         key: text_of(within(map, field, "key")?, &at("key"))?,
         label: text_of(within(map, field, "label")?, &at("label"))?,
@@ -537,9 +556,9 @@ fn account_path(value: &Value, field: &str) -> Result<AccountPath, Refusal> {
             &text_of(within(map, field, "mounted")?, &at("mounted"))?,
             &at("mounted"),
         )?,
-        allowlist: inside("allowlist")?,
+        allowlist,
         credentials: inside("credentials")?,
-        memory: inside("memory")?,
+        memory,
     })
 }
 
@@ -838,7 +857,7 @@ provides:
         example: /home/you/accounts/work/.stub
         kind: directory
         mounted: .stub
-        allowlist: [settings.json, sessions]
+        allowlist: [settings.json, config.toml]
         credentials: [auth.json]
         memory: [memory]
       - key: file
@@ -1081,11 +1100,23 @@ provides:
     fn an_account_whose_first_path_is_a_file_is_refused() {
         let yaml = AGENT.replacen("        kind: directory\n", "        kind: file\n", 1);
         let yaml = yaml.replace(
-            "        allowlist: [settings.json, sessions]\n        credentials: [auth.json]\n        memory: [memory]\n",
+            "        allowlist: [settings.json, config.toml]\n        credentials: [auth.json]\n        memory: [memory]\n",
             "",
         );
 
         assert_eq!(refused_at(&yaml), "provides[0].account[0].kind");
+    }
+
+    #[test]
+    fn a_directory_in_the_allowlist_is_refused() {
+        let slashed = AGENT.replace("[settings.json, config.toml]", "[settings.json, sessions/]");
+        let memory = AGENT.replace(
+            "[settings.json, config.toml]",
+            "[settings.json, memory/notes.md]",
+        );
+
+        assert_eq!(refused_at(&slashed), "provides[0].account[0].allowlist[1]");
+        assert_eq!(refused_at(&memory), "provides[0].account[0].allowlist[1]");
     }
 
     #[test]

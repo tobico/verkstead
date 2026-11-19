@@ -175,7 +175,7 @@ provides:
         example: /home/you/accounts/work/.stub
         kind: directory
         mounted: .stub
-        allowlist: [settings.json, auth.json, memory]
+        allowlist: [settings.json]
         credentials: [auth.json]
         memory: [memory]
       - key: config
