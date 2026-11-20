@@ -65,6 +65,14 @@ impl Hosting {
         self.state.followers.declare(conversation_id, offers);
     }
 
+    /// Say that the Forge lacks `capability` from now on — the declaration a
+    /// Forge makes from stage 12, which GitHub, with every capability, never
+    /// does. A watcher asking over it is settled at once: see
+    /// [`crate::forge`].
+    pub fn lacking(&self, capability: crate::forge::Capability) {
+        self.state.forge.lacking(capability);
+    }
+
     /// Start `activity`, whose component is `component`, on
     /// `conversation_id`, granted nothing. The Conversation counts as driven
     /// from before this returns; the task answers the Outcome, or `None` where
@@ -806,6 +814,107 @@ impl host::Host for Hosted {
         }
 
         host::Host::stage_chain(&mut self.lent, roadmap).await
+    }
+
+    async fn wait_any(
+        &mut self,
+        sessions: Vec<world::Session>,
+        timeout: u64,
+    ) -> wasmtime::Result<world::Woke> {
+        let woke = host::Host::wait_any(&mut self.lent, sessions, timeout).await?;
+
+        if let world::Woke::Waited((session, waited)) = &woke {
+            {
+                let mut seen = self.seen.lock().expect("nothing panics holding it");
+
+                if seen.event_id == Some(self.lent.event_id(*session)) {
+                    seen.ended = self.lent.ended(*session);
+                }
+            }
+
+            if !matches!(waited, world::Waited::Done) {
+                self.ended_by_a_stop().await?;
+            }
+        }
+
+        Ok(woke)
+    }
+
+    async fn pull_requests(&mut self) -> wasmtime::Result<Vec<world::PullRequest>> {
+        host::Host::pull_requests(&mut self.lent).await
+    }
+
+    async fn forge_standing(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<world::PullRequestStanding, world::Unforged>> {
+        host::Host::forge_standing(&mut self.lent, pull_request).await
+    }
+
+    async fn forge_checks(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<world::Suite, world::Unforged>> {
+        host::Host::forge_checks(&mut self.lent, pull_request).await
+    }
+
+    async fn forge_comments(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<Vec<world::Comment>, world::Unforged>> {
+        host::Host::forge_comments(&mut self.lent, pull_request).await
+    }
+
+    async fn forge_reply(
+        &mut self,
+        pull_request: world::PullRequest,
+        markdown: String,
+    ) -> wasmtime::Result<Result<String, world::Unforged>> {
+        host::Host::forge_reply(&mut self.lent, pull_request, markdown).await
+    }
+
+    async fn forge_opened(
+        &mut self,
+        repo: String,
+        branch: String,
+    ) -> wasmtime::Result<Result<Option<world::Opened>, world::Unforged>> {
+        host::Host::forge_opened(&mut self.lent, repo, branch).await
+    }
+
+    async fn settle(&mut self, watcher: world::Watcher) -> wasmtime::Result<()> {
+        host::Host::settle(&mut self.lent, watcher).await
+    }
+
+    async fn unsettle(&mut self, watcher: world::Watcher) -> wasmtime::Result<()> {
+        host::Host::unsettle(&mut self.lent, watcher).await
+    }
+
+    async fn fix_attempts(
+        &mut self,
+        pull_request: world::PullRequest,
+        check: String,
+    ) -> wasmtime::Result<Result<i64, String>> {
+        host::Host::fix_attempts(&mut self.lent, pull_request, check).await
+    }
+
+    async fn count_fix_attempt(
+        &mut self,
+        pull_request: world::PullRequest,
+        check: String,
+    ) -> wasmtime::Result<Result<i64, String>> {
+        host::Host::count_fix_attempt(&mut self.lent, pull_request, check).await
+    }
+
+    async fn addressed(&mut self, repo: String) -> wasmtime::Result<Result<Vec<String>, String>> {
+        host::Host::addressed(&mut self.lent, repo).await
+    }
+
+    async fn mark_addressed(
+        &mut self,
+        repo: String,
+        comments: Vec<String>,
+    ) -> wasmtime::Result<Result<(), String>> {
+        host::Host::mark_addressed(&mut self.lent, repo, comments).await
     }
 }
 

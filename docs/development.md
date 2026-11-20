@@ -1668,6 +1668,8 @@ components where the script looks:
 $ cargo build --release --target wasm32-wasip2 --manifest-path plugins/Cargo.toml
 $ cargo build --release --target wasm32-wasip2 --target-dir plugins/target \
     --manifest-path plugins/tests/stub-harness/Cargo.toml
+$ cargo build --release --target wasm32-wasip2 --target-dir plugins/target \
+    --manifest-path plugins/tests/activity-fixture/Cargo.toml
 $ mkdir -p plugins/dist && cp plugins/target/wasm32-wasip2/release/*.wasm plugins/dist/
 ```
 
@@ -1687,9 +1689,12 @@ $ cargo test --manifest-path plugins/Cargo.toml --workspace
 workspace of its own: the server's suites install them as plugins of their
 own. Apart, because the packaged build (`nix/`) vendors only what the
 server's `Cargo.lock` and the built-ins' name; it leaves `plugins/tests/` out of
-its source, and compiles no test. Today that
-is the **stub harness**, whose component the suites write a `plugin.yaml`
+its source, and compiles no test. Today those
+are the **stub harness**, whose component the suites write a `plugin.yaml`
 beside and install from a directory to launch sessions on a harness a plugin
 declares — see `crates/server/tests/suite/stub_harness.rs`. The build script
 builds it from its own workspace where `plugins/dist/` has none, embeds it
-nowhere, and hands the tests its path in `VERKSTEAD_STUB_HARNESS_WASM`.
+nowhere, and hands the tests its path in `VERKSTEAD_STUB_HARNESS_WASM`. And
+the **activity fixture**, an Activity reaching every host function a wrap-up
+needs — waiting on several sessions and a timeout, the Forge, the wrap-up's
+records — whose path is in `VERKSTEAD_ACTIVITY_FIXTURE_WASM`.

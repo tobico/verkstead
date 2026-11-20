@@ -125,6 +125,8 @@ mod files;
 /// What a follow-up session is started on, and read back from where it stands.
 mod follow_ups;
 mod followers;
+/// The Forge as an Activity reaches it, wrapping [`github`] until stage 12.
+pub mod forge;
 /// The ports of members' terminals held on this device's own `localhost`, from
 /// the first time the terminal's tab is opened here until the server stops or
 /// the terminal ends.
@@ -549,6 +551,10 @@ pub(crate) struct AppState {
     /// How Verkstead itself asks GitHub about a pull request — the host's `gh`,
     /// authenticating as the configured token.
     github: Gh,
+
+    /// And what the Forge an Activity reaches through is said to lack — see
+    /// [`forge`].
+    forge: forge::Forge,
 
     /// And how it asks this machine whether a phone can reach the workbench —
     /// the host's `tailscale`, in front of the port this server is listening
@@ -1723,6 +1729,7 @@ fn standing(
         binds,
 
         github,
+        forge: forge::Forge::new(),
 
         // And the host's `tailscale`, which is the whole of what the Remote access
         // pane reads — see [`remote`].
