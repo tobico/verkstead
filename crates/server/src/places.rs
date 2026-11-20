@@ -29,7 +29,7 @@
 //! from the **roadmap's chain** instead: the highest settled stage of it, and the
 //! roadmap's own Conversation where no stage of it has settled yet. Which is the
 //! foot of the chain either way, and already what the base is chosen off — see
-//! the `continuing` module's own `cut_from`, which walks the chain for the same
+//! the **Stage runner** component's own `cut_from`, which walks the chain for the same
 //! link. The notice that a stage started goes on that Conversation's Timeline.
 //!
 //! **Which is the reading's own limit, inherited whole.** A foot with no Worktree
@@ -222,8 +222,8 @@ async fn look(state: &AppState) {
 /// behind it takes its Pairings, its companions, its base and its Timeline from.
 ///
 /// The highest **settled** stage of the chain, and the roadmap's own Conversation
-/// where no stage of it has settled yet. Which is the same walk the `continuing`
-/// module's own `cut_from` makes to choose a base, asked one field along: the
+/// where no stage of it has settled yet. Which is the same walk the **Stage
+/// runner**'s own `cut_from` makes to choose a base, asked one field along: the
 /// branch it picks is this Conversation's branch, so a stage started off a look
 /// is cut from exactly where a stage started off that Conversation's own settle
 /// would have been.

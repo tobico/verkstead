@@ -1,19 +1,23 @@
-//! Starting the stages of a roadmap that may start now, with nobody asked.
+//! The host's side of starting a roadmap's stages with nobody asked: when the
+//! **Stage runner** runs, and the *start a Conversation* it asks for.
 //!
 //! This is the piece that makes the whole pipeline unattended rather than merely
-//! gateless. A wrap-up settles — see [`crate::settling`] — and every stage of its
-//! roadmap whose dependencies have settled starts: each a Conversation of its
-//! own, on a branch of its own, in a session inside the bundled fork of
-//! next-stage. That fork writes `.tasks/`, at which point the runner takes over
-//! and works the backlog to empty, which finishes and opens a pull request, which
-//! wraps up, which starts whatever stood on it. Nothing in the loop asks for
-//! permission.
+//! gateless. A wrap-up settles — see [`crate::settling`] — and the Stage runner,
+//! a component of the built-in Activities plugin, is run over it: it reads the
+//! roadmap's index and declarations through the host, and asks the host to start
+//! every stage whose dependencies have settled — each a Conversation of its own,
+//! on a branch of its own, whose **Backlog runner** plans it and works the
+//! backlog to empty, which finishes and opens a pull request, which wraps up,
+//! which runs the Stage runner again. Nothing in the loop asks for permission.
+//! What is ready is the component's to decide; [`reading`] is when it runs, and
+//! [`begin`] is the start it asks for — the limits, the placement, the branch,
+//! the `next-stage` annotation — which is the host's.
 //!
 //! **Every ready stage rather than the lowest of them**, up to as many of one
 //! roadmap at a time as the settings say — three where nobody has said, which is
 //! [`stages::AT_ONCE`] — and a place is held by every stage the record has in
 //! flight, whatever that stage is doing. The number is read out of `config.yaml`
-//! here, at every settle, the way the git author and the build cache are: a limit
+//! here, at every start the Stage runner asks for, the way the git author and the build cache are: a limit
 //! changed on the settings page is in force at the next start without a restart,
 //! and nothing already running is stopped by it.
 //!
@@ -62,8 +66,9 @@
 //! Conversation**, and is not ready until that Conversation's wrap-up has
 //! settled — so a look made while the roadmap is still being reviewed starts
 //! nothing of it, and the roadmap's own settle is what starts its first stages.
-//! The rule is [`stages::ready`]'s, the one every reading goes through; a press
-//! is not held on it either, and reads [`stages::ready_when_asked`].
+//! The rule is the Stage runner's, kept in step with [`stages::ready`], which the
+//! adoption and the card read; a press is not held on it either, and reads
+//! [`stages::ready_when_asked`].
 //!
 //! **Each start is its own act.** A branch already taken, a branch standing in the
 //! way, no git author configured, a fetch git would not make, a companion that
@@ -96,8 +101,8 @@
 //! of it, and it used to be.
 //!
 //! **What that roadmap has ready comes from its declarations, the record and the
-//! boxes together** — see [`crate::stages::ready`], which is the whole of that
-//! rule. Whether each stage of it is done is the record's answer wherever it has a
+//! boxes together** — the Stage runner's reading, handed the record by the host,
+//! and the same rule as [`crate::stages::ready`]. Whether each stage of it is done is the record's answer wherever it has a
 //! row for the stage, because a stage that settled ticked its own box on its own
 //! branch and this one may never have seen it; and what each of them stands on is
 //! its own line's to declare, an undeclared roadmap being read as each stage
@@ -543,99 +548,6 @@ async fn stage_runner(
     .await;
 
     outcome.as_deref() == Some("finished")
-}
-
-/// Which branch the next stage is **cut from**: the highest stage of its
-/// roadmap's chain that has settled, and the branch that has just settled where
-/// the chain holds none.
-///
-/// The highest rather than the predecessor, so that a stage builds on
-/// everything the roadmap has finished — its own dependencies among them — and
-/// the rebase at its finish is small. In a roadmap run in order the two are the
-/// same branch: the stage that has just settled is the top of the chain, so
-/// nothing about such a roadmap's start moves. They part company where a
-/// sibling above the settling stage has settled first, which is what this is
-/// for.
-///
-/// **The fallback is the chain's foot.** A roadmap whose chain is empty is one
-/// whose first stage this is, and the branch that has just settled is the
-/// Conversation that *wrote* the roadmap: the chain starts there while its pull
-/// request is unmerged, because the default branch does not hold the roadmap
-/// the stage is started from. Which is the answer this gave before there was a
-/// chain to read, and it is still the answer here.
-///
-/// **Only what the record calls settled.** A link still wrapping up is a branch
-/// that may yet be pushed again — see [`crate::joins`], where the same rule
-/// holds a finish — and a stage cut from one would be cut from a commit that is
-/// about to stop existing.
-///
-/// Walked from the top down, which is what settles a stage attempted twice: two
-/// Conversations answer to one label and the record has one standing for both,
-/// so the branch this finds is the attempt that joined later — the one the
-/// chain is actually stacked through.
-///
-/// Whether that branch is still worth standing on is a separate question and
-/// git's to answer: see [`standing`], which is handed this and asks it.
-#[cfg(test)]
-fn cut_from<'a>(
-    chain: &'a [store::Joined],
-    record: &store::StageStandings,
-    roadmap: &str,
-    settled: &'a str,
-) -> &'a str {
-    chain
-        .iter()
-        .rev()
-        .find(|link| record.of(roadmap, &link.stage) == Some(store::StageStanding::Settled))
-        .map_or(settled, |link| link.branch.as_str())
-}
-
-/// Which branch the roadmap's **declarations** are read off, best first: the top
-/// of its chain, then the branch it was planned on, then the branch that has just
-/// settled.
-///
-/// **Declarations are read afresh at every start**, and this is where *afresh*
-/// means: the newest the roadmap has ever been written down, so that a dependency
-/// somebody edited by hand and committed to a running roadmap takes effect. With
-/// stages worked side by side the settling stage's own Worktree is exactly the
-/// wrong place to ask — its branch may well have been cut before that edit, or
-/// before the stage that edit is about was added — and every stage that has
-/// joined the chain since holds a newer copy.
-///
-/// **The top of the chain** is the branch of the last stage to have joined, which
-/// is the newest `ROADMAP.md` there is: a stage joins by pushing its branch and
-/// opening its pull request, and it rebased onto everything below it to get there.
-/// Walked from the top down rather than taken as one name, so that a link whose
-/// branch has gone gives way to the one below it instead of throwing the whole
-/// chain away.
-///
-/// **Then the branch the roadmap was planned on** — see `store::roadmap_planner`,
-/// which is the read for it. That Conversation is the **foot** of the chain while
-/// its pull request is unmerged, and with no stage joined yet it is the only
-/// branch the roadmap exists on at all: the default branch does not hold it, and
-/// neither does anything Verkstead has cut since.
-///
-/// **And then the branch that has just settled**, which is today's answer and the
-/// right one for a roadmap's first stage — the Conversation that wrote the
-/// roadmap is the one that settled, so the two are the same branch.
-///
-/// An order of preference rather than one answer, because a branch is a thing git
-/// may no longer hold: whoever calls in takes the first of these git still has.
-/// Nothing here asks git or the database — the chain and the planning branch are
-/// read by the caller, and this puts them in order.
-#[cfg(test)]
-fn declaring<'a>(
-    chain: &'a [store::Joined],
-    wrote: Option<&'a str>,
-    settled: &'a str,
-) -> Vec<&'a str> {
-    chain
-        .iter()
-        .rev()
-        .map(|link| link.branch.as_str())
-        .chain(wrote)
-        .chain(std::iter::once(settled))
-        .collect()
 }
 
 /// What happens when a settling Conversation has no roadmap recorded against it:
@@ -1301,10 +1213,10 @@ async fn start(
     if placed.here() {
         // Taken here rather than by the planning, which is started from more
         // than one place and takes the registration from all of them — see
-        // [`crate::runner::plan_stage`].
+        // [`crate::runner::backlog_runner`].
         let driving = state.drivers.driving(id);
 
-        tokio::spawn(crate::runner::plan_stage(state.clone(), id, driving));
+        tokio::spawn(crate::runner::backlog_runner(state.clone(), id, driving));
     }
 
     Began::Started { id, branch }
@@ -2558,175 +2470,5 @@ mod tests {
             ),
             Some(Stands::Off { .. }),
         ));
-    }
-
-    /// One link of a chain, as [`store::stage_chain`] reads it back.
-    fn link(conversation_id: i64, stage: &str) -> store::Joined {
-        store::Joined {
-            conversation_id,
-            stage: stage.to_owned(),
-            branch: format!("roadmaps/rate-limiting/{stage}"),
-        }
-    }
-
-    /// And what the record says each of them got to, in the shape both
-    /// readings of a roadmap take one.
-    ///
-    /// None of them stopped, and none of them names a Conversation: whether a
-    /// stage halted and which Conversation it is are both nothing this reading asks
-    /// — see `store::StageStandings::stopped` and
-    /// `store::StageStandings::conversation`, which the card is drawn from. So
-    /// every row says `0`, which is nobody's.
-    fn standings(rows: &[(&'static str, store::StageStanding)]) -> store::StageStandings {
-        store::StageStandings::from_rows(
-            rows.iter()
-                .map(|(label, standing)| ("rate-limiting", *label, *standing, false, 0)),
-        )
-    }
-
-    /// the Stage runner's `cut_from` at the one roadmap every one of these is about.
-    fn base<'a>(
-        chain: &'a [store::Joined],
-        record: &store::StageStandings,
-        settled: &'a str,
-    ) -> &'a str {
-        cut_from(chain, record, "rate-limiting", settled)
-    }
-
-    /// A roadmap run in order gives the branch that has just settled, because
-    /// that branch is the top of the chain. Which is every roadmap so far, and
-    /// the whole of what must not move: nothing about such a start changes.
-    #[test]
-    fn a_roadmap_run_in_order_is_cut_from_the_stage_that_settled() {
-        let chain = [link(7, "01"), link(9, "02")];
-        let record = standings(&[
-            ("01", store::StageStanding::Settled),
-            ("02", store::StageStanding::Settled),
-        ]);
-
-        assert_eq!(
-            base(&chain, &record, "roadmaps/rate-limiting/02"),
-            "roadmaps/rate-limiting/02",
-        );
-    }
-
-    /// A sibling that joined above the stage that settled, and settled itself,
-    /// is what the next stage is cut from: it is higher in the chain, so its
-    /// branch holds everything below it as well as its own work.
-    #[test]
-    fn a_settled_sibling_above_the_stage_that_settled_is_the_base() {
-        let chain = [link(7, "01"), link(9, "02")];
-        let record = standings(&[
-            ("01", store::StageStanding::Settled),
-            ("02", store::StageStanding::Settled),
-        ]);
-
-        assert_eq!(
-            base(&chain, &record, "roadmaps/rate-limiting/01"),
-            "roadmaps/rate-limiting/02",
-            "stage 01 settled last, and stage 02 is above it in the chain",
-        );
-    }
-
-    /// A link that has joined and not settled is a branch still moving, so the
-    /// highest one that *has* settled is what is cut from — which may be the
-    /// branch that just settled, under a sibling still wrapping up.
-    #[test]
-    fn an_unsettled_link_above_is_not_cut_from() {
-        let chain = [link(7, "01"), link(9, "02")];
-        let record = standings(&[
-            ("01", store::StageStanding::Settled),
-            ("02", store::StageStanding::InFlight),
-        ]);
-
-        assert_eq!(
-            base(&chain, &record, "roadmaps/rate-limiting/01"),
-            "roadmaps/rate-limiting/01",
-        );
-    }
-
-    /// Stage 01 of a roadmap: nothing has joined, so the chain is its foot
-    /// alone — the branch the roadmap itself was written on, which is the
-    /// branch that has just settled. As it comes off today, and for the reason
-    /// it has to keep coming off it.
-    #[test]
-    fn an_empty_chain_is_cut_from_the_branch_that_settled() {
-        assert_eq!(
-            base(&[], &standings(&[]), "roadmap/rate-limiting"),
-            "roadmap/rate-limiting",
-        );
-    }
-
-    /// And a chain whose every link is still moving comes to the same thing:
-    /// the branch that settled is what there is.
-    #[test]
-    fn a_chain_with_nothing_settled_in_it_is_cut_from_the_branch_that_settled() {
-        let chain = [link(9, "02")];
-        let record = standings(&[("02", store::StageStanding::InFlight)]);
-
-        assert_eq!(
-            base(&chain, &record, "roadmap/rate-limiting"),
-            "roadmap/rate-limiting",
-        );
-    }
-
-    /// A stage attempted twice is two branches in the chain under one label,
-    /// and the record has one standing for both. Walked from the top down, so
-    /// what is found is the attempt that joined later — the one the chain is
-    /// actually stacked through.
-    #[test]
-    fn a_stage_attempted_twice_is_cut_from_the_attempt_that_joined_later() {
-        let chain = [
-            store::Joined {
-                conversation_id: 7,
-                stage: "01".to_owned(),
-                branch: "roadmaps/rate-limiting/01-abandoned".to_owned(),
-            },
-            link(9, "01"),
-        ];
-        let record = standings(&[("01", store::StageStanding::Settled)]);
-
-        assert_eq!(
-            base(&chain, &record, "roadmap/rate-limiting"),
-            "roadmaps/rate-limiting/01",
-        );
-    }
-
-    /// The top of the chain is where a running roadmap's declarations are read,
-    /// and the whole chain is offered from the top down: a link whose branch git
-    /// no longer holds gives way to the one below it rather than to the foot.
-    #[test]
-    fn a_running_roadmaps_declarations_are_read_at_the_top_of_its_chain() {
-        let chain = [link(7, "01"), link(9, "02")];
-
-        assert_eq!(
-            declaring(&chain, Some("rate-limiting"), "roadmaps/rate-limiting/01"),
-            [
-                "roadmaps/rate-limiting/02",
-                "roadmaps/rate-limiting/01",
-                "rate-limiting",
-                "roadmaps/rate-limiting/01",
-            ],
-        );
-    }
-
-    /// A roadmap no stage has joined yet is read off the branch it was planned
-    /// on, which is the foot of its chain while that pull request is unmerged —
-    /// and the only branch the roadmap is written on at all.
-    #[test]
-    fn a_roadmap_nothing_has_joined_is_read_off_the_branch_it_was_planned_on() {
-        assert_eq!(
-            declaring(&[], Some("rate-limiting"), "roadmaps/rate-limiting/01"),
-            ["rate-limiting", "roadmaps/rate-limiting/01"],
-            "the planning branch first, and the stage that settled behind it",
-        );
-    }
-
-    /// And one with neither falls back to the branch that settled, which is
-    /// today's answer: a roadmap's own first stage settles on the branch that
-    /// wrote the roadmap, so the two are one branch.
-    #[test]
-    fn a_roadmap_with_neither_is_read_off_the_branch_that_settled() {
-        assert_eq!(declaring(&[], None, "rate-limiting"), ["rate-limiting"]);
     }
 }

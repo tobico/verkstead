@@ -1,17 +1,15 @@
-//! The auto-advancing task runner: once there is a backlog, it works itself.
+//! The runner: what the host does around the sessions a Conversation's work is
+//! carried by, once a direction is picked.
 //!
-//! A fresh session per task, launched the moment the one before it is over,
-//! with no gate between them and nobody asked. That is the whole of it — and
-//! everything difficult about it is in the two questions it has to answer:
-//! what is next, which the repository says, and when a step is over, which the
-//! session says and the repository checks.
-//!
-//! **What is next** is [`next_step`]: the lowest-numbered entry of `TODO.md`
-//! whose box is not ticked, or the finish step once every box is. Read off the
-//! Worktree by the same rule the pinned Event is drawn by — see [`crate::tasks`]
-//! — so the list the human is watching and the list the runner is working are
-//! one list. An unticked entry naming a file nobody wrote is neither, and stops
-//! the run rather than putting a session at nothing to work from.
+//! **What is next is no longer decided here.** A backlog is worked by the
+//! **Backlog runner** Activity and a roadmap's stages are started by the
+//! **Stage runner**, both components of the built-in Activities plugin — see
+//! [`backlog_runner`], [`crate::continuing`] and [`crate::activities`]. They
+//! read the boxes and the declarations off the Repo themselves, through the
+//! host functions [`crate::lending`] lends them. What stays here is what those
+//! host functions and the other drivers stand on: launching a session and
+//! watching it to its signal, checking a signal against the Repo, and carrying
+//! work on to its pull request.
 //!
 //! **What a finished step looks like** is [`Landing`]: an entry ticked in
 //! `TODO.md`, or a path gone from the Worktree or arrived in it — and, either
@@ -285,15 +283,15 @@ impl Default for Pace {
     }
 }
 
-/// What the runner does next, read off the Worktree and nothing else.
+/// The step a grilling's own session is carrying on into, or a roadmap's
+/// session is launched for: the three a pick leaves to the runner rather than to
+/// an Activity. A task and the finish are the **Backlog runner**'s — see
+/// [`backlog_runner`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Step {
     /// Break the work down, which is where a task-list Conversation starts:
     /// there is no backlog yet, and the session writing one is already running.
     ///
-    /// Never what [`next_step`] answers — a backlog that is not there says
-    /// nothing about whether it is about to be written or has just been worked
-    /// through. It is the step the runner is handed rather than one it decides.
     Planning,
 
     /// Write the handoff, which is the whole of what an inline grilling has left
@@ -305,42 +303,15 @@ enum Step {
     /// Worktree — Verkstead's own directory rather than the project's, so that
     /// no `git add -A` after it can sweep the document into the human's
     /// repository. See [`crate::handoffs`].
-    ///
-    /// Never what [`next_step`] answers, for the reason [`Step::Planning`] never
-    /// is: it is the step the runner is handed rather than one it decides.
     Handoff(PathBuf),
-
-    /// Work this task: the lowest-numbered entry whose box is not ticked, and
-    /// the file in `.tasks/` that says what it is.
-    ///
-    /// Both, because the two answer different halves of the step. The number is
-    /// what says it is over — the entry's own box, ticked — and the file is what
-    /// the Notice names when it is not.
-    Task { number: u32, file: PathBuf },
-
-    /// An entry that is not ticked and names no file: a hand-edited backlog, or
-    /// a breakdown that stopped part way through writing one.
-    ///
-    /// Nothing to run. A session launched at it would have no task document to
-    /// read and nothing to tell it where to stop, so the **Backlog runner**
-    /// stops instead, naming the entry.
-    Broken { label: String },
-
-    /// Finish the feature: every entry is ticked, and what is left is taking
-    /// `.tasks/` away.
-    Finish,
 
     /// Write the roadmap, which is where a roadmap Conversation starts and
     /// finishes: the stages it plans are Conversations of their own.
     ///
     /// Carries the commit the branch came off, because what says this step is
     /// over is a roadmap on the branch *that was not there before* — see
-    /// [`Landing::Roadmap`]. Never what [`next_step`] answers, for the reason
-    /// [`Step::Planning`] never is: it is the step the runner is handed.
+    /// [`Landing::Roadmap`].
     Staging(String),
-
-    /// There is no backlog. Nothing to run, and nothing to poll for.
-    Nothing,
 }
 
 /// What says a step is over: a path in the Worktree that has to have gone, or
@@ -370,74 +341,37 @@ pub(crate) enum Landing {
 }
 
 impl Step {
-    /// What the step's session is sent for, where that is building and so may
-    /// leave a Memo: a task, the finish, and a stage's own planning. A
-    /// breakdown, a handoff and a roadmap are the grilling carrying on after a
-    /// pick, which has the handoff or the stage briefs to say what it settled.
-    /// See [`crate::memos`].
-    fn building(&self) -> Option<crate::memos::Building> {
-        match self {
-            Step::Task { number, .. } => Some(crate::memos::Building::Task(*number)),
-            Step::Finish => Some(crate::memos::Building::Finish),
-            Step::Planning
-            | Step::Handoff(_)
-            | Step::Staging(_)
-            | Step::Broken { .. }
-            | Step::Nothing => None,
-        }
-    }
-
-    /// What would say this step is over, or `None` where it is not a step to
-    /// run.
-    fn landing(&self) -> Option<Landing> {
+    /// What would say this step is over.
+    fn landing(&self) -> Landing {
         match self {
             // The plan commit is what puts the backlog under version control,
             // so the backlog being there and committed is the breakdown done.
-            Step::Planning => Some(Landing::Arrived(todo())),
+            Step::Planning => Landing::Arrived(todo()),
             // And the handoff is the document itself, in a directory no commit
             // reaches: nothing puts it under version control, so its being there
             // is the whole of the signal.
-            Step::Handoff(path) => Some(Landing::Handoff(path.clone())),
-            // Finishing a task is what ticks its entry off in the list.
-            Step::Task { number, .. } => Some(Landing::Ticked(*number)),
-            // And the finish commit removes `TODO.md` with the rest of `.tasks/`.
-            Step::Finish => Some(Landing::Gone(todo())),
+            Step::Handoff(path) => Landing::Handoff(path.clone()),
             // The roadmap commit is what puts the stages under version control.
-            Step::Staging(base) => Some(Landing::Roadmap(base.clone())),
-            // Neither of these is a step to run, so neither has anything to
-            // watch for.
-            Step::Broken { .. } | Step::Nothing => None,
+            Step::Staging(base) => Landing::Roadmap(base.clone()),
         }
     }
 
     /// Whether the step's session is done only once its branch has a pull
-    /// request open as well: the finish and a roadmap's own session, which are
-    /// the two a run ends on. See [`crate::done::Ends`].
+    /// request open as well: a roadmap's own session, which the run ends on. See [`crate::done::Ends`].
     fn ends(&self) -> crate::done::Ends {
         match self {
-            Step::Finish | Step::Staging(_) => crate::done::Ends::OnAPullRequest,
-            Step::Planning
-            | Step::Handoff(_)
-            | Step::Task { .. }
-            | Step::Broken { .. }
-            | Step::Nothing => crate::done::Ends::WithItsWork,
+            Step::Staging(_) => crate::done::Ends::OnAPullRequest,
+            Step::Planning | Step::Handoff(_) => crate::done::Ends::WithItsWork,
         }
     }
 
     /// What the step was, in the words the Timeline draws.
     ///
-    /// The sentence rather than the word above it: the two are read by different
-    /// readers, and a human looking at a stopped run wants to know *which* task
-    /// rather than that it was a task.
     fn what(&self) -> String {
         match self {
             Step::Planning => "breaking the work down into a backlog".to_owned(),
             Step::Handoff(_) => "writing the handoff for the session that builds".to_owned(),
-            Step::Task { file, .. } => format!("the task in {}", file.display()),
-            Step::Broken { .. } => "working the backlog".to_owned(),
-            Step::Finish => "finishing the feature".to_owned(),
             Step::Staging(_) => "staging the work into a roadmap".to_owned(),
-            Step::Nothing => "nothing".to_owned(),
         }
     }
 }
@@ -536,7 +470,7 @@ async fn follow_breakdown(
 
     crate::conversations::grilling_over(&state, conversation_id).await;
 
-    carry_on(state, conversation_id, driving).await
+    backlog_runner(state, conversation_id, driving).await
 }
 
 /// Start driving a stalled implementation again, from wherever the repository
@@ -597,81 +531,43 @@ pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, dr
     match direction {
         Direction::Inline => inline_again(state, conversation_id, driving).await,
         Direction::Roadmap => roadmap_again(state, conversation_id, &working_in, driving).await,
-        // The backlog's own answer to what is next, asked of `.tasks/` exactly
-        // as every other turn of the run asks it — a stage's backlog included,
-        // it being a backlog like any other by the time there is one. What is
-        // next has not changed on account of nothing having been running.
         Direction::TaskList => {
-            backlog_again(
-                state,
-                conversation_id,
-                &working_in,
-                conversation.base_commit.as_deref(),
-                driving,
-            )
-            .await
-        }
-    }
-}
+            let base = conversation.base_commit.as_deref();
 
-/// Work a backlog again — or, where it is worked out and the branch is already
-/// on a pull request, wrap that up instead.
-///
-/// The backlog's own answer to what is next, asked of `.tasks/` exactly as every
-/// other turn of the run asks it — a stage's backlog included, it being a
-/// backlog like any other by the time there is one. What is next has not changed
-/// on account of nothing having been running.
-///
-/// An empty one is three situations rather than one. A stage whose planning
-/// never landed is the one that is answered here, because it is the only one
-/// with a step left to run: its backlog was never written, and the session that
-/// would have written it is launched once and by nobody else — see
-/// [`stage_to_plan`]. The other two are a breakdown that never landed and a
-/// feature that is finished with, and nothing can tell those apart until
-/// [`nothing_left`] asks GitHub.
-///
-/// `base` is the commit this Conversation's branch was made on, which is what
-/// the first of the three is read against: what a branch has written is asked of
-/// what it has written *since it branched*, the predecessor's own backlog being
-/// in the history of a stage stacked on one.
-async fn backlog_again(
-    state: AppState,
-    conversation_id: i64,
-    working_in: &Path,
-    base: Option<&str>,
-    driving: Driving,
-) {
-    let step = decide(working_in).await;
-
-    if step == Step::Nothing {
-        // Asked before GitHub is, and before anything is read as an ending that
-        // half happened: a stage that has planned nothing has pushed nothing and
-        // opened nothing, so what an empty backlog means there is that the run
-        // has not started rather than that it is over.
-        if stage_to_plan(&state, conversation_id, working_in, base).await {
-            // A stage the human is still being asked where to start has not
-            // started, and its open Set is the wait — a restart reaching it
-            // included. See [`crate::placing::stage_waiting`].
-            if crate::placing::stage_waiting(&state, conversation_id).await {
-                return;
+            // A list, ticked or not, is the **Backlog runner**'s: it asks the
+            // boxes what is next exactly as every other turn of the run does —
+            // a stage's backlog included, it being a backlog like any other by
+            // the time there is one.
+            if anything_to_work(&working_in).await {
+                return backlog_runner(state, conversation_id, driving).await;
             }
 
-            tracing::info!(
-                conversation_id,
-                "a stage's backlog was never planned, so the planning is being run again",
-            );
+            // An empty one is three situations rather than one. A stage whose
+            // planning never landed is answered here, asked before GitHub is:
+            // a stage that has planned nothing has pushed nothing and opened
+            // nothing, so its empty backlog is a run that has not started —
+            // see [`stage_to_plan`]. The other two are a breakdown that never
+            // landed and a feature that is finished with, and nothing can tell
+            // those apart until [`nothing_left`] asks GitHub.
+            if stage_to_plan(&state, conversation_id, &working_in, base).await {
+                // A stage the human is still being asked where to start has
+                // not started, and its open Set is the wait — a restart
+                // reaching it included. See [`crate::placing::stage_waiting`].
+                if crate::placing::stage_waiting(&state, conversation_id).await {
+                    return;
+                }
 
-            return plan_stage(state, conversation_id, driving).await;
+                tracing::info!(
+                    conversation_id,
+                    "a stage's backlog was never planned, so the planning is being run again",
+                );
+
+                return backlog_runner(state, conversation_id, driving).await;
+            }
+
+            nothing_left(state, conversation_id, &working_in, base, driving).await
         }
-
-        return nothing_left(state, conversation_id, working_in, base, driving).await;
     }
-
-    // The rest is the **Backlog runner**'s, a stage's included: it asks the same
-    // boxes what is next, refuses the same entry naming no file, places the
-    // same tasks and holds a stage's finish for its chain — see
-    // [`backlog_runner`].
-    backlog_runner(state, conversation_id, driving).await
 }
 
 /// What to make of a backlog with nothing left in it, which is decided by asking
@@ -920,35 +816,6 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
     follow_roadmap(state, conversation_id, base, launched, driving).await
 }
 
-/// Plan a roadmap stage and then work the backlog it writes, from the first task
-/// to the pull request.
-///
-/// Where [`follow`] is handed the session that is already running, this launches
-/// one: a stage is started by the stage before it settling rather than by
-/// anything a human pressed, so there is nobody to have launched it — see
-/// [`crate::continuing`]. Everything after that is the same run a task list has,
-/// because from the plan commit onwards it *is* one.
-///
-/// Started as the stage is made — by the stage before it settling, or by a human
-/// adopting the roadmap it belongs to — and started again by a run taken up over
-/// a stage that has no backlog. That second way in is what makes the first
-/// recoverable: a planning session that died before it committed leaves a stage
-/// whose backlog nothing else would ever write, so what is read there is a run
-/// that never began rather than one that is worked out — see [`stage_to_plan`].
-///
-/// What the stage was cut from, which the planning is told, is the record's —
-/// see [`backlog_runner`], which hands it to the component.
-///
-/// `driving` is the registration that says this Conversation is being driven,
-/// taken by whoever is starting the planning rather than here — the stage being
-/// made, or a run that has found the planning never happened. Handed over rather
-/// than taken at this end, for the reason every other driver here hands one
-/// over: the launch is the slow part, and a gap in the middle of one is a
-/// Conversation a sweep reads as standing still. See [`crate::drivers`].
-pub(crate) async fn plan_stage(state: AppState, conversation_id: i64, driving: Driving) {
-    backlog_runner(state, conversation_id, driving).await
-}
-
 /// Work the backlog a wrap-up's review split its findings out into, from its
 /// first task to the pull request the branch already has.
 ///
@@ -978,7 +845,7 @@ pub(crate) fn build_the_split_out(state: &AppState, conversation_id: i64) {
     tokio::spawn(async move {
         crate::conversations::backlog_landed(&state, conversation_id).await;
 
-        carry_on(state, conversation_id, driving).await
+        backlog_runner(state, conversation_id, driving).await
     });
 }
 
@@ -991,24 +858,6 @@ pub(crate) fn build_the_split_out(state: &AppState, conversation_id: i64) {
 /// Conversation back to build a backlog that is about to be swept away.
 pub(crate) async fn backlog_landed(worktree: &Path) -> bool {
     check(worktree, &Landing::Arrived(todo())).await
-}
-
-/// Work whatever the backlog has left, one fresh session per step, until it is
-/// empty.
-///
-/// Where [`work`] is handed a session that is already running its step, this
-/// starts from the repository: what is next is read off `.tasks/` and a session
-/// is launched for it. Split out because the two entries into a run differ only
-/// in that first session — the breakdown's own, or the grilling session that
-/// wrote the backlog in its place.
-///
-/// Every backlog is the **Backlog runner** Activity's — see [`backlog_runner`].
-///
-/// The registration is held for the whole run and let go as it returns, which
-/// is what makes the quiet gaps between one step's session and the next read as
-/// a Conversation being driven rather than as one standing still.
-async fn carry_on(state: AppState, conversation_id: i64, driving: Driving) {
-    backlog_runner(state, conversation_id, driving).await
 }
 
 /// Work a backlog under the **Backlog runner** Activity, from whichever box
@@ -1030,7 +879,7 @@ async fn carry_on(state: AppState, conversation_id: i64, driving: Driving) {
 ///
 /// The registration it is handed is held across the component and whatever its
 /// Outcome sets going, as every driver here holds one.
-async fn backlog_runner(state: AppState, conversation_id: i64, driving: Driving) {
+pub(crate) async fn backlog_runner(state: AppState, conversation_id: i64, driving: Driving) {
     // As every launch here always has: a server with no skills starts no
     // session of any kind, and says so in its log.
     if state.sessions.skills().is_none() {
@@ -1838,7 +1687,7 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
             "the instruction is done and the backlog holds more, so the run carries on",
         );
 
-        return carry_on(state, conversation_id, driving).await;
+        return backlog_runner(state, conversation_id, driving).await;
     }
 
     // Held until the wrap-up's own watchers have registrations of their own, or
@@ -3132,7 +2981,7 @@ async fn see_out(
 ) -> Option<i64> {
     let event_id = lent.event_id(session);
 
-    let landing = step.landing()?;
+    let landing = step.landing();
 
     let worktree = worktree(state, conversation_id).await?;
 
@@ -3547,63 +3396,23 @@ fn writes(line: &str) -> bool {
         .any(|code| !matches!(code, b'D' | b' '))
 }
 
-/// Whether `.tasks/` has anything left in it to work.
+/// Whether `.tasks/` has anything left in it to work: a list, ticked or not.
 ///
-/// The one thing about a backlog anybody outside the runner asks: Resume refuses
-/// by name where there is nothing to launch a session for, and what *nothing*
-/// means is this module's own answer rather than a second reading of the
-/// directory — see [`crate::resume`]. What is left is asked again by whatever
-/// the resume spawns, a moment later and for itself.
+/// The one thing about a backlog anybody outside the **Backlog runner** asks:
+/// Resume refuses by name where there is nothing to launch a session for, and
+/// a run taken up again over an empty one asks GitHub what became of it rather
+/// than starting the component — see [`implementing_again`]. Which box is next
+/// is the component's own reading. A list is read by the same rule the pinned
+/// Event is drawn by — see [`crate::tasks`].
 pub(crate) async fn anything_to_work(worktree: &Path) -> bool {
-    decide(worktree).await != Step::Nothing
-}
-
-/// What to run next in `worktree`, off the runtime's threads.
-async fn decide(worktree: &Path) -> Step {
-    let worktree = worktree.to_owned();
-
-    match tokio::task::spawn_blocking(move || next_step(&worktree)).await {
-        Ok(step) => step,
-        Err(error) => {
-            tracing::error!(error = ?error, "deciding what to run next failed");
-            Step::Nothing
-        }
-    }
-}
-
-/// What to run next, decided from `.tasks/` alone.
-///
-/// The lowest-numbered entry whose box is not ticked, because the order the
-/// backlog was written in is the order its slices depend on each other. Then the
-/// finish step, once every box is ticked. Then nothing — which is a `.tasks/`
-/// that was never written and one that has been finished with, and there is
-/// nothing for the runner to do about either.
-///
-/// The list decides all of it, and the directory beside it only says which file
-/// the session will be working from. A backlog part way through being written
-/// has entries with no files yet, and reading those as done would be the runner
-/// finishing a feature nobody had started: an entry that is not ticked and names
-/// nothing is [`Step::Broken`], which stops the run and says so.
-fn next_step(worktree: &Path) -> Step {
     let backlog = worktree.join(BACKLOG);
 
-    let Some(entries) = crate::tasks::entries(&backlog) else {
-        return Step::Nothing;
-    };
-
-    // In the list's own order rather than sorted: `TODO.md` is written in the
-    // order the tasks are meant to be worked, and renumbering somebody's backlog
-    // is not the runner's to do.
-    let Some(next) = entries.into_iter().find(|entry| !entry.checked) else {
-        return Step::Finish;
-    };
-
-    match crate::tasks::files(&backlog).get(&next.number) {
-        Some(name) => Step::Task {
-            number: next.number,
-            file: Path::new(BACKLOG).join(name),
-        },
-        None => Step::Broken { label: next.label },
+    match tokio::task::spawn_blocking(move || crate::tasks::entries(&backlog).is_some()).await {
+        Ok(listed) => listed,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading whether there is a backlog failed");
+            false
+        }
     }
 }
 
@@ -3698,34 +3507,26 @@ async fn documents(state: &AppState, conversation_id: i64) -> Option<Documents<'
     }
 }
 
-/// The host a step's session is launched or adopted under: what the step
-/// builds, and what the rescue says it is doing.
+/// The host a step's session is launched or adopted under: what the rescue
+/// says it is doing.
 fn lent_for(state: &AppState, conversation_id: i64, step: &Step) -> Lent {
-    Lent::new(state, conversation_id)
-        .building(step.building())
-        .doing(&step.what())
+    Lent::new(state, conversation_id).doing(&step.what())
 }
 
 /// What a step's session is expected to leave, which is its [`Landing`] in the
-/// Worktree, or `None` where there is no Worktree left or nothing to land.
+/// Worktree, or `None` where there is no Worktree left.
 async fn expected(
     state: &AppState,
     conversation_id: i64,
     step: &Step,
 ) -> Option<crate::done::Evidence> {
-    let landing = step.landing()?;
+    let landing = step.landing();
     let worktree = worktree(state, conversation_id).await?;
 
     Some(crate::done::Evidence::Landed { worktree, landing })
 }
 
-/// Launch a backlog's next session — a task, the finish or a stage's planning,
-/// all one skill — on `step`, expecting its landing.
-///
-/// Which step it is is not said: the bundled fork reads `.tasks/` and picks the
-/// same one this did, by the same rule. Verkstead decides the step to know what
-/// to watch for, not to hand it over — a runner that named the file would be a
-/// second opinion about a question the skill is already asking.
+/// Launch a session on `step` under `skill`, expecting its landing.
 async fn launch_step(
     state: &AppState,
     conversation_id: i64,
@@ -3879,6 +3680,12 @@ mod tests {
         run(path, &["commit", "-m", "feat: a task"]);
     }
 
+    /// Whether `path` holds a list, the synchronous half of
+    /// [`anything_to_work`].
+    fn listed(path: &Path) -> bool {
+        crate::tasks::entries(&path.join(BACKLOG)).is_some()
+    }
+
     fn run(dir: &Path, args: &[&str]) -> String {
         let output = Command::new("git")
             .args(args)
@@ -3893,101 +3700,19 @@ mod tests {
         String::from_utf8(output.stdout).unwrap()
     }
 
-    /// The order the backlog was written in is the order its slices depend on
-    /// each other, so the lowest entry still unticked is the only thing to run
-    /// next.
-    #[test]
-    fn the_next_step_is_the_lowest_unticked_entry() {
-        let dir = worktree(&list(0), &DOCUMENTS);
-
-        assert_eq!(
-            next_step(dir.path()),
-            Step::Task {
-                number: 1,
-                file: Path::new(BACKLOG).join("01-first.md"),
-            },
-        );
-
-        finish(dir.path(), "01");
-
-        assert_eq!(
-            next_step(dir.path()),
-            Step::Task {
-                number: 2,
-                file: Path::new(BACKLOG).join("02-second.md"),
-            },
-        );
-    }
-
-    /// And the file staying where it is says nothing: what a session leaves
-    /// behind is a ticked entry beside a document nobody deleted.
-    #[test]
-    fn a_task_file_left_behind_is_not_a_task_still_to_do() {
-        let dir = worktree(&list(2), &DOCUMENTS);
-
-        assert_eq!(
-            next_step(dir.path()),
-            Step::Task {
-                number: 3,
-                file: Path::new(BACKLOG).join("03-third.md"),
-            },
-            "the two ticked entries are done, documents and all",
-        );
-    }
-
-    /// The other way round, and the case the whole rule is for: a backlog part
-    /// way through being written has entries with no documents yet, and the
-    /// runner stops rather than putting a session at nothing to work from.
-    #[test]
-    fn an_unticked_entry_with_no_file_stops_the_run() {
-        let dir = worktree(&list(0), &["01-first.md"]);
-
-        finish(dir.path(), "01");
-
-        assert_eq!(
-            next_step(dir.path()),
-            Step::Broken {
-                label: "02".to_owned()
-            },
-        );
-    }
-
-    /// By the number rather than by the name, which is the same answer for a
-    /// zero-padded backlog and a different one for a backlog that got past nine.
-    #[test]
-    fn a_backlog_that_got_past_nine_is_still_worked_in_order() {
-        let dir = worktree(
-            "- [ ] 9: Ninth\n- [ ] 10: Tenth\n",
-            &["9-ninth.md", "10-tenth.md"],
-        );
-
-        assert_eq!(
-            next_step(dir.path()),
-            Step::Task {
-                number: 9,
-                file: Path::new(BACKLOG).join("9-ninth.md"),
-            },
-        );
-    }
-
-    /// Every box ticked is the feature built, whatever is still sitting in
-    /// `.tasks/` — the finish step is what takes the directory away.
-    #[test]
-    fn the_finish_step_is_what_is_left_once_every_entry_is_ticked() {
-        let dir = worktree(&list(3), &DOCUMENTS);
-
-        assert_eq!(next_step(dir.path()), Step::Finish);
-    }
-
-    /// A Worktree with no backlog is nothing to run. Both ways round: one that
+    /// A Worktree with no list has nothing to work, both ways round: one that
     /// was never broken down, and one whose finish commit took `.tasks/` away.
-    #[test]
-    fn a_worktree_with_no_backlog_has_nothing_to_run() {
+    /// A list with every box ticked still has the finish to run.
+    #[tokio::test]
+    async fn only_a_worktree_with_no_list_has_nothing_to_work() {
         let dir = worktree(&list(3), &DOCUMENTS);
+
+        assert!(anything_to_work(dir.path()).await);
+
         std::fs::remove_dir_all(dir.path().join(BACKLOG)).unwrap();
 
-        assert_eq!(next_step(dir.path()), Step::Nothing);
-        assert_eq!(next_step(Path::new("/nonexistent")), Step::Nothing);
+        assert!(!anything_to_work(dir.path()).await);
+        assert!(!anything_to_work(Path::new("/nonexistent")).await);
     }
 
     /// The done-signal, and the half of it that matters most: the box is
@@ -4247,7 +3972,7 @@ mod tests {
         run(path, &["add", "-A"]);
         run(path, &["commit", "-m", "chore: finish Pipeline"]);
 
-        assert_eq!(next_step(path), Step::Nothing, "nothing left to work");
+        assert!(!listed(path), "nothing left to work");
 
         assert!(
             backlog_written(path, &base),
@@ -4278,7 +4003,7 @@ mod tests {
 
         let base = run(path, &["rev-parse", "HEAD"]).trim().to_owned();
 
-        assert_eq!(next_step(path), Step::Nothing, "there is nothing to work");
+        assert!(!listed(path), "there is nothing to work");
         assert!(
             !backlog_written(path, &base),
             "and nothing on this branch ever wrote a backlog, so there is nothing built \
@@ -4295,9 +4020,8 @@ mod tests {
         run(path, &["add", "-A"]);
         run(path, &["commit", "-m", "chore: finish rate limiting"]);
 
-        assert_eq!(
-            next_step(path),
-            Step::Nothing,
+        assert!(
+            !listed(path),
             "the finish took the list away, so there is nothing to work here either",
         );
         assert!(
@@ -4511,44 +4235,21 @@ mod tests {
         );
     }
 
-    /// What each step turns on. The plan arrives, the finish takes the list
-    /// away, and a task is its own entry ticked off in it.
+    /// What each step turns on. The plan arrives, the roadmap is written since
+    /// the base, and the handoff is a document outside the Worktree.
     #[test]
-    fn every_step_but_nothing_has_something_to_watch_for() {
+    fn every_step_has_something_to_watch_for() {
         assert_eq!(
             Step::Planning.landing(),
-            Some(Landing::Arrived(Path::new(".tasks/TODO.md").to_owned())),
-        );
-        assert_eq!(
-            Step::Finish.landing(),
-            Some(Landing::Gone(Path::new(".tasks/TODO.md").to_owned())),
-        );
-        assert_eq!(
-            Step::Task {
-                number: 1,
-                file: Path::new(".tasks/01-first.md").to_owned(),
-            }
-            .landing(),
-            Some(Landing::Ticked(1)),
+            Landing::Arrived(Path::new(".tasks/TODO.md").to_owned()),
         );
         assert_eq!(
             Step::Staging("d41f8a3b".to_owned()).landing(),
-            Some(Landing::Roadmap("d41f8a3b".to_owned())),
+            Landing::Roadmap("d41f8a3b".to_owned()),
         );
         assert_eq!(
             Step::Handoff(PathBuf::from("/srv/verkstead/handoffs/7/handoff.md")).landing(),
-            Some(Landing::Handoff(PathBuf::from(
-                "/srv/verkstead/handoffs/7/handoff.md"
-            ))),
-        );
-        assert_eq!(Step::Nothing.landing(), None);
-        assert_eq!(
-            Step::Broken {
-                label: "02".to_owned()
-            }
-            .landing(),
-            None,
-            "an entry with no file is nothing to run, so there is nothing to wait for",
+            Landing::Handoff(PathBuf::from("/srv/verkstead/handoffs/7/handoff.md")),
         );
     }
 

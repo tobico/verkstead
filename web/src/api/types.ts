@@ -639,7 +639,7 @@ export type AtOnceView = {
  * always: a roadmap with no places would start nothing at all.
  *
  * A count of places rather than a quantity of anything, which is what the
- * scheduler is handed — see `stages::next_stage` on the server.
+ * host holds a *start a Conversation* to — see `continuing::begin` on the server.
  */
 roadmap_stages: number, 
 /**
