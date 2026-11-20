@@ -1668,6 +1668,15 @@ $ mkdir -p plugins/dist && cp plugins/target/wasm32-wasip2/release/*.wasm plugin
 `plugins/dist/` is gitignored and wins whenever it is there, so delete it after
 changing a component's source, or the server goes on embedding the old build.
 
+**The components' own tests run natively**, not as wasm: what a component
+decides without the host — the step a backlog is at, which stages of a roadmap
+are ready, what each session is told — is plain Rust, and CI's *Built-in
+plugins* job runs it:
+
+```console
+$ cargo test --manifest-path plugins/Cargo.toml --workspace
+```
+
 **Components that are no built-in's** are under `plugins/tests/`, each a
 workspace of its own: the server's suites install them as plugins of their
 own. Apart, because the packaged build (`nix/`) vendors only what the

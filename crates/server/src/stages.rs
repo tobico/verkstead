@@ -66,7 +66,8 @@
 //! **Stage runner**, a component of the built-in Activities plugin, which reads
 //! the index and the declarations through the host itself and asks the host to
 //! start each stage — see [`crate::continuing`]. It keeps its own copy of
-//! [`ready`]'s rule, in the same words, and the two are kept in step by hand.
+//! [`ready`]'s rule, in the same words, and the two are kept in step by the
+//! same cases, run against each — see that component's tests.
 //! The entries, the stage and the branch-naming rule are the same ones; only the
 //! way the bytes are fetched differs — `ls-tree` and `show` against the Repo's own
 //! git directory rather than files off a checkout.

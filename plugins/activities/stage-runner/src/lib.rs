@@ -258,14 +258,7 @@ fn index(
 ) -> Result<(String, String), String> {
     let path = format!("{ROADMAPS}/{roadmap}/{INDEX}");
 
-    let reading = chain
-        .iter()
-        .rev()
-        .map(|link| link.branch.as_str())
-        .chain(planned_on)
-        .chain(std::iter::once(branch));
-
-    for at in reading {
+    for at in declaring(chain, planned_on, branch) {
         match text(repo, &Revision::Named(at.to_owned()), &path) {
             Ok(Some(list)) => return Ok((list, at.to_owned())),
             Ok(None) => {
@@ -285,6 +278,19 @@ fn index(
     ))
 }
 
+/// The branches a roadmap's index is read off, newest first: the chain from
+/// its top down, the branch the roadmap was planned on, and this
+/// Conversation's.
+fn declaring<'a>(chain: &'a [Link], planned_on: Option<&'a str>, branch: &'a str) -> Vec<&'a str> {
+    chain
+        .iter()
+        .rev()
+        .map(|link| link.branch.as_str())
+        .chain(planned_on)
+        .chain(std::iter::once(branch))
+        .collect()
+}
+
 /// The file at `path` as text.
 fn text(repo: &str, at: &Revision, path: &str) -> Result<Option<String>, String> {
     Ok(host::read_file(repo, at, path)?.map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))
@@ -297,6 +303,11 @@ fn stacks(repo: &str) -> bool {
         return false;
     };
 
+    stacking(&workflow)
+}
+
+/// Whether a `git-workflow.md`'s text records a stacking mechanism.
+fn stacking(workflow: &str) -> bool {
     workflow
         .lines()
         .map(str::trim_end)
@@ -734,4 +745,553 @@ fn walk<'a>(
     walked.push(label);
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    //! What the server's carry-on was tested on before the stage runner
+    //! crossed into this component: where a stage is cut from, which branch
+    //! the index is read off, whether the Repo stacks, and which stages are
+    //! ready. Run natively — `cargo test --manifest-path plugins/Cargo.toml` —
+    //! since none of it calls the host.
+    //!
+    //! The readiness cases are the server's own for [`ready`]'s rule in
+    //! `stages.rs`, which this component keeps a copy of: the two are kept in
+    //! step by these.
+
+    use host::StageStanding;
+
+    use super::*;
+
+    /// A roadmap index exactly as `/to-roadmap` writes one.
+    const MVP: &str = "\
+# MVP roadmap
+
+- [x] 01: Workbench — [brief](01-workbench.md)
+- [x] 02: Grilling — [brief](02-grilling.md)
+- [ ] 03: Implementation — [brief](03-implementation.md)
+";
+
+    /// Three stages and none ticked: whether each is done is the record's.
+    const UNTICKED: &str = "\
+# MVP roadmap
+
+- [ ] 01: Workbench — [brief](01-workbench.md)
+- [ ] 02: Grilling — [brief](02-grilling.md)
+- [ ] 03: Implementation — [brief](03-implementation.md)
+";
+
+    /// 01 and 02 stand on nothing, 03 on 02, and 04 on both 01 and 03.
+    const DECLARED: &str = "\
+# MVP roadmap
+
+- [ ] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [ ] 02: Grilling — [brief](02-grilling.md) — no dependencies
+- [ ] 03: Implementation — [brief](03-implementation.md) — after 02
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md) — after 01, 03
+";
+
+    /// What the record holds of the `mvp` roadmap, nothing stopped.
+    fn record(rows: &[(&str, Standing)]) -> Standings {
+        Standings {
+            planner: None,
+            stages: rows
+                .iter()
+                .map(|(label, standing)| StageStanding {
+                    label: (*label).to_owned(),
+                    standing: *standing,
+                    stopped: false,
+                    conversation: 0,
+                })
+                .collect(),
+        }
+    }
+
+    /// And the same with the Conversation that wrote the roadmap standing so.
+    fn planned(rows: &[(&str, Standing)], planner: Standing) -> Standings {
+        Standings {
+            planner: Some(planner),
+            ..record(rows)
+        }
+    }
+
+    /// What [`readiness`] answers, with the stages by label.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Read {
+        Stages(Vec<String>),
+        Complete,
+        InFlight,
+        Misdeclared(String),
+    }
+
+    /// Which stages of `list` may start, read as the Conversation on `branch`.
+    fn ready(list: &str, record: &Standings, branch: &str) -> Read {
+        let entries: Vec<Entry> = list.lines().filter_map(entry).collect();
+
+        match readiness(&entries, &judge("mvp", list), record, branch) {
+            Ready::Stages(ready) => {
+                Read::Stages(ready.iter().map(|entry| entry.label.clone()).collect())
+            }
+            Ready::Complete => Read::Complete,
+            Ready::InFlight => Read::InFlight,
+            Ready::Misdeclared(why) => Read::Misdeclared(why),
+        }
+    }
+
+    fn stages(labels: &[&str]) -> Read {
+        Read::Stages(labels.iter().map(|label| (*label).to_owned()).collect())
+    }
+
+    #[test]
+    fn the_next_stage_is_the_lowest_numbered_unchecked_one() {
+        assert_eq!(ready(MVP, &record(&[]), "anything-else"), stages(&["03"]));
+    }
+
+    /// The annotation naming this Conversation's branch says the stage is its
+    /// own, which a run must never be offered back.
+    #[test]
+    fn the_stage_this_conversation_worked_is_not_the_one_to_start() {
+        let list = "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) *(in progress: `grilling`)*\n\
+             - [ ] 03: Implementation — [brief](03-implementation.md)\n";
+
+        assert_eq!(ready(list, &record(&[]), "grilling"), stages(&["03"]));
+        assert_eq!(
+            ready(list, &record(&[]), "some-other-branch"),
+            stages(&["02"]),
+            "and to anybody else it is the stage it says it is",
+        );
+    }
+
+    #[test]
+    fn a_settled_stage_is_done_however_its_box_reads_on_this_branch() {
+        assert_eq!(
+            ready(
+                UNTICKED,
+                &record(&[("01", Standing::Settled)]),
+                "anything-else"
+            ),
+            stages(&["02"]),
+        );
+    }
+
+    #[test]
+    fn a_stage_ticked_with_no_record_of_it_is_done_too() {
+        let list = "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md)\n\
+             - [ ] 03: Implementation — [brief](03-implementation.md)\n";
+
+        assert_eq!(
+            ready(list, &record(&[("02", Standing::Settled)]), "anything-else"),
+            stages(&["03"]),
+        );
+    }
+
+    /// Nor is what stands on a stage in flight started: it is held up rather
+    /// than stepped over.
+    #[test]
+    fn a_stage_the_record_says_is_in_flight_is_not_started_however_its_box_reads() {
+        let in_flight = record(&[("01", Standing::InFlight), ("02", Standing::InFlight)]);
+
+        let list = "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md)\n\
+             - [ ] 03: Implementation — [brief](03-implementation.md)\n";
+
+        assert_eq!(ready(list, &in_flight, "anything-else"), Read::InFlight);
+
+        assert_eq!(
+            ready(
+                "- [ ] 01: Workbench — [brief](01-workbench.md)\n",
+                &in_flight,
+                "anything-else",
+            ),
+            Read::InFlight,
+            "in flight is not done, and not the roadmap complete either",
+        );
+    }
+
+    #[test]
+    fn a_declared_roadmap_carries_on_with_the_stage_whose_dependency_settled() {
+        assert_eq!(
+            ready(
+                DECLARED,
+                &record(&[("01", Standing::InFlight), ("02", Standing::Settled)]),
+                "roadmaps/mvp/02-grilling",
+            ),
+            stages(&["03"]),
+        );
+    }
+
+    #[test]
+    fn a_stage_whose_dependency_is_in_flight_is_not_started() {
+        assert_eq!(
+            ready(
+                DECLARED,
+                &record(&[
+                    ("01", Standing::InFlight),
+                    ("02", Standing::Settled),
+                    ("03", Standing::Settled),
+                ]),
+                "roadmaps/mvp/03-implementation",
+            ),
+            Read::InFlight,
+            "04 stands on 01 as well as on 03, and 01 has not settled",
+        );
+    }
+
+    #[test]
+    fn nothing_ready_is_the_roadmap_complete_only_where_nothing_is_in_flight() {
+        let settled = [
+            ("01", Standing::Settled),
+            ("02", Standing::Settled),
+            ("03", Standing::Settled),
+        ];
+
+        let mut rows = settled.to_vec();
+        rows.push(("04", Standing::InFlight));
+        assert_eq!(ready(DECLARED, &record(&rows), ""), Read::InFlight);
+
+        rows.pop();
+        rows.push(("04", Standing::Settled));
+        assert_eq!(ready(DECLARED, &record(&rows), ""), Read::Complete);
+    }
+
+    #[test]
+    fn a_stage_in_flight_holds_up_its_own_dependents_and_no_others() {
+        assert_eq!(
+            ready(
+                DECLARED,
+                &record(&[("01", Standing::InFlight), ("02", Standing::Settled)]),
+                "",
+            ),
+            stages(&["03"]),
+        );
+    }
+
+    #[test]
+    fn the_ready_stages_of_a_declaring_roadmap_come_back_lowest_first() {
+        assert_eq!(
+            ready(DECLARED, &record(&[]), ""),
+            stages(&["01", "02"]),
+            "and 03 stands on 02, which has not settled",
+        );
+    }
+
+    #[test]
+    fn no_root_is_ready_while_the_roadmaps_own_conversation_is_in_flight() {
+        for list in [DECLARED, UNTICKED] {
+            assert_eq!(
+                ready(list, &planned(&[], Standing::InFlight), ""),
+                Read::InFlight,
+                "nothing of a roadmap starts before the roadmap is reviewed",
+            );
+        }
+    }
+
+    #[test]
+    fn the_roots_are_ready_once_the_roadmaps_own_conversation_has_settled() {
+        for record in [
+            planned(&[], Standing::Settled),
+            planned(&[], Standing::Abandoned),
+            record(&[]),
+        ] {
+            assert_eq!(ready(DECLARED, &record, ""), stages(&["01", "02"]));
+        }
+    }
+
+    #[test]
+    fn the_roadmaps_own_conversation_holds_only_the_stages_that_stand_on_nothing() {
+        assert_eq!(
+            ready(
+                DECLARED,
+                &planned(&[("02", Standing::Settled)], Standing::InFlight),
+                "",
+            ),
+            stages(&["03"]),
+            "01 is a root, held on the roadmap",
+        );
+    }
+
+    #[test]
+    fn an_undeclared_roadmap_has_one_ready_stage_at_most() {
+        assert_eq!(ready(UNTICKED, &record(&[]), ""), stages(&["01"]));
+    }
+
+    #[test]
+    fn a_roadmap_that_declares_badly_has_nothing_ready() {
+        let Read::Misdeclared(why) = ready(
+            "# MVP roadmap\n\n\
+             - [ ] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md)\n",
+            &record(&[]),
+            "",
+        ) else {
+            panic!("a declaration on one line and not the other is refused");
+        };
+
+        assert!(why.contains("mvp") && why.contains("02"), "{why:?}");
+    }
+
+    #[test]
+    fn an_abandoned_stage_is_left_to_what_its_box_says() {
+        let abandoned = record(&[("01", Standing::Abandoned)]);
+
+        assert_eq!(
+            ready(UNTICKED, &abandoned, "anything-else"),
+            stages(&["01"])
+        );
+
+        let list = "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md)\n";
+
+        assert_eq!(ready(list, &abandoned, "anything-else"), stages(&["02"]));
+    }
+
+    #[test]
+    fn a_roadmap_run_in_order_carries_on_from_the_stage_that_settled() {
+        let list = "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) \
+             *(in progress: `roadmaps/mvp/02-grilling`)*\n\
+             - [ ] 03: Implementation — [brief](03-implementation.md)\n";
+
+        assert_eq!(
+            ready(
+                list,
+                &record(&[("01", Standing::Settled), ("02", Standing::Settled)]),
+                "roadmaps/mvp/02-grilling",
+            ),
+            stages(&["03"]),
+        );
+    }
+
+    #[test]
+    fn a_stage_the_record_holds_no_label_for_is_still_skipped_by_its_annotation() {
+        let list = "# MVP roadmap\n\n\
+             - [ ] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) \
+             *(in progress: `roadmaps/mvp/02-grilling`)*\n\
+             - [ ] 03: Implementation — [brief](03-implementation.md)\n";
+
+        assert_eq!(
+            ready(
+                list,
+                &record(&[("01", Standing::Settled)]),
+                "roadmaps/mvp/02-grilling",
+            ),
+            stages(&["03"]),
+        );
+    }
+
+    #[test]
+    fn a_declaration_on_the_line_does_not_hide_the_stage_in_flight() {
+        for tail in [
+            "— after 01 *(in progress: `grilling`)*",
+            "*(in progress: `grilling`)* — after 01",
+        ] {
+            let list = format!(
+                "# MVP roadmap\n\n\
+                 - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+                 - [ ] 02: Grilling — [brief](02-grilling.md) {tail}\n\
+                 - [ ] 03: Implementation — [brief](03-implementation.md) — after 02\n"
+            );
+
+            assert_eq!(
+                ready(&list, &record(&[]), "grilling"),
+                stages(&["03"]),
+                "{tail:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_declaration_is_nobodys_stage_in_flight() {
+        let list = "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) — after 01 — on windows\n";
+
+        assert_eq!(ready(list, &record(&[]), "grilling"), stages(&["02"]));
+        assert_eq!(
+            platform(&judge("mvp", list), "02"),
+            "windows",
+            "and the stage carries the platform its line declares, which places it",
+        );
+    }
+
+    #[test]
+    fn a_stage_declaring_no_platform_wants_none() {
+        let list = "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md) — no dependencies\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) — after 01\n";
+
+        assert_eq!(platform(&judge("mvp", list), "02"), "");
+    }
+
+    #[test]
+    fn an_undeclared_roadmaps_prose_places_no_stage() {
+        let list = "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Installers — [brief](02-installers.md) — focus on windows installers\n";
+
+        assert_eq!(ready(list, &record(&[]), "grilling"), stages(&["02"]));
+        assert_eq!(platform(&judge("mvp", list), "02"), "");
+    }
+
+    #[test]
+    fn a_roadmap_with_every_stage_checked_has_nothing_to_start() {
+        assert_eq!(
+            ready(
+                "# MVP roadmap\n\n- [x] 01: Workbench — [brief](01-workbench.md)\n",
+                &record(&[]),
+                "anything-else",
+            ),
+            Read::Complete,
+        );
+    }
+
+    #[test]
+    fn the_last_stage_finishing_is_the_roadmap_complete() {
+        let list = "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) *(in progress: `grilling`)*\n";
+
+        assert_eq!(ready(list, &record(&[]), "grilling"), Read::Complete);
+    }
+
+    /// One link of the `rate-limiting` roadmap's chain.
+    fn link(stage: &str) -> Link {
+        Link {
+            stage: Some(stage.to_owned()),
+            branch: format!("roadmaps/rate-limiting/{stage}"),
+        }
+    }
+
+    #[test]
+    fn a_roadmap_run_in_order_is_cut_from_the_stage_that_settled() {
+        let chain = [link("01"), link("02")];
+        let record = record(&[("01", Standing::Settled), ("02", Standing::Settled)]);
+
+        assert_eq!(
+            cut_from(&chain, &record, "roadmaps/rate-limiting/02"),
+            "roadmaps/rate-limiting/02",
+        );
+    }
+
+    #[test]
+    fn a_settled_sibling_above_the_stage_that_settled_is_the_base() {
+        let chain = [link("01"), link("02")];
+        let record = record(&[("01", Standing::Settled), ("02", Standing::Settled)]);
+
+        assert_eq!(
+            cut_from(&chain, &record, "roadmaps/rate-limiting/01"),
+            "roadmaps/rate-limiting/02",
+            "stage 01 settled last, and stage 02 is above it in the chain",
+        );
+    }
+
+    #[test]
+    fn an_unsettled_link_above_is_not_cut_from() {
+        let chain = [link("01"), link("02")];
+        let record = record(&[("01", Standing::Settled), ("02", Standing::InFlight)]);
+
+        assert_eq!(
+            cut_from(&chain, &record, "roadmaps/rate-limiting/01"),
+            "roadmaps/rate-limiting/01",
+        );
+    }
+
+    #[test]
+    fn an_empty_chain_is_cut_from_the_branch_that_settled() {
+        assert_eq!(
+            cut_from(&[], &record(&[]), "roadmap/rate-limiting"),
+            "roadmap/rate-limiting",
+        );
+    }
+
+    #[test]
+    fn a_chain_with_nothing_settled_in_it_is_cut_from_the_branch_that_settled() {
+        assert_eq!(
+            cut_from(
+                &[link("02")],
+                &record(&[("02", Standing::InFlight)]),
+                "roadmap/rate-limiting",
+            ),
+            "roadmap/rate-limiting",
+        );
+    }
+
+    /// Two branches under one label, walked from the top down, so the attempt
+    /// that joined later is the one cut from.
+    #[test]
+    fn a_stage_attempted_twice_is_cut_from_the_attempt_that_joined_later() {
+        let chain = [
+            Link {
+                stage: Some("01".to_owned()),
+                branch: "roadmaps/rate-limiting/01-abandoned".to_owned(),
+            },
+            link("01"),
+        ];
+
+        assert_eq!(
+            cut_from(
+                &chain,
+                &record(&[("01", Standing::Settled)]),
+                "roadmap/rate-limiting",
+            ),
+            "roadmaps/rate-limiting/01",
+        );
+    }
+
+    #[test]
+    fn a_running_roadmaps_declarations_are_read_at_the_top_of_its_chain() {
+        let chain = [link("01"), link("02")];
+
+        assert_eq!(
+            declaring(&chain, Some("rate-limiting"), "roadmaps/rate-limiting/01"),
+            [
+                "roadmaps/rate-limiting/02",
+                "roadmaps/rate-limiting/01",
+                "rate-limiting",
+                "roadmaps/rate-limiting/01",
+            ],
+        );
+    }
+
+    #[test]
+    fn a_roadmap_nothing_has_joined_is_read_off_the_branch_it_was_planned_on() {
+        assert_eq!(
+            declaring(&[], Some("rate-limiting"), "roadmaps/rate-limiting/01"),
+            ["rate-limiting", "roadmaps/rate-limiting/01"],
+        );
+    }
+
+    #[test]
+    fn a_roadmap_with_neither_is_read_off_the_branch_that_settled() {
+        assert_eq!(declaring(&[], None, "rate-limiting"), ["rate-limiting"]);
+    }
+
+    #[test]
+    fn a_repository_records_its_stacking_mechanism_under_its_review_process() {
+        assert!(!stacking(""));
+        assert!(!stacking(
+            "# Git workflow\n\n## Review process\n\n### Finish sequence\n\nPush it.\n"
+        ));
+        assert!(stacking(
+            "# Git workflow\n\n## Review process\n\n\
+             ### Finish sequence\n\nPush it.\n\n\
+             ### Stacking roadmap stages\n\n`gh stack init <predecessor> <new>`\n"
+        ));
+    }
+
+    #[test]
+    fn a_stacking_block_outside_the_review_process_is_not_the_mechanism() {
+        assert!(!stacking(
+            "# Git workflow\n\n## Review process\n\n### Finish sequence\n\nPush it.\n\n\
+             ## Notes\n\n### Stacking roadmap stages\n\nWe gave up on these.\n"
+        ));
+    }
 }

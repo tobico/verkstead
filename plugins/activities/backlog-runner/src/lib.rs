@@ -74,7 +74,7 @@ impl Guest for Backlog {
 
         let repo = &facts.worktree.repo;
         let stage = stage(&facts);
-        let prompt = prompt(&skill.path, &facts);
+        let prompt = prompt(&skill.path, &facts.brief, facts.handoff.as_deref());
 
         loop {
             let step = match next(repo, stage.as_ref()) {
@@ -207,7 +207,23 @@ enum Step {
 /// starts this over a stage only while it is unplanned or part way through,
 /// never over one whose finish took the list away.
 fn next(repo: &str, stage: Option<&Stage>) -> Result<Step, String> {
-    let Some(entries) = entries(repo)? else {
+    let list = host::read_file(repo, &Revision::Head, TODO)?
+        .map(|list| String::from_utf8_lossy(&list).into_owned());
+
+    step(list.as_deref(), stage, || {
+        Ok(host::list_directory(repo, &Revision::Head, BACKLOG)?.unwrap_or_default())
+    })
+}
+
+/// [`next`] over the list as text, or none where there is none, with `files`
+/// asked for the names in `.tasks/` only where an entry needs a file to work
+/// from.
+fn step(
+    list: Option<&str>,
+    stage: Option<&Stage>,
+    files: impl FnOnce() -> Result<Vec<String>, String>,
+) -> Result<Step, String> {
+    let Some(entries) = list.map(parse) else {
         return match stage {
             Some(stage) => Ok(Step::Plan {
                 cut_from: stage.cut_from.clone(),
@@ -224,7 +240,7 @@ fn next(repo: &str, stage: Option<&Stage>) -> Result<Step, String> {
         return Ok(Step::Finish);
     };
 
-    let files = host::list_directory(repo, &Revision::Head, BACKLOG)?.unwrap_or_default();
+    let files = files()?;
 
     let named = files.iter().any(|file| numbered(file) == Some(next.number));
 
@@ -271,12 +287,12 @@ fn entries(repo: &str) -> Result<Option<Vec<Entry>>, String> {
         return Ok(None);
     };
 
-    Ok(Some(
-        String::from_utf8_lossy(&list)
-            .lines()
-            .filter_map(entry)
-            .collect(),
-    ))
+    Ok(Some(parse(&String::from_utf8_lossy(&list))))
+}
+
+/// The entries of a list, in its own order.
+fn parse(list: &str) -> Vec<Entry> {
+    list.lines().filter_map(entry).collect()
 }
 
 /// The entry `line` is — `- [ ] 01: <title> — [details](01-<slug>.md)`, and
@@ -394,15 +410,14 @@ fn broken(label: &str) -> String {
 /// Every session's prompt: the line that sends it into next-task, and the two
 /// documents the work is written down in — the task file says where a session
 /// stops, and these say what it is a slice of.
-fn prompt(skill: &str, facts: &Facts) -> String {
+fn prompt(skill: &str, brief: &str, handoff: Option<&str>) -> String {
     let mut prompt = format!(
         "Read {skill} and work the next task of the backlog for the work described below, the \
          way it says. Nothing else in this session tells you how to reach me.\n\n\
-         # The Brief this started from\n\n{}\n",
-        facts.brief,
+         # The Brief this started from\n\n{brief}\n",
     );
 
-    if let Some(handoff) = &facts.handoff {
+    if let Some(handoff) = handoff {
         prompt.push_str(&format!(
             "\n# What the grilling settled, in its own words\n\n{handoff}\n"
         ));
@@ -480,4 +495,250 @@ fn joining(prompt: &str, chain: &[host::Link]) -> String {
         prompt.trim_end(),
         listed = listed.join("\n"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    //! What the server's runner was tested on before the backlog crossed into
+    //! this component: the step read off a list, and what each session is told.
+    //! Run natively — `cargo test --manifest-path plugins/Cargo.toml` — since
+    //! none of it calls the host.
+
+    use super::*;
+
+    /// A backlog of three, its first `done` entries ticked.
+    fn list(done: usize) -> String {
+        [("01", "First"), ("02", "Second"), ("03", "Third")]
+            .iter()
+            .enumerate()
+            .map(|(at, (label, title))| {
+                let mark = if at < done { "x" } else { " " };
+                let file = format!("{label}-{}.md", title.to_lowercase());
+
+                format!("- [{mark}] {label}: {title} — [details]({file})\n")
+            })
+            .collect()
+    }
+
+    /// The three task files that backlog names.
+    fn documents() -> Vec<String> {
+        ["01-first.md", "02-second.md", "03-third.md", "TODO.md"]
+            .map(str::to_owned)
+            .to_vec()
+    }
+
+    /// The step `list` reads as, its directory holding `files`.
+    fn next_step(list: Option<&str>, files: Vec<String>) -> Result<Step, String> {
+        step(list, None, || Ok(files))
+    }
+
+    fn task(number: u32, label: &str) -> Step {
+        Step::Task {
+            number,
+            label: label.to_owned(),
+            platform: None,
+        }
+    }
+
+    #[test]
+    fn the_next_step_is_the_lowest_unticked_entry() {
+        assert_eq!(next_step(Some(&list(0)), documents()), Ok(task(1, "01")));
+        assert_eq!(next_step(Some(&list(1)), documents()), Ok(task(2, "02")));
+    }
+
+    /// The ticked entries are done, their files left behind and all.
+    #[test]
+    fn a_task_file_left_behind_is_not_a_task_still_to_do() {
+        assert_eq!(next_step(Some(&list(2)), documents()), Ok(task(3, "03")));
+    }
+
+    #[test]
+    fn an_unticked_entry_with_no_file_stops_the_run() {
+        assert_eq!(
+            next_step(Some(&list(1)), vec!["01-first.md".to_owned()]),
+            Ok(Step::Broken {
+                label: "02".to_owned()
+            }),
+        );
+
+        assert!(
+            broken("02").contains("Entry 02 of `.tasks/TODO.md`"),
+            "and the stop names the entry: {:?}",
+            broken("02"),
+        );
+    }
+
+    /// In the list's own order, and by number rather than by the label's text.
+    #[test]
+    fn a_backlog_that_got_past_nine_is_still_worked_in_order() {
+        assert_eq!(
+            next_step(
+                Some("- [ ] 9: Ninth\n- [ ] 10: Tenth\n"),
+                vec!["9-ninth.md".to_owned(), "10-tenth.md".to_owned()],
+            ),
+            Ok(task(9, "9")),
+        );
+    }
+
+    #[test]
+    fn the_finish_step_is_what_is_left_once_every_entry_is_ticked() {
+        assert_eq!(
+            step(Some(&list(3)), None, || panic!("the finish needs no file")),
+            Ok(Step::Finish),
+        );
+    }
+
+    /// A Conversation that is no stage has nothing to run with no list, and
+    /// says so; a stage plans one, told what it was cut from.
+    #[test]
+    fn no_backlog_is_nothing_to_run_unless_a_stage_plans_one() {
+        assert!(next_step(None, Vec::new()).is_err());
+
+        let stage = Stage {
+            cut_from: Some("roadmaps/mvp/01-workbench".to_owned()),
+        };
+
+        assert_eq!(
+            step(None, Some(&stage), || panic!("a plan needs no file")),
+            Ok(Step::Plan {
+                cut_from: Some("roadmaps/mvp/01-workbench".to_owned())
+            }),
+        );
+    }
+
+    /// The word after `on` past the link, and nothing inside an annotation.
+    #[test]
+    fn a_task_wants_the_platform_its_line_names() {
+        let wants = |line: &str| entry(line).and_then(|entry| entry.platform);
+
+        assert_eq!(
+            wants("- [ ] 02: Installer — [details](02-installer.md) — on windows"),
+            Some("windows".to_owned()),
+        );
+        assert_eq!(wants("- [ ] 02: Run on windows — [details](02-x.md)"), None);
+        assert_eq!(
+            wants("- [ ] 02: X — [details](02-x.md) *(in progress: `on windows`)*"),
+            None,
+        );
+    }
+
+    fn link(stage: Option<&str>, branch: &str) -> host::Link {
+        host::Link {
+            stage: stage.map(str::to_owned),
+            branch: branch.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_stage_session_is_started_on_its_brief() {
+        let prompt = planned(
+            "/skills/next-stage/SKILL.md",
+            "# 05. Roadmap direction\n\nThe third Direction.\n",
+            None,
+        );
+
+        assert!(prompt.contains("/skills/next-stage/SKILL.md"), "{prompt:?}");
+        assert!(prompt.contains("The third Direction."), "{prompt:?}");
+        assert!(
+            !prompt.contains("What the grilling settled"),
+            "nothing is said about a document a stage never had: {prompt:?}"
+        );
+    }
+
+    #[test]
+    fn a_stage_session_is_told_what_its_branch_was_cut_from() {
+        let cut = planned("next-stage", "# 05.\n", Some("wrap-up"));
+
+        assert!(cut.contains("cut from `wrap-up`"), "{cut:?}");
+        assert!(
+            !cut.contains("stacks on"),
+            "and not as a place in the chain, which the finish settles: {cut:?}"
+        );
+
+        let alone = planned("next-stage", "# 05.\n", None);
+
+        assert!(
+            alone.contains("default branch") && !alone.contains("stacks on"),
+            "{alone:?}"
+        );
+    }
+
+    #[test]
+    fn a_task_session_is_told_the_brief_and_the_handoff() {
+        let prompt = prompt("next-task", "# Rate limiting\n", Some("Settled: a window."));
+
+        assert!(
+            prompt.contains("work the next task of the backlog"),
+            "{prompt:?}"
+        );
+        assert!(prompt.contains("# The Brief this started from\n\n# Rate limiting"));
+        assert!(prompt.contains("# What the grilling settled, in its own words\n\nSettled"));
+        assert!(
+            !super::prompt("next-task", "# Rate limiting\n", None).contains("grilling settled"),
+            "and nothing about a handoff there isn't",
+        );
+    }
+
+    #[test]
+    fn the_finish_of_a_stage_is_told_the_chain_it_joins_bottom_to_top() {
+        let prompt = joining(
+            &prompt("next-task", "# Rate limiting\n\nThe API has none.\n", None),
+            &[
+                link(None, "rate-limiting"),
+                link(Some("01"), "roadmaps/rate-limiting/01-the-counter"),
+                link(Some("02"), "roadmaps/rate-limiting/02-the-window"),
+            ],
+        );
+
+        assert!(
+            prompt.contains("# The Brief this started from"),
+            "{prompt:?}"
+        );
+
+        let chain = prompt
+            .split_once("# The chain this stage joins")
+            .expect("the chain is a section of its own")
+            .1;
+
+        let counter = chain
+            .find("`roadmaps/rate-limiting/01-the-counter`")
+            .expect("the stage below is named");
+        let window = chain
+            .find("`roadmaps/rate-limiting/02-the-window`")
+            .expect("and so is the one above it");
+
+        assert!(
+            chain.find("`rate-limiting`").expect("and the foot") < counter && counter < window,
+            "bottom to top: {chain:?}"
+        );
+        assert!(chain.contains("stage 01") && chain.contains("stage 02"));
+        assert!(chain.contains("cut from"), "{chain:?}");
+    }
+
+    #[test]
+    fn the_finish_is_told_the_rebase_comes_before_the_push() {
+        let prompt = joining(
+            &prompt("next-task", "# Rate limiting\n", None),
+            &[link(Some("01"), "roadmaps/rate-limiting/01-the-counter")],
+        );
+
+        for said in [
+            "**rebase this branch onto `roadmaps/rate-limiting/01-the-counter` before anything \
+             is pushed**",
+            "open the pull request against `roadmaps/rate-limiting/01-the-counter`",
+            "docs/agents/git-workflow.md",
+            "records no stacking mechanism",
+            "never force-pushed once its own pull request is open",
+            "is a rebase that moves nothing",
+        ] {
+            assert!(prompt.contains(said), "{said:?} in {prompt:?}");
+        }
+    }
+
+    #[test]
+    fn a_session_with_no_chain_to_join_is_started_on_the_prompt_as_it_stands() {
+        let prompt = prompt("next-task", "# Rate limiting\n", None);
+
+        assert_eq!(joining(&prompt, &[]), prompt);
+    }
 }
