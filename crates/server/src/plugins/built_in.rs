@@ -389,7 +389,10 @@ mod tests {
         assert_eq!(rounds.id, "follow-up-rounds");
         assert_eq!(rounds.name, "Follow-up rounds");
         assert_eq!(rounds.outcomes, ["committed", "nothing"]);
-        assert_eq!(rounds.skills, ["verkstead/following-up"]);
+        assert_eq!(
+            rounds.skills,
+            ["verkstead/following-up", "verkstead/investigating"]
+        );
 
         assert_eq!(backlog.id, "backlog-runner");
         assert_eq!(backlog.name, "Backlog runner");
@@ -403,7 +406,6 @@ mod tests {
         assert_eq!(stages.name, "Stage runner");
         assert_eq!(stages.outcomes, ["finished", "continued"]);
         assert!(stages.skills.is_empty(), "it launches no session");
-
         assert_eq!(one.id, "one-session");
         assert_eq!(one.name, "One session");
         assert_eq!(one.outcomes, ["done", "refused"]);
