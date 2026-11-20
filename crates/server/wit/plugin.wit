@@ -432,6 +432,107 @@ interface host {
   /// for the finish's prompt. A Conversation that is no roadmap's stage joins
   /// nothing: it is answered at once, with no branches.
   join-chain: func() -> list<link>;
+
+  // Starting Conversations (stage 10). **Behind a capability**, the one an
+  // Activity's manifest writes as `- conversations: start`: an Activity that
+  // can start work is one worth knowing about at Install. Every call below is
+  // refused, in a sentence, for a plugin that does not declare it.
+
+  /// A roadmap stage to start as a Conversation of its own, against this
+  /// Conversation's Repo, under its Pairings and with its companions.
+  record stage {
+    /// The roadmap's directory under `docs/roadmaps/`: `mvp`.
+    roadmap: string,
+    /// The stage's number as the roadmap's line writes it: `05`.
+    label: string,
+    /// What the stage is called.
+    title: string,
+    /// Where its brief is, from the Repo's root, under the roadmap's
+    /// directory. Its name is what the stage's branch is named for.
+    brief-path: string,
+    /// The brief, which is the new Conversation's Brief.
+    brief: string,
+    /// The branch it is cut from.
+    base: string,
+    /// The word after its line's `on`, or empty: which device it starts on
+    /// is the host's (ADR-0029). A word that is no platform wants none.
+    platform: string,
+    /// Whether the Repo records a way to stack a stage for review, which
+    /// changes what the Timeline is told and nothing else.
+    stacks: bool,
+  }
+
+  /// A stage started: its Conversation, and the branch it is on.
+  record started {
+    conversation: s64,
+    branch: string,
+  }
+
+  /// Why a stage did not start.
+  variant not-started {
+    /// There is no place for it: its roadmap runs as many stages as it may,
+    /// or the server as many Conversations. The sentence says which. Nothing
+    /// was made, and the same start may be asked again once a place frees.
+    no-place(string),
+    /// It could not start, for the sentence's reason: a branch already
+    /// taken, no git author, a fetch git would not make. The host has said
+    /// so where it says such things already.
+    halted(string),
+  }
+
+  /// Start `stage`. The host checks and makes everything around it: the
+  /// branch and its Worktree, the companions, the record of which roadmap
+  /// and stage it is, where it runs, and the Timeline sentences. A run the
+  /// human pressed for is not held to the limits.
+  start-conversation: func(stage: stage) -> result<started, not-started>;
+
+  /// What the record says of a stage, or of the Conversation that wrote a
+  /// roadmap.
+  enum standing {
+    /// Its work finished: it reached Done once, or it was closed having
+    /// wrapped up.
+    settled,
+    /// Somebody, or some run, is on it.
+    in-flight,
+    /// Closed without having wrapped up.
+    abandoned,
+  }
+
+  /// Where a Conversation is.
+  record stands {
+    /// The state's word: `implementing`, `done`.
+    state: string,
+    /// Whether it has settled, as `standing` says.
+    settled: bool,
+  }
+
+  /// The state of `conversation`, one of this Repo's. Refused, in a sentence,
+  /// for one that is not.
+  conversation-state: func(conversation: s64) -> result<stands, string>;
+
+  /// One stage the record holds.
+  record stage-standing {
+    label: string,
+    standing: standing,
+    /// Whether it has stopped: in flight still, and waiting on Resume.
+    stopped: bool,
+    /// The Conversation the standing is read from.
+    conversation: s64,
+  }
+
+  /// What the record holds of one roadmap of this Repo.
+  record standings {
+    /// The Conversation that wrote the roadmap, where the record holds one.
+    planner: option<standing>,
+    /// Every stage it holds a row for, in no order of the roadmap's.
+    stages: list<stage-standing>,
+  }
+
+  /// What the record holds of `roadmap`, in this Repo.
+  stage-standings: func(roadmap: string) -> result<standings, string>;
+
+  /// The stages of `roadmap` that have joined its chain, bottom to top.
+  stage-chain: func(roadmap: string) -> result<list<link>, string>;
 }
 
 /// An Activity's component, run once per start.

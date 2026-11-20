@@ -525,6 +525,33 @@ async fn a_second_plugin_claiming_a_pack_name_loads_in_trouble() {
     );
 }
 
+/// A plugin asking to start Conversations says so on its card, beside what
+/// else it reaches: an Activity that can start work is one worth knowing about
+/// before it is installed.
+#[tokio::test]
+async fn a_plugin_starting_conversations_says_so_on_its_card() {
+    let (app, dir) = kept().await;
+    let path = plugin(
+        dir.path(),
+        "runner",
+        &manifest(
+            PLUGIN,
+            "Runner",
+            &["outbound: gitlab.com", "conversations: start"],
+        ),
+    );
+
+    assert_eq!(
+        read(&app, &path).await.capabilities,
+        [
+            PluginCapability::Outbound {
+                host: "gitlab.com".to_owned()
+            },
+            PluginCapability::Conversations,
+        ],
+    );
+}
+
 /// A local plugin read through the card and installed is listed with its name,
 /// version, author, what it provides and where it came from, and loads.
 #[tokio::test]
@@ -2068,6 +2095,7 @@ async fn the_page_and_the_card_are_written_for_the_viewer() {
                 "outbound: gitlab.com",
                 "filesystem: ~/.config/glab",
                 "environment: GITLAB_TOKEN",
+                "conversations: start",
             ],
         ),
     );

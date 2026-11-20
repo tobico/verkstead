@@ -1070,6 +1070,7 @@ async fn backlog_runner(state: AppState, conversation_id: i64, driving: Driving)
         &[],
         options,
         "working the backlog",
+        crate::continuing::Brought::Settle,
     )
     .await;
 
@@ -2008,6 +2009,7 @@ pub(crate) async fn follow_up_rounds(state: AppState, conversation_id: i64, driv
         &[],
         options,
         "following the work up",
+        crate::continuing::Brought::Settle,
     )
     .await;
 

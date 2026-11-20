@@ -254,11 +254,15 @@ pub enum Capability {
     Outbound { host: String },
     /// An environment variable it may read.
     Environment { name: String },
+    /// Starting Conversations of its own, which an Activity does through the
+    /// host (ADR-0030, *Activity*): written `conversations: start`, the one
+    /// thing there is to do with them.
+    Conversations,
 }
 
 impl Capability {
     /// The words a manifest writes for each kind, in the order they are offered.
-    const KINDS: [&'static str; 3] = ["filesystem", "outbound", "environment"];
+    const KINDS: [&'static str; 4] = ["filesystem", "outbound", "environment", "conversations"];
 }
 
 /// How much of a granted path a component may do.
@@ -1426,7 +1430,7 @@ fn capability(value: &Value, field: &str) -> Result<Capability, Refusal> {
                 field,
                 format!(
                     "`{field}` asks for {named}, which isn't a capability Verkstead knows. \
-                     It's one of filesystem, outbound, or environment."
+                     It's one of filesystem, outbound, environment, or conversations."
                 ),
             ));
         }
@@ -1465,6 +1469,16 @@ fn capability(value: &Value, field: &str) -> Result<Capability, Refusal> {
             }
         }
         "outbound" => Capability::Outbound { host: named },
+        "conversations" if named == "start" => Capability::Conversations,
+        "conversations" => {
+            let field = format!("{field}.conversations");
+            return Err(Refusal::of(
+                &field,
+                format!(
+                    "`{field}` should be `start`, the one thing a plugin may ask to do with conversations."
+                ),
+            ));
+        }
         _ => Capability::Environment { name: named },
     })
 }
@@ -1834,6 +1848,7 @@ provides: []
     access: read-write
   - outbound: gitlab.com
   - environment: GITLAB_HOST
+  - conversations: start
 "
         );
 
@@ -1854,8 +1869,17 @@ provides: []
                 Capability::Environment {
                     name: "GITLAB_HOST".to_owned(),
                 },
+                Capability::Conversations,
             ]
         );
+    }
+
+    #[test]
+    fn conversations_are_asked_for_only_to_start_them() {
+        let yaml = format!("{MINIMAL}capabilities:\n  - conversations: read\n");
+
+        assert_eq!(refused_at(&yaml), "capabilities[0].conversations");
+        assert!(read(&yaml).unwrap_err().why.contains("should be `start`"));
     }
 
     #[test]

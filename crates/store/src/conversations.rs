@@ -139,7 +139,7 @@ impl Lifecycle {
 
     /// The word the column holds. Lowercase and spelled out, so the table reads
     /// as something rather than as a number nobody can look up.
-    pub(crate) fn stored(self) -> &'static str {
+    pub fn stored(self) -> &'static str {
         match self {
             Self::Draft => "draft",
             Self::Grilling => "grilling",
@@ -6727,6 +6727,30 @@ impl StageStandings {
         self.held(roadmap, label).map(|held| held.conversation_id)
     }
 
+    /// Every stage of `roadmap` the record holds a row for, by label, with what
+    /// [`StageStandings::of`], [`StageStandings::stopped`] and
+    /// [`StageStandings::conversation`] answer for it — sorted by label, the
+    /// record keeping no order of the roadmap's.
+    pub fn stages(&self, roadmap: &str) -> Vec<(&str, StageStanding, bool, i64)> {
+        let mut stages: Vec<_> = self
+            .stages
+            .get(roadmap)
+            .into_iter()
+            .flatten()
+            .map(|(label, held)| {
+                (
+                    label.as_str(),
+                    held.standing,
+                    held.stopped,
+                    held.conversation_id,
+                )
+            })
+            .collect();
+
+        stages.sort_by_key(|(label, ..)| *label);
+        stages
+    }
+
     /// And **the device** that stage is on, by the name its member goes by,
     /// wherever that is not here: read off this copy's tombstone of the stage —
     /// the mark naming the device holding the live record — whoever moved it
@@ -6946,18 +6970,7 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
     let mut standings = StageStandings::default();
 
     for (roadmap, label, state, finished, wrapped, stopped, conversation_id) in rows {
-        let standing = match (Lifecycle::read(&state)?, finished, wrapped) {
-            // In Done, however it got there — including a database in which the
-            // move was never written.
-            (Lifecycle::Done, ..) => StageStanding::Settled,
-            (Lifecycle::Closed, _, true) => StageStanding::Settled,
-            (Lifecycle::Closed, _, false) => StageStanding::Abandoned,
-            // Somewhere else, having been in Done before: the work finished and
-            // something was taken up about it afterwards. Which is a stage done —
-            // see [`StageStanding::Settled`], where *once rather than now* is.
-            (_, true, _) => StageStanding::Settled,
-            _ => StageStanding::InFlight,
-        };
+        let standing = standing(Lifecycle::read(&state)?, finished, wrapped);
 
         match label {
             Some(label) => standings.record(&roadmap, &label, standing, stopped, conversation_id),
@@ -6983,6 +6996,64 @@ pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageSta
     standings.away = away.into_iter().collect();
 
     Ok(standings)
+}
+
+/// What a Conversation in `state` stands at, having reached Done at some point
+/// where `finished` and Wrapping where `wrapped`.
+fn standing(state: Lifecycle, finished: bool, wrapped: bool) -> StageStanding {
+    match (state, finished, wrapped) {
+        // In Done, however it got there — including a database in which the
+        // move was never written.
+        (Lifecycle::Done, ..) => StageStanding::Settled,
+        (Lifecycle::Closed, _, true) => StageStanding::Settled,
+        (Lifecycle::Closed, _, false) => StageStanding::Abandoned,
+        // Somewhere else, having been in Done before: the work finished and
+        // something was taken up about it afterwards. Which is a stage done —
+        // see [`StageStanding::Settled`], where *once rather than now* is.
+        (_, true, _) => StageStanding::Settled,
+        _ => StageStanding::InFlight,
+    }
+}
+
+/// Where `conversation_id` is, and what it stands at as [`stage_standings`]
+/// reads a stage — whether or not it is one — or `None` where there is no such
+/// Conversation of `repo_id`'s.
+pub async fn conversation_standing(
+    pool: &SqlitePool,
+    repo_id: i64,
+    conversation_id: i64,
+) -> Result<Option<(Lifecycle, StageStanding)>> {
+    let row: Option<(String, bool, bool)> = sqlx::query_as(
+        "SELECT c.state,
+                EXISTS (
+                    SELECT 1 FROM timeline_events e
+                    WHERE e.conversation_id = c.id AND e.kind = ? AND e.body = ?
+                ),
+                EXISTS (
+                    SELECT 1 FROM timeline_events e
+                    WHERE e.conversation_id = c.id AND e.kind = ? AND e.body IN (?, ?)
+                )
+         FROM conversations c
+         WHERE c.id = ? AND c.repo_id = ?",
+    )
+    .bind(Event::Moved(Lifecycle::Done).kind())
+    .bind(Lifecycle::Done.stored())
+    .bind(Event::Moved(Lifecycle::Wrapping).kind())
+    .bind(Lifecycle::Wrapping.stored())
+    .bind(Lifecycle::Done.stored())
+    .bind(conversation_id)
+    .bind(repo_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading where Conversation {conversation_id} stands"))?;
+
+    let Some((state, finished, wrapped)) = row else {
+        return Ok(None);
+    };
+
+    let state = Lifecycle::read(&state)?;
+
+    Ok(Some((state, standing(state, finished, wrapped))))
 }
 
 /// One stage that has **joined** its roadmap's chain: the Conversation it is,

@@ -43207,6 +43207,23 @@ const LAUNCHING: &str = include_str!("../fixtures/activity-launching.wat");
 /// the WAT.
 const READING: &str = include_str!("../fixtures/activity-reading.wat");
 
+/// The Activity that starts two roadmap stages and reads the first back until
+/// it settles — see the WAT.
+const STARTING: &str = include_str!("../fixtures/activity-starting.wat");
+
+/// That Activity, its second stage wanting a platform this device is not, so
+/// that where it starts is a placement.
+fn starting() -> String {
+    let elsewhere = if cfg!(windows) { "linux" } else { "windows" };
+
+    STARTING
+        .replace("\"windows\"", &format!("\"{elsewhere}\""))
+        .replace(
+            "(i32.const 7) ;; the platform's length",
+            &format!("(i32.const {}) ;; the platform's length", elsewhere.len()),
+        )
+}
+
 /// One whose `run` traps the moment it is called.
 const TRAPPING: &str = r#"
 (module
@@ -43249,6 +43266,28 @@ impl Grilling {
                         .collect(),
                     skills: skills.iter().map(|skill| (*skill).to_owned()).collect(),
                 },
+            )
+    }
+
+    /// Start the stage-starting Activity, its plugin granted `capabilities`.
+    fn starting_stages(
+        &self,
+        capabilities: Vec<verkstead_server::plugins::manifest::Capability>,
+    ) -> tokio::task::JoinHandle<Option<String>> {
+        self.hosting
+            .as_ref()
+            .expect("this bench hosts Activities")
+            .start_granted(
+                self.id,
+                activity_component(&starting()),
+                verkstead_server::plugins::manifest::Activity {
+                    id: "rounds".to_owned(),
+                    name: "Rounds".to_owned(),
+                    component: PathBuf::from("rounds.wasm"),
+                    outcomes: vec!["started".to_owned(), "unstarted".to_owned()],
+                    skills: Vec::new(),
+                },
+                capabilities,
             )
     }
 
@@ -43426,6 +43465,156 @@ async fn a_component_reads_what_the_repo_has_committed() {
         said(read().await),
         answers,
         "the tick is read once it is committed"
+    );
+}
+
+/// Steer Conversation `id` into Done, ending what it is running.
+async fn steered_done(fixture: &Grilling, id: i64) {
+    let _: SteerOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{id}/steer"),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let steered: ConversationSteered = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({ "target": "Done", "interrupt": true }),
+    )
+    .await;
+
+    assert_eq!(steered, ConversationSteered::Steered);
+}
+
+/// A component granted `conversations: start` starts roadmap stages as
+/// Conversations of their own and reads one back to Done: each start is the
+/// host's whole start — its branch, its record, its sentence on the Timeline —
+/// a stage whose line wants another platform is placed as ADR-0029 says, and a
+/// start the host refuses is told why.
+#[tokio::test]
+async fn a_component_starts_a_conversation_and_reads_it_to_done() {
+    let fixture = grilling(&under_an_activity("    sleep 300")).await;
+    fixture.grilling_printed().await;
+
+    let running = fixture.starting_stages(vec![
+        verkstead_server::plugins::manifest::Capability::Conversations,
+    ]);
+
+    let stages = stages_of(&fixture, 2).await;
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing"
+        ],
+    );
+
+    let said = said_on(&fixture, fixture.id, "<em>Refuse the rest</em>").await;
+    assert!(
+        said.contains("Stage 01 of the <code>rate-limiting</code> roadmap"),
+        "the host said each stage started, where it says so: {said:?}",
+    );
+    assert!(
+        said.contains("It wants Windows, but no Windows device is linked, so it's running here.")
+            || said
+                .contains("It wants Linux, but no Linux device is linked, so it's running here."),
+        "and the stage wanting another platform was placed: {said:?}",
+    );
+
+    steered_done(&fixture, stages[0].id).await;
+
+    let outcome = tokio::time::timeout(*PATIENCE, running)
+        .await
+        .expect("the component should end")
+        .expect("the component's task should not panic");
+    assert_eq!(outcome.as_deref(), Some("started"));
+
+    let said = notices(&fixture.view().await);
+    assert!(
+        said.iter().any(|notice| notice.contains("<p>done</p>")),
+        "the component read stage 01 to Done: {said:?}",
+    );
+    assert!(
+        said.last()
+            .is_some_and(|notice| notice.contains("is already a branch of this repository")),
+        "and stage 02 started again is refused, its branch taken: {said:?}",
+    );
+}
+
+/// The limits are the host's: a start over the roadmap's places is refused as
+/// *no place*, with the sentence saying what it waits for and nothing made,
+/// and the same start succeeds once a place frees.
+#[tokio::test]
+async fn a_component_start_over_the_limit_waits_for_a_place() {
+    let fixture = grilling(&under_an_activity("    sleep 300")).await;
+    fixture.grilling_printed().await;
+    configure(&fixture, "at_once:\n  roadmap_stages: 1\n");
+
+    let running = fixture.starting_stages(vec![
+        verkstead_server::plugins::manifest::Capability::Conversations,
+    ]);
+
+    let first = stage_of(&fixture).await;
+    assert_eq!(first.branch, "roadmaps/rate-limiting/01-counter");
+
+    let said = said_on(&fixture, fixture.id, "waiting for a place").await;
+    assert!(
+        said.contains("Stage 02") && said.contains("runs one stage at a time"),
+        "which stage waits, and the limit it waits on: {said:?}",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/02-refusing"],
+        )
+        .contains("02-refusing"),
+        "and nothing was made for it",
+    );
+
+    steered_done(&fixture, first.id).await;
+
+    let outcome = tokio::time::timeout(*PATIENCE, running)
+        .await
+        .expect("the component should end")
+        .expect("the component's task should not panic");
+    assert_eq!(outcome.as_deref(), Some("started"));
+
+    assert_eq!(
+        notices(&fixture.view().await)
+            .last()
+            .map(|said| said.trim()),
+        Some("<p>roadmaps/rate-limiting/02-refusing</p>"),
+        "the place freed, the same start started",
+    );
+}
+
+/// A component whose plugin does not ask to start Conversations is refused at
+/// the call, in a sentence, and nothing starts.
+#[tokio::test]
+async fn a_component_not_granted_conversations_starts_none() {
+    let fixture = grilling(&under_an_activity("    sleep 300")).await;
+    fixture.grilling_printed().await;
+
+    let outcome = tokio::time::timeout(*PATIENCE, fixture.starting_stages(Vec::new()))
+        .await
+        .expect("the component should end")
+        .expect("the component's task should not panic");
+    assert_eq!(outcome.as_deref(), Some("unstarted"));
+
+    let said = notices(&fixture.view().await);
+    assert!(
+        said.iter().any(|notice| notice
+            .contains("Rounds doesn't ask to start conversations, so it can't start or read one.")),
+        "the refusal says why: {said:?}",
+    );
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "and no Conversation was started",
     );
 }
 

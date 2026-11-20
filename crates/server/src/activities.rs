@@ -32,6 +32,7 @@ use anyhow::Result;
 use verkstead_store as store;
 
 use crate::AppState;
+use crate::continuing::Brought;
 use crate::drivers::Driving;
 use crate::lending::Lent;
 use crate::memos::Building;
@@ -66,6 +67,18 @@ impl Hosting {
         component: Vec<u8>,
         activity: Activity,
     ) -> tokio::task::JoinHandle<Option<String>> {
+        self.start_granted(conversation_id, component, activity, Vec::new())
+    }
+
+    /// The same, granted `capabilities`, as a run brought about by a settle
+    /// is.
+    pub fn start_granted(
+        &self,
+        conversation_id: i64,
+        component: Vec<u8>,
+        activity: Activity,
+        capabilities: Vec<Capability>,
+    ) -> tokio::task::JoinHandle<Option<String>> {
         let state = self.state.clone();
         let driving = state.drivers.driving(conversation_id);
 
@@ -80,9 +93,10 @@ impl Hosting {
                 &driving,
                 Files::Embedded(&files),
                 &activity,
-                &[],
+                &capabilities,
                 Vec::new(),
                 &activity.name,
+                Brought::Settle,
             )
             .await
             .map(|ran| ran.outcome)
@@ -109,6 +123,9 @@ pub(crate) struct Ran {
 /// `doing` is what the rescue and a stop the component asks for say it was
 /// doing — the words the state it runs in is judged by, *following the work
 /// up*, rather than the Activity's name.
+///
+/// `brought` is what brought the run about, which a Conversation the component
+/// starts is held to the limits by — see [`crate::continuing::begin`].
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run(
     state: &AppState,
@@ -119,6 +136,7 @@ pub(crate) async fn run(
     capabilities: &[Capability],
     options: Vec<(String, String)>,
     doing: &str,
+    brought: Brought,
 ) -> Option<Ran> {
     let name = &activity.name;
 
@@ -141,11 +159,14 @@ pub(crate) async fn run(
         .map(|homes| homes.servers().to_owned());
     let writing = Arc::new(Mutex::new(None));
     let lent = Hosted {
-        lent: Lent::new(state, conversation_id).doing(doing),
+        lent: Lent::new(state, conversation_id)
+            .doing(doing)
+            .brought(brought),
         state: state.clone(),
         conversation_id,
         name: name.clone(),
         declared: activity.skills.clone(),
+        starts: capabilities.contains(&Capability::Conversations),
         doing: doing.to_owned(),
         writing: writing.clone(),
         planning: None,
@@ -339,6 +360,10 @@ struct Hosted {
     /// refuses a block naming a skill it cannot reach.
     declared: Vec<String>,
 
+    /// Whether its plugin was granted `conversations: start`, without which
+    /// every host function about starting Conversations is refused.
+    starts: bool,
+
     /// What the rescue and a stop say it is doing between the steps its
     /// launches name — see [`step`].
     doing: String,
@@ -366,6 +391,24 @@ impl Hosted {
 }
 
 impl Hosted {
+    /// The sentence a call about starting Conversations is refused in, where
+    /// the plugin was not granted it.
+    fn ungranted(&self) -> Option<String> {
+        if self.starts {
+            return None;
+        }
+
+        tracing::error!(
+            conversation_id = self.conversation_id,
+            "an Activity asked about starting Conversations without the capability",
+        );
+
+        Some(format!(
+            "{} doesn't ask to start conversations, so it can't start or read one.",
+            self.name
+        ))
+    }
+
     /// Whether `.tasks/TODO.md` is in the Worktree, committed as it stands.
     async fn backlog_committed(&self) -> bool {
         let worktree = store::load_conversation(&self.state.pool, self.conversation_id)
@@ -511,6 +554,57 @@ impl host::Host for Hosted {
         self.ended_by_a_stop().await?;
 
         Ok(chain)
+    }
+
+    async fn start_conversation(
+        &mut self,
+        stage: host::Stage,
+    ) -> wasmtime::Result<Result<host::Started, host::NotStarted>> {
+        if let Some(why) = self.ungranted() {
+            return Ok(Err(host::NotStarted::Halted(why)));
+        }
+
+        self.ended_by_a_stop().await?;
+
+        host::Host::start_conversation(&mut self.lent, stage).await
+    }
+
+    /// A stop that landed ends the component here too, as an Activity reading
+    /// a Conversation over and over until it settles has no launch or wait to
+    /// be ended at.
+    async fn conversation_state(
+        &mut self,
+        conversation: i64,
+    ) -> wasmtime::Result<Result<host::Stands, String>> {
+        if let Some(why) = self.ungranted() {
+            return Ok(Err(why));
+        }
+
+        self.ended_by_a_stop().await?;
+
+        host::Host::conversation_state(&mut self.lent, conversation).await
+    }
+
+    async fn stage_standings(
+        &mut self,
+        roadmap: String,
+    ) -> wasmtime::Result<Result<host::Standings, String>> {
+        if let Some(why) = self.ungranted() {
+            return Ok(Err(why));
+        }
+
+        host::Host::stage_standings(&mut self.lent, roadmap).await
+    }
+
+    async fn stage_chain(
+        &mut self,
+        roadmap: String,
+    ) -> wasmtime::Result<Result<Vec<host::Link>, String>> {
+        if let Some(why) = self.ungranted() {
+            return Ok(Err(why));
+        }
+
+        host::Host::stage_chain(&mut self.lent, roadmap).await
     }
 }
 

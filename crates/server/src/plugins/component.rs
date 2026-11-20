@@ -669,6 +669,34 @@ mod unlent {
         async fn join_chain(&mut self) -> wasmtime::Result<Vec<host::Link>> {
             Err(refused())
         }
+
+        async fn start_conversation(
+            &mut self,
+            _stage: host::Stage,
+        ) -> wasmtime::Result<Result<host::Started, host::NotStarted>> {
+            Err(refused())
+        }
+
+        async fn conversation_state(
+            &mut self,
+            _conversation: i64,
+        ) -> wasmtime::Result<Result<host::Stands, String>> {
+            Err(refused())
+        }
+
+        async fn stage_standings(
+            &mut self,
+            _roadmap: String,
+        ) -> wasmtime::Result<Result<host::Standings, String>> {
+            Err(refused())
+        }
+
+        async fn stage_chain(
+            &mut self,
+            _roadmap: String,
+        ) -> wasmtime::Result<Result<Vec<host::Link>, String>> {
+            Err(refused())
+        }
     }
 }
 
@@ -735,6 +763,9 @@ fn grant(capabilities: &[Capability], home: Option<&Path>) -> Result<Grant, Trou
                 }
             }
             Capability::Outbound { host } => outbound.hosts.push(host.clone()),
+            // Nothing of WASI's: the host functions that start a Conversation
+            // ask the grant themselves — see [`crate::activities`].
+            Capability::Conversations => {}
         }
     }
 
