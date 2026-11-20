@@ -520,9 +520,9 @@ pub(crate) fn wrap_up(state: &AppState, conversation_id: i64, against: Option<St
 }
 
 /// The watchers the host still runs beside the Activity: every pull request's
-/// checks and comments, the companions covered, and the branch reviewed.
+/// comments, the companions covered, and the branch reviewed. The checks are
+/// the Activity's own.
 pub(crate) fn watchers(state: &AppState, conversation_id: i64, reviewing: Reviewing) {
-    driving(state, conversation_id, crate::checks::watching);
     driving(state, conversation_id, crate::comments::watching);
 
     // The companions covered, and then the branch read — one task rather than
@@ -658,19 +658,17 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
                     "a companion the work committed in is on a pull request of its own",
                 );
 
-                // And it is watched and read from here, this being the moment
-                // there is something to watch: the watchers this wrap-up started
-                // could only start one each per pull request that was already
-                // recorded, and this one was not. A wrap-up found already covered
-                // starts none of these — a companion recorded already is read
-                // past above — so a server coming back up over one gets its
-                // watchers from [`watching`] rather than from here.
+                // And its comments are read from here, this being the moment
+                // there is something to read: the watcher this wrap-up started
+                // could only start one per pull request that was already
+                // recorded, and this one was not. A wrap-up found already
+                // covered starts none of these — a companion recorded already
+                // is read past above — so a server coming back up over one gets
+                // its watcher from [`watching`] rather than from here. Its
+                // checks are the Wrap-up Activity's, which reads the record
+                // afresh every round.
                 let repo_id = companion.repo_id;
                 let number = opened.number;
-
-                driving(&state, conversation_id, move |state, conversation_id| {
-                    crate::checks::watch(state, conversation_id, repo_id, number)
-                });
 
                 driving(&state, conversation_id, move |state, conversation_id| {
                     crate::comments::watch(state, conversation_id, repo_id, number)

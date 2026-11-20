@@ -10029,6 +10029,185 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
     );
 }
 
+/// A `gh` whose check is red until the first fix session has written its
+/// prompt to `written`, and which cannot be asked about the checks from then
+/// on — a server that dispatched one fix and then lost GitHub.
+fn red_until_a_fix_then_unaskable(written: &Path) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
+case "$5" in
+*statusCheckRollup*)
+    if [ -e {written} ]; then
+        printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
+        exit 1
+    fi
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}'
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
+    ;;
+esac
+"#,
+        written = quoted(written),
+    )
+}
+
+/// The goes a check has had are the host's record, not the Wrap-up
+/// component's memory: a server that comes back up mid-wrap-up over a check
+/// that has had one fix session gives it one more, and then asks the human.
+///
+/// The first server dispatches one fix and can't ask about the checks after
+/// it, so it spends nothing more; the second finds the check still red. Had
+/// the count started again there, it would have had two more goes.
+#[tokio::test]
+async fn fix_attempts_survive_a_server_restarted_mid_wrap_up() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        prompts,
+        &a_backlog_then_fixes(&written),
+        &red_until_a_fix_then_unaskable(&written),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while attempts_spent(&fixture, "Rust").await < 1 || !written.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the first fix was never dispatched"
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+
+    // Long enough for many more polls, had the first server anything left to
+    // spend.
+    pause(Duration::from_millis(500)).await;
+    assert_eq!(
+        attempts_spent(&fixture, "Rust").await,
+        1,
+        "the first server spent one go and lost GitHub",
+    );
+
+    let _restarted = router_running_sessions(
+        open_database(&fixture.database).await.unwrap(),
+        fixture.state.path().to_owned(),
+        Agents::running(
+            vec!["/bin/sh".to_owned(), "-c".to_owned(), "true".to_owned()],
+            Homes::on(
+                Platform::HERE,
+                PathBuf::from("/nonexistent"),
+                fixture.state.path(),
+            ),
+            Reachable::at(LISTENING),
+            SandboxConfig::default(),
+            BuildCache::none(),
+            Skills::installed(Platform::HERE, fixture.state.path())
+                .expect("this binary carries skills"),
+            equipped(fixture.state.path()),
+            Handoffs::under(fixture.state.path()),
+            Attachments::under(fixture.state.path()),
+            Settings::in_data_dir(fixture.state.path()),
+        )
+        .at_pace(*BRISKLY),
+        gh_stub(&gh_checking("FAILURE")),
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("after 2 fix sessions"),
+        "the restarted server asked the human once the check had had its two: {:?}",
+        stopped.html,
+    );
+    assert_eq!(
+        attempts_spent(&fixture, "Rust").await,
+        2,
+        "one go spent before the restart and one after it, and no more",
+    );
+}
+
+/// A `gh` that answers everything about the pull request — merging cleanly —
+/// and writes `asked` the moment anything asks about its checks.
+fn gh_telling_of_checks(asked: &Path) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ "$2" = list ]; then printf '[]'; exit 0; fi
+case "$5" in
+*statusCheckRollup*)
+    : > {asked}
+    printf '{{"mergeable":"MERGEABLE","statusCheckRollup":[]}}'
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"mergeable":"MERGEABLE","number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41","headRefName":"rate-limiting","baseRefName":"main","isCrossRepository":false,"state":"OPEN"}}'
+    ;;
+esac
+"#,
+        asked = quoted(asked),
+    )
+}
+
+/// A Forge with no checks has nothing for the wrap-up to wait on: the checks
+/// watcher is settled at once and the Forge is never asked about them, and
+/// whether the pull request merges is read off its standing instead.
+#[tokio::test]
+async fn a_wrap_up_over_a_forge_lacking_checks_settles_them_and_never_asks() {
+    let spill = tempfile::tempdir().unwrap();
+    let asked = spill.path().join("checks-asked");
+    let written = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_fixes(&written),
+        &gh_telling_of_checks(&asked),
+    )
+    .await;
+
+    fixture
+        .hosting
+        .as_ref()
+        .expect("this bench hosts Activities")
+        .lacking(verkstead_server::forge::Capability::Checks);
+
+    worked_to_empty(&fixture).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !(checks_settled(&fixture).await && merge_settled(&fixture).await) {
+        assert!(
+            Instant::now() < deadline,
+            "the checks the Forge lacks were never settled, nor the merge read off the \
+             standing",
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+
+    // Long enough for many more polls.
+    pause(Duration::from_millis(500)).await;
+
+    assert!(
+        !asked.exists(),
+        "and nothing ever asked about the checks a Forge without them can't answer",
+    );
+    assert!(!written.exists(), "nor was a fix session dispatched");
+}
+
 /// A finish that commits its work and opens no pull request is not the end of the
 /// run: one session is sent for the one thing missing, and a branch that comes
 /// back on a pull request wraps up as though the finish had done it itself.

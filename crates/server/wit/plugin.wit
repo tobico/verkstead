@@ -543,6 +543,34 @@ interface host {
   /// makes.
   count-fix-attempt: func(pull-request: pull-request, check: string) -> result<s64, string>;
 
+  /// What origin holds the pull request's branch at — the commit a suite has
+  /// to be about to be this branch's — or none where that can't be told: no
+  /// origin, a remote that didn't answer, a branch it doesn't hold.
+  pushed-head: func(pull-request: pull-request) -> option<string>;
+
+  /// How many resolution sessions the conflicts in the pull request's Repo
+  /// have had: one count for the Repo, which is one for a stack, a session
+  /// resolving a stack whole.
+  conflict-attempts: func(pull-request: pull-request) -> result<s64, string>;
+
+  /// Count one more, as the session is dispatched, and say how many that
+  /// makes.
+  count-conflict-attempt: func(pull-request: pull-request) -> result<s64, string>;
+
+  /// What a session sent to resolve the pull request's conflict with its base
+  /// is told: where to work, and how — by the strategy the human configured,
+  /// or for a stack, synced whole. Refused, in a sentence, where it is one of
+  /// a stack this Sandbox can't sync — and the run is then stopped saying how
+  /// to put that right, nothing spent.
+  resolution: func(pull-request: pull-request) -> result<string, string>;
+
+  /// Give the wrap-up up over the pull request, saying `how` about `what` it
+  /// was doing, with the tail of the newest session launched here — unless
+  /// another of the work's pull requests still has a fix or a resolution
+  /// coming, which a stop would spend: then nothing is written, and the
+  /// answer is false. Once given up, `wrap-up` says so.
+  give-up: func(pull-request: pull-request, what: string, how: string) -> bool;
+
   /// Which of the comments said in the Repo named `repo` have already been
   /// marked addressed, by what each is.
   addressed: func(repo: string) -> result<list<string>, string>;

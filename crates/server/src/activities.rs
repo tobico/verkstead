@@ -924,6 +924,43 @@ impl host::Host for Hosted {
     ) -> wasmtime::Result<Result<(), String>> {
         host::Host::mark_addressed(&mut self.lent, repo, comments).await
     }
+
+    async fn pushed_head(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Option<String>> {
+        host::Host::pushed_head(&mut self.lent, pull_request).await
+    }
+
+    async fn conflict_attempts(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<i64, String>> {
+        host::Host::conflict_attempts(&mut self.lent, pull_request).await
+    }
+
+    async fn count_conflict_attempt(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<i64, String>> {
+        host::Host::count_conflict_attempt(&mut self.lent, pull_request).await
+    }
+
+    async fn resolution(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<String, String>> {
+        host::Host::resolution(&mut self.lent, pull_request).await
+    }
+
+    async fn give_up(
+        &mut self,
+        pull_request: world::PullRequest,
+        what: String,
+        how: String,
+    ) -> wasmtime::Result<bool> {
+        host::Host::give_up(&mut self.lent, pull_request, what, how).await
+    }
 }
 
 /// What a session launched expecting `evidence` builds, and what it is said to

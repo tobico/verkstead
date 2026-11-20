@@ -158,7 +158,8 @@ pub(crate) async fn standing(
     })
 }
 
-/// Its checks, or the `checks` watcher over it settled at once.
+/// Its checks, or the `checks` watcher over it settled at once — and what
+/// they came to, and whether it merges, written down for the card.
 pub(crate) async fn checks(
     state: &AppState,
     conversation_id: i64,
@@ -176,6 +177,26 @@ pub(crate) async fn checks(
     }
 
     let suite = asked(state, &named, github::checks).await?;
+
+    // Written down before the component decides anything about it, because the
+    // card draws both and outlives the wrap-up: this is the one place anything
+    // asks how the checks are while one runs.
+    crate::checks::remember(
+        state,
+        conversation_id,
+        named.repo.id,
+        named.number,
+        &suite.checks,
+    )
+    .await;
+    crate::checks::marked(
+        state,
+        conversation_id,
+        named.repo.id,
+        named.number,
+        suite.mergeable,
+    )
+    .await;
 
     Ok(world::Suite {
         head: suite.head,

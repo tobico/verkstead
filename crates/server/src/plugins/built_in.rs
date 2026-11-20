@@ -442,7 +442,10 @@ mod tests {
             wrap_up.outcomes,
             ["settled", "merged", "closed", "given-up"]
         );
-        assert_eq!(wrap_up.skills, ["verkstead/submitting"]);
+        assert_eq!(
+            wrap_up.skills,
+            ["verkstead/submitting", "verkstead/addressing"]
+        );
 
         for component in [
             "follow-up-rounds.wasm",

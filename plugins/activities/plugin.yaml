@@ -56,4 +56,4 @@ provides:
     name: Wrap-up
     component: wrap-up.wasm
     outcomes: [settled, merged, closed, given-up]
-    skills: [verkstead/submitting]
+    skills: [verkstead/submitting, verkstead/addressing]

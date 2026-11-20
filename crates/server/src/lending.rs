@@ -142,7 +142,14 @@ enum Turn {
     /// and let go once it is over — a relaunched grilling, which waited for
     /// whatever was running to finish before it decided anything.
     Handed(crate::sessions::Turn),
+    /// Tried rather than waited for, and held for as long as the session it
+    /// was taken for runs — the wrap-up's dispatches, see [`Lent::trying`].
+    Try,
 }
+
+/// What a launch tried for the Turn is refused with where something else holds
+/// it: the Wrap-up component looks again on its next round.
+pub(crate) const BUSY: &str = "Something else is working in the Worktree.";
 
 /// One session the host is watching, and what its Done signal is checked
 /// against while it is waited on.
@@ -157,6 +164,10 @@ struct Watched {
     /// Its Done signal checked and its silences rescued across the ticks of a
     /// `wait-any` — see [`Seeing`].
     seeing: Option<Seeing>,
+
+    /// The Turn it was launched under, where it was tried for — held until a
+    /// wait sees it out. See [`Lent::trying`].
+    turn: Option<crate::sessions::Turn>,
 }
 
 /// A session's Done signal held to its evidence, and the session spoken to
@@ -236,6 +247,20 @@ impl Lent {
     /// go once that is over: neither waiting for it nor asking after a stop.
     pub(crate) fn turn_handed(mut self, turn: crate::sessions::Turn) -> Lent {
         self.turn = Turn::Handed(turn);
+        self
+    }
+
+    /// A launch tries for the Turn rather than waiting, is refused with
+    /// [`BUSY`] where it is taken, and holds it for as long as its session
+    /// runs, ending the session once its Done signal is taken and it idles.
+    ///
+    /// What the wrap-up's dispatches always were. A fix session queued behind
+    /// the review would be dispatched about a suite nobody has looked at since,
+    /// and one not holding the Turn would be ended by the review or a batch of
+    /// comments starting over it mid-commit — see
+    /// [`crate::sessions::Sessions::try_turn`].
+    pub(crate) fn trying(mut self) -> Lent {
+        self.turn = Turn::Try;
         self
     }
 
@@ -364,7 +389,13 @@ impl Lent {
             .and_then(|watched| watched.ended.clone())
     }
 
-    fn watch(&mut self, session: Session, expected: Expected, ends: Ends) -> world::Session {
+    fn watch(
+        &mut self,
+        session: Session,
+        expected: Expected,
+        ends: Ends,
+        turn: Option<crate::sessions::Turn>,
+    ) -> world::Session {
         self.issued += 1;
         self.writing = Some(session.event_id);
 
@@ -376,6 +407,7 @@ impl Lent {
                 ends,
                 ended: None,
                 seeing: None,
+                turn,
             },
         );
 
@@ -685,21 +717,51 @@ impl Lent {
             .expect("it was found above, and nothing is taken out");
         watched.seeing = None;
 
-        let Some(ended) = ended else {
-            return Ok(world::Woke::Waited((handle, world::Waited::Done)));
-        };
-
-        watched.ended = Some(ended.clone());
+        if let Some(ended) = &ended {
+            watched.ended = Some(ended.clone());
+        }
 
         let evidence = match &watched.expected {
             Expected::Evidence(evidence) => evidence.clone(),
             Expected::Picked(_) => unreachable!("a session expecting a pick was refused above"),
         };
 
+        self.seen_out(handle, ended.is_none()).await;
+
+        let Some(ended) = ended else {
+            return Ok(world::Woke::Waited((handle, world::Waited::Done)));
+        };
+
         Ok(world::Woke::Waited((
             handle,
             self.gone(&ended, &evidence).await,
         )))
+    }
+
+    /// Let go of the Turn `session` was launched holding, once a wait has seen
+    /// it out — ending it first where it gave its Done signal and idles since,
+    /// as a fix session dispatched by a wrap-up always was. See
+    /// [`Lent::trying`].
+    async fn seen_out(&mut self, session: world::Session, done: bool) {
+        let Some(turn) = self
+            .watched
+            .get_mut(&session)
+            .and_then(|watched| watched.turn.take())
+        else {
+            return;
+        };
+
+        if done {
+            tracing::info!(
+                conversation_id = self.conversation_id,
+                "a session the wrap-up dispatched said it is done and has gone quiet since, so it \
+                 is being ended",
+            );
+
+            self.state.sessions.end(self.conversation_id).await;
+        }
+
+        drop(turn);
     }
 
     /// Start `session`'s [`Seeing`], where it has none standing.
@@ -804,7 +866,7 @@ impl host::Host for Lent {
 
         // See [`Turn`]: held across the launch alone, and a stop asked after
         // the wait for it rather than before.
-        let _turn = match std::mem::replace(&mut self.turn, Turn::Held) {
+        let turn = match std::mem::replace(&mut self.turn, Turn::Held) {
             Turn::Take => {
                 self.turn = Turn::Take;
 
@@ -818,6 +880,23 @@ impl host::Host for Lent {
             }
             Turn::Held => None,
             Turn::Handed(turn) => Some(turn),
+            Turn::Try => {
+                self.turn = Turn::Try;
+
+                let Some(turn) = state.sessions.try_turn(conversation_id) else {
+                    tracing::debug!(
+                        conversation_id,
+                        "something else is working in the Worktree, so nothing is launched yet",
+                    );
+                    return Ok(Err(BUSY.to_owned()));
+                };
+
+                if crate::stopping::stopped(&state, conversation_id).await {
+                    return Ok(Err("The run was stopped, so nothing new starts.".to_owned()));
+                }
+
+                Some(turn)
+            }
         };
 
         // Read back every time rather than held: where an agent is about to be
@@ -909,7 +988,9 @@ impl host::Host for Lent {
 
                 self.folding = self.building.is_some();
 
-                Ok(Ok(self.watch(session, expected, taken_ends(ends))))
+                let held = matches!(self.turn, Turn::Try).then_some(turn).flatten();
+
+                Ok(Ok(self.watch(session, expected, taken_ends(ends), held)))
             }
             Ok(None) => Ok(self.refused("The session couldn't be started.")),
             Err(error) => {
@@ -977,12 +1058,14 @@ impl host::Host for Lent {
 
         drop(expecting);
 
-        match ended {
-            Some(ended) => {
-                watched.ended = Some(ended.clone());
+        if let Some(ended) = &ended {
+            watched.ended = Some(ended.clone());
+        }
 
-                Ok(self.gone(&ended, &evidence).await)
-            }
+        self.seen_out(session, ended.is_none()).await;
+
+        match ended {
+            Some(ended) => Ok(self.gone(&ended, &evidence).await),
             None => Ok(world::Waited::Done),
         }
     }
@@ -1491,6 +1574,62 @@ impl host::Host for Lent {
             tracing::error!(error = ?error, conversation_id, repo = repo.name, "marking comments addressed failed");
             "The comments couldn't be marked addressed.".to_owned()
         }))
+    }
+
+    async fn pushed_head(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Option<String>> {
+        Ok(crate::checks::pushed(&self.state, self.conversation_id, pull_request).await)
+    }
+
+    async fn conflict_attempts(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<i64, String>> {
+        Ok(crate::checks::conflict_attempts(&self.state, self.conversation_id, pull_request).await)
+    }
+
+    async fn count_conflict_attempt(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<i64, String>> {
+        Ok(
+            crate::checks::count_conflict_attempt(&self.state, self.conversation_id, pull_request)
+                .await,
+        )
+    }
+
+    async fn resolution(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<String, String>> {
+        Ok(crate::checks::resolution(
+            &self.state,
+            self.conversation_id,
+            pull_request,
+            self.writing,
+        )
+        .await)
+    }
+
+    /// Give the wrap-up up with the tail of the newest session launched here,
+    /// which is the last fix or resolution the component dispatched.
+    async fn give_up(
+        &mut self,
+        pull_request: world::PullRequest,
+        what: String,
+        how: String,
+    ) -> wasmtime::Result<bool> {
+        Ok(crate::checks::give_up(
+            &self.state,
+            self.conversation_id,
+            pull_request,
+            what,
+            how,
+            self.writing,
+        )
+        .await)
     }
 }
 
