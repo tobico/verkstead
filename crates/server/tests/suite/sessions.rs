@@ -38164,9 +38164,23 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
         "the model moved under a Profile that did not",
     );
 
-    // The same evidence again: a session ran on the model this steer settled,
-    // which no session before it could have written.
-    until_written_saying(&written, "model=claude-grilling-4.8").await;
+    // Waited for by its model rather than by the next fix to land: the wrap-up
+    // is still working when this steer is pressed, so the fix its last Done
+    // set going can launch under the old Pairing before the stop reaches it,
+    // and that one is not the session the steer set going. Launched under the
+    // Profile's old model, every fix after the steer would read the same, and
+    // this would wait out its patience.
+    let launched_on = |model: &str| {
+        let dispatched = std::fs::read_to_string(&written).unwrap();
+        dispatched
+            .lines()
+            .rfind(|line| line.starts_with("model="))
+            .is_some_and(|line| line == format!("model={model}"))
+    };
+
+    fixture
+        .until(|_| launched_on("claude-grilling-4.8").then_some(()))
+        .await;
 }
 
 /// And a steer whose Worktree has gone makes it again from the branch before any
