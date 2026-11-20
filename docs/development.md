@@ -1635,9 +1635,12 @@ Today there are four:
   which is why the plugin declares `conversations: start`, *One session*, from
   [`plugins/activities/one-session/`](../plugins/activities/one-session), which
   the inline build, the `submitting` step and an `instruction` steer each run
-  under with options of their own, and the *Interview*, from
+  under with options of their own, the *Interview*, from
   [`plugins/activities/interview/`](../plugins/activities/interview), which
-  every grilling session runs under.
+  every grilling session runs under, and the *Wrap-up*, from
+  [`plugins/activities/wrap-up/`](../plugins/activities/wrap-up), which every
+  wrap-up runs under — the checks, comments and review still watched by the
+  host beside it until they move in.
   It depends on the `verkstead` pack's plugin for the skills its sessions run
   under, and is the Built-in group's second row. Its directory holds the
   components' sources rather than their bytes, so `verkstead plugin check`

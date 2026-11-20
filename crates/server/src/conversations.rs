@@ -3520,7 +3520,7 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// picker's branch as the name beside the base commit, and the move into
 /// Wrapping made by the take-up itself rather than by a record arriving. Then one
 /// `submitting` session is sent for the pull request the work is owed — see
-/// [`crate::runner::owed_for_a_branch`].
+/// [`crate::runner::wrap_up`].
 ///
 /// [`adopt`]'s sibling over the other kind of thing a Draft holds, and the same
 /// shape underneath — the roles checked, origin fetched, git asked everything
@@ -4114,22 +4114,14 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
         .nudges
         .announce(Nudge::Conversation { conversation: id });
 
-    // A branch has no pull request for the wrap-up to watch, so the one thing
-    // owed is asked for first and the wrap-up starts over what is opened — the
-    // run a finish step that stopped short of its push is sent through, with the
-    // base the picker holds carried into it. Spawned rather than awaited, and
+    // A branch has no pull request for the wrap-up to watch, so the wrap-up
+    // opens the one thing owed first, with the base the picker holds carried
+    // into it, and watches what is opened. Spawned rather than awaited, and
     // registered as driving before it is: the human is standing at the button
     // this is answering, and what drives the Conversation from here is that run.
-    // See [`crate::runner::owed_for_a_branch`].
+    // See [`crate::runner::wrap_up`].
     if let Target::Branch(_) = &taking {
-        let driving = state.drivers.driving(id);
-
-        tokio::spawn(crate::runner::owed_for_a_branch(
-            state.clone(),
-            id,
-            named,
-            driving,
-        ));
+        crate::wrapping::wrap_up(state, id, Some(named));
 
         return Ok(TakenUp::TakenUp);
     }

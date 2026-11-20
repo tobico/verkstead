@@ -612,8 +612,13 @@ impl Lent {
 
         let timeout = std::time::Duration::from_millis(timeout);
 
+        // Nothing to wait on but the time, or a stop the host's watchers have
+        // handed a wrap-up to answer, which is looked at on the next round.
         let Some(newest) = sessions.iter().max().copied() else {
-            tokio::time::sleep(timeout).await;
+            tokio::select! {
+                () = tokio::time::sleep(timeout) => {}
+                () = self.state.wrap_ups.handed() => {}
+            }
             return Ok(world::Woke::Tick);
         };
 
@@ -1324,6 +1329,48 @@ impl host::Host for Lent {
         branch: String,
     ) -> wasmtime::Result<Result<Option<world::Opened>, world::Unforged>> {
         Ok(crate::forge::opened(&self.state, self.conversation_id, repo, branch).await)
+    }
+
+    async fn wrap_up(&mut self) -> wasmtime::Result<world::Wrapped> {
+        use crate::settling::Standing;
+
+        Ok(
+            match crate::settling::standing(&self.state, self.conversation_id).await {
+                Standing::Waiting => world::Wrapped::Waiting,
+                Standing::Settled => world::Wrapped::Settled,
+                Standing::GivenUp => world::Wrapped::GivenUp,
+                Standing::Over => world::Wrapped::Over,
+            },
+        )
+    }
+
+    /// Record what the `submitting` session launched here opened, as a
+    /// take-up over a bare branch always has: the session ended where it said
+    /// it was done and is idle, GitHub asked, and the pull request written
+    /// beside the wrap-up with the host's watchers started over it — or the
+    /// run stopped over what the session last said. See
+    /// [`crate::wrapping::opened_beside`].
+    async fn record_opened(&mut self) -> wasmtime::Result<Result<world::PullRequest, String>> {
+        let conversation_id = self.conversation_id;
+
+        self.state.sessions.end(conversation_id).await;
+
+        crate::wrapping::opened_beside(&self.state, conversation_id, self.writing).await;
+
+        let own = match store::load_conversation(&self.state.pool, conversation_id).await {
+            Ok(Some(conversation)) => conversation.repo.name,
+            Ok(None) => return Ok(Err("There is no conversation left.".to_owned())),
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, "reading the Conversation a pull request was opened for failed");
+                return Ok(Err("The conversation couldn't be read.".to_owned()));
+            }
+        };
+
+        Ok(crate::forge::recorded(&self.state, conversation_id)
+            .await
+            .into_iter()
+            .find(|pull_request| pull_request.repo == own)
+            .ok_or_else(|| "No pull request was opened.".to_owned()))
     }
 
     /// Settle what `watcher` waits on, in the store the viewer draws the

@@ -986,23 +986,18 @@ async fn ask(
         listed(failed),
     );
 
-    if let Err(error) = crate::stopping::stop(
-        &state.pool,
-        &state.nudges,
+    // The wrap-up given up, which writes this stop as it answers `given-up` —
+    // see [`crate::wrapping::give_up`].
+    crate::wrapping::give_up(
+        state,
         conversation_id,
-        crate::stopping::Decided::Verkstead,
-        &format!("getting the checks green on {}", named(watched)),
-        &how,
-        writing,
+        crate::wrapping::GaveUp {
+            what: format!("getting the checks green on {}", named(watched)),
+            how,
+            writing,
+        },
     )
-    .await
-    {
-        tracing::error!(
-            error = ?error,
-            conversation_id,
-            "the checks would not go green and the stop saying so could not be recorded"
-        );
-    }
+    .await;
 
     Watching::Done("the checks would not go green, so the human is being asked")
 }
@@ -1392,23 +1387,16 @@ async fn unmergeable(
         crate::stopping::opening(&named(watched)),
     );
 
-    if let Err(error) = crate::stopping::stop(
-        &state.pool,
-        &state.nudges,
+    crate::wrapping::give_up(
+        state,
         conversation_id,
-        crate::stopping::Decided::Verkstead,
-        &format!("resolving the conflicts on {}", named(watched)),
-        &how,
-        writing,
+        crate::wrapping::GaveUp {
+            what: format!("resolving the conflicts on {}", named(watched)),
+            how,
+            writing,
+        },
     )
-    .await
-    {
-        tracing::error!(
-            error = ?error,
-            conversation_id,
-            "the pull request would not merge and the stop saying so could not be recorded"
-        );
-    }
+    .await;
 
     Watching::Done("the pull request would not merge, so the human is being asked")
 }

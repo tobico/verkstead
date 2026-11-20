@@ -384,6 +384,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "verkstead-activity-wrap-up"
+version = "0.1.0"
+dependencies = [
+ "wit-bindgen 0.46.0",
+]
+
+[[package]]
 name = "verkstead-plugin-codex"
 version = "0.1.0"
 dependencies = [

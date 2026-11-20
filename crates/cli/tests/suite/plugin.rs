@@ -501,7 +501,7 @@ fn the_activities_verkstead_ships_pass() {
     assert!(
         stdout.contains(
             "providing activity — its activities Follow-up rounds, Backlog runner, Stage runner, \
-             One session, and Interview."
+             One session, Interview, and Wrap-up."
         ),
         "{stdout}"
     );

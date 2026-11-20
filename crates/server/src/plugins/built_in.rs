@@ -369,8 +369,8 @@ mod tests {
 
     /// The shipped Activities are a built-in depending on the pack
     /// `verkstead`, whose *Follow-up rounds*, *Backlog runner*, *Stage runner*,
-    /// *One session* and *Interview* blocks each name a component of their own
-    /// written against the `activity` world.
+    /// *One session*, *Interview* and *Wrap-up* blocks each name a component of
+    /// their own written against the `activity` world.
     #[tokio::test]
     async fn the_activities_are_a_built_in_with_their_components() {
         let shipped = activities();
@@ -383,8 +383,9 @@ mod tests {
         assert_eq!(manifest.dependencies.len(), 1);
         assert_eq!(manifest.dependencies[0].uuid, VERKSTEAD);
 
-        let [rounds, backlog, stages, one, interview] = manifest.activities.as_slice() else {
-            panic!("five Activities: {:?}", manifest.activities);
+        let [rounds, backlog, stages, one, interview, wrap_up] = manifest.activities.as_slice()
+        else {
+            panic!("six Activities: {:?}", manifest.activities);
         };
         assert_eq!(rounds.id, "follow-up-rounds");
         assert_eq!(rounds.name, "Follow-up rounds");
@@ -435,6 +436,13 @@ mod tests {
             ]
         );
         assert_eq!(interview.skills, ["verkstead/grilling"]);
+        assert_eq!(wrap_up.id, "wrap-up");
+        assert_eq!(wrap_up.name, "Wrap-up");
+        assert_eq!(
+            wrap_up.outcomes,
+            ["settled", "merged", "closed", "given-up"]
+        );
+        assert_eq!(wrap_up.skills, ["verkstead/submitting"]);
 
         for component in [
             "follow-up-rounds.wasm",
@@ -442,6 +450,7 @@ mod tests {
             "stage-runner.wasm",
             "one-session.wasm",
             "interview.wasm",
+            "wrap-up.wasm",
         ] {
             assert!(
                 shipped

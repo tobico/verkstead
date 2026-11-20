@@ -11,6 +11,7 @@ members = [
     "activities/interview",
     "activities/one-session",
     "activities/stage-runner",
+    "activities/wrap-up",
     "codex",
     "fixture",
 ]

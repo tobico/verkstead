@@ -750,6 +750,16 @@ mod unlent {
             Err(refused())
         }
 
+        async fn wrap_up(&mut self) -> wasmtime::Result<activity_types::Wrapped> {
+            Err(refused())
+        }
+
+        async fn record_opened(
+            &mut self,
+        ) -> wasmtime::Result<Result<activity_types::PullRequest, String>> {
+            Err(refused())
+        }
+
         async fn settle(&mut self, _watcher: activity_types::Watcher) -> wasmtime::Result<()> {
             Err(refused())
         }
