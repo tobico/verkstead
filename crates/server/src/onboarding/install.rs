@@ -1501,7 +1501,8 @@ fn plan(machine: &Machine, ticked: &[Row]) -> Plan {
         .copied()
         .filter(|row| *row != Row::Wsl)
         .partition(|row| {
-            (row.plugged().is_some() || declared(*row).is_some()) && !packaged(distro, *row)
+            (row.plugged().is_some() || declared(*row, machine.platform).is_some())
+                && !packaged(distro, *row)
         });
     let ticked = rows.as_slice();
 
@@ -1530,11 +1531,21 @@ fn plan(machine: &Machine, ticked: &[Row]) -> Plan {
     plan
 }
 
-/// How a plugin's harness is installed, where `row` is one that says.
-fn declared(row: Row) -> Option<crate::harness::Install<'static>> {
-    match row {
-        Row::Harness(agent_type) => crate::harness::of(agent_type)?.install(),
-        _ => None,
+/// How a plugin's harness is installed on `platform`, where `row` is one that
+/// says: a built-in plugin's as its manifest reads for `platform` — see
+/// [`crate::plugins::built_in::agent_install`] — and an installed one's off
+/// its harness.
+fn declared(row: Row, platform: Platform) -> Option<crate::harness::Install<'static>> {
+    let Row::Harness(agent_type) = row else {
+        return None;
+    };
+
+    match agent_type
+        .built_in()
+        .and_then(|built_in| crate::plugins::built_in::agent_install(built_in.uuid, platform))
+    {
+        Some(install) => crate::harness::plugged::installing(install),
+        None => crate::harness::of(agent_type)?.install(),
     }
 }
 
@@ -1544,7 +1555,13 @@ fn declared(row: Row) -> Option<crate::harness::Install<'static>> {
 /// Homebrew having dropped it. On the two Linuxes with no command at all,
 /// anything packaged goes there too, with that sentence.
 fn packaged(distro: Distro, row: Row) -> bool {
-    declared(row).is_some_and(|install| match distro {
+    let platform = match distro {
+        Distro::MacOs | Distro::MacOsIntel => Platform::MacOs,
+        Distro::Windows => Platform::Windows,
+        _ => Platform::Linux,
+    };
+
+    declared(row, platform).is_some_and(|install| match distro {
         Distro::MacOs | Distro::MacOsIntel => install.brew.is_some() || install.cask.is_some(),
         Distro::Windows | Distro::Ubuntu | Distro::Fedora | Distro::Debian | Distro::Arch => {
             install.npm.is_some()
@@ -1553,16 +1570,16 @@ fn packaged(distro: Distro, row: Row) -> bool {
     })
 }
 
-/// The npm package a plugin's `row` was routed to an arm for.
-fn npm_package(row: Row) -> &'static str {
-    declared(row)
+/// The npm package a plugin's `row` was routed to `platform`'s arm for.
+fn npm_package(row: Row, platform: Platform) -> &'static str {
+    declared(row, platform)
         .and_then(|install| install.npm)
         .expect("a plugin's row reaches an npm arm only for its npm package — see `packaged`")
 }
 
 /// And the Homebrew one, a cask before a formula.
 fn brew_package(row: Row) -> Brew {
-    let install = declared(row);
+    let install = declared(row, Platform::MacOs);
     match (
         install.and_then(|install| install.cask),
         install.and_then(|install| install.brew),
@@ -2370,7 +2387,7 @@ fn on_windows(dependency: Row) -> OnWindows {
         Row::Wsl => unreachable!("the WSL row is worked by `annexing`"),
 
         // A plugin's whose manifest names its npm package — see [`packaged`].
-        Row::Harness(_) => OnWindows::FromNpm(npm_package(dependency)),
+        Row::Harness(_) => OnWindows::FromNpm(npm_package(dependency, Platform::Windows)),
     }
 }
 
@@ -2465,7 +2482,7 @@ fn installs(packager: Packager, dependency: Row) -> Installs {
         Row::Wsl => unreachable!("the WSL row is worked by `annexing`"),
 
         // A plugin's whose manifest names its npm package — see [`packaged`].
-        Row::Harness(_) => Installs::FromNpm(npm_package(dependency)),
+        Row::Harness(_) => Installs::FromNpm(npm_package(dependency, Platform::Linux)),
     }
 }
 
@@ -2979,6 +2996,22 @@ mod tests {
             .collect();
 
         assert_eq!(drawn, rows());
+    }
+
+    /// A built-in plugin's install is read for the platform the plan is for,
+    /// not the one the suite runs on: Codex is an npm package on Linux and
+    /// Windows and a cask on a Mac, which is what lets a Mac runner plan the
+    /// other platforms' installs.
+    #[test]
+    fn a_built_in_plugins_install_is_read_for_the_platform_planned_for() {
+        for platform in [Platform::Linux, Platform::Windows] {
+            let install = declared(Row::CODEX, platform).expect("Codex declares an install");
+            assert_eq!(install.npm, Some("@openai/codex"), "{platform:?}");
+            assert_eq!(install.cask, None, "{platform:?}");
+        }
+
+        let mac = declared(Row::CODEX, Platform::MacOs).expect("and one on a Mac");
+        assert_eq!((mac.npm, mac.cask), (None, Some("codex")));
     }
 
     /// Each of the three package managers is its own line, and every ticked
