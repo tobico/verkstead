@@ -106,7 +106,9 @@ device can open.
 - **A login resumes what it unblocks.** A successful login resumes every run
   on that Profile that is stopped as Signed out. Each resume builds a fresh
   root, which is what picks the new login up: on Linux the old session's bind
-  still holds the old file. A session that signs out *after* the human has
+  still holds the old file. Every member is told too: a run on a device the
+  Profile is not bound on is stopped and recorded there, so that device
+  resumes its own, and the launch fetches the new login. A session that signs out *after* the human has
   already logged in again was built before the login. When the account's
   login is newer than that session's root, it resumes straight away instead
   of stopping.

@@ -601,6 +601,12 @@ impl Logins {
                 .remove(&run.profile.id);
             run.state.nudges.announce_here(Nudge::Profiles);
 
+            // And to every member, whose runs stopped on this login are
+            // recorded over there — see [`crate::signouts::hearing`].
+            run.state.nudges.announce(Nudge::LoggedIn {
+                profile: run.profile.id.clone(),
+            });
+
             tokio::spawn(crate::signouts::logged_in(
                 run.state.clone(),
                 run.profile.id.clone(),

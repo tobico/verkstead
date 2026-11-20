@@ -39,6 +39,7 @@ use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{Capture, ConversationView, ProfileEntry, Started, TimelineEvent};
+use verkstead_schema::Nudge;
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::device::reading::{RUNNING, Reading};
@@ -1254,6 +1255,83 @@ async fn a_login_refreshed_at_home_is_the_one_the_next_launch_gets() {
         "and a sign-out at home is a mirror with no login in it rather than one \
          holding a login nobody can use",
     );
+}
+
+/// What stands where claude goes for a login landing at home: signed out until
+/// the login it was given is the one refreshed there, and then saying so.
+const SIGNED_OUT_UNTIL_REFRESHED: &str = r#"
+if grep -qs 'refreshed-at-home' "$HOME/.claude/.credentials.json"; then
+    printf 'login: %s\n' "$(cat "$HOME/.claude/.credentials.json")"
+else
+    for pass in 1 2 3 4; do
+        printf '  ⎿  Login expired · Please run /login\r\n'
+        sleep 0.25
+    done
+    sleep 300
+fi
+"#;
+
+/// **A login at home resumes the run it unblocks away from home.** The run
+/// signed out on B, so its stop is recorded on B; A, where the login lands,
+/// says so to its members, and B resumes the run with the new login.
+#[tokio::test]
+async fn a_login_at_home_resumes_the_run_signed_out_away_from_home() {
+    let (a, b, _holding) = linked_up_running(SIGNED_OUT_UNTIL_REFRESHED).await;
+
+    a.account("work").await;
+
+    let mirror = b.mirror_of("work").await;
+    let conversation = b.grilling_under(&mirror.id).await;
+
+    let deadline = Instant::now() + WAITING;
+    while verkstead_store::stopped(&b.pool, conversation)
+        .await
+        .unwrap()
+        .and_then(|stop| stop.signed_out)
+        != Some(mirror.id.clone())
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the run never stopped as signed out on the work Profile",
+        );
+        tokio::time::sleep(LOOKING).await;
+    }
+
+    a.logged_in("work", REFRESHED);
+    a.nudges.announce(Nudge::LoggedIn {
+        profile: mirror.id.clone(),
+    });
+
+    let deadline = Instant::now() + WAITING;
+    loop {
+        let drawn: ConversationView = reading(
+            &b.workbench,
+            &format!("/api/ui/conversations/{conversation}"),
+        )
+        .await;
+
+        let mut said = Vec::new();
+        for event in &drawn.timeline {
+            if let TimelineEvent::AgentOutput(output) = event {
+                let capture: Capture = reading(
+                    &b.workbench,
+                    &format!("/api/ui/conversations/{conversation}/capture/{}", output.id),
+                )
+                .await;
+                said.push(capture.text);
+            }
+        }
+
+        if drawn.blocked_on.is_none() && said.iter().any(|text| text.contains(REFRESHED)) {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the run was never resumed with the login refreshed at home. It said: {said:?}",
+        );
+        tokio::time::sleep(LOOKING).await;
+    }
 }
 
 /// **A Profile removed at home takes the mirror of its account with it.** The
