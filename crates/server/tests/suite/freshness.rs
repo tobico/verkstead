@@ -67,9 +67,15 @@ const BRANCH: &str = "solid-viewer";
 /// else in it — the same number on both devices, ids being each device's own.
 const THERE: i64 = 1;
 
-/// How long one address has to answer here, rather than the two seconds a
-/// running server gives one.
-const PATIENCE: Duration = Duration::from_millis(300);
+/// How long one address has to answer here: the two seconds a running server
+/// gives one to connect.
+///
+/// **Not shorter, because B answers all along.** On a loaded machine a third of
+/// a second was short enough for a dial to B to time out and dim its row, and
+/// the next dial that got through then put it back seen a moment later — a row
+/// that moved where a test was asking that it stand still. Nothing here waits
+/// the patience out: a cut link drops its connections at once.
+const PATIENCE: Duration = Duration::from_secs(2);
 
 /// How long a test will wait for a Nudge it expects. Generous, because it is
 /// only ever paid when the assertion is about to fail.
