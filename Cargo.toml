@@ -108,3 +108,38 @@ two-face = { version = "0.5", default-features = false, features = [
 # cargo config. `test` inherits this.
 [profile.dev]
 debug = "line-tables-only"
+
+# The compiler a plugin's component is compiled by, optimised in dev and test
+# builds too. Every process that asks for a harness compiles the built-in Codex
+# component, and every test is a process of its own under nextest: unoptimised,
+# Cranelift spent several CPU-seconds on it per test, which on a CI runner
+# whose cores the suite already fills ran every leg past its timeout.
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+
+[profile.dev.package.cranelift-frontend]
+opt-level = 3
+
+[profile.dev.package.cranelift-entity]
+opt-level = 3
+
+[profile.dev.package.cranelift-bforest]
+opt-level = 3
+
+[profile.dev.package.cranelift-bitset]
+opt-level = 3
+
+[profile.dev.package.cranelift-assembler-x64]
+opt-level = 3
+
+[profile.dev.package.regalloc2]
+opt-level = 3
+
+[profile.dev.package.wasmparser]
+opt-level = 3
+
+[profile.dev.package.wasmtime-environ]
+opt-level = 3
+
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3
