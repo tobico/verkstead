@@ -272,6 +272,16 @@ limits stay the host's: a start over `at_once` is refused as *no place* and
 the Activity says the stage waits, rather than reading the limits itself, and
 a run the human pressed for is held to none of them.
 
+**Joining a roadmap's chain is the host's, asked for by the Activity.** A
+stage's finish waits until every stage already in its roadmap's chain has
+settled, and is then told the chain to go on top of. The backlog runner asks
+for that wait with `join-chain` before it launches a stage's finish, and
+writes the chain the host answers into the finish's prompt; which stages
+joined, and in what order, is the record's, and the rebase is the session's.
+The same holds for the `next-stage` annotation on a stage's line in the
+roadmap: the host writes it as it starts the stage's Conversation, so the
+Activity never writes the Repo's files.
+
 **The stage runner runs beside a Conversation, not in it.** It keeps the
 shape it had in process (Set 1839, Q1): started whenever a stage could start —
 a stage settling, a place coming free, a home device hearing a stage away
@@ -294,6 +304,11 @@ Activity's own.
 being the smallest that still launches, waits, asks and reads git; then the
 interview, one session and the wrap-up; then the backlog runner and the stage
 runner, which spawn Conversations and so give the interface that host function.
+Once they have crossed, the runner in the server is the host functions and
+nothing else: what is next in a backlog, which stages of a roadmap are ready
+and what each task's and stage's session is told are the components', and the
+server keeps launching and watching sessions, checking a Done signal against
+the Repo, the limits, placement, the chain and the record.
 
 ## Process
 
