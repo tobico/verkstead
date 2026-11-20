@@ -27,7 +27,7 @@ provides:
     name: Follow-up rounds
     component: follow-up-rounds.wasm
     outcomes: [committed, nothing]
-    skills: [verkstead/following-up]
+    skills: [verkstead/following-up, verkstead/investigating]
   - category: activity
     id: backlog-runner
     name: Backlog runner

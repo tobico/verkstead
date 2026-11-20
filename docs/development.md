@@ -1719,7 +1719,8 @@ Today there are four:
   functions a stranger's would: a block per Activity, each a component built
   from the crate beside it — today *Follow-up rounds*, from
   [`plugins/activities/follow-up-rounds/`](../plugins/activities/follow-up-rounds),
-  the *Backlog runner*, from
+  which an investigation's rounds run under too, configured with the
+  investigating skill and evidence, the *Backlog runner*, from
   [`plugins/activities/backlog-runner/`](../plugins/activities/backlog-runner),
   the *Stage runner*, from
   [`plugins/activities/stage-runner/`](../plugins/activities/stage-runner),
