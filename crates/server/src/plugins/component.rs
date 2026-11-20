@@ -798,6 +798,43 @@ mod unlent {
         ) -> wasmtime::Result<Result<(), String>> {
             Err(refused())
         }
+
+        async fn pushed_head(
+            &mut self,
+            _pull_request: activity_types::PullRequest,
+        ) -> wasmtime::Result<Option<String>> {
+            Err(refused())
+        }
+
+        async fn conflict_attempts(
+            &mut self,
+            _pull_request: activity_types::PullRequest,
+        ) -> wasmtime::Result<Result<i64, String>> {
+            Err(refused())
+        }
+
+        async fn count_conflict_attempt(
+            &mut self,
+            _pull_request: activity_types::PullRequest,
+        ) -> wasmtime::Result<Result<i64, String>> {
+            Err(refused())
+        }
+
+        async fn resolution(
+            &mut self,
+            _pull_request: activity_types::PullRequest,
+        ) -> wasmtime::Result<Result<String, String>> {
+            Err(refused())
+        }
+
+        async fn give_up(
+            &mut self,
+            _pull_request: activity_types::PullRequest,
+            _what: String,
+            _how: String,
+        ) -> wasmtime::Result<bool> {
+            Err(refused())
+        }
     }
 }
 

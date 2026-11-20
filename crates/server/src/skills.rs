@@ -105,7 +105,9 @@ const NEXT_TASK: &str = "verkstead/next-task/SKILL.md";
 const SUBMITTING: &str = "verkstead/submitting/SKILL.md";
 
 /// And the addressing skill's, which every fix session of a wrap-up runs
-/// inside — whichever of the three kinds of feedback dispatched it.
+/// inside — whichever of the three kinds of feedback dispatched it. The Wrap-up
+/// component writes that prompt itself, so only the tests here still name it.
+#[cfg(test)]
 const ADDRESSING: &str = "verkstead/addressing/SKILL.md";
 
 /// And the reviewing skill's, which the one session a wrap-up starts with runs
@@ -822,44 +824,6 @@ pub(crate) fn responding(
     format!(
         "{prompt}\n# What has just been said on the pull request\n\n{}\n",
         said.trim()
-    )
-}
-
-/// What a fix session is started on: the feedback to address, under the two
-/// documents the work was built from and the line that sends the agent into the
-/// addressing skill.
-///
-/// One function for all three callers — a failed check, and the fixes either
-/// proposal was answered with where the session that proposed them never landed
-/// them — because they are one job: somebody has said that work already pushed
-/// is not right yet, and what differs is the feedback rather than anything about
-/// how to take it. Three prompts saying the same thing in three places is three
-/// things to keep true.
-///
-/// The feedback goes *last*, under the documents rather than over them, for the
-/// reason everything written under them goes there: it is the newest thing said
-/// and the least general. The documents say what the work is; this says what is
-/// wrong with it.
-pub(crate) fn addressing(
-    skills: &Skills,
-    brief: &str,
-    handoff: Option<&str>,
-    feedback: &str,
-) -> String {
-    let skill = skills.named(ADDRESSING);
-
-    let prompt = on_the_documents(
-        &format!(
-            "Read {skill} and address the feedback at the end of this prompt, the way it \
-             says."
-        ),
-        brief,
-        handoff,
-    );
-
-    format!(
-        "{prompt}\n# The feedback to address\n\n{}\n",
-        feedback.trim()
     )
 }
 
@@ -3827,33 +3791,6 @@ mod tests {
         assert!(
             step.contains("a fix written from the log alone is a guess"),
             "never from the log alone: {step}"
-        );
-    }
-
-    /// A fix session is put inside the skill the same way every other is, and
-    /// primed with the documents *and* the feedback — which is the one thing
-    /// only this kind of session is told.
-    #[test]
-    fn a_fix_session_is_started_on_the_documents_with_the_feedback_last() {
-        let prompt = addressing(
-            &mounted(),
-            "# Rate limiting\n\nThe API has none.\n",
-            Some("# What we settled\n\nIn-process counter.\n"),
-            "The Rust check is failing.",
-        );
-
-        assert!(
-            prompt.contains(&at(ADDRESSING)),
-            "the skill is named by the path it is mounted at: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
-            "both documents go in whole: {prompt:?}"
-        );
-        assert!(
-            prompt.find("In-process counter.") < prompt.find("The Rust check is failing."),
-            "and the feedback comes last: it is the newest thing said and the least \
-             general — {prompt:?}"
         );
     }
 

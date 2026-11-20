@@ -1927,7 +1927,7 @@ pub(crate) async fn wrap_up(
     state: AppState,
     conversation_id: i64,
     against: Option<String>,
-    driving: Driving,
+    _driving: Driving,
 ) {
     let Some((shipped, activity)) = built_in(WRAP_UP) else {
         tracing::error!(
@@ -1957,10 +1957,13 @@ pub(crate) async fn wrap_up(
         }
     };
 
-    let mut options = vec![(
-        "poll".to_owned(),
-        state.sessions.pace().checks.as_millis().to_string(),
-    )];
+    let mut options = vec![
+        (
+            "poll".to_owned(),
+            state.sessions.pace().checks.as_millis().to_string(),
+        ),
+        ("attempts".to_owned(), crate::checks::ATTEMPTS.to_string()),
+    ];
 
     if crate::conversations::narrows_the_wrap_up(process) {
         options.push(("review".to_owned(), "off".to_owned()));
@@ -1986,19 +1989,21 @@ pub(crate) async fn wrap_up(
     let outcome = {
         let _running = state.wrap_ups.running(conversation_id);
 
-        crate::activities::run(
+        // Its dispatches try for the Turn rather than wait for it, and hold it
+        // for as long as their sessions run — see [`Lent::trying`].
+        crate::activities::run_seeing(
             &state,
             conversation_id,
-            &driving,
             shipped.files(),
             &activity,
             &[],
             options,
-            "wrapping up",
-            crate::continuing::Brought::Settle,
+            Lent::new(&state, conversation_id)
+                .doing("wrapping up")
+                .trying(),
         )
         .await
-        .map(|ran| ran.outcome)
+        .0
     };
 
     // A stop handed over as it ended some other way is still the stop: it is
@@ -2848,75 +2853,6 @@ async fn staged(state: &AppState, conversation_id: i64, base: &str, writing: i64
     crate::conversations::roadmap_landed(state, conversation_id, worktree.as_deref(), base).await;
 
     to_a_pull_request(state, conversation_id, Some(writing)).await;
-}
-
-/// Run one fix session about `feedback`, and wait until it is over.
-///
-/// The Timeline Event it printed into, or `None` where nothing could be
-/// launched. What it committed is not returned and is not counted here: the
-/// watcher that dispatched this asks GitHub what became of it, and a fix session
-/// that pushed nothing is answered by the check still being red rather than by
-/// anything read off the branch.
-///
-/// **Ended because it said it was done**, the way a backlog step is — see
-/// [`crate::done`] — and once it is next idle after that, so the push that puts
-/// the fix on the pull request and whatever it says after are kept. The signal
-/// is checked against nothing of a fix's own: one that finds nothing to commit
-/// is accepted, because a rule that demanded a commit would leave a fix with
-/// nothing to fix unable to end. The rules every signal has — nothing left
-/// uncommitted — still hold.
-///
-/// Nothing is refused for and nothing is stopped. A fix session that ends having done
-/// nothing is not by itself something to stop over: what
-/// wrap-up is watching is the check, and the human is asked once the machine has
-/// had its two goes at it — see [`crate::checks`].
-///
-/// **A session that will not ask is still spoken to**, which is the one thing
-/// the rescue does here that it does everywhere — see [`crate::rescues`]: the
-/// human is told where it will not answer, and the session left running.
-pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &str) -> Option<i64> {
-    let documents = documents(state, conversation_id).await?;
-
-    // Idle, with no signal given and nothing put to the human, which is a fix
-    // nobody can move on. Spoken to, and the human told where it will not
-    // answer — see [`crate::rescues`]. The wrap-up dispatching it holds the
-    // Turn already.
-    let mut lent = Lent::new(state, conversation_id)
-        .turn_held()
-        .doing("fixing the check");
-
-    // Nothing for the signal to be checked against beyond the rules every signal
-    // has: a fix that finds nothing to commit is still a fix session done. See
-    // [`crate::done::Evidence::Nothing`].
-    let session = lent
-        .start(
-            "verkstead/addressing",
-            store::Role::Implementation,
-            skills::addressing(
-                documents.skills,
-                &documents.brief,
-                documents.handoff(),
-                feedback,
-            ),
-            crate::done::Evidence::Nothing,
-            crate::done::Ends::WithItsWork,
-        )
-        .await?;
-
-    let event_id = lent.event_id(session);
-    let ended = lent.see(session).await;
-
-    if ended.is_none() {
-        tracing::info!(
-            conversation_id,
-            event_id,
-            "a fix session said it is done and has gone quiet since, so it is being ended",
-        );
-
-        state.sessions.end(conversation_id).await;
-    }
-
-    Some(event_id)
 }
 
 /// What a session that proposes and then fixes left behind — the wrap-up's one
