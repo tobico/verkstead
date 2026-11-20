@@ -265,6 +265,12 @@ pub struct StoredSet {
 /// Nothing here ever rewrites a stored body. It is the record of what was
 /// asked, and a Verkstead that can read it again later should still find it as
 /// it was written.
+///
+/// The Set is much the larger variant, which is what the size lint is about —
+/// a proposal grew when it gained the Directions it offers. Left as it is: on a
+/// Timeline it already rides in a box of its own, and a stored body is read
+/// one Set at a time.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Asked {
     /// The Set, as the agent sent it.

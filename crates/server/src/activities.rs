@@ -29,6 +29,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
+use verkstead_schema::Direction;
 use verkstead_store as store;
 
 use crate::AppState;
@@ -55,6 +56,13 @@ pub struct Hosting {
 impl Hosting {
     pub(crate) fn over(state: AppState) -> Hosting {
         Hosting { state }
+    }
+
+    /// Say that `conversation_id`'s interview is to offer `offers` alone —
+    /// the Process's declaration (Set 1765, Q27) until stage 11 writes it.
+    /// Said before the grilling starts, as a declaration is.
+    pub fn offering(&self, conversation_id: i64, offers: Vec<Direction>) {
+        self.state.followers.declare(conversation_id, offers);
     }
 
     /// Start `activity`, whose component is `component`, on
@@ -131,6 +139,11 @@ pub(crate) struct Ran {
 /// [`Building::named`] — every session the component launches builds that,
 /// which is what permits its Memos and previews and stamps the Memos it
 /// leaves.
+///
+/// **So is `offers`**: the Directions an interview offers, as their words
+/// joined by commas — `inline,task-list`. Where it is given, the session
+/// launched expecting `picked` offers those alone: its proposals are stamped
+/// with them and a pick of any other is not heard. Where it is not, all three.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run(
     state: &AppState,
@@ -207,6 +220,11 @@ pub(crate) async fn run_seeing(
         .iter()
         .find(|(key, _)| key == "building")
         .and_then(|(_, kind)| Building::named(kind));
+    let offers = options
+        .iter()
+        .find(|(key, _)| key == "offers")
+        .map(|(_, words)| offered(words))
+        .unwrap_or_else(|| Direction::ALL.to_vec());
 
     let facts = match facts(state, conversation_id, activity, options).await {
         Ok(facts) => facts,
@@ -227,7 +245,7 @@ pub(crate) async fn run_seeing(
         .map(|homes| homes.servers().to_owned());
     let lent = Hosted {
         doing: lent.doing_now().to_owned(),
-        lent: lent.building(building),
+        lent: lent.building(building).offering(offers),
         seen: seen.clone(),
         state: state.clone(),
         conversation_id,
@@ -356,6 +374,24 @@ pub(crate) async fn beside(
             );
             None
         }
+    }
+}
+
+/// The Directions `words` names, joined by commas, in the design's order and
+/// each once — all three where it names none of them.
+fn offered(words: &str) -> Vec<Direction> {
+    let named: Vec<Direction> = words
+        .split(',')
+        .filter_map(|word| Direction::named(word.trim()))
+        .collect();
+
+    match Direction::ALL
+        .into_iter()
+        .filter(|direction| named.contains(direction))
+        .collect::<Vec<_>>()
+    {
+        offered if offered.is_empty() => Direction::ALL.to_vec(),
+        offered => offered,
     }
 }
 

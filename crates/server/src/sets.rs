@@ -22,7 +22,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use serde::Deserialize;
-use verkstead_schema::{ApiError, Nudge, QuestionSet};
+use verkstead_schema::{ApiError, Direction, Nudge, QuestionSet};
 
 use crate::reply::yaml;
 use crate::{AppState, store};
@@ -97,6 +97,22 @@ pub(crate) async fn create_set(
             );
         }
     };
+
+    // A proposal offers what the interview listening on this Conversation
+    // offers, whatever the agent wrote: what the chooser draws is the
+    // Process's declaration, and the session's to recommend from rather than
+    // to set — see [`crate::followers`]. Stamped before the Set is judged, so a
+    // recommendation outside it is refused here, naming what was offered. All
+    // three is written as nothing, as a proposal always was.
+    if let Some(proposal) = &mut set.proposal
+        && let Some(offered) = state.followers.offered(conversation_id)
+    {
+        proposal.offers = if offered.len() < Direction::ALL.len() {
+            offered
+        } else {
+            Vec::new()
+        };
+    }
 
     if let Err(invalid) = set.validate() {
         return yaml(

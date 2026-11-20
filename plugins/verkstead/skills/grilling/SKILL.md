@@ -52,7 +52,11 @@ proposal:
 - **`direction` is one of `inline`, `task-list`, `roadmap`.** `inline` is one
   fresh session; `task-list` breaks the work into `.tasks/` and runs a session
   per task; `roadmap` stages it under `docs/roadmaps/`. Recommend the smallest
-  one the work actually needs.
+  one the work actually needs **among those the work may be built as**: where
+  your prompt says it may be built only some of these ways, the chooser offers
+  those alone and a recommendation of any other is refused naming them, and
+  where it says one, your proposal is accepted with it or sent back rather than
+  chosen between. Your prompt saying nothing about it means all three.
 - **`rationale` is markdown, and the human reads it.** It is shown beside the
   three choices as your reasoning for the one you picked, so write it as an
   argument rather than a label. A `proposal` without one is refused.
@@ -80,7 +84,7 @@ proposal:
   and so is a platform named twice: give each one entry, every reason in its
   `for`. A proposal with no `wants` draws the chooser as it always has.
 - **Ask no question about whether to go ahead.** The workbench draws the
-  chooser on any Set carrying a `proposal` — all three directions, yours marked
+  chooser on any Set carrying a `proposal` — the directions offered, yours marked
   as the recommendation, your rationale beside them — and says what picking one
   does. A Question asking the same thing is a second place to answer it, and the
   chooser is the one that counts. Ask about what is still uncertain, or ask

@@ -458,8 +458,11 @@ omission, and there is nothing there to follow up:
 - `direction` → the direction they picked, on a Set that carried a `proposal`
   and on no other. It answers no Question, so it is a field of the Response
   rather than an entry in `answers`. **A `direction` is the proposal accepted**,
-  and its absence is the proposal sent back. See the grilling skill for what to
-  do about either.
+  and its absence is the proposal sent back. It is always one the proposal
+  offered: a grilling whose prompt says the work may be built only some ways
+  has the server write those as the proposal's `offers`, whatever the Set said,
+  and nothing else can be picked. See the grilling skill for what to do about
+  either.
 
 A Response of nothing but `unanswered` entries plus a `comment` is a valid
 counter-question. It means the human is not answering as asked — take the

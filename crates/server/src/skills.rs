@@ -40,6 +40,8 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
 
+use verkstead_schema::Direction;
+
 use crate::handoffs;
 use crate::platform::Platform;
 use crate::plugins::built_in;
@@ -585,6 +587,37 @@ pub(crate) fn grilling_again(skills: &Skills, brief: &str, settled: &str) -> Str
     format!(
         "{}\n\n# What has already been asked, and what I said\n\n{settled}\n",
         grilling(skills, brief).trim_end(),
+    )
+}
+
+/// A grilling's prompt, told which Directions its interview offers where that
+/// is fewer than all three — what a Process declares (Set 1765, Q27). Under
+/// everything else, because it is the narrowest thing said: it changes the
+/// proposal and nothing before it.
+///
+/// All three adds nothing, so every grilling a Process does not narrow is
+/// started on exactly the words it always was.
+pub(crate) fn offering(prompt: String, offers: &[Direction]) -> String {
+    if offers.len() >= Direction::ALL.len() {
+        return prompt;
+    }
+
+    let said = match offers {
+        [only] => format!(
+            "This work is built one way only, `{}`: recommend it in your proposal, \
+             and I accept it or send it back rather than choosing.",
+            only.word()
+        ),
+        offers => format!(
+            "This work may only be built as {}: recommend one of those in your proposal, \
+             since the chooser offers me no other.",
+            Direction::listed(offers)
+        ),
+    };
+
+    format!(
+        "{}\n\n# How the work may be built\n\n{said}\n",
+        prompt.trim_end()
     )
 }
 

@@ -44,7 +44,7 @@ import type {
 import { readPicture } from "../api/client";
 import { useDevice } from "../reaching";
 import { setWrapping, wrapping } from "../remembered";
-import { DIRECTION, DIRECTION_LABEL, DIRECTIONS } from "../directions";
+import { DIRECTION, DIRECTION_LABEL } from "../directions";
 import { PaneHead } from "../workbench/PaneHead";
 import { Answering, chipped } from "./Answering";
 import { AskText } from "./AskText";
@@ -489,7 +489,7 @@ function Questions(props: {
   );
 }
 
-/// The direction chooser as the record of what was decided: the three that were
+/// The direction chooser as the record of what was decided: the ones that were
 /// offered, the one the agent recommended, and the one the human picked.
 ///
 /// The two marks are the two an Option's record carries, and are as deliberately
@@ -519,7 +519,7 @@ function Chosen(props: {
           />
         </div>
         <ul class={styles.directions}>
-          <For each={DIRECTIONS}>
+          <For each={props.proposal.offers}>
             {(offered) => (
               <li
                 class={styles.direction}

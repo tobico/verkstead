@@ -416,6 +416,12 @@ fn todo() -> PathBuf {
 /// the host's own, held through to wherever the Direction leaves the
 /// Conversation.
 ///
+/// **It offers the Directions declared for the Conversation** — all three until
+/// a Process narrows them (stage 11), which the suite stands in for through
+/// [`crate::followers::Followers::declare`] — handed to the component as its
+/// `offers` start fact, read back by the host for what the chooser draws, and
+/// said to the session under its prompt where they are fewer than three.
+///
 /// Whether a session was launched at all, which is what a relaunch holding Sets
 /// open owes them on: see [`crate::grillings::again`]. Answered once the
 /// interview is over.
@@ -434,13 +440,19 @@ pub(crate) async fn interview(
         return false;
     };
 
+    let offers = state.followers.declared(conversation_id);
+    let words: Vec<&str> = offers.iter().map(|direction| direction.word()).collect();
+
     let (outcome, seen) = crate::activities::run_seeing(
         &state,
         conversation_id,
         shipped.files(),
         &activity,
         &[],
-        vec![("prompt".to_owned(), prompt)],
+        vec![
+            ("prompt".to_owned(), skills::offering(prompt, &offers)),
+            ("offers".to_owned(), words.join(",")),
+        ],
         lent.doing("grilling the work").launching(driving),
     )
     .await;
