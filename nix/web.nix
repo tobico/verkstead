@@ -69,8 +69,10 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       ../crates/server/src/sharing.rs
       # And the built-in harnesses' marks, which the server serves on its
       # harness list and the suite reads as the files they are, so that what a
-      # fixture says a mark is cannot drift from what the server sends.
+      # fixture says a mark is cannot drift from what the server sends —
+      # Codex's in its plugin, now that it is one.
       ../crates/server/src/harness/marks
+      ../plugins/codex/marks
     ];
   };
 
