@@ -644,8 +644,8 @@ impl Machine {
 
     /// Everything a reading of this machine asks it, made in one hop off the
     /// runtime: the rows, and the accounts whose harnesses those rows are.
-    fn probed(&self, plugged: &[store::AgentType]) -> Probed {
-        let dependencies = self.rows_with(plugged);
+    fn probed(&self, plugged: &[store::AgentType], unticked: &[store::AgentType]) -> Probed {
+        let dependencies = self.rows_with(plugged, unticked);
         let accounts = self.accounts(&dependencies);
 
         Probed {
@@ -668,19 +668,26 @@ impl Machine {
     /// is not a directory to stand a server over. See
     /// `tests/suite/account_windows.rs`.
     pub fn rows(&self) -> Vec<DependencyView> {
-        self.rows_with(&[])
+        self.rows_with(&[], &[])
     }
 
     /// The same, with a row for each of `plugged` after the built-ins: the
     /// harnesses this server's enabled Agent plugins declare, each probed by
-    /// the binary its manifest names, the way the five are.
-    fn rows_with(&self, plugged: &[store::AgentType]) -> Vec<DependencyView> {
+    /// the binary its manifest names, the way the five are. And none for a
+    /// built-in of `unticked`, whose plugin is as disabled as a plugin left
+    /// out of `plugged` — see [`profiles::unticked`].
+    fn rows_with(
+        &self,
+        plugged: &[store::AgentType],
+        unticked: &[store::AgentType],
+    ) -> Vec<DependencyView> {
         let mut rows = vec![row(Row::Sandbox, self.sandbox())];
 
         rows.push(row(Row::Git, self.git()));
 
         rows.extend(
             harnesses(plugged)
+                .filter(|agent_type| !unticked.contains(agent_type))
                 .map(|agent_type| row(Row::Harness(agent_type), self.harness_row(agent_type))),
         );
 
@@ -1214,7 +1221,8 @@ impl Onboarding {
     /// and what is configured is a Profile and an author.
     ///
     /// `plugged` is the harnesses this server's enabled Agent plugins declare,
-    /// each a row after the built-ins.
+    /// each a row after the built-ins, and a built-in whose tick is off has
+    /// none.
     pub(crate) async fn read(
         &self,
         pool: &SqlitePool,
@@ -1243,7 +1251,9 @@ impl Onboarding {
         // same hop, being more of the same `stat` calls.
         let machine = self.machine.clone();
         let plugged = plugged.to_vec();
-        let probed = tokio::task::spawn_blocking(move || machine.probed(&plugged)).await?;
+        let unticked = profiles::unticked(pool).await?;
+        let probed =
+            tokio::task::spawn_blocking(move || machine.probed(&plugged, &unticked)).await?;
 
         let steps = steps(&probed.dependencies, pool, settings).await?;
 
@@ -2067,7 +2077,7 @@ mod tests {
     /// them.
     fn offered(machine: &Machine) -> Vec<store::AgentType> {
         machine
-            .probed(&[])
+            .probed(&[], &[])
             .accounts
             .iter()
             .map(|found| crate::profiles::stored(&found.account.agent_type))
@@ -2638,7 +2648,7 @@ echo {token}
         );
 
         assert_eq!(
-            machine.probed(&[]).path,
+            machine.probed(&[], &[]).path,
             vec![
                 dir.path().to_string_lossy().into_owned(),
                 "/usr/bin".to_owned()
@@ -3184,7 +3194,7 @@ echo {token}
         program(&dir.path().join("claude"), "#!/bin/sh\n");
 
         let machine = machine(Platform::Linux, dir.path());
-        let accounts = machine.probed(&[]).accounts;
+        let accounts = machine.probed(&[], &[]).accounts;
 
         assert_eq!(
             offered(&machine),

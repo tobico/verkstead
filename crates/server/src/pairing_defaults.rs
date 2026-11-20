@@ -14,7 +14,7 @@
 //! longest. Review takes the implementation model on every harness.
 //!
 //! **One candidate and no hunting.** A default is picked by rule — the first
-//! built-in harness with a Profile saved, in the order
+//! built-in harness with a Profile saved and its tick on, in the order
 //! [`crate::harness::every`] lists them — or, past them, the plugin harness
 //! this server offers whose Profile was saved first — that harness's unnamed Profile
 //! or else its earliest, the table's model or else the first that Profile lists
@@ -42,8 +42,9 @@ fn model(harness: AgentType, role: Role) -> Option<&'static str> {
 
 /// The platform default for `role`, out of the Profiles in the order they were
 /// saved — or [`Picked::Nothing`] where there is no Profile to run one under.
-/// `offered` is the plugin harnesses this server offers: a disabled plugin's
-/// Profile is never a default (Set 1764, Q20).
+/// `offered` is the plugin harnesses this server offers, and `unticked` the
+/// built-in ones whose tick is off: a disabled plugin's Profile is never a
+/// default (Set 1764, Q20), built in or installed.
 ///
 /// **The built-ins in a fixed order** rather than one read off anything, so
 /// that saving a second harness's Profile does not quietly move every fresh
@@ -51,8 +52,14 @@ fn model(harness: AgentType, role: Role) -> Option<&'static str> {
 ///
 /// Unjudged: whether the Profile's account is still where it was left is the
 /// filesystem's question, and it is asked by whoever prefills with this.
-pub(crate) fn platform_default(profiles: &[Profile], role: Role, offered: &[AgentType]) -> Picked {
+pub(crate) fn platform_default(
+    profiles: &[Profile],
+    role: Role,
+    offered: &[AgentType],
+    unticked: &[AgentType],
+) -> Picked {
     let Some(profile) = crate::harness::every()
+        .filter(|(harness, _)| !unticked.contains(harness))
         .find_map(|(harness, _)| account(profiles, harness))
         .or_else(|| account(profiles, plugged(profiles, offered)?))
     else {
