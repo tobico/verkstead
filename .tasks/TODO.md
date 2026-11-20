@@ -24,5 +24,5 @@ Roadmap stage: [10: The backlog and stage runners across](docs/roadmaps/plugins/
 - [x] 02: The backlog runner for a task list — [details](02-the-backlog-runner.md)
 - [x] 03: Stage backlogs, the join and placement — [details](03-stage-backlogs-join-and-placement.md)
 - [x] 04: Start a Conversation — [details](04-start-a-conversation.md)
-- [ ] 05: The stage runner — [details](05-the-stage-runner.md)
+- [x] 05: The stage runner — [details](05-the-stage-runner.md)
 - [ ] 06: The runner emptied — [details](06-the-runner-emptied.md)

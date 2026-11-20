@@ -410,6 +410,7 @@ const STACKING: &str = "### Stacking roadmap stages";
 /// Read under `## Review process` rather than anywhere in the file, because that
 /// is where the section belongs and a file that mentioned stacking in passing —
 /// a note, a changelog entry — would not be a repository that had recorded one.
+#[cfg(test)]
 pub(crate) fn stacks(worktree: &Path) -> bool {
     std::fs::read_to_string(worktree.join(GIT_WORKFLOW)).is_ok_and(|workflow| stacking(&workflow))
 }
@@ -450,6 +451,7 @@ fn stacking(workflow: &str) -> bool {
 /// the boxes together: the entries and the briefs are read at a commit, off the
 /// branch holding the newest of that roadmap's declarations — see [`Declaring`] —
 /// and which of those entries may start now is [`ready`]'s question.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Next {
     /// What the roadmap starts now, and what it says about the ready stages it
@@ -533,6 +535,7 @@ pub(crate) enum Next {
 /// [`crate::Pace::places`] for as long as the server is up, so it says only the
 /// wait that is about the thing it has just moved: a place on the server
 /// changing hands — see [`crate::continuing::Brought`], where that is decided.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Held {
     /// Waiting for a place on **its own roadmap**: the stages of it already in
@@ -550,6 +553,7 @@ pub(crate) enum Held {
     Halted(String),
 }
 
+#[cfg(test)]
 impl Held {
     /// What it says, which is what goes on a Timeline.
     pub(crate) fn said(&self) -> &str {
@@ -706,6 +710,7 @@ pub(crate) fn in_the_way(repo: &Path, branch: &str) -> Option<String> {
 /// `crate::continuing::declaring`, which is the whole of that rule: the top of the
 /// roadmap's chain, its own Conversation's branch while nothing has joined, and
 /// the branch that has just settled where git holds neither.
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Declaring<'a> {
     /// The branch the reading came off, for saying so. Nothing is looked up by
@@ -786,6 +791,7 @@ pub(crate) struct Declaring<'a> {
 /// back to a reading of the same roadmap somewhere older.
 ///
 /// Blocking work: one git read, and one more per stage that starts.
+#[cfg(test)]
 pub(crate) fn next_stage(
     repo: &Path,
     read: Declaring<'_>,

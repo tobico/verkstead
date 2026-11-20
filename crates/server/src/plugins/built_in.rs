@@ -314,6 +314,7 @@ impl Started {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugins::manifest::Capability;
 
     /// The fixture's bytes are in the binary, whichever way `build.rs` came by
     /// them, and it loads.
@@ -367,8 +368,9 @@ mod tests {
     }
 
     /// The shipped Activities are a built-in depending on the pack
-    /// `verkstead`, whose *Follow-up rounds* and *Backlog runner* blocks each
-    /// name a component of their own written against the `activity` world.
+    /// `verkstead`, whose *Follow-up rounds*, *Backlog runner* and *Stage
+    /// runner* blocks each name a component of their own written against the
+    /// `activity` world.
     #[tokio::test]
     async fn the_activities_are_a_built_in_with_their_components() {
         let shipped = activities();
@@ -381,8 +383,8 @@ mod tests {
         assert_eq!(manifest.dependencies.len(), 1);
         assert_eq!(manifest.dependencies[0].uuid, VERKSTEAD);
 
-        let [rounds, backlog] = manifest.activities.as_slice() else {
-            panic!("two Activities: {:?}", manifest.activities);
+        let [rounds, backlog, stages] = manifest.activities.as_slice() else {
+            panic!("three Activities: {:?}", manifest.activities);
         };
         assert_eq!(rounds.id, "follow-up-rounds");
         assert_eq!(rounds.name, "Follow-up rounds");
@@ -397,7 +399,21 @@ mod tests {
             ["verkstead/next-task", "verkstead/next-stage"]
         );
 
-        for component in ["follow-up-rounds.wasm", "backlog-runner.wasm"] {
+        assert_eq!(stages.id, "stage-runner");
+        assert_eq!(stages.name, "Stage runner");
+        assert_eq!(stages.outcomes, ["finished", "continued"]);
+        assert!(stages.skills.is_empty(), "it launches no session");
+        assert_eq!(
+            manifest.capabilities,
+            [Capability::Conversations],
+            "the stage runner starts conversations, and the plugin says so at install",
+        );
+
+        for component in [
+            "follow-up-rounds.wasm",
+            "backlog-runner.wasm",
+            "stage-runner.wasm",
+        ] {
             assert!(
                 shipped
                     .files

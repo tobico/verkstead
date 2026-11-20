@@ -11,6 +11,9 @@ author:
 version: 0.1.0
 interface: 1
 description: What Verkstead does while a conversation is in one of its states.
+# The stage runner starts a roadmap's stages as conversations of their own.
+capabilities:
+  - conversations: start
 dependencies:
   - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755
     name: Verkstead
@@ -31,3 +34,8 @@ provides:
     component: backlog-runner.wasm
     outcomes: [finished]
     skills: [verkstead/next-task, verkstead/next-stage]
+  - category: activity
+    id: stage-runner
+    name: Stage runner
+    component: stage-runner.wasm
+    outcomes: [finished, continued]

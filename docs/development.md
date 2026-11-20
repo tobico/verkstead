@@ -1627,8 +1627,11 @@ Today there are four:
   functions a stranger's would: a block per Activity, each a component built
   from the crate beside it — today *Follow-up rounds*, from
   [`plugins/activities/follow-up-rounds/`](../plugins/activities/follow-up-rounds),
-  and the *Backlog runner*, from
-  [`plugins/activities/backlog-runner/`](../plugins/activities/backlog-runner).
+  the *Backlog runner*, from
+  [`plugins/activities/backlog-runner/`](../plugins/activities/backlog-runner),
+  and the *Stage runner*, from
+  [`plugins/activities/stage-runner/`](../plugins/activities/stage-runner),
+  which is why the plugin declares `conversations: start`.
   It depends on the `verkstead` pack's plugin for the skills its sessions run
   under, and is the Built-in group's second row. Its directory holds the
   components' sources rather than their bytes, so `verkstead plugin check`

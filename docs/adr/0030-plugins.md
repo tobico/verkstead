@@ -272,6 +272,18 @@ limits stay the host's: a start over `at_once` is refused as *no place* and
 the Activity says the stage waits, rather than reading the limits itself, and
 a run the human pressed for is held to none of them.
 
+**The stage runner runs beside a Conversation, not in it.** It keeps the
+shape it had in process (Set 1839, Q1): started whenever a stage could start —
+a stage settling, a place coming free, a home device hearing a stage away
+settle — over the Conversation that settled or the foot of the roadmap's
+chain, it starts what is ready and ends `finished` or `continued`. It drives
+nothing, so it holds no Driving registration, which would count a settled
+Conversation as a place taken; a stop on the Conversation does not end it,
+and nothing it does stops the Conversation. What it notices goes where its
+start says: the Timeline at a settle, the report a home device answers, and the
+log at a look, but for a stage waiting on the server's places while they are
+all taken.
+
 **One wrap-up, with declared watchers.** The wrap-up watches checks, comments,
 the review and mergeability at once; Fix Merge Issues is the same Activity with
 two watchers off. A watcher per Activity, several running in one state, was
