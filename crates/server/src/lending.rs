@@ -156,8 +156,8 @@ impl Lent {
         }
     }
 
-    /// What brought the run about, where it may start Conversations: a press
-    /// is held to no limit, and a look says less — see
+    /// What brought the run about, where it may start Conversations: a look
+    /// says less — see
     /// [`crate::continuing::begin`]. A settle where nobody says.
     pub(crate) fn brought(mut self, brought: Brought) -> Lent {
         self.brought = brought;

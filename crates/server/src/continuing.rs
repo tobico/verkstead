@@ -216,11 +216,6 @@ pub(crate) enum Brought {
     /// settle would say on its Timeline is collected instead, and handed back for
     /// the live copy to say on its own — see [`reported`].
     Report,
-
-    /// The human **pressed** for it, and an Activity is starting what the press
-    /// asked for — see [`begin`]. Said as a settle says it, and held to no
-    /// limit, as a press never was.
-    Press,
 }
 
 tokio::task_local! {
@@ -277,7 +272,7 @@ impl Brought {
     /// something to write at a level anybody leaves on.
     async fn not_started(self, state: &AppState, conversation_id: i64, markdown: &str) {
         match self {
-            Self::Settle | Self::Press => say(state, conversation_id, markdown).await,
+            Self::Settle => say(state, conversation_id, markdown).await,
             Self::Report => heard(markdown),
             Self::Look => tracing::debug!(
                 conversation_id,
@@ -292,15 +287,14 @@ impl Brought {
     /// report hands back for the live copy to say instead.
     async fn started(self, state: &AppState, conversation_id: i64, markdown: &str) {
         match self {
-            Self::Settle | Self::Look | Self::Press => say(state, conversation_id, markdown).await,
+            Self::Settle | Self::Look => say(state, conversation_id, markdown).await,
             Self::Report => heard(markdown),
         }
     }
 
     /// Say what an Activity's run noticed on `conversation_id`'s Timeline, as
-    /// what brought the run about says it: a settle and a press on the
-    /// Timeline, a report handed back for the live copy, and a look in the log
-    /// alone — see [`Brought::not_started`] for why.
+    /// what brought the run about says it: a settle on the Timeline, a report
+    /// handed back for the live copy, and a look in the log alone — see [`Brought::not_started`] for why.
     ///
     /// **Except a stage waiting for a place on the server**, `waiting` being
     /// whether the notice is the sentence a start was answered *no place* with
@@ -330,7 +324,7 @@ impl Brought {
         waiting: bool,
     ) {
         match self {
-            Self::Settle | Self::Press => say(state, conversation_id, markdown).await,
+            Self::Settle => say(state, conversation_id, markdown).await,
             Self::Report => heard(markdown),
             Self::Look if waiting && places_full(state) => {
                 say(state, conversation_id, markdown).await;
@@ -654,9 +648,9 @@ impl Began {
 /// from `base`, as [`reading`] starts each stage it finds ready: the host's half
 /// of an Activity's *start a Conversation*.
 ///
-/// **The limits are the host's.** Unless `brought` is a press, a start is
-/// weighed against the roadmap's `roadmap_stages` and the server's
-/// `conversations`, both off `config.yaml` as it stands, and the places taken
+/// **The limits are the host's.** A start is weighed against the roadmap's
+/// `roadmap_stages` and the server's `conversations`, both off `config.yaml` as
+/// it stands, and the places taken
 /// counted afresh — so a stage held for a place starts at the first ask after
 /// one frees. The record's stages in flight hold the roadmap's places, and the
 /// two registers the server's, less the settling Conversation's own as
@@ -685,49 +679,47 @@ pub(crate) async fn begin(
         return Began::unsaid(&stage);
     };
 
-    if brought != Brought::Press {
-        let record = match store::stage_standings(&state.pool, conversation.repo.id).await {
-            Ok(record) => record,
-            Err(error) => {
-                tracing::error!(error = ?error, settled, "reading what a roadmap's stages had got to failed");
-                return Began::unsaid(&stage);
-            }
+    let record = match store::stage_standings(&state.pool, conversation.repo.id).await {
+        Ok(record) => record,
+        Err(error) => {
+            tracing::error!(error = ?error, settled, "reading what a roadmap's stages had got to failed");
+            return Began::unsaid(&stage);
+        }
+    };
+
+    let config = state.settings.config();
+    let at_once = config.at_once();
+
+    let in_flight = record
+        .stages(&stage.roadmap)
+        .into_iter()
+        .filter(|(_, standing, ..)| *standing == store::StageStanding::InFlight)
+        .count()
+        + spent;
+
+    if in_flight >= at_once.roadmap_stages() {
+        return Began::NoPlace {
+            said: stages::waiting_on_its_roadmap(
+                &stage.roadmap,
+                &stage.label,
+                &stage.title,
+                at_once.roadmap_stages(),
+            ),
+            server: false,
         };
+    }
 
-        let config = state.settings.config();
-        let at_once = config.at_once();
+    let mut taking = state.drivers.taking(&state.sessions.working());
 
-        let in_flight = record
-            .stages(&stage.roadmap)
-            .into_iter()
-            .filter(|(_, standing, ..)| *standing == store::StageStanding::InFlight)
-            .count()
-            + spent;
+    if brought == Brought::Settle {
+        taking.remove(&settled);
+    }
 
-        if in_flight >= at_once.roadmap_stages() {
-            return Began::NoPlace {
-                said: stages::waiting_on_its_roadmap(
-                    &stage.roadmap,
-                    &stage.label,
-                    &stage.title,
-                    at_once.roadmap_stages(),
-                ),
-                server: false,
-            };
-        }
-
-        let mut taking = state.drivers.taking(&state.sessions.working());
-
-        if brought == Brought::Settle {
-            taking.remove(&settled);
-        }
-
-        if taking.len() + spent >= at_once.conversations() {
-            return Began::NoPlace {
-                said: stages::waiting_on_the_server(&stage.roadmap, &stage.label, &stage.title),
-                server: true,
-            };
-        }
+    if taking.len() + spent >= at_once.conversations() {
+        return Began::NoPlace {
+            said: stages::waiting_on_the_server(&stage.roadmap, &stage.label, &stage.title),
+            server: true,
+        };
     }
 
     start(state, &conversation, settled, stage, stacks, base, brought).await

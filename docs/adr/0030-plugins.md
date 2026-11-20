@@ -269,8 +269,7 @@ own and read Conversations back: their state, and what the record holds of a
 roadmap's stages and chain. It is shown at Install beside the rest, because an
 Activity that can start work is one worth knowing about (Set 1839, Q4). The
 limits stay the host's: a start over `at_once` is refused as *no place* and
-the Activity says the stage waits, rather than reading the limits itself, and
-a run the human pressed for is held to none of them.
+the Activity says the stage waits, rather than reading the limits itself.
 
 **Joining a roadmap's chain is the host's, asked for by the Activity.** A
 stage's finish waits until every stage already in its roadmap's chain has

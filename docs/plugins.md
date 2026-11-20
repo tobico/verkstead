@@ -311,8 +311,8 @@ of Verkstead's:
   Conversation and branch. Over the roadmap's `roadmap_stages` or the server's
   `conversations` (`at_once`, in this device's `config.yaml`) it answers
   `no-place`, with the sentence saying what the stage waits for and nothing
-  made, and the same start succeeds once a place frees; a run the human
-  pressed for is not held to either. Anything else that stops it answers
+  made, and the same start succeeds once a place frees. Anything else that
+  stops it answers
   `halted`, with the sentence the host has already said.
 - **`conversation-state`** of one of the Repo's Conversations — its state's
   word, and whether it has settled — and **`stage-standings`** and
