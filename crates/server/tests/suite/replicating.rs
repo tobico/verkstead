@@ -69,7 +69,16 @@ const TOKENS: &str = "/api/peer/v1/authors/";
 const WORK: &str = "6f1c2a52-7d0e-4c55-9a43-0d6b8f3e2a11";
 const PERSONAL: &str = "0b7e5f3a-2c41-4d8e-b6a9-5e3f1c7d9a20";
 
-const PATIENCE: std::time::Duration = std::time::Duration::from_millis(300);
+/// How long one address has to answer here: the two seconds a running server
+/// gives one to connect.
+///
+/// **Not shorter, because every member here that answers is meant to read as
+/// answering.** On a loaded machine a third of a second was short enough for a
+/// pull from a member answering all along to time out, and what it would have
+/// mirrored arrived after the test had stopped waiting. Nothing here waits the
+/// patience out: a member switched off is a listener gone, which refuses at
+/// once.
+const PATIENCE: std::time::Duration = std::time::Duration::from_secs(2);
 const WAITING: std::time::Duration = std::time::Duration::from_secs(10);
 const LOOKING: std::time::Duration = std::time::Duration::from_millis(50);
 

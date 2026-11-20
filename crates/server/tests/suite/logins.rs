@@ -892,8 +892,9 @@ async fn a_login_left_past_its_limit_is_killed() {
     let profile = workbench.claude_profile("work").await;
 
     workbench.opened(&profile, "laptop").await;
-    workbench.waiting(&profile).await;
 
+    // Not read as waiting on the way: on a loaded machine the second can be
+    // up before the first reading, and the login reads as failed already.
     let ended = workbench
         .read_until(&profile, |reading| {
             matches!(reading, Some(LoginState::Failed { .. }))
