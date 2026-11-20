@@ -736,6 +736,29 @@ async fn devices_come_to(workbench: &Router, wanted: impl Fn(&DevicesView) -> bo
     }
 }
 
+/// What `asking` has been told, once it has been told anything — or the test
+/// fails. Update all tells its members from a task of its own, and a row reads
+/// *updating…* from the press rather than from the call landing, so the row is
+/// no sign the member has heard yet.
+async fn asked(asking: &Asking) -> Vec<String> {
+    let deadline = tokio::time::Instant::now() + WAITING;
+
+    loop {
+        let lines = asking.lines();
+
+        if !lines.is_empty() {
+            return lines;
+        }
+
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the member's app was never asked anything"
+        );
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// `id`'s row in `view`.
 fn member_in(view: &DevicesView, id: &str) -> LinkedDevice {
     view.members
@@ -1074,8 +1097,8 @@ async fn update_all_updates_the_members_then_this_device_and_skips_a_sleeper() {
         member_in(&view, RAVEN).trouble.as_deref(),
         Some("raven couldn't be reached, so it wasn't updated.")
     );
+    assert_eq!(asked(&crow.asking).await, vec![ASKED.to_owned()]);
     assert!(raven.asking.lines().is_empty());
-    assert_eq!(crow.asking.lines(), vec![ASKED.to_owned()]);
 
     // A second press reads the one going: nobody is told twice.
     assert!(pressing.presses_update_all().await.updating_all);
