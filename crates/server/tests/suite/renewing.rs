@@ -270,9 +270,11 @@ impl Verkstead {
     }
 
     /// How it dials, for the questions that are about a call rather than about a
-    /// press.
+    /// press — at the ordinary patience, not [`PATIENCE`]: every device these
+    /// calls go to is there, and a dial cut short on a loaded machine reads as
+    /// a certificate the far end would not take.
     fn peers(&self) -> Peers {
-        Peers::of(self.device.clone(), self.members.clone()).waiting(PATIENCE)
+        Peers::of(self.device.clone(), self.members.clone())
     }
 
     /// What it says about itself, which is what an announcement carries.
