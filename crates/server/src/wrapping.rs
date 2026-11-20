@@ -308,7 +308,14 @@ pub(crate) async fn record(
             // And the wrap-up itself starts here. The branch has just been
             // pushed, so GitHub is already running the checks and nobody else is
             // going to look — and nobody has read the branch at all.
-            watching(state, conversation_id, Reviewing::AsFound);
+            //
+            // Beside a wrap-up already under way, the Activity is running — it
+            // is what launched the session that opened this — so what starts is
+            // the host's watchers over what it opened, and not a second one.
+            match door {
+                Door::TheMove => watching(state, conversation_id, Reviewing::AsFound),
+                Door::Beside => watchers(state, conversation_id, Reviewing::AsFound),
+            }
         }
         // The run was stopped from outside while the last step was landing, or
         // this is a second attempt at an ending that already moved the
@@ -491,6 +498,30 @@ pub(crate) enum Reviewing {
 /// step, a restart, the resolve press — takes the review as found, each for a
 /// reason of its own.
 pub(crate) fn watching(state: &AppState, conversation_id: i64, reviewing: Reviewing) {
+    watchers(state, conversation_id, reviewing);
+    wrap_up(state, conversation_id, None);
+}
+
+/// Start the **Wrap-up** Activity on `conversation_id`, registered as a driver
+/// of it for as long as it runs — see [`crate::runner::wrap_up`]. What ends a
+/// wrap-up is its Outcome.
+///
+/// `against` is the base a take-up over a bare branch is owed its pull request
+/// against, which the Activity opens before it watches anything.
+pub(crate) fn wrap_up(state: &AppState, conversation_id: i64, against: Option<String>) {
+    let driving = state.drivers.driving(conversation_id);
+
+    tokio::spawn(crate::runner::wrap_up(
+        state.clone(),
+        conversation_id,
+        against,
+        driving,
+    ));
+}
+
+/// The watchers the host still runs beside the Activity: every pull request's
+/// checks and comments, the companions covered, and the branch reviewed.
+pub(crate) fn watchers(state: &AppState, conversation_id: i64, reviewing: Reviewing) {
     driving(state, conversation_id, crate::checks::watching);
     driving(state, conversation_id, crate::comments::watching);
 
@@ -519,8 +550,6 @@ pub(crate) fn watching(state: &AppState, conversation_id: i64, reviewing: Review
             }
         },
     );
-
-    driving(state, conversation_id, crate::settling::watch);
 }
 
 /// Find the pull requests the finish opened in the companions it committed in,
@@ -684,14 +713,17 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
     // started by a watcher rather than by the step that ended.
     let writing = crate::stalls::said_last(&state, conversation_id).await;
 
-    stopped(
+    give_up(
         &state,
         conversation_id,
-        &format!(
-            "The work committed in a companion repo that has no pull request. {}",
-            missing.join(" ")
-        ),
-        writing,
+        GaveUp {
+            what: FINDING.to_owned(),
+            how: format!(
+                "The work committed in a companion repo that has no pull request. {}",
+                missing.join(" ")
+            ),
+            writing,
+        },
     )
     .await;
 }
@@ -908,7 +940,7 @@ pub(crate) async fn stopped(
         &state.nudges,
         conversation_id,
         crate::stopping::Decided::Verkstead,
-        "finding the pull request the work ended on",
+        FINDING,
         why,
         writing,
     )
@@ -918,6 +950,158 @@ pub(crate) async fn stopped(
             error = ?error,
             conversation_id,
             "a finish step left no pull request and the stop saying so could not be recorded"
+        );
+    }
+}
+
+/// What a stop over a pull request nobody can find says the run was doing.
+const FINDING: &str = "finding the pull request the work ended on";
+
+/// The stop a watcher the host runs gave a wrap-up up with — what it wrote
+/// itself before the wrap-up was an Activity, and what is written now as the
+/// Activity's `given-up` lands.
+pub(crate) struct GaveUp {
+    /// What the run was doing, which the stop's Notice opens with.
+    pub(crate) what: String,
+
+    /// And why it stopped, in the Notice's words.
+    pub(crate) how: String,
+
+    /// The Timeline Event whose tail is its evidence.
+    pub(crate) writing: Option<i64>,
+}
+
+/// Which Conversations have a **Wrap-up** Activity running, and the stops the
+/// host's watchers have given each of them up with that the Activity has not
+/// answered yet.
+///
+/// The watchers give up — the checks or a conflict out of goes, a companion
+/// left without a pull request — and the Activity answers `given-up` on its
+/// next round, which [`given_up`] maps to the stop as it always stood. Where no
+/// Activity is running to answer, the stop is written at once.
+#[derive(Clone, Default)]
+pub(crate) struct WrapUps {
+    held: std::sync::Arc<std::sync::Mutex<WrapUpsHeld>>,
+
+    /// Woken as a stop is handed over, so a round sleeping out its poll looks
+    /// again at once.
+    handed: std::sync::Arc<tokio::sync::Notify>,
+}
+
+#[derive(Default)]
+struct WrapUpsHeld {
+    running: std::collections::HashMap<i64, usize>,
+    given_up: std::collections::HashMap<i64, GaveUp>,
+}
+
+/// Counts a running wrap-up for as long as it is held.
+pub(crate) struct Running {
+    wrap_ups: WrapUps,
+    conversation_id: i64,
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        let mut held = self.wrap_ups.lock();
+
+        if let Some(running) = held.running.get_mut(&self.conversation_id) {
+            *running -= 1;
+
+            if *running == 0 {
+                held.running.remove(&self.conversation_id);
+            }
+        }
+    }
+}
+
+impl WrapUps {
+    pub(crate) fn new() -> WrapUps {
+        WrapUps::default()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, WrapUpsHeld> {
+        self.held.lock().expect("nothing panics holding it")
+    }
+
+    /// Count a wrap-up running on `conversation_id` until what this answers is
+    /// dropped.
+    pub(crate) fn running(&self, conversation_id: i64) -> Running {
+        *self.lock().running.entry(conversation_id).or_default() += 1;
+
+        Running {
+            wrap_ups: self.clone(),
+            conversation_id,
+        }
+    }
+
+    /// Whether a stop is held for `conversation_id`'s wrap-up to answer.
+    pub(crate) fn given_up(&self, conversation_id: i64) -> bool {
+        self.lock().given_up.contains_key(&conversation_id)
+    }
+
+    /// Woken the next time a stop is handed over.
+    pub(crate) async fn handed(&self) {
+        self.handed.notified().await
+    }
+
+    /// Hold `gave_up` for a running wrap-up, or hand it back where none is.
+    fn hand_over(&self, conversation_id: i64, gave_up: GaveUp) -> Option<GaveUp> {
+        {
+            let mut held = self.lock();
+
+            if !held.running.contains_key(&conversation_id) {
+                return Some(gave_up);
+            }
+
+            held.given_up.insert(conversation_id, gave_up);
+        }
+
+        self.handed.notify_waiters();
+        None
+    }
+
+    fn take(&self, conversation_id: i64) -> Option<GaveUp> {
+        self.lock().given_up.remove(&conversation_id)
+    }
+
+    /// Let go of a stop held for a wrap-up that ended under a stop of its own.
+    pub(crate) fn let_go(&self, conversation_id: i64) {
+        self.take(conversation_id);
+    }
+}
+
+/// Give `conversation_id`'s wrap-up up with `gave_up`: handed to the running
+/// Activity to answer `given-up` over, or written at once where none is.
+pub(crate) async fn give_up(state: &AppState, conversation_id: i64, gave_up: GaveUp) {
+    if let Some(gave_up) = state.wrap_ups.hand_over(conversation_id, gave_up) {
+        write_the_stop(state, conversation_id, gave_up).await;
+    }
+}
+
+/// Land a wrap-up's `given-up`: the stop the host gave it up with, as it was
+/// always written. Nothing where another start of it has written it already.
+pub(crate) async fn given_up(state: &AppState, conversation_id: i64) {
+    if let Some(gave_up) = state.wrap_ups.take(conversation_id) {
+        write_the_stop(state, conversation_id, gave_up).await;
+    }
+}
+
+async fn write_the_stop(state: &AppState, conversation_id: i64, gave_up: GaveUp) {
+    if let Err(error) = crate::stopping::stop(
+        &state.pool,
+        &state.nudges,
+        conversation_id,
+        crate::stopping::Decided::Verkstead,
+        &gave_up.what,
+        &gave_up.how,
+        gave_up.writing,
+    )
+    .await
+    {
+        tracing::error!(
+            error = ?error,
+            conversation_id,
+            "a wrap-up was given up and the stop saying so could not be recorded"
         );
     }
 }
@@ -1045,5 +1229,61 @@ async fn branch(
             tracing::error!(error = ?error, conversation_id, "reading the Conversation to ask gh about failed");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gave_up(how: &str) -> GaveUp {
+        GaveUp {
+            what: "getting the checks green".to_owned(),
+            how: how.to_owned(),
+            writing: None,
+        }
+    }
+
+    /// With no Wrap-up running to answer `given-up`, the stop comes straight
+    /// back to be written, as it always was.
+    #[test]
+    fn a_give_up_with_no_wrap_up_running_is_handed_back() {
+        let wrap_ups = WrapUps::new();
+
+        let handed_back = wrap_ups.hand_over(7, gave_up("A check is still failing."));
+
+        assert_eq!(
+            handed_back.map(|gave_up| gave_up.how).as_deref(),
+            Some("A check is still failing.")
+        );
+        assert!(!wrap_ups.given_up(7));
+    }
+
+    /// A running one holds it until its Outcome lands, once, and only for its
+    /// own Conversation.
+    #[test]
+    fn a_running_wrap_up_holds_the_stop_until_its_outcome_takes_it() {
+        let wrap_ups = WrapUps::new();
+        let running = wrap_ups.running(7);
+
+        assert!(
+            wrap_ups
+                .hand_over(7, gave_up("A check is still failing."))
+                .is_none()
+        );
+        assert!(wrap_ups.given_up(7));
+        assert!(!wrap_ups.given_up(8));
+
+        assert_eq!(
+            wrap_ups.take(7).map(|gave_up| gave_up.how).as_deref(),
+            Some("A check is still failing.")
+        );
+        assert!(wrap_ups.take(7).is_none(), "taken once");
+
+        drop(running);
+        assert!(
+            wrap_ups.hand_over(7, gave_up("Again.")).is_some(),
+            "and counted no longer once it ends"
+        );
     }
 }

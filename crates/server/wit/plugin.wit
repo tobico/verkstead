@@ -435,6 +435,22 @@ interface activity-types {
     markdown: string,
   }
 
+  /// Where a wrap-up stands, by the host's record of what it waits on.
+  variant wrapped {
+    /// Something it waits on is still unsettled.
+    waiting,
+    /// Everything it waits on is settled: Verkstead has finished with the
+    /// work, and what is left is the human's merge.
+    settled,
+    /// The host gave up on it — a check or a conflict out of fix sessions, a
+    /// Companion committed in and left without a pull request — and holds
+    /// the stop that says why. The Activity ends `given-up`.
+    given-up,
+    /// The Conversation is not wrapping up any more, or its run has stopped.
+    /// The Activity ends `steered`.
+    over,
+  }
+
   /// A pull request found open on a branch.
   record opened {
     number: s64,
@@ -449,7 +465,7 @@ interface activity-types {
 interface host {
   use activity-types.{
     evidence, ends, session, waited, branch-facts, woke, pull-request, watcher,
-    unforged, pull-request-standing, suite, comment, opened,
+    unforged, pull-request-standing, suite, comment, opened, wrapped,
   };
 
   /// Launch a session under `skill`, `<pack>/<skill>`, as `role`, with the
@@ -504,6 +520,15 @@ interface host {
   /// The pull request open on `branch` of the Repo named `repo`, where there
   /// is one. `lacking` where the Forge cannot open one, which settles nothing.
   forge-opened: func(repo: string, branch: string) -> result<option<opened>, unforged>;
+
+  /// Where the wrap-up stands, asked each time round its watchers.
+  wrap-up: func() -> wrapped;
+
+  /// Record the pull request the work's own branch is on, which a
+  /// `submitting` session the wrap-up launched has just opened, so there is
+  /// something to watch. Refused, in a sentence, where there is none — and
+  /// the Conversation is then stopped over what that session last said.
+  record-opened: func() -> result<pull-request, string>;
 
   /// Record one of the things a wrap-up waits on as settled, or as not —
   /// what the viewer draws the wrap-up's standing from. Saying it twice is

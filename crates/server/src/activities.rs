@@ -881,6 +881,14 @@ impl host::Host for Hosted {
         host::Host::forge_opened(&mut self.lent, repo, branch).await
     }
 
+    async fn wrap_up(&mut self) -> wasmtime::Result<world::Wrapped> {
+        host::Host::wrap_up(&mut self.lent).await
+    }
+
+    async fn record_opened(&mut self) -> wasmtime::Result<Result<world::PullRequest, String>> {
+        host::Host::record_opened(&mut self.lent).await
+    }
+
     async fn settle(&mut self, watcher: world::Watcher) -> wasmtime::Result<()> {
         host::Host::settle(&mut self.lent, watcher).await
     }

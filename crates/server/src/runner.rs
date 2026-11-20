@@ -773,7 +773,7 @@ async fn nothing_left(
                  session is being sent to open one",
             );
 
-            asked_for_a_pull_request(&state, conversation_id, Owed::AFinish).await
+            asked_for_a_pull_request(&state, conversation_id).await
         }
         Err(github::Trouble::NoPullRequest) => {
             tracing::info!(
@@ -1144,80 +1144,7 @@ async fn to_a_pull_request(state: &AppState, conversation_id: i64, writing: Opti
         "the work is committed and on no pull request, so a session is being sent to open one",
     );
 
-    asked_for_a_pull_request(state, conversation_id, Owed::AFinish).await
-}
-
-/// What the one session sent for a pull request is being sent over.
-///
-/// Two things differ between the ways of wanting one, and they differ together,
-/// which is why this is one value rather than two arguments: which branch it is
-/// told to open against, and which door what it opens is recorded through.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Owed {
-    /// A run that stopped short of its push, or a **Tinker**'s ending. Nothing
-    /// says which branch to open against — the repository's own finish sequence
-    /// says it, and the base this branch came off is in its history — and what is
-    /// opened is the move into Wrapping.
-    AFinish,
-
-    /// A **Review** taken up over a bare branch, carrying the base the picker
-    /// held. Said outright because the skill's own fallback opens against the
-    /// repository's default branch, and the base here is the one the human chose;
-    /// and the Conversation is Wrapping already, so what is opened is written
-    /// beside that wrap-up rather than being what starts one. See
-    /// [`crate::conversations::take_up`].
-    ABranch(String),
-}
-
-impl Owed {
-    /// The branch the session is told to open the pull request against, where
-    /// anything says one.
-    fn against(&self) -> Option<&str> {
-        match self {
-            Owed::AFinish => None,
-            Owed::ABranch(base) => Some(base),
-        }
-    }
-
-    /// And which door what it opens comes through — see [`crate::wrapping::Door`].
-    fn door(&self) -> crate::wrapping::Door {
-        match self {
-            Owed::AFinish => crate::wrapping::Door::TheMove,
-            Owed::ABranch(_) => crate::wrapping::Door::Beside,
-        }
-    }
-}
-
-/// Send the one session a **Review** taken up over a bare branch is owed, and
-/// make of what it leaves what every other ending makes of it.
-///
-/// The press's own way into [`asked_for_a_pull_request`], and the whole of what a
-/// branch take-up has left to do: the work is built and pushed and nobody opened
-/// a pull request, so what is missing is a push and a `gh pr create` — against
-/// `against`, which is the base the picker held. The Conversation is Wrapping
-/// before this runs, so what the session opens is recorded beside that wrap-up
-/// and the watchers start on it; a session that opens none stops the run over what
-/// it last said, and Resume is another go.
-///
-/// `driving` is held to the end, as a Tinker's ending holds its across the same
-/// call: dropping it first would leave a moment where a sweep could find the
-/// Conversation undriven and stop it with a worse sentence.
-pub(crate) async fn owed_for_a_branch(
-    state: AppState,
-    conversation_id: i64,
-    against: String,
-    driving: Driving,
-) {
-    let _driving = driving;
-
-    tracing::info!(
-        conversation_id,
-        against,
-        "a branch was taken up for wrapping and is on no pull request, so a session is being \
-         sent to open one",
-    );
-
-    asked_for_a_pull_request(&state, conversation_id, Owed::ABranch(against)).await
+    asked_for_a_pull_request(state, conversation_id).await
 }
 
 /// Send one session for the pull request the work should already be on, and make
@@ -1240,19 +1167,12 @@ pub(crate) async fn owed_for_a_branch(
 /// something for the human to look at. What they have then is Resume, and a press
 /// is another go through here: the work is still built, so there is still exactly
 /// one thing to ask for.
-async fn asked_for_a_pull_request(state: &AppState, conversation_id: i64, owed: Owed) {
-    let Some(writing) = submitted(state, conversation_id, owed.against()).await else {
+async fn asked_for_a_pull_request(state: &AppState, conversation_id: i64) {
+    let Some(writing) = submitted(state, conversation_id).await else {
         return;
     };
 
-    match owed.door() {
-        crate::wrapping::Door::TheMove => {
-            crate::wrapping::opened(state, conversation_id, Some(writing)).await
-        }
-        crate::wrapping::Door::Beside => {
-            crate::wrapping::opened_beside(state, conversation_id, Some(writing)).await
-        }
-    }
+    crate::wrapping::opened(state, conversation_id, Some(writing)).await
 }
 
 /// Run the one session sent to open a pull request the finish step did not, and
@@ -1274,7 +1194,7 @@ async fn asked_for_a_pull_request(state: &AppState, conversation_id: i64, owed: 
 /// The Timeline Event it printed into, or `None` where nothing ran: no session
 /// could be started, or the run was stopped from outside while this one did. Both
 /// of those have already said whatever there was to say.
-async fn submitted(state: &AppState, conversation_id: i64, against: Option<&str>) -> Option<i64> {
+async fn submitted(state: &AppState, conversation_id: i64) -> Option<i64> {
     let documents = documents(state, conversation_id).await?;
 
     // Every caller is a driver holding a registration of its own already; this
@@ -1297,7 +1217,7 @@ async fn submitted(state: &AppState, conversation_id: i64, against: Option<&str>
                 documents.skills,
                 &documents.brief,
                 documents.handoff(),
-                against,
+                None,
             ),
             evidence: crate::done::Evidence::Nothing,
             ends: crate::done::Ends::OnAPullRequest,
@@ -1973,6 +1893,150 @@ async fn one_session(
     }
 }
 
+/// Run a wrap-up under the **Wrap-up** Activity, and land the Conversation
+/// wherever its Outcome says.
+///
+/// The way in for every start of a wrap-up — a pull request recorded, a
+/// restart, a Resume, the resolve press — through [`crate::wrapping::wrap_up`],
+/// which holds the registration this is handed. The checks, the comments and
+/// the review are still watched by the host beside it (see
+/// [`crate::wrapping::watching`]); what the component watches itself is each
+/// pull request's landing, and what the host's record says of the rest.
+///
+/// - **`against`** is the base a **Review** or **Fix Merge Issues** taken up
+///   over a bare branch is owed its pull request against: the component is
+///   handed the `submitting` session's prompt and opens it itself — see
+///   [`crate::conversations::take_up`].
+/// - **The Process's narrowing is its options**: Fix Merge Issues turns the
+///   review and the comments off, which the component settles at once — see
+///   [`crate::conversations::narrows_the_wrap_up`].
+///
+/// And the Outcomes, mapped here until a Process says them as data:
+///
+/// - **`settled`** is Done, the news, the share and the next stage, as the rule
+///   always ended a wrap-up — see [`crate::settling::settled`]. A rule that is
+///   no longer true by the time it is applied starts the component again.
+/// - **`merged`** is the same Done without the rule: every pull request has
+///   landed, and nothing is left for the wrap-up to wait on.
+/// - **`closed`** is a stop: a pull request closed unmerged is the human's to
+///   decide about.
+/// - **`given-up`** writes the stop the host gave up with, which is exactly the
+///   stop it always wrote — see [`crate::wrapping::give_up`].
+/// - **`steered`**, or a stop, has said where the Conversation went already.
+pub(crate) async fn wrap_up(
+    state: AppState,
+    conversation_id: i64,
+    against: Option<String>,
+    driving: Driving,
+) {
+    let Some((shipped, activity)) = built_in(WRAP_UP) else {
+        tracing::error!(
+            conversation_id,
+            "this build carries no Wrap-up Activity, so nothing is wrapping up"
+        );
+
+        stop(
+            &state,
+            conversation_id,
+            crate::stopping::Decided::Verkstead,
+            "wrapping up",
+            "This build of Verkstead can't wrap up.",
+            None,
+        )
+        .await;
+
+        return;
+    };
+
+    let process = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.process,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to wrap up failed");
+            return;
+        }
+    };
+
+    let mut options = vec![(
+        "poll".to_owned(),
+        state.sessions.pace().checks.as_millis().to_string(),
+    )];
+
+    if crate::conversations::narrows_the_wrap_up(process) {
+        options.push(("review".to_owned(), "off".to_owned()));
+        options.push(("comments".to_owned(), "off".to_owned()));
+    }
+
+    if let Some(against) = against {
+        let Some(documents) = documents(&state, conversation_id).await else {
+            return;
+        };
+
+        options.push((
+            "prompt".to_owned(),
+            skills::submitting(
+                documents.skills,
+                &documents.brief,
+                documents.handoff(),
+                Some(&against),
+            ),
+        ));
+    }
+
+    let outcome = {
+        let _running = state.wrap_ups.running(conversation_id);
+
+        crate::activities::run(
+            &state,
+            conversation_id,
+            &driving,
+            shipped.files(),
+            &activity,
+            &[],
+            options,
+            "wrapping up",
+            crate::continuing::Brought::Settle,
+        )
+        .await
+        .map(|ran| ran.outcome)
+    };
+
+    // A stop handed over as it ended some other way is still the stop: it is
+    // what the host's watchers wrote before the wrap-up was an Activity. Under
+    // a stop of the Conversation's own, it is let go.
+    let outcome = match outcome {
+        Some(_) if state.wrap_ups.given_up(conversation_id) => Some("given-up".to_owned()),
+        Some(outcome) => Some(outcome),
+        None => {
+            state.wrap_ups.let_go(conversation_id);
+            None
+        }
+    };
+
+    match outcome.as_deref() {
+        Some("settled") => crate::settling::settled(&state, conversation_id, true).await,
+        Some("merged") => crate::settling::settled(&state, conversation_id, false).await,
+        Some("closed") => {
+            stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                "wrapping up",
+                "A pull request this work is on was closed without being merged. Reopen \
+                 it and press **Resume** to carry on wrapping up.",
+                None,
+            )
+            .await
+        }
+        Some("given-up") => crate::wrapping::given_up(&state, conversation_id).await,
+        _ => {}
+    }
+}
+
+/// The id the **Wrap-up** Activity has in the built-in Activities plugin's
+/// manifest.
+const WRAP_UP: &str = "wrap-up";
+
 /// The id the **One session** Activity has in the built-in Activities plugin's
 /// manifest.
 const ONE_SESSION: &str = "one-session";
@@ -2237,7 +2301,7 @@ async fn over(
         // leave a moment where a sweep could find the Conversation undriven.
         let _driving = driving;
 
-        return asked_for_a_pull_request(state, conversation_id, Owed::AFinish).await;
+        return asked_for_a_pull_request(state, conversation_id).await;
     }
 
     finished(state, conversation_id, driving).await

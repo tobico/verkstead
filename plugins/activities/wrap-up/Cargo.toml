@@ -1,0 +1,15 @@
+[package]
+name = "verkstead-activity-wrap-up"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Embedded as `wrap-up.wasm`, which is what the `activity` block in
+# `../plugin.yaml` names: see `crates/server/build.rs`.
+[lib]
+name = "wrap_up"
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.46"

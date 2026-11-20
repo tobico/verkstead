@@ -51,3 +51,9 @@ provides:
     component: interview.wasm
     outcomes: ["direction:inline", "direction:task-list", "direction:roadmap", gone]
     skills: [verkstead/grilling]
+  - category: activity
+    id: wrap-up
+    name: Wrap-up
+    component: wrap-up.wasm
+    outcomes: [settled, merged, closed, given-up]
+    skills: [verkstead/submitting]

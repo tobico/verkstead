@@ -476,7 +476,7 @@ async fn recompute(
         // no checks and never open the one thing missing. So the press asks for
         // that instead, which is the promise the run makes about a finish that
         // stopped short of its push, kept for the other ending that sends for one
-        // — see [`crate::runner::owed_for_a_branch`].
+        // — see [`crate::runner::wrap_up`].
         //
         // Asked of the record and nothing else: every other way into Wrapping
         // comes through the pull request being recorded, so a Conversation's own
@@ -498,14 +498,11 @@ async fn recompute(
                 .clone()
                 .unwrap_or_else(|| conversation.repo.default_branch.clone());
 
-            let state = state.clone();
-
-            tokio::spawn(crate::runner::owed_for_a_branch(
-                state,
-                conversation_id,
-                against,
-                driving,
-            ));
+            // The wrap-up opens it before it watches anything, taking a
+            // registration of its own as it is spawned — the handover this one
+            // is held across.
+            crate::wrapping::wrap_up(state, conversation_id, Some(against));
+            drop(driving);
         }
 
         // The wrap-up's watchers over the top of nothing, which is what a

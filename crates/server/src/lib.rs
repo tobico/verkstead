@@ -559,6 +559,10 @@ pub(crate) struct AppState {
     /// [`forge`].
     forge: forge::Forge,
 
+    /// And which Conversations have a **Wrap-up** Activity running, with the
+    /// stops the host's watchers have given each up with — see [`wrapping`].
+    wrap_ups: wrapping::WrapUps,
+
     /// And how it asks this machine whether a phone can reach the workbench —
     /// the host's `tailscale`, in front of the port this server is listening
     /// on. A handle rather than a reading: what it answers is read at the moment
@@ -1733,6 +1737,7 @@ fn standing(
 
         github,
         forge: forge::Forge::new(),
+        wrap_ups: wrapping::WrapUps::new(),
 
         // And the host's `tailscale`, which is the whole of what the Remote access
         // pane reads — see [`remote`].
