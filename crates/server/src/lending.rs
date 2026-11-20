@@ -1631,6 +1631,116 @@ impl host::Host for Lent {
         )
         .await)
     }
+
+    async fn ignored(
+        &mut self,
+        repo: String,
+        comments: Vec<world::Comment>,
+    ) -> wasmtime::Result<Vec<String>> {
+        let conversation_id = self.conversation_id;
+        let Ok(repo) = crate::forge::repo_named(&self.state, conversation_id, &repo).await else {
+            return Ok(Vec::new());
+        };
+
+        let said: Vec<crate::github::Comment> = comments
+            .into_iter()
+            .map(|comment| crate::github::Comment {
+                which: comment.which,
+                author: comment.author,
+                at: comment.at,
+                about: comment.about,
+                markdown: comment.markdown,
+            })
+            .collect();
+
+        Ok(crate::comments::not_to_answer(&self.state, conversation_id, &repo, &said).await)
+    }
+
+    /// Whether `watcher` is settled — a store that will not answer reading as
+    /// *not yet*, which is the right way round for what it decides: on the
+    /// other side of it is an agent let loose on feedback nobody was asked
+    /// about.
+    async fn settled(&mut self, watcher: world::Watcher) -> wasmtime::Result<bool> {
+        let conversation_id = self.conversation_id;
+
+        let Some(waiting_on) = self.waiting_on(&watcher).await else {
+            return Ok(false);
+        };
+
+        Ok(
+            match store::wrap_up_settled(&self.state.pool, conversation_id).await {
+                Ok(settled) => settled.contains(&waiting_on),
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id, ?waiting_on, "reading what a wrap-up had settled failed");
+                    false
+                }
+            },
+        )
+    }
+
+    async fn cover(&mut self) -> wasmtime::Result<()> {
+        crate::wrapping::covering(self.state.clone(), self.conversation_id).await;
+        Ok(())
+    }
+
+    async fn review_wanted(&mut self, afresh: bool) -> wasmtime::Result<bool> {
+        Ok(crate::review::wanted_now(&self.state, self.conversation_id, afresh).await)
+    }
+
+    async fn reviewing(
+        &mut self,
+        said: Option<String>,
+    ) -> wasmtime::Result<Result<String, String>> {
+        Ok(crate::review::prompt(&self.state, self.conversation_id, said).await)
+    }
+
+    /// See the review session out, with the tail of the newest session
+    /// launched here — the review itself — where it ended badly.
+    async fn review_over(&mut self, how: Option<String>) -> wasmtime::Result<()> {
+        let ended_badly = how.map(|how| (how, self.writing.unwrap_or_default()));
+
+        crate::review::over(&self.state, self.conversation_id, ended_badly).await;
+        Ok(())
+    }
+
+    /// The same for a batch session.
+    async fn batch_over(
+        &mut self,
+        pull_request: world::PullRequest,
+        comments: Vec<String>,
+        how: Option<String>,
+    ) -> wasmtime::Result<()> {
+        let conversation_id = self.conversation_id;
+        let named = match crate::forge::named(&self.state, conversation_id, &pull_request).await {
+            Ok(named) => named,
+            Err(why) => {
+                tracing::error!(
+                    conversation_id,
+                    why,
+                    "a batch session was over on a pull request the Conversation isn't on"
+                );
+                return Ok(());
+            }
+        };
+
+        let ended_badly = how.map(|how| (how, self.writing.unwrap_or_default()));
+
+        crate::responding::batch_over(
+            &self.state,
+            conversation_id,
+            named.repo.id,
+            named.number,
+            &comments,
+            ended_badly,
+        )
+        .await;
+
+        Ok(())
+    }
+
+    async fn left_behind(&mut self) -> wasmtime::Result<bool> {
+        Ok(crate::responding::unattended(&self.state, self.conversation_id).await)
+    }
 }
 
 impl Lent {

@@ -5,10 +5,39 @@
 //! **Its watchers are options**: `checks`, `comments`, `review` and
 //! `mergeable`, each `on` unless the Process turns it `off` — which settles it
 //! on every round, the way Fix Merge Issues has its review and comments
-//! settled from the start. The comments and the review are still watched by
-//! the host beside this until they move in; what this watches itself is each
-//! pull request's checks, whether it merges, and its landing, through the
-//! Forge.
+//! settled from the start. The review may also be `afresh`, which is a Resume
+//! asking for the branch read again whatever the last review left standing.
+//! All four run here, side by side, reaching the pull requests through the
+//! Forge alone.
+//!
+//! **The companions first.** Before anything reads the work whole, the host is
+//! asked to find the pull requests the work's Companions were carried to and
+//! record each beside the Conversation's own — which gives the wrap-up up
+//! where one was committed in and left without any.
+//!
+//! **The review**, once, across every pull request: a session inside the
+//! reviewing skill under the Review role, launched where the host says the
+//! branch is to be read — not where it has been, where there is to be no
+//! review, or where a review's own proposal is standing with nobody behind it,
+//! which the host stops the run over. What is already standing on the pull
+//! requests is folded into its prompt and marked addressed as it launches, so
+//! nothing is later sent to do ungated what its Set is about to propose. How
+//! it ended is the host's to see to: the review settled, the work sent back to
+//! build what it split out, or the run stopped. `review-after` holds it back
+//! that many milliseconds, a window the suite holds open.
+//!
+//! **What is said after it**, on every pull request every round. A comment
+//! nobody has been sent to deal with — not one a share left, nor one the
+//! human's ignore rules match, both the host's to say — puts that pull
+//! request's comments back to waiting, and nothing is settled or answered
+//! until the review is over: until then, whatever is said is the review's to
+//! fold in. After it, a pull request with nothing outstanding settles, where
+//! nothing is running, and one with something dispatches a **batch session**
+//! about it inside the responding skill, told which pull request and where to
+//! work, its comments marked addressed as it launches. A batch session's
+//! proposal standing with nobody behind it is the host's to stop over, and
+//! nothing said is settled or answered while it stands. A Forge that lacks
+//! review settles a pull request's comments at once, and the review with them.
 //!
 //! **The checks**, every round, of every pull request on the record — a
 //! Companion's found after this started included. Green settles them, which a
@@ -33,10 +62,11 @@
 //! does neither.
 //!
 //! **One session at a time.** A dispatch tries for the Worktree rather than
-//! waiting on it, and holds it for as long as the session runs: what else is
-//! in there is the review or a batch of comments, both of which take as long
-//! as they take, and a fix queued behind one would be about a suite nobody had
-//! looked at since. The next round looks again. The pull request a session is
+//! waiting on it, and holds it for as long as the session runs, the wait on
+//! the human included: a fix queued behind the review or a batch would be
+//! about a suite nobody had looked at since. The next round looks again, and
+//! with the Worktree free it dispatches the review first, then a fix or a
+//! resolution, then a batch. The pull request a session is
 //! about is not looked at while it runs, and once it is over a round passes
 //! before that one is looked at or anything is dispatched again, so that its
 //! push has been asked about.
@@ -58,7 +88,7 @@
 //! and the Forge's word, asked afresh every round, so a server restarted
 //! mid-wrap-up starts it again and it carries on where the record stands.
 //! What it does keep — which pull requests have reported a check, and which
-//! the Forge has no checks for — it learns again.
+//! the Forge has no checks or no review for — it learns again.
 
 wit_bindgen::generate!({
     world: "activity",
@@ -66,9 +96,10 @@ wit_bindgen::generate!({
 });
 
 use std::collections::HashSet;
+use std::time::{Duration, Instant};
 
 use verkstead::plugin::activity_types::{
-    Check, Checked, Ends, Evidence, Mergeable, PullRequest, PullRequestStanding,
+    Check, Checked, Comment, Ends, Evidence, Mergeable, PullRequest, PullRequestStanding,
     PullRequestStands, Session, Suite, Unforged, Waited, Watcher, Woke, Wrapped,
 };
 use verkstead::plugin::host;
@@ -90,6 +121,17 @@ const BUSY: &str = "Something else is working in the Worktree.";
 /// The skill a fix or a resolution session runs inside.
 const ADDRESSING: &str = "verkstead/addressing";
 
+/// The skill the review runs inside.
+const REVIEWING: &str = "verkstead/reviewing";
+
+/// The skill a batch session runs inside.
+const RESPONDING: &str = "verkstead/responding";
+
+/// What separates one comment from the next, and one pull request's comments
+/// from another's: a rule, which is what a human reading markdown on a phone
+/// sees a break as.
+const BETWEEN: &str = "\n\n---\n\n";
+
 impl Guest for WrapUp {
     fn run(facts: Facts) -> String {
         let poll = option(&facts, "poll")
@@ -104,6 +146,10 @@ impl Guest for WrapUp {
         {
             return outcome;
         }
+
+        // Before anything reads the work whole: which pull requests there are
+        // is what the review reads, and what is said on each of them.
+        host::cover();
 
         let mut watching = Watching::new(&facts);
 
@@ -146,12 +192,14 @@ impl Guest for WrapUp {
 
             watching.round(&pull_requests, &standings);
 
-            let fixing: Vec<Session> = watching.fixing.into_iter().collect();
+            let running: Vec<Session> = watching
+                .running
+                .iter()
+                .map(|(session, _)| *session)
+                .collect();
 
-            if let Woke::Waited((session, _)) = host::wait_any(&fixing, poll)
-                && watching.fixing == Some(session)
-            {
-                watching.fixing = None;
+            if let Woke::Waited((session, waited)) = host::wait_any(&running, poll) {
+                watching.over(session, waited);
             }
         }
     }
@@ -159,13 +207,14 @@ impl Guest for WrapUp {
 
 export!(WrapUp);
 
-/// The checks and the merge, watched across rounds.
+/// The watchers, across rounds.
 struct Watching<'a> {
     facts: &'a Facts,
     attempts: i64,
 
-    /// The fix or resolution session dispatched and not yet over.
-    fixing: Option<Session>,
+    /// The session dispatched and not yet over, and what it was dispatched
+    /// for.
+    running: Option<(Session, Dispatched)>,
 
     /// The pull request it was dispatched about, which is not looked at while
     /// it runs — what the Forge says of it then is about the work before the
@@ -180,6 +229,30 @@ struct Watching<'a> {
     /// The pull requests the Forge has no checks for: settled at once, and
     /// never asked about again.
     lacking: HashSet<(String, i64)>,
+
+    /// The pull requests the Forge has no review for: their comments settled
+    /// at once and never asked about again, and the review with them.
+    silent: HashSet<(String, i64)>,
+
+    /// Whether the review reads past what the last one left standing, until a
+    /// review has been launched.
+    afresh: bool,
+
+    /// When this started, and how long after it the review is held back.
+    started: Instant,
+    review_after: Duration,
+}
+
+/// What a session was dispatched for, which is what is seen to once it is
+/// over.
+enum Dispatched {
+    /// A fix or a resolution: nothing to see to, the next round looking again.
+    Fix,
+    /// The review, which the host sees out.
+    Review,
+    /// A batch about these comments on this pull request, which the host sees
+    /// out.
+    Batch(PullRequest, Vec<String>),
 }
 
 /// What one look at a pull request came to.
@@ -199,16 +272,25 @@ impl<'a> Watching<'a> {
             attempts: option(facts, "attempts")
                 .and_then(|attempts| attempts.parse().ok())
                 .unwrap_or(ATTEMPTS),
-            fixing: None,
+            running: None,
             held: None,
             reported: HashSet::new(),
             lacking: HashSet::new(),
+            silent: HashSet::new(),
+            afresh: option(facts, "review") == Some("afresh"),
+            started: Instant::now(),
+            review_after: Duration::from_millis(
+                option(facts, "review-after")
+                    .and_then(|after| after.parse().ok())
+                    .unwrap_or(0),
+            ),
         }
     }
 
     /// Look at every pull request, settle the wrap-up on what each came to,
-    /// and dispatch at most one session about the first that needs one — where
-    /// none is running and a round has passed since the last.
+    /// and dispatch at most one session — the review, or about the first pull
+    /// request that needs one — where none is running and a round has passed
+    /// since a fix.
     fn round(&mut self, pull_requests: &[PullRequest], standings: &[Option<PullRequestStanding>]) {
         let held = self.held.clone();
 
@@ -221,8 +303,14 @@ impl<'a> Watching<'a> {
             .map(|(pull_request, standing)| (pull_request, self.look(pull_request, standing)))
             .collect();
 
-        // Nothing dispatched beside a session, nor in the round after one.
-        if self.fixing.is_some() || self.held.take().is_some() {
+        let said = self.reading(pull_requests);
+
+        // Nothing dispatched beside a session, nor in the round after a fix.
+        if self.running.is_some() || self.held.take().is_some() {
+            return;
+        }
+
+        if self.review(pull_requests) {
             return;
         }
 
@@ -237,6 +325,228 @@ impl<'a> Watching<'a> {
                 return;
             }
         }
+
+        if let Some((pull_request, fresh)) = said.into_iter().next() {
+            self.answer(&pull_request, &fresh);
+        }
+    }
+
+    /// See to a session that is over, by what it was dispatched for: the host
+    /// sees the review and a batch out — `how` it ended, where that was the
+    /// trouble — and a fix needs nothing. One the human steered past has
+    /// nothing left to see to.
+    fn over(&mut self, session: Session, waited: Waited) {
+        if self.running.as_ref().map(|(running, _)| *running) != Some(session) {
+            return;
+        }
+
+        let Some((_, dispatched)) = self.running.take() else {
+            return;
+        };
+
+        let how = match waited {
+            Waited::Steered => return,
+            Waited::Gone(how) => how,
+            _ => None,
+        };
+
+        match dispatched {
+            Dispatched::Fix => {}
+            Dispatched::Review => host::review_over(how.as_deref()),
+            Dispatched::Batch(pull_request, which) => {
+                host::batch_over(&pull_request, &which, how.as_deref())
+            }
+        }
+    }
+
+    /// Read what is said on every pull request and settle the wrap-up on it,
+    /// answering with what is outstanding on each — once the review is over,
+    /// until when nothing said is anybody's but the review's.
+    fn reading(&mut self, pull_requests: &[PullRequest]) -> Vec<(PullRequest, Vec<Comment>)> {
+        if off(self.facts, "comments") {
+            return Vec::new();
+        }
+
+        // Read before the comments are, which is what makes the two agree: the
+        // review marks what it folds in as it launches, so a reading of the
+        // comments from before that and of the review from after it would
+        // answer the very comments the review was given.
+        let reviewed = host::settled(&Watcher::Review);
+
+        // A batch's proposal standing with nobody behind it is a question with
+        // nobody to read the answer — and its comments marked addressed. Nothing
+        // is settled or answered over it.
+        if reviewed && host::left_behind() {
+            return Vec::new();
+        }
+
+        let mut outstanding = Vec::new();
+
+        for pull_request in pull_requests {
+            // Nothing is touched where the Forge couldn't be asked.
+            let Some(fresh) = self.unaddressed(pull_request) else {
+                continue;
+            };
+
+            let watcher = Watcher::Comments(pull_request.clone());
+
+            // Not until the review is over, nor while something is working —
+            // a batch just dispatched reads exactly as one that is over, its
+            // comments addressed and nothing asked yet.
+            if fresh.is_empty() {
+                if reviewed && self.running.is_none() {
+                    host::settle(&watcher);
+                }
+
+                continue;
+            }
+
+            host::unsettle(&watcher);
+
+            if reviewed {
+                outstanding.push((pull_request.clone(), fresh));
+            }
+        }
+
+        outstanding
+    }
+
+    /// What is said on `pull_request` that nobody has been sent to deal with
+    /// yet — not what was marked addressed, nor what the host says is nobody's
+    /// to answer — or `None` where the Forge could not be asked, which is
+    /// neither *nothing was said* nor *something was*.
+    fn unaddressed(&mut self, pull_request: &PullRequest) -> Option<Vec<Comment>> {
+        let key = (pull_request.repo.clone(), pull_request.number);
+
+        // Settled again every round, as the checks are where there are none.
+        if self.silent.contains(&key) {
+            host::settle(&Watcher::Comments(pull_request.clone()));
+            return None;
+        }
+
+        let said = match host::forge_comments(pull_request) {
+            Ok(said) => said,
+            // Settled by the host as it answered.
+            Err(Unforged::Lacking) => {
+                self.silent.insert(key);
+                return None;
+            }
+            Err(Unforged::Unasked(_)) => return None,
+        };
+
+        let already = host::addressed(&pull_request.repo).ok()?;
+
+        let new: Vec<Comment> = said
+            .into_iter()
+            .filter(|comment| !already.contains(&comment.which))
+            .collect();
+
+        let ignored = host::ignored(&pull_request.repo, &new);
+
+        Some(
+            new.into_iter()
+                .filter(|comment| !ignored.contains(&comment.which))
+                .collect(),
+        )
+    }
+
+    /// Launch the review, where the host says the branch is to be read, with
+    /// whatever is standing on the pull requests folded in. Whether it was.
+    fn review(&mut self, pull_requests: &[PullRequest]) -> bool {
+        if off(self.facts, "review") {
+            return false;
+        }
+
+        // A Forge with no review has nothing for it to wait on.
+        if !self.silent.is_empty() {
+            host::settle(&Watcher::Review);
+            return false;
+        }
+
+        if self.started.elapsed() < self.review_after
+            || host::settled(&Watcher::Review)
+            || !host::review_wanted(self.afresh)
+        {
+            return false;
+        }
+
+        let mut said = Vec::new();
+        let mut folded = Vec::new();
+
+        for pull_request in pull_requests {
+            // One that couldn't be asked about costs the review that one's
+            // comments, which the batch after it picks up.
+            let Some(fresh) = self.unaddressed(pull_request) else {
+                if !self.silent.is_empty() {
+                    host::settle(&Watcher::Review);
+                    return false;
+                }
+
+                continue;
+            };
+
+            if fresh.is_empty() {
+                continue;
+            }
+
+            said.push(said_by(pull_request, &fresh));
+            folded.push((pull_request.clone(), which(&fresh)));
+        }
+
+        let said = (!said.is_empty()).then(|| said.join(BETWEEN));
+
+        let Ok(told) = host::reviewing(said.as_deref()) else {
+            return false;
+        };
+
+        let Ok(session) = host::launch(
+            REVIEWING,
+            "review",
+            &told,
+            &Evidence::Nothing,
+            Ends::WithItsWork,
+        ) else {
+            return false;
+        };
+
+        // Marked as it launches rather than as it ends, so that a server that
+        // restarted over it does not hand them to a batch as well.
+        for (pull_request, which) in folded {
+            let _ = host::mark_addressed(&pull_request.repo, &which);
+        }
+
+        self.afresh = false;
+        self.running = Some((session, Dispatched::Review));
+        true
+    }
+
+    /// Dispatch a batch session about what is outstanding on `pull_request`.
+    /// Whether it was.
+    fn answer(&mut self, pull_request: &PullRequest, fresh: &[Comment]) -> bool {
+        let told = format!(
+            "These comments were left on {}. Work in that repository's worktree, at `{}` —              both `git` and `gh` read the repository from wherever they are run, so a diff              read or a commit made anywhere else is a different repository's.\n\n{}",
+            named(pull_request),
+            worktree(self.facts, &pull_request.repo),
+            said_by(pull_request, fresh),
+        );
+
+        let Ok(session) = host::launch(
+            RESPONDING,
+            "implementation",
+            &responding(self.facts, &told),
+            &Evidence::Nothing,
+            Ends::WithItsWork,
+        ) else {
+            return false;
+        };
+
+        // Marked as it launches, so a batch a server dispatched and then
+        // restarted over is not dispatched twice.
+        let which = which(fresh);
+        let _ = host::mark_addressed(&pull_request.repo, &which);
+
+        self.running = Some((session, Dispatched::Batch(pull_request.clone(), which)));
+        true
     }
 
     /// Ask how `pull_request`'s checks are, and whether it merges, and settle
@@ -396,7 +706,7 @@ impl<'a> Watching<'a> {
             let _ = host::count_fix_attempt(pull_request, &check.name);
         }
 
-        self.fixing = Some(session);
+        self.running = Some((session, Dispatched::Fix));
         self.held = Some((pull_request.repo.clone(), pull_request.number));
         true
     }
@@ -437,7 +747,7 @@ impl<'a> Watching<'a> {
 
         let _ = host::count_conflict_attempt(pull_request);
 
-        self.fixing = Some(session);
+        self.running = Some((session, Dispatched::Fix));
         self.held = Some((pull_request.repo.clone(), pull_request.number));
         true
     }
@@ -523,15 +833,43 @@ fn landed(standings: &[Option<PullRequestStanding>]) -> Option<&'static str> {
 /// written down in, and under them the feedback to address — in the words the
 /// server's own builder has always used.
 fn addressing(facts: &Facts, feedback: &str) -> String {
-    let skill = facts
-        .skills
-        .iter()
-        .find(|skill| skill.name == ADDRESSING)
-        .map_or(ADDRESSING, |skill| skill.path.as_str());
+    let skill = skill(facts, ADDRESSING);
 
+    format!(
+        "{}\n# The feedback to address\n\n{}\n",
+        on_the_documents(
+            facts,
+            &format!(
+                "Read {skill} and address the feedback at the end of this prompt, the way it says."
+            ),
+        ),
+        feedback.trim()
+    )
+}
+
+/// What a batch session is started on: the documents, and under them what has
+/// just been said.
+fn responding(facts: &Facts, said: &str) -> String {
+    let skill = skill(facts, RESPONDING);
+
+    format!(
+        "{}\n# What has just been said on the pull request\n\n{}\n",
+        on_the_documents(
+            facts,
+            &format!(
+                "Read {skill} and answer what has just been said on the pull request named at \
+                 the end of this prompt, the way it says. The work described below is what it \
+                 was meant to be."
+            ),
+        ),
+        said.trim()
+    )
+}
+
+/// The opening line naming the skill, and the Brief and the handoff under it.
+fn on_the_documents(facts: &Facts, opening: &str) -> String {
     let mut prompt = format!(
-        "Read {skill} and address the feedback at the end of this prompt, the way it says. \
-         Nothing else in this session tells you how to reach me.\n\
+        "{opening} Nothing else in this session tells you how to reach me.\n\
          \n# The Brief this started from\n\n{}\n",
         facts.brief,
     );
@@ -542,10 +880,52 @@ fn addressing(facts: &Facts, feedback: &str) -> String {
         ));
     }
 
-    format!(
-        "{prompt}\n# The feedback to address\n\n{}\n",
-        feedback.trim()
-    )
+    prompt
+}
+
+/// Where a session reads the skill `name`'s `SKILL.md`.
+fn skill<'f>(facts: &'f Facts, name: &'f str) -> &'f str {
+    facts
+        .skills
+        .iter()
+        .find(|skill| skill.name == name)
+        .map_or(name, |skill| skill.path.as_str())
+}
+
+/// What was said, in the order it was said in, whole and in the markdown it
+/// was written in, each with the pull request it was said on and — for one
+/// left on the diff — the file and the line: "this is the wrong way round" is
+/// an instruction with them and a riddle without.
+fn said_by(pull_request: &PullRequest, fresh: &[Comment]) -> String {
+    fresh
+        .iter()
+        .map(|comment| {
+            let who = match comment.author.is_empty() {
+                true => "Somebody".to_owned(),
+                false => format!("**{}**", comment.author),
+            };
+
+            let where_said = match comment.about.is_empty() {
+                true => String::new(),
+                false => format!(", on {}", comment.about),
+            };
+
+            format!(
+                "{who} said on {}{where_said}:\n\n{}",
+                named(pull_request),
+                comment.markdown.trim(),
+            )
+        })
+        .collect::<Vec<String>>()
+        .join(BETWEEN)
+}
+
+/// What each of the comments is, which is what it is marked addressed by.
+fn which(comments: &[Comment]) -> Vec<String> {
+    comments
+        .iter()
+        .map(|comment| comment.which.clone())
+        .collect()
 }
 
 /// Where the Repo named `repo` is checked out: the Worktree, or a Companion's.

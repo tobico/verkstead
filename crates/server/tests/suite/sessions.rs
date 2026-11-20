@@ -10208,6 +10208,54 @@ async fn a_wrap_up_over_a_forge_lacking_checks_settles_them_and_never_asks() {
     assert!(!written.exists(), "nor was a fix session dispatched");
 }
 
+/// And a Forge with no review has nothing said on its pull requests for the
+/// wrap-up to answer, nor a review to wait on: the comments are settled at once,
+/// the review with them, and the wrap-up goes Done on the checks and the merge
+/// with no session sent to read the branch or to answer anything — the three
+/// comments standing on it included.
+#[tokio::test]
+async fn a_wrap_up_over_a_forge_lacking_review_settles_it_and_sends_nobody() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh_about(GREEN, THREE_COMMENTS, ""),
+    )
+    .await;
+
+    fixture
+        .hosting
+        .as_ref()
+        .expect("this bench hosts Activities")
+        .lacking(verkstead_server::forge::Capability::Review);
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture
+        .until(|view| (view.state == Lifecycle::Done).then(|| view.clone()))
+        .await;
+
+    assert!(
+        !reviews.exists(),
+        "nothing read the branch: {:?}",
+        std::fs::read_to_string(&reviews).ok(),
+    );
+    assert!(
+        !batches.exists(),
+        "nor was anything sent to answer the comments standing on it: {:?}",
+        std::fs::read_to_string(&batches).ok(),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
 /// A finish that commits its work and opens no pull request is not the end of the
 /// run: one session is sent for the one thing missing, and a branch that comes
 /// back on a pull request wraps up as though the finish had done it itself.

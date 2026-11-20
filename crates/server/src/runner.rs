@@ -1898,10 +1898,10 @@ async fn one_session(
 ///
 /// The way in for every start of a wrap-up — a pull request recorded, a
 /// restart, a Resume, the resolve press — through [`crate::wrapping::wrap_up`],
-/// which holds the registration this is handed. The checks, the comments and
-/// the review are still watched by the host beside it (see
-/// [`crate::wrapping::watching`]); what the component watches itself is each
-/// pull request's landing, and what the host's record says of the rest.
+/// which holds the registration this is handed. The component watches the
+/// whole of it — the companions covered, every pull request's checks, merge,
+/// comments and landing, and the branch reviewed — and the host keeps the
+/// record of what it waits on.
 ///
 /// - **`against`** is the base a **Review** or **Fix Merge Issues** taken up
 ///   over a bare branch is owed its pull request against: the component is
@@ -1910,6 +1910,8 @@ async fn one_session(
 /// - **The Process's narrowing is its options**: Fix Merge Issues turns the
 ///   review and the comments off, which the component settles at once — see
 ///   [`crate::conversations::narrows_the_wrap_up`].
+/// - **`reviewing`** is a Resume asking for the branch read afresh, whatever
+///   the last review left standing — see [`crate::review::wanted_now`].
 ///
 /// And the Outcomes, mapped here until a Process says them as data:
 ///
@@ -1927,6 +1929,7 @@ pub(crate) async fn wrap_up(
     state: AppState,
     conversation_id: i64,
     against: Option<String>,
+    reviewing: crate::wrapping::Reviewing,
     _driving: Driving,
 ) {
     let Some((shipped, activity)) = built_in(WRAP_UP) else {
@@ -1963,11 +1966,19 @@ pub(crate) async fn wrap_up(
             state.sessions.pace().checks.as_millis().to_string(),
         ),
         ("attempts".to_owned(), crate::checks::ATTEMPTS.to_string()),
+        // Zero in a server, and a window a test holds open — see
+        // [`Pace::reviewing`].
+        (
+            "review-after".to_owned(),
+            state.sessions.pace().reviewing.as_millis().to_string(),
+        ),
     ];
 
     if crate::conversations::narrows_the_wrap_up(process) {
         options.push(("review".to_owned(), "off".to_owned()));
         options.push(("comments".to_owned(), "off".to_owned()));
+    } else if reviewing == crate::wrapping::Reviewing::Afresh {
+        options.push(("review".to_owned(), "afresh".to_owned()));
     }
 
     if let Some(against) = against {
@@ -2855,198 +2866,6 @@ async fn staged(state: &AppState, conversation_id: i64, base: &str, writing: i64
     to_a_pull_request(state, conversation_id, Some(writing)).await;
 }
 
-/// What a session that proposes and then fixes left behind — the wrap-up's one
-/// review, and each batch of comments answered after it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Reviewed {
-    /// It finished: it read what it was sent to read, put what it would do to the
-    /// human, landed what they accepted, and ran out of things to say. One that
-    /// found nothing worth raising finishes the same way, having said so as the
-    /// last thing it printed.
-    ///
-    /// Which is nearly always Verkstead ending it on its Done signal rather than
-    /// the session exiting — an interactive agent idles when its work is done.
-    /// Both are this: see [`proposing`].
-    Done,
-
-    /// It ended, and not well. Which is not a session with nothing left to do —
-    /// this is one that did not finish.
-    Stopped {
-        /// How it ended, in the words the Notice records.
-        how: String,
-
-        /// The Timeline Event it was printing into.
-        writing: i64,
-    },
-
-    /// Nothing to say about it: no session could be started, or the run was
-    /// stopped from outside while it ran.
-    Nothing,
-}
-
-/// Run the one review session a wrap-up gets, and wait until it is over.
-///
-/// One session however many pull requests the work ended up on: `on` is every one
-/// of them, so that the session reading the work whole knows where the whole of
-/// it is — see [`crate::review::across`].
-///
-/// `said` is what was written on those pull requests before this started, which
-/// the caller reads inside the Turn it is holding and records as addressed — so
-/// this session is the one that proposes about it, and nothing else is sent to.
-pub(crate) async fn review(
-    state: &AppState,
-    conversation_id: i64,
-    on: Option<String>,
-    said: Option<String>,
-) -> Reviewed {
-    proposing(
-        state,
-        conversation_id,
-        "verkstead/reviewing",
-        store::Role::Review,
-        |documents| {
-            skills::reviewing(
-                documents.skills,
-                &documents.brief,
-                documents.handoff(),
-                on.as_deref(),
-                said.as_deref(),
-            )
-        },
-        "review",
-    )
-    .await
-}
-
-/// Run one batch session, and wait until it is over.
-///
-/// The review's shape exactly — it proposes about what was said, waits on the
-/// human, and lands what they accepted — about a batch of comments rather than
-/// about the branch. `said` is that batch, which the caller reads and records as
-/// addressed inside the Turn it is holding.
-pub(crate) async fn respond(state: &AppState, conversation_id: i64, said: &str) -> Reviewed {
-    proposing(
-        state,
-        conversation_id,
-        "verkstead/responding",
-        store::Role::Implementation,
-        |documents| {
-            skills::responding(
-                documents.skills,
-                &documents.brief,
-                documents.handoff(),
-                said,
-            )
-        },
-        "batch session",
-    )
-    .await
-}
-
-/// Run one session that proposes and then fixes, and wait until it is over.
-///
-/// **Ended because it said it was done** — see [`crate::done`], and ADR-0018 —
-/// and once it is next idle after that, so what it says on the way out is kept.
-/// One of these puts what it would do to the human in the middle of its work and
-/// has the rest of that work to do afterwards, so there is no landing to check
-/// the signal against and no commit it must make: a review that fixes nothing is
-/// a review that did its job. What holds is what every signal has — nothing
-/// left uncommitted, and a Set of its own still open locked as it is taken.
-///
-/// **Nothing ends one on quiet.** It used to be ended on a minute of silence
-/// with nothing of its own open, that being the only report there was, and a
-/// review that started a background check run and ended its turn was ended
-/// mid-review — leaving what it had got to standing as the whole of it. Now a
-/// quiet one is left running, however long the quiet, and a session idling on
-/// a Blocking Ask of its own is left alone as it always was: `verkstead ask`
-/// blocks for as long as the human takes.
-///
-/// **And one that will not ask is spoken to**, until it signals — see
-/// [`crate::rescues`], which tells the human where it will not answer and leaves
-/// the session running.
-///
-/// A session ended on its signal **is a session that finished**: it is
-/// [`Reviewed::Done`], exactly as one that saw itself out cleanly is. Where the
-/// session ends first, how it ended is read exactly as an inline run's is:
-/// cleanly means it did what it was sent to do, and anything else means it did
-/// not. What to do about either is the caller's, and both callers ask the same
-/// further question first: whether anything the human accepted was left
-/// unlanded. See [`crate::review`] and [`crate::responding`].
-///
-/// `what` names the session in the log, which is the one place the two differ
-/// here.
-async fn proposing(
-    state: &AppState,
-    conversation_id: i64,
-    skill: &str,
-    role: store::Role,
-    prompt: impl FnOnce(&Documents<'_>) -> String,
-    what: &'static str,
-) -> Reviewed {
-    let Some(documents) = documents(state, conversation_id).await else {
-        return Reviewed::Nothing;
-    };
-
-    // No signal given and nothing open, with the session sitting there: a
-    // review or a batch nobody can move on. Spoken to, and the human told where
-    // it will not answer — see [`crate::rescues`]. The wrap-up dispatching it
-    // holds the Turn already.
-    let mut lent = Lent::new(state, conversation_id).turn_held().doing(what);
-
-    // Nothing for the signal to be checked against beyond the rules every signal
-    // has: a review that finds nothing, or a batch that asks for nothing, is
-    // still one done. See [`crate::done::Evidence::Nothing`].
-    let Some(session) = lent
-        .start(
-            skill,
-            role,
-            prompt(&documents),
-            crate::done::Evidence::Nothing,
-            crate::done::Ends::WithItsWork,
-        )
-        .await
-    else {
-        return Reviewed::Nothing;
-    };
-
-    let event_id = lent.event_id(session);
-
-    let Some(ended) = lent.see(session).await else {
-        tracing::info!(
-            conversation_id,
-            event_id,
-            what,
-            "the session said it is done and has gone quiet since, so it is being ended",
-        );
-
-        state.sessions.end(conversation_id).await;
-
-        return Reviewed::Done;
-    };
-
-    // Verkstead ended it — the human closed or force-stopped the Conversation
-    // out from under the wrap-up, or the account ran out of window. Either way
-    // the stop is already on the record, so there is nothing to ask about. See
-    // [`crate::sessions::Ended::on_purpose`].
-    if ended.on_purpose() {
-        tracing::info!(
-            conversation_id,
-            event_id,
-            what,
-            "the session was stopped from outside, so nothing is asked about it"
-        );
-        return Reviewed::Nothing;
-    }
-
-    match ended.badly() {
-        Some(how) => Reviewed::Stopped {
-            how,
-            writing: event_id,
-        },
-        None => Reviewed::Done,
-    }
-}
-
 /// Whether the Conversation's commits stand past the `already` a session started
 /// over.
 ///
@@ -3641,14 +3460,14 @@ pub(crate) fn under(
 /// Read by the driver because the prompt is the driver's — see
 /// [`crate::lending`], which adds what every session is told under it. Read
 /// back every time rather than held across the run: a backlog takes hours.
-struct Documents<'a> {
-    skills: &'a skills::Skills,
-    brief: String,
+pub(crate) struct Documents<'a> {
+    pub(crate) skills: &'a skills::Skills,
+    pub(crate) brief: String,
     handoff: Option<String>,
 }
 
 impl Documents<'_> {
-    fn handoff(&self) -> Option<&str> {
+    pub(crate) fn handoff(&self) -> Option<&str> {
         self.handoff.as_deref()
     }
 }
@@ -3656,7 +3475,7 @@ impl Documents<'_> {
 /// The documents `conversation_id`'s next prompt is written from, or `None`
 /// where there is nothing to write one from — a server that installed no skills
 /// runs no sessions to send anywhere.
-async fn documents(state: &AppState, conversation_id: i64) -> Option<Documents<'_>> {
+pub(crate) async fn documents(state: &AppState, conversation_id: i64) -> Option<Documents<'_>> {
     let Some(skills) = state.sessions.skills() else {
         tracing::error!(
             conversation_id,
