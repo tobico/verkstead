@@ -2641,6 +2641,89 @@ async fn codex_is_a_built_in_row_whose_tick_is_the_switch_for_its_profiles() {
     );
 }
 
+/// **Unticked, Codex is no platform default and no wizard row** — the rule a
+/// disabled Agent plugin's harness keeps. With no Claude Code Profile, the
+/// default falls past the Codex Profile to the next harness's rather than
+/// coming up empty, and the dependencies step draws no Codex row to install.
+/// Ticked again, both come back.
+#[tokio::test]
+async fn an_unticked_codex_is_no_platform_default_and_no_wizard_row() {
+    const CODEX: &str = "49ea40c6-298c-412a-95b5-c89b9f539616";
+    let (accounts, _dir, app) = workbench().await;
+    let repo = fresh_repo(&app, accounts.path(), "verkstead").await;
+
+    let codex = home(accounts.path(), "codex");
+    assert_eq!(
+        save(&app, &codex_edit("codex", &codex, &["gpt-5-codex"])).await,
+        ProfileSaved::Saved
+    );
+    let grok = grok_home(accounts.path(), "grok");
+    assert_eq!(
+        save(&app, &grok_edit("grok", &grok, &["grok-4.6"])).await,
+        ProfileSaved::Saved
+    );
+    let named = |name: &'static str| {
+        let app = app.clone();
+        async move {
+            listed(&app)
+                .await
+                .into_iter()
+                .find(|profile| profile.name.as_deref() == Some(name))
+                .unwrap()
+                .id
+        }
+    };
+    let (codex, grok) = (named("codex").await, named("grok").await);
+
+    let defaulted = |repo: i64| {
+        let app = app.clone();
+        async move {
+            prefill(&app, repo)
+                .await
+                .grilling
+                .map(|pairing| pairing.profile.id.clone())
+        }
+    };
+    let drawn = || {
+        let app = app.clone();
+        async move {
+            let wizard: verkstead_render::OnboardingView = get(&app, "/api/ui/onboarding").await;
+            wizard.dependencies.iter().any(|row| {
+                row.dependency
+                    == verkstead_render::Dependency::Harness(verkstead_render::AgentType(
+                        "Codex".into(),
+                    ))
+            })
+        }
+    };
+    let enabled = |on: bool| {
+        let app = app.clone();
+        async move {
+            let _: verkstead_render::PluginsView = post(
+                &app,
+                &format!("/api/ui/plugins/{CODEX}/enabled"),
+                &serde_json::json!({ "enabled": on }),
+            )
+            .await;
+        }
+    };
+
+    assert_eq!(defaulted(repo).await, Some(codex.clone()), "ticked, Codex first");
+    assert!(drawn().await, "and a row in the wizard");
+
+    enabled(false).await;
+    assert_eq!(
+        defaulted(repo).await,
+        Some(grok),
+        "unticked, the default falls to the next harness's Profile",
+    );
+    assert!(!drawn().await, "and the wizard draws no Codex row");
+
+    enabled(true).await;
+    assert_eq!(defaulted(repo).await, Some(codex), "ticked again, Codex again");
+    assert!(drawn().await, "and its row again");
+}
+
 /// **A disabled Agent plugin's Profiles stay, offered on no picker** (Set 1764,
 /// Q20): each reads broken as its plugin disabled, and a Conversation on a Repo
 /// remembering one starts with that role empty, the roles beside it filled as

@@ -1028,6 +1028,21 @@ pub(crate) fn harnesses(
         .collect()
 }
 
+/// The built-in harnesses whose plugin's tick is off: no default runs under
+/// one, and the wizard draws no row for one, as neither does for a disabled
+/// Agent plugin's harness.
+pub(crate) async fn unticked(pool: &SqlitePool) -> Result<Vec<store::AgentType>> {
+    Ok(
+        crate::store::replicated::live_records::<crate::replicating::plugins::Plugins>(pool)
+            .await?
+            .into_iter()
+            .filter(|record| !record.fields.enabled)
+            .map(|record| store::AgentType::read(&record.uuid))
+            .filter(|agent_type| agent_type.built_in().is_some())
+            .collect(),
+    )
+}
+
 /// The harnesses of disabled Agent plugins that Profiles still stand on, and
 /// of every built-in one whose tick is off, each with its plugin's name —
 /// what [`harnesses`] lists as not offered.
