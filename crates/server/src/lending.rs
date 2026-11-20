@@ -153,6 +153,32 @@ struct Watched {
 
     /// How it ended, once a wait has seen it end.
     ended: Option<Ended>,
+
+    /// Its Done signal checked and its silences rescued across the ticks of a
+    /// `wait-any` — see [`Seeing`].
+    seeing: Option<Seeing>,
+}
+
+/// A session's Done signal held to its evidence, and the session spoken to
+/// where it goes quiet, for as long as a `wait-any` keeps coming back to it —
+/// across its ticks rather than within one wait, so a signal given between two
+/// waits is not lost, and neither the grace after a signal nor the span a
+/// rescue waits out starts again at every tick.
+///
+/// Dropped as the wait answers for the session, or with the [`Lent`], which
+/// takes both away.
+struct Seeing {
+    _expecting: crate::done::Expecting,
+
+    /// Over once the signal was given and taken and the session has been idle
+    /// since, the rescue running beside it until then.
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for Seeing {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 /// What a session's Done signal is checked against: evidence known at its
@@ -349,6 +375,7 @@ impl Lent {
                 expected,
                 ends,
                 ended: None,
+                seeing: None,
             },
         );
 
@@ -544,6 +571,185 @@ impl Lent {
         world::Waited::Gone(ended.badly())
     }
 
+    /// Wait on `sessions` for at most `timeout`: see the world's `wait-any`.
+    ///
+    /// **The newest is the one running**, a launch having ended whatever ran
+    /// before it, so it alone has its Done signal checked and its silences
+    /// rescued — by a [`Seeing`] that outlives the wait — and every one of them
+    /// is waited on to end. One already seen to end answers at once, as `wait`
+    /// answers it.
+    async fn wait_any(
+        &mut self,
+        sessions: Vec<world::Session>,
+        timeout: u64,
+    ) -> wasmtime::Result<world::Woke> {
+        for session in &sessions {
+            match self.watched.get(session) {
+                None => {
+                    return Err(wasmtime::Error::msg(format!(
+                        "there is no session {session} to wait on"
+                    )));
+                }
+                Some(Watched {
+                    expected: Expected::Picked(_),
+                    ..
+                }) => {
+                    return Err(wasmtime::Error::msg(format!(
+                        "session {session} was launched expecting a pick, so it is waited on alone"
+                    )));
+                }
+                Some(Watched {
+                    ended: Some(ended), ..
+                }) => {
+                    return Ok(world::Woke::Waited((
+                        *session,
+                        world::Waited::Gone(ended.badly()),
+                    )));
+                }
+                Some(_) => {}
+            }
+        }
+
+        let timeout = std::time::Duration::from_millis(timeout);
+
+        let Some(newest) = sessions.iter().max().copied() else {
+            tokio::time::sleep(timeout).await;
+            return Ok(world::Woke::Tick);
+        };
+
+        self.seeing(newest);
+
+        let woke = {
+            let mut endings = Vec::new();
+            let mut signalled = None;
+
+            for (handle, watched) in self.watched.iter_mut() {
+                if !sessions.contains(handle) {
+                    continue;
+                }
+
+                let Watched {
+                    session, seeing, ..
+                } = watched;
+
+                if *handle == newest {
+                    signalled = seeing.as_mut().map(|seeing| &mut seeing.task);
+                }
+
+                let ending: std::pin::Pin<Box<dyn Future<Output = Ended> + Send + '_>> =
+                    Box::pin(session.ended());
+                endings.push((*handle, ending));
+            }
+
+            let first_to_end = std::future::poll_fn(|context| {
+                for (handle, ending) in endings.iter_mut() {
+                    if let std::task::Poll::Ready(ended) = ending.as_mut().poll(context) {
+                        return std::task::Poll::Ready((*handle, ended));
+                    }
+                }
+
+                std::task::Poll::Pending
+            });
+
+            // A task that was aborted or panicked has given no signal.
+            let signalled = async {
+                match signalled {
+                    Some(task) => {
+                        if task.await.is_err() {
+                            std::future::pending::<()>().await;
+                        }
+                    }
+                    None => std::future::pending().await,
+                }
+            };
+
+            tokio::select! {
+                (handle, ended) = first_to_end => Some((handle, Some(ended))),
+                () = signalled => Some((newest, None)),
+                () = tokio::time::sleep(timeout) => None,
+            }
+        };
+
+        let Some((handle, ended)) = woke else {
+            return Ok(world::Woke::Tick);
+        };
+
+        let watched = self
+            .watched
+            .get_mut(&handle)
+            .expect("it was found above, and nothing is taken out");
+        watched.seeing = None;
+
+        let Some(ended) = ended else {
+            return Ok(world::Woke::Waited((handle, world::Waited::Done)));
+        };
+
+        watched.ended = Some(ended.clone());
+
+        let evidence = match &watched.expected {
+            Expected::Evidence(evidence) => evidence.clone(),
+            Expected::Picked(_) => unreachable!("a session expecting a pick was refused above"),
+        };
+
+        Ok(world::Woke::Waited((
+            handle,
+            self.gone(&ended, &evidence).await,
+        )))
+    }
+
+    /// Start `session`'s [`Seeing`], where it has none standing.
+    fn seeing(&mut self, session: world::Session) {
+        let state = self.state.clone();
+        let conversation_id = self.conversation_id;
+        let building = self.building;
+        let doing = self.doing.clone();
+
+        let Some(watched) = self.watched.get_mut(&session) else {
+            return;
+        };
+
+        let Expected::Evidence(evidence) = &watched.expected else {
+            return;
+        };
+
+        if watched.seeing.is_some() {
+            return;
+        }
+
+        let event_id = watched.session.event_id;
+        let idle = watched.session.idle.clone();
+        let pace = state.sessions.pace();
+
+        let expecting = state.signals.expecting(
+            conversation_id,
+            event_id,
+            evidence.clone(),
+            watched.ends,
+            building,
+        );
+        let signal = expecting.signal();
+
+        let task = tokio::spawn(async move {
+            tokio::select! {
+                () = crate::runner::signalled_and_idle(signal.clone(), &idle, pace) => {}
+                never = crate::rescues::watched(
+                    &state,
+                    conversation_id,
+                    event_id,
+                    &idle,
+                    pace,
+                    signal,
+                    &doing,
+                ) => match never {},
+            }
+        });
+
+        watched.seeing = Some(Seeing {
+            _expecting: expecting,
+            task,
+        });
+    }
+
     /// Whatever a launch is refused over is logged here, where the reason is
     /// known, and handed back as the sentence the world refuses with.
     fn refused(&self, why: &str) -> Result<world::Session, String> {
@@ -727,6 +933,10 @@ impl host::Host for Lent {
         if let Some(ended) = &watched.ended {
             return Ok(world::Waited::Gone(ended.badly()));
         }
+
+        // Waited on here alone from now on: what a `wait-any` left checking it
+        // would be a second check, and a second rescue.
+        watched.seeing = None;
 
         let evidence = match &watched.expected {
             Expected::Evidence(evidence) => evidence.clone(),
@@ -1066,6 +1276,175 @@ impl host::Host for Lent {
             },
         )
     }
+
+    async fn wait_any(
+        &mut self,
+        sessions: Vec<world::Session>,
+        timeout: u64,
+    ) -> wasmtime::Result<world::Woke> {
+        Lent::wait_any(self, sessions, timeout).await
+    }
+
+    async fn pull_requests(&mut self) -> wasmtime::Result<Vec<world::PullRequest>> {
+        Ok(crate::forge::recorded(&self.state, self.conversation_id).await)
+    }
+
+    async fn forge_standing(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<world::PullRequestStanding, world::Unforged>> {
+        Ok(crate::forge::standing(&self.state, self.conversation_id, pull_request).await)
+    }
+
+    async fn forge_checks(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<world::Suite, world::Unforged>> {
+        Ok(crate::forge::checks(&self.state, self.conversation_id, pull_request).await)
+    }
+
+    async fn forge_comments(
+        &mut self,
+        pull_request: world::PullRequest,
+    ) -> wasmtime::Result<Result<Vec<world::Comment>, world::Unforged>> {
+        Ok(crate::forge::comments(&self.state, self.conversation_id, pull_request).await)
+    }
+
+    async fn forge_reply(
+        &mut self,
+        pull_request: world::PullRequest,
+        markdown: String,
+    ) -> wasmtime::Result<Result<String, world::Unforged>> {
+        Ok(crate::forge::reply(&self.state, self.conversation_id, pull_request, markdown).await)
+    }
+
+    async fn forge_opened(
+        &mut self,
+        repo: String,
+        branch: String,
+    ) -> wasmtime::Result<Result<Option<world::Opened>, world::Unforged>> {
+        Ok(crate::forge::opened(&self.state, self.conversation_id, repo, branch).await)
+    }
+
+    /// Settle what `watcher` waits on, in the store the viewer draws the
+    /// wrap-up's standing from (Set 1838, Q3): the host's record, not the
+    /// Activity's memory.
+    async fn settle(&mut self, watcher: world::Watcher) -> wasmtime::Result<()> {
+        let conversation_id = self.conversation_id;
+
+        if let Some(waiting_on) = self.waiting_on(&watcher).await
+            && let Err(error) =
+                store::settle_wrap_up(&self.state.pool, conversation_id, waiting_on).await
+        {
+            tracing::error!(error = ?error, conversation_id, ?waiting_on, "settling something a wrap-up waits on failed");
+        }
+
+        Ok(())
+    }
+
+    async fn unsettle(&mut self, watcher: world::Watcher) -> wasmtime::Result<()> {
+        let conversation_id = self.conversation_id;
+
+        if let Some(waiting_on) = self.waiting_on(&watcher).await
+            && let Err(error) =
+                store::unsettle_wrap_up(&self.state.pool, conversation_id, waiting_on).await
+        {
+            tracing::error!(error = ?error, conversation_id, ?waiting_on, "putting something a wrap-up waits on back to waiting failed");
+        }
+
+        Ok(())
+    }
+
+    async fn fix_attempts(
+        &mut self,
+        pull_request: world::PullRequest,
+        check: String,
+    ) -> wasmtime::Result<Result<i64, String>> {
+        let conversation_id = self.conversation_id;
+        let named = match crate::forge::named(&self.state, conversation_id, &pull_request).await {
+            Ok(named) => named,
+            Err(why) => return Ok(Err(why)),
+        };
+
+        Ok(store::fix_attempts(
+            &self.state.pool,
+            conversation_id,
+            named.repo.id,
+            named.number,
+            &check,
+        )
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, conversation_id, check, "reading a check's fix attempts failed");
+            "The fix attempts couldn't be read.".to_owned()
+        }))
+    }
+
+    async fn count_fix_attempt(
+        &mut self,
+        pull_request: world::PullRequest,
+        check: String,
+    ) -> wasmtime::Result<Result<i64, String>> {
+        let conversation_id = self.conversation_id;
+        let named = match crate::forge::named(&self.state, conversation_id, &pull_request).await {
+            Ok(named) => named,
+            Err(why) => return Ok(Err(why)),
+        };
+
+        Ok(store::record_fix_attempt(
+            &self.state.pool,
+            conversation_id,
+            named.repo.id,
+            named.number,
+            &check,
+        )
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, conversation_id, check, "counting a check's fix attempt failed");
+            "The fix attempt couldn't be counted.".to_owned()
+        }))
+    }
+
+    async fn addressed(&mut self, repo: String) -> wasmtime::Result<Result<Vec<String>, String>> {
+        let conversation_id = self.conversation_id;
+        let repo = match crate::forge::repo_named(&self.state, conversation_id, &repo).await {
+            Ok(repo) => repo,
+            Err(why) => return Ok(Err(why)),
+        };
+
+        Ok(
+            store::addressed_comments(&self.state.pool, conversation_id, repo.id)
+                .await
+                .map_err(|error| {
+                    tracing::error!(error = ?error, conversation_id, repo = repo.name, "reading which comments were addressed failed");
+                    "Which comments were addressed couldn't be read.".to_owned()
+                }),
+        )
+    }
+
+    async fn mark_addressed(
+        &mut self,
+        repo: String,
+        comments: Vec<String>,
+    ) -> wasmtime::Result<Result<(), String>> {
+        let conversation_id = self.conversation_id;
+        let repo = match crate::forge::repo_named(&self.state, conversation_id, &repo).await {
+            Ok(repo) => repo,
+            Err(why) => return Ok(Err(why)),
+        };
+
+        Ok(store::record_addressed_comments(
+            &self.state.pool,
+            conversation_id,
+            repo.id,
+            &comments,
+        )
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, conversation_id, repo = repo.name, "marking comments addressed failed");
+            "The comments couldn't be marked addressed.".to_owned()
+        }))
+    }
 }
 
 impl Lent {
@@ -1358,6 +1737,37 @@ fn inside(path: &str) -> Option<String> {
     }
 
     Some(pieces.join("/"))
+}
+
+impl Lent {
+    /// What `watcher` is in the store's words — `None`, said in the log, where
+    /// it names a pull request in a Repo the Conversation is not in.
+    async fn waiting_on(&self, watcher: &world::Watcher) -> Option<store::WaitingOn> {
+        let (pull_request, waiting_on): (_, fn(i64, i64) -> store::WaitingOn) = match watcher {
+            world::Watcher::Review => return Some(store::WaitingOn::Review),
+            world::Watcher::Checks(pull_request) => (pull_request, |repo_id, number| {
+                store::WaitingOn::Checks { repo_id, number }
+            }),
+            world::Watcher::Comments(pull_request) => (pull_request, |repo_id, number| {
+                store::WaitingOn::Comments { repo_id, number }
+            }),
+            world::Watcher::Mergeable(pull_request) => (pull_request, |repo_id, number| {
+                store::WaitingOn::Mergeable { repo_id, number }
+            }),
+        };
+
+        match crate::forge::named(&self.state, self.conversation_id, pull_request).await {
+            Ok(named) => Some(waiting_on(named.repo.id, named.number)),
+            Err(why) => {
+                tracing::error!(
+                    conversation_id = self.conversation_id,
+                    why,
+                    "a watcher named a pull request the Conversation isn't on"
+                );
+                None
+            }
+        }
+    }
 }
 
 /// The branch's facts, by git, off the runtime's threads. `None` where git

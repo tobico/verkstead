@@ -43497,12 +43497,22 @@ impl Grilling {
         outcomes: &[&str],
         skills: &[&str],
     ) -> tokio::task::JoinHandle<Option<String>> {
+        self.activity_of(activity_component(wat), outcomes, skills)
+    }
+
+    /// The same, its component `component`'s bytes, built already.
+    fn activity_of(
+        &self,
+        component: Vec<u8>,
+        outcomes: &[&str],
+        skills: &[&str],
+    ) -> tokio::task::JoinHandle<Option<String>> {
         self.hosting
             .as_ref()
             .expect("this bench hosts Activities")
             .start(
                 self.id,
-                activity_component(wat),
+                component,
                 verkstead_server::plugins::manifest::Activity {
                     id: "rounds".to_owned(),
                     name: "Rounds".to_owned(),
@@ -43886,6 +43896,110 @@ async fn a_component_that_traps_stops_the_conversation_saying_so() {
 
     let view = fixture.view().await;
     assert!(!view.driven, "nothing is left looking driven");
+}
+
+/// The Activity built from `plugins/tests/activity-fixture`, which reaches
+/// every host function a wrap-up needs and answers what each came to.
+const ACTIVITY_FIXTURE: &str = env!("VERKSTEAD_ACTIVITY_FIXTURE_WASM");
+
+/// What the fixture answers where every host function did as the wrap-up
+/// needs: see its source.
+const ALL_AS_MEANT: &str = "tick first:steered second:done standing:cleanly:open \
+                            checks:lacking attempts:1 addressed:PRRC_1";
+
+/// The world grown for the wrap-up (Set 1838), through one component and
+/// nothing but its host functions.
+///
+/// **Waiting on several sessions and a timeout**: a wait on a session that
+/// outlives it is a tick; a wait on two is answered by the first to end —
+/// ended by the second's launch, which reads as the Conversation taken
+/// elsewhere — and a wait on the second by its Done signal, taken.
+///
+/// **The Forge**: a pull request's standing read through it, and its checks
+/// asked of a Forge said to lack them — which comes back `lacking`, the
+/// `checks` watcher over it settled at once.
+///
+/// **The wrap-up's records**, the host's and what the viewer's standings are
+/// drawn from: a watcher settled, a fix attempt counted and a comment marked
+/// addressed, each read back by the component and found in the store.
+#[tokio::test]
+async fn a_component_waits_on_sessions_asks_the_forge_and_keeps_the_wrap_ups_records() {
+    use verkstead_server::store::WaitingOn;
+
+    let fixture = grilling(
+        r#"
+case "$2" in
+*"first session waits"*)
+    printf 'the first session is waiting\n'
+    sleep 300
+    ;;
+*"second session signals"*)
+    printf 'the second session is done\n'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*)
+    printf 'grilling\n'
+    sleep 300
+    ;;
+esac
+"#,
+    )
+    .await;
+    fixture.grilling_printed().await;
+
+    fixture
+        .hosting
+        .as_ref()
+        .expect("this bench hosts Activities")
+        .lacking(verkstead_server::forge::Capability::Checks);
+
+    let component = std::fs::read(ACTIVITY_FIXTURE).expect("the fixture's component is built");
+    let running = fixture.activity_of(component, &[ALL_AS_MEANT], &["verkstead/implementing"]);
+
+    let outcome = tokio::time::timeout(*PATIENCE, running)
+        .await
+        .expect("the component should end")
+        .expect("the component's task should not panic");
+
+    assert_eq!(
+        outcome.as_deref(),
+        Some(ALL_AS_MEANT),
+        "every host function answered as the wrap-up needs: {:?}",
+        notices(&fixture.view().await),
+    );
+
+    let repo_id = own_repo(&fixture).await;
+    let number = 41;
+
+    assert!(
+        settled(&fixture, WaitingOn::Checks { repo_id, number }).await,
+        "the checks the Forge lacks are settled at once",
+    );
+    assert!(
+        settled(&fixture, WaitingOn::Mergeable { repo_id, number }).await,
+        "and the watcher the component settled stands settled",
+    );
+    assert!(
+        !settled(&fixture, WaitingOn::Comments { repo_id, number }).await,
+        "and nothing it did not settle is",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let attempts =
+        verkstead_server::store::fix_attempts(&pool, fixture.id, repo_id, number, "Rust")
+            .await
+            .unwrap();
+    let addressed = verkstead_server::store::addressed_comments(&pool, fixture.id, repo_id)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    assert_eq!(
+        attempts, 1,
+        "the fix attempt it counted is the host's record"
+    );
+    assert_eq!(addressed, ["PRRC_1"], "and so is the comment it marked");
 }
 
 /// And one that answers an Outcome it never declared stops it the same way,

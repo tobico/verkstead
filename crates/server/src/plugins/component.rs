@@ -697,6 +697,97 @@ mod unlent {
         ) -> wasmtime::Result<Result<Vec<host::Link>, String>> {
             Err(refused())
         }
+
+        async fn wait_any(
+            &mut self,
+            _sessions: Vec<activity_types::Session>,
+            _timeout: u64,
+        ) -> wasmtime::Result<activity_types::Woke> {
+            Err(refused())
+        }
+
+        async fn pull_requests(&mut self) -> wasmtime::Result<Vec<activity_types::PullRequest>> {
+            Err(refused())
+        }
+
+        async fn forge_standing(
+            &mut self,
+            _pull_request: activity_types::PullRequest,
+        ) -> wasmtime::Result<Result<activity_types::PullRequestStanding, activity_types::Unforged>>
+        {
+            Err(refused())
+        }
+
+        async fn forge_checks(
+            &mut self,
+            _pull_request: activity_types::PullRequest,
+        ) -> wasmtime::Result<Result<activity_types::Suite, activity_types::Unforged>> {
+            Err(refused())
+        }
+
+        async fn forge_comments(
+            &mut self,
+            _pull_request: activity_types::PullRequest,
+        ) -> wasmtime::Result<Result<Vec<activity_types::Comment>, activity_types::Unforged>>
+        {
+            Err(refused())
+        }
+
+        async fn forge_reply(
+            &mut self,
+            _pull_request: activity_types::PullRequest,
+            _markdown: String,
+        ) -> wasmtime::Result<Result<String, activity_types::Unforged>> {
+            Err(refused())
+        }
+
+        async fn forge_opened(
+            &mut self,
+            _repo: String,
+            _branch: String,
+        ) -> wasmtime::Result<Result<Option<activity_types::Opened>, activity_types::Unforged>>
+        {
+            Err(refused())
+        }
+
+        async fn settle(&mut self, _watcher: activity_types::Watcher) -> wasmtime::Result<()> {
+            Err(refused())
+        }
+
+        async fn unsettle(&mut self, _watcher: activity_types::Watcher) -> wasmtime::Result<()> {
+            Err(refused())
+        }
+
+        async fn fix_attempts(
+            &mut self,
+            _pull_request: activity_types::PullRequest,
+            _check: String,
+        ) -> wasmtime::Result<Result<i64, String>> {
+            Err(refused())
+        }
+
+        async fn count_fix_attempt(
+            &mut self,
+            _pull_request: activity_types::PullRequest,
+            _check: String,
+        ) -> wasmtime::Result<Result<i64, String>> {
+            Err(refused())
+        }
+
+        async fn addressed(
+            &mut self,
+            _repo: String,
+        ) -> wasmtime::Result<Result<Vec<String>, String>> {
+            Err(refused())
+        }
+
+        async fn mark_addressed(
+            &mut self,
+            _repo: String,
+            _comments: Vec<String>,
+        ) -> wasmtime::Result<Result<(), String>> {
+            Err(refused())
+        }
     }
 }
 
