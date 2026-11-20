@@ -67,6 +67,11 @@ jobs:
           path: plugins/dist
           if-no-files-found: error
 
+      # The components' own tests, natively: what they decide without the
+      # host is plain Rust. After the upload, so a red one holds up no suite.
+      - name: Test
+        run: cargo test --locked --manifest-path plugins/Cargo.toml --workspace
+
   # The workspace's suites, on Linux.
   #
   # **The budget: every leg under fifteen minutes, the typical one near
