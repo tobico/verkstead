@@ -2217,13 +2217,10 @@ mod tests {
         // A component built rather than checked in — the fixture's, Codex's
         // and the Activities' — is not in its directory to be checked: the CLI
         // suite checks the Activities with what the binary embeds.
-        for plugin in crate::plugins::built_in::BUILT_INS
-            .iter()
-            .filter(|plugin| {
-                plugin.directory != "activities"
-                    && !plugins.join(plugin.directory).join("Cargo.toml").is_file()
-            })
-        {
+        for plugin in crate::plugins::built_in::BUILT_INS.iter().filter(|plugin| {
+            plugin.directory != "activities"
+                && !plugins.join(plugin.directory).join("Cargo.toml").is_file()
+        }) {
             let manifest = Manifest::check(&plugins.join(plugin.directory))
                 .unwrap_or_else(|refusals| panic!("{}: {refusals:?}", plugin.directory));
 
