@@ -1,7 +1,8 @@
 //! The sweep that keeps watching a pull request after the work on it is Done.
 //!
 //! A wrap-up watches its pull requests every half minute and stops the moment
-//! the Conversation reaches Done — see [`crate::checks`]. What is left after
+//! the Conversation reaches Done — the **Wrap-up** Activity's checks watcher,
+//! which writes what it reads through [`crate::checks`]. What is left after
 //! that is a branch sitting on GitHub waiting for the human to merge it, and a
 //! base that goes on moving under it: a pull request that merged cleanly at Done
 //! conflicts a day later without anybody having touched it, and nothing would
@@ -10,11 +11,11 @@
 //! So this sweep does, on a pace of its own. Every [`crate::Pace::merges`] it
 //! walks every Done Conversation's pull requests that nothing has recorded
 //! merged or closed, and asks the host's `gh` two things about each: whether it
-//! still merges, and where it has got to. Both land in the store beside what the
-//! wrap-up's own watcher wrote there — see [`crate::store::record_merging`] and
-//! [`crate::store::record_standing`] — so what a card draws about a Done
-//! Conversation goes on being the last thing anybody asked GitHub, however long
-//! ago the work finished.
+//! still merges, and where it has got to. Both land in the store beside what
+//! the wrap-up's checks watcher wrote there — see
+//! [`crate::store::record_merging`] and [`crate::store::record_standing`] — so
+//! what a card draws about a Done Conversation goes on being the last thing
+//! anybody asked GitHub, however long ago the work finished.
 //!
 //! **Done alone.** A Conversation still Wrapping has a watcher asking this every
 //! half minute already, and a Closed one is the human finished with the work —

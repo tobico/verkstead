@@ -28,4 +28,4 @@ Roadmap stage: [09: The interview, one session and the wrap-up across](docs/road
 - [x] 06: The wrap-up's frame — [details](06-the-wrap-ups-frame.md)
 - [x] 07: The checks watcher — [details](07-the-checks-watcher.md)
 - [x] 08: The comments and review watchers — [details](08-the-comments-and-review-watchers.md)
-- [ ] 09: The runner emptied — [details](09-the-runner-emptied.md)
+- [x] 09: The runner emptied — [details](09-the-runner-emptied.md)

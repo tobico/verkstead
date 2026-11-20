@@ -55,43 +55,6 @@ use crate::wrapping::{Watched, named};
 /// watching, which is the whole thing a stop exists instead of.
 pub(crate) const ATTEMPTS: i64 = 2;
 
-/// Forget what a Conversation's checks and conflicts have already been tried,
-/// and watch them again.
-///
-/// What Resume does to a wrap-up that stopped. The attempts go first: the human
-/// has read the Notice of what stopped and asked for another go, and a count
-/// left standing would be a watcher that stopped all over again on its next poll
-/// without dispatching anything.
-///
-/// **Both counts**, because either of them is what the Notice they read could
-/// have been about: a wrap-up stops on the checks that would not go green or on
-/// the pull request that would not merge, and a press that forgave only one of
-/// them would be a Resume that stopped again on the other. See
-/// [`store::forget_fix_attempts`], which is where the two are taken away
-/// together.
-pub(crate) async fn afresh(state: AppState, conversation_id: i64) {
-    if let Err(error) = store::forget_fix_attempts(&state.pool, conversation_id).await {
-        tracing::error!(error = ?error, conversation_id, "forgetting what a Conversation's checks and conflicts had been given failed");
-        return;
-    }
-
-    tracing::info!(
-        conversation_id,
-        "the checks and the conflicts are being tried again from no attempts spent"
-    );
-
-    // The whole wrap-up rather than the checks alone: the review stopped being
-    // run when the stop was written, because nothing advances past one, and a
-    // Conversation that came back with its checks watched and nobody reading its
-    // branch would wait on a review that was never going to happen.
-    //
-    // And its review from the start, which is the same forgetting as the
-    // attempts above: a review found already asking is what the press is an
-    // answer to, so it is read past rather than stopped over a second time. See
-    // [`crate::review::afresh`].
-    crate::wrapping::watching(&state, conversation_id, crate::wrapping::Reviewing::Afresh);
-}
-
 /// `pull_request`, as the wrap-up watches it: the Repo it is in, the branch the
 /// record says its work is on, and the checkout that work is done in — or the
 /// sentence a call naming it is refused with.

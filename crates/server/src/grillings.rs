@@ -74,7 +74,7 @@ pub(crate) enum Digest {
 ///
 /// `driving` is the registration the press took as it arrived, handed on to the
 /// interview the relaunch runs under, which holds it for as long as the grilling
-/// is driven — see [`crate::runner::interview`].
+/// is driven — see [`crate::activities::interview::run`].
 pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Driving, digest: Digest) {
     // Waited for rather than tried for: the human presses Resume whenever they
     // get to it, and nothing is holding a request open on what it starts. So
@@ -210,14 +210,14 @@ async fn relaunching(
     // The Turn this relaunch took handed to the launch, and nothing it may
     // build: a grilling may not retire a Memo, so it is not told how. What its
     // Done signal is checked against is the pick's — see
-    // [`crate::runner::interview`].
+    // [`crate::activities::interview::run`].
     tracing::info!(conversation_id, "a stalled grilling is being grilled again");
 
     let lent = Lent::new(state, conversation_id)
         .turn_handed(turn)
         .holding(held.to_vec());
 
-    crate::runner::interview(state.clone(), conversation_id, driving, prompt, lent).await
+    crate::activities::interview::run(state.clone(), conversation_id, driving, prompt, lent).await
 }
 
 /// Lock every Question Set the dead grilling left open, so that nothing is left

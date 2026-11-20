@@ -43,6 +43,31 @@ use crate::plugins::component::worlds::category::activity::verkstead::plugin::{
 use crate::plugins::component::{self, Ended};
 use crate::plugins::manifest::{Activity, Capability, Files, STEERED};
 
+pub(crate) mod follow_up_rounds;
+pub(crate) mod interview;
+pub(crate) mod one_session;
+pub(crate) mod wrap_up;
+
+/// The built-in Activities plugin, and its Activity whose id is `id`: how
+/// the Conversation's states call Verkstead's own Activities by name, until a
+/// Process names them (stage 11).
+pub(crate) fn built_in(
+    id: &str,
+) -> Option<(
+    crate::plugins::built_in::BuiltIn,
+    crate::plugins::manifest::Activity,
+)> {
+    let shipped = crate::plugins::built_in::activities();
+    let activity = shipped
+        .manifest(crate::platform::Platform::HERE)
+        .ok()?
+        .activities
+        .into_iter()
+        .find(|activity| activity.id == id)?;
+
+    Some((shipped, activity))
+}
+
 /// Start Activities on this server's Conversations from outside it — the
 /// suite's seam, until a Process says which Activity a state runs.
 ///
@@ -405,7 +430,7 @@ fn offered(words: &str) -> Vec<Direction> {
 
 /// Stop the Conversation as `name` saying `how`, closing any Set left open.
 async fn stopping(state: &AppState, conversation_id: i64, name: &str, how: &str) {
-    crate::runner::left_open(state, conversation_id).await;
+    crate::activities::follow_up_rounds::left_open(state, conversation_id).await;
 
     crate::runner::stop(
         state,

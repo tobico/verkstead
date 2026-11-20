@@ -58,18 +58,20 @@
 //! anything about. Every run that ends here commits its work and pushes it
 //! afterwards, so any of them can land the whole of what it was sent for and
 //! still stop short of the push — which leaves the work built, committed and
-//! unreviewable. So *no PR on the branch* is asked for once more, by a session of
-//! its own sent to push and open one, and the stop is what is left if that comes
-//! back to the same missing thing. A pressed Resume takes the same go rather than
-//! the Notice again. See [`crate::runner`], which is where the deciding is done,
-//! and [`record`], which is this module's half of it. The other troubles are
-//! walls a session would walk into in the same place, so they stop as they always
-//! have.
+//! unreviewable. So *no PR on the branch* is asked for once more, by a session
+//! of its own sent to push and open one, and the stop is what is left if that
+//! comes back to the same missing thing. A pressed Resume takes the same go
+//! rather than the Notice again. See
+//! [`crate::activities::one_session::to_a_pull_request`], which is where the
+//! deciding is done, and [`record`], which is this module's half of it. The
+//! other troubles are walls a session would walk into in the same place, so
+//! they stop as they always have.
 //!
 //! Which is advice Resume then has to be able to take: a pull request opened in
 //! a browser is one nothing on the branch knows about, so Resume asks GitHub
-//! about it before it spends anything — see [`asked`], and [`crate::runner`] for
-//! what an inline run makes of the answer.
+//! about it before it spends anything — see [`asked`], and
+//! [`crate::activities::one_session::inline_again`] for what an inline run makes
+//! of the answer.
 
 use std::path::{Path, PathBuf};
 
@@ -156,12 +158,14 @@ pub(crate) enum Door {
 
 /// Make of an answer `gh` has already given what [`opened`] makes of its own.
 ///
-/// The same move with the asking taken out of it, for the one caller that has to
-/// look at the answer before this does: a finish step that left no pull request
-/// is sent back to open one, and only a branch GitHub says has none is worth
-/// spending a session on — see [`crate::runner`]. Everything else it may say is
-/// this function's to record or to stop over, exactly as it always was, so the
-/// deciding stays in one place and the caller hands back what it was given.
+/// The same move with the asking taken out of it, for the one caller that has
+/// to look at the answer before this does: a finish step that left no pull
+/// request is sent back to open one, and only a branch GitHub says has none is
+/// worth spending a session on — see
+/// [`crate::activities::one_session::to_a_pull_request`]. Everything else it
+/// may say is this function's to record or to stop over, exactly as it always
+/// was, so the deciding stays in one place and the caller hands back what it
+/// was given.
 ///
 /// `repo_id` is the registered Repo it was opened in, which is which of a
 /// Conversation's pull requests this one is, and `branch` is the branch that was
@@ -502,8 +506,8 @@ pub(crate) fn watching(state: &AppState, conversation_id: i64, reviewing: Review
 }
 
 /// Start the **Wrap-up** Activity on `conversation_id`, registered as a driver
-/// of it for as long as it runs — see [`crate::runner::wrap_up`]. What ends a
-/// wrap-up is its Outcome.
+/// of it for as long as it runs — see [`crate::activities::wrap_up::run`]. What
+/// ends a wrap-up is its Outcome.
 ///
 /// `against` is the base a take-up over a bare branch is owed its pull request
 /// against, which the Activity opens before it watches anything.
@@ -511,10 +515,47 @@ pub(crate) fn wrap_up(state: &AppState, conversation_id: i64, against: Option<St
     spawn(state, conversation_id, against, Reviewing::AsFound);
 }
 
+/// Forget what a Conversation's checks and conflicts have already been tried,
+/// and watch them again.
+///
+/// What Resume does to a wrap-up that stopped. The attempts go first: the human
+/// has read the Notice of what stopped and asked for another go, and a count
+/// left standing would be a watcher that stopped all over again on its next poll
+/// without dispatching anything.
+///
+/// **Both counts**, because either of them is what the Notice they read could
+/// have been about: a wrap-up stops on the checks that would not go green or on
+/// the pull request that would not merge, and a press that forgave only one of
+/// them would be a Resume that stopped again on the other. See
+/// [`store::forget_fix_attempts`], which is where the two are taken away
+/// together.
+pub(crate) async fn afresh(state: AppState, conversation_id: i64) {
+    if let Err(error) = store::forget_fix_attempts(&state.pool, conversation_id).await {
+        tracing::error!(error = ?error, conversation_id, "forgetting what a Conversation's checks and conflicts had been given failed");
+        return;
+    }
+
+    tracing::info!(
+        conversation_id,
+        "the checks and the conflicts are being tried again from no attempts spent"
+    );
+
+    // The whole wrap-up rather than the checks alone: the review stopped being
+    // run when the stop was written, because nothing advances past one, and a
+    // Conversation that came back with its checks watched and nobody reading its
+    // branch would wait on a review that was never going to happen.
+    //
+    // And its review from the start, which is the same forgetting as the
+    // attempts above: a review found already asking is what the press is an
+    // answer to, so it is read past rather than stopped over a second time. See
+    // [`crate::review::afresh`].
+    watching(&state, conversation_id, Reviewing::Afresh);
+}
+
 fn spawn(state: &AppState, conversation_id: i64, against: Option<String>, reviewing: Reviewing) {
     let driving = state.drivers.driving(conversation_id);
 
-    tokio::spawn(crate::runner::wrap_up(
+    tokio::spawn(crate::activities::wrap_up::run(
         state.clone(),
         conversation_id,
         against,
@@ -851,7 +892,8 @@ pub(crate) async fn still_going(state: &AppState, conversation_id: i64) -> bool 
 /// looking again would find the same missing thing.
 ///
 /// Which is also why Resume on an inline implementation stops here rather than
-/// launching over it — see [`crate::runner`]. A `gh` that cannot answer now is
+/// launching over it — see [`crate::activities::one_session::inline_again`]. A
+/// `gh` that cannot answer now is
 /// one the session would push into later, so the account it would spend is
 /// spent on the same missing thing.
 pub(crate) async fn stopped(
@@ -882,9 +924,9 @@ pub(crate) async fn stopped(
 /// What a stop over a pull request nobody can find says the run was doing.
 const FINDING: &str = "finding the pull request the work ended on";
 
-/// The stop a watcher the host runs gave a wrap-up up with — what it wrote
-/// itself before the wrap-up was an Activity, and what is written now as the
-/// Activity's `given-up` lands.
+/// The stop a host function gave a wrap-up up with — what the watchers wrote
+/// themselves before the wrap-up was an Activity, and what is written now as
+/// the Activity's `given-up` lands.
 pub(crate) struct GaveUp {
     /// What the run was doing, which the stop's Notice opens with.
     pub(crate) what: String,
@@ -897,13 +939,14 @@ pub(crate) struct GaveUp {
 }
 
 /// Which Conversations have a **Wrap-up** Activity running, and the stops the
-/// host's watchers have given each of them up with that the Activity has not
+/// host functions have given each of them up with that the Activity has not
 /// answered yet.
 ///
-/// The watchers give up — the checks or a conflict out of goes, a companion
-/// left without a pull request — and the Activity answers `given-up` on its
-/// next round, which [`given_up`] maps to the stop as it always stood. Where no
-/// Activity is running to answer, the stop is written at once.
+/// The host gives up where the component asks it to — the checks or a conflict
+/// out of goes — or where `cover` finds a companion left without a pull
+/// request, and the Activity answers `given-up` on its next round, which
+/// [`given_up`] maps to the stop as it always stood. Where no Activity is
+/// running to answer, the stop is written at once.
 #[derive(Clone, Default)]
 pub(crate) struct WrapUps {
     held: std::sync::Arc<std::sync::Mutex<WrapUpsHeld>>,
@@ -1039,7 +1082,8 @@ async fn write_the_stop(state: &AppState, conversation_id: i64, gave_up: GaveUp)
 /// end of a run, where a pull request is what the work was carried to, and
 /// Resume on an inline implementation asks it before spending a session,
 /// because a branch that is already on a pull request has nothing left to
-/// implement — see [`crate::runner`]. What each makes of the answer is its own,
+/// implement — see [`crate::activities::one_session::inline_again`]. What each
+/// makes of the answer is its own,
 /// so the answer is what this hands back rather than anything it does about it.
 ///
 /// The Repo comes back with it because a pull request is recorded against one:
