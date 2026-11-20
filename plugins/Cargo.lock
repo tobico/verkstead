@@ -352,11 +352,18 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 name = "verkstead-activity-backlog-runner"
 version = "0.1.0"
 dependencies = [
- "wit-bindgen",
+ "wit-bindgen 0.46.0",
 ]
 
 [[package]]
 name = "verkstead-activity-follow-up-rounds"
+version = "0.1.0"
+dependencies = [
+ "wit-bindgen 0.46.0",
+]
+
+[[package]]
+name = "verkstead-activity-stage-runner"
 version = "0.1.0"
 dependencies = [
  "wit-bindgen 0.46.0",

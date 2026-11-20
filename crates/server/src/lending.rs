@@ -78,6 +78,15 @@ pub(crate) struct Lent {
     /// What brought the run about, which a Conversation it starts is held to
     /// the limits by and says what it says by — see [`Lent::brought`].
     brought: Brought,
+
+    /// The sentences a start was answered *no place* with for want of a place
+    /// on the server, which a look says out loud where the places are full —
+    /// see [`Brought::noticed`].
+    waiting: Vec<String>,
+
+    /// How many starts asked for here were weighed, had a place and halted:
+    /// places spent, for the rest of the run — see [`crate::continuing::begin`].
+    spent: usize,
 }
 
 /// Whether a launch waits for the Conversation's Turn.
@@ -142,6 +151,8 @@ impl Lent {
             writing: None,
             folding: false,
             brought: Brought::Settle,
+            waiting: Vec::new(),
+            spent: 0,
         }
     }
 
@@ -557,8 +568,20 @@ impl host::Host for Lent {
     }
 
     /// Put `text` on the Timeline as a Notice, and tell open pages it is there.
+    /// Put a notice on the Timeline — or, a run a look or a report brought
+    /// about, wherever that says what it noticed: see [`Brought::noticed`].
     async fn notice(&mut self, text: String) -> wasmtime::Result<()> {
         let conversation_id = self.conversation_id;
+
+        if self.brought != Brought::Settle {
+            let waiting = self.waiting.contains(&text);
+
+            self.brought
+                .noticed(&self.state, conversation_id, &text, waiting)
+                .await;
+
+            return Ok(());
+        }
 
         match store::note(&self.state.pool, conversation_id, &text).await {
             Ok(true) => self.state.nudges.announce(Nudge::Conversation {
@@ -687,6 +710,7 @@ impl host::Host for Lent {
             base,
             stacks,
             self.brought,
+            self.spent,
         )
         .await;
 
@@ -695,8 +719,18 @@ impl host::Host for Lent {
                 conversation: id,
                 branch,
             }),
-            Began::NoPlace(why) => Err(host::NotStarted::NoPlace(why)),
-            Began::Halted(why) => Err(host::NotStarted::Halted(why)),
+            Began::NoPlace { said, server } => {
+                if server {
+                    self.waiting.push(said.clone());
+                }
+
+                Err(host::NotStarted::NoPlace(said))
+            }
+            Began::Halted(why) => {
+                self.spent += 1;
+
+                Err(host::NotStarted::Halted(why))
+            }
         })
     }
 

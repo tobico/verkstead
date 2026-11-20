@@ -151,7 +151,7 @@ pub(crate) fn looking(state: &AppState, mut resumed: watch::Receiver<bool>) {
 /// start, and a start can still refuse after that — so the places being full when
 /// a look began is no promise that a roadmap it passes over is genuinely waiting
 /// on the machine. What decides that is a count taken after the starts, once per
-/// reading: see [`crate::continuing::Brought::held`].
+/// reading: see [`crate::continuing::Brought::noticed`].
 ///
 /// **Oldest roadmap first**, which is the order the free places are handed out
 /// in. A roadmap's age is the age of the Conversation that wrote it rather than

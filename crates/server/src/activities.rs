@@ -170,6 +170,7 @@ pub(crate) async fn run(
         doing: doing.to_owned(),
         writing: writing.clone(),
         planning: None,
+        beside: false,
     };
 
     let ran =
@@ -210,6 +211,87 @@ pub(crate) async fn run(
     stopping(state, conversation_id, name, &how).await;
 
     None
+}
+
+/// Run `activity` **beside** `conversation_id` rather than driving it: the
+/// word it answered, where it was one the block declares, and `None` where it
+/// could not be run or answered anything else — which is said in the log
+/// alone.
+///
+/// What the **Stage runner** runs as — see [`crate::continuing`]. The
+/// Conversation it is handed is one that has settled, or the foot of a roadmap's
+/// chain, which nothing here drives: so it holds no Driving registration, a stop
+/// standing on the Conversation does not end it, and nothing it does or fails
+/// to do stops the Conversation. What it notices is said as `brought` says it
+/// is — see [`crate::continuing::Brought::noticed`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn beside(
+    state: &AppState,
+    conversation_id: i64,
+    files: Files<'_>,
+    activity: &Activity,
+    capabilities: &[Capability],
+    options: Vec<(String, String)>,
+    brought: Brought,
+) -> Option<String> {
+    let name = &activity.name;
+
+    let facts = match facts(state, conversation_id, activity, options).await {
+        Ok(facts) => facts,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, activity = activity.id, "reading what an Activity starts with failed");
+            return None;
+        }
+    };
+
+    let home = crate::sandbox::Homes::of_the_server(&state.data_dir)
+        .map(|homes| homes.servers().to_owned());
+    let lent = Hosted {
+        lent: Lent::new(state, conversation_id)
+            .doing(name)
+            .brought(brought),
+        state: state.clone(),
+        conversation_id,
+        name: name.clone(),
+        declared: activity.skills.clone(),
+        starts: capabilities.contains(&Capability::Conversations),
+        doing: name.clone(),
+        writing: Arc::new(Mutex::new(None)),
+        planning: None,
+        beside: true,
+    };
+
+    match component::run_activity(files, activity, capabilities, home.as_deref(), lent, &facts)
+        .await
+    {
+        Ok(outcome) if activity.outcomes.contains(&outcome) => {
+            tracing::info!(
+                conversation_id,
+                activity = activity.id,
+                outcome,
+                "an Activity run beside a Conversation ended"
+            );
+            Some(outcome)
+        }
+        Ok(outcome) => {
+            tracing::error!(
+                conversation_id,
+                activity = activity.id,
+                outcome,
+                "an Activity run beside a Conversation ended in an outcome it doesn't declare"
+            );
+            None
+        }
+        Err(trouble) => {
+            tracing::error!(
+                conversation_id,
+                activity = activity.id,
+                why = trouble.why,
+                "an Activity run beside a Conversation couldn't be run"
+            );
+            None
+        }
+    }
 }
 
 /// Stop the Conversation as `name` saying `how`, closing any Set left open.
@@ -375,12 +457,16 @@ struct Hosted {
     /// The session launched to plan a roadmap stage, where the newest was one:
     /// its backlog landing is the host's to record once it has been waited on.
     planning: Option<world::Session>,
+
+    /// Whether it runs beside the Conversation rather than driving it — see
+    /// [`beside`] — so that a stop standing on it ends nothing.
+    beside: bool,
 }
 
 impl Hosted {
     /// Trap the component where the Conversation has stopped under it.
     async fn ended_by_a_stop(&self) -> wasmtime::Result<()> {
-        if already_stopped(&self.state, self.conversation_id).await {
+        if !self.beside && already_stopped(&self.state, self.conversation_id).await {
             return Err(wasmtime::Error::new(Ended(
                 "The conversation was stopped.".to_owned(),
             )));
