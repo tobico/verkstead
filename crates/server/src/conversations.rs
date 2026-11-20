@@ -513,7 +513,7 @@ pub(crate) async fn settle_a_proposal(
 /// checked against the artifact the pick asked for, is what ends it, and the
 /// Direction is the Outcome it ends in. Which artifact each direction ends on,
 /// and where each Outcome carries the Conversation, is
-/// [`crate::runner::interview`]'s.
+/// [`crate::activities::interview::run`]'s.
 ///
 /// **Latest pick wins.** A pick lets the agent proceed and never makes it: it
 /// may come back with another Set instead, with a fresh proposal on it if it
@@ -2101,9 +2101,13 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // on. Spawned rather than awaited, exactly as a steer into Follow-up spawns
     // it — what drives the Conversation from here is that run, and the human is
     // standing at the button this is answering. See
-    // [`crate::runner::follow_up_rounds`].
+    // [`crate::activities::follow_up_rounds::run`].
     if process == store::Process::Tinker {
-        tokio::spawn(crate::runner::follow_up_rounds(state.clone(), id, driving));
+        tokio::spawn(crate::activities::follow_up_rounds::run(
+            state.clone(),
+            id,
+            driving,
+        ));
 
         return Ok(GrillingStarted::Started);
     }
@@ -2112,9 +2116,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // investigation has: the investigating skill, opened on the Brief as the
     // question to find out about, in rounds of Question Sets that commit
     // nothing. Spawned rather than awaited for the Tinker's reason, and handed
-    // the registration for the same one — see [`crate::runner::investigating`].
+    // the registration for the same one — see
+    // [`crate::activities::follow_up_rounds::investigating`].
     if process == store::Process::Investigate {
-        tokio::spawn(crate::runner::investigating(
+        tokio::spawn(crate::activities::follow_up_rounds::investigating(
             state.clone(),
             id,
             crate::investigations::Investigation::opening(brief),
@@ -2136,7 +2141,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // the registration is handed to for the Tinker's reason: what drives a
     // grilling from here is the interview, from its launch through to wherever
     // the Direction picked carries the Conversation. See
-    // [`crate::runner::interview`].
+    // [`crate::activities::interview::run`].
     //
     // The grilling Profile is what the session runs under. The implementation
     // one is fixed before starting because the grilling ends by handing over to
@@ -2161,7 +2166,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         Some(skills) => {
             let (launched, launching) = tokio::sync::oneshot::channel();
 
-            tokio::spawn(crate::runner::interview(
+            tokio::spawn(crate::activities::interview::run(
                 state.clone(),
                 id,
                 driving,
@@ -3520,7 +3525,7 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// picker's branch as the name beside the base commit, and the move into
 /// Wrapping made by the take-up itself rather than by a record arriving. Then one
 /// `submitting` session is sent for the pull request the work is owed — see
-/// [`crate::runner::wrap_up`].
+/// [`crate::activities::wrap_up::run`].
 ///
 /// [`adopt`]'s sibling over the other kind of thing a Draft holds, and the same
 /// shape underneath — the roles checked, origin fetched, git asked everything
@@ -4119,7 +4124,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, confirming: &Confirming) 
     // into it, and watches what is opened. Spawned rather than awaited, and
     // registered as driving before it is: the human is standing at the button
     // this is answering, and what drives the Conversation from here is that run.
-    // See [`crate::runner::wrap_up`].
+    // See [`crate::activities::wrap_up::run`].
     if let Target::Branch(_) = &taking {
         crate::wrapping::wrap_up(state, id, Some(named));
 

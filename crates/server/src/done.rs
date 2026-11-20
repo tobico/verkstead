@@ -98,9 +98,10 @@ pub(crate) enum Evidence {
 
     /// A follow-up, whose end is the human's to say rather than the session's:
     /// the newest round they answered carries the Nothing-else mark — see
-    /// [`crate::runner::marked`]. What it commits is theirs to have asked for,
-    /// and a round that was a question and an answer commits nothing at all, so
-    /// there is nothing on the branch to read instead.
+    /// [`crate::activities::follow_up_rounds::marked`]. What it commits is
+    /// theirs to have asked for, and a round that was a question and an answer
+    /// commits nothing at all, so there is nothing on the branch to read
+    /// instead.
     NothingElse,
 
     /// An investigation, which is the same mark read in Investigating's own
@@ -349,7 +350,7 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
     // Conversation can have been through more than one of them — see
     // [`Evidence::mark`].
     if let Some((within, unmarked)) = evidence.mark()
-        && !crate::runner::marked(state, conversation_id, within).await
+        && !crate::activities::follow_up_rounds::marked(state, conversation_id, within).await
     {
         return Verdict::Refused(unmarked.to_owned());
     }

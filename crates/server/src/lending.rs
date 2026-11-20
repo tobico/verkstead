@@ -595,7 +595,7 @@ impl Lent {
         };
 
         if !crate::runner::open(state, conversation_id).await
-            && crate::runner::marked(state, conversation_id, within).await
+            && crate::activities::follow_up_rounds::marked(state, conversation_id, within).await
         {
             return world::Waited::Marked;
         }
@@ -1148,7 +1148,7 @@ impl host::Host for Lent {
     /// runner always left one when it stopped over its step.
     async fn stop(&mut self, reason: String) -> wasmtime::Result<()> {
         if !self.folding {
-            crate::runner::left_open(&self.state, self.conversation_id).await;
+            crate::activities::follow_up_rounds::left_open(&self.state, self.conversation_id).await;
         }
 
         crate::runner::stop(

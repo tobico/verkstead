@@ -44,7 +44,7 @@
 //! ask would be the failure nobody notices. Asking costs a few reads of a
 //! table. What the Activity answers on the rule holding is its `settled`, and
 //! the move is made here as that lands — see [`standing`] and [`settled`], and
-//! [`crate::runner::wrap_up`].
+//! [`crate::activities::wrap_up::run`].
 //!
 //! Which is also why the condition on the way is noticed here — see
 //! [`narrowing`]. A wrap-up whose review, comments and merge have settled and
@@ -73,7 +73,7 @@ use crate::AppState;
 use crate::store;
 
 /// Where `conversation_id`'s wrap-up stands, as the **Wrap-up** Activity asks
-/// each time round its watchers — see [`crate::runner::wrap_up`].
+/// each time round its watchers — see [`crate::activities::wrap_up::run`].
 ///
 /// Nothing here is refused for. This runs unattended with nobody watching, and
 /// what it has to say it says on the Timeline or in the log.

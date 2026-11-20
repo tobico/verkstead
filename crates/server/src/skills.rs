@@ -129,7 +129,7 @@ const RESPONDING: &str = "verkstead/responding/SKILL.md";
 /// The one session a human sets going by hand, and it is the pipeline's own:
 /// what follows it is whatever the branch then holds, rather than a
 /// Conversation left standing beside the work its session did — see
-/// [`crate::runner::instructed`].
+/// [`crate::activities::one_session::instructed`].
 const INSTRUCTION: &str = "verkstead/instruction/SKILL.md";
 
 /// And the following-up skill's, which the session a steer into Follow-up

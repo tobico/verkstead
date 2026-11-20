@@ -25,7 +25,7 @@
 //!
 //! **A grilling is driven by its interview**, the Activity its session runs
 //! under, from the launch through the pick to wherever the Direction picked
-//! carries the Conversation — see [`crate::runner::interview`]. The press that
+//! carries the Conversation — see [`crate::activities::interview::run`]. The press that
 //! starts one holds a registration across the gap before it, the Conversation
 //! saying it is grilling from before the interview exists, and hands it on.
 //!
