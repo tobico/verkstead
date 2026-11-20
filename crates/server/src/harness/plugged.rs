@@ -610,20 +610,27 @@ impl Harness for Plugged {
 
     /// None where the manifest declares neither commands nor instructions.
     fn install(&self) -> Option<Install<'_>> {
-        let install = &self.agent.install;
-        if *install == Default::default() {
-            return None;
-        }
-
-        Some(Install {
-            instructions: install.instructions.as_deref(),
-            commands: &install.commands,
-            npm: install.npm.as_deref(),
-            brew: install.brew.as_deref(),
-            cask: install.cask.as_deref(),
-            nix: install.nix.as_deref(),
-        })
+        installing(&self.agent.install)
     }
+}
+
+/// A manifest's `install` as the wizard reads it — None where it declares
+/// neither commands nor instructions.
+pub(crate) fn installing(
+    install: &crate::plugins::manifest::agent::Install,
+) -> Option<Install<'_>> {
+    if *install == Default::default() {
+        return None;
+    }
+
+    Some(Install {
+        instructions: install.instructions.as_deref(),
+        commands: &install.commands,
+        npm: install.npm.as_deref(),
+        brew: install.brew.as_deref(),
+        cask: install.cask.as_deref(),
+        nix: install.nix.as_deref(),
+    })
 }
 
 /// Where a session of a plugin harness keeps its record, as its

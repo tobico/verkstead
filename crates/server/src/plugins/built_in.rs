@@ -185,6 +185,39 @@ pub fn listed() -> &'static [Manifest] {
     &LISTED
 }
 
+/// What the built-in plugin `uuid`'s harness declares to install it, as
+/// `platform` reads its manifest — None where no built-in is `uuid`, or it
+/// provides no agent.
+///
+/// **Read for `platform` rather than off its harness**, which this process
+/// stood up as [`Platform::HERE`] reads it: the wizard's install plan is a
+/// function of the machine it is planned for, and a suite plans every
+/// platform's from one. Each platform's manifests are read once.
+pub(crate) fn agent_install(
+    uuid: &str,
+    platform: Platform,
+) -> Option<&'static super::manifest::agent::Install> {
+    static READ: LazyLock<[(Platform, Vec<Manifest>); 3]> = LazyLock::new(|| {
+        [Platform::Linux, Platform::MacOs, Platform::Windows].map(|platform| {
+            let read = BUILT_INS
+                .iter()
+                .filter_map(|built_in| built_in.manifest(platform).ok())
+                .collect();
+            (platform, read)
+        })
+    });
+
+    READ.iter()
+        .find(|(read_for, _)| *read_for == platform)?
+        .1
+        .iter()
+        .find(|manifest| manifest.uuid == uuid)?
+        .provides
+        .iter()
+        .find_map(|provision| provision.agent())
+        .map(|agent| &agent.install)
+}
+
 /// The listed built-in that provides the language `name`, where one does:
 /// whose tick on the Plugins page is that language's switch.
 pub fn providing(name: &str) -> Option<&'static Manifest> {
