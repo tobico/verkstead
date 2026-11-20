@@ -1798,6 +1798,11 @@ fn standing(
     // [`signouts::carrying_on`].
     signouts::carrying_on(&state);
 
+    // And the one that resumes a run here signed out on a Profile it runs from
+    // a copy of, when the device that Profile is bound on says a login landed —
+    // see [`signouts::hearing`].
+    signouts::hearing(&state);
+
     // And the lists this device holds of its members, which is what the sidebar
     // is merged out of: read once now, and again whenever a member says
     // something its own sidebar would be re-read on (ADR-0020, *The opened

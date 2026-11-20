@@ -506,6 +506,12 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     case "login":
       return [["login", moved.profile]];
 
+    // A login on a Profile landed on that device. What it is for is the
+    // members, which resume the runs they stopped on it; the card's own
+    // reading of the login comes with it.
+    case "logged_in":
+      return [keyOf(device, "profiles")];
+
     // What a member's terminals are listening on moved. That is read by the
     // device that attached to them, over the link, rather than by any page: a
     // browser on the machine the ports are on has nothing to forward, so there
