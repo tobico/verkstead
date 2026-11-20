@@ -1476,6 +1476,11 @@ pub struct ProposalView {
     /// agent wrote them. Empty where it wants none, and the chooser then draws
     /// nothing for them.
     pub wants: Vec<WantView>,
+
+    /// The Directions the chooser draws, in the design's order — all three
+    /// unless the interview offered fewer, and one alone drawn as accepting
+    /// the proposal or not rather than as a choice.
+    pub offers: Vec<Direction>,
 }
 
 /// One platform the proposal wants, and why, as the chooser draws it.
@@ -3305,6 +3310,7 @@ pub fn proposal_view(proposal: &verkstead_schema::Proposal) -> ProposalView {
                 for_html: crate::markdown::to_inline_html(&want.reason),
             })
             .collect(),
+        offers: proposal.offered(),
     }
 }
 

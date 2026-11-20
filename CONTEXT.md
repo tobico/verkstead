@@ -4642,9 +4642,14 @@ for it, carried as a block on a Question Set. What can end a grilling rather
 than continue it — no button anywhere ends one. Ordinary grilling Sets carry
 none, and at most one Proposal is ever in flight.
 
-A Set carrying a Proposal is drawn with the Direction chooser on it: all three
-Directions offered every time, the recommendation marked and never preselected,
-the rationale beside them, and the chooser itself saying what picking does.
+A Set carrying a Proposal is drawn with the Direction chooser on it: the
+Directions its interview offers — all three unless the Process declares fewer
+(Set 1765, Q27), stamped on the Proposal as `offers` by the server as the Set
+arrives — the recommendation marked and never preselected, the rationale beside
+them, and the chooser itself saying what picking does. One Direction offered is
+no chooser at all: a tick that accepts the Proposal with it. A recommendation,
+a pick or a Done signal over a Direction not offered is refused, naming the
+ones that are.
 Picking a Direction accepts the Proposal. **Every other way of answering sends
 it back**: an answer in the human's own words, questions left open, anything
 without a pick. That is how the human disagrees, and it is the whole way back.

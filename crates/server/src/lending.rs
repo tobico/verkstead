@@ -59,6 +59,10 @@ pub(crate) struct Lent {
     /// says it may retire a Memo, and what one it leaves is left under.
     building: Option<Building>,
 
+    /// The Directions a session launched expecting `picked` offers — see
+    /// [`Lent::offering`].
+    offers: Vec<Direction>,
+
     /// What the rescue says the session is doing, where it goes idle without a
     /// word.
     doing: String,
@@ -171,6 +175,7 @@ impl Lent {
             turn: Turn::Take,
             held: Vec::new(),
             building: None,
+            offers: Direction::ALL.to_vec(),
             doing: "working".to_owned(),
             telling: None,
             launching: None,
@@ -245,6 +250,14 @@ impl Lent {
     /// leaves is left under — see [`crate::memos`].
     pub(crate) fn building(mut self, building: Option<Building>) -> Lent {
         self.building = building;
+        self
+    }
+
+    /// The Directions a session launched expecting `picked` offers: what its
+    /// proposals are stamped with, and the only picks it hears. All three
+    /// where nothing narrows them — see [`crate::followers`].
+    pub(crate) fn offering(mut self, offers: Vec<Direction>) -> Lent {
+        self.offers = offers;
         self
     }
 
@@ -422,7 +435,7 @@ impl Lent {
             tokio::select! {
                 ended = watched.session.ended() => break (ended, Some((direction, tail))),
                 () = crate::runner::signalled_and_idle(signal.clone(), &idle, pace) => {
-                    return Ok(world::Waited::Picked(direction_word(direction).to_owned()));
+                    return Ok(world::Waited::Picked(direction.word().to_owned()));
                 }
                 next = next_pick(picks) => {
                     picked = Some(next);
@@ -451,7 +464,7 @@ impl Lent {
         // finishes rather than idles — so the Worktree is asked once more,
         // whichever way it ended.
         if crate::runner::check(&tail.worktree, &tail.landing).await {
-            return Ok(world::Waited::Picked(direction_word(direction).to_owned()));
+            return Ok(world::Waited::Picked(direction.word().to_owned()));
         }
 
         // Stopped or steered from outside, which has said so already.
@@ -626,7 +639,9 @@ impl host::Host for Lent {
         // A pick is listened for from before the session exists, so none on
         // its proposal can arrive with nothing to hear it.
         let expected = match evidence {
-            world::Evidence::Picked => Expected::Picked(state.followers.listen(conversation_id)),
+            world::Evidence::Picked => {
+                Expected::Picked(state.followers.listen(conversation_id, self.offers.clone()))
+            }
             evidence => match taken_evidence(evidence, conversation.worktree.as_deref()) {
                 Some(evidence) => Expected::Evidence(evidence),
                 None => {
@@ -1384,15 +1399,6 @@ async fn next_pick(picks: &mut watch::Receiver<Option<Direction>>) -> Direction 
         if let Some(direction) = *picks.borrow_and_update() {
             return direction;
         }
-    }
-}
-
-/// A Direction as the world's `picked` says it, which is as a Set does.
-fn direction_word(direction: Direction) -> &'static str {
-    match direction {
-        Direction::Inline => "inline",
-        Direction::TaskList => "task-list",
-        Direction::Roadmap => "roadmap",
     }
 }
 

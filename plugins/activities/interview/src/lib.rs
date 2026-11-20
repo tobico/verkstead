@@ -22,6 +22,12 @@
 //! the human already settled, both written by the server's builders so the
 //! session is told exactly what it always was. A launch the host refuses stops
 //! the Conversation in the host's sentence for why.
+//!
+//! **Offering the Directions it is started with** (Set 1765, Q27): the option
+//! `offers`, which a Process declares and the host reads, as it reads
+//! `building` — the chooser on the session's proposals draws those alone, a
+//! pick of any other is never heard, and so the Outcome is always one of them.
+//! Nothing here reads it: what it changes is what the host waits for.
 
 wit_bindgen::generate!({
     world: "activity",

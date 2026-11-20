@@ -18,6 +18,14 @@
 //! **One interview listens at a time.** Listening opens a fresh channel and
 //! drops the one before it, so a grilling relaunched never starts out holding
 //! the last one's pick, and the wait it replaced hears nothing more.
+//!
+//! **And it listens for the Directions it offers alone** (Set 1765, Q27): a
+//! proposal its session puts is stamped with them as the Set arrives — see
+//! [`crate::sets`] — so the chooser draws those and no others, and a pick of
+//! any other is not heard. Which those are is a start fact of the interview,
+//! which a Process declares from stage 11 on; until then the suite says it
+//! through [`Followers::declare`], and every other Conversation is offered all
+//! three.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -28,7 +36,17 @@ use verkstead_schema::Direction;
 /// The picks being listened for, by Conversation.
 #[derive(Clone, Default)]
 pub(crate) struct Followers {
-    picks: Arc<Mutex<HashMap<i64, watch::Sender<Option<Direction>>>>>,
+    picks: Arc<Mutex<HashMap<i64, Listening>>>,
+
+    /// What a Conversation's interview is to offer, where something said so —
+    /// see [`Followers::declare`].
+    declared: Arc<Mutex<HashMap<i64, Vec<Direction>>>>,
+}
+
+/// One interview listening: where its picks go, and what it offers.
+struct Listening {
+    picking: watch::Sender<Option<Direction>>,
+    offers: Vec<Direction>,
 }
 
 impl Followers {
@@ -36,21 +54,26 @@ impl Followers {
         Followers::default()
     }
 
-    /// Listen for this Conversation's picks from now on, with nothing picked
-    /// yet, in place of whoever listened before.
-    pub(crate) fn listen(&self, conversation_id: i64) -> watch::Receiver<Option<Direction>> {
+    /// Listen for this Conversation's picks of `offers` from now on, with
+    /// nothing picked yet, in place of whoever listened before.
+    pub(crate) fn listen(
+        &self,
+        conversation_id: i64,
+        offers: Vec<Direction>,
+    ) -> watch::Receiver<Option<Direction>> {
         let (picking, picks) = watch::channel(None);
 
         self.picks
             .lock()
             .expect("the followers registry is not poisoned")
-            .insert(conversation_id, picking);
+            .insert(conversation_id, Listening { picking, offers });
 
         picks
     }
 
-    /// Say the human picked `direction`. Whether anything was listening: a
-    /// Conversation whose interview is not running has nothing to hear it.
+    /// Say the human picked `direction`. Whether anything heard it: a
+    /// Conversation whose interview is not running has nothing to hear it, and
+    /// one whose interview does not offer it is not listening for it.
     pub(crate) fn picked(&self, conversation_id: i64, direction: Direction) -> bool {
         let picks = self
             .picks
@@ -58,9 +81,41 @@ impl Followers {
             .expect("the followers registry is not poisoned");
 
         match picks.get(&conversation_id) {
-            Some(picking) => picking.send(Some(direction)).is_ok(),
-            None => false,
+            Some(listening) if listening.offers.contains(&direction) => {
+                listening.picking.send(Some(direction)).is_ok()
+            }
+            _ => false,
         }
+    }
+
+    /// What the interview listening on this Conversation offers, or `None`
+    /// where none is.
+    pub(crate) fn offered(&self, conversation_id: i64) -> Option<Vec<Direction>> {
+        self.picks
+            .lock()
+            .expect("the followers registry is not poisoned")
+            .get(&conversation_id)
+            .map(|listening| listening.offers.clone())
+    }
+
+    /// Say that this Conversation's interview is to offer `offers` — the
+    /// suite's stand-in for a Process's declaration until stage 11 writes one.
+    pub(crate) fn declare(&self, conversation_id: i64, offers: Vec<Direction>) {
+        self.declared
+            .lock()
+            .expect("the followers registry is not poisoned")
+            .insert(conversation_id, offers);
+    }
+
+    /// What this Conversation's interview is to offer: what was declared for
+    /// it, or all three.
+    pub(crate) fn declared(&self, conversation_id: i64) -> Vec<Direction> {
+        self.declared
+            .lock()
+            .expect("the followers registry is not poisoned")
+            .get(&conversation_id)
+            .cloned()
+            .unwrap_or_else(|| Direction::ALL.to_vec())
     }
 }
 
@@ -73,7 +128,7 @@ mod tests {
     #[tokio::test]
     async fn a_second_pick_replaces_the_one_before_it() {
         let followers = Followers::new();
-        let mut picks = followers.listen(7);
+        let mut picks = followers.listen(7, Direction::ALL.to_vec());
 
         assert!(followers.picked(7, Direction::Inline));
         assert!(followers.picked(7, Direction::Roadmap));
@@ -87,7 +142,7 @@ mod tests {
     #[tokio::test]
     async fn a_pick_reaches_its_own_conversations_listener_alone() {
         let followers = Followers::new();
-        let picks = followers.listen(7);
+        let picks = followers.listen(7, Direction::ALL.to_vec());
 
         assert!(
             !followers.picked(8, Direction::Inline),
@@ -101,13 +156,26 @@ mod tests {
     #[tokio::test]
     async fn listening_again_starts_from_nothing_picked() {
         let followers = Followers::new();
-        let mut before = followers.listen(7);
+        let mut before = followers.listen(7, Direction::ALL.to_vec());
         followers.picked(7, Direction::TaskList);
 
-        let after = followers.listen(7);
+        let after = followers.listen(7, Direction::ALL.to_vec());
 
         assert_eq!(*after.borrow(), None);
         before.borrow_and_update();
         assert!(before.changed().await.is_err(), "the old channel is closed");
+    }
+
+    /// A pick of a Direction the interview does not offer is not heard, and
+    /// what it offers is read back while it listens.
+    #[tokio::test]
+    async fn a_pick_the_interview_does_not_offer_is_not_heard() {
+        let followers = Followers::new();
+        let picks = followers.listen(7, vec![Direction::Inline]);
+
+        assert!(!followers.picked(7, Direction::Roadmap));
+        assert_eq!(*picks.borrow(), None);
+        assert_eq!(followers.offered(7), Some(vec![Direction::Inline]));
+        assert_eq!(followers.offered(8), None);
     }
 }

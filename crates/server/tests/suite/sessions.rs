@@ -2528,6 +2528,66 @@ fn a_tinker_round(prompts: &Path) -> String {
     )
 }
 
+/// A grilling whose interview offers `offers` alone — what a Process declares
+/// (Set 1765, Q27), said through the bench's hosting until stage 11 writes it —
+/// started as [`grilling`] starts one.
+async fn grilling_offering(
+    spill: tempfile::TempDir,
+    stub: &str,
+    offers: Vec<verkstead_schema::Direction>,
+) -> Grilling {
+    let bench = bench_at_pace(spill, stub, PULL_REQUEST, *BRISKLY, None).await;
+    let app = &bench.app;
+
+    let started: Started = post(
+        app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.under_every_pairing(id).await;
+
+    // Declared before the press, as a Process's declaration is frozen with it.
+    bench
+        .hosting
+        .as_ref()
+        .expect("this bench hosts Activities")
+        .offering(id, offers);
+
+    let saved: BriefSaved = post(
+        app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let grilling: GrillingStarted = post(
+        app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(grilling, GrillingStarted::Started);
+
+    bench.holding(id)
+}
+
+/// A grilling session that writes down the prompt it was started on, then
+/// waits on nothing.
+fn a_grilling_that_writes_its_prompt(prompts: &Path) -> String {
+    format!(
+        "printf 'model=%s\\n%s\\n=====\\n' \"$1\" \"$2\" >> {prompts}\n\
+         printf 'grilling\\n'\n\
+         sleep 300\n",
+        prompts = quoted(prompts),
+    )
+}
+
 /// The same workbench with the same press, on a draft whose Process is
 /// **Investigate**: it lands in Investigating rather than Grilling, and the one
 /// session it starts is the investigating one.
@@ -34665,6 +34725,158 @@ async fn a_grilling_signal_is_refused_before_a_pick_and_over_another_directions_
     assert!(
         running(&fixture, grilled).await,
         "with the grilling session still running",
+    );
+}
+
+/// An interview offering two Directions puts a proposal whose chooser draws
+/// those two alone: the session is told so under its prompt, its proposal is
+/// stored offering them, a recommendation of the third is refused naming what
+/// is offered, and so is a pick of it.
+#[tokio::test]
+async fn an_interview_offering_two_directions_draws_only_those() {
+    use verkstead_schema::Direction;
+
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("grilling-prompts");
+    let fixture = grilling_offering(
+        spill,
+        &a_grilling_that_writes_its_prompt(&written_to),
+        vec![Direction::Inline, Direction::TaskList],
+    )
+    .await;
+
+    let written = until_written_by(&written_to, 1).await;
+    let prompt = prompts(&written)[0];
+
+    assert!(
+        prompt.contains("# How the work may be built")
+            && prompt.contains("only be built as `inline` and `task-list`"),
+        "the session is told which Directions it may recommend: {prompt:?}",
+    );
+
+    // A recommendation of the one not offered is refused as the Set arrives.
+    let (status, body) = fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{}/api/v1/sets", fixture.id))
+            .header(header::CONTENT_TYPE, "application/yaml")
+            .body(Body::from(
+                PROPOSING.replace("direction: inline", "direction: roadmap"),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "refused: {body}");
+    assert!(
+        body.contains("recommends `roadmap`") && body.contains("`inline`\n    and `task-list`"),
+        "saying what may be recommended: {body}",
+    );
+
+    // One among them is put, whatever the agent said it offers.
+    let set = fixture
+        .ask(&format!(
+            "{PROPOSING}  offers: [inline, task-list, roadmap]\n"
+        ))
+        .await;
+    let view = fixture.set(set).await;
+
+    assert_eq!(
+        view.proposal.expect("the Set carries the proposal").offers,
+        vec![Direction::Inline, Direction::TaskList],
+        "the chooser draws what the interview offers, stamped by the server",
+    );
+
+    let refused = fixture.pick(set, "roadmap").await;
+    let Submitted::Rejected(violations) = refused else {
+        panic!("a pick of a Direction not offered is refused, got {refused:?}");
+    };
+    assert!(
+        violations.iter().any(
+            |violation| violation.contains("the proposal offers only `inline` and `task-list`")
+        ),
+        "saying which were offered: {violations:?}",
+    );
+
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+}
+
+/// An interview offering one Direction is no chooser: the proposal carries
+/// that one alone, and accepting it picks it — the session's Done signal is
+/// then held to that Direction's artifact.
+#[tokio::test]
+async fn an_interview_offering_one_direction_is_accepted_with_it() {
+    use verkstead_schema::Direction;
+
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("grilling-prompts");
+    let fixture = grilling_offering(
+        spill,
+        &a_grilling_that_writes_its_prompt(&written_to),
+        vec![Direction::Inline],
+    )
+    .await;
+
+    let written = until_written_by(&written_to, 1).await;
+    assert!(
+        prompts(&written)[0].contains("built one way only, `inline`"),
+        "the session is told it is built one way: {written:?}",
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+
+    assert_eq!(
+        fixture.set(set).await.proposal.expect("a proposal").offers,
+        vec![Direction::Inline],
+    );
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let deadline = Instant::now() + *PATIENCE;
+    let (status, body) = loop {
+        let (status, body) = signal_done(&fixture).await;
+
+        if !body.contains("still being taken up") {
+            break (status, body);
+        }
+
+        assert!(Instant::now() < deadline, "the pick was never taken up");
+        pause(Duration::from_millis(25)).await;
+    };
+
+    assert_eq!(status, StatusCode::CONFLICT, "refused: {body}");
+    assert!(
+        body.contains("handoff document has not been written"),
+        "accepting picked inline, so its handoff is what is waited for: {body}",
+    );
+}
+
+/// With nothing declared, a proposal offers all three as it always did, and
+/// the session is told nothing about it.
+#[tokio::test]
+async fn an_interview_nothing_narrows_offers_all_three_and_says_nothing() {
+    use verkstead_schema::Direction;
+
+    let spill = tempfile::tempdir().unwrap();
+    let written_to = spill.path().join("grilling-prompts");
+    let fixture = grilling_offering(
+        spill,
+        &a_grilling_that_writes_its_prompt(&written_to),
+        Direction::ALL.to_vec(),
+    )
+    .await;
+
+    let written = until_written_by(&written_to, 1).await;
+    assert!(
+        !written.contains("# How the work may be built"),
+        "nothing is said where nothing is narrowed: {written:?}",
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+
+    assert_eq!(
+        fixture.set(set).await.proposal.expect("a proposal").offers,
+        Direction::ALL.to_vec(),
     );
 }
 
