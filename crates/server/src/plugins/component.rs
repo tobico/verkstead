@@ -835,6 +835,50 @@ mod unlent {
         ) -> wasmtime::Result<bool> {
             Err(refused())
         }
+
+        async fn ignored(
+            &mut self,
+            _repo: String,
+            _comments: Vec<activity_types::Comment>,
+        ) -> wasmtime::Result<Vec<String>> {
+            Err(refused())
+        }
+
+        async fn settled(&mut self, _watcher: activity_types::Watcher) -> wasmtime::Result<bool> {
+            Err(refused())
+        }
+
+        async fn cover(&mut self) -> wasmtime::Result<()> {
+            Err(refused())
+        }
+
+        async fn review_wanted(&mut self, _afresh: bool) -> wasmtime::Result<bool> {
+            Err(refused())
+        }
+
+        async fn reviewing(
+            &mut self,
+            _said: Option<String>,
+        ) -> wasmtime::Result<Result<String, String>> {
+            Err(refused())
+        }
+
+        async fn review_over(&mut self, _how: Option<String>) -> wasmtime::Result<()> {
+            Err(refused())
+        }
+
+        async fn batch_over(
+            &mut self,
+            _pull_request: activity_types::PullRequest,
+            _comments: Vec<String>,
+            _how: Option<String>,
+        ) -> wasmtime::Result<()> {
+            Err(refused())
+        }
+
+        async fn left_behind(&mut self) -> wasmtime::Result<bool> {
+            Err(refused())
+        }
     }
 }
 

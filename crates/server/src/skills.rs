@@ -118,6 +118,9 @@ const REVIEWING: &str = "verkstead/reviewing/SKILL.md";
 /// And the responding skill's, which a batch of comments left on the pull
 /// request after the review is answered inside: the review's propose-then-fix
 /// shape again, about what somebody has just said rather than about the branch.
+/// The Wrap-up component writes that prompt itself, so only the tests here
+/// still name it.
+#[cfg(test)]
 const RESPONDING: &str = "verkstead/responding/SKILL.md";
 
 /// And the instruction skill's, which the session a steer into Implementing
@@ -783,48 +786,6 @@ pub(crate) fn reviewing(
         ),
         None => prompt,
     }
-}
-
-/// What a batch session is started on: the comments it is about, under the two
-/// documents and the line that sends the agent into the responding skill.
-///
-/// The same three pieces the review gets, in the same order and for the same
-/// reasons — the documents say what the work is, and what was said goes last
-/// because it is the newest and least general thing. What differs is which
-/// comments and how many: the review is given everything standing on every one
-/// of the pull requests when it starts, and this is given one batch of what was
-/// said on one of them after it.
-///
-/// Which pull request that is, and which worktree to answer it in, are in `said`
-/// rather than said here: a Conversation ends on one per repository it was worked
-/// in, and a session sent at a companion's would otherwise read the diff of the
-/// repository it started in — see [`crate::comments::feedback`].
-///
-/// `said` is never empty here, unlike the review's. A batch session exists
-/// because something was said, so there is no version of this prompt with
-/// nothing under the heading.
-pub(crate) fn responding(
-    skills: &Skills,
-    brief: &str,
-    handoff: Option<&str>,
-    said: &str,
-) -> String {
-    let skill = skills.named(RESPONDING);
-
-    let prompt = on_the_documents(
-        &format!(
-            "Read {skill} and answer what has just been said on the pull request named \
-             at the end of this prompt, the way it says. The work described below is what it \
-             was meant to be."
-        ),
-        brief,
-        handoff,
-    );
-
-    format!(
-        "{prompt}\n# What has just been said on the pull request\n\n{}\n",
-        said.trim()
-    )
 }
 
 /// What an instruction session is started on: the documents the work is written
@@ -4253,42 +4214,6 @@ mod tests {
             responding.contains("last thing you print"),
             "and what was said is answered where the Timeline will show it: \
              {responding}"
-        );
-    }
-
-    /// A batch session is put inside the skill the same way every other is, and
-    /// primed with the two documents *and* the comments it is about.
-    #[test]
-    fn a_batch_session_is_started_on_the_documents_with_the_comments_last() {
-        let prompt = responding(
-            &mounted(),
-            "# Rate limiting\n\nThe API has none.\n",
-            Some("# What we settled\n\nIn-process counter.\n"),
-            "**tobico** said on `src/window.rs` line 12:\n\nThis is the wrong way round.",
-        );
-
-        assert!(
-            prompt.contains(&at(RESPONDING)),
-            "the skill is named by the path it is mounted at: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
-            "both documents go in whole: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("This is the wrong way round.")
-                && prompt.contains("`src/window.rs` line 12"),
-            "and so does what was said, with where it was said: {prompt:?}"
-        );
-        assert!(
-            prompt.find("In-process counter.") < prompt.find("This is the wrong way round."),
-            "under the documents: they say what the work is and this says what \
-             somebody has just said about it — {prompt:?}"
-        );
-        assert!(
-            !prompt.contains(&at(ADDRESSING)) && !prompt.contains(&at(REVIEWING)),
-            "and no other skill is named: a batch is neither a fix nor a review — \
-             {prompt:?}"
         );
     }
 

@@ -579,6 +579,51 @@ interface host {
   /// dispatched.
   mark-addressed: func(repo: string, comments: list<string>) -> result<_, string>;
 
+  /// Which of these comments said in the Repo named `repo` are nobody's to
+  /// answer, by what each is: the one a share of the Conversation left, and
+  /// what the human's ignore rules match — the second marked addressed on the
+  /// way past, so that taking a rule away changes what happens next rather
+  /// than what happened.
+  ignored: func(repo: string, comments: list<comment>) -> list<string>;
+
+  /// Whether one of the things a wrap-up waits on is settled, by the host's
+  /// record — the review being over is what lets a batch of comments be
+  /// answered.
+  settled: func(watcher: watcher) -> bool;
+
+  /// Find the pull requests the work's Companions were committed in and
+  /// carried to, and record each beside the Conversation's own — giving the
+  /// wrap-up up where one was committed in and left without any. Asked once
+  /// as the wrap-up starts, before anything reads the work whole.
+  cover: func();
+
+  /// Whether the branch is to be reviewed now: false where it has been
+  /// already, or is not to be at all — which settles the review — or where
+  /// the review's own proposal is standing with nobody behind it, which stops
+  /// the run. `afresh` reads past such a proposal, closing it, which is what
+  /// Resume asks for.
+  review-wanted: func(afresh: bool) -> bool;
+
+  /// What the review session is told: the documents, where every pull request
+  /// is where there are several, and `said` — what was standing on them as it
+  /// starts — under it.
+  reviewing: func(said: option<string>) -> result<string, string>;
+
+  /// The review session launched here is over, `how` it ended where that was
+  /// the trouble: settle the review, send the work back to build what it split
+  /// out, or stop over a proposal left with nobody behind it.
+  review-over: func(how: option<string>);
+
+  /// The same for a session answering a batch of comments on the pull
+  /// request, `comments` being which: carry on, or stop — and read them again
+  /// — where it did not finish.
+  batch-over: func(pull-request: pull-request, comments: list<string>, how: option<string>);
+
+  /// Whether a batch session's proposal is standing with nobody behind it,
+  /// which stops the run as it is found: nothing said is settled or answered
+  /// while it is.
+  left-behind: func() -> bool;
+
   /// Stop: the Conversation stays where it is, the reason goes on the
   /// Timeline, and any Set left open is closed — unless the newest session
   /// launched was building (a backlog task, the finish, a stage's planning),

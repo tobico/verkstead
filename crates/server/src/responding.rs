@@ -2,7 +2,7 @@
 //! its pull requests comes to.
 //!
 //! Everything standing on every pull request when the review starts belongs to
-//! the review — see [`crate::comments::for_the_review`]. This is about what is
+//! the review — which the Wrap-up Activity folds into the review's prompt. This is about what is
 //! said *after* it: a batch of comments the human wrote on one of them while the
 //! branch sat there, which nothing has been asked about yet.
 //!
@@ -78,49 +78,55 @@
 //! Set nobody reported on would be Verkstead acting on somebody else's reading
 //! of what was said.
 //!
-//! **One agent in one Worktree.** The caller holds the Conversation's Turn
+//! **One agent in one Worktree.** The Activity holds the Conversation's Turn
 //! across the whole of a batch session, the wait on the human included, exactly
-//! as the review's caller does — see [`crate::comments::dispatch`].
+//! as it holds it across the review's.
 
 use crate::AppState;
-use crate::runner::Reviewed;
 use crate::store;
 
-/// Run one batch session about `said`, and see out whatever it leaves.
+/// The batch session the **Wrap-up** Activity dispatched about `which` — the
+/// comments it read on pull request `number` of Repo `repo_id` and marked
+/// addressed — is over: see out whatever it left. `ended_badly` is how it
+/// ended where that was the trouble, and the Timeline Event it was printing
+/// into.
 ///
-/// The caller is holding the Conversation's Turn and has recorded `which` — the
-/// comments this batch is made of — as addressed against the pull request opened
-/// in `repo_id`. Both are what make this the one session that will act on them.
+/// The pull request is carried through so that whatever has to be put back
+/// where it was — the comments unread, the settlement back to waiting — is put
+/// back for that one rather than for all of them. Both halves, a repository
+/// holding as many pull requests as its stack is deep.
 ///
-/// `repo_id` and `number` are which pull request the batch was left on, carried
-/// through so that whatever has to be put back where it was — the comments
-/// unread, the settlement back to waiting — is put back for that one rather than
-/// for all of them. Both halves, a repository holding as many pull requests as
-/// its stack is deep.
+/// Nothing at all where the run was stopped from outside while it ran, or the
+/// Conversation is not wrapping up any more: what happened is on the record
+/// already. See [`crate::sessions::Ended::on_purpose`].
 ///
 /// Nothing is refused for. This runs unattended with nobody watching, and what
 /// it has to say it says on the Timeline or in the log.
-pub(crate) async fn run(
+pub(crate) async fn batch_over(
     state: &AppState,
     conversation_id: i64,
     repo_id: i64,
     number: i64,
-    said: &str,
     which: &[String],
+    ended_badly: Option<(String, i64)>,
 ) {
+    if !crate::wrapping::still_going(state, conversation_id).await
+        || crate::stopping::stopped(state, conversation_id).await
+    {
+        tracing::info!(
+            conversation_id,
+            "the batch session was stopped from outside, so nothing is asked about it"
+        );
+        return;
+    }
+
     let batch = Batch {
         repo_id,
         number,
         which,
     };
 
-    match crate::runner::respond(state, conversation_id, said).await {
-        Reviewed::Done => over(state, conversation_id, batch, None).await,
-        Reviewed::Stopped { how, writing } => {
-            over(state, conversation_id, batch, Some((how, writing))).await
-        }
-        Reviewed::Nothing => {}
-    }
+    over(state, conversation_id, batch, ended_badly).await
 }
 
 /// One batch as whoever dispatched it knows it: which pull request it was left

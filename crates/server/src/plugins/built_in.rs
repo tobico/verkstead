@@ -444,7 +444,12 @@ mod tests {
         );
         assert_eq!(
             wrap_up.skills,
-            ["verkstead/submitting", "verkstead/addressing"]
+            [
+                "verkstead/submitting",
+                "verkstead/addressing",
+                "verkstead/reviewing",
+                "verkstead/responding"
+            ]
         );
 
         for component in [

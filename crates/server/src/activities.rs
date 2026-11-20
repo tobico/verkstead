@@ -961,6 +961,50 @@ impl host::Host for Hosted {
     ) -> wasmtime::Result<bool> {
         host::Host::give_up(&mut self.lent, pull_request, what, how).await
     }
+
+    async fn ignored(
+        &mut self,
+        repo: String,
+        comments: Vec<world::Comment>,
+    ) -> wasmtime::Result<Vec<String>> {
+        host::Host::ignored(&mut self.lent, repo, comments).await
+    }
+
+    async fn settled(&mut self, watcher: world::Watcher) -> wasmtime::Result<bool> {
+        host::Host::settled(&mut self.lent, watcher).await
+    }
+
+    async fn cover(&mut self) -> wasmtime::Result<()> {
+        host::Host::cover(&mut self.lent).await
+    }
+
+    async fn review_wanted(&mut self, afresh: bool) -> wasmtime::Result<bool> {
+        host::Host::review_wanted(&mut self.lent, afresh).await
+    }
+
+    async fn reviewing(
+        &mut self,
+        said: Option<String>,
+    ) -> wasmtime::Result<Result<String, String>> {
+        host::Host::reviewing(&mut self.lent, said).await
+    }
+
+    async fn review_over(&mut self, how: Option<String>) -> wasmtime::Result<()> {
+        host::Host::review_over(&mut self.lent, how).await
+    }
+
+    async fn batch_over(
+        &mut self,
+        pull_request: world::PullRequest,
+        comments: Vec<String>,
+        how: Option<String>,
+    ) -> wasmtime::Result<()> {
+        host::Host::batch_over(&mut self.lent, pull_request, comments, how).await
+    }
+
+    async fn left_behind(&mut self) -> wasmtime::Result<bool> {
+        host::Host::left_behind(&mut self.lent).await
+    }
 }
 
 /// What a session launched expecting `evidence` builds, and what it is said to

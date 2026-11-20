@@ -310,11 +310,10 @@ pub(crate) async fn record(
             // going to look — and nobody has read the branch at all.
             //
             // Beside a wrap-up already under way, the Activity is running — it
-            // is what launched the session that opened this — so what starts is
-            // the host's watchers over what it opened, and not a second one.
-            match door {
-                Door::TheMove => watching(state, conversation_id, Reviewing::AsFound),
-                Door::Beside => watchers(state, conversation_id, Reviewing::AsFound),
+            // is what launched the session that opened this — and it watches
+            // what was opened from here on, so nothing more starts.
+            if door == Door::TheMove {
+                watching(state, conversation_id, Reviewing::AsFound);
             }
         }
         // The run was stopped from outside while the last step was landing, or
@@ -448,7 +447,7 @@ pub(crate) fn named(watched: &Watched) -> String {
 pub(crate) enum Reviewing {
     /// Whatever there is to see to: a branch nobody has read, or a review whose
     /// session is gone, which is a stop. What the finish step, a server coming
-    /// back up and the resolve press all mean — see [`crate::review::run`].
+    /// back up and the resolve press all mean — see [`crate::review::wanted_now`].
     ///
     /// The press means it for a reason the other two do not, and deliberately:
     /// the branch *was* read, the human read the review, and the work was
@@ -459,7 +458,7 @@ pub(crate) enum Reviewing {
     AsFound,
 
     /// The branch read from the start, whatever the last review left behind.
-    /// What Resume means — see [`crate::review::afresh`].
+    /// What Resume means — see [`crate::review::wanted_now`].
     Afresh,
 }
 
@@ -488,8 +487,9 @@ pub(crate) enum Reviewing {
 /// branch nobody has read, a review whose session went between its ask and the
 /// answers, a batch's proposal in the same state, a companion whose pull request
 /// the human has since opened by hand. Each of them asks the record what it is
-/// looking at rather than being told — see [`covering`], [`crate::review::run`]
-/// and [`crate::responding::unattended`].
+/// looking at rather than being told — see [`covering`], [`crate::review::wanted_now`]
+/// and [`crate::responding::unattended`]. All of it is the **Wrap-up**
+/// Activity's now, which asks the host each of those things in its turn.
 ///
 /// `reviewing` is the one thing the ways of starting them differ over, and it is
 /// a Resume that makes the difference: a review already asking is something to
@@ -498,8 +498,7 @@ pub(crate) enum Reviewing {
 /// step, a restart, the resolve press — takes the review as found, each for a
 /// reason of its own.
 pub(crate) fn watching(state: &AppState, conversation_id: i64, reviewing: Reviewing) {
-    watchers(state, conversation_id, reviewing);
-    wrap_up(state, conversation_id, None);
+    spawn(state, conversation_id, None, reviewing);
 }
 
 /// Start the **Wrap-up** Activity on `conversation_id`, registered as a driver
@@ -509,54 +508,27 @@ pub(crate) fn watching(state: &AppState, conversation_id: i64, reviewing: Review
 /// `against` is the base a take-up over a bare branch is owed its pull request
 /// against, which the Activity opens before it watches anything.
 pub(crate) fn wrap_up(state: &AppState, conversation_id: i64, against: Option<String>) {
+    spawn(state, conversation_id, against, Reviewing::AsFound);
+}
+
+fn spawn(state: &AppState, conversation_id: i64, against: Option<String>, reviewing: Reviewing) {
     let driving = state.drivers.driving(conversation_id);
 
     tokio::spawn(crate::runner::wrap_up(
         state.clone(),
         conversation_id,
         against,
+        reviewing,
         driving,
     ));
-}
-
-/// The watchers the host still runs beside the Activity: every pull request's
-/// comments, the companions covered, and the branch reviewed. The checks are
-/// the Activity's own.
-pub(crate) fn watchers(state: &AppState, conversation_id: i64, reviewing: Reviewing) {
-    driving(state, conversation_id, crate::comments::watching);
-
-    // The companions covered, and then the branch read — one task rather than
-    // two, because the second of them waits on the first. One review reads the
-    // whole of the work, and *the whole of it* is what covering settles: which
-    // pull requests there are, and so what has been said on each of them. A
-    // review started beside it would be given the Conversation's own pull
-    // request's comments and leave the companion's standing for a batch session
-    // to be dispatched about ungated — which is the thing folding them into the
-    // review exists to prevent.
-    //
-    // A wrap-up whose companions are already covered spends a read of the record
-    // per companion on this and gets to the review, and one that stops here —
-    // work committed in a companion with no pull request — has a review that asks
-    // whether the run has stopped before it reads a line.
-    driving(
-        state,
-        conversation_id,
-        move |state: AppState, conversation_id| async move {
-            covering(state.clone(), conversation_id).await;
-
-            match reviewing {
-                Reviewing::AsFound => crate::review::run(state, conversation_id).await,
-                Reviewing::Afresh => crate::review::afresh(state, conversation_id).await,
-            }
-        },
-    );
 }
 
 /// Find the pull requests the finish opened in the companions it committed in,
 /// and record each one beside the Conversation's own.
 ///
-/// The other half of [`opened`], and the reason it is a watcher rather than a
-/// step inside it: what this is looking at is a wrap-up whose companions are not
+/// The other half of [`opened`], and the reason it is the **Wrap-up**
+/// Activity's first step — its `cover` host function — rather than a step
+/// inside [`opened`]: what this is looking at is a wrap-up whose companions are not
 /// all covered yet, and that is the same situation however it arose — a finish
 /// that has just happened, a server coming back up, a human who has opened the
 /// missing pull request by hand and pressed Resume. A companion already recorded
@@ -657,22 +629,6 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
                     url = opened.url,
                     "a companion the work committed in is on a pull request of its own",
                 );
-
-                // And its comments are read from here, this being the moment
-                // there is something to read: the watcher this wrap-up started
-                // could only start one per pull request that was already
-                // recorded, and this one was not. A wrap-up found already
-                // covered starts none of these — a companion recorded already
-                // is read past above — so a server coming back up over one gets
-                // its watcher from [`watching`] rather than from here. Its
-                // checks are the Wrap-up Activity's, which reads the record
-                // afresh every round.
-                let repo_id = companion.repo_id;
-                let number = opened.number;
-
-                driving(&state, conversation_id, move |state, conversation_id| {
-                    crate::comments::watch(state, conversation_id, repo_id, number)
-                });
 
                 // The Timeline has something new pinned on it, and an open page
                 // should say so without being reloaded. Announced per pull
@@ -857,35 +813,6 @@ pub(crate) async fn committed_in(
     }
 
     Some(committed)
-}
-
-/// Start one of them, registered as a driver of the Conversation for as long as
-/// it runs.
-///
-/// The registration goes with the task rather than around the spawning, which
-/// is the whole of what makes it worth a function: a wrap-up is driven while
-/// any one of the four is still going, and each of them ends in its own time —
-/// the companions and then the review once that has asked, the rest once the
-/// Conversation stops wrapping up. And the ones started after them:
-/// [`covering`] starts a checks watcher and a comments watcher for each
-/// companion's pull request as it finds one, through here, so the Conversation
-/// is driven while those are going too. Counted rather than flagged, so a second
-/// set started over the top of the first — which is what Resume on a stopped
-/// wrap-up does — does not have the first of them to finish taking the
-/// Conversation off the register. See [`crate::drivers`].
-fn driving<W, F>(state: &AppState, conversation_id: i64, watcher: W)
-where
-    W: FnOnce(AppState, i64) -> F,
-    F: Future<Output = ()> + Send + 'static,
-{
-    let driving = state.drivers.driving(conversation_id);
-    let watching = watcher(state.clone(), conversation_id);
-
-    tokio::spawn(async move {
-        let _driving = driving;
-
-        watching.await;
-    });
 }
 
 /// Whether the Conversation is still wrapping up, which is the only state
