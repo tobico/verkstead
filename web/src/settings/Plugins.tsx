@@ -760,6 +760,8 @@ function asked(capability: PluginCapability): JSX.Element {
           Read the environment variable <code>{capability.name}</code>
         </>
       );
+    case "Conversations":
+      return <>Start conversations of its own</>;
   }
 }
 

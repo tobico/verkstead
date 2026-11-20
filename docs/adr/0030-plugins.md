@@ -263,6 +263,15 @@ A placement hidden inside *launch* was weighed and not taken (Set 1839, Q3):
 each of the host's decisions is a call the Activity makes, so a reader of the
 component sees every one.
 
+**Starting a Conversation is a capability.** An Activity whose manifest asks
+for `conversations: start` may start a roadmap stage as a Conversation of its
+own and read Conversations back: their state, and what the record holds of a
+roadmap's stages and chain. It is shown at Install beside the rest, because an
+Activity that can start work is one worth knowing about (Set 1839, Q4). The
+limits stay the host's: a start over `at_once` is refused as *no place* and
+the Activity says the stage waits, rather than reading the limits itself, and
+a run the human pressed for is held to none of them.
+
 **One wrap-up, with declared watchers.** The wrap-up watches checks, comments,
 the review and mergeability at once; Fix Merge Issues is the same Activity with
 two watchers off. A watcher per Activity, several running in one state, was

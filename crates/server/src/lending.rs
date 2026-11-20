@@ -31,6 +31,7 @@ use verkstead_schema::Nudge;
 use verkstead_store as store;
 
 use crate::AppState;
+use crate::continuing::{Began, Brought};
 use crate::done::{Ends, Evidence};
 use crate::memos::Building;
 use crate::plugins::component::worlds::category::activity::verkstead::plugin::{
@@ -73,6 +74,10 @@ pub(crate) struct Lent {
     /// [`Lent::building`] — so that what it asked and left standing is
     /// answered into the next session's prompt rather than closed by a stop.
     folding: bool,
+
+    /// What brought the run about, which a Conversation it starts is held to
+    /// the limits by and says what it says by — see [`Lent::brought`].
+    brought: Brought,
 }
 
 /// Whether a launch waits for the Conversation's Turn.
@@ -136,7 +141,16 @@ impl Lent {
             issued: 0,
             writing: None,
             folding: false,
+            brought: Brought::Settle,
         }
+    }
+
+    /// What brought the run about, where it may start Conversations: a press
+    /// is held to no limit, and a look says less — see
+    /// [`crate::continuing::begin`]. A settle where nobody says.
+    pub(crate) fn brought(mut self, brought: Brought) -> Lent {
+        self.brought = brought;
+        self
     }
 
     /// The caller holds the Turn already — a wrap-up takes it before it decides
@@ -653,6 +667,210 @@ impl host::Host for Lent {
             })
             .collect())
     }
+
+    /// Start a roadmap stage as a Conversation of its own, as the carry-on
+    /// starts each stage it finds ready — see [`crate::continuing::begin`],
+    /// which holds it to the limits and says what it says.
+    async fn start_conversation(
+        &mut self,
+        stage: host::Stage,
+    ) -> wasmtime::Result<Result<host::Started, host::NotStarted>> {
+        let (stage, base, stacks) = match staged(stage) {
+            Ok(staged) => staged,
+            Err(why) => return Ok(Err(host::NotStarted::Halted(why))),
+        };
+
+        let began = crate::continuing::begin(
+            &self.state,
+            self.conversation_id,
+            stage,
+            base,
+            stacks,
+            self.brought,
+        )
+        .await;
+
+        Ok(match began {
+            Began::Started { id, branch } => Ok(host::Started {
+                conversation: id,
+                branch,
+            }),
+            Began::NoPlace(why) => Err(host::NotStarted::NoPlace(why)),
+            Began::Halted(why) => Err(host::NotStarted::Halted(why)),
+        })
+    }
+
+    /// Where `conversation` is, and whether it has settled, as the record
+    /// reads a stage — one of this Conversation's Repo's.
+    async fn conversation_state(
+        &mut self,
+        conversation: i64,
+    ) -> wasmtime::Result<Result<host::Stands, String>> {
+        let repo = match self.repo().await {
+            Ok(repo) => repo,
+            Err(why) => return Ok(Err(why)),
+        };
+
+        let read = store::conversation_standing(&self.state.pool, repo, conversation).await;
+
+        Ok(match read {
+            Ok(Some((state, standing))) => Ok(host::Stands {
+                state: state.stored().to_owned(),
+                settled: standing == store::StageStanding::Settled,
+            }),
+            Ok(None) => Err(format!(
+                "There is no conversation {conversation} on this conversation's repo."
+            )),
+            Err(error) => {
+                tracing::error!(error = ?error, conversation, "reading where a Conversation stands failed");
+                Err(format!(
+                    "Where conversation {conversation} is couldn't be read."
+                ))
+            }
+        })
+    }
+
+    /// What the record holds of `roadmap` in this Conversation's Repo — see
+    /// [`store::stage_standings`].
+    async fn stage_standings(
+        &mut self,
+        roadmap: String,
+    ) -> wasmtime::Result<Result<host::Standings, String>> {
+        let repo = match self.repo().await {
+            Ok(repo) => repo,
+            Err(why) => return Ok(Err(why)),
+        };
+
+        let record = match store::stage_standings(&self.state.pool, repo).await {
+            Ok(record) => record,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = self.conversation_id, "reading what a roadmap's stages had got to failed");
+                return Ok(Err(format!(
+                    "What the `{roadmap}` roadmap's stages have got to couldn't be read."
+                )));
+            }
+        };
+
+        Ok(Ok(host::Standings {
+            planner: record.planner(&roadmap).map(standing),
+            stages: record
+                .stages(&roadmap)
+                .into_iter()
+                .map(|(label, held, stopped, conversation)| host::StageStanding {
+                    label: label.to_owned(),
+                    standing: standing(held),
+                    stopped,
+                    conversation,
+                })
+                .collect(),
+        }))
+    }
+
+    /// The stages of `roadmap` that have joined its chain, bottom to top —
+    /// see [`store::stage_chain`].
+    async fn stage_chain(
+        &mut self,
+        roadmap: String,
+    ) -> wasmtime::Result<Result<Vec<host::Link>, String>> {
+        let repo = match self.repo().await {
+            Ok(repo) => repo,
+            Err(why) => return Ok(Err(why)),
+        };
+
+        Ok(
+            match store::stage_chain(&self.state.pool, repo, &roadmap).await {
+                Ok(chain) => Ok(chain
+                    .into_iter()
+                    .map(|joined| host::Link {
+                        stage: Some(joined.stage),
+                        branch: joined.branch,
+                    })
+                    .collect()),
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id = self.conversation_id, "reading a roadmap's chain failed");
+                    Err(format!("The `{roadmap}` roadmap's chain couldn't be read."))
+                }
+            },
+        )
+    }
+}
+
+impl Lent {
+    /// The id of this Conversation's Repo, or a sentence saying it couldn't
+    /// be read.
+    async fn repo(&self) -> Result<i64, String> {
+        match store::load_conversation(&self.state.pool, self.conversation_id).await {
+            Ok(Some(conversation)) => Ok(conversation.repo.id),
+            Ok(None) => Err("There is no Conversation left to read.".to_owned()),
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = self.conversation_id, "reading the Conversation for its Repo failed");
+                Err("The Conversation couldn't be read.".to_owned())
+            }
+        }
+    }
+}
+
+/// What the record's standing is called in the world.
+fn standing(standing: store::StageStanding) -> host::Standing {
+    match standing {
+        store::StageStanding::Settled => host::Standing::Settled,
+        store::StageStanding::InFlight => host::Standing::InFlight,
+        store::StageStanding::Abandoned => host::Standing::Abandoned,
+    }
+}
+
+/// A stage an Activity asked to start, read into the host's: the stage, the
+/// branch it is cut from, and whether the Repo records stacking. Refused, in a
+/// sentence, where its roadmap is no directory name or its brief is not inside
+/// that roadmap's directory, since the branch is named for both.
+fn staged(stage: host::Stage) -> Result<(crate::stages::Stage, String, bool), String> {
+    let host::Stage {
+        roadmap,
+        label,
+        title,
+        brief_path,
+        brief,
+        base,
+        platform,
+        stacks,
+    } = stage;
+
+    let named =
+        !roadmap.is_empty() && roadmap != "." && roadmap != ".." && !roadmap.contains(['/', '\\']);
+
+    if !named {
+        return Err(format!(
+            "`{roadmap}` isn't a roadmap's directory name, so no stage of it can start."
+        ));
+    }
+
+    let within = format!("{}/{roadmap}/", crate::stages::ROADMAPS);
+    let file = brief_path.strip_prefix(&within).unwrap_or_default();
+
+    if file.is_empty() || file.contains('/') || inside(&brief_path).is_none() {
+        return Err(format!(
+            "Stage {label} of the `{roadmap}` roadmap names `{brief_path}` as its brief, which \
+             isn't a file in `{within}`, so it can't start."
+        ));
+    }
+
+    if label.is_empty() || base.is_empty() {
+        return Err(format!(
+            "A stage of the `{roadmap}` roadmap needs its number and the branch it's cut from \
+             to start."
+        ));
+    }
+
+    let stage = crate::stages::Stage {
+        roadmap,
+        label,
+        title,
+        brief_path,
+        brief,
+        platform: crate::declarations::matching(&platform),
+    };
+
+    Ok((stage, base, stacks))
 }
 
 /// A Repo of the Conversation's, found by name: where it is, its Worktree, and

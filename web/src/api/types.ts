@@ -4928,7 +4928,7 @@ export type PluginAt = { source: string, };
 /**
  * One capability a plugin's wasm component asks for.
  */
-export type PluginCapability = { "kind": "Filesystem", path: string, writable: boolean, } | { "kind": "Outbound", host: string, } | { "kind": "Environment", name: string, };
+export type PluginCapability = { "kind": "Filesystem", path: string, writable: boolean, } | { "kind": "Outbound", host: string, } | { "kind": "Environment", name: string, } | { "kind": "Conversations" };
 
 /**
  * The consent card: who the plugin is, what it provides, and every

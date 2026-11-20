@@ -209,6 +209,11 @@ pub(crate) enum Brought {
     /// settle would say on its Timeline is collected instead, and handed back for
     /// the live copy to say on its own — see [`reported`].
     Report,
+
+    /// The human **pressed** for it, and an Activity is starting what the press
+    /// asked for — see [`begin`]. Said as a settle says it, and held to no
+    /// limit, as a press never was.
+    Press,
 }
 
 tokio::task_local! {
@@ -265,7 +270,7 @@ impl Brought {
     /// something to write at a level anybody leaves on.
     async fn not_started(self, state: &AppState, conversation_id: i64, markdown: &str) {
         match self {
-            Self::Settle => say(state, conversation_id, markdown).await,
+            Self::Settle | Self::Press => say(state, conversation_id, markdown).await,
             Self::Report => heard(markdown),
             Self::Look => tracing::debug!(
                 conversation_id,
@@ -280,7 +285,7 @@ impl Brought {
     /// report hands back for the live copy to say instead.
     async fn started(self, state: &AppState, conversation_id: i64, markdown: &str) {
         match self {
-            Self::Settle | Self::Look => say(state, conversation_id, markdown).await,
+            Self::Settle | Self::Look | Self::Press => say(state, conversation_id, markdown).await,
             Self::Report => heard(markdown),
         }
     }
@@ -323,7 +328,7 @@ impl Brought {
     /// until they got to it. See [`stages::Held`], where the three part company.
     async fn held(self, state: &AppState, conversation_id: i64, held: &stages::Held, full: bool) {
         match (self, held) {
-            (Self::Settle, _) => say(state, conversation_id, held.said()).await,
+            (Self::Settle | Self::Press, _) => say(state, conversation_id, held.said()).await,
             (Self::Report, _) => heard(held.said()),
             (Self::Look, stages::Held::Server(_)) if full => {
                 say(state, conversation_id, held.said()).await;
@@ -897,6 +902,103 @@ async fn unrecorded(
     }
 }
 
+/// What became of one stage's start.
+pub(crate) enum Began {
+    /// It started as Conversation `id`, on `branch`.
+    Started { id: i64, branch: String },
+
+    /// There was no place for it, for the sentence's reason — its roadmap's, or
+    /// the server's — and nothing was made. Said nowhere: what waits is for
+    /// whoever asked to say. See [`begin`].
+    NoPlace(String),
+
+    /// It halted, for the sentence's reason: said already, where [`start`] says
+    /// its halts, or in the log alone where the sentence says so.
+    Halted(String),
+}
+
+impl Began {
+    /// A halt with nothing to say but that it happened, the log holding why.
+    fn unsaid(stage: &Stage) -> Began {
+        Began::Halted(format!(
+            "Stage {} of the `{}` roadmap couldn't be started. The server log says why.",
+            stage.label, stage.roadmap,
+        ))
+    }
+}
+
+/// Start `stage` from `settled` — the Conversation an Activity runs on — cut
+/// from `base`, as [`reading`] starts each stage it finds ready: the host's half
+/// of an Activity's *start a Conversation*.
+///
+/// **The limits are the host's.** Unless `brought` is a press, a start is
+/// weighed against the roadmap's `roadmap_stages` and the server's
+/// `conversations`, both off `config.yaml` as it stands, and the places taken
+/// counted afresh — so a stage held for a place starts at the first ask after
+/// one frees. The record's stages in flight hold the roadmap's places, and the
+/// two registers the server's, less the settling Conversation's own as
+/// [`reading`] discounts it.
+///
+/// Whoever calls holds [`AppState::starting`] where two runs could overlap, as
+/// [`reading`] does: this takes nothing, so that a run asking for several
+/// starts can hold it across all of them.
+pub(crate) async fn begin(
+    state: &AppState,
+    settled: i64,
+    stage: Stage,
+    base: String,
+    stacks: bool,
+    brought: Brought,
+) -> Began {
+    let Some(conversation) = load(state, settled).await else {
+        return Began::unsaid(&stage);
+    };
+
+    if brought != Brought::Press {
+        let record = match store::stage_standings(&state.pool, conversation.repo.id).await {
+            Ok(record) => record,
+            Err(error) => {
+                tracing::error!(error = ?error, settled, "reading what a roadmap's stages had got to failed");
+                return Began::unsaid(&stage);
+            }
+        };
+
+        let config = state.settings.config();
+        let at_once = config.at_once();
+
+        let in_flight = record
+            .stages(&stage.roadmap)
+            .into_iter()
+            .filter(|(_, standing, ..)| *standing == store::StageStanding::InFlight)
+            .count();
+
+        if in_flight >= at_once.roadmap_stages() {
+            return Began::NoPlace(stages::waiting_on_its_roadmap(
+                &stage.roadmap,
+                &stage.label,
+                &stage.title,
+                at_once.roadmap_stages(),
+            ));
+        }
+
+        let mut taking = state.drivers.taking(&state.sessions.working());
+
+        if brought == Brought::Settle {
+            taking.remove(&settled);
+        }
+
+        if taking.len() >= at_once.conversations() {
+            return Began::NoPlace(stages::waiting_on_the_server(
+                &stage.roadmap,
+                &stage.label,
+                &stage.title,
+            ));
+        }
+    }
+
+    start(state, &conversation, settled, stage, stacks, base, brought).await
+}
+
 /// Start `stage` as a Conversation of its own against the same Repo.
 ///
 /// The order is the order [`crate::conversations::start_grilling`] does the same
@@ -928,7 +1030,7 @@ async fn start(
     stacks: bool,
     base: String,
     brought: Brought,
-) {
+) -> Began {
     let branch = stage.branch();
     let repo = conversation.repo.path.clone();
 
@@ -979,7 +1081,7 @@ async fn start(
             &conversation.repo.name,
         );
 
-        halting(
+        let halted = halting(
             state,
             brought,
             settled,
@@ -1011,7 +1113,7 @@ async fn start(
             );
         }
 
-        return;
+        return halted;
     };
 
     // And the companions it inherits, each still the Repo's own Author's: the
@@ -1136,7 +1238,7 @@ async fn start(
 
         Err(error) => {
             tracing::error!(error = ?error, settled, "deciding where the next stage's branch goes failed");
-            return;
+            return Began::unsaid(&stage);
         }
     };
 
@@ -1160,11 +1262,11 @@ async fn start(
                 settled,
                 "the Repo the stage would be against has gone, so nothing was started"
             );
-            return;
+            return Began::unsaid(&stage);
         }
         Err(error) => {
             tracing::error!(error = ?error, settled, "starting the next stage's Conversation failed");
-            return;
+            return Began::unsaid(&stage);
         }
     };
 
@@ -1177,7 +1279,7 @@ async fn start(
 
         gave_up(state, id).await;
 
-        halting(
+        return halting(
             state,
             brought,
             settled,
@@ -1188,8 +1290,6 @@ async fn start(
             ),
         )
         .await;
-
-        return;
     }
 
     let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch);
@@ -1276,7 +1376,9 @@ async fn start(
         }
         Err(error) => {
             tracing::error!(error = ?error, settled, stage = id, "making the next stage's worktrees failed");
-            return gave_up(state, id).await;
+            gave_up(state, id).await;
+
+            return Began::unsaid(&stage);
         }
     };
 
@@ -1305,11 +1407,11 @@ async fn start(
                 refused = ?refused,
                 "the next stage's Conversation could not be set working",
             );
-            return;
+            return Began::unsaid(&stage);
         }
         Err(error) => {
             tracing::error!(error = ?error, settled, stage = id, "recording the next stage failed");
-            return;
+            return Began::unsaid(&stage);
         }
     }
 
@@ -1375,16 +1477,16 @@ async fn start(
     // Moving, the far end's arrival plans it, by the Resume it presses for
     // itself; asked about, the human's answer does. Neither is this device's to
     // launch, and nothing here is driving it.
-    if !placed.here() {
-        return;
+    if placed.here() {
+        // Taken here rather than by the planning, which is started from more
+        // than one place and takes the registration from all of them — see
+        // [`crate::runner::plan_stage`].
+        let driving = state.drivers.driving(id);
+
+        tokio::spawn(crate::runner::plan_stage(state.clone(), id, driving));
     }
 
-    // Taken here rather than by the planning, which is started from more than one
-    // place and takes the registration from all of them — see
-    // [`crate::runner::plan_stage`].
-    let driving = state.drivers.driving(id);
-
-    tokio::spawn(crate::runner::plan_stage(state.clone(), id, driving));
+    Began::Started { id, branch }
 }
 
 /// Place `stage`, just recorded at home as Conversation `id`, where its line
@@ -2195,8 +2297,10 @@ async fn taken(repo: &Path, branch: &str) -> bool {
 /// Whether it reaches the Timeline is the reason the start was attempted — a
 /// settle says it, a look logs it. See [`Brought::not_started`], which is where
 /// that is decided and why.
-async fn halting(state: &AppState, brought: Brought, settled: i64, markdown: String) {
+async fn halting(state: &AppState, brought: Brought, settled: i64, markdown: String) -> Began {
     brought.not_started(state, settled, &markdown).await;
+
+    Began::Halted(markdown)
 }
 
 /// Put a notice on a Timeline.

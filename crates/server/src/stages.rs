@@ -877,13 +877,11 @@ pub(crate) fn next_stage(
             // How many are in flight is deliberately not said: three of them may
             // have started a moment ago, in this very reading, and the record the
             // count came off was read before any of that.
-            held.push(Held::Roadmap(format!(
-                "Stage {} of the `{roadmap}` roadmap, *{}*, is ready and waiting for a place. \
-                 This roadmap runs {} at a time, and its places are taken. It starts when one of \
-                 them settles.",
+            held.push(Held::Roadmap(waiting_on_its_roadmap(
+                roadmap,
                 entry.label,
                 entry.title,
-                how_many_places(at_once),
+                at_once,
             )));
 
             continue;
@@ -904,12 +902,10 @@ pub(crate) fn next_stage(
             // stages in flight are not: the registers were read before any of
             // this, and a Conversation may have finished since. What says the
             // number as of the moment it is asked is the settings pane.
-            held.push(Held::Server(format!(
-                "Stage {} of the `{roadmap}` roadmap, *{}*, is ready and waiting for a place \
-                 on the server. The conversations Verkstead is running have taken them all, \
-                 whatever roadmap or process they belong to. It starts when one of them comes \
-                 free.",
-                entry.label, entry.title,
+            held.push(Held::Server(waiting_on_the_server(
+                roadmap,
+                entry.label,
+                entry.title,
             )));
 
             continue;
@@ -958,6 +954,31 @@ pub(crate) fn next_stage(
 /// The number is a setting now — see [`crate::settings::AtOnce`] — so *at most 1
 /// stages* is a thing a Timeline can be asked to say, and a roadmap somebody set
 /// to one is the roadmap most likely to be waiting for a place at all.
+/// What a stage ready and **held by its own roadmap's limit** says: see
+/// [`Held::Roadmap`].
+pub(crate) fn waiting_on_its_roadmap(
+    roadmap: &str,
+    label: &str,
+    title: &str,
+    at_once: usize,
+) -> String {
+    format!(
+        "Stage {label} of the `{roadmap}` roadmap, *{title}*, is ready and waiting for a place. \
+         This roadmap runs {} at a time, and its places are taken. It starts when one of them \
+         settles.",
+        how_many_places(at_once),
+    )
+}
+
+/// And one **held by the server's**: see [`Held::Server`].
+pub(crate) fn waiting_on_the_server(roadmap: &str, label: &str, title: &str) -> String {
+    format!(
+        "Stage {label} of the `{roadmap}` roadmap, *{title}*, is ready and waiting for a place on \
+         the server. The conversations Verkstead is running have taken them all, whatever \
+         roadmap or process they belong to. It starts when one of them comes free."
+    )
+}
+
 fn how_many_places(at_once: usize) -> String {
     match at_once {
         1 => "one stage".to_owned(),
