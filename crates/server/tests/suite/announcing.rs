@@ -69,14 +69,15 @@ const STRANGER: &str = "99887766554433221100ffeeddccbbaa";
 /// each reading's Tailscale is built with it and never runs.
 const PORT: u16 = 8422;
 
-/// How long a dial in this suite gives one address, rather than the two seconds
-/// a running server gives one.
+/// How long a dial through [`Verkstead::workbench_in_a_hurry`] gives one
+/// address: the two seconds a running server gives one to connect.
 ///
-/// Spent only where a dial is meant to reach nobody, which here is the member
-/// whose machine is not there: what is being asked is what an announcement does
-/// when it cannot be made, and a test that waited out the real deadline would
-/// be spending its time on the clock rather than on the question.
-const PATIENCE: Duration = Duration::from_millis(300);
+/// **Not shorter, because the same press dials members that answer.** The
+/// press whose announcement is meant to reach nobody also links an Annex that
+/// is there, and on a loaded machine a third of a second was short enough for
+/// that link to come back as timed out. Nothing here waits the patience out:
+/// the member that is not there is dialled at a port that refuses at once.
+const PATIENCE: Duration = Duration::from_secs(2);
 
 /// A machine with no Tailscale on it: `verkstead-no-such-tailscale` is a
 /// program that is not there, which is what having none *is*.
