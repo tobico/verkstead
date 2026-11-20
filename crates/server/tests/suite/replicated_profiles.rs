@@ -80,9 +80,17 @@ const RECORDS: &str = "/api/peer/v1/records/profile";
 /// The model every Profile in this suite lists.
 const MODEL: &str = "claude-opus-5";
 
-/// How long one address has to answer here, rather than the two seconds a
-/// running server gives one.
-const PATIENCE: std::time::Duration = std::time::Duration::from_millis(300);
+/// How long one address has to answer here: the two seconds a running server
+/// gives one to connect.
+///
+/// **Not shorter, because every member here that answers is meant to read as
+/// answering.** Taking up a Nudge stream reads the member's identity again
+/// beside it, and a dial that runs out of patience dims the row — so on a
+/// loaded machine a third of a second was short enough for A, answering all
+/// along, to be drawn as not answering on B's card. Nothing here waits the
+/// patience out: a member that is not there is dialled at a port that refuses
+/// at once.
+const PATIENCE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// How long a test will wait for the mirrors to say what it is waiting for.
 /// Generous, because it is only ever paid in full when the assertion is about to
