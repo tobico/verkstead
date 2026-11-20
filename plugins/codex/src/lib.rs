@@ -24,7 +24,7 @@ wit_bindgen::generate!({
     world: "agent",
 });
 
-use std::io::{Read, Seek};
+use std::io::{BufRead, Read, Seek};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -270,18 +270,19 @@ const SESSION_META: &str = "session_meta";
 const FIRST_LINE: u64 = 256 * 1024;
 
 /// The line a rollout opens with, as far as it has been written.
+///
+/// Read only to its newline: finding a rollout by its id opens every one in
+/// the store, inside a call the server gives ten seconds to answer.
 fn opening(rollout: &str) -> Option<String> {
+    let file = std::fs::File::open(rollout).ok()?;
     let mut first = Vec::new();
-    std::fs::File::open(rollout)
-        .ok()?
-        .take(FIRST_LINE)
-        .read_to_end(&mut first)
+    std::io::BufReader::new(file.take(FIRST_LINE))
+        .read_until(b'\n', &mut first)
         .ok()?;
-    let end = first
-        .iter()
-        .position(|byte| *byte == b'\n')
-        .unwrap_or(first.len());
-    Some(String::from_utf8_lossy(&first[..end]).into_owned())
+    if first.last() == Some(&b'\n') {
+        first.pop();
+    }
+    Some(String::from_utf8_lossy(&first).into_owned())
 }
 
 /// Every day directory of `sessions`, `YYYY/MM/DD`.
