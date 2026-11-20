@@ -2737,7 +2737,11 @@ async fn an_unticked_codex_is_no_platform_default_and_no_wizard_row() {
         }
     };
 
-    assert_eq!(defaulted(repo).await, Some(codex.clone()), "ticked, Codex first");
+    assert_eq!(
+        defaulted(repo).await,
+        Some(codex.clone()),
+        "ticked, Codex first"
+    );
     assert!(drawn().await, "and a row in the wizard");
 
     enabled(false).await;
@@ -2749,7 +2753,11 @@ async fn an_unticked_codex_is_no_platform_default_and_no_wizard_row() {
     assert!(!drawn().await, "and the wizard draws no Codex row");
 
     enabled(true).await;
-    assert_eq!(defaulted(repo).await, Some(codex), "ticked again, Codex again");
+    assert_eq!(
+        defaulted(repo).await,
+        Some(codex),
+        "ticked again, Codex again"
+    );
     assert!(drawn().await, "and its row again");
 }
 
