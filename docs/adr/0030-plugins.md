@@ -278,9 +278,9 @@ settled, and is then told the chain to go on top of. The backlog runner asks
 for that wait with `join-chain` before it launches a stage's finish, and
 writes the chain the host answers into the finish's prompt; which stages
 joined, and in what order, is the record's, and the rebase is the session's.
-The same holds for the `next-stage` annotation on a stage's line in the
-roadmap: the host writes it as it starts the stage's Conversation, so the
-Activity never writes the Repo's files.
+The `next-stage` annotation on a stage's line in the roadmap is neither's: the
+stage's planning session writes it, as the `next-stage` skill says, so neither
+the Activity nor the host writes the Repo's files.
 
 **The stage runner runs beside a Conversation, not in it.** It keeps the
 shape it had in process (Set 1839, Q1): started whenever a stage could start —

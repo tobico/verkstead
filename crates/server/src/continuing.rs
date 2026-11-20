@@ -10,8 +10,9 @@
 //! backlog to empty, which finishes and opens a pull request, which wraps up,
 //! which runs the Stage runner again. Nothing in the loop asks for permission.
 //! What is ready is the component's to decide; [`reading`] is when it runs, and
-//! [`begin`] is the start it asks for — the limits, the placement, the branch,
-//! the `next-stage` annotation — which is the host's.
+//! [`begin`] is the start it asks for — the limits, the placement, the branch
+//! — which is the host's. The `next-stage` annotation on the stage's line is
+//! neither's: the stage's planning session writes it.
 //!
 //! **Every ready stage rather than the lowest of them**, up to as many of one
 //! roadmap at a time as the settings say — three where nobody has said, which is
