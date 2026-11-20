@@ -482,8 +482,7 @@ interface host {
 
   /// Start `stage`. The host checks and makes everything around it: the
   /// branch and its Worktree, the companions, the record of which roadmap
-  /// and stage it is, where it runs, and the Timeline sentences. A run the
-  /// human pressed for is not held to the limits.
+  /// and stage it is, where it runs, and the Timeline sentences.
   start-conversation: func(stage: stage) -> result<started, not-started>;
 
   /// What the record says of a stage, or of the Conversation that wrote a
