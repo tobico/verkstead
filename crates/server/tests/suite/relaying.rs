@@ -74,14 +74,15 @@ const BRANCH: &str = "solid-viewer";
 /// B's Conversation, which is the first one in a store with nothing else in it.
 const THERE: i64 = 1;
 
-/// How long one address has to answer here, rather than the two seconds a
-/// running server gives one.
+/// How long one address has to answer here: the two seconds a running server
+/// gives one to connect.
 ///
-/// Spent by the test about a member that is not there: what that is asking is
-/// what the hop says when nobody is home, and a test that waited out the real
-/// deadline would be spending its time on the clock rather than on the
-/// question.
-const PATIENCE: Duration = Duration::from_millis(300);
+/// **Not shorter, because every member here that answers is meant to read as
+/// answering.** On a loaded machine a third of a second was short enough for a
+/// relay to B, answering all along, to come back as unreachable. Nothing here
+/// waits the patience out: the member that is not there is dialled at a port
+/// that refuses at once.
+const PATIENCE: Duration = Duration::from_secs(2);
 
 /// One Verkstead: its store, its identity, where it keeps what it makes, and
 /// where its Peer Listener landed.
