@@ -13221,6 +13221,105 @@ async fn a_restart_over_a_review_waiting_on_its_ask_stops_the_run_rather_than_le
     );
 }
 
+/// A pull request merged while the review waits on its ask ends the wrap-up in
+/// Done — and takes the review with it, rather than leaving it running.
+///
+/// The human merges from GitHub whenever they like, which is often before they
+/// have got round to the review's questions. Once the work has landed nothing
+/// is waiting on that session: left running it would hold the Worktree for
+/// nobody, and its Set would carry answers to a session that pushes to a branch
+/// already merged.
+#[tokio::test]
+async fn a_merge_while_the_review_waits_on_its_ask_ends_it_and_lands_in_done() {
+    let (fixture, set, landing) = a_review_waiting_on_its_ask().await;
+
+    std::fs::write(&landing, r#"{"mergeable":"MERGEABLE","state":"MERGED"}"#).unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    seen_out_by_the_landing(&fixture, set).await;
+}
+
+/// And one closed unmerged stops the run, saying so, with the review seen out
+/// the same way.
+#[tokio::test]
+async fn a_close_while_the_review_waits_on_its_ask_ends_it_and_stops_the_run() {
+    let (fixture, set, landing) = a_review_waiting_on_its_ask().await;
+
+    std::fs::write(&landing, r#"{"mergeable":"MERGEABLE","state":"CLOSED"}"#).unwrap();
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("closed without being merged"),
+        "the stop says what happened to the pull request: {:?}",
+        stopped.html,
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "and the Conversation stays where it was, for a Resume once it is reopened",
+    );
+
+    seen_out_by_the_landing(&fixture, set).await;
+}
+
+/// A wrap-up whose review session is waiting on the Set it put, everything
+/// else green — and the file its pull request's state is read from.
+async fn a_review_waiting_on_its_ask() -> (Grilling, i64, PathBuf) {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let asked = spill.path().join("gh-asked");
+    let landing = spill.path().join("landing");
+
+    let fixture = grilling_landing(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WAIT),
+        &gh_landing(&asked, &landing),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_asking(&fixture, &reviews).await;
+
+    let set = fixture.ask(REVIEW).await;
+
+    (fixture, set, landing)
+}
+
+/// The review session ended, and the Set it left open closed unanswered.
+async fn seen_out_by_the_landing(fixture: &Grilling, set: i64) {
+    fixture
+        .until(|view| {
+            outputs(view)
+                .last()
+                .filter(|output| !output.running)
+                .map(|_| ())
+        })
+        .await;
+
+    let view = fixture.view().await;
+
+    let standing = sets(&view)
+        .into_iter()
+        .find(|asked| asked.set_id == set)
+        .expect("the review's Set is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
+        "with nothing left for the human to answer into: {standing:?}",
+    );
+    assert!(
+        !review_settled(fixture).await,
+        "and nothing settled the review it never finished",
+    );
+}
+
 /// And one that comes back up over a review whose findings *were* answered stops
 /// the run just the same, rather than picking the doing up off what was picked.
 ///
