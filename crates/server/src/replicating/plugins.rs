@@ -128,6 +128,10 @@ pub struct Fields {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub activities: Vec<String>,
 
+    /// The drawn names of the Processes it provides, the same way.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub processes: Vec<String>,
+
     /// The uuids of the plugins its manifest depended on when it was last read
     /// at a press: what keeps those from being removed, and what goes with
     /// one when it is unticked, read the same on every device.

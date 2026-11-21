@@ -51,7 +51,7 @@ fn manifest(uuid: &str, name: &str, capabilities: &[&str]) -> String {
          author:\n  name: Ada Lovelace\n  email: ada@example.com\n\
          version: 1.4.0\n\
          interface: 1\n\
-         provides:\n  - category: forge\n  - category: process\n  - category: forge\n\
+         provides:\n  - category: forge\n  - category: forge\n\
          {capabilities}"
     )
 }
@@ -149,7 +149,7 @@ async fn kept() -> (Router, tempfile::TempDir) {
 /// the Skill Pack `pack` holding the one skill `reviewing`.
 fn packing(dir: &Path, uuid: &str, name: &str, pack: &str) -> String {
     let text = manifest(uuid, name, &[]).replace(
-        "provides:\n  - category: forge\n  - category: process\n  - category: forge\n",
+        "provides:\n  - category: forge\n  - category: forge\n",
         &format!("provides:\n  - category: skills\n    name: {pack}\n    directory: skills\n"),
     );
     let at = plugin(dir, name, &text);
@@ -194,16 +194,25 @@ fn activity_component() -> Vec<u8> {
         .expect("the activity should encode as a component")
 }
 
+/// A Process, *Review watch*, of one state over the Activity [`acting`]
+/// provides.
+const WATCHING: &str = "  - category: process\n    id: review-watch\n    name: Review watch\n    \
+     description: Watch a review through its rounds.\n    roles:\n      \
+     - {name: review, label: Review, building: true}\n    states:\n      \
+     - {id: reviewing, word: Reviewing, activity: review-rounds}\n    transitions:\n      \
+     reviewing: {approved: done, abandoned: stopped}\n";
+
 /// `text` with an Activity, *Review rounds*, provided after what it provides
-/// already, its component `rounds.wasm` and launching each of `skills`.
+/// already, its component `rounds.wasm` and launching each of `skills`, and a
+/// Process, *Review watch*, running it.
 fn acting(text: &str, skills: &str) -> String {
     text.replace(
-        "  - category: forge\n  - category: process\n  - category: forge\n",
+        "  - category: forge\n  - category: forge\n",
         &format!(
-            "  - category: forge\n  - category: process\n  - category: forge\n  \
+            "  - category: forge\n  - category: forge\n  \
              - category: activity\n    id: review-rounds\n    name: Review rounds\n    \
              component: rounds.wasm\n    outcomes: [approved, abandoned]\n    \
-             skills: {skills}\n"
+             skills: {skills}\n{WATCHING}"
         ),
     )
 }
@@ -233,7 +242,7 @@ async fn a_plugin_providing_an_activity_loads_and_its_row_names_it() {
 
     let row = row(&view, PLUGIN);
     assert_eq!(row.trouble, None);
-    assert_eq!(row.provides, ["forge", "process", "activity"]);
+    assert_eq!(row.provides, ["forge", "activity", "process"]);
     assert_eq!(row.activities, ["Review rounds"]);
 }
 
@@ -281,7 +290,7 @@ async fn an_activity_naming_a_skill_from_a_pack_it_cannot_reach_is_refused() {
 
     assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
     assert!(
-        said.contains("`provides[3].skills[0]` is `verkstead/following-up`"),
+        said.contains("`provides[2].skills[0]` is `verkstead/following-up`"),
         "{said}"
     );
 }
@@ -315,6 +324,172 @@ async fn an_activity_naming_a_skill_its_dependency_lacks_loads_in_trouble() {
              plugin it depends on provides that skill."
         )
     );
+}
+
+/// `text` providing, in place of what it provides, a Process, *Triage*, of one
+/// state over the Activity `activity` with `transitions` as its row.
+fn processing(text: &str, activity: &str, transitions: &str) -> String {
+    text.replace(
+        "provides:\n  - category: forge\n  - category: forge\n",
+        &format!(
+            "provides:\n  - category: process\n    id: triage\n    name: Triage\n    \
+             description: Sort what came in.\n    roles:\n      \
+             - {{name: review, label: Review, building: true}}\n    states:\n      \
+             - {{id: sorting, word: Sorting, activity: {activity}}}\n    transitions:\n      \
+             sorting: {transitions}\n"
+        ),
+    )
+}
+
+/// Base, ANOTHER, providing the Activity *Review rounds* and the Process
+/// *Review watch* over it, and a plugin depending on it whose Process
+/// *Triage* runs `activity` with `transitions`, both installed.
+async fn watching_theirs(
+    app: &Router,
+    dir: &Path,
+    activity: &str,
+    transitions: &str,
+) -> PluginsView {
+    let base = with_activity(
+        dir,
+        "base",
+        &acting(&manifest(ANOTHER, BASE, &[]), "[]"),
+        &activity_component(),
+    );
+    installs(app, &base).await;
+    let path = plugin(
+        dir,
+        "triage",
+        &depending(
+            &processing(&manifest(PLUGIN, "Triage", &[]), activity, transitions),
+            ANOTHER,
+            BASE,
+            "^1",
+            None,
+        ),
+    );
+    installs(app, &path).await
+}
+
+/// A Process over an installed dependency's Activity loads, its row naming
+/// it, and so does the dependency's own Process.
+#[tokio::test]
+async fn a_process_over_its_dependencys_activity_loads_and_its_row_names_it() {
+    let (app, dir) = kept().await;
+
+    let view = watching_theirs(
+        &app,
+        dir.path(),
+        "review-rounds",
+        "{approved: done, abandoned: closed}",
+    )
+    .await;
+
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+    assert_eq!(row(&view, PLUGIN).provides, ["process"]);
+    assert_eq!(row(&view, PLUGIN).processes, ["Triage"]);
+    assert_eq!(row(&view, ANOTHER).processes, ["Review watch"]);
+}
+
+/// One naming an Activity its installed dependency doesn't provide is in
+/// trouble once the dependency has loaded, naming the Activity.
+#[tokio::test]
+async fn a_process_naming_an_activity_its_dependency_lacks_loads_in_trouble() {
+    let (app, dir) = kept().await;
+
+    let view = watching_theirs(&app, dir.path(), "sorting-hat", "{sorted: done}").await;
+
+    let trouble = row(&view, PLUGIN).trouble.clone().expect("trouble");
+    assert!(
+        trouble.contains("`provides[0].states[0].activity` is `sorting-hat`"),
+        "{trouble}"
+    );
+}
+
+/// And one leaving an Outcome of its dependency's Activity unmapped is in
+/// trouble the same way, naming the state and the Outcome.
+#[tokio::test]
+async fn a_process_leaving_its_dependencys_outcome_unmapped_loads_in_trouble() {
+    let (app, dir) = kept().await;
+
+    let view = watching_theirs(&app, dir.path(), "review-rounds", "{approved: done}").await;
+
+    let trouble = row(&view, PLUGIN).trouble.clone().expect("trouble");
+    assert!(
+        trouble
+            .contains("`provides[0].transitions.sorting` leaves the Outcome `abandoned` unmapped"),
+        "{trouble}"
+    );
+}
+
+/// A Process naming an Activity from no plugin it depends on is refused at
+/// the card, naming it.
+#[tokio::test]
+async fn a_process_naming_an_activity_it_does_not_depend_on_is_refused() {
+    let (app, dir) = kept().await;
+    let path = plugin(
+        dir.path(),
+        "triage",
+        &processing(
+            &manifest(PLUGIN, "Triage", &[]),
+            "wrap-up",
+            "{settled: done}",
+        ),
+    );
+
+    let (status, said) = pressing(
+        &app,
+        "/api/ui/plugins/read",
+        serde_json::json!({ "source": path }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
+    assert!(
+        said.contains("`provides[0].states[0].activity` is `wrap-up`"),
+        "{said}"
+    );
+}
+
+/// Unticking the plugin whose Activity a Process runs puts the Process's
+/// plugin in trouble, saying which dependency is wanted; ticked again, it
+/// loads.
+#[tokio::test]
+async fn a_process_whose_dependency_is_unticked_is_in_trouble_until_ticked() {
+    let (app, dir) = kept().await;
+    let view = watching_theirs(
+        &app,
+        dir.path(),
+        "review-rounds",
+        "{approved: done, abandoned: stopped}",
+    )
+    .await;
+    assert_eq!(row(&view, PLUGIN).trouble, None);
+
+    let ticked = |enabled: bool| {
+        let app = app.clone();
+        async move {
+            let (status, said) = pressing(
+                &app,
+                &format!("/api/ui/plugins/{ANOTHER}/enabled"),
+                serde_json::json!({ "enabled": enabled }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{said}");
+            serde_json::from_str::<PluginsView>(&said).unwrap()
+        }
+    };
+
+    let view = ticked(false).await;
+    let trouble = row(&view, PLUGIN).trouble.clone().expect("trouble");
+    assert!(
+        trouble.contains("needs Base, which is disabled"),
+        "{trouble}"
+    );
+    assert_eq!(row(&view, PLUGIN).processes, ["Triage"], "still named");
+
+    let view = ticked(true).await;
+    assert_eq!(row(&view, PLUGIN).trouble, None);
 }
 
 /// The Activities Verkstead ships are a Built-in row of their own after the
@@ -575,7 +750,7 @@ async fn a_local_plugin_installed_through_the_card_is_listed_on_its_row() {
 
     let consent = read(&app, &path).await;
     assert_eq!(consent.name, "GitLab");
-    assert_eq!(consent.provides, ["forge", "process"]);
+    assert_eq!(consent.provides, ["forge"]);
     assert_eq!(
         consent.capabilities,
         [PluginCapability::Outbound {
@@ -593,7 +768,7 @@ async fn a_local_plugin_installed_through_the_card_is_listed_on_its_row() {
     assert_eq!(row.name, "GitLab");
     assert_eq!(row.version, "1.4.0");
     assert_eq!(row.author, "Ada Lovelace");
-    assert_eq!(row.provides, ["forge", "process"]);
+    assert_eq!(row.provides, ["forge"]);
     assert_eq!(row.source, PluginSource::Local { path: path.clone() });
     assert!(row.enabled);
     assert_eq!(row.trouble, None);
@@ -1052,7 +1227,7 @@ async fn an_installers_own_language_is_a_row_of_its_own() {
 /// `size` setting.
 fn languaging(dir: &Path, uuid: &str, name: &str, language: &str) -> String {
     let text = manifest(uuid, name, &[]).replace(
-        "provides:\n  - category: forge\n  - category: process\n  - category: forge\n",
+        "provides:\n  - category: forge\n  - category: forge\n",
         &format!(
             "settings:\n  - key: size\n    label: Store size limit\n    kind: size\n\
              provides:\n  - category: language\n    language: {language}\n    label: Zig\n    \

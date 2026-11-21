@@ -576,6 +576,10 @@ function Row(props: {
         <p class={styles.provides}>{activities(props.of.activities)}</p>
       </Show>
 
+      <Show when={props.of.processes.length > 0}>
+        <p class={styles.provides}>{processes(props.of.processes)}</p>
+      </Show>
+
       <Show when={source(props.of)}>
         {(from) => <p class={styles.source}>{from()}</p>}
       </Show>
@@ -722,6 +726,13 @@ function activities(names: string[]): string {
     : `Its activities are ${listed(names)}.`;
 }
 
+/// The Processes a plugin provides, by the names its manifest draws them as.
+function processes(names: string[]): string {
+  return names.length === 1
+    ? `Its process is ${names[0]}.`
+    : `Its processes are ${listed(names)}.`;
+}
+
 /// Where a row's plugin came from: its directory, its repository and the
 /// revision this cluster is pinned to, or this device's `config.yaml`. Nothing
 /// for a built-in, whose group says it.
@@ -800,6 +811,10 @@ function Consent(props: {
 
       <Show when={props.of.activities.length > 0}>
         <p>{activities(props.of.activities)}</p>
+      </Show>
+
+      <Show when={props.of.processes.length > 0}>
+        <p>{processes(props.of.processes)}</p>
       </Show>
 
       <Show

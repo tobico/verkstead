@@ -506,3 +506,59 @@ fn the_activities_verkstead_ships_pass() {
         "{stdout}"
     );
 }
+
+/// The whole plugin `docs/plugins.md` writes under *`process`*, so the grammar
+/// and its document say the same.
+fn documented_process() -> String {
+    let docs = include_str!("../../../../docs/plugins.md");
+    let (_, after) = docs.split_once("\n#### `process`\n").unwrap();
+    let (_, after) = after.split_once("```yaml\n").unwrap();
+    let (example, _) = after.split_once("```").unwrap();
+    example.to_owned()
+}
+
+#[test]
+fn the_documented_process_passes_naming_it() {
+    let dir = plugin(&documented_process());
+
+    let output = check(dir.path());
+
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("providing process — its processes Sketch."),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn a_process_leaving_an_outcome_unmapped_is_refused_naming_the_state_and_the_outcome() {
+    let dir = plugin(&documented_process().replace(", nothing: done", ""));
+
+    let output = check(dir.path());
+
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr
+            .contains("`provides[0].transitions.sketching` leaves the Outcome `nothing` unmapped"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn a_process_naming_an_activity_it_does_not_depend_on_is_refused_naming_it() {
+    let example = documented_process();
+    let (head, rest) = example.split_once("  - uuid: d7a5e719").unwrap();
+    let (_, rest) = rest.split_once("  - uuid: 15447a8d").unwrap();
+    let dir = plugin(&format!("{head}  - uuid: 15447a8d{rest}"));
+
+    let output = check(dir.path());
+
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`provides[0].states[0].activity` is `follow-up-rounds`"),
+        "{stderr}"
+    );
+}

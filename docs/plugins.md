@@ -333,6 +333,146 @@ one that isn't a component, imports something Verkstead does not give an
 Activity, or does not export `run` is the plugin's trouble, drawn on its row
 and printed by `verkstead plugin check`, naming the Activity.
 
+#### `process`
+
+A **Process**: what a Conversation runs, as states over Activities. Each
+state runs one Activity with the options the Process gives it, and the
+Process's transitions map every Outcome that Activity declares to where the
+Conversation goes next. A plugin may provide several, a block each. A Process
+is data and needs no component: every Activity it names is one this plugin or
+a plugin it depends on provides.
+
+This is a whole plugin, providing one Process over two of the Activities
+Verkstead ships:
+
+```yaml
+uuid: 3f9c2b71-6d4e-4a8f-9b0c-1e2d3c4b5a69
+name: Sketching
+author:
+  name: Grace Hopper
+  email: grace@example.com
+version: 1.0.0
+interface: 1
+dependencies:
+  - uuid: d7a5e719-8491-46a7-b7d7-8f9f85e57bd6   # the Activities Verkstead ships
+    name: Activities
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+  - uuid: 15447a8d-f28d-4573-8b8b-a7226d477755   # the pack `verkstead`'s
+    name: Verkstead
+    author:
+      name: Tobias Cohen
+      email: tobi@tobico.net
+    version: ^0.1
+provides:
+  - category: process
+    id: sketch
+    name: Sketch
+    description: Rounds of changes on a branch, then the wrap-up.
+    roles:
+      - { name: implementation, label: Implementation, building: true }
+      - { name: review, label: Review }
+    states:
+      - id: sketching
+        word: Sketching
+        activity: follow-up-rounds
+        options: { skill: verkstead/following-up }
+        steer: { brief: follow-up }
+      - id: wrapping
+        word: Wrapping up
+        activity: wrap-up
+    transitions:
+      sketching: { committed: wrapping, nothing: done }
+      wrapping: { settled: done, merged: done, closed: stopped, given-up: stopped }
+```
+
+- **`id`** — required, lowercase letters, digits and hyphens, and unique among
+  the plugin's Processes: what a Conversation's record names it by, beside the
+  plugin's uuid.
+- **`name`** and **`description`** — required. What the Process picker draws.
+- **`target`** — optional, `true` or `false`, and `false` where it is not
+  written: whether a Draft of it takes a Target, a pull request or a branch
+  already there.
+- **`narrows-the-wrap-up`** — optional, `true` or `false`: whether its wrap-up
+  watches the checks alone, leaving the review and the comments be.
+- **`roles`** — required, a list of each role a session of it runs under, by
+  `name` — lowercase letters, digits and hyphens — and the `label` drawn for
+  it. Exactly one is marked `building: true`: the role the Done signal, memos
+  and previews assume.
+- **`states`** — required, a list, in order: **Start enters the first.** Each
+  has:
+  - **`id`** — what the Conversation's state is stored as: lowercase letters,
+    digits, hyphens and underscores, like `follow_up`, unique among the
+    Process's states. `draft`, `done`, `closed` and `stopped` are Verkstead's
+    own, and refused.
+  - **`word`** — what the Conversation's card draws while it is in the state.
+  - **`activity`** — the `id` of the Activity it runs. The plugin's own
+    Activities are looked in first, then each dependency's in the order they
+    are written.
+  - **`options`** — optional, a map of what the Activity is started with
+    beside the Conversation's facts, each value text, a number, or `true` or
+    `false`. Which options an Activity reads is the Activity's to say. A
+    `skill` option names a skill as `<pack>/<skill>`, and **what a Process
+    names, it declares**: the pack is the plugin's own or a dependency's, as
+    for an Activity's `skills`.
+  - **`steer`** — optional: the state takes a steer, and `brief` says which
+    of Verkstead's brief kinds the Steer form draws for it — `round`, a new
+    round's Brief; `instruction`, what the human wants done; `follow-up`, what
+    to take up about work already pushed; `question`, the question an
+    investigation answers; or `none`. A state with no `steer` is not on the
+    Steer form.
+  - **`detour`** — optional, `true` or `false`: when its Activity ends, the
+    Conversation goes back to the state it was steered from, whatever the
+    Outcome — or to Done, where it was steered in from a state nothing returns
+    to. A detour takes no transitions.
+- **`transitions`** — a map of each state's `id` to a map of each Outcome its
+  Activity declares to where it leads: another of the Process's states,
+  `done`, `closed`, or `stopped`, which leaves the Conversation **Stopped**
+  where it stands, with the Activity's notice, until it is resumed. **Every
+  Outcome is mapped**: one left out is refused, naming the state and the
+  Outcome, and so is one the Activity never ends in. Draft is never a target.
+  `steered` is never written — the `steer` marks are where a steer leads —
+  and nor is a `direction:` Outcome, which `directions` maps.
+- **`directions`** — a map of each Direction the Process's interview offers —
+  `inline`, `task-list` or `roadmap` — to the state it leads to. The chooser
+  draws only those, and a Process offering one draws no chooser. Required
+  where a state runs an Activity ending in a Direction, the *Interview*.
+
+**A state may run an Activity per Direction.** Its `activity` is then a map of
+each Direction the Process offers to an Activity, and the Direction the
+Conversation was given picks which runs, on entry and on every restart. Its
+transitions map the Outcomes of every one of them:
+
+```yaml
+    directions: { inline: implementing, task-list: implementing, roadmap: implementing }
+    states:
+      - { id: grilling, word: Grilling, activity: interview, steer: { brief: round } }
+      - id: implementing
+        word: Implementing
+        activity: { inline: one-session, task-list: backlog-runner, roadmap: stage-runner }
+      - id: investigating
+        word: Investigating
+        activity: follow-up-rounds
+        options: { skill: verkstead/investigating, evidence: investigated }
+        steer: { brief: question }
+        detour: true
+    transitions:
+      grilling: { gone: stopped }
+      implementing: { done: wrapping, refused: stopped, finished: wrapping, continued: wrapping }
+```
+
+`verkstead plugin check` and the loader refuse a Process alike: a state
+running an Activity that neither the plugin nor a dependency provides, or
+under a skill from a pack neither does, naming it; an Outcome unmapped; a
+transition from or to a state that isn't declared; no building role, or two; a
+Direction leading to no state. What an installed dependency provides is known
+once it has loaded, so that much is checked by the loader, and is the plugin's
+trouble rather than a refusal at the card. A Process whose dependency is
+missing, disabled or outdated loads **in trouble**, its row saying which
+dependency is wanted, and is not offered until it is put right.
+
 ### What its wasm component may reach
 
 **`component`** — optional. A path to a `.wasm` file inside the plugin's

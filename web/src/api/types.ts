@@ -4938,7 +4938,11 @@ export type PluginConsent = { uuid: string, name: string, version: string, autho
 /**
  * The drawn name of each Activity it provides.
  */
-activities: Array<string>, capabilities: Array<PluginCapability>, };
+activities: Array<string>, 
+/**
+ * The drawn name of each Process it provides.
+ */
+processes: Array<string>, capabilities: Array<PluginCapability>, };
 
 /**
  * The checkbox.
@@ -5096,7 +5100,11 @@ languages: Array<string>,
 /**
  * The drawn name of each Activity it provides, in the order written.
  */
-activities: Array<string>, source: PluginSource, 
+activities: Array<string>, 
+/**
+ * The drawn name of each Process it provides, in the order written.
+ */
+processes: Array<string>, source: PluginSource, 
 /**
  * Its checkbox: whether the cluster has it on.
  */

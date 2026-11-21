@@ -83,8 +83,9 @@ describe("a row", () => {
     const row = await theRow("GitLab");
 
     expect(row.textContent).toContain("1.4.0 · Ada Lovelace");
-    expect(row.textContent).toContain("Provides forge, process, activity.");
+    expect(row.textContent).toContain("Provides forge, activity, process.");
     expect(row.textContent).toContain("Its activity is Review rounds.");
+    expect(row.textContent).toContain("Its process is Review watch.");
     expect(row.textContent).toContain("/home/you/src/gitlab");
     expect(row.querySelector("input[type=checkbox]")).toHaveProperty(
       "checked",
@@ -126,7 +127,7 @@ describe("a row", () => {
     const row = await theRow("Shared skills");
 
     expect(row.textContent).toContain(
-      "file:///home/you/src/sources/skills at d9327cd",
+      "file:///home/you/src/sources/skills at 0b45903",
     );
     expect(row.textContent).toContain("Update");
   });

@@ -19,7 +19,7 @@ Roadmap stage: [11: The Process engine](docs/roadmaps/plugins/11-the-process-eng
 
 ## Tasks
 
-- [ ] 01: The `process` provides-block — [details](01-the-process-block.md)
+- [x] 01: The `process` provides-block — [details](01-the-process-block.md)
 - [ ] 02: The engine, end to end on a fixture Process — [details](02-the-engine.md)
 - [ ] 03: Tinker, Investigate, Review and Fix Merge Issues as data — [details](03-four-processes-as-data.md)
 - [ ] 04: Steers land on declared states — [details](04-steers-on-declared-states.md)

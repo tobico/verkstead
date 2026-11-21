@@ -41,8 +41,10 @@ use crate::languages::Provided;
 use crate::platform::Platform;
 
 pub mod agent;
+pub mod process;
 
 pub use agent::Agent;
+pub use process::Process;
 
 /// The newest interface version this build knows. A manifest naming a higher
 /// one was written for a newer Verkstead and is refused at load, rather than
@@ -103,6 +105,8 @@ pub struct Manifest {
     pub packs: Vec<Pack>,
     /// The Activities its `activity` entries are, in the order written.
     pub activities: Vec<Activity>,
+    /// The Processes its `process` entries are, in the order written.
+    pub processes: Vec<Process>,
     pub capabilities: Vec<Capability>,
     pub settings: Vec<Setting>,
     /// A `.wasm` inside the plugin's directory, relative to it.
@@ -401,6 +405,7 @@ impl Manifest {
         sized(&provides, &settings)?;
         let dependencies = list(&fields, "dependencies", dependency)?;
         let activities = walk.activities(&provides, &packs, &dependencies, platform)?;
+        let processes = walk.processes(&provides, &activities, &packs, &dependencies, platform)?;
 
         let manifest = Manifest {
             uuid,
@@ -415,6 +420,7 @@ impl Manifest {
             provides,
             packs,
             activities,
+            processes,
             capabilities: list(&fields, "capabilities", capability)?,
             settings,
             component: walk.component(&fields)?,
@@ -841,6 +847,45 @@ impl Walk<'_> {
         })
     }
 
+    /// Every `process` entry of `provides` read as a [`Process`], refused at
+    /// the first that is wrong, and held against the Activities it can find
+    /// here: the plugin's own, and those of the built-ins among
+    /// `dependencies`. One an installed dependency provides is the loader's
+    /// to find, once that dependency has loaded.
+    fn processes(
+        &self,
+        provides: &[Provision],
+        activities: &[Activity],
+        packs: &[Pack],
+        dependencies: &[Dependency],
+        platform: Platform,
+    ) -> Result<Vec<Process>, Refusal> {
+        let mut processes: Vec<Process> = Vec::new();
+        for (index, provision) in provides.iter().enumerate() {
+            if provision.category != Category::Process {
+                continue;
+            }
+            let Body::Unread(body) = &provision.body else {
+                continue;
+            };
+            let field = format!("provides[{index}]");
+            let process = self.process(body, &field, packs, dependencies, platform)?;
+            if processes.iter().any(|seen| seen.id == process.id) {
+                let field = format!("{field}.id");
+                return Err(Refusal::of(
+                    &field,
+                    format!(
+                        "`{field}` is `{}`, which an earlier entry already uses.",
+                        process.id
+                    ),
+                ));
+            }
+            process.checked(|id| found(id, activities, dependencies, platform))?;
+            processes.push(process);
+        }
+        Ok(processes)
+    }
+
     /// Every `skills` entry of `provides` read as a [`Pack`], each of its skills'
     /// `SKILL.md` read for its frontmatter. Refused at the first that is wrong:
     /// a skill's refusal names the skill.
@@ -1038,6 +1083,45 @@ fn skilled(
              nor depends on. Add a dependency on the plugin that provides it."
         ),
     ))
+}
+
+/// The Activity `id` as the manifest reader can find it: one of the plugin's
+/// own `activities`, then one of a built-in dependency's, in the order the
+/// dependencies are written. Where neither has it and an installed dependency
+/// might, it is the loader's to look for.
+fn found(
+    id: &str,
+    activities: &[Activity],
+    dependencies: &[Dependency],
+    platform: Platform,
+) -> process::Found {
+    if let Some(own) = activities.iter().find(|own| own.id == id) {
+        return process::Found::Known(own.clone());
+    }
+    let mut unknown = false;
+    for dependency in dependencies {
+        let built_in = super::built_in::BUILT_INS
+            .iter()
+            .filter(|built_in| built_in.is(&dependency.uuid))
+            .find_map(|built_in| built_in.manifest(platform).ok());
+        match built_in {
+            Some(manifest) => {
+                if let Some(theirs) = manifest
+                    .activities
+                    .into_iter()
+                    .find(|theirs| theirs.id == id)
+                {
+                    return process::Found::Known(theirs);
+                }
+            }
+            None => unknown = true,
+        }
+    }
+    if unknown {
+        process::Found::Unknown
+    } else {
+        process::Found::Unreachable
+    }
 }
 
 /// Whether `text` is lowercase letters, digits and hyphens, and not empty.

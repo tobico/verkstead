@@ -10,6 +10,7 @@
       "languages": [],
       "name": "Verkstead",
       "needs": [],
+      "processes": [],
       "profiles": 0,
       "provides": [
         "skills"
@@ -39,6 +40,7 @@
       "languages": [],
       "name": "Activities",
       "needs": [],
+      "processes": [],
       "profiles": 0,
       "provides": [
         "activity"
@@ -61,6 +63,7 @@
       "languages": [],
       "name": "Codex",
       "needs": [],
+      "processes": [],
       "profiles": 0,
       "provides": [
         "agent"
@@ -85,6 +88,7 @@
       ],
       "name": ".NET",
       "needs": [],
+      "processes": [],
       "profiles": 0,
       "provides": [
         "language"
@@ -109,6 +113,7 @@
       ],
       "name": "Go",
       "needs": [],
+      "processes": [],
       "profiles": 0,
       "provides": [
         "language"
@@ -133,6 +138,7 @@
       ],
       "name": "JVM",
       "needs": [],
+      "processes": [],
       "profiles": 0,
       "provides": [
         "language"
@@ -157,6 +163,7 @@
       ],
       "name": "Node",
       "needs": [],
+      "processes": [],
       "profiles": 0,
       "provides": [
         "language"
@@ -181,6 +188,7 @@
       ],
       "name": "Python",
       "needs": [],
+      "processes": [],
       "profiles": 0,
       "provides": [
         "language"
@@ -206,6 +214,7 @@
       ],
       "name": "Rust & C/C++",
       "needs": [],
+      "processes": [],
       "profiles": 0,
       "provides": [
         "language"
@@ -232,11 +241,14 @@
       "languages": [],
       "name": "GitLab",
       "needs": [],
+      "processes": [
+        "Review watch"
+      ],
       "profiles": 0,
       "provides": [
         "forge",
-        "process",
-        "activity"
+        "activity",
+        "process"
       ],
       "settings": 4,
       "source": {
@@ -257,10 +269,10 @@
       "languages": [],
       "name": "Broken",
       "needs": [],
+      "processes": [],
       "profiles": 0,
       "provides": [
-        "forge",
-        "process"
+        "forge"
       ],
       "settings": 0,
       "source": {
@@ -281,15 +293,15 @@
       "languages": [],
       "name": "Shared skills",
       "needs": [],
+      "processes": [],
       "profiles": 0,
       "provides": [
-        "forge",
-        "process"
+        "forge"
       ],
       "settings": 0,
       "source": {
         "kind": "Git",
-        "revision": "d9327cd7b48cc94021a562334dea4377b6560097",
+        "revision": "0b45903081bf9c80ee92d882d4b84df35654516d",
         "url": "file:///home/you/src/sources/skills"
       },
       "trouble": null,
@@ -315,10 +327,10 @@
           "uuid": "8e7d6c5b-4a39-4281-9f0e-1d2c3b4a5968"
         }
       ],
+      "processes": [],
       "profiles": 0,
       "provides": [
-        "forge",
-        "process"
+        "forge"
       ],
       "settings": 0,
       "source": {
@@ -341,6 +353,7 @@
       ],
       "name": "Zig",
       "needs": [],
+      "processes": [],
       "profiles": 0,
       "provides": [
         "language"
