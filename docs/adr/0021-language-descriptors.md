@@ -52,6 +52,12 @@ The descriptors Verkstead ships are a YAML file embedded in the binary, in the
 grammar an installer writes. One grammar means the built-ins are the
 documentation's worked examples and the loader has one path through it.
 
+*Since the plugins roadmap's second stage* ([ADR-0030](0030-plugins.md)) that
+file is retired: the built-ins are the `language` entries of six built-in
+Language plugins under `plugins/`, Rust and C/C++ sharing one, still embedded
+and still in the one grammar, which is written down in
+[Plugins](../plugins.md#language).
+
 ## One map, merged key by key
 
 `config.yaml` holds one map keyed by language. An entry carries the descriptor

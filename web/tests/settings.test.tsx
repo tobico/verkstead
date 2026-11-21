@@ -105,24 +105,6 @@ const PATHS = {
   sandbox_binds: ["/var/cache/verkstead-node", "/var/cache/verkstead-cargo"],
 };
 
-/// And the languages as a save puts them back: the two keys the page writes,
-/// per language the read listed — the installer's own beside the ones Verkstead
-/// ships, with a size the language pane draws no field for sent along like any
-/// other, and an empty one where nobody has configured a size at all. Carried by
-/// every section for the reason the paths are — see [`heldLanguages`].
-const LANGUAGES = {
-  languages: [
-    { name: "rust", enabled: true, size: "50G" },
-    { name: "go", enabled: true, size: "" },
-    { name: "node", enabled: true, size: "" },
-    { name: "python", enabled: true, size: "" },
-    { name: "dotnet", enabled: true, size: "" },
-    { name: "cpp", enabled: true, size: "" },
-    { name: "jvm", enabled: true, size: "" },
-    { name: "gleam", enabled: true, size: "8G" },
-  ],
-};
-
 /// And the Cleanup as a save puts it back: the switches where the read left
 /// them, and each duration as the string a form holds. Carried by every
 /// section for the reason the paths are — see [`heldCleanup`].
@@ -548,10 +530,6 @@ describe("saving", () => {
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
         mcp_servers: "Keep",
-        // The languages ride along as they stand, because the endpoint writes
-        // the whole of `config.yaml` and this form only means to change the
-        // author.
-        ...LANGUAGES,
         cleanup: CLEANUP,
         at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
@@ -581,7 +559,6 @@ describe("saving", () => {
       verified: null,
       refused: [],
       refused_servers: [],
-      refused_sizes: [],
       tried: [],
     };
     theSettings(TOLD, json(rewritten));
@@ -665,7 +642,6 @@ describe("saving", () => {
       verified: { Account: { login: "ada", missing: ["gist"] } },
       refused: [],
       refused_servers: [],
-      refused_sizes: [],
       tried: [],
     };
     theSettings(UNSET, json(unscoped));
@@ -715,7 +691,6 @@ describe("saving", () => {
       },
       refused: [],
       refused_servers: [],
-      refused_sizes: [],
       tried: [],
     };
     theSettings(UNSET, json(unverified));
@@ -817,7 +792,6 @@ describe("replacing and clearing the token", () => {
       verified: null,
       refused: [],
       refused_servers: [],
-      refused_sizes: [],
       tried: [],
     };
     const fetching = theSettings(TOLD, json(cleared));
@@ -834,7 +808,6 @@ describe("replacing and clearing the token", () => {
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
         mcp_servers: "Keep",
-        ...LANGUAGES,
         cleanup: CLEANUP,
         at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
@@ -899,7 +872,6 @@ describe("the ignore rules", () => {
       verified: null,
       refused,
       refused_servers: [],
-      refused_sizes: [],
       tried: [],
     };
   }
@@ -1171,7 +1143,6 @@ describe("the ignore rules", () => {
       verified: null,
       refused: [],
       refused_servers: [],
-      refused_sizes: [],
       tried: [],
     };
     theSettings(TOLD, json(written));
@@ -1194,7 +1165,6 @@ const answering = (standing: SettingsView): SettingsSaved => ({
   verified: null,
   refused: [],
   refused_servers: [],
-  refused_sizes: [],
   tried: [],
 });
 
@@ -1245,7 +1215,6 @@ describe("sharing on Done", () => {
         // And everything else in the file as it stands, because one request
         // writes the whole of it — the resolution the select beside it owns
         // included.
-        ...LANGUAGES,
         cleanup: CLEANUP,
         at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
@@ -1365,7 +1334,6 @@ describe("how a conflict is resolved", () => {
         // And everything else in the file as it stands, the checkbox below it
         // included.
         share_on_done: TOLD.share_on_done,
-        ...LANGUAGES,
         cleanup: CLEANUP,
         at_once: AT_ONCE,
         ...PATHS,
@@ -2244,12 +2212,12 @@ describe("the path a details pane stands at", () => {
     expect(face.classList).toContain(card.open);
   });
 
-  /// Both parts in the one details pane: the build caches' boxes and the field
+  /// Both parts in the one details pane: the build caches' line and the field
   /// that adds a bind, under the one card that reads as open.
   it("draws the caches and the binds in the details pane, and reads the sandbox card as open", async () => {
     const { container } = thePage("/settings/sandbox");
 
-    await waitFor(() => screen.getByRole("checkbox", { name: "Rust" }));
+    await waitFor(() => screen.getByText(/build cache is in its plugin's settings/));
     await waitFor(() => screen.getByLabelText("Add a path"));
 
     const face = await drawn<HTMLElement>(container, `.${sandbox.sandboxCard}`);

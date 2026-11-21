@@ -115,11 +115,12 @@
 //! and because a descriptor is the sort of thing somebody hand-edits — see
 //! [`crate::build_cache`] for what Rust's entry switches.
 //!
-//! `enabled` and `size` are keys of the same entry and the only two the
-//! settings page ever writes, so an installer's own keys survive a save. And an
-//! entry nothing here could read survives one too, as the text it was written
-//! in: the language falls back to the descriptor Verkstead ships, the settings
-//! page says why, and the file is still the installer's to fix.
+//! `enabled` and `size` are keys of the same entry, taken up once into the
+//! record of the Language plugin it is drawn as, and the settings page writes
+//! no key of any entry, so an installer's own survive a save. And an entry
+//! nothing here could read survives one too, as the text it was written in:
+//! the language falls back to the descriptor Verkstead ships, its plugin's
+//! row says why, and the file is still the installer's to fix.
 //!
 //! `rust_build_cache` is where Rust's two used to be said, and it is **read
 //! and never written**: a `config.yaml` from before the map says exactly what
@@ -250,6 +251,16 @@ struct Held {
     /// And whether the log has been told about an `mcp_servers:` key nothing
     /// reads any more.
     ignoring_servers_said: AtomicBool,
+
+    /// And what the built-in Language plugins' records say of their
+    /// languages — see [`Settings::holding_plugin_languages`]. `None` until
+    /// they first are.
+    plugin_languages: RwLock<Option<crate::languages::Held>>,
+
+    /// And the languages the installed Language plugins loaded here provide —
+    /// see [`Settings::holding_installed_languages`]. Empty until a load has
+    /// read them.
+    installed_languages: RwLock<Vec<(String, crate::languages::Provided)>>,
 }
 
 /// Every Data Directory's held lists, so that every handle on one directory
@@ -375,6 +386,48 @@ impl Settings {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(servers);
     }
 
+    /// Hold `held` as what the built-in Language plugins' records say — which
+    /// languages are unticked, and the size each was saved at — for
+    /// [`Settings::config`] to lay beside whatever `config.yaml` says.
+    ///
+    /// **And from then on a built-in language's `enabled` and `size` in
+    /// `config.yaml` are not read**: the plugin's tick is its switch and its
+    /// `size` setting its size, cluster-wide — see
+    /// [`crate::replicating::plugins::taken_up`] and
+    /// [`crate::languages::configured`].
+    pub fn holding_plugin_languages(&self, held: crate::languages::Held) {
+        *self
+            .held
+            .plugin_languages
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(held);
+    }
+
+    /// Hold the languages the installed Language plugins loaded here provide,
+    /// each beside its plugin's uuid, in the order they were installed — what
+    /// the next [`crate::replicating::plugins::held`] lays beside the
+    /// built-ins'. Set by every load, so a plugin unticked or in trouble takes
+    /// its languages with it.
+    pub fn holding_installed_languages(
+        &self,
+        installed: Vec<(String, crate::languages::Provided)>,
+    ) {
+        *self
+            .held
+            .installed_languages
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = installed;
+    }
+
+    /// And those languages, as the last load left them.
+    pub fn installed_languages(&self) -> Vec<(String, crate::languages::Provided)> {
+        self.held
+            .installed_languages
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     /// Forget the declarations held, as a new start of the server would.
     #[cfg(test)]
     pub(crate) fn forgetting_the_mcp_servers(&self) {
@@ -498,6 +551,15 @@ impl Settings {
 
             config.mcp_servers = servers;
         }
+
+        // And which built-in languages are off, and at what size, out of
+        // their plugins' records.
+        config.plugin_languages = self
+            .held
+            .plugin_languages
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
 
         // The table's Authors over the file's, once there are any held: the
         // file was emptied of them as they were taken up, so an `authors:` key
@@ -1445,6 +1507,14 @@ pub struct Config {
     #[serde(skip)]
     awaited: BTreeSet<String>,
 
+    /// What the built-in Language plugins' records say of their languages,
+    /// once they are held — never read from this file nor written to it, but
+    /// laid beside it by [`Settings::config`]. `None` before then, when each
+    /// language's `enabled` and `size` here are still its own. See
+    /// [`crate::languages::configured`].
+    #[serde(skip)]
+    plugin_languages: Option<crate::languages::Held>,
+
     /// And how the shared Rust build cache is set: whether sessions get one at
     /// all, and how big its compiled half may grow — see [`crate::build_cache`].
     ///
@@ -1474,9 +1544,9 @@ pub struct Config {
     /// `enabled` and `size`, and this map wins where both are written — see
     /// [`Config::languages`], which is where the two are put together.
     ///
-    /// **The page writes `enabled` and `size` and nothing else.** A save sends
-    /// the whole file, so what keeps an installer's own keys — and, once a
-    /// descriptor will not load, the entry nothing could read — is
+    /// **The page writes nothing here.** A save sends the whole file, so what
+    /// keeps an installer's own entries — and, once a descriptor will not load,
+    /// the entry nothing could read — is
     /// [`Config::keeping_what_the_page_never_drew`], said at the endpoint over
     /// what the file already holds.
     #[serde(default, skip_serializing_if = "Languages::is_empty")]
@@ -1690,6 +1760,7 @@ impl Config {
             // dropped — see [`authors_kept`].
             authors: authors_kept(config.authors),
             awaited: BTreeSet::new(),
+            plugin_languages: None,
             rust_build_cache: RustBuildCache {
                 enabled: config.rust_build_cache.enabled,
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
@@ -1729,7 +1800,6 @@ impl Config {
     #[allow(clippy::too_many_arguments)]
     pub fn of(
         author: Option<Author>,
-        languages: Languages,
         cleanup: Cleanup,
         at_once: AtOnce,
         conflict_resolution: ConflictResolution,
@@ -1747,18 +1817,18 @@ impl Config {
             // installer's descriptor keys are.
             authors: author.into_iter().collect(),
             awaited: BTreeSet::new(),
+            plugin_languages: None,
             // And nothing for the key the map replaced: the two keys the page
             // draws of Rust are in `languages` below now, so writing this one
             // as well would leave a second opinion about them in the file. A
             // save is what migrates it, and the reading half is what keeps an
             // install that wrote one working until somebody presses anything.
             rust_build_cache: RustBuildCache::default(),
-            // The two keys the page writes, per language it was given, and only
-            // those two: the rest of an entry is an installer's. What keeps
-            // their descriptors — and an entry the page was never given at all
-            // — is [`Config::keeping_what_the_page_never_drew`], which puts the
-            // file underneath this.
-            languages,
+            // And no languages: every one of them is a Language plugin's now,
+            // switched and sized on the Plugins page, and an entry in the file
+            // is an installer's alone — see
+            // [`Config::keeping_what_the_page_never_drew`], which keeps them.
+            languages: Languages::default(),
             // As the page set it: both switches written down, and each duration
             // only where somebody typed one — see [`CleanupStep::of`], where an
             // empty box is the default asked for back rather than a duration of
@@ -1918,6 +1988,12 @@ impl Config {
         .merged(&self.languages)
     }
 
+    /// What the built-in Language plugins' records say of their languages,
+    /// where they are held — see [`Config::plugin_languages`].
+    pub fn plugin_languages(&self) -> Option<&crate::languages::Held> {
+        self.plugin_languages.as_ref()
+    }
+
     /// And what the Cleanup is to do after an archiving, which is a trim at
     /// three days and no delete at all where nobody has said otherwise.
     pub fn cleanup(&self) -> &Cleanup {
@@ -2028,23 +2104,17 @@ impl Config {
     /// - `kept_by`, which the page has no field for either — the Keeper writes
     ///   it, and a save that dropped it would leave an Annex that has forgotten
     ///   who keeps it.
-    /// - the descriptor half of every `languages` entry. The page draws
-    ///   `enabled` and `size` and writes those two, so what the file already
-    ///   holds is kept underneath and what the page sent is written over it —
-    ///   which leaves an installer's label, manifests and variables exactly as
-    ///   they were written, and leaves an entry the page never drew at all
-    ///   untouched. Written over rather than merged, because the page's two
-    ///   keys are the page's word even when it sends neither: see
-    ///   [`Languages::under_the_page`]. An entry nothing could read is the
-    ///   furthest case of the same rule — it goes back as the text it was
-    ///   written in, that being the whole of what is left of it once it did not
-    ///   load, and it is still what the installer is about to go and fix.
+    /// - every `languages` entry, whole: each is an installer's, the page
+    ///   drawing none of them now that every language is a Language plugin's.
+    ///   An entry nothing could read goes back as the text it was written in,
+    ///   that being the whole of what is left of it once it did not load, and
+    ///   it is still what the installer is about to go and fix.
     /// - every Author but the one the Git section is about, which the page
     ///   sends alone.
     pub fn keeping_what_the_page_never_drew(mut self, kept: &Config) -> Config {
         self.session_path = kept.session_path.clone();
         self.kept_by = kept.kept_by.clone();
-        self.languages = kept.languages.under_the_page(&self.languages);
+        self.languages = kept.languages.clone();
 
         // And every Author the page did not draw, the one it did written over
         // its own entry where the file already has it and on the end where it
@@ -3427,8 +3497,8 @@ mod tests {
 
     use super::{
         AtOnce, AttachedServer, Author, Cleanup, CleanupStep, Config, ConflictResolution,
-        GitAuthor, HeaderValue, IgnoreRule, KeptBy, Languages, McpServer, Recorded, RuleTrouble,
-        Secrets, ServerTrouble, Settings, Signature, Unauthored, trouble_among, yaml,
+        GitAuthor, HeaderValue, IgnoreRule, KeptBy, McpServer, Recorded, RuleTrouble, Secrets,
+        ServerTrouble, Settings, Signature, Unauthored, trouble_among, yaml,
     };
 
     /// The Author the tests here write and read back, keyed `work` — any
@@ -4095,7 +4165,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::of(Some("1".to_owned()), Some("2".to_owned())),
                 ConflictResolution::Merge,
@@ -4128,7 +4197,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::of(Some(String::new()), Some(String::new())),
                 ConflictResolution::Merge,
@@ -4307,7 +4375,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Rebase,
@@ -4327,7 +4394,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -4408,7 +4474,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -4425,7 +4490,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -4545,7 +4609,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::of(
                     CleanupStep::of(false, Some("14".to_owned())),
                     CleanupStep::of(true, Some("2".to_owned())),
@@ -4584,7 +4647,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::of(
                     CleanupStep::of(true, Some(String::new())),
                     CleanupStep::of(false, Some("  ".to_owned())),
@@ -4835,7 +4897,6 @@ mod tests {
                     Some("Tobias Cohen".to_owned()),
                     Some("tobi@tobico.net".to_owned()),
                 ),
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -4873,7 +4934,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -4906,7 +4966,6 @@ mod tests {
                     Some("Cohen, Tobias: #1".to_owned()),
                     Some("tobi@tobico.net".to_owned()),
                 ),
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -4932,7 +4991,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 author(Some("Tobias Cohen".to_owned()), Some(String::new())),
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -5004,7 +5062,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 author(Some("Tobias Cohen".to_owned()), None),
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -5044,7 +5101,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 author(Some("Tobias Cohen".to_owned()), None),
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -5110,7 +5166,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -5132,7 +5187,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -5217,7 +5271,6 @@ mod tests {
 
         let page = Config::of(
             author(Some("Ada".to_owned()), Some("ada@example.com".to_owned())),
-            Languages::default(),
             Cleanup::default(),
             AtOnce::default(),
             ConflictResolution::Merge,
@@ -5296,7 +5349,6 @@ mod tests {
 
         let page = Config::of(
             author(Some("Ada".to_owned()), Some("ada@example.com".to_owned())),
-            Languages::default(),
             Cleanup::default(),
             AtOnce::default(),
             ConflictResolution::Merge,
@@ -5376,12 +5428,12 @@ mod tests {
     }
 
     /// And a save from the settings page leaves an installer's own descriptor
-    /// keys exactly as the file had them.
+    /// exactly as the file had it.
     ///
-    /// The page draws `enabled` and `size` and writes those two. Everything
-    /// else in an entry — the label, the manifests, the variables — is the
-    /// file's, and one request writes the whole of `config.yaml`, so a save
-    /// built out of what the page sent would take a language off the machine.
+    /// The page draws no language: every entry — the label, the manifests, the
+    /// variables — is the file's, and one request writes the whole of
+    /// `config.yaml`, so a save built out of what the page sent would take a
+    /// language off the machine.
     #[test]
     fn a_save_from_the_settings_page_keeps_the_descriptor_keys_it_never_drew() {
         let dir = tempfile::tempdir().unwrap();
@@ -5396,7 +5448,6 @@ mod tests {
 
         let page = Config::of(
             author(Some("Ada".to_owned()), Some("ada@example.com".to_owned())),
-            Languages::default(),
             Cleanup::default(),
             AtOnce::default(),
             ConflictResolution::Merge,
@@ -5456,10 +5507,6 @@ mod tests {
 
         let page = Config::of(
             None,
-            crate::languages::Languages::of_page([
-                (crate::languages::RUST.to_owned(), false, String::new()),
-                ("gleam".to_owned(), true, String::new()),
-            ]),
             Cleanup::default(),
             AtOnce::default(),
             ConflictResolution::Merge,
@@ -5481,11 +5528,6 @@ mod tests {
             "the entry the page could not be drawn from is still the installer's \
              own to fix: {written}",
         );
-        assert!(
-            !written.contains("enabled: false"),
-            "and nothing the page sent was written into it, there being no entry \
-             there that could be read to write it into: {written}",
-        );
 
         let languages = crate::languages::configured(&settings.config());
 
@@ -5499,7 +5541,7 @@ mod tests {
         );
         assert!(
             languages.get("gleam").unwrap().enabled(),
-            "while the language beside it took what the page sent",
+            "while the language beside it is as it was",
         );
     }
 
@@ -5602,7 +5644,6 @@ mod tests {
     fn config_saying(instructions: &str) -> Config {
         Config::of(
             None,
-            Languages::default(),
             Cleanup::default(),
             AtOnce::default(),
             ConflictResolution::Merge,
@@ -5679,7 +5720,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -5859,7 +5899,6 @@ mod tests {
         settings
             .save_config(&Config::of(
                 None,
-                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -6323,7 +6362,6 @@ mod tests {
                 Some("T. Cohen".to_owned()),
                 Some("tobi@tobico.net".to_owned()),
             ),
-            Languages::default(),
             Cleanup::default(),
             AtOnce::default(),
             ConflictResolution::Merge,

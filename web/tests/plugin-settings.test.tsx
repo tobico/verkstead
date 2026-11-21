@@ -10,7 +10,12 @@ import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { describe, expect, it, vi } from "vitest";
 
-import type { PluginSettingsSaved, PluginSettingsView } from "../src/api/types";
+import type {
+  LanguageCleared,
+  PluginLanguageCache,
+  PluginSettingsSaved,
+  PluginSettingsView,
+} from "../src/api/types";
 import { PluginSettingsPane } from "../src/settings/PluginSettings";
 import settings from "./fixtures/plugin-settings.json" with { type: "json" };
 import { json, serving, whenever } from "./serving";
@@ -54,6 +59,26 @@ describe("a plugin's settings pane", () => {
     expect((await box("Cache size")).value).toBe("");
     expect((await box("Groups")).value).toBe("infra\nweb");
     screen.getByText("The GitLab instance, where it isn't gitlab.com.");
+  });
+
+  /// A size's placeholder is the server's: a Language plugin's default size,
+  /// and nothing where the field has none.
+  it("draws a size's placeholder as the server gives it", async () => {
+    const sized = (placeholder: string | null): PluginSettingsView => ({
+      ...SETTINGS,
+      fields: SETTINGS.fields.map((field) =>
+        field.label === "Cache size" ? { ...field, placeholder } : field,
+      ),
+    });
+
+    serving(whenever(AT, json(sized("30G"))));
+    const { unmount } = pane();
+    expect((await box("Cache size")).placeholder).toBe("30G");
+    unmount();
+
+    serving(whenever(AT, json(sized(null))));
+    pane();
+    expect((await box("Cache size")).placeholder).toBe("");
   });
 
   it("draws a set secret as its presses, and never its value", async () => {
@@ -143,5 +168,155 @@ describe("a plugin's settings pane", () => {
 
     await waitFor(() => screen.getByText("Its `plugin.yaml` doesn't parse."));
     await box("Host");
+  });
+
+  describe("a Language plugin's build cache", () => {
+    const GIB = 1024 ** 3;
+
+    /// Rust & C/C++'s pane, its size field and its two languages: Rust's
+    /// store holding `held` bytes, and C/C++ compiling through it.
+    const sized = (
+      held: number,
+      running = { sessions: 0, terminals: 0 },
+    ): PluginSettingsView => {
+      const rust: PluginLanguageCache = {
+        name: "rust",
+        label: "Rust",
+        size: "30G",
+        disk_use: { Measured: { bytes: held, in_units: held } },
+        stores: [
+          { name: "cargo", eviction: "ByUnit" },
+          { name: "sccache", eviction: "ByItsTool" },
+        ],
+        swept: null,
+        compiling: "Cached",
+        through: null,
+      };
+      const cpp: PluginLanguageCache = {
+        name: "cpp",
+        label: "C/C++",
+        size: "30G",
+        disk_use: "NoStore",
+        stores: [],
+        swept: null,
+        compiling: "Cached",
+        through: "Rust",
+      };
+
+      return {
+        ...SETTINGS,
+        name: "Rust & C/C++",
+        fields: [
+          {
+            key: "size",
+            label: "Store size limit",
+            description: null,
+            placeholder: "30G",
+            value: { kind: "Size", value: "" },
+          },
+        ],
+        languages: [rust, cpp],
+        running,
+      };
+    };
+    const CLEAR = "/api/ui/languages/rust/clear";
+
+    it("draws each language's store against its size, under the fields", async () => {
+      serving(whenever(AT, json(sized(3.2 * GIB))));
+      pane();
+
+      await waitFor(() =>
+        screen.getByText("Cache usage: 3.2/30GB, 3.2GB of it in packages."),
+      );
+      screen.getByText("cargo");
+      screen.getByText(
+        "sccache holds its compile cache to this size by itself, so the store may hold up to twice it.",
+      );
+      screen.getByText(/^Not trimmed since the server started/);
+      screen.getByText(
+        "Compiles through the compile server, so its cache is Rust's.",
+      );
+      // One Clear, Rust's: C/C++ has no store of its own.
+      expect(screen.getAllByRole("button", { name: /^Clear / })).toHaveLength(
+        1,
+      );
+    });
+
+    it("clears a store and draws the figure again", async () => {
+      let cleared = false;
+      const fetching = serving(
+        whenever(AT, () => json(sized(cleared ? 0 : 3.2 * GIB))()),
+        whenever(
+          CLEAR,
+          () => {
+            cleared = true;
+            return json({
+              Cleared: { settings: {} },
+            } as unknown as LanguageCleared)();
+          },
+          "POST",
+        ),
+      );
+      pane();
+
+      fireEvent.click(
+        await waitFor(() =>
+          screen.getByRole("button", { name: "Clear Rust's cache" }),
+        ),
+      );
+
+      await waitFor(() =>
+        screen.getByText("Cache usage: 0.0/30GB, 0 bytes of it in packages."),
+      );
+      expect(
+        fetching.mock.calls.some(
+          ([asked, init]) => String(asked) === CLEAR && init?.method === "POST",
+        ),
+      ).toBe(true);
+    });
+
+    it("draws Clear off with what is running, and a refusal the same way", async () => {
+      serving(whenever(AT, json(sized(GIB, { sessions: 1, terminals: 2 }))));
+      const { unmount } = pane();
+
+      const clear = await waitFor(() =>
+        screen.getByRole("button", { name: "Clear Rust's cache" }),
+      );
+      expect((clear as HTMLButtonElement).disabled).toBe(true);
+      screen.getByText(
+        "Clear waits until no session or terminal is running. 1 session and 2 terminals are running.",
+      );
+      unmount();
+
+      serving(
+        whenever(AT, json(sized(GIB))),
+        whenever(
+          CLEAR,
+          json({
+            Running: { sessions: 1, terminals: 0 },
+          } satisfies LanguageCleared),
+          "POST",
+        ),
+      );
+      pane();
+
+      fireEvent.click(
+        await waitFor(() =>
+          screen.getByRole("button", { name: "Clear Rust's cache" }),
+        ),
+      );
+      await waitFor(() =>
+        screen.getByText(
+          "Clear waits until no session or terminal is running. 1 session is running.",
+        ),
+      );
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Clear Rust's cache",
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(true);
+    });
   });
 });

@@ -13,7 +13,8 @@
 //! is a plugin quietly doing less than its author wrote, which is the gap the
 //! interface version exists to stop. A `provides:` entry's body beyond its
 //! `category` is read here once a stage has given that Category its grammar —
-//! `skills`, so far, in [`Walk::packs`] — and kept as written until then.
+//! `skills` in [`Walk::packs`], and `language` in the descriptor grammar, see
+//! [`crate::languages::provided`] — and kept as written until then.
 //!
 //! **Per-platform overrides replace, key by key.** A top-level `linux:`,
 //! `macos:` or `windows:` holds keys of the common declaration, and reading for
@@ -35,6 +36,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde_json::{Map, Value};
 
+use crate::languages::Provided;
 use crate::platform::Platform;
 
 /// The newest interface version this build knows. A manifest naming a higher
@@ -136,6 +138,8 @@ pub struct Dependency {
 pub struct Provision {
     pub category: Category,
     pub body: Map<String, Value>,
+    /// The body read, where the Category is `language`.
+    pub language: Option<Provided>,
 }
 
 /// A **Skill Pack**: a `provides:` entry of the `skills` Category, read.
@@ -231,7 +235,7 @@ pub struct Setting {
 #[serde(rename_all = "lowercase")]
 pub enum SettingKind {
     Text,
-    /// A size in the grammar `languages.yaml`'s sizes are: `30G`.
+    /// A size in the grammar a language's `size` is: `30G`.
     Size,
     List,
     /// Kept in `secrets.yaml` and never returned to the viewer.
@@ -259,7 +263,7 @@ pub struct Refusal {
 }
 
 impl Refusal {
-    fn of(field: &str, why: impl Into<String>) -> Self {
+    pub(crate) fn of(field: &str, why: impl Into<String>) -> Self {
         Refusal {
             field: Some(field.to_owned()),
             why: why.into(),
@@ -272,6 +276,10 @@ impl Refusal {
 
     fn unknown(field: &str) -> Self {
         Refusal::of(field, format!("`{field}` isn't a key a plugin has."))
+    }
+
+    pub(crate) fn unknown_to_a_language(field: &str) -> Self {
+        Refusal::of(field, format!("`{field}` isn't a key a language has."))
     }
 }
 
@@ -335,8 +343,10 @@ impl Manifest {
 
         let interface = walk.interface(&fields)?;
         let uuid = uuid(required(&fields, "uuid")?, "uuid")?;
-        let provides = list(&fields, "provides", provision)?;
+        let provides = languages(list(&fields, "provides", provision)?, text, platform)?;
         let packs = walk.packs(&provides, &uuid)?;
+        let settings = settings(&fields)?;
+        sized(&provides, &settings)?;
 
         Ok(Manifest {
             uuid,
@@ -351,7 +361,7 @@ impl Manifest {
             provides,
             packs,
             capabilities: list(&fields, "capabilities", capability)?,
-            settings: settings(&fields)?,
+            settings,
             component: walk.component(&fields)?,
         })
     }
@@ -961,9 +971,68 @@ fn provision(value: &Value, field: &str) -> Result<Provision, Refusal> {
         ));
     };
 
+    if category == Category::Language {
+        text_of(
+            within(map, field, "language")?,
+            &format!("{field}.language"),
+        )?;
+    }
+
     let mut body = map.clone();
     body.remove("category");
-    Ok(Provision { category, body })
+    Ok(Provision {
+        category,
+        body,
+        language: None,
+    })
+}
+
+/// `provides` with each `language` entry's body read in the descriptor
+/// grammar.
+///
+/// Out of the manifest's text a second time rather than out of the tree the
+/// rest was read from, because that tree is a map that sorts its keys, and a
+/// descriptor's variables are a session's environment in the order they were
+/// written — see [`crate::languages::Languages`].
+fn languages(
+    mut provides: Vec<Provision>,
+    text: &str,
+    platform: Platform,
+) -> Result<Vec<Provision>, Refusal> {
+    if provides
+        .iter()
+        .all(|provision| provision.category != Category::Language)
+    {
+        return Ok(provides);
+    }
+
+    let blocks = crate::languages::blocks(text, platform);
+    let mut names: Vec<String> = Vec::new();
+
+    for (index, provision) in provides.iter_mut().enumerate() {
+        if provision.category != Category::Language {
+            continue;
+        }
+
+        let field = format!("provides[{index}]");
+        let provided = crate::languages::provided(blocks.get(index), &field)?;
+
+        if names.contains(&provided.name) {
+            let field = format!("{field}.language");
+            return Err(Refusal::of(
+                &field,
+                format!(
+                    "`{field}` is `{}`, which an earlier entry already provides.",
+                    provided.name
+                ),
+            ));
+        }
+
+        names.push(provided.name.clone());
+        provision.language = Some(provided);
+    }
+
+    Ok(provides)
 }
 
 fn capability(value: &Value, field: &str) -> Result<Capability, Refusal> {
@@ -1047,6 +1116,36 @@ fn settings(fields: &Map<String, Value>) -> Result<Vec<Setting>, Refusal> {
         }
     }
     Ok(settings)
+}
+
+/// A plugin providing a language may declare a `size` setting only of kind
+/// `size`: it is what `{size}` reads and what the language's stores are held
+/// to, so a value that is not a size would be a store held to nothing anybody
+/// typed.
+fn sized(provides: &[Provision], settings: &[Setting]) -> Result<(), Refusal> {
+    if !provides
+        .iter()
+        .any(|provision| provision.language.is_some())
+    {
+        return Ok(());
+    }
+
+    match settings
+        .iter()
+        .position(|setting| setting.key == crate::languages::SIZE_SETTING)
+    {
+        Some(index) if settings[index].kind != SettingKind::Size => {
+            let field = format!("settings[{index}].kind");
+            Err(Refusal::of(
+                &field,
+                format!(
+                    "`{field}` should be `size`: a language's `size` setting is the size its \
+                     stores are held to."
+                ),
+            ))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn setting(value: &Value, field: &str) -> Result<Setting, Refusal> {
@@ -1181,6 +1280,170 @@ provides: []
         let provision = &read(&yaml).unwrap().provides[0];
         assert_eq!(provision.category, Category::Forge);
         assert_eq!(provision.body["noun"], "merge request");
+    }
+
+    /// A manifest providing one language, `rust`, whose entry goes on with
+    /// `rest` — written at the entry's own indentation.
+    fn providing(rest: &str) -> String {
+        MINIMAL.replace(
+            "provides: []",
+            &format!("provides:\n  - category: language\n    language: rust\n{rest}"),
+        )
+    }
+
+    #[test]
+    fn a_languages_size_setting_is_a_size() {
+        let settings = |kind: &str| {
+            providing("    label: Rust\n").replace(
+                "provides:",
+                &format!("settings:\n  - key: size\n    label: Size\n    kind: {kind}\nprovides:"),
+            )
+        };
+
+        assert!(read(&settings("size")).is_ok());
+        assert_eq!(refused_at(&settings("text")), "settings[0].kind");
+
+        // A plugin providing no language may call a setting what it likes.
+        let elsewhere =
+            format!("{MINIMAL}settings:\n  - key: size\n    label: Size\n    kind: text\n");
+        assert!(read(&elsewhere).is_ok());
+    }
+
+    #[test]
+    fn a_language_entry_is_read_in_the_descriptor_grammar() {
+        let yaml = providing(
+            "    label: Rust
+    detect: [Cargo.toml]
+    env:
+      CARGO_HOME: \"{cache}/cargo\"
+    capabilities:
+      sccache:
+        env:
+          RUSTC_WRAPPER: \"{sccache}\"
+    stores:
+      cargo:
+        dir: \"{cache}/cargo\"
+        units:
+          - under: registry/cache
+            depth: 2
+",
+        );
+
+        let provision = &read(&yaml).unwrap().provides[0];
+        let provided = provision
+            .language
+            .as_ref()
+            .expect("a language entry is read");
+
+        assert_eq!(provided.name, "rust");
+        assert_eq!(provided.descriptor.label(), Some("Rust"));
+        assert!(provided.descriptor.names(crate::languages::SCCACHE));
+        assert_eq!(
+            provided.descriptor.store_names().collect::<Vec<_>>(),
+            ["cargo"]
+        );
+    }
+
+    #[test]
+    fn a_language_entry_with_a_key_a_language_has_not_got_is_refused_naming_it() {
+        for (rest, field) in [
+            ("    enabled: false\n", "provides[0].enabled"),
+            ("    detct: [Cargo.toml]\n", "provides[0].detct"),
+            (
+                "    capabilities:\n      sccache:\n        environment: {}\n",
+                "provides[0].capabilities.sccache.environment",
+            ),
+            (
+                "    stores:\n      cargo:\n        dir: \"{cache}/cargo\"\n        \
+                 units:\n          - depht: 2\n",
+                "provides[0].stores.cargo.units[0].depht",
+            ),
+        ] {
+            let yaml = providing(rest);
+
+            assert_eq!(refused_at(&yaml), field, "{rest}");
+            assert_eq!(
+                read(&yaml).unwrap_err().why,
+                format!("`{field}` isn't a key a language has.")
+            );
+        }
+    }
+
+    #[test]
+    fn a_language_entry_setting_a_variable_the_sandbox_sets_is_refused_naming_it() {
+        let yaml = providing("    env:\n      PATH: /usr/bin\n");
+
+        assert_eq!(refused_at(&yaml), "provides[0].env.PATH");
+
+        let yaml = providing(
+            "    capabilities:\n      sccache:\n        env:\n          HOME: \"{cache}\"\n",
+        );
+
+        assert_eq!(
+            refused_at(&yaml),
+            "provides[0].capabilities.sccache.env.HOME"
+        );
+        assert!(
+            read(&yaml)
+                .unwrap_err()
+                .why
+                .contains("a variable the sandbox sets itself")
+        );
+    }
+
+    #[test]
+    fn a_language_entry_whose_store_is_not_one_is_refused_naming_the_store() {
+        let yaml = providing("    stores:\n      cargo:\n        dir: ~/.cargo\n");
+
+        assert_eq!(refused_at(&yaml), "provides[0].stores.cargo");
+    }
+
+    #[test]
+    fn a_language_entry_of_the_wrong_shape_is_refused() {
+        let yaml = providing("    detect: Cargo.toml\n");
+
+        assert_eq!(refused_at(&yaml), "provides[0]");
+    }
+
+    #[test]
+    fn a_language_entry_needs_its_name() {
+        let yaml = MINIMAL.replace(
+            "provides: []",
+            "provides:\n  - category: language\n    label: Rust\n",
+        );
+
+        assert_eq!(refused_at(&yaml), "provides[0].language");
+    }
+
+    #[test]
+    fn a_language_provided_twice_is_refused() {
+        let yaml = format!(
+            "{}  - category: language\n    language: rust\n",
+            providing("    label: Rust\n")
+        );
+
+        assert_eq!(refused_at(&yaml), "provides[1].language");
+    }
+
+    #[test]
+    fn a_platforms_own_list_is_read_for_its_languages() {
+        let yaml = format!(
+            "{}windows:\n  provides:\n    - category: language\n      language: rust\n      \
+             label: Rust on Windows\n",
+            providing("    label: Rust\n")
+        );
+
+        let label = |platform| {
+            read_for(&yaml, platform).unwrap().provides[0]
+                .language
+                .as_ref()
+                .unwrap()
+                .descriptor
+                .label()
+                .map(str::to_owned)
+        };
+        assert_eq!(label(Platform::Windows).as_deref(), Some("Rust on Windows"));
+        assert_eq!(label(Platform::Linux).as_deref(), Some("Rust"));
     }
 
     #[test]

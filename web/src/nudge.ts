@@ -503,7 +503,9 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     // The installed Plugins moved: one installed, updated or ticked on this
     // device, a record of one pulled off a member, or what loading them here
     // came to. The Plugins section draws them, and so does the Attach menu's
-    // Skill packs section, off the packs they provide.
+    // Skill packs section, off the packs they provide; and the settings beside
+    // it, since a Language plugin's tick is its languages' switch, which the
+    // Sandbox section's sccache line reads.
     //
     // **And every Conversation of that device**, for the declarations' reason
     // above: a pack chip says whether anything loaded here still provides it,
@@ -514,6 +516,7 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
         keyOf(device, "plugins"),
         keyOf(device, "skill-packs"),
         keyOf(device, "conversation"),
+        keyOf(device, "settings"),
       ];
 
     // Where a Profile's login has got to moved — which is what shows a second

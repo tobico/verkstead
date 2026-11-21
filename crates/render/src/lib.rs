@@ -97,9 +97,10 @@ pub use onboarding::{
 };
 pub use plugins::{
     PluginAt, PluginCapability, PluginConsent, PluginEnabled, PluginField, PluginFieldEdit,
-    PluginFieldRefused, PluginFieldValue, PluginFieldWrite, PluginFix, PluginInstall, PluginNeed,
-    PluginRow, PluginSecretValues, PluginSettingsSave, PluginSettingsSaved, PluginSettingsView,
-    PluginSource, PluginUpdate, PluginUpdated, PluginsView,
+    PluginFieldRefused, PluginFieldValue, PluginFieldWrite, PluginFix, PluginInstall,
+    PluginLanguageCache, PluginNeed, PluginRow, PluginSecretValues, PluginSettingsSave,
+    PluginSettingsSaved, PluginSettingsView, PluginSource, PluginUpdate, PluginUpdated,
+    PluginsView,
 };
 pub use profiles::{
     AccountFile, AccountLogin, AgentType, Broken, MemoryFile, MemoryLeft, MemoryWanted,
@@ -117,11 +118,11 @@ pub use settings::{
     AtOnceEdit, AtOnceView, Author, AuthorEdit, AuthorEdited, AuthorEntry, AuthorRemoved,
     AuthorSaved, AuthorToken, BindEntry, CleanupEdit, CleanupStepEdit, CleanupStepView,
     CleanupView, CompileCaching, ConflictResolution, DiskUse, Eviction, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, InstructionsEdit, LanguageCleared, LanguageEdit, LanguageView, McpHeader,
-    McpHeaderEdit, McpHeaderValues, McpServer, McpServerEdit, McpServersEdit, PathResolution,
-    PathSource, PathsView, PointingRepo, RuleField, RuleRefused, Running, RunningOn, ServerField,
-    ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView, SizeRefused, StoreView,
-    TokenEdit, TokenSaved, Tried, UnreadEntry, UnrepointedRepo, Unrepointing, Verified,
+    IgnoredCommentsEdit, InstructionsEdit, LanguageCleared, LanguageView, McpHeader, McpHeaderEdit,
+    McpHeaderValues, McpServer, McpServerEdit, McpServersEdit, PathResolution, PathSource,
+    PathsView, PointingRepo, RuleField, RuleRefused, Running, ServerField, ServerRefused,
+    ServerTried, SettingsEdit, SettingsSaved, SettingsView, StoreView, TokenEdit, TokenSaved,
+    Tried, UnrepointedRepo, Unrepointing, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

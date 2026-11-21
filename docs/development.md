@@ -547,9 +547,9 @@ a size.
 
 **None of those variable names are Rust's by name in the server.** A language
 is a **descriptor** — data, in one grammar — and the seven Verkstead ships are
-`crates/server/languages.yaml`, embedded in the binary and read by
-`crates/server/src/languages.rs`, which is the module's documentation as well
-as its data: Rust and C/C++, which compile, the four package stores — Go,
+the `language` entries of six built-in plugins under `plugins/` (Rust and C/C++
+share one), embedded in the binary like every built-in and read by
+`crates/server/src/languages.rs`: Rust and C/C++, which compile, the four package stores — Go,
 Node, Python and .NET —
 whose eleven tools download into this directory the same way, and the JVM,
 whose `jvm` entry moves Maven's local repository and Gradle's whole home into it
@@ -564,8 +564,9 @@ again as each session is spawned, so a descriptor hand-edited in between the two
 is one the next session really starts with. A key the grammar does not have is
 refused like a refused variable, so a misspelled one falls back to the built-in
 with a reason rather than silently setting nothing. The grammar
-is [ADR-0021](adr/0021-language-descriptors.md)'s, and the built-ins in
-`crates/server/languages.yaml` are its worked examples.
+is [ADR-0021](adr/0021-language-descriptors.md)'s, written down in
+[Plugins](plugins.md#language), and the built-ins' `plugin.yaml` files are its
+worked examples.
 
 The sccache **server** is Verkstead's own, not the sessions'. It comes up as a
 child of the running server the first time a session starts while a language
@@ -637,17 +638,9 @@ author_tokens:
 ```yaml
 # config.yaml
 languages:
-  rust:
-    enabled: true
-    size: 30G
   go:
-    enabled: true
-  node:
-    enabled: true
-  python:
-    enabled: true
-  dotnet:
-    enabled: false
+    env:
+      GOFLAGS: -mod=mod
   gleam:
     label: Gleam
     detect:
@@ -668,16 +661,17 @@ sandbox_binds:
   - /var/cache/verkstead-cargo
 ```
 
-`languages` is one entry per language, merged key by key over the descriptors
-embedded in the binary — the seven Verkstead ships are Rust, C/C++, the four
-package stores and the JVM, and a save from the settings page writes an entry for each: `enabled`
-and `size` are the two the page writes, and everything else in an entry is the
-installer's. `dotnet: enabled: false` above is a machine that builds no .NET and
-would rather not have NuGet's three variables in every session. `gleam` is a
-language Verkstead has never heard of and works all the same. `rust_build_cache`
-is where Rust's two used to be said, and is still read as Rust's — the map wins
-where both say something, and the first save from the settings page carries it
-into the map and leaves the old key out of the file.
+`languages` is the installer's alone: one entry per language, merged key by key
+over the language of its name as its plugin provides it — the seven Verkstead
+ships are Rust, C/C++, the four package stores and the JVM, as six built-in
+Language plugins. `go` above adds one variable to Go's and keeps the rest.
+`gleam` is a language no plugin provides, and is drawn on the Plugins page as
+a plugin of its own. The settings page writes no key of any entry: whether
+sessions get a language is its plugin's tick and how big its stores grow is its
+plugin's `size` setting, both the cluster's. An entry's `enabled` and `size`,
+and `rust_build_cache`, where Rust's two used to be said, were taken up into
+those plugins' records at the first start that had them, and are not read
+again.
 
 A Data Directory from before the list said `git_author:` in `config.yaml` and
 `github_token:` in `secrets.yaml`. The first start moves the two into the list

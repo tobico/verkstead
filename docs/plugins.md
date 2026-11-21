@@ -261,8 +261,8 @@ settings:
 plugin's settings; `label` is what is drawn. `kind` is one of:
 
 - **`text`** — a line of text.
-- **`size`** — a size as `languages.yaml` writes one: a whole number and `K`,
-  `M`, `G` or `T`, such as `30G`.
+- **`size`** — a size in sccache's grammar: a whole number and `K`, `M`, `G`
+  or `T` for binary multiples, such as `30G`.
 - **`list`** — a list of lines.
 - **`secret`** — kept in `secrets.yaml` and never shown again.
 
@@ -276,6 +276,214 @@ device fetches its own copy from one that holds it. A secret is never shown
 again: the pane says only whether one is set. A value the field's kind cannot
 hold, such as a size that isn't one, is refused at the field with the reason,
 and nothing else in that save is written.
+
+## The Categories
+
+What a `provides:` entry holds beyond its `category`, for each Category that
+has its grammar. A Category not here yet keeps the rest of its entry unread.
+
+### Language
+
+A `language` entry is a **descriptor**: what Verkstead gives every session for
+one language's tools, as data. The seven Verkstead ships are the built-in
+plugins under the repository's `plugins/` — Rust and C/C++ one plugin, because
+both name the Compile Server and one mechanism is one thing to switch; Go,
+Node, Python, .NET and the JVM one each — and their `plugin.yaml` files are
+this grammar's worked examples, with the reasons for every variable in their
+comments. [ADR-0021](adr/0021-language-descriptors.md) is why it is shaped
+this way.
+
+```yaml
+provides:
+  - category: language
+    language: go                 # the name config.yaml's `languages:` keys by
+    label: Go                    # what is drawn
+    detect: [go.mod]             # for the setup card's warning, and nothing else
+    env:
+      GOMODCACHE: "{cache}/go/mod"
+      GOCACHE: "{cache}/go/build"
+    stores:
+      modules:
+        dir: "{cache}/go/mod"
+        units:
+          - named: ["*@*"]
+      build:
+        dir: "{cache}/go/build"
+        units:
+          - depth: 2
+```
+
+**A descriptor is data and cannot say a command to run.** Anything that is
+behaviour is built into the server and switched on by name, under
+`capabilities` — so a Language plugin has no `component` and asks for no
+`capabilities` of its own at the top of the manifest: it runs nothing.
+
+- **`language`** — required. The language's name: what an installer's
+  `languages:` entry in `config.yaml` merges over, key by key. One plugin
+  provides a name once.
+- **`label`** — what the language is called on screen.
+- **`detect`** — the manifests that say a Repo builds the language, looked for
+  at the root of a checkout: a list of file names, or paths relative to the
+  root, with no globs. Only the setup card's warning reads it. What a session
+  is given never turns on it, because a manifest is often not at the root and a
+  variable nothing reads costs nothing.
+- **`env`** — the variables every session is given while the language is on,
+  in the order written. A variable the sandbox sets itself — `HOME`, `PATH` and
+  the rest — is refused, named, as `provides[0].env.PATH`.
+- **`capabilities`** — the server behaviour the language switches on, each by
+  name with the variables that are set only where this server can offer it.
+  There is one: **`sccache`**, the Compile Server — one sccache server for the
+  machine, in a sandbox of its own, started wherever a language naming it is on
+  and there is an sccache to run. A machine with none gets the language's own
+  `env` and none of the capability's. The first language naming it sizes its
+  store, whether or not that one is on. A name this server has never heard of
+  is a capability it cannot offer, rather than a refusal, so a descriptor
+  written for a newer Verkstead still gets its variables.
+- **`stores`** — the directories the language's tools fill, each by a name of
+  the entry's own, with a `dir` and how it is kept under the language's size
+  (below). Named rather than read back out of `env`, because a variable is not
+  always a path: Maven's repository is a flag inside `MAVEN_OPTS`. A store is
+  what the settings measure the disk use of, what **Clear** empties, and what is
+  held to the size.
+
+Any other key is refused, named, inside a capability, a store and a unit as
+much as at the entry's top.
+
+#### Placeholders
+
+A value is text, and these stand for what only the server knows:
+
+- **`{cache}`** — the Build Cache: `--build-cache-dir`, or this machine's own
+  cache directory where nobody has said. Where a store goes that nothing has to
+  share a filesystem with.
+- **`{stores}`** — a directory beside the Worktrees, for a store that does:
+  pnpm, deno, bun and uv hardlink packages out of their store into the project,
+  and copy the lot where the two are on different filesystems. **On Linux they
+  copy anyway**: a Worktree and this directory are two bind mounts, and
+  `link(2)` answers `EXDEV` across two mounts whatever is underneath. So what a
+  store here saves today is the download, as `{cache}` does.
+- **`{size}`** — how big this language's store may grow: its plugin's `size`
+  setting (below), 10G where nobody has set one, and 30G for Rust, whose
+  sccache has always been started at that.
+- **`{sccache}`** — where a session reaches the sccache this server found. Only
+  inside the `sccache` capability.
+
+A placeholder's directory is made, and granted writable to a session, only
+where a language that is on names it.
+
+**Write `/` between the placeholder and what is under it, on every platform.**
+A descriptor is read on three, so the grammar has one separator, and a Windows
+session is handed the path its own tools would compose, `\` and all.
+
+**A value that is a line of words is left out where a directory in it has
+whitespace.** A line of flags is what a tool with no variable for a path reads
+one out of, and it splits the line on whitespace: Maven 3's `mvn` splits
+`MAVEN_OPTS` bare, so a Build Cache under a name with a space in it would hand
+over a line that breaks the tool outright. A value that is one word is a path,
+read whole, space and all.
+
+#### Stores and how each is kept under the size
+
+A store's `dir` is `{cache}/…` or `{stores}/…` and nowhere else, because what
+is done to a store is delete what is in it. Each says one of three things:
+
+- **`evicted: by-its-tool`** — the tool filling it evicts for itself, handed
+  the size in a variable carrying `{size}`. The sweep leaves it alone. sccache
+  is the one built-in that does, through `SCCACHE_CACHE_SIZE`.
+- **`units:`** — what the sweep takes out of it whole, oldest first, until the
+  language's units are under its size: **a package, never a file of one**,
+  because a Go module or a Maven artifact with one file missing is a broken
+  store rather than a smaller one. A list, each item a way of finding one,
+  walking down from `under` (a path inside the store, the store itself where it
+  is not said) and stopping at the first entry that is one:
+  - **`depth`** — every entry that many levels down; one for what is directly
+    in `under`.
+  - **`named`** — an entry whose name is one of these patterns.
+  - **`holding`** — a directory holding an entry whose name is one of these
+    patterns.
+
+  Where more than one is said, an entry has to be all of them. A pattern is one
+  name, `*` for any run of characters and `?` for one. The walk follows no
+  symlink and never takes one as a unit. **A unit may be a file** where the
+  file is the whole package, or where the store is content-addressed and its
+  tool checks every blob it reads.
+- **neither** — the store is never swept, and the settings say so. What cannot
+  be given a unit safely is left this way rather than guessed at.
+
+Refused, naming the store: a `dir` anywhere else; a store saying both of the
+first two; a unit naming none of `depth`, `named` or `holding`, which would
+match anything; `depth: 0`, which is the whole store; an `under` that leaves
+the store; a pattern that is a path; and a store under `.verkstead-swept`,
+which is the directory the sweep moves units aside into.
+
+**The sweep runs as the server starts and hourly after, and only while no
+session and no Conversation Terminal runs.** A unit is as old as the newest
+time anywhere in it — access times where the filesystem keeps them,
+modification times where it does not — and is renamed into `.verkstead-swept`
+at the top of `{cache}` or `{stores}` before it is deleted, so no tool ever sees
+half of one. A store mounted on a filesystem of its own is never swept.
+**Clear** empties every store of one language the same way, whichever of the
+three it is, and is refused while anything runs.
+
+#### What an installer writes over it
+
+The map under `languages:` in `config.yaml` is this grammar again, keyed by
+`language`, and **each entry merges over the language of its name key by key**:
+changing one variable keeps every later fix to the rest. A variable, or a store,
+set to `null` is taken **out**; `detect` and a store's `units` are replaced
+whole. An entry naming a language no plugin provides is a language of its own.
+
+Unlike a plugin, an entry there is never refused outright: one that will not
+read falls back to the language of its name as the plugin says it, and that
+plugin's row and pane carry why as its **trouble**; the language still runs.
+Beside the grammar's keys it holds two of the installation's own — `enabled`,
+whether sessions get the language, and `size`, how big its store may grow —
+which a plugin's entry cannot hold.
+
+**An entry naming a language no plugin provides is drawn as a Language plugin
+of its own**, under **Installed**, saying it comes from this device's
+`config.yaml`, so an installer who adds a language gets its row with no code
+change. Its tick and its size are a cluster record keyed by a uuid derived from
+the language's name: drawn only on a device whose file has the entry, and
+shared by every device that does. It has no Update or Remove — the entry is
+the file's to take out — and its pane has the `size` field and the build cache
+below where its entry names a store. An entry of this kind that will not read
+is in trouble and off.
+
+**A Language plugin installed from a directory or from git** is a language
+every session gets once it loads on a device, after the built-ins' in the
+order the plugins were installed; its tick is the switch and its `size` the
+size, like a built-in's, and an entry under `languages:` merges over it the
+same way. Its row says which languages it provides. One providing a language
+that a built-in or an earlier plugin already provides loads in trouble, and
+that language stays the first plugin's.
+
+**A built-in language's switch is its plugin's tick** on the Plugins page,
+cluster-wide: unticked, none of its languages' variables, stores or grants
+reach a session. Its `enabled` here was taken up into the plugin's record once,
+at the first start of a release that has the ticks — on where any of its
+languages was on, on any device — and is not read again. An installer's own
+language's `enabled` is taken up the same way into its record, the first time
+each device reads the entry.
+
+**And its size is its plugin's `size` setting**, cluster-wide, drawn in the
+plugin's pane with the default as its placeholder. Every Language plugin
+declares one, of kind `size` — a plugin providing a language may call no other
+kind of setting `size` — and it sizes every language the plugin provides, so
+Rust & C/C++ has one size for its one Compile Server. A language's `size` here
+was taken up once beside its `enabled` — the larger wins, across a plugin's
+languages and across devices, and a size that will not read is none — and is
+not read again. An installer's own language's `size` is taken up the same way,
+beside its `enabled`.
+
+**Under the fields, a Language plugin's pane draws its build cache**: for each
+language it provides, what its stores hold on this device against the size in
+force, which directories they are and how each is held to the size, when they
+were last trimmed, and **Clear**, which empties that language's stores —
+sccache's too, for Rust. Ticked or not, since an off language still holds what
+it fetched. Clear is off, and refused by the server, while a session or a
+terminal runs. The Sandbox page's **Build caches** part keeps only what is no
+language's: whether the server can see an sccache.
 
 ## Per-platform overrides
 

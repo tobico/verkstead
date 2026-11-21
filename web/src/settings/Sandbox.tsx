@@ -8,16 +8,16 @@
 //! they had, each saving itself as it did: see [`BuildCaches`] in
 //! `Languages.tsx` and [`SandboxBinds`] in `SandboxBinds.tsx`.
 //!
-//! The card's line says what is waiting on the human in either part first — an
-//! unreadable entry, no sccache, a bind the server cannot see — and otherwise
-//! how many caches are on and how many binds there are.
+//! The card's line says what is waiting on the human in either part first — no
+//! sccache, a bind the server cannot see — and otherwise how many binds there
+//! are. A language's cache is its plugin's, on the Plugins page.
 
 import { Match, Switch as Choose, type JSX } from "solid-js";
 
 import { PaneSticky } from "../Panes";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { BuildCaches, cacheWarnings, cachesOn } from "./Languages";
+import { BuildCaches, cacheWarnings } from "./Languages";
 import { useSettings } from "./PathEditor";
 import { SandboxBinds, unseen } from "./SandboxBinds";
 import { SettingsCard } from "./SettingsCard";
@@ -70,10 +70,7 @@ export function SandboxCard(props: {
               status={
                 waiting().length > 0
                   ? waiting().join(" · ")
-                  : `${counted(cachesOn(told()), "build cache")} · ${counted(
-                      told().paths.binds.length,
-                      "bind",
-                    )}`
+                  : counted(told().paths.binds.length, "bind")
               }
             />
           );

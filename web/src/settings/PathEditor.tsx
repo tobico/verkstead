@@ -50,7 +50,6 @@ import {
   heldAtOnce,
   heldAuthor,
   heldCleanup,
-  heldLanguages,
   heldPaths,
 } from "./held";
 import styles from "./PathEditor.module.css";
@@ -107,7 +106,7 @@ export function without(entries: string[], at: number): string[] {
 ///
 /// One request writes the whole of `config.yaml`, so a save carries every value
 /// in it and the caller rewrites the binds it is about — `writeBinds` is that.
-/// The author, the token, the languages and the share-on-Done switch ride
+/// The author, the token and the share-on-Done switch ride
 /// along the same way: what is sent is what the file holds afterwards, so a
 /// list or a value left out would be one emptied.
 export function useWritingPaths() {
@@ -128,8 +127,6 @@ export function useWritingPaths() {
         // and a paths editor has no business with any of it.
         git_author: heldAuthor(standing),
         github_token: "Keep",
-        // And the languages as they stand — see [`heldLanguages`].
-        ...heldLanguages(standing),
         // And what becomes of an archived Conversation — see [`heldCleanup`].
         cleanup: heldCleanup(standing),
         // And how much Verkstead runs at once, likewise — see [`heldAtOnce`].

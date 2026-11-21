@@ -63,10 +63,13 @@ fn check(dir: &Path) -> Result<()> {
                 }
             }
 
-            let provides: Vec<&str> = manifest
+            let provides: Vec<String> = manifest
                 .provides
                 .iter()
-                .map(|provision| provision.category.word())
+                .map(|provision| match &provision.language {
+                    Some(provided) => format!("{} {}", provision.category.word(), provided.name),
+                    None => provision.category.word().to_owned(),
+                })
                 .collect();
             let provides = if provides.is_empty() {
                 "nothing".to_owned()

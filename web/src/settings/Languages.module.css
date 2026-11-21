@@ -1,4 +1,4 @@
-/* Which languages a session gets build support for — see `Languages.tsx`.
+/* The Build caches part — see `Languages.tsx`.
 
    The Build caches part of the Sandbox pane, whose card is the Sandbox's — see
    `Sandbox.tsx`. What is here is only what stands in the part. */
@@ -20,8 +20,8 @@
   font-size: 0.9rem;
 }
 
-/* And the details pane: a row a language, and what stands in the way of one
-   under it. */
+/* And the part in the pane: the sccache line, then where a language's cache
+   is now. */
 .languages {
   display: flex;
   flex-direction: column;
@@ -30,160 +30,6 @@
 
 .languages .warning {
   margin: 0.5rem 0 0;
-}
-
-/* The checkbox and the link to its panel, on one line: the row is what
-   somebody scanning the pane reads, and everything else is behind the link.
-
-   In two columns rather than at the two ends of the line. The links read as
-   one column beside the ticks, starting at one edge just past the longest of
-   the language names — at the far end of a wide pane, each was a reading too
-   far from the language it was about to be read as that language's. The first
-   column is a width rather than the label's own, so every row's link starts at
-   the same place; a name longer than it wraps rather than pushing its link out
-   of line. */
-.row {
-  --names: 7rem;
-  position: relative;
-  display: grid;
-  grid-template-columns: var(--names) minmax(0, 1fr);
-  align-items: center;
-  column-gap: 0.75rem;
-  min-width: 0;
-}
-
-/* The link, which is the panel's trigger: drawn as a link rather than as a
-   button, because it is a reading first — what the cache holds — and the panel
-   behind it second. In the accent while its language is on. */
-.cache > button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.2rem 0;
-  font-size: 0.9rem;
-  color: var(--accent);
-  white-space: nowrap;
-  background: none;
-  border: 0;
-}
-
-/* And quieter while it is off: an unticked language that still holds
-   something is worth a way to it, and not worth the eye. */
-.quiet > button {
-  color: var(--ink-soft);
-}
-
-.arrow {
-  font-size: 0.75em;
-}
-
-.cache > button[aria-expanded="true"],
-.cache > button:focus-visible {
-  text-decoration: underline;
-}
-
-@media (hover: hover) {
-  .cache > button:not(:disabled):hover {
-    text-decoration: underline;
-  }
-}
-
-/* The panel the link drops, hung off the row rather than off the link: the
-   link's anchor gives up its positioning, so the card is measured against the
-   row — from the link's column, under the link, and no wider than the rest of
-   the row is, so a pane narrower than the card does not have it spread off the
-   window's edge. */
-.row > .cache {
-  position: static;
-  justify-self: start;
-}
-
-.cache > [role="group"] {
-  right: auto;
-  left: calc(var(--names) + 0.75rem);
-  width: min(22rem, calc(100% - var(--names) - 0.75rem));
-}
-
-.cache > [role="group"] > * + * {
-  margin-top: 0.6rem;
-}
-
-.sizing label {
-  display: block;
-  margin-bottom: 0.35rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-/* The value is short — `30G` — so a field the width of the panel would say it
-   was expecting prose. */
-.sizing input {
-  width: 7rem;
-  font: inherit;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  color: inherit;
-  background: var(--paper);
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-  padding: 0.5rem 0.6rem;
-}
-
-.sizing input:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.sizing input:focus-visible {
-  border-color: var(--accent);
-}
-
-@media (hover: hover) {
-  .sizing input:not(:disabled):hover {
-    border-color: var(--ink-soft);
-  }
-}
-
-.failure {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-
-/* A reading rather than a control — what the store holds, which directories,
-   when it was last trimmed — so in the quiet the field's label is in. */
-.note {
-  margin: 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-/* A Clear and what it does, or what it waits on, at the foot of the panel: its
-   press quieter than anything filled, since it is not what the panel is for. */
-.clearing {
-  display: flex;
-  gap: 0.6rem;
-  align-items: baseline;
-}
-
-.clearing button {
-  flex: none;
-  padding: 0.35rem 0.8rem;
-  font: inherit;
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
-.clearing button:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-@media (hover: hover) {
-  .clearing button:not(:disabled):hover {
-    border-color: var(--ink-soft);
-  }
 }
 
 /* The part's heading inside the Sandbox pane — see `Sandbox.tsx` — drawn as the

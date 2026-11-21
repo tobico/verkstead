@@ -12,6 +12,7 @@
 //! starts. The start says so in the log and carries on without it.
 
 use std::path::Path;
+use std::sync::LazyLock;
 
 use super::component::{self, Trouble};
 use super::manifest::{Files, Manifest, Refusal};
@@ -70,6 +71,48 @@ pub fn verkstead() -> BuiltIn {
         .iter()
         .find(|built_in| built_in.directory == "verkstead")
         .expect("build.rs embeds every directory under plugins/, and plugins/verkstead is one")
+}
+
+/// The built-ins the Plugins page lists, their manifests as this platform
+/// reads them, in the order `build.rs` embedded them: every one but the
+/// fixture.
+///
+/// A manifest that will not read is left out rather than listed, which only a
+/// build that should never have shipped can make so — the start says why, and
+/// the suite reads every one. Read once, the binary being the same all along.
+pub fn listed() -> &'static [Manifest] {
+    static LISTED: LazyLock<Vec<Manifest>> = LazyLock::new(|| {
+        BUILT_INS
+            .iter()
+            .filter_map(|built_in| built_in.manifest(Platform::HERE).ok())
+            .filter(|manifest| manifest.uuid != FIXTURE)
+            .collect()
+    });
+
+    &LISTED
+}
+
+/// The listed built-in that provides the language `name`, where one does:
+/// whose tick on the Plugins page is that language's switch.
+pub fn providing(name: &str) -> Option<&'static Manifest> {
+    listed()
+        .iter()
+        .find(|manifest| languages(manifest).any(|provided| provided.name == name))
+}
+
+/// Whether `manifest`'s built-in has a tick: a Language plugin's is whether
+/// sessions get its languages, and every other built-in is always on.
+pub fn switched(manifest: &Manifest) -> bool {
+    languages(manifest).next().is_some()
+}
+
+/// The languages `manifest` provides, by the name `config.yaml` keys each by,
+/// in the order it lists them.
+pub fn languages(manifest: &Manifest) -> impl Iterator<Item = &crate::languages::Provided> {
+    manifest
+        .provides
+        .iter()
+        .filter_map(|provision| provision.language.as_ref())
 }
 
 /// A built-in, once the start has tried to load it.

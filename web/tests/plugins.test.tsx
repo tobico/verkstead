@@ -25,7 +25,8 @@ import plugins from "./fixtures/plugins.json" with { type: "json" };
 import { json, serving, whenever } from "./serving";
 
 /// One plugin that loaded, GitLab, one whose manifest broke, Broken, one from
-/// git, Shared skills, and one whose dependency, Base, isn't installed.
+/// git, Shared skills, one whose dependency, Base, isn't installed, and Zig, an
+/// installer's own language from `config.yaml`.
 const PLUGINS = plugins as PluginsView;
 const CONSENT = consent as PluginConsent;
 
@@ -111,6 +112,27 @@ describe("a row", () => {
     expect(row.textContent).toContain("`version` isn't a semantic version.");
   });
 
+  /// An installer's own language: a `languages:` entry naming a language no
+  /// plugin provides, drawn under Installed saying where it comes from, with
+  /// no version, no author, and no Update or Remove — the entry is the file's.
+  it("reads an installer's own language from config.yaml, with no Update or Remove", async () => {
+    serving(whenever("/api/ui/plugins", json(PLUGINS)));
+    pane();
+
+    const row = await theRow("Zig");
+
+    expect(row.textContent).toContain("Provides Zig.");
+    expect(row.textContent).toContain("From this device's config.yaml.");
+    expect(row.textContent).not.toContain("·");
+    expect(
+      [...row.querySelectorAll("button")].map((button) => button.textContent),
+    ).toEqual(["Settings"]);
+    expect(row.querySelector("input[type=checkbox]")).toHaveProperty(
+      "checked",
+      true,
+    );
+  });
+
   it("draws a local plugin on another device greyed, naming it, with no Update", async () => {
     serving(whenever("/api/ui/plugins", json(ELSEWHERE)));
     pane();
@@ -154,6 +176,42 @@ describe("a row", () => {
       String(asked).endsWith("/enabled"),
     );
     expect(JSON.parse(String(press![1]!.body))).toEqual({ enabled: false });
+  });
+});
+
+describe("the Built-in group", () => {
+  /// The six Language plugins, each saying the languages it provides by
+  /// label, ticked, with no source line, Update or Remove — only Settings,
+  /// which opens the pane its size is set in.
+  it("lists the Language plugins, each saying the languages it provides", async () => {
+    serving(whenever("/api/ui/plugins", json(PLUGINS)));
+    pane();
+
+    const rust = await theRow("Rust & C/C++");
+
+    expect(rust.textContent).toContain("Provides Rust and C/C++.");
+    expect(rust.querySelector("input[type=checkbox]")).toHaveProperty(
+      "checked",
+      true,
+    );
+    expect(
+      [...rust.querySelectorAll("button")].map((button) => button.textContent),
+    ).toEqual(["Settings"]);
+    expect((await theRow("Go")).textContent).toContain("Provides Go.");
+    expect(
+      [...screen.getAllByRole("heading", { level: 3 })].map(
+        (heading) => heading.textContent,
+      ),
+    ).toEqual(["Installed", "Built-in"]);
+    expect(PLUGINS.built_in.map((row) => row.name)).toEqual([
+      "Verkstead",
+      ".NET",
+      "Go",
+      "JVM",
+      "Node",
+      "Python",
+      "Rust & C/C++",
+    ]);
   });
 });
 

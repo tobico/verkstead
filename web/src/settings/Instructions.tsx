@@ -47,7 +47,7 @@ import type { SettingsSaved, SettingsView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldAtOnce, heldAuthor, heldCleanup, heldLanguages, heldPaths } from "./held";
+import { heldAtOnce, heldAuthor, heldCleanup, heldPaths } from "./held";
 import styles from "./Instructions.module.css";
 import { SettingsCard } from "./SettingsCard";
 
@@ -141,8 +141,6 @@ export function InstructionsPane(props: {
         // blank token field read as *clear this* is exactly what `Keep` is
         // here to stop.
         github_token: "Keep",
-        // And the languages as they stand — see [`heldLanguages`].
-        ...heldLanguages(told()),
         // And what becomes of an archived Conversation — see [`heldCleanup`].
         cleanup: heldCleanup(told()),
         // And how much Verkstead runs at once, likewise — see [`heldAtOnce`].
