@@ -163,7 +163,10 @@ pub(crate) async fn asked(state: &AppState, conversation_id: i64) -> bool {
 
     match landing(state, conversation_id, lifecycle, AFTER_THE_STEP).await {
         Ok(store::Stopping::Withdrawn) => false,
-        Ok(store::Stopping::Stopped(_) | store::Stopping::Already) => true,
+        // Driven is only ever the stall sweep's answer, never a request's.
+        Ok(store::Stopping::Stopped(_) | store::Stopping::Already | store::Stopping::Driven) => {
+            true
+        }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "a run the human stopped could not be recorded as stopped");
             true

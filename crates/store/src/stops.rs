@@ -384,7 +384,7 @@ pub async fn stop(
     .await?
     {
         Stopping::Stopped(notice) => Ok(Some(notice)),
-        Stopping::Already | Stopping::Withdrawn => Ok(None),
+        Stopping::Already | Stopping::Withdrawn | Stopping::Driven => Ok(None),
     }
 }
 
@@ -413,7 +413,7 @@ pub async fn stop_signed_out(
     .await?
     {
         Stopping::Stopped(notice) => Ok(Some(notice)),
-        Stopping::Already | Stopping::Withdrawn => Ok(None),
+        Stopping::Already | Stopping::Withdrawn | Stopping::Driven => Ok(None),
     }
 }
 
@@ -454,6 +454,41 @@ pub async fn stop_as_asked(
     .await
 }
 
+/// The same, for a stop that says nothing is driving the Conversation — the
+/// stall sweep's — and only while that is still true.
+///
+/// `driven` is asked inside the transaction that writes the stop, for
+/// [`stop_as_asked`]'s reason with the register in place of the request. The
+/// register is the server's and lives in no table, so it is handed in as the
+/// question rather than read here. What makes asking it here a fix is the act
+/// on the other side of the race: a Resume registers its driver and then
+/// clears whatever stop it finds, and the clear is a write. Registered before
+/// this asks and nothing is written; registered after, and the clear waits on
+/// this transaction and takes away the stop it wrote. Asked any earlier — the
+/// evidence a stop carries is a `git status` and a Timeline read — and a
+/// Resume landing in between is stopped a moment after it started, by a
+/// Notice saying nothing was driving it.
+pub async fn stop_undriven(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    decision: Decision,
+    markdown: &str,
+    driven: &(dyn Fn() -> bool + Sync),
+) -> Result<Stopping> {
+    write_stop(
+        pool,
+        conversation_id,
+        decision,
+        markdown,
+        Carried {
+            resets: None,
+            signed_out: None,
+        },
+        Standing::Undriven(driven),
+    )
+    .await
+}
+
 /// What a stop carries beside its Notice: the words about a window coming
 /// back, and the Profile a login is waiting on. Each is one kind of stop's.
 #[derive(Clone, Copy)]
@@ -475,17 +510,25 @@ pub enum Stopping {
     /// Nothing written because nobody is asking any more: the request this
     /// stop stands on was taken back before the write got to it.
     Withdrawn,
+
+    /// Nothing written because something is driving the Conversation now: it
+    /// was taken up before the write got to it — see [`stop_undriven`].
+    Driven,
 }
 
 /// What a stop being written stands on.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Standing {
+#[derive(Clone, Copy)]
+enum Standing<'a> {
     /// Whatever the run had to say. The ordinary stop: a session that fell
     /// over, an account out of window, the human's own press.
     Whatever,
 
     /// The request the human left behind them — see [`stop_as_asked`].
     Asked,
+
+    /// Nothing driving the Conversation, as the server's register answers it
+    /// — see [`stop_undriven`].
+    Undriven(&'a (dyn Fn() -> bool + Sync)),
 }
 
 /// Both of the above, and the transaction they share.
@@ -495,7 +538,7 @@ async fn write_stop(
     decision: Decision,
     markdown: &str,
     carried: Carried<'_>,
-    standing: Standing,
+    standing: Standing<'_>,
 ) -> Result<Stopping> {
     let mut tx = super::writing(pool, "stopping a Conversation").await?;
 
@@ -519,8 +562,10 @@ async fn write_stop(
         Some((None, asked_for)) => asked_for,
     };
 
-    if standing == Standing::Asked && asked_for.is_none() {
-        return Ok(Stopping::Withdrawn);
+    match standing {
+        Standing::Asked if asked_for.is_none() => return Ok(Stopping::Withdrawn),
+        Standing::Undriven(driven) if driven() => return Ok(Stopping::Driven),
+        _ => {}
     }
 
     let event = Event::Notice(markdown.to_owned());
@@ -569,7 +614,7 @@ async fn write_stop(
     // And the request goes with the stop it became, in the transaction that
     // wrote it: one left behind would be read as a stop still to come and land
     // all over again at the next launch.
-    if standing == Standing::Asked {
+    if matches!(standing, Standing::Asked) {
         sqlx::query("UPDATE conversations SET stop_asked_at = NULL WHERE id = ?")
             .bind(conversation_id)
             .execute(&mut *tx)
