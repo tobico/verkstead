@@ -306,12 +306,14 @@ async fn allow(app: &Router, request: &str) {
 /// Read off the wire rather than off the channel behind it, the way
 /// `tests/suite/unlinking.rs` reads one: what has to hold is that a page which is
 /// open hears that a row has just been dimmed, down its own connection.
+///
+/// **Read as it arrives, the way a page reads it.** The server ends the stream
+/// of a page that falls a backlog behind, and a stream nobody polls is one
+/// falling behind: left unread through a press and its telling, a loaded runner
+/// had it ended before the Nudge it was opened for. So a task drains it from
+/// the moment it is open, as a browser does, and hands on what it heard.
 struct Listening {
-    body: Body,
-
-    /// What has been read off the stream and is not a whole frame yet. SSE
-    /// frames are not the chunks they arrive in.
-    buffered: String,
+    heard: tokio::sync::mpsc::UnboundedReceiver<Nudge>,
 }
 
 impl Listening {
@@ -327,45 +329,42 @@ impl Listening {
 
         assert_eq!(response.status(), StatusCode::OK, "GET {NUDGES}");
 
-        Listening {
-            body: response.into_body(),
-            buffered: String::new(),
-        }
-    }
+        let (hear, heard) = tokio::sync::mpsc::unbounded_channel();
+        let mut body = response.into_body();
+        tokio::spawn(async move {
+            // What has been read off the stream and is not a whole frame yet.
+            // SSE frames are not the chunks they arrive in.
+            let mut buffered = String::new();
 
-    /// The next Nudge, past the keep-alives that are the stream's other traffic.
-    async fn nudge(&mut self) -> Nudge {
-        let waited_for = tokio::time::timeout(HEARING, async {
-            loop {
-                let frame = self.frame().await;
+            while let Some(chunk) = body.frame().await {
+                let chunk = chunk
+                    .unwrap()
+                    .into_data()
+                    .expect("the stream carries data frames");
+                buffered.push_str(std::str::from_utf8(&chunk).unwrap());
 
-                if let Some(data) = frame.lines().find_map(|line| line.strip_prefix("data: ")) {
-                    return serde_json::from_str(data).unwrap();
+                while let Some(end) = buffered.find("\n\n") {
+                    let frame: String = buffered.drain(..end + 2).collect();
+
+                    // Past the keep-alives that are the stream's other traffic.
+                    if let Some(data) = frame.lines().find_map(|line| line.strip_prefix("data: "))
+                        && hear.send(serde_json::from_str(data).unwrap()).is_err()
+                    {
+                        return;
+                    }
                 }
             }
         });
 
-        waited_for.await.expect("waited for a Nudge in vain")
+        Listening { heard }
     }
 
-    /// The next whole frame off the stream, whatever kind it is.
-    async fn frame(&mut self) -> String {
-        loop {
-            if let Some(end) = self.buffered.find("\n\n") {
-                return self.buffered.drain(..end + 2).collect();
-            }
-
-            let chunk = self
-                .body
-                .frame()
-                .await
-                .expect("the stream ended")
-                .unwrap()
-                .into_data()
-                .expect("the stream carries data frames");
-
-            self.buffered.push_str(std::str::from_utf8(&chunk).unwrap());
-        }
+    /// The next Nudge.
+    async fn nudge(&mut self) -> Nudge {
+        tokio::time::timeout(HEARING, self.heard.recv())
+            .await
+            .expect("waited for a Nudge in vain")
+            .expect("the stream ended")
     }
 }
 
